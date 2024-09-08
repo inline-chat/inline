@@ -1,0 +1,10 @@
+{
+  "name": "inline",
+  "private": true,
+  "workspaces": [
+    "website"
+  ],
+  "scripts": {
+    "dev:website": "cd website && bun run dev"
+  }
+}
