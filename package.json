@@ -5,6 +5,8 @@
     "website"
   ],
   "scripts": {
-    "dev:website": "cd website && bun run dev"
+    "dev:website": "cd website && bun run dev",
+    "build:website": "cd website && bun run build",
+    "start:website": "cd website && bun run start"
   }
 }
