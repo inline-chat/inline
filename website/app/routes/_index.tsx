@@ -275,7 +275,15 @@ const styles = stylex.create({
   bg: {
     top: 0,
     left: 0,
-    backgroundImage: "url(/content-bg.jpg)",
+    backgroundImage: `url(/content-bg.jpg), linear-gradient(
+   to bottom,
+    #536D9C 0%,
+    #5476A3 40%,
+    #7D9AAA 60%,
+    #5A6A7B 80%,
+    #303848 100%
+
+  )`,
     "@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi)": {
       backgroundImage: "url(/content-bg@2x.jpg)",
     },
