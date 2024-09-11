@@ -248,7 +248,11 @@ const styles = stylex.create({
     },
     padding: {
       default: "0",
-      "@media (max-width: 1000px)": "12px",
+      "@media (max-width: 1000px)": 12,
+    },
+    paddingTop: {
+      default: 32,
+      "@media (max-width: 1000px)": 12,
     },
     overflow: "hidden",
   },
