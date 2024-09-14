@@ -1,24 +1,29 @@
 import type { MetaFunction } from "@remix-run/node"
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import "../landing.css"
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Inline – Messaging for high-performance teams" },
+    { title: "Inline – Messaging for teams that want the best tools" },
     {
       name: "description",
-      content: "Team messaging that isn't from the 2010s",
+      content: "Team messaging that's not from the 2010s",
     },
   ]
 }
 
+const messagesLength = 4
+
 const centerWidth = 983
 const centerHeight = 735
+const cardRadius = 22
 const firstContentRowHeight = 445
 
 export default function Index() {
+  const lastPlayedAtRef = useRef(0)
+  const [message, setMessage] = useState(0)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
 
   useEffect(() => {
@@ -95,30 +100,46 @@ export default function Index() {
           // }}
         >
           <h1 {...stylex.props(styles.logotype)}>
-            <img
-              src="/logotype-white.svg"
-              alt="Inline"
-              height="22px"
-              width="96px"
-            />
+            <a href="https://inline.chat">
+              <img
+                src="/logotype-white.svg"
+                alt="Inline"
+                height="22px"
+                width="96px"
+              />
+            </a>
           </h1>
-          <h2 {...stylex.props(styles.subheading)}>
-            Team messaging <span {...stylex.props(styles.softBreak)} />
-            that isn’t from{" "}
-            <span
-              {...stylex.props(styles.dated)}
-              onPointerEnter={(e) => {
-                const audio = new Audio("/sounds/slack-notification.mp3")
-                audio.volume = 0.4
-                audio.play()
-              }}
-            >
-              2010s
-            </span>
+          <h2
+            {...stylex.props(styles.subheading)}
+            onClick={() => {
+              setMessage((m) => (m < messagesLength - 1 ? m + 1 : 0))
+            }}
+          >
+            {message === 0 && (
+              <>
+                Chat that's not from{" "}
+                <span
+                  {...stylex.props(styles.dated)}
+                  onPointerEnter={(e) => {
+                    // limit it to once per 2s
+                    if (Date.now() - lastPlayedAtRef.current < 1500) return
+                    const audio = new Audio("/sounds/slack-notification.mp3")
+                    audio.volume = 0.2
+                    audio.play()
+                    lastPlayedAtRef.current = Date.now()
+                  }}
+                >
+                  2010s
+                </span>
+              </>
+            )}
+            {message === 1 && <>Where chat happens</>}
+            {message === 2 && <>iMessage, but powerful & for teams</>}
+            {message === 3 && <>Messaging for focused work</>}
           </h2>
           <p {...stylex.props(styles.description)}>
-            We’re building a native, high-quality chat app for teams who crave
-            the best tools.
+            We’re building a native, high-quality messaging app for teams who
+            crave the best tools.
           </p>
           <a
             href="https://x.com/inline_chat"
@@ -158,7 +179,7 @@ export default function Index() {
             },
             {
               title: "Intelligent",
-              desc: "Agents can process & insert data across apps triggered through custom reactions.",
+              desc: "Agents can handle workflows across apps via custom reaction triggers.",
             },
             {
               title: "Tranquil",
@@ -267,7 +288,7 @@ const styles = stylex.create({
       "@media (max-width: 1000px)": "100%",
     },
     borderRadius: {
-      default: 12,
+      default: cardRadius,
       "@media (max-width: 1000px)": 10,
     },
   },
@@ -346,9 +367,9 @@ const styles = stylex.create({
       "@media (max-width: 800px)": "repeat(6, auto)",
     },
 
-    rowGap: 32,
-    columnGap: 28,
-    padding: "50px 50px",
+    rowGap: 40,
+    columnGap: 34,
+    padding: "52px 60px",
   },
 
   card: {},
@@ -385,7 +406,8 @@ const styles = stylex.create({
     fontSize: { default: 48, "@media (max-width: 500px)": 28 },
     lineHeight: 1.2,
     fontWeight: "700",
-    maxWidth: 480,
+    cursor: "default",
+    // maxWidth: 480,
     fontFamily: '"Red Hat Display", sans-serif',
     WebkitFontSmoothing: "unset",
     MozOsxFontSmoothing: "unset",
@@ -403,6 +425,7 @@ const styles = stylex.create({
     fontSize: { default: 18, "@media (max-width: 500px)": 15 },
     maxWidth: 425,
     marginBottom: 28,
+    cursor: "default",
     color: "rgba(255,255,255,0.88)",
     textShadow: "0 1px 1px rgba(0,0,0,0.1)",
   },
@@ -413,6 +436,7 @@ const styles = stylex.create({
     height: 40,
     lineHeight: "40px",
     userSelect: "none",
+    cursor: "pointer",
     backgroundColor: {
       default: "rgba(255,255,255,0.24)",
       ":hover": "rgba(255,255,255,0.32)",
