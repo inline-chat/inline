@@ -1,0 +1,29 @@
+{
+  "name": "@inline/server",
+  "private": true,
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "build": "bun build src/index.ts --target bun --outdir ./dist",
+    "start": "NODE_ENV=production bun dist/index.js",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate --config config/drizzle.ts",
+    "db:migrate": "bun scripts/migrate.ts",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio --port 8010 --config config/drizzle.ts"
+  },
+  "dependencies": {
+    "@elysiajs/cors": "^1.1.1",
+    "@sentry/bun": "^8.30.0",
+    "drizzle-orm": "^0.33.0",
+    "elysia": "^1.1.12",
+    "elysia-helmet": "^2.0.0",
+    "elysia-rate-limit": "^4.1.0",
+    "pg": "^8.12.0",
+    "postgres": "^3.4.4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.9",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.24.2"
+  }
+}

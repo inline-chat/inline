@@ -2,11 +2,18 @@
   "name": "inline",
   "private": true,
   "workspaces": [
-    "website"
+    "website",
+    "server"
   ],
   "scripts": {
     "dev:website": "cd website && bun run dev",
+    "dev:server": "cd server && bun run dev",
     "build:website": "cd website && bun run build",
-    "start:website": "cd website && bun run start"
+    "build:server": "cd server && bun run build",
+    "start:website": "cd website && bun run start",
+    "start:server": "cd server && bun run start"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.9"
   }
 }

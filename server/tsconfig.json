@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "esModuleInterop": true,
+    "paths": {
+      "@in/server": ["./src"],
+      "@in/server/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
+}
