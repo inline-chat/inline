@@ -27,6 +27,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           name="twitter:image"
           content="https://inline.chat/twitter-og.jpg"
         />
+        <meta name="og:image" content="https://inline.chat/twitter-og.jpg" />
         <link
           href="favicon-black.png"
           rel="icon"
