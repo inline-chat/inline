@@ -7,10 +7,11 @@ import "../landing.css"
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Inline – Messaging for teams that want the best tools" },
+    { title: "Inline - Messaging for teams that crave high-quality software" },
     {
       name: "description",
-      content: "Team messaging that's not from the 2010s",
+      content:
+        "We're building a native, fast, powerful chat app for teams. It's ultra-low RAM, 120 fps, tranquil and has context-aware notifications.",
     },
   ]
 }
