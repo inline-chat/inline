@@ -131,9 +131,9 @@ export default function Index() {
               bottom: 0,
               background: `linear-gradient(${55 + parallaxOffset.x * 1.5}deg, 
               rgba(255,255,255,0) 30%, 
-              rgba(255,255,255,0.1) 40%, 
-              rgba(255,255,255,0.9) 50%, 
-              rgba(255,255,255,0.1) 60%, 
+              rgba(255,255,255,0.1) 45%, 
+              rgba(255,255,255,0.4) 50%, 
+              rgba(255,255,255,0.1) 55%, 
               rgba(255,255,255,0) 70%)`,
               opacity: 0.18,
               transform: `scale(1.5) translateX(${
@@ -188,7 +188,7 @@ export default function Index() {
           >
             {message === 0 && (
               <>
-                Chat, but not from the{" "}
+                Chat that isn't from{" "}
                 <span
                   {...stylex.props(styles.dated)}
                   onPointerEnter={(e) => {
@@ -205,7 +205,7 @@ export default function Index() {
               </>
             )}
             {message === 1 && <>Where chat happens</>}
-            {message === 2 && <>iMessage, but powerful & for teams</>}
+            {message === 2 && <>iMessage, but for teams</>}
             {message === 3 && <>Messaging for focused work</>}
           </motion.h2>
           <motion.p
@@ -215,7 +215,7 @@ export default function Index() {
             animate={fontAvailable ? { opacity: 1, y: 0, scale: 1 } : undefined}
           >
             We’re building a native, high-quality messaging app for teams who
-            want to use the best software.
+            crave the best.
           </motion.p>
 
           <motion.div
