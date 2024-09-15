@@ -1,4 +1,4 @@
-import type { MetaFunction } from "@remix-run/node"
+import type { MetaFunction, LinksFunction } from "@remix-run/node"
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
@@ -11,6 +11,18 @@ export const meta: MetaFunction = () => {
     {
       name: "description",
       content: "Team messaging that's not from the 2010s",
+    },
+  ]
+}
+
+export const links: LinksFunction = () => {
+  return [
+    { rel: "preload", href: "/content-bg.jpg", as: "image" },
+    {
+      rel: "preload",
+      href: "/content-bg@2x.jpg",
+      as: "image",
+      media: "(-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi)",
     },
   ]
 }
@@ -93,10 +105,9 @@ export default function Index() {
       >
         <motion.div
           {...stylex.props(styles.centerBox, styles.bg)}
+          initial={{ filter: "brightness(1)" }}
           animate={{
-            filter: formActive
-              ? "blur(4px) brightness(1.2)"
-              : "blur(0px) brightness(1.1)",
+            filter: formActive ? "brightness(1.15)" : undefined,
           }}
           style={{
             position: "absolute",
