@@ -188,7 +188,7 @@ export default function Index() {
           >
             {message === 0 && (
               <>
-                Chat that isn't from{" "}
+                Chat, but not from the{" "}
                 <span
                   {...stylex.props(styles.dated)}
                   onPointerEnter={(e) => {
@@ -215,7 +215,7 @@ export default function Index() {
             animate={fontAvailable ? { opacity: 1, y: 0, scale: 1 } : undefined}
           >
             We’re building a native, high-quality messaging app for teams who
-            crave the best tools.
+            want to use the best software.
           </motion.p>
 
           <motion.div
@@ -660,7 +660,7 @@ const styles = stylex.create({
 
   description: {
     fontSize: { default: 21, "@media (max-width: 500px)": 18 },
-    maxWidth: 445,
+    maxWidth: 480,
     marginBottom: 28,
     cursor: "default",
     color: "rgba(255,255,255,0.88)",
