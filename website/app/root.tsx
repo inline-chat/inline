@@ -14,6 +14,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta
+          name="twitter:title"
+          content="Inline - Messaging for teams that crave high-quality software"
+        />
+        <meta
+          name="twitter:description"
+          content="We're building a native, fast, powerful chat app for teams. It's ultra-low RAM, 120 fps, tranquil and has context-aware notifications."
+        />
+        <meta
+          name="twitter:image"
+          content="https://inline.chat/twitter-og.jpg"
+        />
         <link
           href="favicon-black.png"
           rel="icon"
