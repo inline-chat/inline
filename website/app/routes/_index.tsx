@@ -177,10 +177,11 @@ export default function Index() {
             </motion.div>
           </h1>
           <motion.h2
+            style={{ userSelect: "none" }}
             initial={{ opacity: 0, y: -10 }}
             transition={{ delay: 0, duration: 0.4 }}
             animate={fontAvailable ? { opacity: 1, y: 0, scale: 1 } : undefined}
-            layout="preserve-aspect"
+            // layout="preserve-aspect"
             {...stylex.props(styles.subheading)}
             onClick={() => {
               setMessage((m) => (m < messagesLength - 1 ? m + 1 : 0))
