@@ -95,29 +95,32 @@ export default function Index() {
 
             boxShadow: `${parallaxOffset.x * 1.8}px ${
               20 + parallaxOffset.y * 1
-            }px 20px -10px rgba(0, 0, 0, 0.2), inset
-              0px -10px 30px 0px rgba(255, 255, 255, 0.2)`,
+            }px 20px -10px rgba(0, 0, 0, 0.2)`,
           }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            zIndex: 2,
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: `linear-gradient(${55 + parallaxOffset.x * 1.5}deg, 
+        >
+          <div
+            style={{
+              position: "absolute",
+              zIndex: 2,
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: `linear-gradient(${55 + parallaxOffset.x * 1.5}deg, 
               rgba(255,255,255,0) 30%, 
               rgba(255,255,255,0.1) 40%, 
-              rgba(255,255,255,0.8) 50%, 
+              rgba(255,255,255,0.9) 50%, 
               rgba(255,255,255,0.1) 60%, 
               rgba(255,255,255,0) 70%)`,
-            opacity: 0.18,
-            transform: `scale(1.5) translateX(${parallaxOffset.x * 2}px)`,
-            pointerEvents: "none",
-          }}
-        />
+              opacity: 0.18,
+              transform: `scale(1.5) translateX(${
+                parallaxOffset.x * -2
+              }px) translateY(${parallaxOffset.y * -1}px)`,
+              pointerEvents: "none",
+              boxShadow: "inset 0px 10px 80px 120px rgba(255, 255, 255, 1)",
+            }}
+          />
+        </motion.div>
 
         <div
           {...stylex.props(styles.content)}
@@ -734,10 +737,13 @@ const styles = stylex.create({
       default: centerWidth,
       "@media (max-width: 1000px)": "100%",
     },
-    padding: "100px 50px",
+    color: {
+      default: "rgba(44, 54, 66, 0.8)",
+      "@media (prefers-color-scheme: dark)": "rgba(255,255,255,0.8)",
+    },
+    padding: "60px 50px",
     fontFamily: '"Reddit Mono", monospace',
     fontSize: 14,
-    color: "rgba(44, 54, 66, 0.8)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -759,16 +765,16 @@ const styles = stylex.create({
 
   copyRight: {
     marginRight: "auto",
-    color: "rgba(44, 54, 66, 0.4)",
+    opacity: 0.5,
   },
 
   footerLink: {
     position: "relative",
     display: "block",
     padding: "4px 8px",
-    color: {
-      default: "rgba(44, 54, 66, 0.6)",
-      ":hover": "rgba(44, 54, 66, 0.9)",
+    opacity: {
+      default: 0.8,
+      ":hover": 1,
     },
     marginLeft: {
       default: 24,
