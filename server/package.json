@@ -6,10 +6,10 @@
     "build": "bun build src/index.ts --target bun --outdir ./dist",
     "start": "NODE_ENV=production bun dist/index.js",
     "test": "bun test",
-    "db:generate": "drizzle-kit generate --config config/drizzle.ts",
     "db:migrate": "bun scripts/migrate.ts",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio --port 8010 --config config/drizzle.ts"
+    "db:generate": "drizzle-kit generate --schema src/db/schema/index.ts --out drizzle --dialect postgresql",
+    "db:push": "drizzle-kit push --schema src/db/schema/index.ts --out drizzle --dialect postgresql",
+    "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.1.1",

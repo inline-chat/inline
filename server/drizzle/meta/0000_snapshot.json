@@ -1,5 +1,5 @@
 {
-  "id": "51e07e4f-f639-4e94-8aec-6a4418430127",
+  "id": "5eeb39b6-a26d-4c37-a2b2-0187ff713c51",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -36,6 +36,12 @@
         "user_agent": {
           "name": "user_agent",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "time_zone": {
+          "name": "time_zone",
+          "type": "varchar(256)",
           "primaryKey": false,
           "notNull": false
         },

@@ -20,6 +20,7 @@ export const waitlist = new Elysia({ prefix: "/waitlist" })
         email: t.String(),
         name: t.Optional(t.String()),
         userAgent: t.Optional(t.String()),
+        timeZone: t.Optional(t.String()),
       }),
     },
   )

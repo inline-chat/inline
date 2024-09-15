@@ -1,6 +1,7 @@
 import type { MetaFunction } from "@remix-run/node"
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
+import { AnimatePresence, motion } from "framer-motion"
 
 import "../landing.css"
 
@@ -15,13 +16,30 @@ export const meta: MetaFunction = () => {
 }
 
 const messagesLength = 4
-
+const apiEndpoint =
+  process.env.NODE_ENV == "production"
+    ? "https://headline.inline.chat"
+    : "http://localhost:8000"
 const centerWidth = 983
 const centerHeight = 735
 const cardRadius = 22
 const firstContentRowHeight = 445
-
+const buttonHeight = 44
 export default function Index() {
+  const [focused, setFocused] = useState(false)
+  const [email, setEmail] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const [subscribed, setSubscribed] = useState(false)
+  const [isntInitialRender, setIsntInitialRender] = useState(false)
+
+  const [formActive, setFormActive] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setIsntInitialRender(true)
+  }, [])
+
   const lastPlayedAtRef = useRef(0)
   const [message, setMessage] = useState(0)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
@@ -57,14 +75,24 @@ export default function Index() {
 
   return (
     <div className="font-sans p-4" {...stylex.props(styles.root)}>
-      <div {...stylex.props(styles.centerBox, styles.center)} id="center">
-        <div
+      <motion.div
+        {...stylex.props(styles.centerBox, styles.center)}
+        id="center"
+        animate={{}}
+      >
+        <motion.div
           {...stylex.props(styles.centerBox, styles.bg)}
+          animate={{
+            filter: formActive
+              ? "blur(4px) brightness(1.2)"
+              : "blur(0px) brightness(1.1)",
+          }}
           style={{
             position: "absolute",
             transform: `translate(${parallaxOffset.x * 0.2}px, ${
               parallaxOffset.y * 0.15
             }px)`,
+
             boxShadow: `${parallaxOffset.x * 1.8}px ${
               20 + parallaxOffset.y * 1
             }px 20px -10px rgba(0, 0, 0, 0.2), inset
@@ -100,16 +128,26 @@ export default function Index() {
           // }}
         >
           <h1 {...stylex.props(styles.logotype)}>
-            <a href="https://inline.chat">
-              <img
+            <motion.div>
+              <motion.img
+                drag
+                whileTap={{ scale: 1.15 }}
+                dragElastic={0.1}
+                dragConstraints={{
+                  top: 10,
+                  left: 10,
+                  right: 10,
+                  bottom: 10,
+                }}
                 src="/logotype-white.svg"
                 alt="Inline"
                 height="22px"
                 width="96px"
               />
-            </a>
+            </motion.div>
           </h1>
-          <h2
+          <motion.h2
+            layout="preserve-aspect"
             {...stylex.props(styles.subheading)}
             onClick={() => {
               setMessage((m) => (m < messagesLength - 1 ? m + 1 : 0))
@@ -136,31 +174,178 @@ export default function Index() {
             {message === 1 && <>Where chat happens</>}
             {message === 2 && <>iMessage, but powerful & for teams</>}
             {message === 3 && <>Messaging for focused work</>}
-          </h2>
+          </motion.h2>
           <p {...stylex.props(styles.description)}>
             We’re building a native, high-quality messaging app for teams who
             crave the best tools.
           </p>
-          <a
-            href="https://x.com/inline_chat"
-            target="_blank"
-            rel="noreferrer"
-            {...stylex.props(styles.button)}
+
+          <div
             style={{
-              transform: `translate(${parallaxOffset.x * 0.2 * -1}px, ${
-                parallaxOffset.y * 0.1 * -1
-              }px)`,
+              height: buttonHeight,
+              position: "relative",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
             }}
           >
-            <span
-              style={{
-                display: "block",
-                transform: `translate(${parallaxOffset.x * 0.08 * -1}px, 0px)`,
-              }}
-            >
-              Follow updates on X
-            </span>
-          </a>
+            <AnimatePresence>
+              {formActive ? (
+                <motion.form
+                  key="form"
+                  initial={{ opacity: 0, width: 0, scale: 0.6 }}
+                  animate={{
+                    opacity: 1,
+                    width: 300,
+                    scale: 1,
+                  }}
+                  exit={{ opacity: 0, width: 0, scale: 0.6 }}
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    setSubmitting(true)
+
+                    const revert = () => {
+                      setTimeout(() => {
+                        setFormActive(false)
+                        setSubmitting(false)
+                        setSubscribed(false)
+                        setFailed(false)
+                      }, 1500)
+                    }
+
+                    // submit
+                    fetch(`${apiEndpoint}/waitlist/subscribe`, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({
+                        email,
+                        userAgent: navigator.userAgent,
+                        timeZone:
+                          Intl.DateTimeFormat().resolvedOptions().timeZone,
+                      }),
+                    })
+                      .then(() => {
+                        setFormActive(false)
+                        setSubmitting(false)
+                        setSubscribed(true)
+                        setEmail("")
+                        revert()
+                      })
+                      .catch(() => {
+                        setFailed(true)
+                        setFormActive(false)
+                        setSubmitting(false)
+                        setSubscribed(false)
+                        revert()
+                      })
+                  }}
+                  {...stylex.props(
+                    styles.emailForm,
+                    focused ? styles.emailFormActive : null,
+                  )}
+                  style={{
+                    top: 0,
+                    overflow: "hidden",
+                    position: "absolute",
+                    transform: `translate(${parallaxOffset.x * 0.2 * -1}px, ${
+                      parallaxOffset.y * 0.1 * -1
+                    }px)`,
+                  }}
+                >
+                  <motion.input
+                    key="input"
+                    type="email"
+                    ref={inputRef}
+                    placeholder="What's your work email?"
+                    {...stylex.props(styles.emailInput)}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onFocus={() => {
+                      setFocused(true)
+                    }}
+                    onBlur={() => {
+                      setFocused(false)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setFormActive(false)
+                      }
+                    }}
+                  />
+
+                  <motion.button {...stylex.props(styles.emailButton)}>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                      <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                  </motion.button>
+                </motion.form>
+              ) : (
+                <motion.div
+                  key="btn"
+                  {...stylex.props(styles.button)}
+                  initial={
+                    isntInitialRender
+                      ? { opacity: 0, width: 0, scale: 0.6 }
+                      : undefined
+                  }
+                  animate={{
+                    opacity: 1,
+                    width: 300,
+                    scale: 1,
+                  }}
+                  exit={{ opacity: 0, scale: 0.6, width: 0 }}
+                  style={{
+                    top: 0,
+                    position: "absolute",
+                    transform: `translate(${parallaxOffset.x * 0.2 * -1}px, ${
+                      parallaxOffset.y * 0.1 * -1
+                    }px)`,
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    setFormActive(true)
+                    requestAnimationFrame(() => {
+                      // focus input
+                      inputRef.current?.focus()
+                      inputRef.current?.select()
+                    })
+                  }}
+                  whileTap={{ scale: formActive ? 1 : 0.95 }}
+                >
+                  <span
+                    style={{
+                      display: "block",
+                      transform: `translate(${
+                        parallaxOffset.x * 0.08 * -1
+                      }px, 0px)`,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {failed
+                      ? "Failed to submit"
+                      : submitting
+                      ? "Submitting..."
+                      : subscribed
+                      ? "🎉 You're on the waitlist!"
+                      : "Get on the Waitlist"}
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
 
         <div {...stylex.props(styles.features)}>
@@ -196,7 +381,7 @@ export default function Index() {
             </div>
           ))}
         </div>
-      </div>
+      </motion.div>
 
       {/* == */}
       <div {...stylex.props(styles.footer)}>
@@ -223,7 +408,7 @@ export default function Index() {
               rel="noopener noreferrer"
               {...stylex.props(styles.footerLink)}
             >
-              X (Twitter)
+              Follow updates on X (Twitter)
             </a>
           </div>
           <div>
@@ -422,8 +607,8 @@ const styles = stylex.create({
   },
 
   description: {
-    fontSize: { default: 18, "@media (max-width: 500px)": 15 },
-    maxWidth: 425,
+    fontSize: { default: 21, "@media (max-width: 500px)": 18 },
+    maxWidth: 445,
     marginBottom: 28,
     cursor: "default",
     color: "rgba(255,255,255,0.88)",
@@ -431,10 +616,10 @@ const styles = stylex.create({
   },
 
   button: {
-    display: "inline-block",
-    minWidth: 230,
-    height: 40,
-    lineHeight: "40px",
+    overflow: "hidden",
+    height: buttonHeight,
+    width: 300,
+    textAlign: "center",
     userSelect: "none",
     cursor: "pointer",
     backgroundColor: {
@@ -453,14 +638,93 @@ const styles = stylex.create({
       default: "scale(1)",
       ":active": "scale(0.95)",
     },
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
     backdropFilter: "blur(25px)",
     color: "white",
-    borderRadius: 25,
+    borderRadius: 40,
     textDecoration: "none",
     fontSize: { default: 18, "@media (max-width: 500px)": 15 },
     fontWeight: "700",
     transition:
       "background-color 0.15s ease-out, transform 0.18s ease-out, box-shadow 0.15s ease-out",
+  },
+
+  emailForm: {
+    height: buttonHeight,
+    paddingLeft: 4,
+    paddingRight: 4,
+    userSelect: "none",
+    cursor: "pointer",
+    backgroundColor: {
+      default: "rgba(255,255,255,0.24)",
+      ":hover": "rgba(255,255,255,0.32)",
+      ":active": "rgba(255,255,255,0.35)",
+    },
+    boxShadow: {
+      default:
+        "inset 0 1px 0 0 rgba(255, 255, 255, 0.2), 0 -1px 2px 2px rgba(255, 255, 255, 0.05)",
+      ":hover":
+        "inset 0 1px 0 0 rgba(255, 255, 255, 0.5), 0 -1px 2px 2px rgba(255, 255, 255, 0.1), 0 -3px 6px 5px rgba(255, 255, 255, 0.06)",
+    },
+    textShadow: "0 1px 1px rgba(0,0,0,0.1)",
+    transform: {
+      default: "scale(1)",
+      ":active": "scale(0.95)",
+    },
+    display: "flex",
+    alignItems: "center",
+    flexDirection: "row",
+    backdropFilter: "blur(25px)",
+    color: "white",
+    borderRadius: 40,
+    textDecoration: "none",
+    fontSize: { default: 18, "@media (max-width: 500px)": 15 },
+    fontWeight: "700",
+    transition:
+      "background-color 0.15s ease-out, transform 0.18s ease-out, box-shadow 0.15s ease-out",
+  },
+
+  emailFormActive: {
+    backgroundColor: "rgba(255,255,255,0.35)",
+    boxShadow:
+      "inset 0 1px 0 0 rgba(255, 255, 255, 0.5), 0 -1px 2px 2px rgba(255, 255, 255, 0.1), 0 -3px 6px 5px rgba(255, 255, 255, 0.06)",
+  },
+
+  emailInput: {
+    height: buttonHeight - 8,
+    background: "none",
+    width: "100%",
+    minWidth: 0,
+    flexShrink: 1,
+    color: "white",
+    fontWeight: 700,
+    textAlign: "center",
+    fontSize: 18,
+    "::placeholder": {
+      color: "rgba(255,255,255,0.9)",
+      fontWeight: 400,
+    },
+    border: "none",
+    outline: "none",
+  },
+
+  emailButton: {
+    flexShrink: 0,
+    height: buttonHeight - 8,
+    width: buttonHeight - 8,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 18,
+    background: {
+      default: "rgba(255,255,255,0.2)",
+      ":hover": "rgba(255,255,255,0.3)",
+    },
+    transition: "background-color 0.15s ease-out",
+    borderRadius: 25,
   },
 
   footer: {
@@ -469,9 +733,9 @@ const styles = stylex.create({
       default: centerWidth,
       "@media (max-width: 1000px)": "100%",
     },
-    padding: "44px 50px",
+    padding: "100px 50px",
     fontFamily: '"Reddit Mono", monospace',
-    fontSize: 13,
+    fontSize: 14,
     color: "rgba(44, 54, 66, 0.8)",
     display: "flex",
     flexDirection: "column",
@@ -499,14 +763,17 @@ const styles = stylex.create({
 
   footerLink: {
     position: "relative",
+    display: "block",
+    padding: "4px 8px",
     color: {
       default: "rgba(44, 54, 66, 0.6)",
-      ":hover": "rgba(44, 54, 66, 0.8)",
+      ":hover": "rgba(44, 54, 66, 0.9)",
     },
     marginLeft: {
       default: 24,
       "@media (max-width: 500px)": 0,
     },
+    transition: "color 0.12s ease-out",
   },
 
   dated: {

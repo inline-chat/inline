@@ -15,6 +15,7 @@
     "@remix-run/react": "^2.11.2",
     "@remix-run/serve": "^2.11.2",
     "@stylexjs/stylex": "^0.7.5",
+    "framer-motion": "^11.5.4",
     "isbot": "^4.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

@@ -15,4 +15,8 @@ export default defineConfig({
     tsconfigPaths(),
     styleX({}),
   ],
+
+  server: {
+    port: 8001,
+  },
 })

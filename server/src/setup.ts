@@ -16,8 +16,3 @@ export const setup = new Elysia({ name: "setup" })
     }),
   )
   .use(helmet())
-  .use(
-    rateLimit({
-      errorResponse: new Error("FLOOD"),
-    }),
-  )

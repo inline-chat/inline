@@ -16,6 +16,7 @@ export const waitlist = pgTable("waitlist", {
   verified: boolean("verified").default(false).notNull(),
   name: varchar("name", { length: 256 }),
   userAgent: text("user_agent"),
+  timeZone: varchar("time_zone", { length: 256 }),
   date: timestamp("date", { mode: "date", withTimezone: true }).defaultNow(),
 })
 
