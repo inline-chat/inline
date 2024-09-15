@@ -202,6 +202,7 @@ export default function Index() {
                   exit={{ opacity: 0, width: 0, scale: 0.6 }}
                   onSubmit={(e) => {
                     e.preventDefault()
+                    setFormActive(false)
                     setSubmitting(true)
 
                     const revert = () => {
@@ -339,7 +340,7 @@ export default function Index() {
                       : submitting
                       ? "Submitting..."
                       : subscribed
-                      ? "🎉 You're on the waitlist!"
+                      ? "You're on the waitlist 🎉"
                       : "Get on the Waitlist"}
                   </span>
                 </motion.div>
