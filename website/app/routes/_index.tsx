@@ -44,6 +44,18 @@ export default function Index() {
   const [message, setMessage] = useState(0)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
 
+  const [fontAvailable, setFontAvailable] = useState(false)
+
+  useEffect(() => {
+    // Check if the 'Red Hat Display' font is available
+    document.fonts.ready.then(() => {
+      if (document.fonts.check("12px 'Red Hat Display'")) {
+        setFontAvailable(true)
+      } else {
+        setFontAvailable(false)
+      }
+    })
+  }, [])
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
       setMousePosition({ x: event.clientX, y: event.clientY })
@@ -74,11 +86,10 @@ export default function Index() {
   const parallaxOffset = calculateParallax()
 
   return (
-    <div className="font-sans p-4" {...stylex.props(styles.root)}>
+    <motion.div className="font-sans p-4" {...stylex.props(styles.root)}>
       <motion.div
         {...stylex.props(styles.centerBox, styles.center)}
         id="center"
-        animate={{}}
       >
         <motion.div
           {...stylex.props(styles.centerBox, styles.bg)}
@@ -131,7 +142,11 @@ export default function Index() {
           // }}
         >
           <h1 {...stylex.props(styles.logotype)}>
-            <motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              transition={{ delay: 0.1, duration: 0.2 }}
+              animate={fontAvailable ? { opacity: 1, y: 0 } : undefined}
+            >
               <motion.img
                 drag
                 whileTap={{ scale: 1.15 }}
@@ -150,6 +165,9 @@ export default function Index() {
             </motion.div>
           </h1>
           <motion.h2
+            initial={{ opacity: 0, y: -10 }}
+            transition={{ delay: 0, duration: 0.4 }}
+            animate={fontAvailable ? { opacity: 1, y: 0, scale: 1 } : undefined}
             layout="preserve-aspect"
             {...stylex.props(styles.subheading)}
             onClick={() => {
@@ -178,12 +196,17 @@ export default function Index() {
             {message === 2 && <>iMessage, but powerful & for teams</>}
             {message === 3 && <>Messaging for focused work</>}
           </motion.h2>
-          <p {...stylex.props(styles.description)}>
+          <motion.p
+            {...stylex.props(styles.description)}
+            initial={{ opacity: 0, y: -10 }}
+            transition={{ delay: 0.1, duration: 0.2 }}
+            animate={fontAvailable ? { opacity: 1, y: 0, scale: 1 } : undefined}
+          >
             We’re building a native, high-quality messaging app for teams who
             crave the best tools.
-          </p>
+          </motion.p>
 
-          <div
+          <motion.div
             style={{
               height: buttonHeight,
               position: "relative",
@@ -191,6 +214,9 @@ export default function Index() {
               justifyContent: "center",
               alignItems: "center",
             }}
+            initial={{ opacity: 0, scale: 0.9 }}
+            transition={{ delay: 0.4, duration: 0.3 }}
+            animate={fontAvailable ? { opacity: 1, y: 0, scale: 1 } : undefined}
           >
             <AnimatePresence>
               {formActive ? (
@@ -349,7 +375,7 @@ export default function Index() {
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
+          </motion.div>
         </div>
 
         <div {...stylex.props(styles.features)}>
@@ -364,7 +390,7 @@ export default function Index() {
             },
             {
               title: "Simple",
-              desc: "Powerful, intuitive and easy to use. Minimum clicks and modals, no clutter.",
+              desc: "Powerful, yet easy to use. Minimum clicks and modals. Clutter-free.",
             },
             {
               title: "Intelligent",
@@ -376,13 +402,23 @@ export default function Index() {
             },
             {
               title: "Context-aware notifications",
-              desc: "Stay in the zone as Inline differentiates urgent requests vs casual pings.",
+              desc: "Inline differentiates urgent messages vs casual pings.",
             },
-          ].map(({ title, desc }) => (
-            <div {...stylex.props(styles.card)} key={title}>
+          ].map(({ title, desc }, index) => (
+            <motion.div
+              {...stylex.props(styles.card)}
+              key={title}
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                delay: 1 + index * 0.05,
+                // duration: 0.2,
+                // ease: "easeOut",
+              }}
+            >
               <h3 {...stylex.props(styles.cardHeading)}>{title}</h3>
               <p {...stylex.props(styles.cardText)}>{desc}</p>
-            </div>
+            </motion.div>
           ))}
         </div>
       </motion.div>
@@ -431,7 +467,7 @@ export default function Index() {
           <div {...stylex.props(styles.copyRight)}>© 2024 Inline Chat</div>
         </div>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
@@ -557,7 +593,7 @@ const styles = stylex.create({
     },
 
     rowGap: 40,
-    columnGap: 34,
+    columnGap: 28,
     padding: "52px 60px",
   },
 
@@ -566,13 +602,13 @@ const styles = stylex.create({
   cardHeading: {
     fontFamily: '"Red Hat Display", sans-serif',
     fontWeight: "700",
-    fontSize: 15,
+    fontSize: 16,
     marginBottom: 4,
     color: "rgba(255,255,255,0.95)",
     textShadow: "0 1px 1px rgba(0,0,0,0.1)",
   },
   cardText: {
-    fontSize: 15,
+    fontSize: 16,
     color: "rgba(255,255,255,0.85)",
     textShadow: "0 1px 1px rgba(0,0,0,0.1)",
   },
