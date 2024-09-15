@@ -17,6 +17,7 @@ try {
   migrationClient.end({ timeout: 5_000 })
 } catch (error) {
   console.error("🔥 Error applying migrations", error)
+  process.exit(1)
 }
 
 // ??? Don't forget to close the connection, otherwise the script will hang
