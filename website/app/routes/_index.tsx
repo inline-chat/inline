@@ -117,7 +117,7 @@ export default function Index() {
           >
             {message === 0 && (
               <>
-                Chat that's not from{" "}
+                Chat that isn't from{" "}
                 <span
                   {...stylex.props(styles.dated)}
                   onPointerEnter={(e) => {
