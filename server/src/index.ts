@@ -10,6 +10,7 @@ Sentry.init({
 import { root } from "@in/server/controllers/root"
 import { waitlist } from "@in/server/controllers/waitlist"
 import { Elysia } from "elysia"
+import { there } from "./controllers/there"
 
 const port = process.env.PORT || 8000
 
@@ -18,6 +19,7 @@ const port = process.env.PORT || 8000
 const app = new Elysia()
   .use(root)
   .use(waitlist)
+  .use(there)
   .onError(({ code, error }) => {
     if (code === "NOT_FOUND") return "404"
     console.error("error:", error)
