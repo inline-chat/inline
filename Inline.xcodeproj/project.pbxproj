@@ -1,0 +1,564 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		CD2661762CA01E4000EB186F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CD2660FC2CA01CAE00EB186F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CD2661642CA01E3E00EB186F;
+			remoteInfo = InlineMac;
+		};
+		CD2661802CA01E4000EB186F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CD2660FC2CA01CAE00EB186F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CD2661642CA01E3E00EB186F;
+			remoteInfo = InlineMac;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		CD2661652CA01E3E00EB186F /* InlineMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD2661752CA01E4000EB186F /* InlineMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD26617F2CA01E4000EB186F /* InlineMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		CD2661662CA01E3E00EB186F /* InlineMac */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = InlineMac;
+			sourceTree = "<group>";
+		};
+		CD2661782CA01E4000EB186F /* InlineMacTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = InlineMacTests;
+			sourceTree = "<group>";
+		};
+		CD2661822CA01E4000EB186F /* InlineMacUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = InlineMacUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CD2661622CA01E3E00EB186F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD2661722CA01E4000EB186F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD26617C2CA01E4000EB186F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		CD2660FB2CA01CAE00EB186F = {
+			isa = PBXGroup;
+			children = (
+				CD2661662CA01E3E00EB186F /* InlineMac */,
+				CD2661782CA01E4000EB186F /* InlineMacTests */,
+				CD2661822CA01E4000EB186F /* InlineMacUITests */,
+				CD2661052CA01CAE00EB186F /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CD2661052CA01CAE00EB186F /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CD2661652CA01E3E00EB186F /* InlineMac.app */,
+				CD2661752CA01E4000EB186F /* InlineMacTests.xctest */,
+				CD26617F2CA01E4000EB186F /* InlineMacUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CD2661642CA01E3E00EB186F /* InlineMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD2661872CA01E4000EB186F /* Build configuration list for PBXNativeTarget "InlineMac" */;
+			buildPhases = (
+				CD2661612CA01E3E00EB186F /* Sources */,
+				CD2661622CA01E3E00EB186F /* Frameworks */,
+				CD2661632CA01E3E00EB186F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CD2661662CA01E3E00EB186F /* InlineMac */,
+			);
+			name = InlineMac;
+			packageProductDependencies = (
+			);
+			productName = InlineMac;
+			productReference = CD2661652CA01E3E00EB186F /* InlineMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CD2661742CA01E4000EB186F /* InlineMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD26618A2CA01E4000EB186F /* Build configuration list for PBXNativeTarget "InlineMacTests" */;
+			buildPhases = (
+				CD2661712CA01E4000EB186F /* Sources */,
+				CD2661722CA01E4000EB186F /* Frameworks */,
+				CD2661732CA01E4000EB186F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CD2661772CA01E4000EB186F /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CD2661782CA01E4000EB186F /* InlineMacTests */,
+			);
+			name = InlineMacTests;
+			packageProductDependencies = (
+			);
+			productName = InlineMacTests;
+			productReference = CD2661752CA01E4000EB186F /* InlineMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		CD26617E2CA01E4000EB186F /* InlineMacUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD26618D2CA01E4000EB186F /* Build configuration list for PBXNativeTarget "InlineMacUITests" */;
+			buildPhases = (
+				CD26617B2CA01E4000EB186F /* Sources */,
+				CD26617C2CA01E4000EB186F /* Frameworks */,
+				CD26617D2CA01E4000EB186F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CD2661812CA01E4000EB186F /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CD2661822CA01E4000EB186F /* InlineMacUITests */,
+			);
+			name = InlineMacUITests;
+			packageProductDependencies = (
+			);
+			productName = InlineMacUITests;
+			productReference = CD26617F2CA01E4000EB186F /* InlineMacUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CD2660FC2CA01CAE00EB186F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					CD2661642CA01E3E00EB186F = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					CD2661742CA01E4000EB186F = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = CD2661642CA01E3E00EB186F;
+					};
+					CD26617E2CA01E4000EB186F = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = CD2661642CA01E3E00EB186F;
+					};
+				};
+			};
+			buildConfigurationList = CD2660FF2CA01CAE00EB186F /* Build configuration list for PBXProject "Inline" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = CD2660FB2CA01CAE00EB186F;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CD2661642CA01E3E00EB186F /* InlineMac */,
+				CD2661742CA01E4000EB186F /* InlineMacTests */,
+				CD26617E2CA01E4000EB186F /* InlineMacUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CD2661632CA01E3E00EB186F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD2661732CA01E4000EB186F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD26617D2CA01E4000EB186F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		CD2661612CA01E3E00EB186F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD2661712CA01E4000EB186F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD26617B2CA01E4000EB186F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CD2661772CA01E4000EB186F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CD2661642CA01E3E00EB186F /* InlineMac */;
+			targetProxy = CD2661762CA01E4000EB186F /* PBXContainerItemProxy */;
+		};
+		CD2661812CA01E4000EB186F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CD2661642CA01E3E00EB186F /* InlineMac */;
+			targetProxy = CD2661802CA01E4000EB186F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		CD2661272CA01CB100EB186F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		CD2661282CA01CB100EB186F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		CD2661882CA01E4000EB186F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = InlineMac/InlineMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"InlineMac/Preview Content\"";
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Inline;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		CD2661892CA01E4000EB186F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = InlineMac/InlineMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"InlineMac/Preview Content\"";
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Inline;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		CD26618B2CA01E4000EB186F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/InlineMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/InlineMac";
+			};
+			name = Debug;
+		};
+		CD26618C2CA01E4000EB186F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/InlineMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/InlineMac";
+			};
+			name = Release;
+		};
+		CD26618E2CA01E4000EB186F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMacUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = InlineMac;
+			};
+			name = Debug;
+		};
+		CD26618F2CA01E4000EB186F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMacUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = InlineMac;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CD2660FF2CA01CAE00EB186F /* Build configuration list for PBXProject "Inline" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD2661272CA01CB100EB186F /* Debug */,
+				CD2661282CA01CB100EB186F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CD2661872CA01E4000EB186F /* Build configuration list for PBXNativeTarget "InlineMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD2661882CA01E4000EB186F /* Debug */,
+				CD2661892CA01E4000EB186F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CD26618A2CA01E4000EB186F /* Build configuration list for PBXNativeTarget "InlineMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD26618B2CA01E4000EB186F /* Debug */,
+				CD26618C2CA01E4000EB186F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CD26618D2CA01E4000EB186F /* Build configuration list for PBXNativeTarget "InlineMacUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD26618E2CA01E4000EB186F /* Debug */,
+				CD26618F2CA01E4000EB186F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = CD2660FC2CA01CAE00EB186F /* Project object */;
+}
