@@ -24,7 +24,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		CD2661652CA01E3E00EB186F /* InlineMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD2661652CA01E3E00EB186F /* Inline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD2661752CA01E4000EB186F /* InlineMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD26617F2CA01E4000EB186F /* InlineMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -85,7 +85,7 @@
 		CD2661052CA01CAE00EB186F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				CD2661652CA01E3E00EB186F /* InlineMac.app */,
+				CD2661652CA01E3E00EB186F /* Inline.app */,
 				CD2661752CA01E4000EB186F /* InlineMacTests.xctest */,
 				CD26617F2CA01E4000EB186F /* InlineMacUITests.xctest */,
 			);
@@ -114,7 +114,7 @@
 			packageProductDependencies = (
 			);
 			productName = InlineMac;
-			productReference = CD2661652CA01E3E00EB186F /* InlineMac.app */;
+			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
 			productType = "com.apple.product-type.application";
 		};
 		CD2661742CA01E4000EB186F /* InlineMacTests */ = {
@@ -407,7 +407,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 12.4;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Inline;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -438,7 +438,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 12.4;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Inline;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
