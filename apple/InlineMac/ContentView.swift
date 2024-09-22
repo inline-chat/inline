@@ -8,14 +8,17 @@
 import SwiftUI
 
 struct ContentView: View {
+    var hideTitlebar: () -> Void = { }
+    
     var body: some View {
         VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+            Text("Welcome to Inline.").font(.largeTitle)
         }
         .padding()
+        .frame(minWidth: 0, idealWidth: 500, maxWidth: .infinity, minHeight: 0, idealHeight: 300, maxHeight: .infinity)
+        .task {
+            hideTitlebar()
+        }
     }
 }
 
