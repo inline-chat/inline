@@ -1,4 +1,4 @@
-# Inline – chat for teams
+# Inline
 
 [Inline](https://inline.chat) is a chat app for teams.
 
