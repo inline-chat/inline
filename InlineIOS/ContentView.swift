@@ -8,8 +8,21 @@
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var nav = Navigation()
+
     var body: some View {
-        Welcome()
+        NavigationStack(path: $nav.path) {
+            Welcome()
+                .navigationDestination(for: Navigation.Destination.self) { destination in
+                    switch destination {
+                    case .welcome:
+                        Welcome()
+                    case .email:
+                        Email()
+                    }
+                }
+        }
+        .environmentObject(nav)
     }
 }
 

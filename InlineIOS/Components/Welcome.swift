@@ -8,9 +8,10 @@
 import SwiftUI
 
 struct Welcome: View {
+    @EnvironmentObject var nav: Navigation
     var body: some View {
         VStack(alignment: .center, spacing: 0) {
-            Text("Welcome to", comment: "Welcome to")
+            Text("Welcome to")
                 .font(Font.custom("Red Hat Display", size: 35))
                 .fontWeight(.bold)
                 .opacity(0.6)
@@ -28,8 +29,15 @@ struct Welcome: View {
         .frame(maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             Button {
+                nav.push(.email)
             } label: {
-                Text("Continue", comment: "Continue")
+                HStack {
+                    Text("Continue")
+                        .padding(.trailing, 6)
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.secondary)
+                        .font(.callout)
+                }
             }
             .buttonStyle(GlassyButtonStyle())
         }
@@ -38,4 +46,5 @@ struct Welcome: View {
 
 #Preview {
     Welcome()
+        .environmentObject(Navigation())
 }
