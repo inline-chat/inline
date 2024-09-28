@@ -15,6 +15,13 @@
       "when": 1726502720215,
       "tag": "0001_eager_nextwave",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1727544803189,
+      "tag": "0002_users",
+      "breakpoints": true
     }
   ]
 }

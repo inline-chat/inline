@@ -7,23 +7,23 @@
     "start": "NODE_ENV=production bun dist/index.js",
     "test": "bun test",
     "db:migrate": "bun scripts/migrate.ts",
-    "db:generate": "drizzle-kit generate --schema src/db/schema/index.ts --out drizzle --dialect postgresql",
-    "db:push": "drizzle-kit push --schema src/db/schema/index.ts --out drizzle --dialect postgresql",
+    "db:dangerously-reset-db": "bun scripts/reset-db.ts",
+    "db:generate": "drizzle-kit generate --schema src/db/schema/index.ts --out drizzle --dialect postgresql --name",
+    "db:push": "drizzle-kit push --schema src/db/schema/index.ts --dialect postgresql",
+    "db:drop": "drizzle-kit drop --out drizzle",
     "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.1.1",
-    "@sentry/bun": "^8.30.0",
+    "@sentry/bun": "^8.32.0",
     "drizzle-orm": "^0.33.0",
-    "elysia": "^1.1.12",
+    "elysia": "^1.1.16",
     "elysia-helmet": "^2.0.0",
     "elysia-rate-limit": "^4.1.0",
-    "pg": "^8.12.0",
     "postgres": "^3.4.4"
   },
   "devDependencies": {
-    "@types/bun": "^1.1.9",
-    "@types/pg": "^8.11.10",
+    "@types/bun": "^1.1.10",
     "drizzle-kit": "^0.24.2"
   }
 }
