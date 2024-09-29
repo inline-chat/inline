@@ -50,7 +50,7 @@ export const auth = new Elysia({ prefix: "auth" })
       let userId = user.id
 
       // save session
-      let token = await createSession({ userId, ip, userAgent, timeZone })
+      let { token } = await createSession({ userId, ip, userAgent, timeZone })
 
       return {
         ok: true,
