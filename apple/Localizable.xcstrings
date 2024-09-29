@@ -1,6 +1,12 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%lld" : {
+
+    },
+    "Choose your login method:" : {
+
+    },
     "Continue" : {
       "comment" : "Continue",
       "extractionState" : "manual",
@@ -96,6 +102,21 @@
           }
         }
       }
+    },
+    "Continue with Apple" : {
+
+    },
+    "Continue with Email" : {
+
+    },
+    "Continue with Google" : {
+
+    },
+    "Continue with Phone" : {
+
+    },
+    "Email" : {
+
     },
     "Enter your email" : {
       "comment" : "Enter your email",
@@ -193,11 +214,17 @@
         }
       }
     },
-    "Hi" : {
-      "shouldTranslate" : false
+    "Enter your phone number" : {
+
     },
     "inline" : {
       "shouldTranslate" : false
+    },
+    "the button in the bottom seems small for a thumb, you should make that 3x bigger" : {
+
+    },
+    "Wanver bugs" : {
+
     },
     "Welcome to" : {
       "comment" : "Welcome to",
