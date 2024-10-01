@@ -1,3 +1,4 @@
+import HeadlineKit
 import SwiftUI
 
 struct Code: View {
@@ -8,6 +9,7 @@ struct Code: View {
     private var placeHolder: String = "xxx xxx"
 
     @EnvironmentObject var nav: Navigation
+    @EnvironmentObject var api: ApiClient
 
     init(email: String) {
         self.email = email
@@ -46,6 +48,13 @@ struct Code: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             Button {
+                Task {
+                    do {
+                        try await api.verifyCode(code: code, email: email)
+                    } catch {
+                        print("ERORORORO \(error)")
+                    }
+                }
             } label: {
                 Text("Continue")
             }

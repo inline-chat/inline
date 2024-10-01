@@ -5,11 +5,13 @@
 //  Created by Dena Sohrabi on 9/26/24.
 //
 
+import HeadlineKit
 import SwiftUI
 
 struct ContentView: View {
     @StateObject private var nav = Navigation()
-
+    @StateObject var api = ApiClient()
+    
     var body: some View {
         NavigationStack(path: $nav.path) {
             Welcome()
@@ -25,6 +27,10 @@ struct ContentView: View {
                 }
         }
         .environmentObject(nav)
+        .environmentObject(api)
+        .onAppear{
+            print("HEY")
+        }
     }
 }
 
