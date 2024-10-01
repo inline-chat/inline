@@ -9,6 +9,7 @@ struct Email: View {
     private var placeHolder: String = "dena@example.com"
 
     @EnvironmentObject var nav: Navigation
+    @EnvironmentObject var api: ApiClient
 
     init(prevEmail: String? = nil) {
         self.prevEmail = prevEmail
@@ -39,7 +40,14 @@ struct Email: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             Button {
-                nav.push(.code(email: email))
+                Task {
+                    do {
+                        try await api.sendCode(email: email)
+                        nav.push(.code(email: email))
+                    } catch {
+                        print("ERORORORO \(error)")
+                    }
+                }
             } label: {
                 Text("Continue")
             }

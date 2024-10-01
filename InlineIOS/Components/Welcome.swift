@@ -35,7 +35,7 @@ struct Welcome: View {
             .safeAreaInset(edge: .bottom) {
                 VStack {
                     Button {
-                        nav.push(.email)
+                        nav.push(.email())
                     } label: {
                         Text("Continue with email")
                             .padding(.trailing, 6)
@@ -43,7 +43,7 @@ struct Welcome: View {
                     .buttonStyle(SimpleWhiteButtonStyle())
                     .padding(.horizontal, 44)
                     Button {
-                        nav.push(.email)
+                        nav.push(.email())
                     } label: {
                         Text("Continue with phone")
                             .padding(.trailing, 6)
