@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C31675042CAC16C3009A1FD8 /* HeadlineKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		C38A28472CA5AB9200D3DFB8 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -38,6 +42,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		C31675022CAC163A009A1FD8 /* HeadlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = HeadlineKit; path = /Users/denasohrabi/Documents/GitHub/inline/apple/HeadlineKit; sourceTree = "<absolute>"; };
 		C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28462CA5AB9200D3DFB8 /* InlineIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28502CA5AB9200D3DFB8 /* InlineIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -97,6 +102,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,15 +144,24 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		C31675032CAC167D009A1FD8 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		CD2660FB2CA01CAE00EB186F = {
 			isa = PBXGroup;
 			children = (
+				C31675022CAC163A009A1FD8 /* HeadlineKit */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				CD2661782CA01E4000EB186F /* InlineMacTests */,
 				CD2661822CA01E4000EB186F /* InlineMacUITests */,
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
 				C38A28492CA5AB9200D3DFB8 /* InlineIOSTests */,
 				C38A28532CA5AB9200D3DFB8 /* InlineIOSUITests */,
+				C31675032CAC167D009A1FD8 /* Frameworks */,
 				CD2661052CA01CAE00EB186F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -184,6 +199,7 @@
 			);
 			name = InlineIOS;
 			packageProductDependencies = (
+				C31675042CAC16C3009A1FD8 /* HeadlineKit */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -496,7 +512,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"InlineIOS/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -533,7 +549,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"InlineIOS/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -963,6 +979,13 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C31675042CAC16C3009A1FD8 /* HeadlineKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HeadlineKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = CD2660FC2CA01CAE00EB186F /* Project object */;
 }
