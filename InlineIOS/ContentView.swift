@@ -17,8 +17,10 @@ struct ContentView: View {
                     switch destination {
                     case .welcome:
                         Welcome()
-                    case .email:
-                        Email()
+                    case let .email(prevEmail):
+                        Email(prevEmail: prevEmail)
+                    case let .code(email):
+                        Code(email: email)
                     }
                 }
         }

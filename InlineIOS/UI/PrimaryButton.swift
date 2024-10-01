@@ -28,7 +28,7 @@ struct GlassyActionButton: View {
                 }
             }
         }
-        .buttonStyle(GlassyButtonStyle())
+        .buttonStyle(SimpleButtonStyle())
         .disabled(isLoading)
         .animation(.bouncy, value: isLoading)
     }

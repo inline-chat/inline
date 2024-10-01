@@ -6,15 +6,6 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		C3F0BEF22CA6A9350076AE17 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C3F0BEF12CA6A9350076AE17 /* Localizable.xcstrings */; };
-		C3F0BEF32CA6A9350076AE17 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C3F0BEF12CA6A9350076AE17 /* Localizable.xcstrings */; };
-		C3F0BEF42CA6A9350076AE17 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C3F0BEF12CA6A9350076AE17 /* Localizable.xcstrings */; };
-		C3F0BEF52CA6A9350076AE17 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C3F0BEF12CA6A9350076AE17 /* Localizable.xcstrings */; };
-		C3F0BEF62CA6A9350076AE17 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C3F0BEF12CA6A9350076AE17 /* Localizable.xcstrings */; };
-		C3F0BEF72CA6A9350076AE17 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C3F0BEF12CA6A9350076AE17 /* Localizable.xcstrings */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXContainerItemProxy section */
 		C38A28472CA5AB9200D3DFB8 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -50,7 +41,6 @@
 		C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28462CA5AB9200D3DFB8 /* InlineIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28502CA5AB9200D3DFB8 /* InlineIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		C3F0BEF12CA6A9350076AE17 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		CD2661652CA01E3E00EB186F /* Inline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD2661752CA01E4000EB186F /* InlineMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD26617F2CA01E4000EB186F /* InlineMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -151,7 +141,6 @@
 		CD2660FB2CA01CAE00EB186F = {
 			isa = PBXGroup;
 			children = (
-				C3F0BEF12CA6A9350076AE17 /* Localizable.xcstrings */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				CD2661782CA01E4000EB186F /* InlineMacTests */,
 				CD2661822CA01E4000EB186F /* InlineMacUITests */,
@@ -391,7 +380,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C3F0BEF22CA6A9350076AE17 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -399,7 +387,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C3F0BEF62CA6A9350076AE17 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -407,7 +394,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C3F0BEF72CA6A9350076AE17 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -415,7 +401,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C3F0BEF32CA6A9350076AE17 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -423,7 +408,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C3F0BEF42CA6A9350076AE17 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -431,7 +415,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C3F0BEF52CA6A9350076AE17 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
