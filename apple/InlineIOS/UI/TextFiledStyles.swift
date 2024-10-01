@@ -4,17 +4,18 @@ struct OutlinedTextFieldStyle: TextFieldStyle {
     let isFocused: Bool
 
     func _body(configuration: TextField<_Label>) -> some View {
-        configuration
-            .font(.body.weight(.medium))
-            .padding(.vertical, 12)
-            .multilineTextAlignment(.center)
-            .frame(width: 250)
-            .padding(.horizontal)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(isFocused ? Color.accentColor : Color(.systemGray5), lineWidth: 2)
-            )
-            .animation(.default, value: isFocused)
+        VStack(spacing: 0) {
+            configuration
+                .font(.title2.weight(.medium))
+                .padding(.vertical, 12)
+                .multilineTextAlignment(.center)
+
+            Rectangle()
+                .fill(isFocused ? Color(.systemGray4) : Color.clear)
+                .frame(height: 2)
+                .animation(.default, value: isFocused)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

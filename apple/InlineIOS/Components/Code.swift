@@ -1,44 +1,51 @@
 import SwiftUI
 
-struct Email: View {
-    var prevEmail: String?
-    @State private var email = ""
+struct Code: View {
+    var email: String
+    @State private var code = ""
     @FocusState private var isFocused: Bool
 
-    private var placeHolder: String = "dena@example.com"
+    private var placeHolder: String = "xxx xxx"
 
     @EnvironmentObject var nav: Navigation
 
-    init(prevEmail: String? = nil) {
-        self.prevEmail = prevEmail
+    init(email: String) {
+        self.email = email
     }
 
     var body: some View {
         VStack(alignment: .center, spacing: 0) {
-            Image(systemName: "at")
+            Image(systemName: "person.badge.key")
                 .font(.largeTitle)
                 .padding(.top, 50)
-                .foregroundColor(.purple)
+                .foregroundColor(.pink)
             Spacer()
-            Text("Enter your email")
+            Text("Enter the code")
                 .font(Font.custom("Red Hat Display", size: 28))
                 .fontWeight(.medium)
 
-            TextField(placeHolder, text: $email)
+            TextField(placeHolder, text: $code)
                 .textFieldStyle(OutlinedTextFieldStyle(isFocused: isFocused))
                 .focused($isFocused)
                 .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
-                .frame(minWidth: 220)
-                .fixedSize()
+                .frame(maxWidth: 220)
+            HStack(spacing: 2) {
+                Text("Code sent to \(email).")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                Button("Edit") {
+                    nav.push(.email(prevEmail: email))
+                }
+                .font(.callout)
+            }
             Spacer()
         }
         .padding(.horizontal, 44)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             Button {
-                nav.push(.code(email: email))
             } label: {
                 Text("Continue")
             }
@@ -46,14 +53,9 @@ struct Email: View {
             .padding(.bottom, 18)
             .padding(.horizontal, 44)
         }
-        .onAppear {
-            if let prevEmail = prevEmail {
-                email = prevEmail
-            }
-        }
     }
 }
 
 #Preview {
-    Email()
+    Code(email: "dena@noor.to")
 }
