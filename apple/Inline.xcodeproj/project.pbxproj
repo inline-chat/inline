@@ -7,7 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C30681222CADB48D00EDE3BE /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C30681212CADB48D00EDE3BE /* HeadlineKit */; };
+		C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C30681262CADB5F300EDE3BE /* HeadlineKit */; };
 		C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C31675042CAC16C3009A1FD8 /* HeadlineKit */; };
+		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
+		C35E95102CAC499800D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950F2CAC499800D569AF /* GRDB */; };
+		C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35E95112CAC49A600D569AF /* HeadlineKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,7 +47,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		C31675022CAC163A009A1FD8 /* HeadlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = HeadlineKit; path = /Users/denasohrabi/Documents/GitHub/inline/apple/HeadlineKit; sourceTree = "<absolute>"; };
+		C30681242CADB5CD00EDE3BE /* HeadlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = HeadlineKit; sourceTree = "<group>"; };
 		C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28462CA5AB9200D3DFB8 /* InlineIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28502CA5AB9200D3DFB8 /* InlineIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -103,6 +108,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */,
+				C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */,
+				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
+				C30681222CADB48D00EDE3BE /* HeadlineKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -124,6 +132,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C35E95102CAC499800D569AF /* GRDB in Frameworks */,
+				C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -154,7 +164,7 @@
 		CD2660FB2CA01CAE00EB186F = {
 			isa = PBXGroup;
 			children = (
-				C31675022CAC163A009A1FD8 /* HeadlineKit */,
+				C30681242CADB5CD00EDE3BE /* HeadlineKit */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				CD2661782CA01E4000EB186F /* InlineMacTests */,
 				CD2661822CA01E4000EB186F /* InlineMacUITests */,
@@ -200,6 +210,9 @@
 			name = InlineIOS;
 			packageProductDependencies = (
 				C31675042CAC16C3009A1FD8 /* HeadlineKit */,
+				C35E950D2CAC497700D569AF /* GRDB */,
+				C30681212CADB48D00EDE3BE /* HeadlineKit */,
+				C30681262CADB5F300EDE3BE /* HeadlineKit */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -268,6 +281,8 @@
 			);
 			name = InlineMac;
 			packageProductDependencies = (
+				C35E950F2CAC499800D569AF /* GRDB */,
+				C35E95112CAC49A600D569AF /* HeadlineKit */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -376,6 +391,10 @@
 			);
 			mainGroup = CD2660FB2CA01CAE00EB186F;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C35E950C2CAC497700D569AF /* XCLocalSwiftPackageReference "../../../Downloads/GRDB.swift-main" */,
+				C30681252CADB5F300EDE3BE /* XCLocalSwiftPackageReference "HeadlineKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
 			projectDirPath = "";
@@ -980,8 +999,40 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		C30681252CADB5F300EDE3BE /* XCLocalSwiftPackageReference "HeadlineKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = HeadlineKit;
+		};
+		C35E950C2CAC497700D569AF /* XCLocalSwiftPackageReference "../../../Downloads/GRDB.swift-main" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../../Downloads/GRDB.swift-main";
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
+		C30681212CADB48D00EDE3BE /* HeadlineKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HeadlineKit;
+		};
+		C30681262CADB5F300EDE3BE /* HeadlineKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HeadlineKit;
+		};
 		C31675042CAC16C3009A1FD8 /* HeadlineKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HeadlineKit;
+		};
+		C35E950D2CAC497700D569AF /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GRDB;
+		};
+		C35E950F2CAC499800D569AF /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C35E950C2CAC497700D569AF /* XCLocalSwiftPackageReference "../../../Downloads/GRDB.swift-main" */;
+			productName = GRDB;
+		};
+		C35E95112CAC49A600D569AF /* HeadlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HeadlineKit;
 		};

@@ -11,7 +11,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var nav = Navigation()
     @StateObject var api = ApiClient()
-    
+
     var body: some View {
         NavigationStack(path: $nav.path) {
             Welcome()
@@ -28,7 +28,7 @@ struct ContentView: View {
         }
         .environmentObject(nav)
         .environmentObject(api)
-        .onAppear{
+        .onAppear {
             print("HEY")
         }
     }
