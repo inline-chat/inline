@@ -33,6 +33,7 @@ struct Code: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
                 .frame(maxWidth: 220)
+
             HStack(spacing: 2) {
                 Text("Code sent to \(email).")
                     .font(.callout)
@@ -42,6 +43,7 @@ struct Code: View {
                 }
                 .font(.callout)
             }
+            .padding(.top, 8)
             Spacer()
         }
         .padding(.horizontal, 44)
@@ -50,7 +52,9 @@ struct Code: View {
             Button {
                 Task {
                     do {
-                        try await api.verifyCode(code: code, email: email)
+                        let result = try await api.verifyCode(code: code, email: email)
+
+                        CurrentDataModel.shared.saveToken(result.token)
                     } catch {
                         print("ERORORORO \(error)")
                     }

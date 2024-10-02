@@ -35,7 +35,6 @@ struct AddAccount: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             Button {
-           
             } label: {
                 Text("Continue")
             }
