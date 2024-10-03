@@ -45,7 +45,7 @@ struct Email: View {
                         try await api.sendCode(email: email)
                         nav.push(.code(email: email))
                     } catch {
-                        print("ERORORORO \(error)")
+                        Log.shared.error("Failed to send code", error: error)
                     }
                 }
             } label: {

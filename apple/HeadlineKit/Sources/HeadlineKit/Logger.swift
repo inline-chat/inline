@@ -24,8 +24,8 @@ public enum LogLevel: String {
     }
 }
 
-public final class Logger: @unchecked Sendable {
-    public static let shared = Logger()
+public final class Log: @unchecked Sendable {
+    public static let shared = Log()
     
     private let dateFormatter: DateFormatter
     
@@ -66,7 +66,6 @@ public final class Logger: @unchecked Sendable {
     
     public func debug(_ message: String, scope: LogScope = .none, file: String = #file, function: String = #function, line: Int = #line) {
         #if DEBUG
-        print("🐛 DEBUG - \(scope) - in: \(file) at: \(function) \(line) \(message)")
         log(message, level: .debug, scope: scope, file: file, function: function, line: line)
         #endif
     }
