@@ -15,7 +15,7 @@ public enum Path: String {
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
     public static let shared = ApiClient()
-    public init(){}
+    public init() {}
     var baseURL: String {
         #if DEBUG
             return "http://localhost:8000/v001"
@@ -41,9 +41,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
 
-        print("👾 Requested URL: \(url)")
-        print("👾 Request: \(request)")
-
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -58,7 +55,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             let decodedData = try decoder.decode(T.self, from: data)
             return decodedData
         } catch {
-            print("👾 Error: \(error)")
+            Log.shared.error("Failed to request", error: error, scope: .api)
             throw error
         }
     }

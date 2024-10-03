@@ -60,11 +60,11 @@ struct Code: View {
                             try AppDatabase.shared.setupDatabase()
                             print("Database setup successful")
                         } catch {
-                            print("Failed to setup database: \(error)")
+                            Log.shared.error("Failed to setup database", error: error)
                         }
 
                     } catch {
-                        print("ERORORORO \(error)")
+                        Log.shared.error("Failed to verify code", error: error)
                     }
                 }
             } label: {

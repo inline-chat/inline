@@ -47,15 +47,15 @@ public final class AppDatabase: @unchecked Sendable {
             self.dbWriter = dbPool
             print("📁 Existing database opened at: \(databaseURL.path)")
         } catch {
-            print("Failed to open existing database: \(error)")
-            print("Attempting to create a new database...")
-                
+            Log.shared.error("Failed to open existing database", error: error)
+            Log.shared.debug("Attempting to create a new database...")
+
             // If opening fails, remove the existing file and create a new one
             try? fileManager.removeItem(at: databaseURL)
                 
             let newDbPool = try DatabasePool(path: databaseURL.path, configuration: config)
             self.dbWriter = newDbPool
-            print("📁 New database created at: \(databaseURL.path)")
+            Log.shared.debug("📁 New database created at: \(databaseURL.path)")
         }
             
         // Verify that we can read from the database
@@ -67,7 +67,7 @@ public final class AppDatabase: @unchecked Sendable {
     /// Provides a read-only access to the database.
     public var reader: any GRDB.DatabaseReader {
         guard let dbWriter = dbWriter else {
-            fatalError("Database has not been set up. Call setupDatabase() first.")
+            Log.shared.error("Database has not been set up. Call setupDatabase() first.")
         }
         return dbWriter
     }
@@ -78,9 +78,11 @@ public final class AppDatabase: @unchecked Sendable {
         do {
             let dbQueue = try DatabaseQueue()
             instance.dbWriter = dbQueue
-            print("Empty in-memory database created")
+        
+            Log.shared.debug("Empty in-memory database created")
+
         } catch {
-            print("Failed to create empty in-memory database: \(error)")
+            Log.shared.error("Failed to create empty in-memory database", error: error)
         }
         return instance
     }
