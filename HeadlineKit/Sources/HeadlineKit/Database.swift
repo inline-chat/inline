@@ -68,6 +68,8 @@ public final class AppDatabase: @unchecked Sendable {
     public var reader: any GRDB.DatabaseReader {
         guard let dbWriter = dbWriter else {
             Log.shared.error("Database has not been set up. Call setupDatabase() first.")
+            /// because of (error: 'guard' body must not fall through, consider using a 'return' or 'throw' to exit the scope), I preferred to throw an error out instead of returning
+            fatalError("Database has not been set up. Call setupDatabase() first.")
         }
         return dbWriter
     }
