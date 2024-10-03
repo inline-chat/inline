@@ -15,6 +15,7 @@
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
 		C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35E95112CAC49A600D569AF /* HeadlineKit */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
+		CD3BBCC02CAEA5A2006AD998 /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CD3BBCBF2CAEA5A2006AD998 /* SwiftUIIntrospect */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -138,6 +139,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */,
+				CD3BBCC02CAEA5A2006AD998 /* SwiftUIIntrospect in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -289,6 +291,7 @@
 			name = InlineMac;
 			packageProductDependencies = (
 				C35E95112CAC49A600D569AF /* HeadlineKit */,
+				CD3BBCBF2CAEA5A2006AD998 /* SwiftUIIntrospect */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -402,6 +405,7 @@
 				C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */,
 				C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */,
+				CD3BBCBE2CAEA5A2006AD998 /* XCRemoteSwiftPackageReference "swiftui-introspect" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -826,7 +830,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				MACOSX_DEPLOYMENT_TARGET = 13.5;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac;
 				PRODUCT_NAME = Inline;
@@ -857,7 +861,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				MACOSX_DEPLOYMENT_TARGET = 13.5;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac;
 				PRODUCT_NAME = Inline;
@@ -1041,6 +1045,14 @@
 				minimumVersion = 2.4.2;
 			};
 		};
+		CD3BBCBE2CAEA5A2006AD998 /* XCRemoteSwiftPackageReference "swiftui-introspect" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/siteline/swiftui-introspect";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.3.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1078,6 +1090,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
+		};
+		CD3BBCBF2CAEA5A2006AD998 /* SwiftUIIntrospect */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD3BBCBE2CAEA5A2006AD998 /* XCRemoteSwiftPackageReference "swiftui-introspect" */;
+			productName = SwiftUIIntrospect;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
