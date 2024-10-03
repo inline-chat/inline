@@ -55,6 +55,14 @@ struct Code: View {
                         let result = try await api.verifyCode(code: code, email: email)
 
                         CurrentDataModel.shared.saveToken(result.token)
+
+                        do {
+                            try AppDatabase.shared.setupDatabase()
+                            print("Database setup successful")
+                        } catch {
+                            print("Failed to setup database: \(error)")
+                        }
+
                     } catch {
                         print("ERORORORO \(error)")
                     }

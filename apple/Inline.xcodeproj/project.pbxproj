@@ -11,8 +11,8 @@
 		C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C30681262CADB5F300EDE3BE /* HeadlineKit */; };
 		C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C31675042CAC16C3009A1FD8 /* HeadlineKit */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
-		C35E95102CAC499800D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950F2CAC499800D569AF /* GRDB */; };
 		C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35E95112CAC49A600D569AF /* HeadlineKit */; };
+		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +108,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */,
+				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C30681222CADB48D00EDE3BE /* HeadlineKit in Frameworks */,
@@ -132,7 +133,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C35E95102CAC499800D569AF /* GRDB in Frameworks */,
 				C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -213,6 +213,7 @@
 				C35E950D2CAC497700D569AF /* GRDB */,
 				C30681212CADB48D00EDE3BE /* HeadlineKit */,
 				C30681262CADB5F300EDE3BE /* HeadlineKit */,
+				C3E6D5CA2CAE82B00048D2D8 /* GRDB */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -281,7 +282,6 @@
 			);
 			name = InlineMac;
 			packageProductDependencies = (
-				C35E950F2CAC499800D569AF /* GRDB */,
 				C35E95112CAC49A600D569AF /* HeadlineKit */,
 			);
 			productName = InlineMac;
@@ -392,8 +392,8 @@
 			mainGroup = CD2660FB2CA01CAE00EB186F;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				C35E950C2CAC497700D569AF /* XCLocalSwiftPackageReference "../../../Downloads/GRDB.swift-main" */,
 				C30681252CADB5F300EDE3BE /* XCLocalSwiftPackageReference "HeadlineKit" */,
+				C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -1004,11 +1004,18 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = HeadlineKit;
 		};
-		C35E950C2CAC497700D569AF /* XCLocalSwiftPackageReference "../../../Downloads/GRDB.swift-main" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../../Downloads/GRDB.swift-main";
-		};
 /* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/duckduckgo/GRDB.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		C30681212CADB48D00EDE3BE /* HeadlineKit */ = {
@@ -1027,14 +1034,14 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = GRDB;
 		};
-		C35E950F2CAC499800D569AF /* GRDB */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C35E950C2CAC497700D569AF /* XCLocalSwiftPackageReference "../../../Downloads/GRDB.swift-main" */;
-			productName = GRDB;
-		};
 		C35E95112CAC49A600D569AF /* HeadlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HeadlineKit;
+		};
+		C3E6D5CA2CAE82B00048D2D8 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
