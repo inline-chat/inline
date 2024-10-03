@@ -10,6 +10,8 @@
 		C30681222CADB48D00EDE3BE /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C30681212CADB48D00EDE3BE /* HeadlineKit */; };
 		C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C30681262CADB5F300EDE3BE /* HeadlineKit */; };
 		C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C31675042CAC16C3009A1FD8 /* HeadlineKit */; };
+		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
+		C35092CC2CAEA7DB00AE3E23 /* SentrySwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = C35092CB2CAEA7DB00AE3E23 /* SentrySwiftUI */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
 		C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35E95112CAC49A600D569AF /* HeadlineKit */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
@@ -108,10 +110,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */,
+				C35092CC2CAEA7DB00AE3E23 /* SentrySwiftUI in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C30681222CADB48D00EDE3BE /* HeadlineKit in Frameworks */,
+				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -214,6 +218,8 @@
 				C30681212CADB48D00EDE3BE /* HeadlineKit */,
 				C30681262CADB5F300EDE3BE /* HeadlineKit */,
 				C3E6D5CA2CAE82B00048D2D8 /* GRDB */,
+				C35092C92CAEA7DB00AE3E23 /* Sentry */,
+				C35092CB2CAEA7DB00AE3E23 /* SentrySwiftUI */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -394,6 +400,7 @@
 			packageReferences = (
 				C30681252CADB5F300EDE3BE /* XCLocalSwiftPackageReference "HeadlineKit" */,
 				C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */,
+				C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -1007,6 +1014,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.36.0;
+			};
+		};
 		C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/duckduckgo/GRDB.swift";
@@ -1029,6 +1044,16 @@
 		C31675042CAC16C3009A1FD8 /* HeadlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HeadlineKit;
+		};
+		C35092C92CAEA7DB00AE3E23 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
+		C35092CB2CAEA7DB00AE3E23 /* SentrySwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = SentrySwiftUI;
 		};
 		C35E950D2CAC497700D569AF /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
