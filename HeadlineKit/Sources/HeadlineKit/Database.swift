@@ -14,11 +14,11 @@ public final class AppDatabase: @unchecked Sendable {
     /// Sets up the database
     /// Summery of functionality:
     /// - We need to create db after saving token, so we create a fake empty db till token is not exist with calling empty() funtion.
-    /// - Then after reciving toekn from api result and saving it in CurrentData class, will call this func to:
+    /// - Then after reciving toekn from api result and saving it in Auth class, will call this func to:
     ///     1. Check if any db is exist, delete it and create new one using token
     ///     2. Othervise if it was not created yet, creatre one using token
     public func setupDatabase() throws {
-        guard let token = CurrentDataModel.shared.token else {
+        guard let token = Auth.shared.token else {
             print("No token available. Database will not be created.")
             throw NSError(domain: "AppDatabase", code: 1, userInfo: [NSLocalizedDescriptionKey: "No token available"])
         }

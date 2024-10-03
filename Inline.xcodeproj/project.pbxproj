@@ -11,7 +11,7 @@
 		C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C30681262CADB5F300EDE3BE /* HeadlineKit */; };
 		C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C31675042CAC16C3009A1FD8 /* HeadlineKit */; };
 		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
-		C35092CC2CAEA7DB00AE3E23 /* SentrySwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = C35092CB2CAEA7DB00AE3E23 /* SentrySwiftUI */; };
+		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
 		C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35E95112CAC49A600D569AF /* HeadlineKit */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
@@ -110,9 +110,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */,
-				C35092CC2CAEA7DB00AE3E23 /* SentrySwiftUI in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */,
+				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C30681222CADB48D00EDE3BE /* HeadlineKit in Frameworks */,
 				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
@@ -219,7 +219,7 @@
 				C30681262CADB5F300EDE3BE /* HeadlineKit */,
 				C3E6D5CA2CAE82B00048D2D8 /* GRDB */,
 				C35092C92CAEA7DB00AE3E23 /* Sentry */,
-				C35092CB2CAEA7DB00AE3E23 /* SentrySwiftUI */,
+				C35092D42CAEE8EA00AE3E23 /* KeychainSwift */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -401,6 +401,7 @@
 				C30681252CADB5F300EDE3BE /* XCLocalSwiftPackageReference "HeadlineKit" */,
 				C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */,
 				C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
+				C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -536,6 +537,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = InlineIOS/InlineIOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -573,6 +575,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = InlineIOS/InlineIOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -1022,6 +1025,14 @@
 				minimumVersion = 8.36.0;
 			};
 		};
+		C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/evgenyneu/keychain-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 24.0.0;
+			};
+		};
 		C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/duckduckgo/GRDB.swift";
@@ -1050,10 +1061,10 @@
 			package = C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
 			productName = Sentry;
 		};
-		C35092CB2CAEA7DB00AE3E23 /* SentrySwiftUI */ = {
+		C35092D42CAEE8EA00AE3E23 /* KeychainSwift */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
-			productName = SentrySwiftUI;
+			package = C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */;
+			productName = KeychainSwift;
 		};
 		C35E950D2CAC497700D569AF /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
