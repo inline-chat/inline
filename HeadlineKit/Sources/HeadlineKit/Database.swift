@@ -1,120 +1,87 @@
 import Foundation
 import GRDB
-import os.log
 
-public final class AppDatabase: Sendable {
+public final class AppDatabase: @unchecked Sendable {
     /// Access to the database.
-    private let dbWriter: any DatabaseWriter
-
-    /// Creates a `AppDatabase`, and makes sure the database schema
-    /// is ready.
-    ///
-    /// - important: Create the `DatabaseWriter` with a configuration
-    ///   returned by ``makeConfiguration(_:)``.
-    public init(_ dbWriter: any GRDB.DatabaseWriter) throws {
-        self.dbWriter = dbWriter
-        try migrator.migrate(dbWriter)
-    }
-
-    /// The DatabaseMigrator that defines the database schema.
-    ///
-    /// See <https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/migrations>
-    private var migrator: DatabaseMigrator {
-        var migrator = DatabaseMigrator()
-
-        #if DEBUG
-            // Speed up development by nuking the database when migrations change
-            // See <https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/migrations#The-eraseDatabaseOnSchemaChange-Option>
-            migrator.eraseDatabaseOnSchemaChange = true
-        #endif
-
-        // Migrations for future application versions will be inserted here:
-        // migrator.registerMigration(...) { db in
-        //     ...
-        // }
-
-        return migrator
-    }
-}
-
-// MARK: - Database Configuration
-
-public extension AppDatabase {
-    // Uncomment for enabling SQL logging
-    // private static let sqlLogger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "SQL")
-
-    /// Returns a database configuration suited for `AppDatabase`.
-    ///
-    /// SQL statements are logged if the `SQL_TRACE` environment variable
-    /// is set.
-    ///
-    /// - parameter base: A base configuration.
-    static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
-        var config = base
-
-        return config
-    }
-}
-
-// MARK: - Database Access: Reads
-
-public extension AppDatabase {
-    /// Provides a read-only access to the database.
-    var reader: any GRDB.DatabaseReader {
-        dbWriter
-    }
-}
-
-public extension AppDatabase {
-    /// The database for the application
-    static let shared = makeShared()
-
-    private static func makeShared() -> AppDatabase {
-        do {
-            if let token = CurrentDataModel.shared.token {
-                print("Token is exist for \(token).")
-       
-                return try setup(token: token)
-            } else {
-                print("Waiting for logging in...")
-                return AppDatabase.empty()
-            }
-        } catch {
-            print("Error setting up database: \(error.localizedDescription)")
-            return AppDatabase.empty()
+    private var dbWriter: (any DatabaseWriter)?
+    
+    /// The shared database instance
+    public static let shared = AppDatabase()
+    
+    /// Private initializer to ensure singleton usage
+    private init() {}
+    
+    /// Sets up the database
+    /// Summery of functionality:
+    /// - We need to create db after saving token, so we create a fake empty db till token is not exist with calling empty() funtion.
+    /// - Then after reciving toekn from api result and saving it in CurrentData class, will call this func to:
+    ///     1. Check if any db is exist, delete it and create new one using token
+    ///     2. Othervise if it was not created yet, creatre one using token
+    public func setupDatabase() throws {
+        guard let token = CurrentDataModel.shared.token else {
+            print("No token available. Database will not be created.")
+            throw NSError(domain: "AppDatabase", code: 1, userInfo: [NSLocalizedDescriptionKey: "No token available"])
         }
-    }
-
-    private static func setup(token: String) throws -> AppDatabase {
-        // Apply recommendations from
-        // <https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/databaseconnections>
-        print("Setup called")
+            
         let fileManager = FileManager.default
         let appSupportURL = try fileManager.url(
-            for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true)
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
         let directoryURL = appSupportURL.appendingPathComponent("Database", isDirectory: true)
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-
+            
         let databaseURL = directoryURL.appendingPathComponent("db.sqlite")
-        var config = AppDatabase.makeConfiguration()
-
-        // encryption
+        var config = Configuration()
+            
+        print("Setting up database with token: \(token)")
         config.prepareDatabase { db in
             try db.usePassphrase(token)
         }
-
-        let dbPool = try DatabasePool(path: databaseURL.path, configuration: config)
-
-        return try AppDatabase(dbPool)
+            
+        do {
+            // Try to open existing database
+            let dbPool = try DatabasePool(path: databaseURL.path, configuration: config)
+            self.dbWriter = dbPool
+            print("📁 Existing database opened at: \(databaseURL.path)")
+        } catch {
+            print("Failed to open existing database: \(error)")
+            print("Attempting to create a new database...")
+                
+            // If opening fails, remove the existing file and create a new one
+            try? fileManager.removeItem(at: databaseURL)
+                
+            let newDbPool = try DatabasePool(path: databaseURL.path, configuration: config)
+            self.dbWriter = newDbPool
+            print("📁 New database created at: \(databaseURL.path)")
+        }
+            
+        // Verify that we can read from the database
+        try self.dbWriter?.read { db in
+            try db.execute(sql: "SELECT 1")
+        }
     }
 
-    /// Creates an empty database for SwiftUI previews
-    static func empty() -> AppDatabase {
-        // Connect to an in-memory database
-        // See https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/databaseconnections
-
-        let dbQueue = try! DatabaseQueue(configuration: AppDatabase.makeConfiguration())
-        return try! AppDatabase(dbQueue)
+    /// Provides a read-only access to the database.
+    public var reader: any GRDB.DatabaseReader {
+        guard let dbWriter = dbWriter else {
+            fatalError("Database has not been set up. Call setupDatabase() first.")
+        }
+        return dbWriter
+    }
+    
+    /// Creates an empty in-memory database for SwiftUI previews and testing
+    public static func empty() -> AppDatabase {
+        let instance = AppDatabase()
+        do {
+            let dbQueue = try DatabaseQueue()
+            instance.dbWriter = dbQueue
+            print("Empty in-memory database created")
+        } catch {
+            print("Failed to create empty in-memory database: \(error)")
+        }
+        return instance
     }
 }

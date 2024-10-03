@@ -6,20 +6,29 @@ import PackageDescription
 let package = Package(
     name: "HeadlineKit",
     platforms: [
-      .iOS(.v17),
-      .macOS(.v12)
+        .iOS(.v17),
+        .macOS(.v12),
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "HeadlineKit",
-            targets: ["HeadlineKit"]),
+            targets: ["HeadlineKit"]
+        ),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/duckduckgo/GRDB.swift", branch: "main"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "HeadlineKit"),
+            name: "HeadlineKit",
+            dependencies: [
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ]
+        ),
+
         .testTarget(
             name: "HeadlineKitTests",
             dependencies: ["HeadlineKit"]

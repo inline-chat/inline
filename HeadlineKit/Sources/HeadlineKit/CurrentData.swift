@@ -13,6 +13,5 @@ public final class CurrentDataModel: ObservableObject, @unchecked Sendable {
         print("💶 TOKEN Self \(self.token)")
     }
 
-    public init() {
-    }
+    public init() {}
 }
