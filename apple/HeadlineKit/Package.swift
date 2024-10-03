@@ -18,6 +18,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/duckduckgo/GRDB.swift", branch: "main"),
+        .package(url: "https://github.com/getsentry/sentry-cocoa", from: "8.36.0"),
+
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -26,6 +28,7 @@ let package = Package(
             name: "HeadlineKit",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "Sentry", package: "Sentry"),
             ]
         ),
 
