@@ -19,6 +19,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/duckduckgo/GRDB.swift", branch: "main"),
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "8.36.0"),
+        .package(url: "https://github.com/evgenyneu/keychain-swift.git", from: "24.0.0"),
 
     ],
     targets: [
@@ -28,7 +29,8 @@ let package = Package(
             name: "HeadlineKit",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
-                .product(name: "Sentry", package: "Sentry"),
+                .product(name: "Sentry", package: "sentry-cocoa"),
+                .product(name: "KeychainSwift", package: "keychain-swift"),
             ]
         ),
 

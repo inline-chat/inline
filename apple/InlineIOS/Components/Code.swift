@@ -54,7 +54,7 @@ struct Code: View {
                     do {
                         let result = try await api.verifyCode(code: code, email: email)
 
-                        CurrentDataModel.shared.saveToken(result.token)
+                        Auth.shared.saveToken(result.token)
 
                         do {
                             try AppDatabase.shared.setupDatabase()

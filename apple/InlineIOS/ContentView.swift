@@ -14,17 +14,26 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack(path: $nav.path) {
-            Welcome()
-                .navigationDestination(for: Navigation.Destination.self) { destination in
-                    switch destination {
-                    case .welcome:
-                        Welcome()
-                    case let .email(prevEmail):
-                        Email(prevEmail: prevEmail)
-                    case let .code(email):
-                        Code(email: email)
+            Group {
+                if let token = Auth.shared.token {
+                    VStack {
+                        Text("Welcome")
                     }
                 }
+                else {
+                    Welcome()
+                }
+            }
+            .navigationDestination(for: Navigation.Destination.self) { destination in
+                switch destination {
+                case .welcome:
+                    Welcome()
+                case let .email(prevEmail):
+                    Email(prevEmail: prevEmail)
+                case let .code(email):
+                    Code(email: email)
+                }
+            }
         }
         .environmentObject(nav)
         .environmentObject(api)
