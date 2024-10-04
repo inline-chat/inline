@@ -6,5 +6,9 @@
 	<array>
 		<string>group.chat.inline</string>
 	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)keychainGroup</string>
+	</array>
 </dict>
 </plist>
