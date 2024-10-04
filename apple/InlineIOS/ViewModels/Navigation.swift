@@ -5,6 +5,8 @@ class Navigation: ObservableObject {
         case welcome
         case email(prevEmail: String? = nil)
         case code(email: String)
+        case main
+        case addAccount(email: String)
     }
 
     @Published var path = NavigationPath()
