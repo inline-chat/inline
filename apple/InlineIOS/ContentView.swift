@@ -11,14 +11,12 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var nav = Navigation()
     @StateObject var api = ApiClient()
-
+    @Environment(\.appDatabase) var database
     var body: some View {
         NavigationStack(path: $nav.path) {
             Group {
-                if let token = Auth.shared.token {
-                    VStack {
-                        Text("Welcome")
-                    }
+                if Auth.shared.getToken() != nil {
+                    MainView()
                 }
                 else {
                     Welcome()
@@ -32,6 +30,10 @@ struct ContentView: View {
                     Email(prevEmail: prevEmail)
                 case let .code(email):
                     Code(email: email)
+                case .main:
+                    MainView()
+                case let .addAccount(email):
+                    AddAccount(email: email)
                 }
             }
         }
