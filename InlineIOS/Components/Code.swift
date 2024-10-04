@@ -10,6 +10,7 @@ struct Code: View {
 
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var api: ApiClient
+    @Environment(\.appDatabase) var database
 
     init(email: String) {
         self.email = email
@@ -50,29 +51,34 @@ struct Code: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             Button {
-                Task {
-                    do {
-                        let result = try await api.verifyCode(code: code, email: email)
+                submitCode()
 
-                        Auth.shared.saveToken(result.token)
-
-                        do {
-                            try AppDatabase.shared.setupDatabase()
-                            print("Database setup successful")
-                        } catch {
-                            Log.shared.error("Failed to setup database", error: error)
-                        }
-
-                    } catch {
-                        Log.shared.error("Failed to verify code", error: error)
-                    }
-                }
             } label: {
                 Text("Continue")
             }
             .buttonStyle(SimpleButtonStyle())
             .padding(.bottom, 18)
             .padding(.horizontal, 44)
+        }
+    }
+
+    func submitCode() {
+        Task {
+            do {
+                let result = try await api.verifyCode(code: code, email: email)
+
+                Auth.shared.saveToken(result.token)
+                nav.push(.addAccount(email: email))
+                do {
+                    try database.setupDatabase()
+                    print("Database setup successful")
+                } catch {
+                    Log.shared.error("Failed to setup database", error: error)
+                }
+
+            } catch {
+                Log.shared.error("Failed to verify code", error: error)
+            }
         }
     }
 }
