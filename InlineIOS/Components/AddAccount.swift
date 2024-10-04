@@ -2,6 +2,7 @@ import HeadlineKit
 import SwiftUI
 
 struct AddAccount: View {
+    var email: String
     @State private var name = ""
     @FocusState private var isFocused: Bool
 
@@ -9,6 +10,11 @@ struct AddAccount: View {
 
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var api: ApiClient
+    @Environment(\.appDatabase) var database
+
+    init(email: String) {
+        self.email = email
+    }
 
     var body: some View {
         VStack(alignment: .center, spacing: 0) {
@@ -35,6 +41,7 @@ struct AddAccount: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             Button {
+                submitAccount()
             } label: {
                 Text("Continue")
             }
@@ -43,8 +50,24 @@ struct AddAccount: View {
             .padding(.horizontal, 44)
         }
     }
+
+    func submitAccount() {
+        Task {
+            do {
+                try await database.dbWriter.write { db in
+                    let user = User(
+                        email: email,
+                        firstName: name
+                    )
+                    try user.insert(db)
+                }
+            } catch {
+                Log.shared.error("Failed to create user", error: error)
+            }
+        }
+    }
 }
 
 #Preview {
-    AddAccount()
+    AddAccount(email: "")
 }
