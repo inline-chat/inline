@@ -3,13 +3,15 @@ import GRDB
 
 public final class AppDatabase: @unchecked Sendable {
     /// Access to the database.
-    private var dbWriter: (any DatabaseWriter)?
-    
+    public private(set) var dbWriter: any DatabaseWriter
+
     /// The shared database instance
     public static let shared = AppDatabase()
     
     /// Private initializer to ensure singleton usage
-    private init() {}
+    private init() {
+        self.dbWriter = try! DatabaseQueue()
+    }
     
     /// Sets up the database
     /// Summery of functionality:
@@ -18,7 +20,7 @@ public final class AppDatabase: @unchecked Sendable {
     ///     1. Check if any db is exist, delete it and create new one using token
     ///     2. Othervise if it was not created yet, creatre one using token
     public func setupDatabase() throws {
-        guard let token = Auth.shared.token else {
+        guard let token = Auth.shared.getToken() else {
             print("No token available. Database will not be created.")
             throw NSError(domain: "AppDatabase", code: 1, userInfo: [NSLocalizedDescriptionKey: "No token available"])
         }
@@ -59,19 +61,14 @@ public final class AppDatabase: @unchecked Sendable {
         }
             
         // Verify that we can read from the database
-        try self.dbWriter?.read { db in
+        try self.dbWriter.read { db in
             try db.execute(sql: "SELECT 1")
         }
     }
 
     /// Provides a read-only access to the database.
     public var reader: any GRDB.DatabaseReader {
-        guard let dbWriter = dbWriter else {
-            Log.shared.error("Database has not been set up. Call setupDatabase() first.")
-            /// because of (error: 'guard' body must not fall through, consider using a 'return' or 'throw' to exit the scope), I preferred to throw an error out instead of returning
-            fatalError("Database has not been set up. Call setupDatabase() first.")
-        }
-        return dbWriter
+        return self.dbWriter
     }
     
     /// Creates an empty in-memory database for SwiftUI previews and testing
