@@ -1,9 +1,7 @@
-
 import SwiftUI
 
 struct Onboarding: View {
     @EnvironmentObject var windowViewModel: MainWindowViewModel
-    
     
     var body: some View {
         VStack {
@@ -14,12 +12,10 @@ struct Onboarding: View {
                 Text("Continue")
             }
         }.padding()
-            .onAppear {
-//                window.setWindowStyle?(.onboarding)
-            }
     }
 }
 
 #Preview {
     Onboarding()
+        .environmentObject(MainWindowViewModel())
 }
