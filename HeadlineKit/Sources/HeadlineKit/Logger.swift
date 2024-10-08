@@ -37,7 +37,7 @@ public final class Log: @unchecked Sendable {
     private func log(_ message: String, level: LogLevel, scope: LogScope, error: Error? = nil, file: String = #file, function: String = #function, line: Int = #line) {
         let timestamp = dateFormatter.string(from: Date())
         let fileName = (file as NSString).lastPathComponent
-        let logMessage = "\(timestamp) \(level.rawValue) [\(scope.rawValue)] [\(fileName):\(line) \(function)] \(message)"
+        let logMessage = "\(level.rawValue) [\(scope.rawValue)] [\(fileName):\(line) \(function)] \(message) \(error)"
         
         print(logMessage)
         

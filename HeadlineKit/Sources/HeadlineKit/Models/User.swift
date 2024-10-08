@@ -8,8 +8,8 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     public var lastName: String?
     public var createdAt: Date?
 
-    public init(email: String, firstName: String, lastName: String? = nil) {
-        id = Int64.random(in: 1 ... 5000)
+    public init(id: Int64 = Int64.random(in: 1 ... 5000), email: String, firstName: String, lastName: String? = nil) {
+        self.id = id
         self.email = email
         self.firstName = firstName
         self.lastName = lastName

@@ -11,6 +11,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var nav = Navigation()
     @StateObject var api = ApiClient()
+    @StateObject var userData = UserData()
     @Environment(\.appDatabase) var database
     var body: some View {
         NavigationStack(path: $nav.path) {
@@ -39,9 +40,7 @@ struct ContentView: View {
         }
         .environmentObject(nav)
         .environmentObject(api)
-        .onAppear {
-            print("HEY")
-        }
+        .environmentObject(userData)
     }
 }
 
