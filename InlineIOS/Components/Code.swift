@@ -10,6 +10,8 @@ struct Code: View {
 
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var api: ApiClient
+    @EnvironmentObject var userData: UserData
+
     @Environment(\.appDatabase) var database
 
     init(email: String) {
@@ -67,6 +69,7 @@ struct Code: View {
             do {
                 let result = try await api.verifyCode(code: code, email: email)
 
+                userData.setId(Int64(result.userId) ?? 0)
                 Auth.shared.saveToken(result.token)
                 nav.push(.addAccount(email: email))
                 do {

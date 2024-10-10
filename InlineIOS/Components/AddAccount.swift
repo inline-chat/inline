@@ -10,6 +10,7 @@ struct AddAccount: View {
 
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var api: ApiClient
+    @EnvironmentObject var userData: UserData
     @Environment(\.appDatabase) var database
 
     init(email: String) {
@@ -56,11 +57,13 @@ struct AddAccount: View {
             do {
                 try await database.dbWriter.write { db in
                     let user = User(
+                        id: userData.getId() ?? Int64.random(in: 1 ... 6000),
                         email: email,
                         firstName: name
                     )
-                    try user.insert(db)
+                    try user.save(db)
                 }
+                nav.push(.main)
             } catch {
                 Log.shared.error("Failed to create user", error: error)
             }

@@ -11,6 +11,8 @@ public final class AppDatabase: @unchecked Sendable {
     /// Private initializer to ensure singleton usage
     private init() {
         self.dbWriter = try! DatabaseQueue()
+        // TODO: FIXME
+        try! migrator.migrate(self.dbWriter)
     }
     
     /// Sets up the database
@@ -84,5 +86,26 @@ public final class AppDatabase: @unchecked Sendable {
             Log.shared.error("Failed to create empty in-memory database", error: error)
         }
         return instance
+    }
+}
+
+extension AppDatabase {
+    private var migrator: DatabaseMigrator {
+        var migrator = DatabaseMigrator()
+#if DEBUG
+        // Speed up development by nuking the database when migrations change
+        // See <https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/migrations>
+        migrator.eraseDatabaseOnSchemaChange = true
+#endif
+        migrator.registerMigration("addModels") { db in
+            try db.create(table: "user") { t in
+                t.primaryKey("id", .integer).notNull()
+                t.column("email", .text).notNull()
+                t.column("firstName", .text).notNull()
+                t.column("lastName", .text)
+                t.column("createdAt", .date)
+            }
+        }
+        return migrator
     }
 }
