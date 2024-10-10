@@ -6,7 +6,6 @@
 //
 
 import CoreHaptics
-import InlineUI
 import SwiftUI
 
 struct Welcome: View {
@@ -69,7 +68,8 @@ struct Welcome: View {
         .safeAreaInset(edge: .bottom) {
             Button("Continue") {}
                 .buttonStyle(SimpleButtonStyle())
-                .padding(.horizontal, 50)
+                .padding(.horizontal, OnboardingUtils.shared.hPadding)
+                .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
         }
     }
 

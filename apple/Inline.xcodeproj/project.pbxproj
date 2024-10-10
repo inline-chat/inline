@@ -14,7 +14,6 @@
 		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
 		C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35E95112CAC49A600D569AF /* HeadlineKit */; };
-		C3A357142CB7CD3A00DA78A7 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3A357132CB7CD3A00DA78A7 /* InlineUI */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -54,7 +53,6 @@
 		C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28462CA5AB9200D3DFB8 /* InlineIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28502CA5AB9200D3DFB8 /* InlineIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		C3A3570C2CB7C6D200DA78A7 /* InlineUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineUI; sourceTree = "<group>"; };
 		CD2661652CA01E3E00EB186F /* Inline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD2661752CA01E4000EB186F /* InlineMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD26617F2CA01E4000EB186F /* InlineMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -89,11 +87,6 @@
 			path = InlineIOSUITests;
 			sourceTree = "<group>";
 		};
-		C3A3570D2CB7CCB700DA78A7 /* Sounds */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Sounds;
-			sourceTree = "<group>";
-		};
 		CD2661662CA01E3E00EB186F /* InlineMac */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = InlineMac;
@@ -121,7 +114,6 @@
 				C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */,
 				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
-				C3A357142CB7CD3A00DA78A7 /* InlineUI in Frameworks */,
 				C30681222CADB48D00EDE3BE /* HeadlineKit in Frameworks */,
 				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
 			);
@@ -176,8 +168,6 @@
 		CD2660FB2CA01CAE00EB186F = {
 			isa = PBXGroup;
 			children = (
-				C3A3570D2CB7CCB700DA78A7 /* Sounds */,
-				C3A3570C2CB7C6D200DA78A7 /* InlineUI */,
 				C30681242CADB5CD00EDE3BE /* HeadlineKit */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				CD2661782CA01E4000EB186F /* InlineMacTests */,
@@ -220,7 +210,6 @@
 			);
 			fileSystemSynchronizedGroups = (
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
-				C3A3570D2CB7CCB700DA78A7 /* Sounds */,
 			);
 			name = InlineIOS;
 			packageProductDependencies = (
@@ -231,7 +220,6 @@
 				C3E6D5CA2CAE82B00048D2D8 /* GRDB */,
 				C35092C92CAEA7DB00AE3E23 /* Sentry */,
 				C35092D42CAEE8EA00AE3E23 /* KeychainSwift */,
-				C3A357132CB7CD3A00DA78A7 /* InlineUI */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -296,7 +284,6 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				C3A3570D2CB7CCB700DA78A7 /* Sounds */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 			);
 			name = InlineMac;
@@ -1088,10 +1075,6 @@
 		C35E95112CAC49A600D569AF /* HeadlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HeadlineKit;
-		};
-		C3A357132CB7CD3A00DA78A7 /* InlineUI */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineUI;
 		};
 		C3E6D5CA2CAE82B00048D2D8 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -5,6 +5,7 @@ struct Email: View {
     var prevEmail: String?
     @State private var email = ""
     @FocusState private var isFocused: Bool
+    @State private var animate: Bool = false
 
     private var placeHolder: String = "dena@example.com"
 
@@ -16,30 +17,26 @@ struct Email: View {
     }
 
     var body: some View {
-        VStack(alignment: .center, spacing: 0) {
-            Image(systemName: "at")
-                .font(.largeTitle)
-                .padding(.top, 50)
-                .foregroundColor(.purple)
-            Spacer()
-            Text("Enter your email")
-                .font(Font.custom("Red Hat Display", size: 28))
-                .fontWeight(.medium)
-
+        VStack(alignment: .leading, spacing: 6) {
+            AnimatedLabel(animate: $animate, text: "Enter your email")
             TextField(placeHolder, text: $email)
-                .textFieldStyle(OutlinedTextFieldStyle(isFocused: isFocused))
                 .focused($isFocused)
                 .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
-                .frame(minWidth: 220)
-                .fixedSize()
-            Spacer()
+                .font(.title2)
+                .fontWeight(.semibold)
+                .padding(.vertical, 8)
+                .onChange(of: isFocused) { _, newValue in
+                    withAnimation(.smooth(duration: 0.15)) {
+                        animate = newValue
+                    }
+                }
         }
-        .padding(.horizontal, 44)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 50)
+        .frame(maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
-            Button {
+            Button("Continue") {
                 Task {
                     do {
                         try await api.sendCode(email: email)
@@ -48,12 +45,10 @@ struct Email: View {
                         Log.shared.error("Failed to send code", error: error)
                     }
                 }
-            } label: {
-                Text("Continue")
             }
             .buttonStyle(SimpleButtonStyle())
-            .padding(.bottom, 18)
-            .padding(.horizontal, 44)
+            .padding(.horizontal, OnboardingUtils.shared.hPadding)
+            .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
         }
         .onAppear {
             if let prevEmail = prevEmail {
