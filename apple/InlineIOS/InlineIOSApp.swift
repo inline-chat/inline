@@ -5,6 +5,7 @@
 //  Created by Dena Sohrabi on 9/26/24.
 //
 
+import AVFAudio
 import HeadlineKit
 import Sentry
 import SwiftUI
@@ -13,6 +14,7 @@ import SwiftUI
 struct InlineIOSApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     init() {
+        setupAudioSession()
         SentrySDK.start { options in
             options.dsn = "https://1bd867ae25150dd18dad6100789649fd@o124360.ingest.us.sentry.io/4508058293633024"
 //            options.debug = true
@@ -33,6 +35,15 @@ struct InlineIOSApp: App {
         WindowGroup {
             ContentView()
                 .environment(\.appDatabase, .shared)
+        }
+    }
+
+    private func setupAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Failed to set audio session category: \(error)")
         }
     }
 }
