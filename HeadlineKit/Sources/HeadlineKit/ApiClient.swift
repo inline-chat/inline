@@ -6,6 +6,8 @@ public enum APIError: Error {
     case invalidResponse
     case httpError(statusCode: Int)
     case decodingError(Error)
+    case networkError
+    case rateLimited
 }
 
 public enum Path: String {
@@ -26,7 +28,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     private let decoder = JSONDecoder()
 
-    // Use for base URL of your API requests
     private func request<T: Decodable>(_ path: Path, queryItems: [URLQueryItem] = []) async throws -> T {
         guard var urlComponents = URLComponents(string: "\(baseURL)/auth/\(path.rawValue)") else {
             throw APIError.invalidURL
@@ -48,27 +49,31 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
                 throw APIError.invalidResponse
             }
 
-            guard (200 ... 299).contains(httpResponse.statusCode) else {
+            switch httpResponse.statusCode {
+            case 200 ... 299:
+                return try decoder.decode(T.self, from: data)
+            case 429:
+                throw APIError.rateLimited
+            default:
                 throw APIError.httpError(statusCode: httpResponse.statusCode)
             }
-
-            let decodedData = try decoder.decode(T.self, from: data)
-            return decodedData
+        } catch let decodingError as DecodingError {
+            throw APIError.decodingError(decodingError)
+        } catch let apiError as APIError {
+            throw apiError
         } catch {
-            Log.shared.error("Failed to request", error: error, scope: .api)
-            throw error
+            throw APIError.networkError
         }
     }
 
     // MARK: AUTH
 
     public func sendCode(email: String) async throws {
-        let result: SendCodeResponse = try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
+        let _: SendCodeResponse = try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
     }
 
     public func verifyCode(code: String, email: String) async throws -> VerifyCodeResponse {
-        let result: VerifyCodeResponse = try await request(.verifyCode, queryItems: [URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email)])
-        return result
+        try await request(.verifyCode, queryItems: [URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email)])
     }
 }
 
