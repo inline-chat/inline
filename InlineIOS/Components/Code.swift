@@ -4,6 +4,7 @@ import SwiftUI
 struct Code: View {
     var email: String
     @State private var code = ""
+    @State var animate: Bool = false
     @FocusState private var isFocused: Bool
 
     private var placeHolder: String = "xxx xxx"
@@ -19,48 +20,46 @@ struct Code: View {
     }
 
     var body: some View {
-        VStack(alignment: .center, spacing: 0) {
-            Image(systemName: "person.badge.key")
-                .font(.largeTitle)
-                .padding(.top, 50)
-                .foregroundColor(.pink)
-            Spacer()
-            Text("Enter the code")
-                .font(Font.custom("Red Hat Display", size: 28))
-                .fontWeight(.medium)
-
+        VStack(alignment: .leading, spacing: 4) {
+            AnimatedLabel(animate: $animate, text: "Enter the code")
             TextField(placeHolder, text: $code)
-                .textFieldStyle(OutlinedTextFieldStyle(isFocused: isFocused))
                 .focused($isFocused)
                 .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
-                .frame(maxWidth: 220)
-
-            HStack(spacing: 2) {
-                Text("Code sent to \(email).")
-                    .font(.callout)
-                    .foregroundColor(.secondary)
-                Button("Edit") {
-                    nav.push(.email(prevEmail: email))
+                .font(.title2)
+                .fontWeight(.semibold)
+                .padding(.vertical, 8)
+                .onChange(of: isFocused) { _, newValue in
+                    withAnimation(.smooth(duration: 0.15)) {
+                        animate = newValue
+                    }
                 }
-                .font(.callout)
-            }
-            .padding(.top, 8)
-            Spacer()
         }
-        .padding(.horizontal, 44)
+        .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
-            Button {
-                submitCode()
+            VStack {
+                HStack(spacing: 2) {
+                    Text("Code sent to \(email).")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                    Button("Edit") {
+                        nav.push(.email(prevEmail: email))
+                    }
+                    .font(.callout)
+                }
 
-            } label: {
-                Text("Continue")
+                Button {
+                    submitCode()
+
+                } label: {
+                    Text("Continue")
+                }
+                .buttonStyle(SimpleButtonStyle())
+                .padding(.horizontal, OnboardingUtils.shared.hPadding)
+                .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
             }
-            .buttonStyle(SimpleButtonStyle())
-            .padding(.bottom, 18)
-            .padding(.horizontal, 44)
         }
     }
 

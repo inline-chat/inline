@@ -4,6 +4,8 @@ import SwiftUI
 struct AddAccount: View {
     var email: String
     @State private var name = ""
+    @State var animate: Bool = false
+
     @FocusState private var isFocused: Bool
 
     private var placeHolder: String = "Dena"
@@ -18,37 +20,34 @@ struct AddAccount: View {
     }
 
     var body: some View {
-        VStack(alignment: .center, spacing: 0) {
-            Image(systemName: "person.fill")
-                .font(.largeTitle)
-                .padding(.top, 50)
-                .foregroundColor(.cyan)
-            Spacer()
-            Text("Enter your name")
-                .font(Font.custom("Red Hat Display", size: 28))
-                .fontWeight(.medium)
-
+        VStack(alignment: .leading, spacing: 4) {
+            AnimatedLabel(animate: $animate, text: "Enter the name")
             TextField(placeHolder, text: $name)
-                .textFieldStyle(OutlinedTextFieldStyle(isFocused: isFocused))
                 .focused($isFocused)
                 .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
-                .frame(minWidth: 220)
-                .fixedSize()
-            Spacer()
+                .font(.title2)
+                .fontWeight(.semibold)
+                .padding(.vertical, 8)
+                .onChange(of: isFocused) { _, newValue in
+                    withAnimation(.smooth(duration: 0.15)) {
+                        animate = newValue
+                    }
+                }
         }
-        .padding(.horizontal, 44)
+        .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             Button {
                 submitAccount()
+
             } label: {
                 Text("Continue")
             }
             .buttonStyle(SimpleButtonStyle())
-            .padding(.bottom, 18)
-            .padding(.horizontal, 44)
+            .padding(.horizontal, OnboardingUtils.shared.hPadding)
+            .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
         }
     }
 
