@@ -70,6 +70,7 @@ struct Welcome: View {
                 .buttonStyle(SimpleButtonStyle())
                 .padding(.horizontal, OnboardingUtils.shared.hPadding)
                 .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+            
         }
     }
 
