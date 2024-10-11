@@ -1,6 +1,8 @@
 import SwiftUI
 
-class Navigation: ObservableObject {
+class Navigation: ObservableObject, @unchecked Sendable {
+    static var shared = Navigation()
+
     enum Destination: Hashable {
         case welcome
         case email(prevEmail: String? = nil)
@@ -11,7 +13,9 @@ class Navigation: ObservableObject {
 
     @Published var path = NavigationPath()
 
+    var activeDestination: Destination = .welcome
     func push(_ destination: Destination) {
+        activeDestination = destination
         path.append(destination)
     }
 
