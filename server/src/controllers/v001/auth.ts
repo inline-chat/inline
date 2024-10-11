@@ -93,7 +93,7 @@ const getLoginCode = async (email: string) => {
         ),
       )
       .limit(1)
-  )[0]
+  )?.[0]
 
   if (existingCode) {
     return existingCode.code
@@ -101,6 +101,9 @@ const getLoginCode = async (email: string) => {
 
   // generate
   let code = secureRandomSixDigitNumber().toString()
+
+  // delete all prev attempts
+  await db.delete(loginCodes).where(eq(loginCodes.email, email))
 
   await db.insert(loginCodes).values({
     code,
@@ -114,6 +117,7 @@ const getLoginCode = async (email: string) => {
 
 const sendEmail = async (email: string, code: string) => {
   console.log(`Sending email to ${email} with code ${code}`)
+  // todo
 }
 
 const verifyEmailCode = async (email: string, code: string): Promise<true> => {
