@@ -6,7 +6,7 @@
 //
 
 import AVFAudio
-import HeadlineKit
+import InlineKit
 import Sentry
 import SwiftUI
 

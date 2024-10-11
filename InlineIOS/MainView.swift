@@ -1,4 +1,4 @@
-import HeadlineKit
+import InlineKit
 import SwiftUI
 
 struct MainView: View {
