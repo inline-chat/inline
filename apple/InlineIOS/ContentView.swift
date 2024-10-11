@@ -5,7 +5,7 @@
 //  Created by Dena Sohrabi on 9/26/24.
 //
 
-import HeadlineKit
+import InlineKit
 import SwiftUI
 
 struct ContentView: View {

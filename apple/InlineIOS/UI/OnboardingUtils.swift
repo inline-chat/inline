@@ -1,5 +1,5 @@
 import Foundation
-import HeadlineKit
+import InlineKit
 import SwiftUI
 
 public class OnboardingUtils: @unchecked Sendable {

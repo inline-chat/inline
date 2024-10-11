@@ -7,13 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		C30681222CADB48D00EDE3BE /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C30681212CADB48D00EDE3BE /* HeadlineKit */; };
-		C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C30681262CADB5F300EDE3BE /* HeadlineKit */; };
-		C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C31675042CAC16C3009A1FD8 /* HeadlineKit */; };
 		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
 		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
 		C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35E95112CAC49A600D569AF /* HeadlineKit */; };
+		C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905D2CB9431900B78B8A /* InlineKit */; };
+		C38C90602CB9432200B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905F2CB9432200B78B8A /* InlineKit */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -49,10 +48,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		C30681242CADB5CD00EDE3BE /* HeadlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = HeadlineKit; sourceTree = "<group>"; };
 		C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28462CA5AB9200D3DFB8 /* InlineIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28502CA5AB9200D3DFB8 /* InlineIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C3AA8E4E2CB942BF00800A03 /* InlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineKit; sourceTree = "<group>"; };
 		CD2661652CA01E3E00EB186F /* Inline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD2661752CA01E4000EB186F /* InlineMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD26617F2CA01E4000EB186F /* InlineMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -109,12 +108,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C31675052CAC16C3009A1FD8 /* HeadlineKit in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
-				C30681272CADB5F300EDE3BE /* HeadlineKit in Frameworks */,
 				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
-				C30681222CADB48D00EDE3BE /* HeadlineKit in Frameworks */,
+				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
 				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -137,6 +134,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
 				C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -168,7 +166,7 @@
 		CD2660FB2CA01CAE00EB186F = {
 			isa = PBXGroup;
 			children = (
-				C30681242CADB5CD00EDE3BE /* HeadlineKit */,
+				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				CD2661782CA01E4000EB186F /* InlineMacTests */,
 				CD2661822CA01E4000EB186F /* InlineMacUITests */,
@@ -213,13 +211,11 @@
 			);
 			name = InlineIOS;
 			packageProductDependencies = (
-				C31675042CAC16C3009A1FD8 /* HeadlineKit */,
 				C35E950D2CAC497700D569AF /* GRDB */,
-				C30681212CADB48D00EDE3BE /* HeadlineKit */,
-				C30681262CADB5F300EDE3BE /* HeadlineKit */,
 				C3E6D5CA2CAE82B00048D2D8 /* GRDB */,
 				C35092C92CAEA7DB00AE3E23 /* Sentry */,
 				C35092D42CAEE8EA00AE3E23 /* KeychainSwift */,
+				C38C905D2CB9431900B78B8A /* InlineKit */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -289,6 +285,7 @@
 			name = InlineMac;
 			packageProductDependencies = (
 				C35E95112CAC49A600D569AF /* HeadlineKit */,
+				C38C905F2CB9432200B78B8A /* InlineKit */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -398,10 +395,10 @@
 			mainGroup = CD2660FB2CA01CAE00EB186F;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				C30681252CADB5F300EDE3BE /* XCLocalSwiftPackageReference "HeadlineKit" */,
 				C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */,
 				C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */,
+				C38C905C2CB9431900B78B8A /* XCLocalSwiftPackageReference "InlineKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -1012,9 +1009,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		C30681252CADB5F300EDE3BE /* XCLocalSwiftPackageReference "HeadlineKit" */ = {
+		C38C905C2CB9431900B78B8A /* XCLocalSwiftPackageReference "InlineKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = HeadlineKit;
+			relativePath = InlineKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -1046,18 +1043,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		C30681212CADB48D00EDE3BE /* HeadlineKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = HeadlineKit;
-		};
-		C30681262CADB5F300EDE3BE /* HeadlineKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = HeadlineKit;
-		};
-		C31675042CAC16C3009A1FD8 /* HeadlineKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = HeadlineKit;
-		};
 		C35092C92CAEA7DB00AE3E23 /* Sentry */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
@@ -1075,6 +1060,14 @@
 		C35E95112CAC49A600D569AF /* HeadlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HeadlineKit;
+		};
+		C38C905D2CB9431900B78B8A /* InlineKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineKit;
+		};
+		C38C905F2CB9432200B78B8A /* InlineKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineKit;
 		};
 		C3E6D5CA2CAE82B00048D2D8 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
