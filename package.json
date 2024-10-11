@@ -14,6 +14,6 @@
     "start:server": "cd server && bun run start"
   },
   "devDependencies": {
-    "@types/bun": "^1.1.9"
+    "@types/bun": "^1.1.11"
   }
 }
