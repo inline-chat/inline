@@ -10,10 +10,10 @@
 		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
 		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
-		C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35E95112CAC49A600D569AF /* HeadlineKit */; };
 		C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905D2CB9431900B78B8A /* InlineKit */; };
 		C38C90602CB9432200B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905F2CB9432200B78B8A /* InlineKit */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
+		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -135,7 +135,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
-				C35E95122CAC49A600D569AF /* HeadlineKit in Frameworks */,
+				CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -284,8 +284,8 @@
 			);
 			name = InlineMac;
 			packageProductDependencies = (
-				C35E95112CAC49A600D569AF /* HeadlineKit */,
 				C38C905F2CB9432200B78B8A /* InlineKit */,
+				CDE960152CB94C4F004C541C /* SwiftUIIntrospect */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -399,6 +399,7 @@
 				C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */,
 				C38C905C2CB9431900B78B8A /* XCLocalSwiftPackageReference "InlineKit" */,
+				CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -824,7 +825,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				MACOSX_DEPLOYMENT_TARGET = 13.5;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac;
 				PRODUCT_NAME = Inline;
@@ -856,7 +857,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				MACOSX_DEPLOYMENT_TARGET = 13.5;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac;
 				PRODUCT_NAME = Inline;
@@ -1040,6 +1041,14 @@
 				minimumVersion = 2.4.2;
 			};
 		};
+		CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/siteline/swiftui-introspect";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.3.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1057,10 +1066,6 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = GRDB;
 		};
-		C35E95112CAC49A600D569AF /* HeadlineKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = HeadlineKit;
-		};
 		C38C905D2CB9431900B78B8A /* InlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineKit;
@@ -1073,6 +1078,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
+		};
+		CDE960152CB94C4F004C541C /* SwiftUIIntrospect */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */;
+			productName = SwiftUIIntrospect;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
