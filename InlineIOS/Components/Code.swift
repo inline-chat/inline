@@ -6,6 +6,7 @@ struct Code: View {
     @State private var code = ""
     @State var animate: Bool = false
     @FocusState private var isFocused: Bool
+    @State var errorMsg: String = ""
 
     private var placeHolder: String = "xxx xxx"
 
@@ -24,8 +25,10 @@ struct Code: View {
             AnimatedLabel(animate: $animate, text: "Enter the code")
             TextField(placeHolder, text: $code)
                 .focused($isFocused)
-                .keyboardType(.emailAddress)
+                .keyboardType(.numberPad)
                 .textInputAutocapitalization(.never)
+                .monospaced()
+                .kerning(5)
                 .autocorrectionDisabled(true)
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -61,6 +64,9 @@ struct Code: View {
                 .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
             }
         }
+        .onAppear {
+            isFocused = true
+        }
     }
 
     func submitCode() {
@@ -78,8 +84,8 @@ struct Code: View {
                     Log.shared.error("Failed to setup database", error: error)
                 }
 
-            } catch {
-                Log.shared.error("Failed to verify code", error: error)
+            } catch let error as APIError {
+                OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
             }
         }
     }

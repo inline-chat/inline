@@ -6,7 +6,7 @@ struct Email: View {
     @State private var email = ""
     @FocusState private var isFocused: Bool
     @State private var animate: Bool = false
-
+    @State var errorMsg: String = ""
     private var placeHolder: String = "dena@example.com"
 
     @EnvironmentObject var nav: Navigation
@@ -14,6 +14,10 @@ struct Email: View {
 
     init(prevEmail: String? = nil) {
         self.prevEmail = prevEmail
+    }
+
+    var disabled: Bool {
+        email.isEmpty || !email.contains("@") || !email.contains(".")
     }
 
     var body: some View {
@@ -41,19 +45,22 @@ struct Email: View {
                     do {
                         try await api.sendCode(email: email)
                         nav.push(.code(email: email))
-                    } catch {
-                        Log.shared.error("Failed to send code", error: error)
+                    } catch let error as APIError {
+                        OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
                     }
                 }
             }
             .buttonStyle(SimpleButtonStyle())
             .padding(.horizontal, OnboardingUtils.shared.hPadding)
             .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+            .disabled(disabled)
+            .opacity(disabled ? 0.5 : 1)
         }
         .onAppear {
             if let prevEmail = prevEmail {
                 email = prevEmail
             }
+            isFocused = true
         }
     }
 }
