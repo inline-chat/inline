@@ -13,6 +13,31 @@ const MAX_ATTEMPTS = 6
 export const auth = new Elysia({ prefix: "auth" })
   .use(setup)
   .get(
+    "/send-sms-code",
+    async ({}) => {
+      // todo
+      return await twilio.sendVerificationToken("+989304857933", "sms")
+    },
+    {
+      query: t.Object({
+        phone_number: t.String(),
+      }),
+    },
+  )
+  .get(
+    "/verify-sms-code",
+    async ({ query: { code, phone_number } }) => {
+      // todo
+      return await twilio.checkVerificationToken(phone_number, code)
+    },
+    {
+      query: t.Object({
+        phone_number: t.String(),
+        code: t.String(),
+      }),
+    },
+  )
+  .get(
     "/send-email-code",
     async ({ query }) => {
       // store code
@@ -74,6 +99,7 @@ import { db } from "@in/server/db"
 import { loginCodes, DbNewLoginCode } from "@in/server/db/schema/loginCodes"
 import { and, eq, gte, lt } from "drizzle-orm"
 import { sessions, users } from "@in/server/db/schema"
+import { twilio } from "@in/server/libs/twilio"
 
 const getLoginCode = async (email: string) => {
   // if there is one that isn't yet expired, ensure we return the same code.
