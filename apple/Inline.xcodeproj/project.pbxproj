@@ -13,7 +13,10 @@
 		C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905D2CB9431900B78B8A /* InlineKit */; };
 		C38C90602CB9432200B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905F2CB9432200B78B8A /* InlineKit */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
+		CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CD26CEAB2CB94E7900665A89 /* Sentry */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
+		CDE9601A2CB94D17004C541C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960192CB94D17004C541C /* GRDB */; };
+		CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CDE9601B2CB94D1C004C541C /* KeychainSwift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -134,8 +137,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
 				CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */,
+				CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */,
+				CDE9601A2CB94D17004C541C /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -286,6 +292,9 @@
 			packageProductDependencies = (
 				C38C905F2CB9432200B78B8A /* InlineKit */,
 				CDE960152CB94C4F004C541C /* SwiftUIIntrospect */,
+				CDE960192CB94D17004C541C /* GRDB */,
+				CDE9601B2CB94D1C004C541C /* KeychainSwift */,
+				CD26CEAB2CB94E7900665A89 /* Sentry */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -1022,7 +1031,7 @@
 			repositoryURL = "https://github.com/getsentry/sentry-cocoa";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 8.36.0;
+				minimumVersion = "8.38.0-beta.1";
 			};
 		};
 		C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */ = {
@@ -1079,10 +1088,24 @@
 			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
 		};
+		CD26CEAB2CB94E7900665A89 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Sentry;
+		};
 		CDE960152CB94C4F004C541C /* SwiftUIIntrospect */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */;
 			productName = SwiftUIIntrospect;
+		};
+		CDE960192CB94D17004C541C /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
+		};
+		CDE9601B2CB94D1C004C541C /* KeychainSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */;
+			productName = KeychainSwift;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
