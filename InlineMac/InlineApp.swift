@@ -1,4 +1,5 @@
 import SwiftUI
+import Sentry
 
 @main
 struct InlineApp: App {
@@ -8,7 +9,7 @@ struct InlineApp: App {
         WindowGroup(id: "main") {
             MainWindow()
         }
-        .defaultSize(width: 840, height: 560)
+        .defaultSize(width: 900, height: 600)
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
         .commands { MainWindowCommands() }
