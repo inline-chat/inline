@@ -31,36 +31,54 @@ struct Email: View {
                 .font(.title2)
                 .fontWeight(.semibold)
                 .padding(.vertical, 8)
+                .onChange(of: email) { _, _ in
+                    errorMsg = ""
+                }
                 .onChange(of: isFocused) { _, newValue in
                     withAnimation(.smooth(duration: 0.15)) {
                         animate = newValue
                     }
                 }
+                .onSubmit {
+                    if !disabled {
+                        submit()
+                    }
+                }
+            Text(errorMsg)
+                .font(.callout)
+                .foregroundColor(.red)
         }
         .padding(.horizontal, 50)
         .frame(maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
-            Button("Continue") {
-                Task {
-                    do {
-                        try await api.sendCode(email: email)
-                        nav.push(.code(email: email))
-                    } catch let error as APIError {
-                        OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
-                    }
+            VStack {
+                Button("Continue") {
+                    submit()
                 }
+                .buttonStyle(SimpleButtonStyle())
+                .padding(.horizontal, OnboardingUtils.shared.hPadding)
+                .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+                .disabled(disabled)
+                .opacity(disabled ? 0.5 : 1)
             }
-            .buttonStyle(SimpleButtonStyle())
-            .padding(.horizontal, OnboardingUtils.shared.hPadding)
-            .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-            .disabled(disabled)
-            .opacity(disabled ? 0.5 : 1)
         }
         .onAppear {
             if let prevEmail = prevEmail {
                 email = prevEmail
             }
             isFocused = true
+        }
+    }
+
+    func submit() {
+        Task {
+            do {
+                print("email is \(email)")
+                try await api.sendCode(email: email)
+                nav.push(.code(email: email))
+            } catch let error as APIError {
+                OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isEmail: true)
+            }
         }
     }
 }

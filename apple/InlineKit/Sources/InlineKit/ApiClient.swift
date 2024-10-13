@@ -19,8 +19,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     public static let shared = ApiClient()
     public init() {}
     var baseURL: String {
-        #if DEBUG
+        #if targetEnvironment(simulator)
             return "http://localhost:8000/v001"
+        #elseif DEBUG
+            return "http://192.168.3.122:8000/v001"
         #else
             return "https://headline.inline.chat/v001"
         #endif

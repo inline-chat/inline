@@ -1,5 +1,5 @@
 {
-  "originHash" : "4493f720fc8552c4073a1fa5241f1fc31b64762ca527ec42d7f027bf45efe3ee",
+  "originHash" : "75dccc548188a44a926529f18e7e0b6526c152a79e0833834c3c9838aa4921ed",
   "pins" : [
     {
       "identity" : "grdb.swift",
@@ -13,7 +13,7 @@
     {
       "identity" : "keychain-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/evgenyneu/keychain-swift.git",
+      "location" : "https://github.com/evgenyneu/keychain-swift",
       "state" : {
         "revision" : "5e1b02b6a9dac2a759a1d5dbc175c86bd192a608",
         "version" : "24.0.0"

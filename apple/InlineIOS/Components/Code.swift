@@ -8,7 +8,8 @@ struct Code: View {
     @FocusState private var isFocused: Bool
     @State var errorMsg: String = ""
 
-    private var placeHolder: String = "xxx xxx"
+    private var placeHolder: String = "xxxxxx"
+    let characterLimit = 6
 
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var api: ApiClient
@@ -33,11 +34,28 @@ struct Code: View {
                 .font(.title2)
                 .fontWeight(.semibold)
                 .padding(.vertical, 8)
+                .onChange(of: code) { _, _ in
+                    errorMsg = ""
+                }
                 .onChange(of: isFocused) { _, newValue in
                     withAnimation(.smooth(duration: 0.15)) {
                         animate = newValue
                     }
                 }
+                .onChange(of: code) { _, newValue in
+                    if newValue.count == characterLimit {
+                        submitCode()
+                    }
+                    if newValue.count > characterLimit {
+                        code = String(newValue.prefix(characterLimit))
+                    }
+                }
+                .onSubmit {
+                    submitCode()
+                }
+            Text(errorMsg)
+                .font(.callout)
+                .foregroundColor(.red)
         }
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -74,18 +92,28 @@ struct Code: View {
             do {
                 let result = try await api.verifyCode(code: code, email: email)
 
-                userData.setId(Int64(result.userId) ?? 0)
+                let userId = Int64(result.userId) ?? 0
+                print("Received userId: \(userId)")
+                userData.setId(userId)
                 Auth.shared.saveToken(result.token)
-                nav.push(.addAccount(email: email))
+
+                print("TOKEN \(result.token)")
                 do {
                     try database.setupDatabase()
                     print("Database setup successful")
+
                 } catch {
-                    Log.shared.error("Failed to setup database", error: error)
+                    Log.shared.error("Failed to setup database or save user", error: error)
+                    print("Detailed error: \(error)")
                 }
+
+                nav.push(.addAccount(email: email))
 
             } catch let error as APIError {
                 OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
+            } catch {
+                Log.shared.error("Unexpected error", error: error)
+                print("Detailed unexpected error: \(error)")
             }
         }
     }

@@ -14,11 +14,11 @@ struct Welcome: View {
     @State private var displayedText = ""
     @State private var showCaret = false
 
-    let fullText = "Welcome to Inline"
-    let typingSpeed: TimeInterval = 0.1
+    let fullText = "Hey There."
+    let typingSpeed: TimeInterval = 0.08
 
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .center) {
             LinearGradient(colors: [Color(.systemGray6), Color(.systemGray6).opacity(0.6)], startPoint: .topLeading, endPoint: .bottom)
                 .frame(width: 65, height: 65)
                 .mask {
@@ -28,22 +28,22 @@ struct Welcome: View {
                 .overlay(alignment: .center, content: {
                     Image("inlineIcon")
                         .resizable()
-                        .frame(width: 55, height: 55)
+                        .frame(width: 60, height: 60)
                 })
                 .padding(.bottom, 12)
 
-            ZStack(alignment: .leading) {
+            ZStack(alignment: .center) {
                 // Placeholder to maintain layout
                 Text(fullText)
                     .font(.largeTitle)
-                    .fontWeight(.semibold)
+                    .fontWeight(.bold)
                     .opacity(0)
 
                 // Animated text with caret
                 HStack(alignment: .center, spacing: 2) {
                     Text(displayedText)
                         .font(.largeTitle)
-                        .fontWeight(.semibold)
+                        .fontWeight(.bold)
 
                     Rectangle()
                         .frame(width: 4, height: 28)
@@ -52,9 +52,10 @@ struct Welcome: View {
                 }
             }
 
-            Text("high-quality messaging app for teams who crave the best")
+            Text("Ready for a new way to chat at work?")
                 .foregroundColor(.secondary)
-                .font(.body)
+                .font(.title3)
+                .multilineTextAlignment(.center)
         }
         .onAppear {
             prepareHaptics()
@@ -63,14 +64,15 @@ struct Welcome: View {
                 animateText()
             }
         }
-        .padding(.horizontal, 50)
+        .padding(.horizontal, 35)
         .frame(maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
-            Button("Continue") {}
-                .buttonStyle(SimpleButtonStyle())
-                .padding(.horizontal, OnboardingUtils.shared.hPadding)
-                .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-            
+            Button("Continue") {
+                nav.push(.email())
+            }
+            .buttonStyle(SimpleButtonStyle())
+            .padding(.horizontal, OnboardingUtils.shared.hPadding)
+            .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
         }
     }
 
