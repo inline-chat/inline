@@ -8,16 +8,22 @@ public class OnboardingUtils: @unchecked Sendable {
     public var hPadding: CGFloat = 50
     public var buttonBottomPadding: CGFloat = 18
 
-    public func showError(error: APIError, errorMsg: Binding<String>) {
+    public func showError(error: APIError, errorMsg: Binding<String>, isEmail: Bool = false) {
         switch error {
         case .invalidURL:
             Log.shared.error("Failed invalidURL", error: error)
         case .invalidResponse:
-            errorMsg.wrappedValue = "Your \(Navigation.shared.activeDestination == .email() ? "email" : "code") is incorrect. Please try again."
+            errorMsg.wrappedValue = "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
         case .httpError(let statusCode):
-            Log.shared.error("Failed httpError \(statusCode)", error: error)
+            if statusCode == 500 {
+                errorMsg.wrappedValue = "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
+                Log.shared.error("Failed httpError \(statusCode)", error: error)
+
+            } else {
+                Log.shared.error("Failed httpError \(statusCode)", error: error)
+            }
         case .decodingError:
-            errorMsg.wrappedValue = "Your \(Navigation.shared.activeDestination == .email() ? "email" : "code") is incorrect. Please try again."
+            errorMsg.wrappedValue = "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
         case .networkError:
             errorMsg.wrappedValue = "Please check your connection."
         case .rateLimited:

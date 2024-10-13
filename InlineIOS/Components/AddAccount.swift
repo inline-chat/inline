@@ -5,6 +5,7 @@ struct AddAccount: View {
     var email: String
     @State private var name = ""
     @State var animate: Bool = false
+    @State var errorMsg: String = ""
 
     @FocusState private var isFocused: Bool
 
@@ -35,6 +36,12 @@ struct AddAccount: View {
                         animate = newValue
                     }
                 }
+                .onSubmit {
+                    submitAccount()
+                }
+            Text(errorMsg)
+                .font(.callout)
+                .foregroundColor(.red)
         }
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -54,13 +61,20 @@ struct AddAccount: View {
     func submitAccount() {
         Task {
             do {
+                guard !name.isEmpty else {
+                    errorMsg = "Please enter your name"
+                    return
+                }
                 try await database.dbWriter.write { db in
-                    let user = User(
-                        id: userData.getId() ?? Int64.random(in: 1 ... 6000),
-                        email: email,
-                        firstName: name
-                    )
-                    try user.save(db)
+                    if let id = userData.getId() {
+                        var existingUser = try User.fetchOne(db, id: id)
+                        existingUser?.firstName = name
+                        existingUser?.email = email
+                        try existingUser?.save(db)
+                    } else {
+                        let user = User(id: Int64.random(in: 10 ... 999), email: email, firstName: name, lastName: nil)
+                        try user.insert(db)
+                    }
                 }
                 nav.push(.main)
             } catch {

@@ -23,11 +23,11 @@ struct InlineIOSApp: App {
             // Use 'options.tracesSampleRate' to set the sampling rate.
             // We recommend setting a sample rate in production.
             options.enableTracing = true
-//            options.attachViewHierarchy = true
-//            options.enableMetricKit = true
-//            options.enableTimeToFullDisplayTracing = true
-//            options.swiftAsyncStacktraces = true
-//            options.enableAppLaunchProfiling = true
+            options.attachViewHierarchy = true
+            options.enableMetricKit = true
+            options.enableTimeToFullDisplayTracing = true
+            options.swiftAsyncStacktraces = true
+            options.enableAppLaunchProfiling = true
         }
     }
 
@@ -49,5 +49,5 @@ struct InlineIOSApp: App {
 }
 
 extension EnvironmentValues {
-    @Entry var appDatabase: AppDatabase = .empty()
+    @Entry var appDatabase: AppDatabase = (Auth.shared.getToken() != nil) ? AppDatabase.shared : .empty()
 }
