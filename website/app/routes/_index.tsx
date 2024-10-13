@@ -129,11 +129,11 @@ export default function Index() {
               left: 0,
               right: 0,
               bottom: 0,
-              background: `linear-gradient(${55 + parallaxOffset.x * 1.5}deg, 
-              rgba(255,255,255,0) 30%, 
-              rgba(255,255,255,0.1) 45%, 
-              rgba(255,255,255,0.4) 50%, 
-              rgba(255,255,255,0.1) 55%, 
+              background: `linear-gradient(${55 + parallaxOffset.x * 1.5}deg,
+              rgba(255,255,255,0) 30%,
+              rgba(255,255,255,0.1) 45%,
+              rgba(255,255,255,0.4) 50%,
+              rgba(255,255,255,0.1) 55%,
               rgba(255,255,255,0) 70%)`,
               opacity: 0.18,
               transform: `scale(1.5) translateX(${
@@ -440,7 +440,7 @@ export default function Index() {
       <div {...stylex.props(styles.footer)}>
         <div>
           <div>
-            Early access starting in October 2024 for macOS and iOS • Written in
+            Early access starting in Oct-Nov 2024 for macOS and iOS • Written in
             Swift.
           </div>
         </div>
@@ -456,7 +456,7 @@ export default function Index() {
           </a>
           <div>
             <a
-              href="https://x.com/inline_chat"
+              href="https://x.com/intent/follow?screen_name=inline_chat"
               target="_blank"
               rel="noopener noreferrer"
               {...stylex.props(styles.footerLink)}
