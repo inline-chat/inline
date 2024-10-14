@@ -19,25 +19,7 @@ struct MainView: View {
                 nav.popToRoot()
             }
         }
-        .onAppear {
-            print("Appear")
-            Task {
-                do {
-                    // Ensure database is setup
-                    try database.setupDatabase()
-
-                    if let userId = userData.userId {
-                        let fetchedUser = try await database.dbWriter.read { db in
-                            try User.fetchOne(db, id: userId)
-                        }
-                        self.user = fetchedUser
-                        print("fetchedUser \(String(describing: fetchedUser))")
-                    }
-                } catch {
-                    Log.shared.error("Failed to get user", error: error)
-                }
-            }
-        }
+        .onAppear {}
         .navigationBarBackButtonHidden()
     }
 }

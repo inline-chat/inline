@@ -20,11 +20,9 @@ public final class Auth: @unchecked Sendable {
 
     public func getToken() -> String? {
         if cachedToken == nil {
-            print("Getting token")
             cachedToken = keychain.get(groupKey)
-            print("Got token \(cachedToken)")
         }
-        print("CachedToken \(cachedToken)")
+
         return cachedToken
     }
 
