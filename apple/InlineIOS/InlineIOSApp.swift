@@ -14,7 +14,6 @@ import SwiftUI
 struct InlineIOSApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     init() {
-        setupAudioSession()
         SentrySDK.start { options in
             options.dsn = "https://1bd867ae25150dd18dad6100789649fd@o124360.ingest.us.sentry.io/4508058293633024"
 //            options.debug = true
@@ -34,20 +33,19 @@ struct InlineIOSApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environment(\.appDatabase, .shared)
-        }
-    }
-
-    private func setupAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("Failed to set audio session category: \(error)")
+                .appDatabase(.shared)
         }
     }
 }
 
+// MARK: - Give SwiftUI access to the database
+
 extension EnvironmentValues {
-    @Entry var appDatabase: AppDatabase = (Auth.shared.getToken() != nil) ? AppDatabase.shared : .empty()
+    @Entry var appDatabase = AppDatabase.empty()
+}
+
+extension View {
+    func appDatabase(_ appDatabase: AppDatabase) -> some View {
+        self.environment(\.appDatabase, appDatabase)
+    }
 }

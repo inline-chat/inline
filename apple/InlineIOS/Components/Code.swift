@@ -93,18 +93,16 @@ struct Code: View {
                 let result = try await api.verifyCode(code: code, email: email)
 
                 let userId = Int64(result.userId) ?? 0
-                print("Received userId: \(userId)")
+
                 userData.setId(userId)
                 Auth.shared.saveToken(result.token)
-
-                print("TOKEN \(result.token)")
+                print("Token \(result.token))")
                 do {
-                    try database.setupDatabase()
-                    print("Database setup successful")
+                    try AppDatabase.authenticated()
+                    print("Database pasphrase changed successful")
 
                 } catch {
                     Log.shared.error("Failed to setup database or save user", error: error)
-                    print("Detailed error: \(error)")
                 }
 
                 nav.push(.addAccount(email: email))
@@ -113,7 +111,6 @@ struct Code: View {
                 OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
             } catch {
                 Log.shared.error("Unexpected error", error: error)
-                print("Detailed unexpected error: \(error)")
             }
         }
     }
