@@ -58,7 +58,6 @@ struct OnboardingEnterCode: View {
                     focusedField = .codeField
                 }
             
-            
             GrayButton {
                 self.submit()
             } label: {
