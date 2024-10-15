@@ -3,23 +3,35 @@ import SwiftUI
 import SwiftUIIntrospect
 
 struct MainWindow: View {
-    @StateObject var windowViewModel = MainWindowViewModel()
+    @StateObject var viewModel = MainWindowViewModel()
     
     var body: some View {
         ZStack {
-            switch windowViewModel.topLevelRoute {
+            switch viewModel.topLevelRoute {
             case .main:
                 MainView()
+                    .transition(
+                        .opacity
+                    )
                 
             case .onboarding:
-                VisualEffectView().ignoresSafeArea(.all)
+                VisualEffectView(
+                    material: .popover,
+                    blendingMode: .behindWindow
+                )
+                .ignoresSafeArea(.all)
+                
                 Onboarding()
+                    .transition(
+                        .opacity
+                    )
             }
         }
+        .animation(.snappy, value: viewModel.topLevelRoute)
         .introspect(.window, on: .macOS(.v13, .v14, .v15)) {
-            windowViewModel.windowInititized($0)
+            viewModel.windowInititized($0)
         }
-        .environmentObject(windowViewModel)
+        .environmentObject(viewModel)
     }
 }
 

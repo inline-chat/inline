@@ -2,93 +2,134 @@ import SwiftUI
 
 struct Onboarding: View {
     @EnvironmentObject var windowViewModel: MainWindowViewModel
-    
-    var body: some View {
-        VStack {
-            Image("OnboardingLogoType")
-                .renderingMode(.template)
-                .foregroundColor(.primary)
-                .padding(.top, 50)
-            
-            Spacer()
-            
-            Text("Hey There.")
-                .font(
-                    .custom(Fonts.RedHatDisplay, size: 48, relativeTo: .title)
-                ).fontWeight(.bold)
-                
-            Text("Ready for a new way to chat at work?")
-                .font(.title)
-                .fontWeight(.regular)
-            
-            Spacer()
-            Button {
-                windowViewModel.navigate(.main)
-            } label: {
-                Text("Continue")
-            }.buttonStyle(GrayButtonStyle())
-            
-            Footer()
-                .padding(.top, 12)
-        }.padding()
-    }
-    
-    
-    struct GrayButtonStyle: ButtonStyle {
-        func makeBody(configuration: Configuration) -> some View {
-            let background: Color = configuration.isPressed ?
-                .primary.opacity(0.1) :
-                .primary.opacity(0.06)
-            let scale: CGFloat = configuration.isPressed ? 0.95 : 1
-            
-            configuration.label
-                .font(.body)
-                .fontWeight(.medium)
-                .frame(height: 34)
-                .padding(.horizontal)
-                .background(background)
-                .foregroundStyle(.primary)
-                .cornerRadius(10)
-                .scaleEffect(x: scale, y: scale)
-                .animation(.snappy, value: configuration.isPressed)
-           
+    @StateObject var viewModel = OnboardingViewModel()
+
+    var routeTransition1: AnyTransition = .asymmetric(
+        insertion: .push(from: .trailing),
+        removal: .push(from: .trailing)
+    )
+
+    var routeTransition2: AnyTransition = .asymmetric(
+        insertion: .push(from: .leading),
+        removal: .push(from: .leading)
+    )
+
+    var routeTransition: AnyTransition {
+        if self.viewModel.goingBack {
+            return self.routeTransition2
+        } else {
+            return self.routeTransition1
         }
     }
-    
-    
-    struct Footer: View {
-        var body: some View {
-            HStack(alignment: .bottom) {
-                Text("[inline.chat](https://inline.chat)")
-                    .tint(Color.secondary)
-                
-                Spacer()
-                
-                Text(
-                    "By continuing, you acknowledge that you understand and agree to the [Terms & Conditions](https://inline.chat/legal) and [Privacy Policy](https://inline.chat/legal)."
-                )
-                .tint(Color.secondary)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
-                
-                Spacer()
-                
-                Button(
-                    "English",
-                    systemImage: "globe",
-                    action: {
-                        // ..
-                    }
-                )
-                .buttonStyle(.borderless)
+
+    var body: some View {
+        ZStack {
+            switch self.viewModel.path.last {
+            case .welcome:
+                OnboardingWelcome().transition(self.routeTransition)
+            case .enterEmail:
+                OnboardingEnterEmail().transition(self.routeTransition)
+            case .enterCode:
+                OnboardingEnterCode().transition(self.routeTransition)
+            case .profile:
+                OnboardingProfile().transition(self.routeTransition)
+            case .none:
+                OnboardingWelcome().transition(self.routeTransition)
             }
         }
+        .animation(.snappy, value: self.viewModel.path)
+
+        .toolbar(content: {
+            if self.viewModel.canGoBack {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        self.viewModel.goBack()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                }
+            } else {
+                // Hack to show toolbar in first screen to avoid a jump
+                // When going back from an inner screen
+
+                ToolbarItem(placement: .navigation) {
+                    Text("")
+                }
+            }
+        })
+        .environmentObject(self.viewModel)
+        .task {
+            self.viewModel.setMainWindowViewModel(self.windowViewModel)
+        }
+    }
+}
+
+enum OnboardingRoute {
+    case welcome
+    case enterEmail
+    case enterCode
+    case profile
+}
+
+class OnboardingViewModel: ObservableObject {
+//    @Published fileprivate var path: NavigationPath = .init()
+    @Published fileprivate var path: [OnboardingRoute] = [.welcome]
+
+    // Email entered in the onboarding
+    @Published var email: String = ""
+
+    // nil = server provided no data, true = login, false = sign up
+    @Published var existingUser: Bool? = nil
+
+    // Becomes berifly true when we're navigating
+    @Published var navigatingToMainView = false
+    @Published var goingBack = false
+
+    var canGoBack: Bool {
+        self.path.count > 1
+    }
+
+    func navigate(to route: OnboardingRoute) {
+        DispatchQueue.main.async {
+            self.path.append(route)
+        }
+    }
+
+    // Special navigate that decides next step after user is verified and logged in
+    // i.e. we have token and current user id, should we open profile or main view?
+    func navigateAfterLogin() {
+        if self.existingUser == false {
+            // new user -> go to profile page
+            self.navigate(to: .profile)
+        } else {
+            self.navigatingToMainView = true
+
+            self.mainWindowViewModel?.navigate(.main)
+        }
+    }
+
+    func goBack() {
+        DispatchQueue.main.async {
+            self.goingBack = true
+            DispatchQueue.main.async {
+                self.path.removeLast()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.goingBack = false
+                }
+            }
+        }
+    }
+
+    weak var mainWindowViewModel: MainWindowViewModel?
+
+    func setMainWindowViewModel(_ mvm: MainWindowViewModel) {
+        self.mainWindowViewModel = mvm
     }
 }
 
 #Preview {
     Onboarding()
         .environmentObject(MainWindowViewModel())
+        .environmentObject(OnboardingViewModel())
         .frame(width: 900, height: 600)
 }
