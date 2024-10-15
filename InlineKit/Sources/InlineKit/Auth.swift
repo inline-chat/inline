@@ -29,4 +29,12 @@ public final class Auth: @unchecked Sendable {
     private init() {
         cachedToken = keychain.get(groupKey)
     }
+
+    public func saveCurrentUserId(userId: String) {
+        UserDefaults.standard.set(userId, forKey: "userId")
+    }
+    
+    public func getCurrentUserId(userId: String) -> String? {
+        return UserDefaults.standard.string(forKey: userId)
+    }
 }

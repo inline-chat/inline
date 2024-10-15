@@ -24,7 +24,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         #elseif DEBUG
             return "http://192.168.3.122:8000/v001"
         #else
-            return "https://headline.inline.chat/v001"
+            return "https://api.inline.chat/v001"
         #endif
     }
 
@@ -70,8 +70,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     // MARK: AUTH
 
-    public func sendCode(email: String) async throws {
-        let _: SendCodeResponse = try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
+    public func sendCode(email: String) async throws -> SendCodeResponse {
+        try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
     }
 
     public func verifyCode(code: String, email: String) async throws -> VerifyCodeResponse {
@@ -79,12 +79,21 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
 }
 
-public struct VerifyCodeResponse: Codable {
+public struct VerifyCodeResponse: Codable, Sendable {
     public let ok: Bool
     public let userId: String
     public let token: String
+
+    // Failed
+    public let errorCode: Int?
+    public let description: String?
 }
 
-public struct SendCodeResponse: Codable {
-    let ok: Bool
+public struct SendCodeResponse: Codable, Sendable {
+    public let ok: Bool
+    public let existingUser: Bool?
+
+    // Failed
+    public let errorCode: Int?
+    public let description: String?
 }
