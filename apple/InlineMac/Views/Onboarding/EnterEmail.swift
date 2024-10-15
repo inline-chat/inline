@@ -11,7 +11,6 @@ struct OnboardingEnterEmail: View {
     
     @FocusState private var focusedField: Field?
 
-    
     var body: some View {
         VStack {
             Image(systemName: "at.circle.fill")
@@ -26,15 +25,15 @@ struct OnboardingEnterEmail: View {
                 .foregroundStyle(.primary)
             
             self.emailField
-                .focused($focusedField, equals: .codeField)
-                .disabled(formState.isLoading)
+                .focused(self.$focusedField, equals: .codeField)
+                .disabled(self.formState.isLoading)
                 .padding(.top, 6)
                 .padding(.bottom, 10)
                 .onSubmit {
                     self.sendCode()
                 }
                 .onAppear {
-                    focusedField = .codeField
+                    self.focusedField = .codeField
                 }
             
             GrayButton {
@@ -48,7 +47,6 @@ struct OnboardingEnterEmail: View {
                         .scaleEffect(0.5)
                 }
             }
-            
         }
         .padding()
         .frame(minWidth: 500, minHeight: 400)
@@ -75,7 +73,7 @@ struct OnboardingEnterEmail: View {
                 
                 if result.ok {
                     // self.formState.succeeded()
-                    self.onboardingViewModel.existingUser = result.existingUser;
+                    self.onboardingViewModel.existingUser = result.existingUser
                     self.onboardingViewModel.navigate(to: .enterCode)
                 } else {
                     self.formState.failed(error: result.description)
