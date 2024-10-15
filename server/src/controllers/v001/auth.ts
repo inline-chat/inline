@@ -14,9 +14,9 @@ export const auth = new Elysia({ prefix: "auth" })
   .use(setup)
   .get(
     "/send-sms-code",
-    async ({}) => {
+    async ({ query: { phone_number } }) => {
       // todo
-      return await twilio.sendVerificationToken("+989304857933", "sms")
+      return await twilio.sendVerificationToken(phone_number, "sms")
     },
     {
       query: t.Object({
@@ -41,13 +41,14 @@ export const auth = new Elysia({ prefix: "auth" })
     "/send-email-code",
     async ({ query }) => {
       // store code
-      let code = await getLoginCode(query.email)
+      let { code, existingUser } = await getLoginCode(query.email)
 
       // send code to email
       await sendEmail(query.email, code)
 
       return {
         ok: true,
+        existingUser,
       }
     },
     {
@@ -101,10 +102,19 @@ import { and, eq, gte, lt } from "drizzle-orm"
 import { sessions, users } from "@in/server/db/schema"
 import { twilio } from "@in/server/libs/twilio"
 
-const getLoginCode = async (email: string) => {
+const getLoginCode = async (
+  email: string,
+): Promise<{ code: string; existingUser: boolean }> => {
   // if there is one that isn't yet expired, ensure we return the same code.
   // To avoid a denial of service attack if the attacker keeps triggering
   // new codes preventing user from logging in
+
+  let existingUsers = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1)
+  let existingUser = Boolean(existingUsers[0])
 
   // check
   let existingCode = (
@@ -122,7 +132,7 @@ const getLoginCode = async (email: string) => {
   )?.[0]
 
   if (existingCode) {
-    return existingCode.code
+    return { code: existingCode.code, existingUser }
   }
 
   // generate
@@ -138,7 +148,7 @@ const getLoginCode = async (email: string) => {
     attempts: 0,
   })
 
-  return code
+  return { code, existingUser }
 }
 
 const sendEmail = async (email: string, code: string) => {
