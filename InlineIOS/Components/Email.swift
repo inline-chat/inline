@@ -7,6 +7,8 @@ struct Email: View {
     @FocusState private var isFocused: Bool
     @State private var animate: Bool = false
     @State var errorMsg: String = ""
+    @FormState var formState
+
     private var placeHolder: String = "dena@example.com"
 
     @EnvironmentObject var nav: Navigation
@@ -17,7 +19,7 @@ struct Email: View {
     }
 
     var disabled: Bool {
-        email.isEmpty || !email.contains("@") || !email.contains(".")
+        email.isEmpty || !email.contains("@") || !email.contains(".") || formState.isLoading
     }
 
     var body: some View {
@@ -52,7 +54,7 @@ struct Email: View {
         .frame(maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             VStack {
-                Button("Continue") {
+                Button(formState.isLoading ? "Sending Code..." : "Continue") {
                     submit()
                 }
                 .buttonStyle(SimpleButtonStyle())
@@ -73,8 +75,9 @@ struct Email: View {
     func submit() {
         Task {
             do {
-                print("email is \(email)")
-                try await api.sendCode(email: email)
+                formState.startLoading()
+                let _ = try await api.sendCode(email: email)
+                formState.reset()
                 nav.push(.code(email: email))
             } catch let error as APIError {
                 OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isEmail: true)

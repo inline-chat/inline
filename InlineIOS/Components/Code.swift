@@ -7,14 +7,18 @@ struct Code: View {
     @State var animate: Bool = false
     @FocusState private var isFocused: Bool
     @State var errorMsg: String = ""
+    @FormState var formState
 
     private var placeHolder: String = "xxxxxx"
     let characterLimit = 6
 
+    var disabled: Bool {
+        code.isEmpty || code.count < 6 || formState.isLoading
+    }
+
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var api: ApiClient
     @EnvironmentObject var userData: UserData
-
     @Environment(\.appDatabase) var database
 
     init(email: String) {
@@ -71,15 +75,13 @@ struct Code: View {
                     .font(.callout)
                 }
 
-                Button {
+                Button(formState.isLoading ? "Verifying..." : "Continue") {
                     submitCode()
-
-                } label: {
-                    Text("Continue")
                 }
                 .buttonStyle(SimpleButtonStyle())
                 .padding(.horizontal, OnboardingUtils.shared.hPadding)
                 .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+                .disabled(disabled)
             }
         }
         .onAppear {
@@ -90,21 +92,24 @@ struct Code: View {
     func submitCode() {
         Task {
             do {
+                formState.startLoading()
                 let result = try await api.verifyCode(code: code, email: email)
 
                 let userId = Int64(result.userId) ?? 0
 
                 userData.setId(userId)
                 Auth.shared.saveToken(result.token)
+
                 print("Token \(result.token))")
+
                 do {
                     try AppDatabase.authenticated()
-                    print("Database pasphrase changed successful")
 
                 } catch {
                     Log.shared.error("Failed to setup database or save user", error: error)
                 }
 
+                formState.reset()
                 nav.push(.addAccount(email: email))
 
             } catch let error as APIError {
