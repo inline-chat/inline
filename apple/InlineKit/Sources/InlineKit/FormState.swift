@@ -10,6 +10,7 @@ public enum FormStateData: Equatable {
 // A helper for easier state management for simple forms
 public class FormStateObject: ObservableObject {
     @Published public private(set) var state: FormStateData
+
     public var isLoading: Bool {
         state == FormStateData.loading
     }
