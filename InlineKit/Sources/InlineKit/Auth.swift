@@ -37,7 +37,7 @@ public final class Auth: @unchecked Sendable {
         UserDefaults.standard.set(userId, forKey: "userId")
     }
 
-    public func getCurrentUserId(userId: String) -> String? {
-        return UserDefaults.standard.string(forKey: userId)
+    public func getCurrentUserId() -> String? {
+        return UserDefaults.standard.string(forKey: "userId")
     }
 }
