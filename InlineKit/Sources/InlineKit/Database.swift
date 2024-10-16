@@ -27,7 +27,7 @@ public extension AppDatabase {
 
         migrator.registerMigration("v0") { db in
             try db.create(table: "user") { t in
-                t.primaryKey("id", .integer).notNull()
+                t.primaryKey("id", .text).notNull()
                 t.column("email", .text).notNull()
                 t.column("firstName", .text).notNull()
                 t.column("lastName", .text)
