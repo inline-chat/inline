@@ -79,6 +79,7 @@ struct Code: View {
                     submitCode()
                 }
                 .buttonStyle(SimpleButtonStyle())
+                .opacity(disabled ? 0.5 : 1)
                 .padding(.horizontal, OnboardingUtils.shared.hPadding)
                 .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
                 .disabled(disabled)
