@@ -40,6 +40,14 @@ export const auth = new Elysia({ prefix: "auth" })
   .get(
     "/send-email-code",
     async ({ query }) => {
+      if (isValidEmail(query.email) === false) {
+        return {
+          ok: false,
+          errorCode: ErrorCodes.INAVLID_ARGS,
+          description: "Invalid email",
+        }
+      }
+
       // store code
       let { code, existingUser } = await getLoginCode(query.email)
 
@@ -62,6 +70,14 @@ export const auth = new Elysia({ prefix: "auth" })
     async ({ query, server, request }) => {
       // add random delay to limit bruteforce
       await new Promise((resolve) => setTimeout(resolve, Math.random() * 1000))
+
+      if (isValidEmail(query.email) === false) {
+        return {
+          ok: false,
+          errorCode: ErrorCodes.INAVLID_ARGS,
+          description: "Invalid email",
+        }
+      }
 
       // send code to email
       await verifyEmailCode(query.email, query.code)
@@ -101,6 +117,8 @@ import { loginCodes, DbNewLoginCode } from "@in/server/db/schema/loginCodes"
 import { and, eq, gte, lt } from "drizzle-orm"
 import { sessions, users } from "@in/server/db/schema"
 import { twilio } from "@in/server/libs/twilio"
+import { isValidEmail } from "@in/server/utils/validate"
+import { ErrorCodes } from "@in/server/types/errors"
 
 const getLoginCode = async (
   email: string,
