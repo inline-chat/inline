@@ -18,21 +18,8 @@ struct Welcome: View {
     let typingSpeed: TimeInterval = 0.08
 
     var body: some View {
-        VStack(alignment: .center) {
-            LinearGradient(colors: [Color(.systemGray6), Color(.systemGray6).opacity(0.6)], startPoint: .topLeading, endPoint: .bottom)
-                .frame(width: 65, height: 65)
-                .mask {
-                    Circle()
-                        .frame(width: 65)
-                }
-                .overlay(alignment: .center, content: {
-                    Image("inlineIcon")
-                        .resizable()
-                        .frame(width: 60, height: 60)
-                })
-                .padding(.bottom, 12)
-
-            ZStack(alignment: .center) {
+        VStack(alignment: .leading) {
+            ZStack(alignment: .leading) {
                 // Placeholder to maintain layout
                 Text(fullText)
                     .font(.largeTitle)
@@ -55,7 +42,7 @@ struct Welcome: View {
             Text("Ready for a new way to chat at work?")
                 .foregroundColor(.secondary)
                 .font(.title3)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(.leading)
         }
         .onAppear {
             prepareHaptics()
@@ -73,6 +60,16 @@ struct Welcome: View {
             .buttonStyle(SimpleButtonStyle())
             .padding(.horizontal, OnboardingUtils.shared.hPadding)
             .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+        }
+        .safeAreaInset(edge: .top) {
+            HStack{
+                Image("OnboardingLogoType")
+                    .renderingMode(.template)
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, OnboardingUtils.shared.hPadding)
+                    .padding(.top, 28)
+                Spacer()
+            }
         }
     }
 

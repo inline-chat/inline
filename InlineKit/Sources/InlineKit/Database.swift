@@ -63,6 +63,8 @@ public extension AppDatabase {
                 try db.changePassphrase(token)
                 // maybe dbPool.invalidateReadOnlyConnections()???
             }
+        } else {
+            Log.shared.warning("AppDatabase.authenticated called without token")
         }
     }
 }
@@ -88,7 +90,8 @@ public extension AppDatabase {
             let fileManager = FileManager.default
             let appSupportURL = try fileManager.url(
                 for: .applicationSupportDirectory, in: .userDomainMask,
-                appropriateFor: nil, create: true)
+                appropriateFor: nil, create: true
+            )
             let directoryURL = appSupportURL.appendingPathComponent("Database", isDirectory: true)
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
