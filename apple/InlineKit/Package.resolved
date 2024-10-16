@@ -1,0 +1,33 @@
+{
+  "originHash" : "119ea17d7b2c44816646c7f32926392542a1aa510a06c7688fa15e2c237bd4d7",
+  "pins" : [
+    {
+      "identity" : "grdb.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/duckduckgo/GRDB.swift",
+      "state" : {
+        "branch" : "main",
+        "revision" : "e0b43b524db8a5053672cf44869952bb81f11777"
+      }
+    },
+    {
+      "identity" : "keychain-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/evgenyneu/keychain-swift.git",
+      "state" : {
+        "revision" : "5e1b02b6a9dac2a759a1d5dbc175c86bd192a608",
+        "version" : "24.0.0"
+      }
+    },
+    {
+      "identity" : "sentry-cocoa",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/getsentry/sentry-cocoa",
+      "state" : {
+        "revision" : "54cc2e3e4fcbf9d4c7708ce00d3b6eee29aecbb1",
+        "version" : "8.38.0"
+      }
+    }
+  ],
+  "version" : 3
+}
