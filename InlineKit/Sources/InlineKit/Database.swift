@@ -18,16 +18,9 @@ public extension AppDatabase {
     var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
 
-        #if DEBUG
-            // MAKE SURE: it does not enable in production
-            // Speed up development by nuking the database when migrations change
-            // Refrence <https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/migrations#The-eraseDatabaseOnSchemaChange-Option>
-            migrator.eraseDatabaseOnSchemaChange = true
-        #endif
-
         migrator.registerMigration("v0") { db in
             try db.create(table: "user") { t in
-                t.primaryKey("id", .text).notNull()
+                t.primaryKey("id", .text).notNull().unique()
                 t.column("email", .text).notNull()
                 t.column("firstName", .text).notNull()
                 t.column("lastName", .text)
@@ -74,17 +67,10 @@ public extension AppDatabase {
         }
     }
 
-    static func deleteDB() throws {
-        let fileManager = FileManager.default
-        let appSupportURL = try fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: false
-        )
-        let directoryURL = appSupportURL.appendingPathComponent("Database", isDirectory: true)
-        let databaseURL = directoryURL.appendingPathComponent("db.sqlite")
-        try fileManager.removeItem(at: databaseURL)
+    static func clearDB() throws {
+        _ = try AppDatabase.shared.dbWriter.write { db in
+            try User.deleteAll(db)
+        }
         Log.shared.info("Database successfully deleted.")
     }
 }
