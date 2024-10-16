@@ -99,7 +99,7 @@ struct Code: View {
                 Auth.shared.saveToken(result.token)
 
                 try await database.dbWriter.write { db in
-                    let user = try User(
+                    let user = User(
                         id: result.userId,
                         email: email,
                         firstName: "",
