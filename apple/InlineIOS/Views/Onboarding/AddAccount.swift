@@ -3,7 +3,7 @@ import SwiftUI
 
 struct AddAccount: View {
     var email: String
-    @State private var name = ""
+    @State var name = ""
     @State var animate: Bool = false
     @State var errorMsg: String = ""
 
@@ -43,6 +43,9 @@ struct AddAccount: View {
                 .font(.callout)
                 .foregroundColor(.red)
         }
+        .onAppear {
+            isFocused = true
+        }
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
@@ -66,14 +69,11 @@ struct AddAccount: View {
                     return
                 }
                 try await database.dbWriter.write { db in
-                    if let id = userData.getId() {
-                        var existingUser = try User.fetchOne(db, id: id)
-                        existingUser?.firstName = name
-                        existingUser?.email = email
-                        try existingUser?.save(db)
-                    } else {
-                        let user = User(id: Int64.random(in: 10 ... 999), email: email, firstName: name, lastName: nil)
-                        try user.insert(db)
+                    if let id = Auth.shared.getCurrentUserId() {
+                        var user = try User.fetchOne(db, id: id)
+                        user?.firstName = name
+
+                        try user?.save(db)
                     }
                 }
                 nav.push(.main)

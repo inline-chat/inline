@@ -95,12 +95,19 @@ struct Code: View {
                 formState.startLoading()
                 let result = try await api.verifyCode(code: code, email: email)
 
-                let userId = Int64(result.userId) ?? 0
-
-                userData.setId(userId)
+                Auth.shared.saveCurrentUserId(userId: result.userId)
                 Auth.shared.saveToken(result.token)
 
-                print("Token \(result.token))")
+                try await database.dbWriter.write { db in
+                    let user = try User(
+                        id: result.userId,
+                        email: email,
+                        firstName: "",
+                        lastName: nil
+                    )
+                    try user.save(db)
+                }
+                print("Token \(result.token)")
 
                 do {
                     try AppDatabase.authenticated()
