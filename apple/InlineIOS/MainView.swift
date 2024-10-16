@@ -16,6 +16,12 @@ struct MainView: View {
 
             Button("Logout") {
                 Auth.shared.saveToken(nil)
+                do {
+                    
+                    try AppDatabase.deleteDB()
+                }catch{
+                    Log.shared.error("Failed to delete DB and logout", error: error)
+                }
                 nav.popToRoot()
             }
         }

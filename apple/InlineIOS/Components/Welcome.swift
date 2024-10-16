@@ -51,10 +51,12 @@ struct Welcome: View {
                 animateText()
             }
         }
+      
         .padding(.horizontal, 35)
         .frame(maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             Button("Continue") {
+                displayedText = ""
                 nav.push(.email())
             }
             .buttonStyle(SimpleButtonStyle())
@@ -62,7 +64,7 @@ struct Welcome: View {
             .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
         }
         .safeAreaInset(edge: .top) {
-            HStack{
+            HStack {
                 Image("OnboardingLogoType")
                     .renderingMode(.template)
                     .foregroundColor(.primary)
