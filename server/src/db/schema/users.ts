@@ -37,8 +37,5 @@ export const users = pgTable("users", {
   date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
 })
 
-// flags? pendingSetup
-// presence? online
-
 export type DbUser = typeof users.$inferSelect
 export type DbNewUser = typeof users.$inferInsert
