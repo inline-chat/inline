@@ -25,8 +25,14 @@ public extension AppDatabase {
             migrator.eraseDatabaseOnSchemaChange = true
         #endif
 
-        migrator.registerMigration("v0") { _ in
-            // Create tables here
+        migrator.registerMigration("v0") { db in
+            try db.create(table: "user") { t in
+                t.primaryKey("id", .integer).notNull()
+                t.column("email", .text).notNull()
+                t.column("firstName", .text).notNull()
+                t.column("lastName", .text)
+                t.column("createdAt", .datetime).notNull().defaults(to: GRDB.Date.now)
+            }
         }
 
         // Migrations for future application versions will be inserted here:
@@ -66,6 +72,20 @@ public extension AppDatabase {
         } else {
             Log.shared.warning("AppDatabase.authenticated called without token")
         }
+    }
+
+    static func deleteDB() throws {
+        let fileManager = FileManager.default
+        let appSupportURL = try fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        let directoryURL = appSupportURL.appendingPathComponent("Database", isDirectory: true)
+        let databaseURL = directoryURL.appendingPathComponent("db.sqlite")
+        try fileManager.removeItem(at: databaseURL)
+        Log.shared.info("Database successfully deleted.")
     }
 }
 

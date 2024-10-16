@@ -6,7 +6,7 @@ struct AnimatedLabel: View {
     var body: some View {
         Text(text)
             .font(animate ? .title2 : .largeTitle)
-            .fontWeight(.medium)
+            .fontWeight(.bold)
             .foregroundColor(animate ? .secondary : .primary)
     }
 }
