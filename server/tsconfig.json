@@ -2,7 +2,7 @@
   "compilerOptions": {
     "strict": true,
     "esModuleInterop": true,
-    "target": "ES2023",
+    "target": "ESNext",
     "module": "NodeNext",
     "paths": {
       "@in/server": ["./src"],

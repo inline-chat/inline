@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm"
+import { SQL, sql } from "drizzle-orm"
 import {
   integer,
   pgEnum,
@@ -10,9 +10,16 @@ import {
   timestamp,
   text,
   bigserial,
+  lower,
   bigint,
+  AnyPgColumn,
 } from "drizzle-orm/pg-core"
 import { pgSchema, pgSequence } from "drizzle-orm/pg-core"
+
+// custom lower function
+export function lower(email: AnyPgColumn): SQL {
+  return sql`lower(${email})`
+}
 
 // Sequence with params
 export const userIdSequence = pgSequence("user_id", {
@@ -23,19 +30,27 @@ export const userIdSequence = pgSequence("user_id", {
   increment: 3,
 })
 
-export const users = pgTable("users", {
-  id: bigint("id", { mode: "bigint" })
-    .default(sql`nextval('user_id')`)
-    .primaryKey(),
-  email: varchar("email", { length: 256 }).unique(),
-  phoneNumber: varchar("phone_number", { length: 15 }).unique(),
-  email_verified: boolean("email_verified"),
-  phone_verified: boolean("phone_verified"),
-  firstName: varchar("first_name", { length: 256 }),
-  lastName: varchar("last_name", { length: 256 }),
-  deleted: boolean("deleted"),
-  date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
-})
+export const users = pgTable(
+  "users",
+  {
+    id: bigint("id", { mode: "bigint" })
+      .default(sql`nextval('user_id')`)
+      .primaryKey(),
+    email: varchar("email", { length: 256 }),
+    phoneNumber: varchar("phone_number", { length: 15 }).unique(),
+    email_verified: boolean("email_verified"),
+    phone_verified: boolean("phone_verified"),
+    firstName: varchar("first_name", { length: 256 }),
+    lastName: varchar("last_name", { length: 256 }),
+    deleted: boolean("deleted"),
+    date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
+  },
+  (table) => ({
+    users_email_unique: uniqueIndex("users_email_unique").on(
+      lower(table.email),
+    ),
+  }),
+)
 
 export type DbUser = typeof users.$inferSelect
 export type DbNewUser = typeof users.$inferInsert
