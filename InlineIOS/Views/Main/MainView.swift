@@ -44,7 +44,7 @@ struct MainView: View {
             }
         }
         .toolbar(content: {
-            ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .topBarLeading) {
                 HStack {
                     Circle()
                         .fill(Color(.systemGray6))
@@ -57,7 +57,6 @@ struct MainView: View {
                     Text(user?.firstName ?? "Home")
                         .font(.title3)
                         .fontWeight(.semibold)
-                    Spacer()
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
