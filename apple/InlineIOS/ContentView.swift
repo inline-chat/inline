@@ -35,6 +35,8 @@ struct ContentView: View {
                     MainView()
                 case let .addAccount(email):
                     AddAccount(email: email)
+                case let .space(id):
+                    SpaceView(spaceId: id)
                 }
             }
         }
