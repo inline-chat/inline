@@ -15,14 +15,14 @@ import {
 } from "drizzle-orm/pg-core"
 
 export const sessions = pgTable("sessions", {
-  id: serial("id").primaryKey(),
+  id: serial().primaryKey(),
   userId: bigint("user_id", { mode: "bigint" })
     .notNull()
     .references(() => users.id),
   tokenHash: varchar("token_hash", { length: 64 }).notNull(), // hash
-  revoked: timestamp("revoked", { mode: "date", precision: 3 }),
+  revoked: timestamp({ mode: "date", precision: 3 }),
   lastActive: timestamp("last_active", { mode: "date", precision: 3 }),
-  date: timestamp("date", { mode: "date", precision: 3 }),
+  date: timestamp({ mode: "date", precision: 3 }),
 })
 
 export type DbSession = typeof sessions.$inferSelect

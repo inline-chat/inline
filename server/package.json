@@ -16,7 +16,7 @@
   "dependencies": {
     "@elysiajs/cors": "^1.1.1",
     "@sentry/bun": "^8.32.0",
-    "drizzle-orm": "^0.33.0",
+    "drizzle-orm": "^0.35.2",
     "elysia": "^1.1.16",
     "elysia-helmet": "^2.0.0",
     "elysia-rate-limit": "^4.1.0",
@@ -24,6 +24,6 @@
   },
   "devDependencies": {
     "@types/bun": "^1.1.10",
-    "drizzle-kit": "^0.24.2"
+    "drizzle-kit": "^0.26.2"
   }
 }

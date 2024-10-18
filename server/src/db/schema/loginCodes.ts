@@ -7,7 +7,7 @@ import {
 } from "drizzle-orm/pg-core"
 
 export const loginCodes = pgTable("login_codes", {
-  id: serial("id").primaryKey(),
+  id: serial().primaryKey(),
   email: varchar("email", { length: 256 }).unique(),
   phoneNumber: varchar("phone_number", { length: 15 }).unique(),
   code: varchar("code", { length: 10 }).notNull(),

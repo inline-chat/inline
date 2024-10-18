@@ -223,7 +223,7 @@ const getUserByEmail = async (email: string) => {
         .insert(users)
         .values({
           email,
-          email_verified: true,
+          emailVerified: true,
           // pending setup
         })
         .returning()

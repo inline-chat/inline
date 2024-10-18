@@ -10,7 +10,6 @@ import {
   timestamp,
   text,
   bigserial,
-  lower,
   bigint,
   AnyPgColumn,
 } from "drizzle-orm/pg-core"
@@ -38,8 +37,8 @@ export const users = pgTable(
       .primaryKey(),
     email: varchar("email", { length: 256 }),
     phoneNumber: varchar("phone_number", { length: 15 }).unique(),
-    email_verified: boolean("email_verified"),
-    phone_verified: boolean("phone_verified"),
+    emailVerified: boolean("email_verified"),
+    phoneVerified: boolean("phone_verified"),
     firstName: varchar("first_name", { length: 256 }),
     lastName: varchar("last_name", { length: 256 }),
     deleted: boolean("deleted"),

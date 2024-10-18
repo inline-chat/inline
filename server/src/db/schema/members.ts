@@ -9,22 +9,26 @@ import {
 } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
+import { bigserial } from "drizzle-orm/pg-core"
 
 export const rolesEnum = pgEnum("member_roles", ["owner", "admin", "member"])
 
 export const members = pgTable(
   "members",
   {
-    id: bigint("id", { mode: "bigint" }),
+    id: bigserial({ mode: "bigint" }).primaryKey(),
     userId: bigint("user_id", { mode: "bigint" })
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, {
+        onDelete: "cascade",
+      }),
     spaceId: bigint("space_id", { mode: "bigint" })
       .notNull()
-      .references(() => spaces.id),
-    role: rolesEnum("role").default("member"),
-    deleted: boolean("deleted"),
-    date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
+      .references(() => spaces.id, {
+        onDelete: "cascade",
+      }),
+    role: rolesEnum().default("member"),
+    date: timestamp({ mode: "date", precision: 3 }).defaultNow(),
   },
   (table) => ({ uniqueUserInSpace: unique().on(table.userId, table.spaceId) }),
 )

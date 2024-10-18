@@ -11,7 +11,7 @@ import {
 } from "drizzle-orm/pg-core"
 
 export const waitlist = pgTable("waitlist", {
-  id: serial("id").primaryKey(),
+  id: serial().primaryKey(),
   email: varchar("email", { length: 256 }).notNull().unique(),
   verified: boolean("verified").default(false).notNull(),
   name: varchar("name", { length: 256 }),

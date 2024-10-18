@@ -1,3 +1,4 @@
+import { bigserial } from "drizzle-orm/pg-core"
 import {
   pgTable,
   varchar,
@@ -7,11 +8,10 @@ import {
 } from "drizzle-orm/pg-core"
 
 export const spaces = pgTable("spaces", {
-  id: bigint("id", { mode: "bigint" }),
-  name: varchar("name", { length: 256 }),
-  handle: varchar("handle", { length: 32 }).unique(),
-  deleted: boolean("deleted"),
-  date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
+  id: bigserial({ mode: "bigint" }).primaryKey(),
+  name: varchar({ length: 256 }).notNull(),
+  handle: varchar({ length: 32 }).unique(),
+  date: timestamp({ mode: "date", precision: 3 }).defaultNow(),
 })
 
 export type DbSpace = typeof spaces.$inferSelect
