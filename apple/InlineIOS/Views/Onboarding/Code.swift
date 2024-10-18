@@ -95,18 +95,19 @@ struct Code: View {
             do {
                 formState.startLoading()
                 let result = try await api.verifyCode(code: code, email: email)
-
-                Auth.shared.saveCurrentUserId(userId: result.userId)
                 Auth.shared.saveToken(result.token)
+                if let id = decodeInt64(from: result.userId) {
+                    Auth.shared.saveCurrentUserId(userId: id)
 
-                try await database.dbWriter.write { db in
-                    let user = User(
-                        id: result.userId,
-                        email: email,
-                        firstName: "",
-                        lastName: nil
-                    )
-                    try user.save(db)
+                    try await database.dbWriter.write { db in
+                        let user = User(
+                            id: id,
+                            email: email,
+                            firstName: "",
+                            lastName: nil
+                        )
+                        try user.save(db)
+                    }
                 }
                 print("Token \(result.token)")
 
@@ -126,6 +127,10 @@ struct Code: View {
                 Log.shared.error("Unexpected error", error: error)
             }
         }
+    }
+
+    func decodeInt64(from string: String) -> Int64? {
+        return Int64(string)
     }
 }
 
