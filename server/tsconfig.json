@@ -2,6 +2,7 @@
   "compilerOptions": {
     "strict": true,
     "esModuleInterop": true,
+    "exactOptionalPropertyTypes": true,
     "target": "ESNext",
     "module": "NodeNext",
     "paths": {

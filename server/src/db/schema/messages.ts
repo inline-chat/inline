@@ -17,6 +17,7 @@ import { chats } from "./chats"
 import { bigserial } from "drizzle-orm/pg-core"
 import { integer } from "drizzle-orm/pg-core"
 import { index } from "drizzle-orm/pg-core"
+import { creationDate } from "@in/server/db/schema/common"
 
 export const messages = pgTable(
   "messages",
@@ -30,7 +31,7 @@ export const messages = pgTable(
     text: text(),
 
     /** required, chat it belongs to */
-    chatId: bigint("chat_id", { mode: "bigint" })
+    chatId: integer("chat_id")
       .notNull()
       .references(() => chats.id, {
         onDelete: "cascade",
@@ -44,7 +45,7 @@ export const messages = pgTable(
     /** when it was edited. if null indicated it hasn't been edited */
     editDate: timestamp("edit_date", { mode: "date", precision: 3 }),
 
-    date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
+    date: creationDate,
   },
   (table) => ({
     messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(

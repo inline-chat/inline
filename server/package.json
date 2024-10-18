@@ -14,8 +14,10 @@
     "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql"
   },
   "dependencies": {
+    "@effect/schema": "^0.75.5",
     "@elysiajs/cors": "^1.1.1",
     "@sentry/bun": "^8.32.0",
+    "@sinclair/typebox": "^0.33.17",
     "drizzle-orm": "^0.35.2",
     "elysia": "^1.1.16",
     "elysia-helmet": "^2.0.0",

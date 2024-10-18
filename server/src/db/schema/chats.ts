@@ -13,18 +13,20 @@ import { users } from "./users"
 import { spaces } from "./spaces"
 import { sql } from "drizzle-orm"
 import { bigserial } from "drizzle-orm/pg-core"
+import { creationDate } from "@in/server/db/schema/common"
+import { integer } from "drizzle-orm/pg-core"
 
 export const chatTypeEnum = pgEnum("chat_types", ["private", "thread"])
 
 export const chats = pgTable(
   "chats",
   {
-    id: bigserial({ mode: "bigint" }).primaryKey(),
+    id: integer().primaryKey(),
     type: chatTypeEnum().notNull(),
     title: varchar(),
 
     /** optional, if part of a space */
-    spaceId: bigint("space_id", { mode: "bigint" }).references(() => spaces.id),
+    spaceId: integer("space_id").references(() => spaces.id),
 
     /** optional, required for private chats, least user id */
     minUserId: bigint("min_user_id", { mode: "bigint" }).references(
@@ -35,7 +37,7 @@ export const chats = pgTable(
       () => users.id,
     ),
 
-    date: timestamp({ mode: "date", precision: 3 }).defaultNow(),
+    date: creationDate,
   },
   (table) => ({
     /** Ensure correctness */

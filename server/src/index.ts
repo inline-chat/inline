@@ -12,21 +12,20 @@ import { waitlist } from "@in/server/controllers/waitlist"
 import { Elysia } from "elysia"
 import { there } from "./controllers/there"
 import { apiV001 } from "@in/server/controllers/v001"
+import { setup } from "@in/server/setup"
+import { Log } from "@in/server/utils/log"
 
 const port = process.env.PORT || 8000
 
 // Ensure to call this before importing any other modules!
 
-const app = new Elysia()
-  .use(root)
-  .use(waitlist)
-  .use(there)
-  .use(apiV001)
-  .onError(({ code, error }) => {
-    if (code === "NOT_FOUND") return "404"
-    console.error("error:", error)
-    Sentry.captureException(error)
-  })
+const app = new Elysia().use(root).use(waitlist).use(there).use(apiV001)
+
+// .onError({ as: "local" }, ({ code, error }) => {
+//   if (code === "NOT_FOUND") return "404"
+//   console.error("error:", error)
+//   Log.shared.error("Top level error " + code, error)
+// })
 
 // Run
 app.listen(port, (server) => {

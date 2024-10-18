@@ -1,3 +1,4 @@
+import { timestamp } from "drizzle-orm/pg-core"
 import { customType } from "drizzle-orm/pg-core"
 
 export const bytea = customType<{
@@ -9,3 +10,10 @@ export const bytea = customType<{
     return "bytea"
   },
 })
+
+export const creationDate = timestamp("date", {
+  mode: "date",
+  precision: 3,
+})
+  .defaultNow()
+  .notNull()

@@ -6,29 +6,32 @@ import {
   bigint,
   pgEnum,
   unique,
+  integer,
 } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { bigserial } from "drizzle-orm/pg-core"
+import { creationDate } from "@in/server/db/schema/common"
+import { serial } from "drizzle-orm/pg-core"
 
 export const rolesEnum = pgEnum("member_roles", ["owner", "admin", "member"])
 
 export const members = pgTable(
   "members",
   {
-    id: bigserial({ mode: "bigint" }).primaryKey(),
+    id: serial().primaryKey(),
     userId: bigint("user_id", { mode: "bigint" })
       .notNull()
       .references(() => users.id, {
         onDelete: "cascade",
       }),
-    spaceId: bigint("space_id", { mode: "bigint" })
+    spaceId: integer("space_id")
       .notNull()
       .references(() => spaces.id, {
         onDelete: "cascade",
       }),
     role: rolesEnum().default("member"),
-    date: timestamp({ mode: "date", precision: 3 }).defaultNow(),
+    date: creationDate,
   },
   (table) => ({ uniqueUserInSpace: unique().on(table.userId, table.spaceId) }),
 )

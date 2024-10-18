@@ -11,7 +11,7 @@ function secureRandomSixDigitNumber() {
 const MAX_ATTEMPTS = 6
 
 export const auth = new Elysia({ prefix: "auth" })
-  .use(setup)
+
   .get(
     "/send-sms-code",
     async ({ query: { phone_number } }) => {

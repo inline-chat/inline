@@ -1,30 +1,30 @@
 CREATE TYPE "public"."member_roles" AS ENUM('owner', 'admin', 'member');--> statement-breakpoint
 CREATE TYPE "public"."chat_types" AS ENUM('private', 'thread');--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "spaces" (
-	"id" bigserial PRIMARY KEY NOT NULL,
+	"id" serial PRIMARY KEY NOT NULL,
 	"name" varchar(256) NOT NULL,
 	"handle" varchar(32),
-	"date" timestamp (3) DEFAULT now(),
+	"date" timestamp (3) DEFAULT now() NOT NULL,
 	CONSTRAINT "spaces_handle_unique" UNIQUE("handle")
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "members" (
-	"id" bigserial PRIMARY KEY NOT NULL,
+	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" bigint NOT NULL,
-	"space_id" bigint NOT NULL,
+	"space_id" integer NOT NULL,
 	"role" "member_roles" DEFAULT 'member',
-	"date" timestamp (3) DEFAULT now(),
+	"date" timestamp (3) DEFAULT now() NOT NULL,
 	CONSTRAINT "members_user_id_space_id_unique" UNIQUE("user_id","space_id")
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "chats" (
-	"id" bigserial PRIMARY KEY NOT NULL,
+	"id" integer PRIMARY KEY NOT NULL,
 	"type" "chat_types" NOT NULL,
 	"title" varchar,
-	"space_id" bigint,
+	"space_id" integer,
 	"min_user_id" bigint,
 	"max_user_id" bigint,
-	"date" timestamp (3) DEFAULT now(),
+	"date" timestamp (3) DEFAULT now() NOT NULL,
 	CONSTRAINT "user_ids_unique" UNIQUE("min_user_id","max_user_id"),
 	CONSTRAINT "user_ids_check" CHECK ("chats"."min_user_id" < "chats"."max_user_id")
 );
@@ -33,18 +33,18 @@ CREATE TABLE IF NOT EXISTS "messages" (
 	"id" bigserial PRIMARY KEY NOT NULL,
 	"message_id" integer NOT NULL,
 	"text" text,
-	"chat_id" bigint NOT NULL,
+	"chat_id" integer NOT NULL,
 	"from_id" bigint NOT NULL,
 	"edit_date" timestamp (3),
-	"date" timestamp (3) DEFAULT now(),
+	"date" timestamp (3) DEFAULT now() NOT NULL,
 	CONSTRAINT "msg_id_per_chat_unique" UNIQUE("message_id","chat_id")
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "dialogs" (
-	"id" bigserial,
-	"chat_id" bigint,
+	"id" serial PRIMARY KEY NOT NULL,
+	"chat_id" integer,
 	"user_id" bigint,
-	"date" timestamp (3) DEFAULT now(),
+	"date" timestamp (3) DEFAULT now() NOT NULL,
 	CONSTRAINT "chat_id_user_id_unique" UNIQUE("chat_id","user_id")
 );
 --> statement-breakpoint

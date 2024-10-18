@@ -1,5 +1,5 @@
 {
-  "id": "578e9adb-3100-4a72-88bd-e2989e0e2a9a",
+  "id": "60c6968c-51e9-4f8f-8407-44f33a82d6c3",
   "prevId": "6ee53e41-dd0d-4943-ba05-cfe1de87667e",
   "version": "7",
   "dialect": "postgresql",
@@ -345,7 +345,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "bigserial",
+          "type": "serial",
           "primaryKey": true,
           "notNull": true
         },
@@ -365,7 +365,7 @@
           "name": "date",
           "type": "timestamp (3)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": "now()"
         }
       },
@@ -389,7 +389,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "bigserial",
+          "type": "serial",
           "primaryKey": true,
           "notNull": true
         },
@@ -401,7 +401,7 @@
         },
         "space_id": {
           "name": "space_id",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
@@ -417,7 +417,7 @@
           "name": "date",
           "type": "timestamp (3)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": "now()"
         }
       },
@@ -469,7 +469,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "bigserial",
+          "type": "integer",
           "primaryKey": true,
           "notNull": true
         },
@@ -488,7 +488,7 @@
         },
         "space_id": {
           "name": "space_id",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -508,7 +508,7 @@
           "name": "date",
           "type": "timestamp (3)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": "now()"
         }
       },
@@ -596,7 +596,7 @@
         },
         "chat_id": {
           "name": "chat_id",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
@@ -616,7 +616,7 @@
           "name": "date",
           "type": "timestamp (3)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": "now()"
         }
       },
@@ -690,13 +690,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "bigserial",
-          "primaryKey": false,
-          "notNull": false
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
         },
         "chat_id": {
           "name": "chat_id",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -710,7 +710,7 @@
           "name": "date",
           "type": "timestamp (3)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": "now()"
         }
       },

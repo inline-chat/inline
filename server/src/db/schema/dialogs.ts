@@ -8,28 +8,31 @@ import {
   makePgArray,
   unique,
   check,
+  integer,
 } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { sql } from "drizzle-orm"
 import { chats } from "./chats"
 import { bigserial } from "drizzle-orm/pg-core"
+import { creationDate } from "@in/server/db/schema/common"
+import { serial } from "drizzle-orm/pg-core"
 
 export const dialogs = pgTable(
   "dialogs",
   {
     /** internal id */
-    id: bigserial({ mode: "bigint" }),
+    id: serial().primaryKey(),
 
     /** which chat */
-    chatId: bigint("chat_id", { mode: "bigint" }).references(() => chats.id, {
+    chatId: integer("chat_id").references(() => chats.id, {
       onDelete: "cascade",
     }),
 
     /** which user in the chat */
     userId: bigint("user_id", { mode: "bigint" }).references(() => users.id),
 
-    date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
+    date: creationDate,
   },
   (table) => ({
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(
