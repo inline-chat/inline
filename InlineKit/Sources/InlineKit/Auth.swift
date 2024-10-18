@@ -33,11 +33,15 @@ public final class Auth: @unchecked Sendable {
         cachedToken = keychain.get("token")
     }
 
-    public func saveCurrentUserId(userId: String) {
+    public func saveCurrentUserId(userId: Int64) {
         UserDefaults.standard.set(userId, forKey: "userId")
     }
 
-    public func getCurrentUserId() -> String? {
-        return UserDefaults.standard.string(forKey: "userId")
+    public func getCurrentUserId() -> Int64? {
+        let userDefaultsKey = "userId"
+        if UserDefaults.standard.object(forKey: userDefaultsKey) != nil {
+            return Int64(UserDefaults.standard.integer(forKey: userDefaultsKey))
+        }
+        return nil
     }
 }

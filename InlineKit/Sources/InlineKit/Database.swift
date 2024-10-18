@@ -20,7 +20,7 @@ public extension AppDatabase {
 
         migrator.registerMigration("v0") { db in
             try db.create(table: "user") { t in
-                t.primaryKey("id", .text).notNull().unique()
+                t.primaryKey("id", .integer).notNull().unique()
                 t.column("email", .text).notNull()
                 t.column("firstName", .text).notNull()
                 t.column("lastName", .text)
@@ -29,9 +29,23 @@ public extension AppDatabase {
         }
 
         // Migrations for future application versions will be inserted here:
-        // migrator.registerMigration(...) { db in
-        //     ...
-        // }
+        migrator.registerMigration("Space flow") { db in
+
+            try db.create(table: "space") { t in
+                t.primaryKey("id", .integer).notNull().unique()
+                t.column("name", .text).notNull()
+                t.column("createdAt", .datetime).notNull().defaults(to: GRDB.Date.now)
+            }
+
+            try db.create(table: "member") { t in
+                t.primaryKey("id", .integer).notNull().unique()
+                t.column("userId", .integer).references("user", column: "id", onDelete: .setNull)
+                t.column("spaceId", .integer).references("space", column: "id", onDelete: .setNull)
+                t.column("createdAt", .datetime).notNull().defaults(to: GRDB.Date.now)
+
+                t.uniqueKey(["userId", "spaceId"])
+            }
+        }
 
         return migrator
     }
