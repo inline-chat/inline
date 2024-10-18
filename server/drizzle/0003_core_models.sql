@@ -48,7 +48,6 @@ CREATE TABLE IF NOT EXISTS "dialogs" (
 	CONSTRAINT "chat_id_user_id_unique" UNIQUE("chat_id","user_id")
 );
 --> statement-breakpoint
-ALTER TABLE "users" DROP CONSTRAINT "users_email_unique";--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "members" ADD CONSTRAINT "members_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
@@ -103,5 +102,4 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "msg_id_per_chat_index" ON "messages" USING btree ("message_id","chat_id");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "users_email_unique" ON "users" USING btree (lower("email"));
+CREATE INDEX IF NOT EXISTS "msg_id_per_chat_index" ON "messages" USING btree ("message_id","chat_id");

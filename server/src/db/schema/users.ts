@@ -35,7 +35,7 @@ export const users = pgTable(
     id: bigint("id", { mode: "bigint" })
       .default(sql`nextval('user_id')`)
       .primaryKey(),
-    email: varchar("email", { length: 256 }),
+    email: varchar("email", { length: 256 }).unique(),
     phoneNumber: varchar("phone_number", { length: 15 }).unique(),
     emailVerified: boolean("email_verified"),
     phoneVerified: boolean("phone_verified"),
@@ -45,9 +45,9 @@ export const users = pgTable(
     date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
   },
   (table) => ({
-    users_email_unique: uniqueIndex("users_email_unique").on(
-      lower(table.email),
-    ),
+    // users_email_unique: uniqueIndex("users_email_unique").on(
+    //   lower(table.email),
+    // ),
   }),
 )
 
