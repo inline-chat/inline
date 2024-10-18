@@ -145,4 +145,20 @@ public extension AppDatabase {
         let dbQueue = try! DatabaseQueue(configuration: AppDatabase.makeConfiguration())
         return try! AppDatabase(dbQueue)
     }
+
+    static func emptyWithSpaces() -> AppDatabase {
+        let db = AppDatabase.empty()
+        do {
+            try db.dbWriter.write { db in
+                let space1 = Space(name: "Space X", createdAt: Date.now)
+                let space2 = Space(name: "Space Y", createdAt: Date.now)
+                let space3 = Space(name: "Space Z", createdAt: Date.now)
+
+                try space1.insert(db)
+                try space2.insert(db)
+                try space3.insert(db)
+            }
+        } catch {}
+        return db
+    }
 }

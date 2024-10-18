@@ -10,8 +10,6 @@
 		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
 		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
-		C35EC7AF2CC28BB90067979B /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = C35EC7AE2CC28BB90067979B /* GRDBQuery */; };
-		C35EC7B12CC28BC20067979B /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = C35EC7B02CC28BC20067979B /* GRDBQuery */; };
 		C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905D2CB9431900B78B8A /* InlineKit */; };
 		C38C90602CB9432200B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905F2CB9432200B78B8A /* InlineKit */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
@@ -115,7 +113,6 @@
 			files = (
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
-				C35EC7AF2CC28BB90067979B /* GRDBQuery in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
 				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
@@ -142,7 +139,6 @@
 			files = (
 				CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
-				C35EC7B12CC28BC20067979B /* GRDBQuery in Frameworks */,
 				CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */,
 				CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */,
 				CDE9601A2CB94D17004C541C /* GRDB in Frameworks */,
@@ -226,7 +222,6 @@
 				C35092C92CAEA7DB00AE3E23 /* Sentry */,
 				C35092D42CAEE8EA00AE3E23 /* KeychainSwift */,
 				C38C905D2CB9431900B78B8A /* InlineKit */,
-				C35EC7AE2CC28BB90067979B /* GRDBQuery */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -300,7 +295,6 @@
 				CDE960192CB94D17004C541C /* GRDB */,
 				CDE9601B2CB94D1C004C541C /* KeychainSwift */,
 				CD26CEAB2CB94E7900665A89 /* Sentry */,
-				C35EC7B02CC28BC20067979B /* GRDBQuery */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -415,7 +409,6 @@
 				C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */,
 				C38C905C2CB9431900B78B8A /* XCLocalSwiftPackageReference "InlineKit" */,
 				CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */,
-				C35EC7AD2CC28BB90067979B /* XCRemoteSwiftPackageReference "GRDBQuery" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -1049,14 +1042,6 @@
 				minimumVersion = 24.0.0;
 			};
 		};
-		C35EC7AD2CC28BB90067979B /* XCRemoteSwiftPackageReference "GRDBQuery" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/groue/GRDBQuery";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.10.1;
-			};
-		};
 		C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/duckduckgo/GRDB.swift";
@@ -1089,16 +1074,6 @@
 		C35E950D2CAC497700D569AF /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = GRDB;
-		};
-		C35EC7AE2CC28BB90067979B /* GRDBQuery */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C35EC7AD2CC28BB90067979B /* XCRemoteSwiftPackageReference "GRDBQuery" */;
-			productName = GRDBQuery;
-		};
-		C35EC7B02CC28BC20067979B /* GRDBQuery */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C35EC7AD2CC28BB90067979B /* XCRemoteSwiftPackageReference "GRDBQuery" */;
-			productName = GRDBQuery;
 		};
 		C38C905D2CB9431900B78B8A /* InlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
