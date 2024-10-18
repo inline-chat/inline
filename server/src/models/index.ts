@@ -19,4 +19,11 @@ export const encodeSpaceInfo = (
 ): SpaceInfoEncoded => {
   return Schema.encodeSync(SpaceInfo)(space)
 }
+import { t } from "elysia"
+export const TSpaceInfo = t.Object({
+  id: t.Integer(),
+  name: t.String(),
+  handle: t.Union([t.Null(), t.String(), t.Undefined()]),
+  date: t.Number(),
+})
 /// --------------------

@@ -4,8 +4,9 @@ import { auth } from "@in/server/controllers/v001/auth"
 import { createSpaceRoute } from "@in/server/controllers/v001/createSpace"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
+import { swagger } from "@elysiajs/swagger"
 
-export const apiV001 = new Elysia()
+export const apiV001 = new Elysia({ name: "v001" })
   .group("v001", (app) => {
     return app
       .use(setup)
@@ -15,6 +16,7 @@ export const apiV001 = new Elysia()
         return { ok: false, errorCode: 404, description: "Method not found" }
       })
   })
+
   .error("INLINE_ERROR", InlineError)
   .onError(({ code, error }) => {
     if (code === "NOT_FOUND")

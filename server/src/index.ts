@@ -14,13 +14,43 @@ import { there } from "./controllers/there"
 import { apiV001 } from "@in/server/controllers/v001"
 import { setup } from "@in/server/setup"
 import { Log } from "@in/server/utils/log"
+import swagger from "@elysiajs/swagger"
 
 const port = process.env.PORT || 8000
 
 // Ensure to call this before importing any other modules!
 
-const app = new Elysia().use(root).use(waitlist).use(there).use(apiV001)
-
+const app = new Elysia()
+  .use(root)
+  .use(waitlist)
+  .use(there)
+  .use(apiV001)
+  .use(
+    swagger({
+      path: "/v001/docs",
+      exclude: /^(?!\/v001).*$/,
+      scalarConfig: {
+        servers: [
+          {
+            url: "https://api.inline.chat",
+            description: "Production API server",
+          },
+        ],
+      },
+      documentation: {
+        info: {
+          title: "Inline API Docs",
+          version: "0.0.1",
+          contact: {
+            email: "hi@inline.chat",
+            name: "Inline Team",
+            url: "https://inline.chat",
+          },
+          termsOfService: "https://inline.chat/terms",
+        },
+      },
+    }),
+  )
 // .onError({ as: "local" }, ({ code, error }) => {
 //   if (code === "NOT_FOUND") return "404"
 //   console.error("error:", error)
