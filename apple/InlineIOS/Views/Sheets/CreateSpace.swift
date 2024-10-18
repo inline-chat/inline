@@ -6,6 +6,7 @@ struct CreateSpace: View {
     @State private var name = ""
     @FocusState private var isFocused: Bool
     @FormState var formState
+    @EnvironmentObject var nav: Navigation
 
     @Environment(\.appDatabase) var database
 
@@ -39,16 +40,18 @@ struct CreateSpace: View {
                     Task {
                         do {
                             formState.startLoading()
+                            let result = try await ApiClient.shared.createSpace(name: name)
+
                             try await database.dbWriter.write { db in
-                                let space = Space(name: name, createdAt: Date.now)
+                                let space = Space(from: result.space)
+                                try space.save(db)
 
-                                try space.insert(db)
-
-                                let member = Member(createdAt: Date.now, userId: Auth.shared.getCurrentUserId()!, spaceId: space.id)
-                                try member.insert(db)
+                                let member = Member(createdAt: Date.now, userId: Auth.shared.getCurrentUserId()!, spaceId: result.space.id)
+                                try member.save(db)
                             }
                             formState.succeeded()
                             showSheet = false
+                            nav.push(.space(id: result.space.id))
                         } catch {
                             Log.shared.error("Failed to create space", error: error)
                         }

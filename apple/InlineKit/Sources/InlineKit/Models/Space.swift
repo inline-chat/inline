@@ -1,6 +1,12 @@
 import Foundation
 import GRDB
 
+public struct ApiSpace: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked Sendable {
+    public var id: Int64
+    public var name: String
+    public var date: Int
+}
+
 public struct Space: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked Sendable {
     public var id: Int64
     public var name: String
@@ -22,5 +28,17 @@ public struct Space: FetchableRecord, Identifiable, Codable, Hashable, Persistab
         self.id = id
         self.name = name
         self.createdAt = createdAt
+    }
+}
+
+public extension Space {
+    init(from apiSpace: ApiSpace) {
+        self.id = apiSpace.id
+        self.name = apiSpace.name
+        self.createdAt = Self.fromTimestamp(from: apiSpace.date)
+    }
+
+    static func fromTimestamp(from: Int) -> Date {
+        return Date(timeIntervalSince1970: Double(from) / 1000)
     }
 }
