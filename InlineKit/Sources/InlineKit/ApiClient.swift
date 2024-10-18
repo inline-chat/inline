@@ -13,6 +13,7 @@ public enum APIError: Error {
 public enum Path: String {
     case verifyCode = "verify-email-code"
     case sendCode = "send-email-code"
+    case createSpace
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -30,8 +31,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     private let decoder = JSONDecoder()
 
-    private func request<T: Decodable>(_ path: Path, queryItems: [URLQueryItem] = []) async throws -> T {
-        guard var urlComponents = URLComponents(string: "\(baseURL)/auth/\(path.rawValue)") else {
+    private func request<T: Decodable>(_ path: Path, queryItems: [URLQueryItem] = [], isAuth: Bool = false) async throws -> T {
+        guard var urlComponents = URLComponents(string: "\(baseURL)\(isAuth ? "/auth/" : "/")\(path.rawValue)") else {
             throw APIError.invalidURL
         }
 
@@ -71,11 +72,15 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     // MARK: AUTH
 
     public func sendCode(email: String) async throws -> SendCodeResponse {
-        try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
+        try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)], isAuth: true)
     }
 
     public func verifyCode(code: String, email: String) async throws -> VerifyCodeResponse {
-        try await request(.verifyCode, queryItems: [URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email)])
+        try await request(.verifyCode, queryItems: [URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email)], isAuth: true)
+    }
+
+    public func createSpace(name: String) async throws -> CreateSpaceResult {
+        try await request(.createSpace, queryItems: [URLQueryItem(name: "name", value: name)])
     }
 }
 
@@ -96,4 +101,9 @@ public struct SendCodeResponse: Codable, Sendable {
     // Failed
     public let errorCode: Int?
     public let description: String?
+}
+
+public struct CreateSpaceResult: Codable, Sendable {
+    public let ok: Bool
+    public let space: ApiSpace
 }
