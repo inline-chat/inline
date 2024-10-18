@@ -9,6 +9,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
         case code(email: String)
         case main
         case addAccount(email: String)
+        case space(id: Int64)
     }
 
     @Published var path = NavigationPath()

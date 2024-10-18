@@ -19,6 +19,9 @@ struct MainView: View {
             if let spaces = spaceList.spaces {
                 List(spaces.sorted(by: { $0.createdAt > $1.createdAt })) { space in
                     Text(space.name)
+                        .onTapGesture {
+                            nav.push(.space(id: space.id))
+                        }
                 }
                 .listStyle(.plain)
                 .padding(.vertical, 8)
