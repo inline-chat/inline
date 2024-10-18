@@ -48,11 +48,13 @@ export const auth = new Elysia({ prefix: "auth" })
         }
       }
 
+      let email = normalizeEmail(query.email)
+
       // store code
-      let { code, existingUser } = await getLoginCode(query.email)
+      let { code, existingUser } = await getLoginCode(email)
 
       // send code to email
-      await sendEmail(query.email, code)
+      await sendEmail(email, code)
 
       return {
         ok: true,
@@ -79,8 +81,10 @@ export const auth = new Elysia({ prefix: "auth" })
         }
       }
 
+      let email = normalizeEmail(query.email)
+
       // send code to email
-      await verifyEmailCode(query.email, query.code)
+      await verifyEmailCode(email, query.code)
 
       // make session
       let ip = server?.requestIP(request)?.address
@@ -88,7 +92,7 @@ export const auth = new Elysia({ prefix: "auth" })
       let timeZone = query.timeZone
 
       // create or fetch user by email
-      let user = await getUserByEmail(query.email)
+      let user = await getUserByEmail(email)
       let userId = user.id
 
       // save session
@@ -119,6 +123,7 @@ import { sessions, users } from "@in/server/db/schema"
 import { twilio } from "@in/server/libs/twilio"
 import { isValidEmail } from "@in/server/utils/validate"
 import { ErrorCodes } from "@in/server/types/errors"
+import { normalizeEmail } from "@in/server/utils/normalize"
 
 const getLoginCode = async (
   email: string,

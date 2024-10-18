@@ -1,7 +1,8 @@
 import * as Sentry from "@sentry/bun"
+import { SENTRY_DSN } from "@in/server/env"
 
 Sentry.init({
-  dsn: process.env.SENTRY_DSN,
+  dsn: SENTRY_DSN,
   tracesSampleRate: 1.0,
 })
 
