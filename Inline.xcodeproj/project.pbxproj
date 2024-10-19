@@ -11,6 +11,7 @@
 		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
 		C35EC8222CC2A24A0067979B /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35EC8212CC2A24A0067979B /* InlineKit */; };
+		C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */; };
 		C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905D2CB9431900B78B8A /* InlineKit */; };
 		C38C90602CB9432200B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905F2CB9432200B78B8A /* InlineKit */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
@@ -112,6 +113,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */,
 				C35EC8222CC2A24A0067979B /* InlineKit in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
@@ -225,6 +227,7 @@
 				C35092D42CAEE8EA00AE3E23 /* KeychainSwift */,
 				C38C905D2CB9431900B78B8A /* InlineKit */,
 				C35EC8212CC2A24A0067979B /* InlineKit */,
+				C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -1081,6 +1084,11 @@
 		C35EC8212CC2A24A0067979B /* InlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineKit;
+		};
+		C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */;
+			productName = SwiftUIIntrospect;
 		};
 		C38C905D2CB9431900B78B8A /* InlineKit */ = {
 			isa = XCSwiftPackageProductDependency;

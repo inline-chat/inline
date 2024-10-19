@@ -13,6 +13,14 @@ struct ContentView: View {
     @StateObject var api = ApiClient()
     @StateObject var userData = UserData()
     @Environment(\.appDatabase) var database
+    @EnvironmentStateObject var dataManager: DataManager
+
+    init() {
+        _dataManager = EnvironmentStateObject { env in
+            DataManager(database: env.appDatabase)
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $nav.path) {
             VStack {
@@ -37,12 +45,15 @@ struct ContentView: View {
                     AddAccount(email: email)
                 case let .space(id):
                     SpaceView(spaceId: id)
+                case let .chat(id):
+                    ChatView(chatId: id)
                 }
             }
         }
         .environmentObject(nav)
         .environmentObject(api)
         .environmentObject(userData)
+        .environmentObject(dataManager)
     }
 }
 
