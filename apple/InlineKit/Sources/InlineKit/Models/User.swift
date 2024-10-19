@@ -19,6 +19,16 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
         request(for: User.spaces)
     }
 
+    public nonisolated(unsafe) static let chats = hasMany(Chat.self)
+    public var chats: QueryInterfaceRequest<Chat> {
+        request(for: User.chats)
+    }
+
+    public nonisolated(unsafe) static let messages = hasMany(Message.self)
+    public var messages: QueryInterfaceRequest<Message> {
+        request(for: User.messages)
+    }
+
     public init(id: Int64 = Int64.random(in: 1 ... 5000), email: String, firstName: String, lastName: String? = nil) {
         self.id = id
         self.email = email
