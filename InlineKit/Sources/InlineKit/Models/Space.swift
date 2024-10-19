@@ -24,6 +24,11 @@ public struct Space: FetchableRecord, Identifiable, Codable, Hashable, Persistab
         request(for: Space.members)
     }
 
+    public nonisolated(unsafe) static let chats = hasMany(Chat.self)
+    public var chats: QueryInterfaceRequest<Chat> {
+        request(for: Space.chats)
+    }
+
     public init(id: Int64 = Int64.random(in: 1 ... 5000), name: String, createdAt: Date) {
         self.id = id
         self.name = name
@@ -33,9 +38,9 @@ public struct Space: FetchableRecord, Identifiable, Codable, Hashable, Persistab
 
 public extension Space {
     init(from apiSpace: ApiSpace) {
-        self.id = apiSpace.id
-        self.name = apiSpace.name
-        self.createdAt = Self.fromTimestamp(from: apiSpace.date)
+        id = apiSpace.id
+        name = apiSpace.name
+        createdAt = Self.fromTimestamp(from: apiSpace.date)
     }
 
     static func fromTimestamp(from: Int) -> Date {

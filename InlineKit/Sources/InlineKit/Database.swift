@@ -45,6 +45,23 @@ public extension AppDatabase {
 
                 t.uniqueKey(["userId", "spaceId"])
             }
+
+            try db.create(table: "chat") { t in
+                t.primaryKey("id", .integer).notNull().unique()
+                t.column("spaceId", .integer).references("space", column: "id", onDelete: .cascade)
+                t.column("minUserId", .integer).references("user", column: "id", onDelete: .setNull)
+                t.column("maxUserId", .integer).references("user", column: "id", onDelete: .setNull)
+                t.column("createdAt", .datetime).notNull().defaults(to: GRDB.Date.now)
+            }
+
+            try db.create(table: "message") { t in
+                t.primaryKey("id", .integer).notNull().unique()
+                t.column("chatId", .integer).references("chat", column: "id", onDelete: .cascade)
+                t.column("fromId", .integer).references("user", column: "id", onDelete: .setNull)
+                t.column("date", .datetime).notNull()
+                t.column("text", .text)
+                t.column("editDate", .datetime)
+            }
         }
 
         return migrator
