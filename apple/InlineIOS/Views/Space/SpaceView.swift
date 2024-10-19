@@ -18,29 +18,45 @@ struct SpaceView: View {
 
     var body: some View {
         VStack {
-            if let members = fullSpaceViewModel.members {
-                List(members) { member in
-                    MemberView(userId: member.userId)
+            List {
+                if let members = fullSpaceViewModel.members {
+                    Section(header: Text("Members")) {
+                        ForEach(members) { member in
+                            MemberView(userId: member.userId)
+                        }
+                    }
                 }
-                .listStyle(.plain)
+
+                if let chats = fullSpaceViewModel.chats {
+                    Section(header: Text("Threads")) {
+                        ForEach(chats) { chat in
+                            Text(chat.title ?? "Thread")
+                                .onTapGesture {
+                                    nav.push(.chat(id: chat.id))
+                                }
+                        }
+                    }
+                }
             }
+            .listStyle(.plain)
         }
         .frame(maxWidth: .infinity)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                HStack(spacing: 8) {
+                HStack(spacing: 2) {
                     Button(action: {
                         nav.popToRoot()
                     }) {
                         Image(systemName: "chevron.left")
                             .foregroundColor(.secondary)
-                            .font(.body)
+                            .font(.callout)
                     }
 
                     if let space = fullSpaceViewModel.space {
                         Text(space.name)
-                            .font(.headline)
+                            .font(.title3)
+                            .fontWeight(.medium)
                             .foregroundColor(.primary)
                     }
                 }

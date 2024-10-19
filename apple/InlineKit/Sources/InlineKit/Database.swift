@@ -45,13 +45,16 @@ public extension AppDatabase {
 
                 t.uniqueKey(["userId", "spaceId"])
             }
+        }
 
+        migrator.registerMigration("Chat flow") { db in
             try db.create(table: "chat") { t in
                 t.primaryKey("id", .integer).notNull().unique()
                 t.column("spaceId", .integer).references("space", column: "id", onDelete: .cascade)
-                t.column("minUserId", .integer).references("user", column: "id", onDelete: .setNull)
-                t.column("maxUserId", .integer).references("user", column: "id", onDelete: .setNull)
-                t.column("createdAt", .datetime).notNull().defaults(to: GRDB.Date.now)
+                t.column("peerUserId", .integer).references("user", column: "id", onDelete: .setNull)
+                t.column("title", .text)
+                t.column("type", .integer).notNull().defaults(to: 0)
+                t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
             }
 
             try db.create(table: "message") { t in

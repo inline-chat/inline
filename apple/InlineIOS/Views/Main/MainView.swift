@@ -7,13 +7,10 @@ struct MainView: View {
     @EnvironmentStateObject var spaceList: SpaceListViewModel
     @State var user: User? = nil
     @State var showSheet: Bool = false
-    @EnvironmentStateObject var dataManager: DataManager
+
     init() {
         _spaceList = EnvironmentStateObject { env in
             SpaceListViewModel(db: env.appDatabase)
-        }
-        _dataManager = EnvironmentStateObject { env in
-            DataManager(database: env.appDatabase)
         }
     }
 
@@ -89,7 +86,7 @@ struct MainView: View {
                 .presentationBackground(.thinMaterial)
                 .presentationCornerRadius(28)
         }
-        .environmentObject(dataManager)
+        
     }
 }
 
