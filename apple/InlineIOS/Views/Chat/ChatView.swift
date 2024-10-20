@@ -60,11 +60,10 @@ struct ChatView: View {
             .onAppear {
                 scrollToBottom(proxy: proxy)
             }
-            .introspect(.scrollView) { scrollView in
+            .introspect(.scrollView, on: .iOS(.v13, .v14, .v15, .v16, .v17, .v18)) { scrollView in
                 scrollView.keyboardDismissMode = .interactive
             }
         }
-        .keyboardAwareModifier()
     }
 
     private var inputArea: some View {
@@ -106,29 +105,5 @@ struct ChatView: View {
         withAnimation {
             proxy.scrollTo(fullChatViewModel.messages.first?.id, anchor: .center)
         }
-    }
-}
-
-extension View {
-    func keyboardAwareModifier() -> some View {
-        return modifier(KeyboardAwareModifier())
-    }
-}
-
-struct KeyboardAwareModifier: ViewModifier {
-    @State private var keyboardHeight: CGFloat = 0
-
-    func body(content: Content) -> some View {
-        content
-            .padding(.bottom, keyboardHeight)
-            .onAppear {
-                NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
-                    let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect ?? .zero
-                    keyboardHeight = keyboardFrame.height
-                }
-                NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
-                    keyboardHeight = 0
-                }
-            }
     }
 }
