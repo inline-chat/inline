@@ -1,13 +1,7 @@
 import { creationDate } from "@in/server/db/schema/common"
-import { bigserial } from "drizzle-orm/pg-core"
-import {
-  pgTable,
-  varchar,
-  boolean,
-  timestamp,
-  serial,
-  bigint,
-} from "drizzle-orm/pg-core"
+import { members } from "@in/server/db/schema/members"
+import { relations } from "drizzle-orm"
+import { pgTable, varchar, serial } from "drizzle-orm/pg-core"
 
 export const spaces = pgTable("spaces", {
   id: serial().primaryKey(),
@@ -15,6 +9,10 @@ export const spaces = pgTable("spaces", {
   handle: varchar({ length: 32 }).unique(),
   date: creationDate,
 })
+
+export const spaceRelations = relations(spaces, ({ many }) => ({
+  members: many(members),
+}))
 
 export type DbSpace = typeof spaces.$inferSelect
 export type DbNewSpace = typeof spaces.$inferInsert

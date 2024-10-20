@@ -36,6 +36,13 @@
       "when": 1729412238299,
       "tag": "0004_more_integers_and_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1729441987727,
+      "tag": "0005_username",
+      "breakpoints": true
     }
   ]
 }

@@ -41,13 +41,14 @@ export const users = pgTable(
     phoneVerified: boolean("phone_verified"),
     firstName: varchar("first_name", { length: 256 }),
     lastName: varchar("last_name", { length: 256 }),
+    username: varchar("username", { length: 256 }),
     deleted: boolean("deleted"),
     date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
   },
   (table) => ({
-    // users_email_unique: uniqueIndex("users_email_unique").on(
-    //   lower(table.email),
-    // ),
+    users_username_unique: uniqueIndex("users_username_unique").on(
+      lower(table.username),
+    ),
   }),
 )
 

@@ -11,7 +11,8 @@
     "build:website": "cd website && bun run build",
     "build:server": "cd server && bun run build",
     "start:website": "cd website && bun run start",
-    "start:server": "cd server && bun run start"
+    "start:server": "cd server && bun run start",
+    "db:migrate": "cd server && bun run db:migrate"
   },
   "overrides": {
     "@sinclair/typebox": "0.32.34"
