@@ -149,6 +149,7 @@ const createSession = async ({
   let _ = await db.insert(sessions).values({
     userId,
     tokenHash,
+    date: new Date(),
     // userAgent,
     // timeZone,
     // ip,
