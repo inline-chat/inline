@@ -30,7 +30,7 @@ export const dialogs = pgTable(
     }),
 
     /** which user in the chat */
-    userId: bigint("user_id", { mode: "bigint" }).references(() => users.id),
+    userId: integer("user_id").references(() => users.id),
 
     date: creationDate,
   },

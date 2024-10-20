@@ -4,7 +4,25 @@
     "esModuleInterop": true,
     "exactOptionalPropertyTypes": true,
     "target": "ESNext",
-    "module": "NodeNext",
+    "module": "ESNext",
+
+    // Bundler mode
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    "moduleDetection": "force",
+
+    // Best practices
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Some stricter flags
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noPropertyAccessFromIndexSignature": true,
+
     "paths": {
       "@in/server": ["./src"],
       "@in/server/*": ["./src/*"]

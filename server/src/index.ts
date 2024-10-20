@@ -9,15 +9,13 @@ Sentry.init({
 // Main app
 // Entry point for your Elysia server, ideal place for setting global plugin
 import { root } from "@in/server/controllers/root"
-import { waitlist } from "@in/server/controllers/waitlist"
+import { waitlist } from "@in/server/controllers/extra/waitlist"
 import { Elysia } from "elysia"
-import { there } from "./controllers/there"
-import { apiV001 } from "@in/server/controllers/v001"
-import { setup } from "@in/server/setup"
-import { Log } from "@in/server/utils/log"
+import { there } from "./controllers/extra/there"
 import swagger from "@elysiajs/swagger"
+import { apiV1 } from "@in/server/controllers/v1"
 
-const port = process.env.PORT || 8000
+const port = process.env["PORT"] || 8000
 
 // Ensure to call this before importing any other modules!
 
@@ -25,7 +23,7 @@ const app = new Elysia()
   .use(root)
   .use(waitlist)
   .use(there)
-  .use(apiV001)
+  .use(apiV1)
   .use(
     swagger({
       path: "/v001/docs",

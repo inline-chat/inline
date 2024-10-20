@@ -1,5 +1,6 @@
 export enum ErrorCodes {
   INAVLID_ARGS = 400,
+  UNAUTHORIZED = 403,
   SERVER_ERROR = 500,
 }
 

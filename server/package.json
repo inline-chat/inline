@@ -1,6 +1,7 @@
 {
   "name": "@inline/server",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "build": "bun build src/index.ts --target bun --outdir ./dist",
@@ -18,15 +19,16 @@
     "@elysiajs/cors": "^1.1.1",
     "@elysiajs/swagger": "^1.1.5",
     "@sentry/bun": "^8.32.0",
-    "@sinclair/typebox": "^0.33.17",
     "drizzle-orm": "^0.35.2",
-    "elysia": "^1.1.22",
     "elysia-helmet": "^2.0.0",
     "elysia-rate-limit": "^4.1.0",
+    "nanoid": "^5.0.7",
+    "nanoid-dictionary": "^4.3.0",
     "postgres": "^3.4.4"
   },
   "devDependencies": {
     "@types/bun": "^1.1.10",
+    "@types/nanoid-dictionary": "^4.2.3",
     "drizzle-kit": "^0.26.2"
   }
 }

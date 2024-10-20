@@ -16,7 +16,7 @@ import {
 
 export const sessions = pgTable("sessions", {
   id: serial().primaryKey(),
-  userId: bigint("user_id", { mode: "bigint" })
+  userId: integer("user_id")
     .notNull()
     .references(() => users.id),
   tokenHash: varchar("token_hash", { length: 64 }).notNull(), // hash

@@ -18,11 +18,12 @@ import { bigserial } from "drizzle-orm/pg-core"
 import { integer } from "drizzle-orm/pg-core"
 import { index } from "drizzle-orm/pg-core"
 import { creationDate } from "@in/server/db/schema/common"
+import { AnyPgColumn } from "drizzle-orm/pg-core"
 
 export const messages = pgTable(
   "messages",
   {
-    id: bigserial({ mode: "bigint" }).primaryKey(),
+    globalId: bigserial("global_id", { mode: "bigint" }).primaryKey(),
 
     // sequencial within one chat
     messageId: integer("message_id").notNull(),
@@ -33,12 +34,12 @@ export const messages = pgTable(
     /** required, chat it belongs to */
     chatId: integer("chat_id")
       .notNull()
-      .references(() => chats.id, {
+      .references((): AnyPgColumn => chats.id, {
         onDelete: "cascade",
       }),
 
     /** required, chat it belongs to */
-    from_id: bigint("from_id", { mode: "bigint" })
+    fromId: integer("from_id")
       .notNull()
       .references(() => users.id),
 

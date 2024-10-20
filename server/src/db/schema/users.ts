@@ -32,7 +32,7 @@ export const userIdSequence = pgSequence("user_id", {
 export const users = pgTable(
   "users",
   {
-    id: bigint("id", { mode: "bigint" })
+    id: integer("id")
       .default(sql`nextval('user_id')`)
       .primaryKey(),
     email: varchar("email", { length: 256 }).unique(),

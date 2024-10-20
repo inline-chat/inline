@@ -20,7 +20,7 @@ export const members = pgTable(
   "members",
   {
     id: serial().primaryKey(),
-    userId: bigint("user_id", { mode: "bigint" })
+    userId: integer("user_id")
       .notNull()
       .references(() => users.id, {
         onDelete: "cascade",

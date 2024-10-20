@@ -1,24 +1,19 @@
-import { Elysia, t } from "elysia"
-import { setup } from "@in/server/setup"
-import { auth } from "@in/server/controllers/v001/auth"
-import { createSpaceRoute } from "@in/server/controllers/v001/createSpace"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
-import { Log } from "@in/server/utils/log"
-import { swagger } from "@elysiajs/swagger"
+import Elysia, { t, TSchema } from "elysia"
 
-export const apiV001 = new Elysia({ name: "v001" })
-  .group("v001", (app) => {
-    return app
-      .use(setup)
-      .use(auth)
-      .use(createSpaceRoute)
-      .all("/*", () => {
-        return { ok: false, errorCode: 404, description: "Method not found" }
-      })
-  })
+export const TMakeApiResponse = <T extends TSchema>(type: T) =>
+  t.Union([
+    t.Composite([t.Object({ ok: t.Literal(true) }), type]),
+    t.Object({
+      ok: t.Literal(false),
+      errorCode: t.Number(),
+      description: t.Optional(t.String()),
+    }),
+  ])
 
+export const handleError = new Elysia()
   .error("INLINE_ERROR", InlineError)
-  .onError(({ code, error }) => {
+  .onError({ as: "scoped" }, ({ code, error }) => {
     if (code === "NOT_FOUND")
       return {
         ok: false,

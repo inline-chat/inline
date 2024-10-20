@@ -15,27 +15,39 @@ import { sql } from "drizzle-orm"
 import { bigserial } from "drizzle-orm/pg-core"
 import { creationDate } from "@in/server/db/schema/common"
 import { integer } from "drizzle-orm/pg-core"
+import { messages } from "@in/server/db/schema/messages"
+import { AnyPgColumn } from "drizzle-orm/pg-core"
+import { foreignKey } from "drizzle-orm/pg-core"
+import { text } from "drizzle-orm/pg-core"
 
 export const chatTypeEnum = pgEnum("chat_types", ["private", "thread"])
 
 export const chats = pgTable(
   "chats",
   {
-    id: integer().primaryKey(),
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
     type: chatTypeEnum().notNull(),
-    title: varchar(),
+    title: varchar({ length: 150 }),
+    description: text(),
+    emoji: varchar({ length: 20 }),
+
+    /** Most recent message id */
+    maxMsgId: integer("max_msg_id"),
 
     /** optional, if part of a space */
     spaceId: integer("space_id").references(() => spaces.id),
 
+    /** optional, required for space chats, defaults to false */
+    spacePublic: boolean("space_public"),
+
+    /** optional, required for space chats, thread number */
+    threadNumber: integer("thread_number"),
+
     /** optional, required for private chats, least user id */
-    minUserId: bigint("min_user_id", { mode: "bigint" }).references(
-      () => users.id,
-    ),
+    minUserId: integer("min_user_id").references(() => users.id),
+
     /** optional, required for private chats, greatest user id */
-    maxUserId: bigint("max_user_id", { mode: "bigint" }).references(
-      () => users.id,
-    ),
+    maxUserId: integer("max_user_id").references(() => users.id),
 
     date: creationDate,
   },
@@ -50,6 +62,19 @@ export const chats = pgTable(
       table.minUserId,
       table.maxUserId,
     ),
+
+    /** Ensure unique space thread number */
+    spaceThreadNumberUniqueContraint: unique("space_thread_number_unique").on(
+      table.spaceId,
+      table.threadNumber,
+    ),
+
+    /** Ensure maxMsgId is valid */
+    maxMsgIdForeignKey: foreignKey({
+      name: "max_msg_id_fk",
+      columns: [table.id, table.maxMsgId],
+      foreignColumns: [messages.chatId, messages.messageId],
+    }).onDelete("set null"),
   }),
 )
 
