@@ -16,7 +16,9 @@ import {
   TSpaceInfo,
 } from "@in/server/models"
 
-export const Input = Type.Object({})
+export const Input = Type.Object({
+  username: Type.String(),
+})
 
 type Input = Static<typeof Input>
 
@@ -25,19 +27,16 @@ type Context = {
 }
 
 type RawOutput = {
-  spaces: DbSpace[]
-  members: DbMember[]
+  available: boolean
 }
 
 export const Response = Type.Object({
-  spaces: Type.Array(TSpaceInfo),
-  members: Type.Array(TMemberInfo),
+  available: Type.Boolean(),
 })
 
 export const encode = (output: RawOutput): Static<typeof Response> => {
   return {
-    spaces: output.spaces.map(encodeSpaceInfo),
-    members: output.members.map(encodeMemberInfo),
+    available: output.available,
   }
 }
 
@@ -46,24 +45,15 @@ export const handler = async (
   context: Context,
 ): Promise<RawOutput> => {
   try {
-    const result = await db.query.members.findMany({
-      with: {
-        space: true,
-      },
-      where: eq(members.userId, context.currentUserId),
-    })
+    const result = await db
+      .select()
+      .from(users)
+      .where(eq(users.username, input.username))
 
-    // db.query.spaces.findMany({
-    //   where: {}
-    // })
-
-    return {
-      spaces: result.map((r) => r.space),
-      members: result.map((r) => r),
-    }
+    return { available: result.length === 0 }
   } catch (error) {
-    Log.shared.error("Failed to send email code", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to send email code")
+    Log.shared.error("Failed to check username", error)
+    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to check username")
   }
 }
 

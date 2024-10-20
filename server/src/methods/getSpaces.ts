@@ -1,6 +1,11 @@
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
-import { members, type DbMember, type DbSpace } from "@in/server/db/schema"
+import {
+  members,
+  spaces,
+  type DbMember,
+  type DbSpace,
+} from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -41,20 +46,15 @@ export const handler = async (
   context: Context,
 ): Promise<RawOutput> => {
   try {
-    const result = await db.query.members.findMany({
-      with: {
-        space: true,
-      },
-      where: eq(members.userId, context.currentUserId),
-    })
-
-    // db.query.spaces.findMany({
-    //   where: {}
-    // })
+    const result = await db
+      .select()
+      .from(members)
+      .where(eq(members.userId, context.currentUserId))
+      .innerJoin(spaces, eq(members.spaceId, spaces.id))
 
     return {
-      spaces: result.map((r) => r.space),
-      members: result.map((r) => r),
+      spaces: result.map((r) => r.spaces),
+      members: result.map((r) => r.members),
     }
   } catch (error) {
     Log.shared.error("Failed to send email code", error)
