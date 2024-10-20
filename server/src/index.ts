@@ -26,12 +26,15 @@ const app = new Elysia()
   .use(apiV1)
   .use(
     swagger({
-      path: "/v001/docs",
-      exclude: /^(?!\/v001).*$/,
+      path: "/v1/docs",
+      exclude: /^(?!\/v1).*$/,
       scalarConfig: {
         servers: [
           {
-            url: "https://api.inline.chat",
+            url:
+              process.env["NODE_ENV"] === "production"
+                ? "https://api.inline.chat"
+                : "http://localhost:8000",
             description: "Production API server",
           },
         ],
