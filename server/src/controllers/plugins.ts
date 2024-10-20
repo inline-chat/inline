@@ -34,11 +34,13 @@ const normalizeToken = (token: unknown): string | null => {
   if (typeof token !== "string") {
     return null
   }
-  return token.replace("Bearer ", "").toLowerCase().trim()
+  return token.replace("Bearer ", "").trim()
 }
 
 const getUserIdFromToken = async (token: string): Promise<number> => {
   let tokenHash = hashToken(token)
+  console.log("token", token)
+  console.log("tokenHash", tokenHash)
   let session = await db.query.sessions.findFirst({
     where: and(eq(sessions.tokenHash, tokenHash), isNull(sessions.revoked)),
   })
