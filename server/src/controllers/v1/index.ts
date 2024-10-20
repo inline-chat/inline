@@ -9,6 +9,8 @@ import { createSpaceRoute } from "@in/server/controllers/v1/createSpace"
 import { updateProfileRoute } from "@in/server/controllers/v1/updateProfile"
 import { checkUsernameRoute } from "./checkUsername"
 import { getSpaceRoute } from "./getSpace"
+import { getChatRoute } from "./getChat"
+import { createThreadRoute } from "./createThread"
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1/:token?", (app) => {
@@ -22,6 +24,8 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(updateProfileRoute)
       .use(checkUsernameRoute)
       .use(getSpaceRoute)
+      .use(createThreadRoute)
+
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }

@@ -1,7 +1,13 @@
 // https://effect.website/docs/guides/schema/basic-usage
 
 import { t } from "elysia"
-import { DbChat, DbMember, DbSpace, DbUser } from "@in/server/db/schema"
+import {
+  DbChat,
+  DbMember,
+  DbSpace,
+  DbUser,
+  type DbMessage,
+} from "@in/server/db/schema"
 import {
   Type,
   type Static,
@@ -88,5 +94,24 @@ export const encodeChatInfo = (chat: DbChat | TChatInfo): TChatInfo => {
   return Value.Encode(TChatInfo, {
     ...chat,
     date: encodeDate(chat.date),
+  })
+}
+
+// Message -------------
+export const TMessageInfo = Type.Object({
+  id: Type.Integer(),
+  chatId: Type.Integer(),
+  userId: Type.Integer(),
+  content: Type.String(),
+  date: Type.Integer(),
+})
+
+export type TMessageInfo = StaticEncode<typeof TMessageInfo>
+export const encodeMessageInfo = (
+  message: DbMessage | TMessageInfo,
+): TMessageInfo => {
+  return Value.Encode(TMessageInfo, {
+    ...message,
+    date: encodeDate(message.date),
   })
 }
