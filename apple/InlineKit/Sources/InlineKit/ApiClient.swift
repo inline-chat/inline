@@ -99,7 +99,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 ///     }
 /// }
 public enum APIResponse<T: Codable>: Decodable {
-    case success(T?)
+    case success(T)
     case error(errorCode: Int?, description: String?)
 
     private enum CodingKeys: String, CodingKey {
@@ -112,7 +112,7 @@ public enum APIResponse<T: Codable>: Decodable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         if try values.decode(Bool.self, forKey: .ok) {
-            self = try .success(values.decodeIfPresent(T.self, forKey: .result) ?? nil)
+            self = try .success(values.decodeIfPresent(T.self, forKey: .result)!)
         } else {
             self = try .error(
                 errorCode: values.decodeIfPresent(Int.self, forKey: .errorCode),
