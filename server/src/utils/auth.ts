@@ -12,10 +12,10 @@ export function secureRandomSixDigitNumber() {
 
 const nanoid = customAlphabet(alphanumeric, USER_TOKEN_LENGTH)
 
-export async function generateToken() {
+export async function generateToken(userId: number) {
   // Generate a random token
   const randomPart = nanoid()
-  const token = `${USER_TOKEN_PREFIX}${randomPart}`
+  const token = `${userId}:${USER_TOKEN_PREFIX}${randomPart}`
 
   // Create a SHA256 hash for storing in the database
   const tokenHash = hashToken(token)

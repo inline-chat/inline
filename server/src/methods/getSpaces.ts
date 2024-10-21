@@ -15,7 +15,6 @@ export const Response = Type.Object({
 })
 
 export const handler = async (input: undefined, context: HandlerContext): Promise<Static<typeof Response>> => {
-  console.log("getSpaces handler", context)
   try {
     const result = await db
       .select()

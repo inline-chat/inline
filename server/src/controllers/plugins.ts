@@ -14,7 +14,6 @@ export const authenticate = new Elysia({ name: "authenticate" }).state("currentU
 
   beforeHandle: async ({ headers, store }) => {
     let auth = headers["authorization"]
-    console.log("auth", auth)
     let token = normalizeToken(auth)
     if (!token) {
       throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
@@ -50,9 +49,8 @@ const normalizeToken = (token: unknown): string | null => {
 }
 
 const getUserIdFromToken = async (token: string): Promise<number> => {
+  let supposedUserId = token.split(":")[0]
   let tokenHash = hashToken(token)
-  console.log("token", token)
-  console.log("tokenHash", tokenHash)
   let session = await db.query.sessions.findFirst({
     where: and(eq(sessions.tokenHash, tokenHash), isNull(sessions.revoked)),
   })
@@ -62,6 +60,11 @@ const getUserIdFromToken = async (token: string): Promise<number> => {
   }
 
   // TODO: update last active
+
+  if (session.userId !== parseInt(supposedUserId, 10)) {
+    console.error("userId mismatch", session.userId, supposedUserId)
+    throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
+  }
 
   return session.userId
 }
