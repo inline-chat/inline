@@ -88,12 +88,14 @@ export const TChatInfo = Type.Object({
   spaceId: Optional(Type.Integer()),
   title: Optional(Type.String()),
   date: Type.Integer(),
+  threadNumber: Optional(Type.Integer()),
 })
 export type TChatInfo = StaticEncode<typeof TChatInfo>
 export const encodeChatInfo = (chat: DbChat | TChatInfo): TChatInfo => {
   return Value.Encode(TChatInfo, {
     ...chat,
     date: encodeDate(chat.date),
+    threadNumber: chat.threadNumber ? chat.threadNumber : undefined,
   })
 }
 
