@@ -9,12 +9,9 @@ public final class Auth: @unchecked Sendable {
     private let keychain: KeychainSwift
     private var accessGroup: String
 
-    public func saveToken(_ token: String?) {
-        if let token = token {
-            keychain.set(token, forKey: "token")
-        } else {
-            keychain.delete("token")
-        }
+    public func saveToken(_ token: String) {
+ 
+        keychain.set(token, forKey: "token")
         cachedToken = token
     }
 
@@ -43,5 +40,16 @@ public final class Auth: @unchecked Sendable {
             return Int64(UserDefaults.standard.integer(forKey: userDefaultsKey))
         }
         return nil
+    }
+    
+    public func logOut() {
+        // clear userId
+        UserDefaults.standard.removeObject(forKey: "userId")
+
+        // clear token
+        keychain.delete("token")
+        
+        // clear cache
+        cachedToken = nil
     }
 }
