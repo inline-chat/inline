@@ -23,7 +23,7 @@ struct GrayTextField: View {
         TextField(titleKey, text: value, prompt: prompt)
             .multilineTextAlignment(.center)
             .textFieldStyle(.plain)
-            , weight: .regular))
+            .font(.system(size: 17, weight: .regular))
             .frame(height: 36)
             .focused($isFocused)
             .cornerRadius(10)

@@ -37,7 +37,7 @@ struct Onboarding: View {
                 OnboardingWelcome().transition(self.routeTransition)
             }
         }
-        .animation(.snappy, value: self.viewModel.path)
+        .animation(.snappy.speed(1.5), value: self.viewModel.path)
 
         .toolbar(content: {
             if self.viewModel.canGoBack {
