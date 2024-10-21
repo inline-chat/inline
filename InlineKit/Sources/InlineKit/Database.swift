@@ -42,6 +42,7 @@ public extension AppDatabase {
                 t.column("userId", .integer).references("user", column: "id", onDelete: .setNull)
                 t.column("spaceId", .integer).references("space", column: "id", onDelete: .setNull)
                 t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
+                t.column("role", .text).notNull().defaults(to: "member")
 
                 t.uniqueKey(["userId", "spaceId"])
             }

@@ -138,6 +138,8 @@ public struct SendCode: Codable, Sendable {
 
 public struct CreateSpace: Codable, Sendable {
     public let space: ApiSpace
+    public let member: ApiMember
+    public let chats: [ApiChat]
 }
 
 public struct UpdateProfile: Codable, Sendable {
