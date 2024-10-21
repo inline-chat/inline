@@ -77,39 +77,60 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     // MARK: AUTH
 
-    public func sendCode(email: String) async throws -> SendCodeResponse {
+    public func sendCode(email: String) async throws -> APIResponse<SendCode> {
         try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
     }
 
-    public func verifyCode(code: String, email: String) async throws -> VerifyCodeResponse {
+    public func verifyCode(code: String, email: String) async throws -> APIResponse<VerifyCode> {
         try await request(.verifyCode, queryItems: [URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email)])
     }
 
-    public func createSpace(name: String) async throws -> CreateSpaceResult {
+    public func createSpace(name: String) async throws -> APIResponse<CreateSpace> {
         try await request(.createSpace, queryItems: [URLQueryItem(name: "name", value: name)], includeToken: true)
     }
 }
 
-public struct VerifyCodeResponse: Codable, Sendable {
-    public let ok: Bool
+/// Example
+/// {
+///     "ok": true,
+///     "result": {
+///         "userId": 123,
+///         "token": "123"
+///     }
+/// }
+public enum APIResponse<T: Codable>: Decodable {
+    case success(T?)
+    case error(errorCode: Int?, description: String?)
+
+    private enum CodingKeys: String, CodingKey {
+        case ok
+        case errorCode
+        case description
+        case result
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        if try values.decode(Bool.self, forKey: .ok) {
+            self = try .success(values.decodeIfPresent(T.self, forKey: .result) ?? nil)
+        } else {
+            self = try .error(
+                errorCode: values.decodeIfPresent(Int.self, forKey: .errorCode),
+                description: values.decodeIfPresent(String.self, forKey: .description)
+            )
+        }
+    }
+}
+
+public struct VerifyCode: Codable, Sendable {
     public let userId: Int64
     public let token: String
-
-    // Failed
-    public let errorCode: Int?
-    public let description: String?
 }
 
-public struct SendCodeResponse: Codable, Sendable {
-    public let ok: Bool
+public struct SendCode: Codable, Sendable {
     public let existingUser: Bool?
-
-    // Failed
-    public let errorCode: Int?
-    public let description: String?
 }
 
-public struct CreateSpaceResult: Codable, Sendable {
-    public let ok: Bool
+public struct CreateSpace: Codable, Sendable {
     public let space: ApiSpace
 }
