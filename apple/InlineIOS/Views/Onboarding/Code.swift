@@ -96,19 +96,19 @@ struct Code: View {
                 formState.startLoading()
                 let result = try await api.verifyCode(code: code, email: email)
                 Auth.shared.saveToken(result.token)
-                if let id = decodeInt64(from: result.userId) {
-                    Auth.shared.saveCurrentUserId(userId: id)
 
-                    try await database.dbWriter.write { db in
-                        let user = User(
-                            id: id,
-                            email: email,
-                            firstName: "",
-                            lastName: nil
-                        )
-                        try user.save(db)
-                    }
+                Auth.shared.saveCurrentUserId(userId: result.userId)
+
+                try await database.dbWriter.write { db in
+                    let user = User(
+                        id: result.userId,
+                        email: email,
+                        firstName: "",
+                        lastName: nil
+                    )
+                    try user.save(db)
                 }
+
                 print("Token \(result.token)")
 
                 do {
