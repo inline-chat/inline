@@ -11,8 +11,8 @@ public enum APIError: Error {
 }
 
 public enum Path: String {
-    case verifyCode = "verify-email-code"
-    case sendCode = "send-email-code"
+    case verifyCode = "verifyEmailCode"
+    case sendCode = "sendEmailCode"
     case createSpace
 }
 
@@ -21,18 +21,18 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     public init() {}
     var baseURL: String {
         #if targetEnvironment(simulator)
-            return "http://localhost:8000/v001"
+            return "http://localhost:8000/v1"
         #elseif DEBUG
-            return "http://192.168.3.122:8000/v001"
+            return "http://localhost:8000/v1"
         #else
-            return "https://api.inline.chat/v001"
+            return "https://api.inline.chat/v1"
         #endif
     }
 
     private let decoder = JSONDecoder()
 
-    private func request<T: Decodable>(_ path: Path, queryItems: [URLQueryItem] = [], isAuth: Bool = false) async throws -> T {
-        guard var urlComponents = URLComponents(string: "\(baseURL)\(isAuth ? "/auth/" : "/")\(path.rawValue)") else {
+    private func request<T: Decodable>(_ path: Path, queryItems: [URLQueryItem] = [], includeToken: Bool = false) async throws -> T {
+        guard var urlComponents = URLComponents(string: "\(baseURL)/\(path.rawValue)") else {
             throw APIError.invalidURL
         }
 
@@ -42,8 +42,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             throw APIError.invalidURL
         }
 
+        print("url is \(url)")
+
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+
+        if let token = Auth.shared.getToken(), includeToken {
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -72,21 +78,21 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     // MARK: AUTH
 
     public func sendCode(email: String) async throws -> SendCodeResponse {
-        try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)], isAuth: true)
+        try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
     }
 
     public func verifyCode(code: String, email: String) async throws -> VerifyCodeResponse {
-        try await request(.verifyCode, queryItems: [URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email)], isAuth: true)
+        try await request(.verifyCode, queryItems: [URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email)])
     }
 
     public func createSpace(name: String) async throws -> CreateSpaceResult {
-        try await request(.createSpace, queryItems: [URLQueryItem(name: "name", value: name)])
+        try await request(.createSpace, queryItems: [URLQueryItem(name: "name", value: name)], includeToken: true)
     }
 }
 
 public struct VerifyCodeResponse: Codable, Sendable {
     public let ok: Bool
-    public let userId: String
+    public let userId: Int64
     public let token: String
 
     // Failed
