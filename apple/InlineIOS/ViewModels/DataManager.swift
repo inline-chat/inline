@@ -13,17 +13,17 @@ class DataManager: ObservableObject, @unchecked Sendable {
             let result = try await ApiClient.shared.createSpace(name: name)
             if case let .success(result) = result {
                 try await database.dbWriter.write { db in
-
                     let space = Space(from: result.space)
                     try space.save(db)
 
-                    // Add our user as first member
-                    let member = Member(createdAt: Date.now, userId: Auth.shared.getCurrentUserId()!, spaceId: result.space.id)
+                    let member = Member(from: result.member)
                     try member.save(db)
 
                     // Create main thread (default)
-                    let thread = Chat(date: Date.now, type: .thread, title: "Main", spaceId: result.space.id)
-                    try thread.save(db)
+                    for chat in result.chats {
+                        let thread = Chat(from: chat)
+                        try thread.save(db)
+                    }
                 }
 
                 // Return for navigating to space using id

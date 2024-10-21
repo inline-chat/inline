@@ -6,6 +6,14 @@ public enum ChatType: String, Codable {
     case thread
 }
 
+public struct ApiChat: Codable, Hashable, Sendable {
+    public var id: Int64
+    public var date: Int
+    public var title: String?
+    public var spaceId: Int64?
+    public var threadNumber: Int
+}
+
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked Sendable {
     public var id: Int64
     public var date: Date
@@ -58,5 +66,20 @@ public extension Chat {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         spaceId = try container.decodeIfPresent(Int64.self, forKey: .spaceId)
         peerUserId = try container.decodeIfPresent(Int64.self, forKey: .peerUserId)
+    }
+}
+
+public extension Chat {
+    init(from: ApiChat) {
+        id = from.id
+        date = Self.fromTimestamp(from: from.date)
+        type = ChatType(rawValue: from.type) ?? .thread
+        title = from.title
+        spaceId = from.spaceId
+        peerUserId = from.peerUserId
+    }
+
+    static func fromTimestamp(from: Int) -> Date {
+        return Date(timeIntervalSince1970: Double(from) / 1000)
     }
 }
