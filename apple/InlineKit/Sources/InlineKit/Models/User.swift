@@ -1,12 +1,22 @@
 import Foundation
 import GRDB
 
+public struct ApiUser: Codable, Hashable, Sendable {
+    public var id: Int64
+    public var email: String
+    public var firstName: String
+    public var lastName: String?
+    public var date: Int
+    public var username: String?
+}
+
 public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked Sendable {
     public var id: Int64
     public var email: String
     public var firstName: String
     public var lastName: String?
-    public var createdAt: Date?
+    public var date: Date?
+    public var username: String?
 
     public nonisolated(unsafe) static let members = hasMany(Member.self)
     public nonisolated(unsafe) static let spaces = hasMany(Space.self, through: members, using: Member.space)
@@ -29,12 +39,27 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
         request(for: User.messages)
     }
 
-    public init(id: Int64 = Int64.random(in: 1 ... 5000), email: String, firstName: String, lastName: String? = nil) {
+    public init(id: Int64 = Int64.random(in: 1 ... 5000), email: String, firstName: String, lastName: String? = nil, username: String? = nil) {
         self.id = id
         self.email = email
         self.firstName = firstName
         self.lastName = lastName
-        createdAt = Date.now
+        date = Date.now
+        self.username = username
+    }
+}
+
+public extension User {
+    init(from apiUser: ApiUser) {
+        id = apiUser.id
+        email = apiUser.email
+        firstName = apiUser.firstName
+        lastName = apiUser.lastName
+        date = Self.fromTimestamp(from: apiUser.date)
+    }
+
+    static func fromTimestamp(from: Int) -> Date {
+        return Date(timeIntervalSince1970: Double(from) / 1000)
     }
 }
 
@@ -44,7 +69,7 @@ public extension User {
         case email
         case firstName
         case lastName
-        case createdAt
+        case date
     }
 
     init(from decoder: Decoder) throws {
@@ -54,6 +79,6 @@ public extension User {
         email = try container.decode(String.self, forKey: .email)
         firstName = try container.decode(String.self, forKey: .firstName)
         lastName = try container.decodeIfPresent(String.self, forKey: .lastName)
-        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+        date = try container.decodeIfPresent(Date.self, forKey: .date) ?? .now
     }
 }

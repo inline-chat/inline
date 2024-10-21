@@ -11,22 +11,26 @@ class DataManager: ObservableObject, @unchecked Sendable {
     func createSpace(name: String) async throws -> Int64? {
         do {
             let result = try await ApiClient.shared.createSpace(name: name)
+            if case let .success(result) = result {
+                try await database.dbWriter.write { db in
 
-            try await database.dbWriter.write { db in
-                let space = Space(from: result.space)
-                try space.save(db)
+                    let space = Space(from: result.space)
+                    try space.save(db)
 
-                // Add our user as first member
-                let member = Member(createdAt: Date.now, userId: Auth.shared.getCurrentUserId()!, spaceId: result.space.id)
-                try member.save(db)
+                    // Add our user as first member
+                    let member = Member(createdAt: Date.now, userId: Auth.shared.getCurrentUserId()!, spaceId: result.space.id)
+                    try member.save(db)
 
-                // Create main thread (default)
-                let thread = Chat(date: Date.now, type: .thread, title: "Main", spaceId: result.space.id)
-                try thread.save(db)
+                    // Create main thread (default)
+                    let thread = Chat(date: Date.now, type: .thread, title: "Main", spaceId: result.space.id)
+                    try thread.save(db)
+                }
+
+                // Return for navigating to space using id
+                return result.space.id
+            } else {
+                return nil
             }
-
-            // Return for navigating to space using id
-            return result.space.id
         } catch {
             Log.shared.error("Failed to create space", error: error)
         }

@@ -24,7 +24,7 @@ public extension AppDatabase {
                 t.column("email", .text).notNull()
                 t.column("firstName", .text).notNull()
                 t.column("lastName", .text)
-                t.column("createdAt", .datetime).notNull().defaults(to: GRDB.Date.now)
+                t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
             }
         }
 
@@ -34,14 +34,14 @@ public extension AppDatabase {
             try db.create(table: "space") { t in
                 t.primaryKey("id", .integer).notNull().unique()
                 t.column("name", .text).notNull()
-                t.column("createdAt", .datetime).notNull().defaults(to: GRDB.Date.now)
+                t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
             }
 
             try db.create(table: "member") { t in
                 t.primaryKey("id", .integer).notNull().unique()
                 t.column("userId", .integer).references("user", column: "id", onDelete: .setNull)
                 t.column("spaceId", .integer).references("space", column: "id", onDelete: .setNull)
-                t.column("createdAt", .datetime).notNull().defaults(to: GRDB.Date.now)
+                t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
 
                 t.uniqueKey(["userId", "spaceId"])
             }
@@ -170,9 +170,9 @@ public extension AppDatabase {
         let db = AppDatabase.empty()
         do {
             try db.dbWriter.write { db in
-                let space1 = Space(name: "Space X", createdAt: Date.now)
-                let space2 = Space(name: "Space Y", createdAt: Date.now)
-                let space3 = Space(name: "Space Z", createdAt: Date.now)
+                let space1 = Space(name: "Space X", date: Date.now)
+                let space2 = Space(name: "Space Y", date: Date.now)
+                let space3 = Space(name: "Space Z", date: Date.now)
 
                 try space1.insert(db)
                 try space2.insert(db)

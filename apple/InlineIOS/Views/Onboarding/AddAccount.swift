@@ -70,12 +70,17 @@ struct AddAccount: View {
                     errorMsg = "Please enter your name"
                     return
                 }
-                try await database.dbWriter.write { db in
-                    if let id = Auth.shared.getCurrentUserId() {
-                        var user = try User.fetchOne(db, id: id)
-                        user?.firstName = name
-
-                        try user?.save(db)
+                let result = try await api.updateProfile(firstName: name, lastName: "", username: "")
+                if case let .success(result) = result {
+                    let user = User(from: result.user)
+                    try await database.dbWriter.write { db in
+                        try user.save(db)
+                    }
+                } else {
+                    try await database.dbWriter.write { db in
+                        var fetchedUser = try User.fetchOne(db, id: Auth.shared.getCurrentUserId()!)
+                        fetchedUser?.firstName = name
+                        try fetchedUser?.save(db)
                     }
                 }
                 nav.push(.main)
