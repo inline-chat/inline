@@ -37,6 +37,11 @@ import {
   Input as VerifyEmailCodeInput,
   Response as VerifyEmailCodeResponse,
 } from "@in/server/methods/verifyEmailCode"
+import {
+  handler as checkUsernameHandler,
+  Input as CheckUsernameInput,
+  Response as CheckUsernameResponse,
+} from "@in/server/methods/checkUsername"
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
@@ -51,6 +56,7 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(makeApiRoute("/getMe", GetMeInput, GetMeResponse, getMeHandler))
       .use(makeApiRoute("/getSpaces", GetSpacesInput, GetSpacesResponse, getSpacesHandler))
       .use(makeApiRoute("/getSpace", GetSpaceInput, GetSpaceResponse, getSpaceHandler))
+      .use(makeApiRoute("/checkUsername", CheckUsernameInput, CheckUsernameResponse, checkUsernameHandler))
       .use(makeApiRoute("/createThread", CreateThreadInput, CreateThreadResponse, createThreadHandler))
       .all("/*", () => {
         // fallback

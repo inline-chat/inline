@@ -1,54 +1,22 @@
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
-import {
-  members,
-  users,
-  type DbMember,
-  type DbSpace,
-} from "@in/server/db/schema"
+import { users } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
-import {
-  encodeMemberInfo,
-  encodeSpaceInfo,
-  TMemberInfo,
-  TSpaceInfo,
-} from "@in/server/models"
+import type { HandlerContext } from "@in/server/controllers/v1/helpers"
 
 export const Input = Type.Object({
   username: Type.String(),
 })
 
-type Input = Static<typeof Input>
-
-type Context = {
-  currentUserId: number
-}
-
-type RawOutput = {
-  available: boolean
-}
-
 export const Response = Type.Object({
   available: Type.Boolean(),
 })
 
-export const encode = (output: RawOutput): Static<typeof Response> => {
-  return {
-    available: output.available,
-  }
-}
-
-export const handler = async (
-  input: Input,
-  context: Context,
-): Promise<RawOutput> => {
+export const handler = async (input: Static<typeof Input>, _: HandlerContext): Promise<Static<typeof Response>> => {
   try {
-    const result = await db
-      .select()
-      .from(users)
-      .where(eq(users.username, input.username))
+    const result = await db.select().from(users).where(eq(users.username, input.username))
 
     return { available: result.length === 0 }
   } catch (error) {
