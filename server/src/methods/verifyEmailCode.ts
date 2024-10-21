@@ -8,15 +8,12 @@ import { normalizeEmail } from "@in/server/utils/normalize"
 import { Log } from "@in/server/utils/log"
 import { generateToken, MAX_LOGIN_ATTEMPTS } from "@in/server/utils/auth"
 import { type Static, Type } from "@sinclair/typebox"
+import type { UnauthenticatedHandlerContext } from "@in/server/controllers/v1/helpers"
 
 export const Input = Type.Object({
   email: Type.String(),
   code: Type.String(),
 })
-
-type Input = Static<typeof Input>
-
-type Context = {}
 
 type Output = {
   userId: number
@@ -33,9 +30,9 @@ export const encode = (output: Output): Static<typeof Response> => {
 }
 
 export const handler = async (
-  input: Input,
-  context: Context,
-): Promise<Output> => {
+  input: Static<typeof Input>,
+  _: UnauthenticatedHandlerContext,
+): Promise<Static<typeof Response>> => {
   try {
     if (isValidEmail(input.email) === false) {
       throw new InlineError(ErrorCodes.INAVLID_ARGS, "Invalid email")
@@ -111,9 +108,7 @@ const verifyCode = async (email: string, code: string): Promise<true> => {
 }
 
 const getUserByEmail = async (email: string) => {
-  let user = (
-    await db.select().from(users).where(eq(users.email, email)).limit(1)
-  )[0]
+  let user = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0]
 
   if (!user) {
     // create user
@@ -146,7 +141,7 @@ const createSession = async ({
   let { token, tokenHash } = await generateToken()
 
   // store session
-  let _ = await db.insert(sessions).values({
+  await db.insert(sessions).values({
     userId,
     tokenHash,
     date: new Date(),

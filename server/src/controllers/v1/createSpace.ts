@@ -22,7 +22,7 @@ export const createSpaceRoute = new Elysia()
       let result = encodeCreateSpace(
         await createSpace(query, { currentUserId }),
       )
-      return { ok: true, ...result }
+      return { ok: true, result }
     },
     {
       query: Input,
@@ -33,7 +33,7 @@ export const createSpaceRoute = new Elysia()
     "/createSpace",
     async ({ body, store: { currentUserId } }) => {
       let result = encodeCreateSpace(await createSpace(body, { currentUserId }))
-      return { ok: true, ...result }
+      return { ok: true, result }
     },
     {
       body: Input,

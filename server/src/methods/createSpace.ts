@@ -1,39 +1,34 @@
+import type { HandlerContext } from "@in/server/controllers/v1/helpers"
 import { db } from "@in/server/db"
-import {
-  chats,
-  DbChat,
-  DbMember,
-  DbSpace,
-  members,
-  spaces,
-} from "@in/server/db/schema"
+import { chats, members, spaces } from "@in/server/db/schema"
 import {
   encodeChatInfo,
   encodeMemberInfo,
   encodeSpaceInfo,
+  TChatInfo,
+  TMemberInfo,
+  TSpaceInfo,
 } from "@in/server/models"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
+import { Type } from "@sinclair/typebox"
+import type { Static } from "elysia"
 
-type Input = {
-  name: string
-  handle?: string
-}
+export const Input = Type.Object({
+  name: Type.String(),
+  handle: Type.Optional(Type.String()),
+})
 
-type Context = {
-  currentUserId: number
-}
+export const Response = Type.Object({
+  space: TSpaceInfo,
+  member: TMemberInfo,
+  chats: Type.Array(TChatInfo),
+})
 
-type Output = {
-  space: DbSpace
-  member: DbMember
-  chats: DbChat[]
-}
-
-export const createSpace = async (
-  input: Input,
-  context: Context,
-): Promise<Output> => {
+export const handler = async (
+  input: Static<typeof Input>,
+  context: HandlerContext,
+): Promise<Static<typeof Response>> => {
   try {
     // Create the space
     let space = (
@@ -73,17 +68,14 @@ export const createSpace = async (
         .returning()
     )[0]
 
-    return { space, member, chats: [mainChat] }
+    const output = { space, member, chats: [mainChat] }
+    return {
+      space: encodeSpaceInfo(output.space),
+      member: encodeMemberInfo(output.member),
+      chats: output.chats.map(encodeChatInfo),
+    }
   } catch (error) {
     Log.shared.error("Failed to create space", error)
     throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to create space")
-  }
-}
-
-export const encodeCreateSpace = (output: Output) => {
-  return {
-    space: encodeSpaceInfo(output.space),
-    member: encodeMemberInfo(output.member),
-    chats: output.chats.map(encodeChatInfo),
   }
 }

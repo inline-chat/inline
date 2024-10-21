@@ -5,30 +5,42 @@ import { and, eq, isNull } from "drizzle-orm"
 import { sessions } from "@in/server/db/schema"
 import { hashToken } from "@in/server/utils/auth"
 
-export const authenticate = new Elysia({ name: "authenticate" })
-  .state("currentUserId", 0)
-  .guard({
-    as: "scoped",
+export const authenticate = new Elysia({ name: "authenticate" }).state("currentUserId", 0).guard({
+  as: "scoped",
 
-    params: t.Object({
-      token: t.Optional(t.String()),
-    }),
+  headers: t.Object({
+    authorization: t.Optional(t.TemplateLiteral("Bearer ${string}")),
+  }),
 
-    headers: t.Object({
-      authorization: t.Optional(t.TemplateLiteral("Bearer ${string}")),
-    }),
+  beforeHandle: async ({ headers, store }) => {
+    let auth = headers["authorization"]
+    console.log("auth", auth)
+    let token = normalizeToken(auth)
+    if (!token) {
+      throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
+    }
 
-    beforeHandle: async ({ headers, params, store }) => {
-      console.log("authenticate")
-      let auth = headers["authorization"] ?? params.token
-      let token = normalizeToken(auth)
-      if (!token) {
-        throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
-      }
+    store.currentUserId = await getUserIdFromToken(token)
+  },
+})
 
-      store.currentUserId = await getUserIdFromToken(token)
-    },
-  })
+export const authenticateGet = new Elysia({ name: "authenticate" }).state("currentUserId", 0).guard({
+  as: "scoped",
+
+  params: t.Object({
+    token: t.Optional(t.String()),
+  }),
+
+  beforeHandle: async ({ headers, params, store }) => {
+    let auth = params.token ?? headers["authorization"]
+    let token = normalizeToken(auth)
+    if (!token) {
+      throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
+    }
+
+    store.currentUserId = await getUserIdFromToken(token)
+  },
+})
 
 const normalizeToken = (token: unknown): string | null => {
   if (typeof token !== "string") {
