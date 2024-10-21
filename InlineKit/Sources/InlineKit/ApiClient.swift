@@ -98,7 +98,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 ///         "token": "123"
 ///     }
 /// }
-public enum APIResponse<T: Codable>: Decodable {
+public enum APIResponse<T>: Decodable, Sendable where T: Codable & Sendable {
+
     case success(T)
     case error(errorCode: Int?, description: String?)
 
