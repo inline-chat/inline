@@ -65,7 +65,7 @@ struct MainView: View {
                         showSheet = true
                     }
                     Button("Logout", role: .destructive) {
-                        Auth.shared.saveToken(nil)
+                        Auth.shared.logOut()
                         do {
                             try AppDatabase.clearDB()
                         } catch {
