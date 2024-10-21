@@ -3,7 +3,7 @@ import SwiftUI
 import SwiftUIIntrospect
 
 struct MainWindow: View {
-    @StateObject var viewModel = MainWindowViewModel()
+    @EnvironmentObject var viewModel: MainWindowViewModel
     
     var body: some View {
         ZStack {
@@ -31,7 +31,6 @@ struct MainWindow: View {
         .introspect(.window, on: .macOS(.v13, .v14, .v15)) {
             viewModel.windowInititized($0)
         }
-        .environmentObject(viewModel)
     }
 }
 
@@ -44,7 +43,11 @@ class MainWindowViewModel: ObservableObject {
     @Published var topLevelRoute: TopLevelRoute
     
     init() {
-        topLevelRoute = .onboarding
+        if Auth.shared.isLoggedIn {
+            topLevelRoute = .main
+        } else {
+            topLevelRoute = .onboarding
+        }
     }
      
     private var window: NSWindow?

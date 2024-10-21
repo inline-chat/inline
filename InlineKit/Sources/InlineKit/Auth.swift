@@ -6,11 +6,11 @@ import SwiftUI
 public final class Auth: @unchecked Sendable {
     public static let shared = Auth()
     private var cachedToken: String?
+    private var cachedUserId: Int64?
     private let keychain: KeychainSwift
     private var accessGroup: String
 
     public func saveToken(_ token: String) {
- 
         keychain.set(token, forKey: "token")
         cachedToken = token
     }
@@ -28,6 +28,11 @@ public final class Auth: @unchecked Sendable {
         keychain = KeychainSwift()
         keychain.accessGroup = accessGroup
         cachedToken = keychain.get("token")
+        cachedUserId = getCurrentUserId()
+    }
+
+    public var isLoggedIn: Bool {
+        (cachedToken != nil) && (cachedUserId != nil)
     }
 
     public func saveCurrentUserId(userId: Int64) {
@@ -41,15 +46,16 @@ public final class Auth: @unchecked Sendable {
         }
         return nil
     }
-    
+
     public func logOut() {
         // clear userId
         UserDefaults.standard.removeObject(forKey: "userId")
 
         // clear token
         keychain.delete("token")
-        
+
         // clear cache
         cachedToken = nil
+        cachedUserId = nil
     }
 }

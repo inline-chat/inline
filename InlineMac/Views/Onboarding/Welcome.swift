@@ -15,7 +15,7 @@ struct OnboardingWelcome: View {
             
             Text("Hey There.")
                 .font(
-                    .custom(Fonts.RedHatDisplay, size: 48, relativeTo: .title)
+                    .custom(Fonts.RedHatDisplay, size: 42, relativeTo: .title)
                 ).fontWeight(.bold)
                 .padding(.bottom, 1)
             
