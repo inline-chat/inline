@@ -10,7 +10,7 @@ public struct ApiSpace: FetchableRecord, Identifiable, Codable, Hashable, Persis
 public struct Space: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked Sendable {
     public var id: Int64
     public var name: String
-    public var createdAt: Date
+    public var date: Date
 
     // Based on https://github.com/groue/GRDB.swift/discussions/1492, GRDB models can't be marked as sendable in GRDB < 6 so we should use nonisolated(unsafe). This issue was fixed in GRDB 7, but because we use GRDB + SQLCipher from Duck Duck Go, we can't upgrade GRDB from v 6 to 7, and the discussions and issues are not open.
     public nonisolated(unsafe) static let members = hasMany(Member.self)
@@ -29,10 +29,10 @@ public struct Space: FetchableRecord, Identifiable, Codable, Hashable, Persistab
         request(for: Space.chats)
     }
 
-    public init(id: Int64 = Int64.random(in: 1 ... 5000), name: String, createdAt: Date) {
+    public init(id: Int64 = Int64.random(in: 1 ... 5000), name: String, date: Date) {
         self.id = id
         self.name = name
-        self.createdAt = createdAt
+        self.date = date
     }
 }
 
@@ -40,7 +40,7 @@ public extension Space {
     init(from apiSpace: ApiSpace) {
         id = apiSpace.id
         name = apiSpace.name
-        createdAt = Self.fromTimestamp(from: apiSpace.date)
+        date = Self.fromTimestamp(from: apiSpace.date)
     }
 
     static func fromTimestamp(from: Int) -> Date {

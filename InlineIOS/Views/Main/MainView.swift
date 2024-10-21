@@ -17,7 +17,7 @@ struct MainView: View {
     var body: some View {
         VStack {
             if let spaces = spaceList.spaces {
-                List(spaces.sorted(by: { $0.createdAt > $1.createdAt })) { space in
+                List(spaces.sorted(by: { $0.date > $1.date })) { space in
                     Text(space.name)
                         .onTapGesture {
                             nav.push(.space(id: space.id))
@@ -86,7 +86,6 @@ struct MainView: View {
                 .presentationBackground(.thinMaterial)
                 .presentationCornerRadius(28)
         }
-        
     }
 }
 
