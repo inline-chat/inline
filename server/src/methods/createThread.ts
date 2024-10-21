@@ -1,27 +1,23 @@
 import { db } from "@in/server/db"
-import { chats, DbChat } from "@in/server/db/schema"
-import { encodeChatInfo } from "@in/server/models"
+import { chats } from "@in/server/db/schema"
+import { encodeChatInfo, TChatInfo } from "@in/server/models"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { eq, sql } from "drizzle-orm"
+import type { Static } from "elysia"
+import { Type } from "@sinclair/typebox"
+import type { HandlerContext } from "@in/server/controllers/v1/helpers"
 
-type Input = {
-  title: string
-  spaceId: string
-}
+export const Input = Type.Object({
+  title: Type.String(),
+  spaceId: Type.String(),
+})
 
-type Context = {
-  currentUserId: number
-}
+export const Response = Type.Object({
+  chat: TChatInfo,
+})
 
-type Output = {
-  chat: DbChat
-}
-
-export const createThread = async (
-  input: Input,
-  context: Context,
-): Promise<Output> => {
+export const handler = async (input: Static<typeof Input>, _: HandlerContext): Promise<Static<typeof Response>> => {
   try {
     const spaceId = parseInt(input.spaceId, 10)
     if (isNaN(spaceId)) {
@@ -48,15 +44,9 @@ export const createThread = async (
       })
       .returning()
 
-    return { chat: chat[0] }
+    return { chat: encodeChatInfo(chat[0]) }
   } catch (error) {
     Log.shared.error("Failed to create thread", error)
     throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to create thread")
-  }
-}
-
-export const encodeCreateThread = (output: Output) => {
-  return {
-    chat: encodeChatInfo(output.chat),
   }
 }

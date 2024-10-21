@@ -6,6 +6,7 @@ import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import { TUserInfo, encodeUserInfo } from "@in/server/models"
 import { checkUsernameAvailable } from "@in/server/methods/checkUsername"
+import type { HandlerContext } from "@in/server/controllers/v1/helpers"
 
 export const Input = Type.Object({
   firstName: Type.Optional(Type.String()),
@@ -15,37 +16,17 @@ export const Input = Type.Object({
 
 type Input = Static<typeof Input>
 
-type Context = {
-  currentUserId: number
-}
-
-type RawOutput = {
-  user: DbUser
-}
-
 export const Response = Type.Object({
   user: TUserInfo,
 })
 
-export const encode = (output: RawOutput): Static<typeof Response> => {
-  return {
-    user: encodeUserInfo(output.user),
-  }
-}
-
-export const handler = async (
-  input: Input,
-  context: Context,
-): Promise<RawOutput> => {
+export const handler = async (input: Input, context: HandlerContext): Promise<Static<typeof Response>> => {
   try {
     if (input.username) {
       // check username is available if it's set
       let isAvailable = await checkUsernameAvailable(input.username)
       if (!isAvailable) {
-        throw new InlineError(
-          ErrorCodes.INAVLID_ARGS,
-          "Username is already taken",
-        )
+        throw new InlineError(ErrorCodes.INAVLID_ARGS, "Username is already taken")
       }
     }
 
@@ -54,13 +35,9 @@ export const handler = async (
     if ("lastName" in input) props.lastName = input.lastName ?? null
     if ("username" in input) props.username = input.username ?? null
 
-    let user = await db
-      .update(users)
-      .set(props)
-      .where(eq(users.id, context.currentUserId))
-      .returning()
+    let user = await db.update(users).set(props).where(eq(users.id, context.currentUserId)).returning()
 
-    return { user: user[0] }
+    return { user: encodeUserInfo(user[0]) }
   } catch (error) {
     Log.shared.error("Failed to set profile", error)
     throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to set profile")
