@@ -97,7 +97,8 @@ struct OnboardingEnterCode: View {
                     email: self.onboardingViewModel.email
                 )
                 
-                if result.ok {
+                switch result {
+                case let .success(result) :
                     // self.formState.succeeded()
                     
                     Auth.shared.saveToken(result.token)
@@ -106,8 +107,8 @@ struct OnboardingEnterCode: View {
                     // todo ...
                     
                     self.onboardingViewModel.navigateAfterLogin()
-                } else {
-                    self.formState.failed(error: result.description)
+                case let .error(_, description):
+                    self.formState.failed(error: description)
                 }
             } catch {
                 self.formState.failed(error: "Failed: \(error.localizedDescription)")
