@@ -138,7 +138,7 @@ const createSession = async ({
   // timeZone: string | undefined
 }): Promise<{ token: string }> => {
   // store sha256 of token in db
-  let { token, tokenHash } = await generateToken()
+  let { token, tokenHash } = await generateToken(userId)
 
   // store session
   await db.insert(sessions).values({

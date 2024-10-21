@@ -88,6 +88,6 @@ const getLoginCode = async (email: string): Promise<{ code: string; existingUser
 }
 
 const sendEmail = async (email: string, code: string) => {
-  console.log(`Sending email to ${email} with code ${code}`)
+  console.info(`Sending email to ${email} with code ${code}`)
   // todo
 }
