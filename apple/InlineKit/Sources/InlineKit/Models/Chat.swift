@@ -73,10 +73,9 @@ public extension Chat {
     init(from: ApiChat) {
         id = from.id
         date = Self.fromTimestamp(from: from.date)
-        type = ChatType(rawValue: from.type) ?? .thread
         title = from.title
         spaceId = from.spaceId
-        peerUserId = from.peerUserId
+        type = .thread
     }
 
     static func fromTimestamp(from: Int) -> Date {

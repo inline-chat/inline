@@ -50,6 +50,24 @@ class DataManager: ObservableObject, @unchecked Sendable {
         return nil
     }
 
+    func getSpaces() async throws -> [Space] {
+        let result = try await ApiClient.shared.getSpaces()
+        if case let .success(result) = result {
+            try await database.dbWriter.write { db in
+                for space in result.spaces {
+                    let space = Space(from: space)
+                    try space.save(db)
+                }
+                for member in result.members {
+                    let member = Member(from: member)
+                    try member.save(db)
+                }
+            }
+            return result.spaces
+        }
+        return []
+    }
+
     func sendMessage(chatId: Int64, text: String) async throws {
         try await database.dbWriter.write { db in
             let message = Message(date: Date.now, text: text, chatId: chatId, fromId: Auth.shared.getCurrentUserId()!)
