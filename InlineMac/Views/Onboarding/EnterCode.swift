@@ -105,6 +105,7 @@ struct OnboardingEnterCode: View {
                     Auth.shared.saveCurrentUserId(userId: result.userId)
                     
                     // todo ...
+                    if result.user.firstName 
                     
                     self.onboardingViewModel.navigateAfterLogin()
                 case let .error(_, description):

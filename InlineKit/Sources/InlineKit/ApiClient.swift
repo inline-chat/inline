@@ -140,6 +140,7 @@ public enum APIResponse<T>: Decodable, Sendable where T: Codable & Sendable {
 public struct VerifyCode: Codable, Sendable {
     public let userId: Int64
     public let token: String
+    public let user: ApiUser
 }
 
 public struct SendCode: Codable, Sendable {

@@ -3,8 +3,8 @@ import GRDB
 
 public struct ApiUser: Codable, Hashable, Sendable {
     public var id: Int64
-    public var email: String
-    public var firstName: String
+    public var email: String?
+    public var firstName: String?
     public var lastName: String?
     public var date: Int
     public var username: String?
