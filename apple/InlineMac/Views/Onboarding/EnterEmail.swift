@@ -69,15 +69,10 @@ struct OnboardingEnterEmail: View {
         
         Task {
             do {
-                let result = try await ApiClient.shared.sendCode(email: self.onboardingViewModel.email)
+                let data = try await ApiClient.shared.sendCode(email: self.onboardingViewModel.email)
 
-                switch result {
-                case .success(let data):
-                    self.onboardingViewModel.existingUser = data.existingUser
-                    self.onboardingViewModel.navigate(to: .enterCode)
-                case .error(_, let description):
-                    self.formState.failed(error: description ?? "Unknown error")
-                }
+                self.onboardingViewModel.existingUser = data.existingUser
+                self.onboardingViewModel.navigate(to: .enterCode)
             } catch {
                 self.formState.failed(error: "Failed: \(error.localizedDescription)")
                 Log.shared.error("Failed to send code", error: error)

@@ -13,18 +13,21 @@ public class OnboardingUtils: @unchecked Sendable {
         case .invalidURL:
             Log.shared.error("Failed invalidURL", error: error)
         case .invalidResponse:
-            errorMsg.wrappedValue = "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
+            errorMsg.wrappedValue =
+                "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
             Log.shared.error("Failed invalidResponse", error: error)
         case let .httpError(statusCode):
             if statusCode == 500 {
-                errorMsg.wrappedValue = "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
+                errorMsg.wrappedValue =
+                    "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
                 Log.shared.error("Failed httpError \(statusCode)", error: error)
 
             } else {
                 Log.shared.error("Failed httpError \(statusCode)", error: error)
             }
         case .decodingError:
-            errorMsg.wrappedValue = "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
+            errorMsg.wrappedValue =
+                "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
             Log.shared.error("Failed decodingError", error: error)
         case .networkError:
             errorMsg.wrappedValue = "Please check your connection."
@@ -32,6 +35,9 @@ public class OnboardingUtils: @unchecked Sendable {
         case .rateLimited:
             errorMsg.wrappedValue = "Too many tries. Please try again after a few minutes."
             Log.shared.error("Failed rateLimited", error: error)
+        case let .error(errorCode, description):
+            errorMsg.wrappedValue = description ?? "Unknown error"
+            Log.shared.error("Failed error \(errorCode)", error: error)
         }
     }
 
