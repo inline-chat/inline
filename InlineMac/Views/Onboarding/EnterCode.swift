@@ -97,20 +97,16 @@ struct OnboardingEnterCode: View {
                     email: self.onboardingViewModel.email
                 )
                 
-                switch result {
-                case let .success(result) :
-                    // self.formState.succeeded()
+                Auth.shared.saveToken(result.token)
+                Auth.shared.saveCurrentUserId(userId: result.userId)
                     
-                    Auth.shared.saveToken(result.token)
-                    Auth.shared.saveCurrentUserId(userId: result.userId)
-                    
-                    // todo ...
-                    if result.user.firstName 
-                    
+                // todo ...
+                if result.user.firstName == nil {
+                    self.onboardingViewModel.navigate(to: .profile)
+                } else {
                     self.onboardingViewModel.navigateAfterLogin()
-                case let .error(_, description):
-                    self.formState.failed(error: description)
                 }
+                    
             } catch {
                 self.formState.failed(error: "Failed: \(error.localizedDescription)")
                 Log.shared.error("Failed to send code", error: error)

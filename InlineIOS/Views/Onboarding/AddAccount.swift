@@ -61,11 +61,11 @@ struct AddAccount: View {
                             do {
                                 try? await Task.sleep(for: .seconds(1.8))
                                 let result = try await api.checkUsername(username: trimmedUsername)
-                                if case let .success(result) = result {
-                                    withAnimation(.smooth(duration: 0.15)) {
-                                        usernameStatus = result.available ? .available : .taken
-                                    }
+
+                                withAnimation(.smooth(duration: 0.15)) {
+                                    usernameStatus = result.available ? .available : .taken
                                 }
+
                             } catch {
                                 Log.shared.error("Failed to check username", error: error)
                             }
@@ -127,20 +127,21 @@ struct AddAccount: View {
                     return
                 }
                 let result = try await api.updateProfile(firstName: name, lastName: "", username: username)
-                if case let .success(result) = result {
-                    let user = User(from: result.user)
-                    try await database.dbWriter.write { db in
-                        try user.save(db)
-                    }
-                } else {
-                    try await database.dbWriter.write { db in
-                        var fetchedUser = try User.fetchOne(db, id: Auth.shared.getCurrentUserId()!)
-                        fetchedUser?.firstName = name
-                        try fetchedUser?.save(db)
-                    }
+
+                let user = User(from: result.user)
+                try await database.dbWriter.write { db in
+                    try user.save(db)
                 }
+
                 nav.push(.main)
             } catch {
+                // why?
+                try await database.dbWriter.write { db in
+                    var fetchedUser = try User.fetchOne(db, id: Auth.shared.getCurrentUserId()!)
+                    fetchedUser?.firstName = name
+                    try fetchedUser?.save(db)
+                }
+
                 Log.shared.error("Failed to create user", error: error)
             }
         }

@@ -95,35 +95,34 @@ struct Code: View {
             do {
                 formState.startLoading()
                 let result = try await api.verifyCode(code: code, email: email)
-                if case let .success(result) = result {
-                    Auth.shared.saveToken(result.token)
-                    Auth.shared.saveCurrentUserId(userId: result.userId)
 
-                    try await database.dbWriter.write { db in
-                        let user = User(
-                            id: result.userId,
-                            email: email,
-                            firstName: "",
-                            lastName: nil
-                        )
-                        try user.save(db)
-                    }
+                Auth.shared.saveToken(result.token)
+                Auth.shared.saveCurrentUserId(userId: result.userId)
 
-                    print("Token \(result.token)")
-
-                    do {
-                        try AppDatabase.authenticated()
-
-                    } catch {
-                        Log.shared.error("Failed to setup database or save user", error: error)
-                    }
-
-                    formState.reset()
-                    nav.push(.addAccount)
-                } else {
-                    errorMsg = "Invalid code, please try again."
+                try await database.dbWriter.write { db in
+                    let user = User(
+                        id: result.userId,
+                        email: email,
+                        firstName: "",
+                        lastName: nil
+                    )
+                    try user.save(db)
                 }
+
+                print("Token \(result.token)")
+
+                do {
+                    try AppDatabase.authenticated()
+
+                } catch {
+                    Log.shared.error("Failed to setup database or save user", error: error)
+                }
+
+                formState.reset()
+                nav.push(.addAccount)
+
             } catch let error as APIError {
+                errorMsg = "Please try again."
                 OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
             } catch {
                 Log.shared.error("Unexpected error", error: error)

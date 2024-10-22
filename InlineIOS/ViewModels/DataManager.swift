@@ -11,26 +11,24 @@ class DataManager: ObservableObject, @unchecked Sendable {
     func createSpace(name: String) async throws -> Int64? {
         do {
             let result = try await ApiClient.shared.createSpace(name: name)
-            if case let .success(result) = result {
-                try await database.dbWriter.write { db in
-                    let space = Space(from: result.space)
-                    try space.save(db)
 
-                    let member = Member(from: result.member)
-                    try member.save(db)
+            try await database.dbWriter.write { db in
+                let space = Space(from: result.space)
+                try space.save(db)
 
-                    // Create main thread (default)
-                    for chat in result.chats {
-                        let thread = Chat(from: chat)
-                        try thread.save(db)
-                    }
+                let member = Member(from: result.member)
+                try member.save(db)
+
+                // Create main thread (default)
+                for chat in result.chats {
+                    let thread = Chat(from: chat)
+                    try thread.save(db)
                 }
-
-                // Return for navigating to space using id
-                return result.space.id
-            } else {
-                return nil
             }
+
+            // Return for navigating to space using id
+            return result.space.id
+
         } catch {
             Log.shared.error("Failed to create space", error: error)
         }
@@ -51,8 +49,9 @@ class DataManager: ObservableObject, @unchecked Sendable {
     }
 
     func getSpaces() async throws -> [ApiSpace] {
-        let result = try await ApiClient.shared.getSpaces()
-        if case let .success(result) = result {
+        do {
+            let result = try await ApiClient.shared.getSpaces()
+
             try await database.dbWriter.write { db in
                 for space in result.spaces {
                     let space = Space(from: space)
@@ -64,8 +63,10 @@ class DataManager: ObservableObject, @unchecked Sendable {
                 }
             }
             return result.spaces
+
+        } catch {
+            return []
         }
-        return []
     }
 
     func sendMessage(chatId: Int64, text: String) async throws {

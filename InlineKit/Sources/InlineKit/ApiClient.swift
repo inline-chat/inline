@@ -8,6 +8,7 @@ public enum APIError: Error {
     case decodingError(Error)
     case networkError
     case rateLimited
+    case error(errorCode: Int, description: String?)
 }
 
 public enum Path: String {
@@ -35,7 +36,11 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     private let decoder = JSONDecoder()
 
-    private func request<T: Decodable>(_ path: Path, queryItems: [URLQueryItem] = [], includeToken: Bool = false) async throws -> T {
+    private func request<T: Decodable & Sendable>(
+        _ path: Path,
+        queryItems: [URLQueryItem] = [],
+        includeToken: Bool = false) async throws -> T
+    {
         guard var urlComponents = URLComponents(string: "\(baseURL)/\(path.rawValue)") else {
             throw APIError.invalidURL
         }
@@ -64,7 +69,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
             switch httpResponse.statusCode {
             case 200 ... 299:
-                return try decoder.decode(T.self, from: data)
+                let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
+                switch apiResponse {
+                case let .success(data):
+                    return data
+                case let .error(errorCode, description):
+                    throw APIError
+                        .error(errorCode: errorCode, description: description)
+                }
             case 429:
                 throw APIError.rateLimited
             default:
@@ -81,32 +93,60 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     // MARK: AUTH
 
-    public func sendCode(email: String) async throws -> APIResponse<SendCode> {
+    public func sendCode(email: String) async throws -> SendCode {
         try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
     }
 
-    public func verifyCode(code: String, email: String) async throws -> APIResponse<VerifyCode> {
-        try await request(.verifyCode, queryItems: [URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email)])
+    public func verifyCode(code: String, email: String) async throws -> VerifyCode {
+        try await request(
+            .verifyCode,
+            queryItems: [
+                URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
+            ])
     }
 
-    public func createSpace(name: String) async throws -> APIResponse<CreateSpace> {
-        try await request(.createSpace, queryItems: [URLQueryItem(name: "name", value: name)], includeToken: true)
+    public func createSpace(name: String) async throws -> CreateSpace {
+        try await request(
+            .createSpace, queryItems: [URLQueryItem(name: "name", value: name)], includeToken: true)
     }
 
-    public func updateProfile(firstName: String, lastName: String, username: String) async throws -> APIResponse<UpdateProfile> {
-        try await request(.updateProfile, queryItems: [URLQueryItem(name: "firstName", value: firstName), URLQueryItem(name: "lastName", value: lastName), URLQueryItem(name: "username", value: username)], includeToken: true)
+    public func updateProfile(firstName: String?, lastName: String?, username: String?) async throws
+        -> UpdateProfile
+    {
+        var queryItems: [URLQueryItem] = []
+
+        if let firstName = firstName {
+            queryItems.append(URLQueryItem(name: "firstName", value: firstName))
+        }
+        if let lastName = lastName {
+            queryItems.append(URLQueryItem(name: "lastName", value: lastName))
+        }
+        if let username = username {
+            queryItems.append(URLQueryItem(name: "username", value: username))
+        }
+
+        return try await request(.updateProfile, queryItems: queryItems, includeToken: true)
     }
 
-    public func getSpaces() async throws -> APIResponse<GetSpaces> {
+    public func getSpaces() async throws -> GetSpaces {
         try await request(.getSpaces, includeToken: true)
     }
 
-    public func createThread(title: String, spaceId: Int64) async throws -> APIResponse<CreateThread> {
-        try await request(.createThread, queryItems: [URLQueryItem(name: "title", value: title), URLQueryItem(name: "spaceId", value: "\(spaceId)")], includeToken: true)
+    public func createThread(title: String, spaceId: Int64) async throws ->
+        CreateThread
+    {
+        try await request(
+            .createThread,
+            queryItems: [
+                URLQueryItem(name: "title", value: title),
+                URLQueryItem(name: "spaceId", value: "\(spaceId)"),
+            ], includeToken: true)
     }
 
-    public func checkUsername(username: String) async throws -> APIResponse<CheckUsername> {
-        try await request(.checkUsername, queryItems: [URLQueryItem(name: "username", value: username)], includeToken: true)
+    public func checkUsername(username: String) async throws -> CheckUsername {
+        try await request(
+            .checkUsername, queryItems: [URLQueryItem(name: "username", value: username)],
+            includeToken: true)
     }
 }
 
@@ -118,9 +158,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 ///         "token": "123"
 ///     }
 /// }
-public enum APIResponse<T>: Decodable, Sendable where T: Codable & Sendable {
+public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
     case success(T)
-    case error(errorCode: Int?, description: String?)
+    case error(errorCode: Int, description: String?)
 
     private enum CodingKeys: String, CodingKey {
         case ok
@@ -135,9 +175,8 @@ public enum APIResponse<T>: Decodable, Sendable where T: Codable & Sendable {
             self = try .success(values.decodeIfPresent(T.self, forKey: .result)!)
         } else {
             self = try .error(
-                errorCode: values.decodeIfPresent(Int.self, forKey: .errorCode),
-                description: values.decodeIfPresent(String.self, forKey: .description)
-            )
+                errorCode: values.decode(Int.self, forKey: .errorCode),
+                description: values.decodeIfPresent(String.self, forKey: .description))
         }
     }
 }
