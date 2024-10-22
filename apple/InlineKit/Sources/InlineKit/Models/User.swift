@@ -12,8 +12,8 @@ public struct ApiUser: Codable, Hashable, Sendable {
 
 public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked Sendable {
     public var id: Int64
-    public var email: String
-    public var firstName: String
+    public var email: String?
+    public var firstName: String?
     public var lastName: String?
     public var date: Date?
     public var username: String?
@@ -39,7 +39,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
         request(for: User.messages)
     }
 
-    public init(id: Int64 = Int64.random(in: 1 ... 5000), email: String, firstName: String, lastName: String? = nil, username: String? = nil) {
+    public init(id: Int64 = Int64.random(in: 1 ... 5000), email: String?, firstName: String?, lastName: String? = nil, username: String? = nil) {
         self.id = id
         self.email = email
         self.firstName = firstName

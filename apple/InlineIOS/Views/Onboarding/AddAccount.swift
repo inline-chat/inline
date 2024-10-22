@@ -1,8 +1,13 @@
 import InlineKit
 import SwiftUI
 
+enum UsernameStatus {
+    case checking
+    case available
+    case taken
+}
+
 struct AddAccount: View {
-    var email: String
     @State var name = ""
     @State var animate: Bool = false
     @State var errorMsg: String = ""
@@ -16,9 +21,9 @@ struct AddAccount: View {
     @EnvironmentObject var userData: UserData
     @Environment(\.appDatabase) var database
 
-    init(email: String) {
-        self.email = email
-    }
+    @State var username = ""
+    @FocusState private var isUsernameFocused: Bool
+    @State var usernameStatus: UsernameStatus = .checking
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -39,9 +44,54 @@ struct AddAccount: View {
                 .onSubmit {
                     submitAccount()
                 }
-            Text(errorMsg)
-                .font(.callout)
-                .foregroundColor(.red)
+            TextField("Username", text: $username)
+                .focused($isUsernameFocused)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .font(.title2)
+                .fontWeight(.semibold)
+                .padding(.vertical, 8)
+                .onChange(of: username) { _, newValue in
+                    let trimmedUsername = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmedUsername.isEmpty && trimmedUsername.count >= 2 {
+                        withAnimation(.smooth(duration: 0.15)) {
+                            usernameStatus = .checking
+                        }
+                        Task {
+                            do {
+                                try? await Task.sleep(for: .seconds(1.8))
+                                let result = try await api.checkUsername(username: trimmedUsername)
+                                if case let .success(result) = result {
+                                    withAnimation(.smooth(duration: 0.15)) {
+                                        usernameStatus = result.available ? .available : .taken
+                                    }
+                                }
+                            } catch {
+                                Log.shared.error("Failed to check username", error: error)
+                            }
+                        }
+                    } else {
+                        usernameStatus = .checking
+                    }
+                }
+                .overlay(alignment: .trailing) {
+                    if username.count >= 2 {
+                        switch usernameStatus {
+                        case .checking:
+                            Image(systemName: "hourglass")
+                                .font(.callout)
+                                .foregroundColor(.secondary)
+                        case .available:
+                            Image(systemName: "checkmark.circle")
+                                .font(.callout)
+                                .foregroundColor(.green)
+                        case .taken:
+                            Image(systemName: "xmark.circle")
+                                .font(.callout)
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
         }
         .onAppear {
             isFocused = true
@@ -49,17 +99,23 @@ struct AddAccount: View {
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
-            Button {
-                submitAccount()
+            VStack {
+                Text(errorMsg)
+                    .font(.callout)
+                    .foregroundColor(.red)
+                    .padding(.bottom, 8)
 
-            } label: {
-                Text("Continue")
+                Button {
+                    submitAccount()
+                } label: {
+                    Text("Continue")
+                }
+                .buttonStyle(SimpleButtonStyle())
+                .padding(.horizontal, OnboardingUtils.shared.hPadding)
+                .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+                .opacity(name.isEmpty ? 0.5 : 1)
+                .disabled(name.isEmpty)
             }
-            .buttonStyle(SimpleButtonStyle())
-            .padding(.horizontal, OnboardingUtils.shared.hPadding)
-            .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-            .opacity(name.isEmpty ? 0.5 : 1)
-            .disabled(name.isEmpty)
         }
     }
 
@@ -70,7 +126,7 @@ struct AddAccount: View {
                     errorMsg = "Please enter your name"
                     return
                 }
-                let result = try await api.updateProfile(firstName: name, lastName: "", username: "")
+                let result = try await api.updateProfile(firstName: name, lastName: "", username: username)
                 if case let .success(result) = result {
                     let user = User(from: result.user)
                     try await database.dbWriter.write { db in
@@ -92,5 +148,5 @@ struct AddAccount: View {
 }
 
 #Preview {
-    AddAccount(email: "")
+    AddAccount()
 }
