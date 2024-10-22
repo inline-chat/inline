@@ -31,20 +31,6 @@ struct MainView: View {
         .onAppear {
             Task {
                 do {
-                    let result = try await api.getSpaces()
-
-                    if case let .success(response) = result {
-                        try await database.dbWriter.write { db in
-                            try response.spaces.forEach { space in
-                                let space = Space(from: space)
-                                try space.save(db)
-                            }
-                            try response.members.forEach { member in
-                                let member = Member(from: member)
-                                try member.save(db)
-                            }
-                        }
-                    }
                     try await database.dbWriter.write { db in
                         if let id = Auth.shared.getCurrentUserId() {
                             let fetchedUser = try User.fetchOne(db, id: id)
