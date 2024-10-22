@@ -119,7 +119,7 @@ struct Code: View {
                     }
 
                     formState.reset()
-                    nav.push(.addAccount(email: email))
+                    nav.push(.addAccount)
                 } else {
                     errorMsg = "Invalid code, please try again."
                 }

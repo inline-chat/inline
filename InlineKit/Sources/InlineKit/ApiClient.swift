@@ -17,6 +17,7 @@ public enum Path: String {
     case updateProfile
     case getSpaces
     case createThread
+    case checkUsername
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -103,6 +104,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     public func createThread(title: String, spaceId: Int64) async throws -> APIResponse<CreateThread> {
         try await request(.createThread, queryItems: [URLQueryItem(name: "title", value: title), URLQueryItem(name: "spaceId", value: "\(spaceId)")], includeToken: true)
     }
+
+    public func checkUsername(username: String) async throws -> APIResponse<CheckUsername> {
+        try await request(.checkUsername, queryItems: [URLQueryItem(name: "username", value: username)], includeToken: true)
+    }
 }
 
 /// Example
@@ -164,4 +169,8 @@ public struct GetSpaces: Codable, Sendable {
 
 public struct CreateThread: Codable, Sendable {
     public let chat: ApiChat
+}
+
+public struct CheckUsername: Codable, Sendable {
+    public let available: Bool
 }

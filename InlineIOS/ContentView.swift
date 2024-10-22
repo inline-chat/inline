@@ -26,8 +26,7 @@ struct ContentView: View {
             VStack {
                 if Auth.shared.getToken() != nil {
                     MainView()
-                }
-                else {
+                } else {
                     Welcome()
                 }
             }
@@ -41,8 +40,8 @@ struct ContentView: View {
                     Code(email: email)
                 case .main:
                     MainView()
-                case let .addAccount(email):
-                    AddAccount(email: email)
+                case .addAccount:
+                    AddAccount()
                 case let .space(id):
                     SpaceView(spaceId: id)
                 case let .chat(id):

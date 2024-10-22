@@ -50,7 +50,7 @@ class DataManager: ObservableObject, @unchecked Sendable {
         return nil
     }
 
-    func getSpaces() async throws -> [Space] {
+    func getSpaces() async throws -> [ApiSpace] {
         let result = try await ApiClient.shared.getSpaces()
         if case let .success(result) = result {
             try await database.dbWriter.write { db in

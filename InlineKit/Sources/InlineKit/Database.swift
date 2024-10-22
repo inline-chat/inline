@@ -21,9 +21,10 @@ public extension AppDatabase {
         migrator.registerMigration("v0") { db in
             try db.create(table: "user") { t in
                 t.primaryKey("id", .integer).notNull().unique()
-                t.column("email", .text).notNull()
-                t.column("firstName", .text).notNull()
+                t.column("email", .text)
+                t.column("firstName", .text)
                 t.column("lastName", .text)
+                t.column("username", .text)
                 t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
             }
         }

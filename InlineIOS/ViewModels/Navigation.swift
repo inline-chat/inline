@@ -8,7 +8,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
         case email(prevEmail: String? = nil)
         case code(email: String)
         case main
-        case addAccount(email: String)
+        case addAccount
         case space(id: Int64)
         case chat(id: Int64)
     }

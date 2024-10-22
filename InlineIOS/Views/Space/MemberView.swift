@@ -15,7 +15,7 @@ struct MemberView: View {
 
     var body: some View {
         if let user = userDataViewModel.user {
-            Text(user.firstName)
+            Text(user.firstName ?? "")
         }
     }
 }
