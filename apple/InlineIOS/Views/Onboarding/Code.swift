@@ -99,6 +99,16 @@ struct Code: View {
                 Auth.shared.saveToken(result.token)
                 Auth.shared.saveCurrentUserId(userId: result.userId)
 
+             
+
+                print("Token \(result.token)")
+
+                do {
+                    try await AppDatabase.authenticated()
+                } catch {
+                    Log.shared.error("Failed to setup database or save user", error: error)
+                }
+                
                 try await database.dbWriter.write { db in
                     let user = User(
                         id: result.userId,
@@ -107,15 +117,6 @@ struct Code: View {
                         lastName: nil
                     )
                     try user.save(db)
-                }
-
-                print("Token \(result.token)")
-
-                do {
-                    try AppDatabase.authenticated()
-
-                } catch {
-                    Log.shared.error("Failed to setup database or save user", error: error)
                 }
 
                 formState.reset()

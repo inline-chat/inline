@@ -93,9 +93,10 @@ public extension AppDatabase {
         return config
     }
 
-    static func authenticated() throws {
+    static func authenticated() async throws {
         if let token = Auth.shared.getToken() {
-            try AppDatabase.shared.dbWriter.barrierWriteWithoutTransaction { db in
+            try await AppDatabase.shared.dbWriter
+                .barrierWriteWithoutTransaction { db in
                 try db.changePassphrase(token)
                 // maybe dbPool.invalidateReadOnlyConnections()???
             }
@@ -108,9 +109,40 @@ public extension AppDatabase {
         _ = try AppDatabase.shared.dbWriter.write { db in
             try User.deleteAll(db)
         }
+        
+        
+        // Optionally, delete the database file
+        // Uncomment the next line if you want to delete the file
+        // try deleteDatabaseFile()
+        
+        // Reset the database passphrase to a default value
+        try AppDatabase.shared.dbWriter.write { db in
+            try db.changePassphrase("123")
+        }
+        
         Log.shared.info("Database successfully deleted.")
     }
 }
+
+public extension AppDatabase {
+    static func deleteDatabaseFile() throws {
+        let fileManager = FileManager.default
+        let appSupportURL = try fileManager.url(
+            for: .applicationSupportDirectory, in: .userDomainMask,
+            appropriateFor: nil, create: false
+        )
+        let directoryURL = appSupportURL.appendingPathComponent("Database", isDirectory: true)
+        let databaseURL = directoryURL.appendingPathComponent("db.sqlite")
+        
+        if fileManager.fileExists(atPath: databaseURL.path) {
+            try fileManager.removeItem(at: databaseURL)
+            Log.shared.info("Database file successfully deleted.")
+        } else {
+            Log.shared.warning("Database file not found.")
+        }
+    }
+}
+
 
 // MARK: - Database Access: Reads
 
