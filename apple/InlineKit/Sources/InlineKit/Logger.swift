@@ -41,7 +41,13 @@ public final class Log: @unchecked Sendable {
         
         print(logMessage)
         
-        if level == .error {
+        if level == .error, let error = error {
+            SentrySDK.capture(error: error) { sentryScope in
+                sentryScope.setLevel(level.sentryLevel)
+                sentryScope.setTag(value: scope.rawValue, key: "scope")
+                sentryScope.setExtra(value: message, key: "message")
+            }
+        } else {
             SentrySDK.capture(message: message) { sentryScope in
                 sentryScope.setLevel(level.sentryLevel)
                 sentryScope.setTag(value: scope.rawValue, key: "scope")
