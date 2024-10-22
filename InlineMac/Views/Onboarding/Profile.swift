@@ -3,7 +3,7 @@ import SwiftUI
 
 struct OnboardingProfile: View {
     @EnvironmentObject var onboardingViewModel: OnboardingViewModel
-
+    @Environment(\.appDatabase) var database
     @FormState var formState
     @State var name: String = ""
     @State var username: String = ""
@@ -92,9 +92,13 @@ struct OnboardingProfile: View {
             let (firstName, lastName) = parseNameComponents(fullName: name)
             
             do {
-                let _ = try await ApiClient.shared
+                let result = try await ApiClient.shared
                     .updateProfile(firstName: firstName, lastName: lastName, username: username)
                 
+                // Todo: handle errors
+                try await database.dbWriter.write { db in
+                    try User(from: result.user).save(db)
+                }
             } catch {
                 formState.failed(error: error.localizedDescription)
             }
@@ -115,6 +119,7 @@ struct OnboardingProfile: View {
 
 #Preview {
     OnboardingProfile()
+        .appDatabase(.empty())
         .environmentObject(OnboardingViewModel())
         .frame(width: 900, height: 600)
 }

@@ -25,7 +25,7 @@ public extension AppDatabase {
                 t.column("firstName", .text)
                 t.column("lastName", .text)
                 t.column("username", .text)
-                t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
+                t.column("date", .datetime).notNull()
             }
         }
 
@@ -35,15 +35,15 @@ public extension AppDatabase {
             try db.create(table: "space") { t in
                 t.primaryKey("id", .integer).notNull().unique()
                 t.column("name", .text).notNull()
-                t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
+                t.column("date", .datetime).notNull()
             }
 
             try db.create(table: "member") { t in
                 t.primaryKey("id", .integer).notNull().unique()
                 t.column("userId", .integer).references("user", column: "id", onDelete: .setNull)
                 t.column("spaceId", .integer).references("space", column: "id", onDelete: .setNull)
-                t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
-                t.column("role", .text).notNull().defaults(to: "member")
+                t.column("date", .datetime).notNull()
+                t.column("role", .text).notNull()
 
                 t.uniqueKey(["userId", "spaceId"])
             }
@@ -56,11 +56,12 @@ public extension AppDatabase {
                 t.column("peerUserId", .integer).references("user", column: "id", onDelete: .setNull)
                 t.column("title", .text)
                 t.column("type", .integer).notNull().defaults(to: 0)
-                t.column("date", .datetime).notNull().defaults(to: GRDB.Date.now)
+                t.column("date", .datetime).notNull()
             }
 
             try db.create(table: "message") { t in
-                t.primaryKey("id", .integer).notNull().unique()
+                t.primaryKey("globalId", .integer).notNull().unique()
+                t.column("id", .integer).notNull()
                 t.column("chatId", .integer).references("chat", column: "id", onDelete: .cascade)
                 t.column("fromId", .integer).references("user", column: "id", onDelete: .setNull)
                 t.column("date", .datetime).notNull()
