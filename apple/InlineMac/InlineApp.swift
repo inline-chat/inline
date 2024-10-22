@@ -1,5 +1,6 @@
 import Sentry
 import SwiftUI
+import InlineKit
 
 @main
 struct InlineApp: App {
@@ -10,6 +11,7 @@ struct InlineApp: App {
         WindowGroup(id: "main") {
             MainWindow()
                 .environmentObject(viewModel)
+                .appDatabase(.shared)
         }
         .defaultSize(width: 900, height: 600)
         .windowStyle(.hiddenTitleBar)
@@ -19,6 +21,19 @@ struct InlineApp: App {
         Settings {
             SettingsView()
                 .environmentObject(viewModel)
+                .appDatabase(.shared)
         }
+    }
+}
+
+
+// MARK: - Database
+extension EnvironmentValues {
+    @Entry var appDatabase = AppDatabase.empty()
+}
+
+extension View {
+    func appDatabase(_ appDatabase: AppDatabase) -> some View {
+        self.environment(\.appDatabase, appDatabase)
     }
 }
