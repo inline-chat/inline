@@ -41,7 +41,12 @@ export const ipinfo = async (ip: string): Promise<IPInfoResponse | undefined> =>
     return
   }
 
-  let result = await fetch(`https://ipinfo.io/${ip}?token=${IPINFO_TOKEN}`)
+  // "Accept: application/json"
+  let result = await fetch(`https://ipinfo.io/${ip}?token=${IPINFO_TOKEN}`, {
+    headers: {
+      Accept: "application/json",
+    },
+  })
 
   if (!result.ok) {
     console.warn(`Failed to get IP info for ${ip}.`)
