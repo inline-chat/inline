@@ -28,7 +28,7 @@ struct ChatView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 HStack(spacing: 2) {
-                    Button(action: { nav.popToRoot() }) {
+                    Button(action: { nav.pop() }) {
                         Image(systemName: "chevron.left")
                             .foregroundColor(.secondary)
                             .font(.body)
