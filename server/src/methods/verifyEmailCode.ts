@@ -129,7 +129,7 @@ const getUserByEmail = async (email: string) => {
   return user
 }
 
-const createSession = async ({
+export const createSession = async ({
   userId,
 }: {
   userId: number

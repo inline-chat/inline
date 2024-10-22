@@ -42,11 +42,23 @@ import {
   Input as CheckUsernameInput,
   Response as CheckUsernameResponse,
 } from "@in/server/methods/checkUsername"
+import {
+  handler as sendSmsCodeHandler,
+  Input as SendSmsCodeInput,
+  Response as SendSmsCodeResponse,
+} from "@in/server/methods/sendSmsCode"
+import {
+  handler as verifySmsCodeHandler,
+  Input as VerifySmsCodeInput,
+  Response as VerifySmsCodeResponse,
+} from "@in/server/methods/verifySmsCode"
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
       .use(setup)
+      .use(makeUnauthApiRoute("/sendSmsCode", SendSmsCodeInput, SendSmsCodeResponse, sendSmsCodeHandler))
+      .use(makeUnauthApiRoute("/verifySmsCode", VerifySmsCodeInput, VerifySmsCodeResponse, verifySmsCodeHandler))
       .use(makeUnauthApiRoute("/sendEmailCode", SendEmailCodeInput, SendEmailCodeResponse, sendEmailCodeHandler))
       .use(
         makeUnauthApiRoute("/verifyEmailCode", VerifyEmailCodeInput, VerifyEmailCodeResponse, verifyEmailCodeHandler),
