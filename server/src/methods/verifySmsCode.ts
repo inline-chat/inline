@@ -1,4 +1,4 @@
-import { isValidPhoneNumber } from "@in/server/utils/validate"
+import { isValidPhoneNumber, validateUpToFourSegementSemver } from "@in/server/utils/validate"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
@@ -10,10 +10,18 @@ import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
 import { createSession } from "@in/server/methods/verifyEmailCode"
 import { encodeUserInfo, TUserInfo } from "@in/server/models"
+import { ipinfo } from "@in/server/libs/ipinfo"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
   code: Type.String(),
+
+  // optional
+  clientType: Type.Optional(Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web")])),
+  clientVersion: Type.Optional(Type.String()),
+  osVersion: Type.Optional(Type.String()),
+  deviceName: Type.Optional(Type.String()),
+  timezone: Type.Optional(Type.String()),
 })
 
 export const Response = Type.Object({
@@ -24,7 +32,7 @@ export const Response = Type.Object({
 
 export const handler = async (
   input: Static<typeof Input>,
-  _: UnauthenticatedHandlerContext,
+  { ip: requestIp }: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
     // verify formatting
@@ -43,12 +51,34 @@ export const handler = async (
     // Otherwise, we'll endup with duplicates.
     const phoneNumber = response.to
 
+    // make session
+    let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
+    let ip = requestIp ?? null
+    let country = ipInfo?.country ?? null
+    let region = ipInfo?.region ?? null
+    let city = ipInfo?.city ?? null
+    let timezone = input.timezone ?? ipInfo?.timezone ?? null
+    let clientType = input.clientType ?? null
+    let clientVersion = validateUpToFourSegementSemver(input.clientVersion ?? "") ? input.clientVersion ?? null : null
+    let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? null : null
+    let deviceName = input.deviceName ?? null
     // create or fetch user by email
     let user = await getUserByPhoneNumber(phoneNumber)
     let userId = user.id
 
     // save session
-    let { token } = await createSession({ userId })
+    let { token } = await createSession({
+      userId,
+      country,
+      region,
+      city,
+      timezone,
+      ip,
+      clientType,
+      clientVersion,
+      osVersion,
+      deviceName,
+    })
 
     return { userId: userId, token: token, user: encodeUserInfo(user) }
   } catch (error) {

@@ -1,8 +1,8 @@
 import { authenticate, authenticateGet } from "@in/server/controllers/plugins"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
-import Elysia, { t, type TSchema, type Static, type TDecodeType, type InputSchema } from "elysia"
-import type { TUndefined, TObject } from "@sinclair/typebox"
+import Elysia, { t, type TSchema, type Static, type InputSchema } from "elysia"
+import type { TUndefined, TObject, TDecodeType } from "@sinclair/typebox"
 
 export const TMakeApiResponse = <T extends TSchema>(type: T) => {
   const success = t.Object({ ok: t.Literal(true), result: type })
@@ -48,9 +48,12 @@ export const handleError = new Elysia()
 
 export type HandlerContext = {
   currentUserId: number
+  ip: string | undefined
 }
 
-export type UnauthenticatedHandlerContext = {}
+export type UnauthenticatedHandlerContext = {
+  ip: string | undefined
+}
 
 export const makeApiRoute = <Path extends string, ISchema extends TObject, OSchema extends TSchema>(
   path: Path,
@@ -61,8 +64,9 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
   const response = TMakeApiResponse(outputType)
   const getRoute = new Elysia({ tags: ["GET"] }).use(authenticateGet).get(
     `/:token?${path}`,
-    async ({ query: input, store }) => {
-      const context = { currentUserId: store.currentUserId }
+    async ({ query: input, store, server, request }) => {
+      const ip = server?.requestIP(request)?.address
+      const context = { currentUserId: store.currentUserId, ip }
       let result = await method(input, context)
       return { ok: true, result } as any
     },
@@ -74,8 +78,9 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
 
   const postRoute = new Elysia({ tags: ["POST"] }).use(authenticate).post(
     path,
-    async ({ body: input, store }) => {
-      const context = { currentUserId: store.currentUserId }
+    async ({ body: input, store, server, request }) => {
+      const ip = server?.requestIP(request)?.address
+      const context = { currentUserId: store.currentUserId, ip }
       let result = await method(input, context)
       return { ok: true, result } as any
     },
@@ -97,8 +102,10 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
   const response = TMakeApiResponse(outputType)
   const getRoute = new Elysia({ tags: ["GET"] }).get(
     `${path}`,
-    async ({ query: input }) => {
-      let result = await method(input, {})
+    async ({ query: input, server, request }) => {
+      const ip = server?.requestIP(request)?.address
+      const context = { ip }
+      let result = await method(input, context)
       return { ok: true, result } as any
     },
     {
@@ -109,8 +116,10 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
 
   const postRoute = new Elysia({ tags: ["POST"] }).post(
     path,
-    async ({ body: input }) => {
-      let result = await method(input, {})
+    async ({ body: input, server, request }) => {
+      const ip = server?.requestIP(request)?.address
+      const context = { ip }
+      let result = await method(input, context)
       return { ok: true, result } as any
     },
     {

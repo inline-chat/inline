@@ -43,6 +43,13 @@
       "when": 1729441987727,
       "tag": "0005_username",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1729607177541,
+      "tag": "0006_session_info",
+      "breakpoints": true
     }
   ]
 }

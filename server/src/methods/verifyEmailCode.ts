@@ -1,8 +1,8 @@
 import { db } from "@in/server/db"
 import { loginCodes } from "@in/server/db/schema/loginCodes"
 import { and, eq, gte, lt } from "drizzle-orm"
-import { sessions, users } from "@in/server/db/schema"
-import { isValidEmail } from "@in/server/utils/validate"
+import { sessions, users, type DbNewSession } from "@in/server/db/schema"
+import { isValidEmail, validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { normalizeEmail } from "@in/server/utils/normalize"
 import { Log } from "@in/server/utils/log"
@@ -10,10 +10,18 @@ import { generateToken, MAX_LOGIN_ATTEMPTS } from "@in/server/utils/auth"
 import { type Static, Type } from "@sinclair/typebox"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/v1/helpers"
 import { encodeUserInfo, TUserInfo } from "@in/server/models"
+import { ipinfo } from "@in/server/libs/ipinfo"
 
 export const Input = Type.Object({
   email: Type.String(),
   code: Type.String(),
+
+  // optional
+  clientType: Type.Optional(Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web")])),
+  clientVersion: Type.Optional(Type.String()),
+  osVersion: Type.Optional(Type.String()),
+  deviceName: Type.Optional(Type.String()),
+  timezone: Type.Optional(Type.String()),
 })
 
 export const Response = Type.Object({
@@ -24,7 +32,7 @@ export const Response = Type.Object({
 
 export const handler = async (
   input: Static<typeof Input>,
-  _: UnauthenticatedHandlerContext,
+  { ip: requestIp }: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
     if (isValidEmail(input.email) === false) {
@@ -40,16 +48,33 @@ export const handler = async (
     await verifyCode(email, input.code)
 
     // make session
-    // let ip = server?.requestIP(request)?.address
-    // let userAgent = query.userAgent
-    // let timeZone = query.timeZone
+    let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
+    let ip = requestIp ?? null
+    let country = ipInfo?.country ?? null
+    let region = ipInfo?.region ?? null
+    let city = ipInfo?.city ?? null
+    let timezone = validateIanaTimezone(input.timezone ?? "") ? input.timezone ?? null : ipInfo?.timezone ?? null
+    let clientType = input.clientType ?? null
+    let clientVersion = validateUpToFourSegementSemver(input.clientVersion ?? "") ? input.clientVersion ?? null : null
+    let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? null : null
 
     // create or fetch user by email
     let user = await getUserByEmail(email)
     let userId = user.id
 
     // save session
-    let { token } = await createSession({ userId })
+    let { token } = await createSession({
+      userId,
+      ip,
+      country,
+      region,
+      city,
+      timezone,
+      clientType,
+      clientVersion: clientVersion ?? null,
+      osVersion: osVersion ?? null,
+      deviceName: input.deviceName ?? null,
+    })
 
     return { userId: userId, token: token, user: encodeUserInfo(user) }
   } catch (error) {
@@ -121,23 +146,19 @@ const getUserByEmail = async (email: string) => {
 
 export const createSession = async ({
   userId,
+  ...session
 }: {
   userId: number
-  // ip: string | undefined
-  // userAgent: string | undefined
-  // timeZone: string | undefined
-}): Promise<{ token: string }> => {
+} & Omit<DbNewSession, "tokenHash">): Promise<{ token: string }> => {
   // store sha256 of token in db
   let { token, tokenHash } = await generateToken(userId)
 
   // store session
   await db.insert(sessions).values({
     userId,
+    ...session,
     tokenHash,
     date: new Date(),
-    // userAgent,
-    // timeZone,
-    // ip,
   })
 
   return { token }

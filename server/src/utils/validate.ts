@@ -35,3 +35,34 @@ export const isValid6DigitCode = (code: string | undefined | null): boolean => {
 
   return true
 }
+
+export const validateUpToFourSegementSemver = (version: string): boolean => {
+  if (!/^(0|[1-9]\d*)(\.(0|[1-9]\d*)){0,3}$/.test(version)) {
+    return false
+  }
+
+  return true
+}
+
+export const validateIanaTimezone = (timezone: string): boolean => {
+  if (!timezone) {
+    return false
+  }
+
+  if (timezone.length > 64) {
+    return false
+  }
+
+  if (timezone === "UTC" || timezone === "GMT") {
+    return true
+  }
+
+  // Regex for most IANA time zone formats
+  const validRegex =
+    /^(Africa|America|Antarctica|Asia|Atlantic|Australia|Europe|Indian|Pacific)\/([A-Za-z_]+)(\/[A-Za-z_]+)?$/
+
+  // Special regex for Etc timezones
+  const etcRegex = /^Etc\/(GMT[+-]\d{1,2}|UTC|UCT|Greenwich|Universal|Zulu)$/
+
+  return validRegex.test(timezone) || etcRegex.test(timezone)
+}
