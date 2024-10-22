@@ -65,7 +65,11 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
   const getRoute = new Elysia({ tags: ["GET"] }).use(authenticateGet).get(
     `/:token?${path}`,
     async ({ query: input, store, server, request }) => {
-      const ip = server?.requestIP(request)?.address
+      const ip =
+        request.headers.get("x-forwarded-for") ??
+        request.headers.get("cf-connecting-ip") ??
+        request.headers.get("x-real-ip") ??
+        server?.requestIP(request)?.address
       const context = { currentUserId: store.currentUserId, ip }
       let result = await method(input, context)
       return { ok: true, result } as any
@@ -79,7 +83,11 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
   const postRoute = new Elysia({ tags: ["POST"] }).use(authenticate).post(
     path,
     async ({ body: input, store, server, request }) => {
-      const ip = server?.requestIP(request)?.address
+      const ip =
+        request.headers.get("x-forwarded-for") ??
+        request.headers.get("cf-connecting-ip") ??
+        request.headers.get("x-real-ip") ??
+        server?.requestIP(request)?.address
       const context = { currentUserId: store.currentUserId, ip }
       let result = await method(input, context)
       return { ok: true, result } as any
@@ -103,7 +111,11 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
   const getRoute = new Elysia({ tags: ["GET"] }).get(
     `${path}`,
     async ({ query: input, server, request }) => {
-      const ip = server?.requestIP(request)?.address
+      const ip =
+        request.headers.get("x-forwarded-for") ??
+        request.headers.get("cf-connecting-ip") ??
+        request.headers.get("x-real-ip") ??
+        server?.requestIP(request)?.address
       const context = { ip }
       let result = await method(input, context)
       return { ok: true, result } as any
@@ -117,7 +129,11 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
   const postRoute = new Elysia({ tags: ["POST"] }).post(
     path,
     async ({ body: input, server, request }) => {
-      const ip = server?.requestIP(request)?.address
+      const ip =
+        request.headers.get("x-forwarded-for") ??
+        request.headers.get("cf-connecting-ip") ??
+        request.headers.get("x-real-ip") ??
+        server?.requestIP(request)?.address
       const context = { ip }
       let result = await method(input, context)
       return { ok: true, result } as any
