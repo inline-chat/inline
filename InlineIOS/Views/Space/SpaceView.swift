@@ -16,6 +16,8 @@ struct SpaceView: View {
         }
     }
 
+    @State var openCreateThreadSheet = false
+
     var body: some View {
         VStack {
             List {
@@ -61,8 +63,25 @@ struct SpaceView: View {
                     }
                 }
             }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button(action: {
+                        openCreateThreadSheet = true
+                    }) {
+                        Text("Create Thread")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .tint(Color.secondary)
+                }
+            }
         }
         .navigationBarBackButtonHidden(true)
+        .sheet(isPresented: $openCreateThreadSheet) {
+            CreateThread(showSheet: $openCreateThreadSheet, spaceId: spaceId)
+                .presentationBackground(.thinMaterial)
+                .presentationCornerRadius(28)
+        }
     }
 }
 
