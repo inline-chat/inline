@@ -9,6 +9,7 @@ import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
 import { createSession } from "@in/server/methods/verifyEmailCode"
+import { encodeUserInfo, TUserInfo } from "@in/server/models"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -18,6 +19,7 @@ export const Input = Type.Object({
 export const Response = Type.Object({
   userId: Type.Number(),
   token: Type.String(),
+  user: TUserInfo,
 })
 
 export const handler = async (
@@ -48,10 +50,7 @@ export const handler = async (
     // save session
     let { token } = await createSession({ userId })
 
-    return {
-      userId: userId,
-      token,
-    }
+    return { userId: userId, token: token, user: encodeUserInfo(user) }
   } catch (error) {
     Log.shared.error("Failed to verify sms code", error)
     throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to verify sms code")

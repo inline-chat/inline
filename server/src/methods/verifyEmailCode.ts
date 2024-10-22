@@ -9,25 +9,18 @@ import { Log } from "@in/server/utils/log"
 import { generateToken, MAX_LOGIN_ATTEMPTS } from "@in/server/utils/auth"
 import { type Static, Type } from "@sinclair/typebox"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/v1/helpers"
+import { encodeUserInfo, TUserInfo } from "@in/server/models"
 
 export const Input = Type.Object({
   email: Type.String(),
   code: Type.String(),
 })
 
-type Output = {
-  userId: number
-  token: string
-}
-
 export const Response = Type.Object({
   userId: Type.Number(),
   token: Type.String(),
+  user: TUserInfo,
 })
-
-export const encode = (output: Output): Static<typeof Response> => {
-  return { userId: output.userId, token: output.token }
-}
 
 export const handler = async (
   input: Static<typeof Input>,
@@ -58,10 +51,7 @@ export const handler = async (
     // save session
     let { token } = await createSession({ userId })
 
-    return {
-      userId: userId,
-      token,
-    }
+    return { userId: userId, token: token, user: encodeUserInfo(user) }
   } catch (error) {
     Log.shared.error("Failed to send email code", error)
     throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to send email code")

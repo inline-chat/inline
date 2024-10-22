@@ -48,6 +48,7 @@ struct GrayButton<Label>: View
                 .primary.opacity(0.15) : hovered ?
                 .primary.opacity(0.13) :
                 .primary.opacity(0.09)
+//            let background: Color = .accentColor
             let scale: CGFloat = configuration.isPressed ? 0.95 : 1
             let textOpacity: Double = configuration.isPressed ? 0.8 : 0.95
             let animation =
