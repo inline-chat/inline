@@ -15,6 +15,7 @@
     "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.675.0",
     "@effect/schema": "^0.75.5",
     "@elysiajs/cors": "^1.1.1",
     "@elysiajs/swagger": "^1.1.5",

@@ -10,6 +10,8 @@ import { MAX_LOGIN_ATTEMPTS, secureRandomSixDigitNumber } from "@in/server/utils
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/v1/helpers"
+import { sendEmail } from "@in/server/libs/ses"
+import { isProd } from "@in/server/env"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -34,7 +36,7 @@ export const handler = async (
     let { code, existingUser } = await getLoginCode(email)
 
     // send code to email
-    await sendEmail(email, code)
+    await sendEmailCode(email, code)
 
     return { existingUser }
   } catch (error) {
@@ -87,7 +89,28 @@ const getLoginCode = async (email: string): Promise<{ code: string; existingUser
   return { code, existingUser }
 }
 
-const sendEmail = async (email: string, code: string) => {
-  console.info(`Sending email to ${email} with code ${code}`)
+const sendEmailCode = async (email: string, code: string) => {
   // todo
+
+  if (isProd || process.env["SEND_EMAIL"]) {
+    await sendEmail({
+      to: email,
+      from: "team@inline.chat",
+      content: {
+        type: "text",
+        subject: `Your Inline code: ${code}`,
+        text: TextTemplate(code),
+      },
+    })
+  } else {
+    console.info(`Sending email to ${email} with code ${code}. To send emails in dev, set SEND_EMAIL=1.`)
+  }
 }
+
+const TextTemplate = (code: string) => `
+Hey –
+
+Here's your verification code for Inline: ${code}
+
+Inline Team
+`
