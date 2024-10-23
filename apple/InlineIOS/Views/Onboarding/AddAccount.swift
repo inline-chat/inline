@@ -9,10 +9,13 @@ enum UsernameStatus {
 
 struct AddAccount: View {
     @State var name = ""
+    @State var username = ""
     @State var animate: Bool = false
     @State var errorMsg: String = ""
+    @State var isInputValid: Bool = false
 
     @FocusState private var isFocused: Bool
+    @FocusState private var isUsernameFocused: Bool
 
     private var placeHolder: String = "Dena"
 
@@ -21,9 +24,9 @@ struct AddAccount: View {
     @EnvironmentObject var userData: UserData
     @Environment(\.appDatabase) var database
 
-    @State var username = ""
-    @FocusState private var isUsernameFocused: Bool
     @State var usernameStatus: UsernameStatus = .checking
+
+    @FormState var formState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -41,9 +44,6 @@ struct AddAccount: View {
                         animate = newValue
                     }
                 }
-                .onSubmit {
-                    submitAccount()
-                }
             TextField("Username", text: $username)
                 .focused($isUsernameFocused)
                 .textInputAutocapitalization(.never)
@@ -52,6 +52,7 @@ struct AddAccount: View {
                 .fontWeight(.semibold)
                 .padding(.vertical, 8)
                 .onChange(of: username) { _, newValue in
+                    errorMsg = ""
                     let trimmedUsername = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmedUsername.isEmpty && trimmedUsername.count >= 2 {
                         withAnimation(.smooth(duration: 0.15)) {
@@ -102,26 +103,37 @@ struct AddAccount: View {
                     .foregroundColor(.red)
                     .padding(.bottom, 8)
 
-                Button {
+                Button(formState.isLoading ? "Creating Account..." : "Continue") {
                     submitAccount()
-                } label: {
-                    Text("Continue")
                 }
                 .buttonStyle(SimpleButtonStyle())
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, OnboardingUtils.shared.hPadding)
                 .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-                .opacity(name.isEmpty ? 0.5 : 1)
-                .disabled(name.isEmpty)
+                .disabled(!isInputValid || formState.isLoading)
+                .opacity((!isInputValid || formState.isLoading) ? 0.5 : 1)
             }
         }
+        .onChange(of: name) { _, _ in
+            validateInput()
+        }
+        .onChange(of: username) { _, _ in
+            validateInput()
+        }
+    }
+
+    private func validateInput() {
+        errorMsg = ""
+        isInputValid = !name.isEmpty && !username.isEmpty && usernameStatus == .available
     }
 
     func submitAccount() {
         Task {
             do {
+                formState.startLoading()
                 guard !name.isEmpty else {
                     errorMsg = "Please enter your name"
+                    formState.reset()
                     return
                 }
                 let result = try await api.updateProfile(firstName: name, lastName: "", username: username)
@@ -131,16 +143,13 @@ struct AddAccount: View {
                     try user.save(db)
                 }
 
+                formState.reset()
                 nav.push(.main)
             } catch {
-                // why?
-                try await database.dbWriter.write { db in
-                    var fetchedUser = try User.fetchOne(db, id: Auth.shared.getCurrentUserId()!)
-                    fetchedUser?.firstName = name
-                    try fetchedUser?.save(db)
-                }
-
                 Log.shared.error("Failed to create user", error: error)
+                errorMsg = "Failed to create account. Please try again."
+                formState.reset()
+                isInputValid = false
             }
         }
     }
