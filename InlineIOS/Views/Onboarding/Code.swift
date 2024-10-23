@@ -8,13 +8,10 @@ struct Code: View {
     @FocusState private var isFocused: Bool
     @State var errorMsg: String = ""
     @FormState var formState
+    @State private var isInputValid: Bool = false
 
     private var placeHolder: String = "xxxxxx"
     let characterLimit = 6
-
-    var disabled: Bool {
-        code.isEmpty || code.count < 6 || formState.isLoading
-    }
 
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var api: ApiClient
@@ -38,24 +35,19 @@ struct Code: View {
                 .font(.title2)
                 .fontWeight(.semibold)
                 .padding(.vertical, 8)
-                .onChange(of: code) { _, _ in
-                    errorMsg = ""
-                }
                 .onChange(of: isFocused) { _, newValue in
                     withAnimation(.smooth(duration: 0.15)) {
                         animate = newValue
                     }
                 }
                 .onChange(of: code) { _, newValue in
-                    if newValue.count == characterLimit {
-                        submitCode()
-                    }
                     if newValue.count > characterLimit {
                         code = String(newValue.prefix(characterLimit))
                     }
-                }
-                .onSubmit {
-                    submitCode()
+                    validateInput()
+                    if newValue.count == characterLimit {
+                        submitCode()
+                    }
                 }
             Text(errorMsg)
                 .font(.callout)
@@ -80,15 +72,20 @@ struct Code: View {
                 }
                 .buttonStyle(SimpleButtonStyle())
                 .frame(maxWidth: .infinity)
-                .opacity(disabled ? 0.5 : 1)
                 .padding(.horizontal, OnboardingUtils.shared.hPadding)
                 .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-                .disabled(disabled)
+                .disabled(!isInputValid || formState.isLoading)
+                .opacity((!isInputValid || formState.isLoading) ? 0.5 : 1)
             }
         }
         .onAppear {
             isFocused = true
         }
+    }
+
+    private func validateInput() {
+        errorMsg = ""
+        isInputValid = code.count == characterLimit
     }
 
     func submitCode() {
@@ -99,8 +96,6 @@ struct Code: View {
 
                 Auth.shared.saveToken(result.token)
                 Auth.shared.saveCurrentUserId(userId: result.userId)
-
-                print("Token \(result.token)")
 
                 do {
                     try await AppDatabase.authenticated()
@@ -124,14 +119,14 @@ struct Code: View {
             } catch let error as APIError {
                 errorMsg = "Please try again."
                 OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
+                formState.reset()
+                isInputValid = false
             } catch {
                 Log.shared.error("Unexpected error", error: error)
+                formState.reset()
+                isInputValid = false
             }
         }
-    }
-
-    func decodeInt64(from string: String) -> Int64? {
-        return Int64(string)
     }
 }
 

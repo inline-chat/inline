@@ -8,6 +8,7 @@ struct Email: View {
     @State private var animate: Bool = false
     @State var errorMsg: String = ""
     @FormState var formState
+    @State private var isInputValid: Bool = false
 
     private var placeHolder: String = "dena@example.com"
 
@@ -16,10 +17,6 @@ struct Email: View {
 
     init(prevEmail: String? = nil) {
         self.prevEmail = prevEmail
-    }
-
-    var disabled: Bool {
-        email.isEmpty || !email.contains("@") || !email.contains(".") || formState.isLoading
     }
 
     var body: some View {
@@ -33,17 +30,9 @@ struct Email: View {
                 .font(.title2)
                 .fontWeight(.semibold)
                 .padding(.vertical, 8)
-                .onChange(of: email) { _, _ in
-                    errorMsg = ""
-                }
                 .onChange(of: isFocused) { _, newValue in
                     withAnimation(.smooth(duration: 0.15)) {
                         animate = newValue
-                    }
-                }
-                .onSubmit {
-                    if !disabled {
-                        submit()
                     }
                 }
             Text(errorMsg)
@@ -53,24 +42,31 @@ struct Email: View {
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .safeAreaInset(edge: .bottom) {
-            VStack {
-                Button(formState.isLoading ? "Sending Code..." : "Continue") {
-                    submit()
-                }
-                .buttonStyle(SimpleButtonStyle())
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, OnboardingUtils.shared.hPadding)
-                .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-                .disabled(disabled)
-                .opacity(disabled ? 0.5 : 1)
+            Button(formState.isLoading ? "Sending Code..." : "Continue") {
+                submit()
             }
+            .buttonStyle(SimpleButtonStyle())
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, OnboardingUtils.shared.hPadding)
+            .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+            .disabled(!isInputValid || formState.isLoading)
+            .opacity((!isInputValid || formState.isLoading) ? 0.5 : 1)
         }
         .onAppear {
             if let prevEmail = prevEmail {
                 email = prevEmail
             }
             isFocused = true
+            validateInput()
         }
+        .onChange(of: email) { _, _ in
+            validateInput()
+        }
+    }
+
+    private func validateInput() {
+        errorMsg = ""
+        isInputValid = !email.isEmpty && email.contains("@") && email.contains(".")
     }
 
     func submit() {
@@ -82,6 +78,8 @@ struct Email: View {
                 nav.push(.code(email: email))
             } catch let error as APIError {
                 OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isEmail: true)
+                formState.reset()
+                isInputValid = false
             }
         }
     }
