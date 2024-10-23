@@ -17,8 +17,8 @@ struct MainView: View {
 
     var body: some View {
         VStack {
-            if let spaces = spaceList.spaces {
-                List(spaces.sorted(by: { $0.date > $1.date })) { space in
+            if !spaceList.spaces.isEmpty {
+                List(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
                     Text(space.name)
                         .onTapGesture {
                             nav.push(.space(id: space.id))
@@ -26,6 +26,9 @@ struct MainView: View {
                 }
                 .listStyle(.plain)
                 .padding(.vertical, 8)
+            } else {
+                EmptyStateView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         }
         .onAppear {
@@ -47,15 +50,12 @@ struct MainView: View {
         .toolbar(content: {
             ToolbarItem(placement: .topBarLeading) {
                 HStack {
-                    Circle()
-                        .fill(Color(.systemGray6))
-                        .frame(width: 28)
-                        .overlay(alignment: .center) {
-                            Text("🐱")
-                                .font(.body)
-                        }
-                        .padding(.trailing, 6)
-                    Text(user?.firstName ?? "Home")
+                    Image(systemName: "house.fill")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+
+                        .padding(.trailing, 4)
+                    Text("Home")
                         .font(.title3)
                         .fontWeight(.semibold)
                 }
@@ -87,6 +87,24 @@ struct MainView: View {
                 .presentationBackground(.thinMaterial)
                 .presentationCornerRadius(28)
         }
+    }
+}
+
+struct EmptyStateView: View {
+    var body: some View {
+        VStack {
+            Text("🏡")
+                .font(.largeTitle)
+                .padding(.bottom, 6)
+
+            Text("Home is empty")
+                .font(.title2)
+                .fontWeight(.bold)
+            Text("Create a space or start a DM")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .padding()
     }
 }
 

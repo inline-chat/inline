@@ -3,7 +3,7 @@ import GRDB
 
 public final class SpaceListViewModel: ObservableObject {
     /// The spaces to display.
-    @Published public private(set) var spaces: [Space]?
+    @Published public private(set) var spaces: [Space] = []
 
     private var cancellable: AnyCancellable?
     private var db: AppDatabase

@@ -28,7 +28,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         #if targetEnvironment(simulator)
             return "http://localhost:8000/v1"
         #elseif DEBUG
-            return "http://localhost:8000/v1"
+            return "http://192.168.3.122:8000/v1"
         #else
             return "https://api.inline.chat/v1"
         #endif
