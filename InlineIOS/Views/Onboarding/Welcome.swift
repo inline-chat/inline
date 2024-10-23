@@ -53,14 +53,15 @@ struct Welcome: View {
             }
         }
 
-        .padding(.horizontal, 35)
-        .frame(maxHeight: .infinity)
+        .padding(.horizontal, OnboardingUtils.shared.hPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .safeAreaInset(edge: .bottom) {
             Button("Continue") {
                 displayedText = ""
                 nav.push(.email())
             }
             .buttonStyle(SimpleButtonStyle())
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, OnboardingUtils.shared.hPadding)
             .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
         }

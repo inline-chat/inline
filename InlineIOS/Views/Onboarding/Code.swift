@@ -62,9 +62,9 @@ struct Code: View {
                 .foregroundColor(.red)
         }
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .safeAreaInset(edge: .bottom) {
-            VStack {
+            VStack(alignment: .leading) {
                 HStack(spacing: 2) {
                     Text("Code sent to \(email).")
                         .font(.callout)
@@ -79,6 +79,7 @@ struct Code: View {
                     submitCode()
                 }
                 .buttonStyle(SimpleButtonStyle())
+                .frame(maxWidth: .infinity)
                 .opacity(disabled ? 0.5 : 1)
                 .padding(.horizontal, OnboardingUtils.shared.hPadding)
                 .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
@@ -99,8 +100,6 @@ struct Code: View {
                 Auth.shared.saveToken(result.token)
                 Auth.shared.saveCurrentUserId(userId: result.userId)
 
-             
-
                 print("Token \(result.token)")
 
                 do {
@@ -108,7 +107,7 @@ struct Code: View {
                 } catch {
                     Log.shared.error("Failed to setup database or save user", error: error)
                 }
-                
+
                 try await database.dbWriter.write { db in
                     let user = User(
                         id: result.userId,
