@@ -93,13 +93,10 @@ struct AddAccount: View {
                     }
                 }
         }
-        .onAppear {
-            isFocused = true
-        }
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .safeAreaInset(edge: .bottom) {
-            VStack {
+            VStack(alignment: .leading) {
                 Text(errorMsg)
                     .font(.callout)
                     .foregroundColor(.red)
@@ -111,6 +108,7 @@ struct AddAccount: View {
                     Text("Continue")
                 }
                 .buttonStyle(SimpleButtonStyle())
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, OnboardingUtils.shared.hPadding)
                 .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
                 .opacity(name.isEmpty ? 0.5 : 1)

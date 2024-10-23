@@ -50,14 +50,15 @@ struct Email: View {
                 .font(.callout)
                 .foregroundColor(.red)
         }
-        .padding(.horizontal, 50)
-        .frame(maxHeight: .infinity)
+        .padding(.horizontal, OnboardingUtils.shared.hPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .safeAreaInset(edge: .bottom) {
             VStack {
                 Button(formState.isLoading ? "Sending Code..." : "Continue") {
                     submit()
                 }
                 .buttonStyle(SimpleButtonStyle())
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, OnboardingUtils.shared.hPadding)
                 .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
                 .disabled(disabled)
