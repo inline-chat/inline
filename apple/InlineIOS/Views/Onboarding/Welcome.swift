@@ -13,6 +13,7 @@ struct Welcome: View {
     @State private var engine: CHHapticEngine?
     @State private var displayedText = ""
     @State private var showCaret = false
+    @State private var animationCompleted = false
 
     let fullText = "Hey There."
     let typingSpeed: TimeInterval = 0.08
@@ -28,7 +29,7 @@ struct Welcome: View {
 
                 // Animated text with caret
                 HStack(alignment: .center, spacing: 2) {
-                    Text(displayedText)
+                    Text(animationCompleted ? fullText : displayedText)
                         .font(.largeTitle)
                         .fontWeight(.bold)
 
@@ -51,7 +52,7 @@ struct Welcome: View {
                 animateText()
             }
         }
-      
+
         .padding(.horizontal, 35)
         .frame(maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
@@ -76,6 +77,8 @@ struct Welcome: View {
     }
 
     private func animateText() {
+        guard !animationCompleted else { return }
+
         withAnimation(.bouncy) {
             showCaret = true
         }
@@ -83,12 +86,16 @@ struct Welcome: View {
         for (index, character) in fullText.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + typingSpeed * Double(index)) {
                 displayedText += String(character)
-                playHapticFeedback()
+
+                if !animationCompleted {
+                    playHapticFeedback()
+                }
 
                 if index == fullText.count - 1 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                         withAnimation(.bouncy) {
                             showCaret = false
+                            animationCompleted = true
                         }
                     }
                 }
@@ -107,7 +114,7 @@ struct Welcome: View {
     }
 
     private func playHapticFeedback() {
-        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics && !animationCompleted else { return }
 
         let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.5)
         let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
@@ -134,7 +141,7 @@ struct TypingText: View {
     let typingInterval: TimeInterval
 
     init(_ text: String, typingInterval: TimeInterval = 0.2) {
-        self.fullText = text
+        fullText = text
         self.typingInterval = typingInterval
     }
 
