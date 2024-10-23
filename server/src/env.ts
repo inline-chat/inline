@@ -10,6 +10,7 @@ export const TWILIO_AUTH_TOKEN = process.env["TWILIO_AUTH_TOKEN"] as string
 export const TWILIO_SID = process.env["TWILIO_SID"] as string
 export const TWILIO_VERIFY_SERVICE_SID = process.env["TWILIO_VERIFY_SERVICE_SID"] as string
 export const SENTRY_DSN = process.env["SENTRY_DSN"] as string
+export const RESEND_API_KEY = process.env["RESEND_API_KEY"] as string
 
 // OPTIONAL
 export const IPINFO_TOKEN = process.env["IPINFO_TOKEN"]
@@ -22,13 +23,16 @@ const requiredProductionVariables = [
   "TWILIO_SID",
   "TWILIO_VERIFY_SERVICE_SID",
   "SENTRY_DSN",
+  "RESEND_API_KEY",
 ]
 
-if (requiredProductionVariables.some((variable) => !process.env[variable])) {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("Required production variables must be defined.")
-  } else {
-    console.warn("Some env variables are not defined")
+for (const variable of requiredProductionVariables) {
+  if (!process.env[variable]) {
+    if (isProd) {
+      throw new Error(`Required production variable ${variable} is not defined.`)
+    } else {
+      console.warn(`Env variable ${variable} is not defined.`)
+    }
   }
 }
 

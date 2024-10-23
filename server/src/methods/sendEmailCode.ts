@@ -10,8 +10,8 @@ import { MAX_LOGIN_ATTEMPTS, secureRandomSixDigitNumber } from "@in/server/utils
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/v1/helpers"
-import { sendEmail } from "@in/server/libs/ses"
 import { isProd } from "@in/server/env"
+import { sendEmail } from "@in/server/utils/email"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -33,10 +33,10 @@ export const handler = async (
     let email = normalizeEmail(input.email)
 
     // store code
-    let { code, existingUser } = await getLoginCode(email)
+    let { code, existingUser, firstName } = await getLoginCode(email)
 
     // send code to email
-    await sendEmailCode(email, code)
+    await sendEmailCode(email, code, firstName)
 
     return { existingUser }
   } catch (error) {
@@ -46,13 +46,20 @@ export const handler = async (
 }
 
 /// HELPER FUNCTIONS ///
-const getLoginCode = async (email: string): Promise<{ code: string; existingUser: boolean }> => {
+const getLoginCode = async (
+  email: string,
+): Promise<{ code: string; existingUser: boolean; firstName: string | undefined }> => {
   // if there is one that isn't yet expired, ensure we return the same code.
   // To avoid a denial of service attack if the attacker keeps triggering
   // new codes preventing user from logging in
 
   let existingUsers = await db.select().from(users).where(eq(users.email, email)).limit(1)
   let existingUser = Boolean(existingUsers[0])
+  let firstName = existingUsers[0]?.firstName ?? undefined
+
+  console.log("existingUsers", existingUsers)
+  console.log("existingUser", existingUser)
+  console.log("firstName", firstName)
 
   // check
   let existingCode = (
@@ -70,7 +77,7 @@ const getLoginCode = async (email: string): Promise<{ code: string; existingUser
   )?.[0]
 
   if (existingCode) {
-    return { code: existingCode.code, existingUser }
+    return { code: existingCode.code, existingUser, firstName }
   }
 
   // generate
@@ -86,31 +93,13 @@ const getLoginCode = async (email: string): Promise<{ code: string; existingUser
     attempts: 0,
   })
 
-  return { code, existingUser }
+  return { code, existingUser, firstName }
 }
 
-const sendEmailCode = async (email: string, code: string) => {
-  // todo
-
+const sendEmailCode = async (email: string, code: string, firstName: string | undefined) => {
   if (isProd || process.env["SEND_EMAIL"]) {
-    await sendEmail({
-      to: email,
-      from: "team@inline.chat",
-      content: {
-        type: "text",
-        subject: `Your Inline code: ${code}`,
-        text: TextTemplate(code),
-      },
-    })
+    await sendEmail({ to: email, content: { template: "code", variables: { code, firstName } } })
   } else {
     console.info(`Sending email to ${email} with code ${code}. To send emails in dev, set SEND_EMAIL=1.`)
   }
 }
-
-const TextTemplate = (code: string) => `
-Hey –
-
-Here's your verification code for Inline: ${code}
-
-Inline Team
-`

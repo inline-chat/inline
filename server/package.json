@@ -25,7 +25,8 @@
     "elysia-rate-limit": "^4.1.0",
     "nanoid": "^5.0.7",
     "nanoid-dictionary": "^4.3.0",
-    "postgres": "^3.4.4"
+    "postgres": "^3.4.4",
+    "resend": "^4.0.0"
   },
   "devDependencies": {
     "@types/bun": "^1.1.10",
