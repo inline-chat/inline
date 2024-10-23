@@ -56,13 +56,13 @@ struct Code: View {
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading) {
+            VStack(alignment: .center) {
                 HStack(spacing: 2) {
                     Text("Code sent to \(email).")
                         .font(.callout)
                         .foregroundColor(.secondary)
                     Button("Edit") {
-                        nav.push(.email(prevEmail: email))
+                        nav.pop()
                     }
                     .font(.callout)
                 }

@@ -44,6 +44,9 @@ struct AddAccount: View {
                         animate = newValue
                     }
                 }
+                .onSubmit {
+                    isUsernameFocused = true
+                }
             TextField("Username", text: $username)
                 .focused($isUsernameFocused)
                 .textInputAutocapitalization(.never)
@@ -93,26 +96,27 @@ struct AddAccount: View {
                         }
                     }
                 }
+                .onSubmit {
+                    submitAccount()
+                }
+
+            Text(errorMsg)
+                .font(.callout)
+                .foregroundColor(.red)
+                .padding(.top, 8)
         }
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading) {
-                Text(errorMsg)
-                    .font(.callout)
-                    .foregroundColor(.red)
-                    .padding(.bottom, 8)
-
-                Button(formState.isLoading ? "Creating Account..." : "Continue") {
-                    submitAccount()
-                }
-                .buttonStyle(SimpleButtonStyle())
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, OnboardingUtils.shared.hPadding)
-                .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-                .disabled(!isInputValid || formState.isLoading)
-                .opacity((!isInputValid || formState.isLoading) ? 0.5 : 1)
+            Button(formState.isLoading ? "Creating Account..." : "Continue") {
+                submitAccount()
             }
+            .buttonStyle(SimpleButtonStyle())
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, OnboardingUtils.shared.hPadding)
+            .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+            .disabled(formState.isLoading)
+            .opacity(formState.isLoading ? 0.5 : 1)
         }
         .onChange(of: name) { _, _ in
             validateInput()
