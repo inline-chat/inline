@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { eq } from "drizzle-orm"
+import { and, eq, or } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
@@ -12,15 +12,15 @@ export const Input = Type.Object({
 })
 
 export const Response = Type.Object({
-  users: Type.Array(TUserInfo),
+  user: TUserInfo,
 })
 
 export const handler = async (input: Static<typeof Input>, _: HandlerContext): Promise<Static<typeof Response>> => {
   try {
     const result = await db.select().from(users).where(eq(users.username, input.username))
-    return { users: result.map(encodeUserInfo) }
+    return { user: encodeUserInfo(result[0]) }
   } catch (error) {
-    Log.shared.error("Failed to find user", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to find user")
+    Log.shared.error("Failed to get user", error)
+    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to get user")
   }
 }
