@@ -61,9 +61,9 @@ struct MainView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("Create Space") {
-                        showSheet = true
-                    }
+//                    Button("Create Space") {
+//                        showSheet = true
+//                    }
                     Button("Logout", role: .destructive) {
                         Auth.shared.logOut()
                         do {
