@@ -52,6 +52,11 @@ import {
   Input as VerifySmsCodeInput,
   Response as VerifySmsCodeResponse,
 } from "@in/server/methods/verifySmsCode"
+import {
+  handler as findUserHandler,
+  Input as FindUserInput,
+  Response as FindUserResponse,
+} from "@in/server/methods/findUser"
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
@@ -70,6 +75,7 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(makeApiRoute("/getSpace", GetSpaceInput, GetSpaceResponse, getSpaceHandler))
       .use(makeApiRoute("/checkUsername", CheckUsernameInput, CheckUsernameResponse, checkUsernameHandler))
       .use(makeApiRoute("/createThread", CreateThreadInput, CreateThreadResponse, createThreadHandler))
+      .use(makeApiRoute("/findUser", FindUserInput, FindUserResponse, findUserHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }
