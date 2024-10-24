@@ -53,7 +53,6 @@ struct MainView: View {
                     Image(systemName: "house.fill")
                         .font(.callout)
                         .foregroundColor(.secondary)
-
                         .padding(.trailing, 4)
                     Text("Home")
                         .font(.title3)
@@ -77,6 +76,8 @@ struct MainView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .tint(Color.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
             }
         })
