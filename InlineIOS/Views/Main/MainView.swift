@@ -104,6 +104,23 @@ struct EmptyStateView: View {
             Text("Create a space or start a DM")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
+            HStack {
+                Button {
+                    // TODO: Create Space
+                } label: {
+                    Text("Create Space")
+                }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+
+                Button {
+                    // TODO: Start DM
+                } label: {
+                    Text("New DM")
+                }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+            }
         }
         .padding()
     }
