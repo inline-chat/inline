@@ -99,7 +99,7 @@ struct OnboardingEnterCode: View {
                 
                 Auth.shared.saveToken(result.token)
                 Auth.shared.saveCurrentUserId(userId: result.userId)
-                try AppDatabase.authenticated()
+                try await AppDatabase.authenticated()
                     
                 // todo ...
                 if result.user.firstName == nil {

@@ -122,6 +122,11 @@ public extension AppDatabase {
         
         Log.shared.info("Database successfully deleted.")
     }
+    
+    
+    static func loggedOut() throws {
+        try Self.clearDB()
+    }
 }
 
 public extension AppDatabase {
