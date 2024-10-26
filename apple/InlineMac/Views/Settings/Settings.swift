@@ -43,7 +43,7 @@ struct AccountSettingsView: View {
         Form {
             Button("Log Out", role: .destructive) {
                 Auth.shared.logOut()
-                try? AppDatabase.clearDB()
+                try? AppDatabase.loggedOut()
                 mainWindowViewModel.navigate(.onboarding)
 
                 if let window = NSApplication.shared.keyWindow {

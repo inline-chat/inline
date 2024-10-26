@@ -73,6 +73,13 @@
 			);
 			target = C38A28362CA5AB8F00D3DFB8 /* InlineIOS */;
 		};
+		CD4F9CBD2CCCEB2F006AA93E /* Exceptions for "InlineMac" folder in "InlineMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = CD2661642CA01E3E00EB186F /* InlineMac */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -96,6 +103,9 @@
 		};
 		CD2661662CA01E3E00EB186F /* InlineMac */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				CD4F9CBD2CCCEB2F006AA93E /* Exceptions for "InlineMac" folder in "InlineMac" target */,
+			);
 			path = InlineMac;
 			sourceTree = "<group>";
 		};
@@ -841,6 +851,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineMac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Inline;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -873,6 +884,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineMac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Inline;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
