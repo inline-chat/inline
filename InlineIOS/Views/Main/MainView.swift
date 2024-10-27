@@ -8,7 +8,7 @@ struct MainView: View {
     @EnvironmentStateObject var spaceList: SpaceListViewModel
     @State var user: User? = nil
     @State var showSheet: Bool = false
-
+    @State var showDmSheet: Bool = false
     init() {
         _spaceList = EnvironmentStateObject { env in
             SpaceListViewModel(db: env.appDatabase)
@@ -27,7 +27,7 @@ struct MainView: View {
                 .listStyle(.plain)
                 .padding(.vertical, 8)
             } else {
-                EmptyStateView()
+                EmptyStateView(showDmSheet: $showDmSheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         }
@@ -88,10 +88,16 @@ struct MainView: View {
                 .presentationBackground(.thinMaterial)
                 .presentationCornerRadius(28)
         }
+        .sheet(isPresented: $showDmSheet) {
+            CreateDm(showSheet: $showDmSheet)
+                .presentationBackground(.thinMaterial)
+                .presentationCornerRadius(28)
+        }
     }
 }
 
 struct EmptyStateView: View {
+    @Binding var showDmSheet: Bool
     var body: some View {
         VStack {
             Text("🏡")
@@ -114,7 +120,7 @@ struct EmptyStateView: View {
                 .tint(.secondary)
 
                 Button {
-                    // TODO: Start DM
+                    showDmSheet = true
                 } label: {
                     Text("New DM")
                 }

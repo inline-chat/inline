@@ -93,7 +93,7 @@ struct Code: View {
             do {
                 formState.startLoading()
                 let result = try await api.verifyCode(code: code, email: email)
-
+                print("TOKEN \(result.token)")
                 Auth.shared.saveToken(result.token)
                 Auth.shared.saveCurrentUserId(userId: result.userId)
 
