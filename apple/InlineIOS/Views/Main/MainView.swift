@@ -25,6 +25,8 @@ struct MainView: View {
             if !spaceList.spaces.isEmpty {
                 List(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
                     Text(space.name)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                         .onTapGesture {
                             nav.push(.space(id: space.id))
                         }
@@ -40,6 +42,8 @@ struct MainView: View {
                             .padding(.trailing, 6)
                         Text(chat.title ?? "")
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                     .onTapGesture {
                         nav.push(.chat(id: chat.id))
                     }

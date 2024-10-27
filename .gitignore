@@ -81,3 +81,13 @@ iOSInjectionProject/
 Network Trash Folder
 Temporary Items
 .apdisk
+
+
+.DS_Store
+/Packages
+xcuserdata/
+DerivedData/
+**/.build
+**/.swiftpm/configuration/registries.json
+**/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+**/.netrc
