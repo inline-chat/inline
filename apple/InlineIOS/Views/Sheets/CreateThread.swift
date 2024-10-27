@@ -42,7 +42,7 @@ struct CreateThread: View {
                     Task {
                         do {
                             formState.startLoading()
-                            let threadId = try await dataManager.createThread(spaceId: spaceId, title: name)
+                            let threadId = try await dataManager.createThread(spaceId: spaceId, title: name, peerUserId: nil)
                             formState.succeeded()
                             showSheet = false
                             if let threadId = threadId {

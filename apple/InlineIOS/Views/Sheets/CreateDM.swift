@@ -8,30 +8,51 @@ struct CreateDm: View {
     @State private var searchResults: [User] = []
     @State private var isSearching = false
     @Environment(\.appDatabase) var database
+    @EnvironmentObject var dataManager: DataManager
+    @EnvironmentObject var nav: Navigation
 
     var body: some View {
         NavigationView {
             VStack {
                 TextField("Search username", text: $username)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .padding()
+                    .padding(.horizontal)
+                    .fontWeight(.medium)
+                    .background(.clear)
+                    .font(.body)
                     .onChange(of: username) { newValue in
                         searchUsers(query: newValue)
                     }
-
+//
                 List(searchResults, id: \.id) { user in
                     Button(action: {
-                        selectUser(user)
+                        Task {
+                            do {
+                                if let threadId = try await dataManager.createThread(spaceId: nil, title: user.username ?? user.firstName ?? user.email ?? user.lastName ?? "User", peerUserId: user.id) {
+                                    showSheet = false
+                                    nav.push(.chat(id: threadId))
+                                }
+                            } catch {
+                                Log.shared.error("Failed to create thread", error: error)
+                            }
+                        }
                     }) {
                         HStack {
-                            InitialsCircle(name: user.firstName ?? "User")
+                            InitialsCircle(name: user.firstName ?? "User", size: 25)
                             Text(user.firstName ?? "User")
                         }
                     }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
                 .listStyle(.plain)
             }
-            .navigationTitle("New DM")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Text("New DM")
+                        .fontWeight(.semibold)
+                }
+            }
         }
     }
 

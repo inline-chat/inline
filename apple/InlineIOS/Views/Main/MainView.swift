@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct MainView: View {
@@ -6,12 +7,16 @@ struct MainView: View {
     @Environment(\.appDatabase) var database
     @EnvironmentObject var api: ApiClient
     @EnvironmentStateObject var spaceList: SpaceListViewModel
+    @EnvironmentStateObject var home: HomeViewModel
     @State var user: User? = nil
     @State var showSheet: Bool = false
     @State var showDmSheet: Bool = false
     init() {
         _spaceList = EnvironmentStateObject { env in
             SpaceListViewModel(db: env.appDatabase)
+        }
+        _home = EnvironmentStateObject { env in
+            HomeViewModel(db: env.appDatabase)
         }
     }
 
@@ -26,8 +31,25 @@ struct MainView: View {
                 }
                 .listStyle(.plain)
                 .padding(.vertical, 8)
-            } else {
-                EmptyStateView(showDmSheet: $showDmSheet)
+            }
+
+            if !home.chats.isEmpty {
+                List(home.chats.sorted(by: { $0.date > $1.date })) { chat in
+                    HStack {
+                        InitialsCircle(name: chat.title ?? "", size: 26)
+                            .padding(.trailing, 6)
+                        Text(chat.title ?? "")
+                    }
+                    .onTapGesture {
+                        nav.push(.chat(id: chat.id))
+                    }
+                }
+                .listStyle(.plain)
+                .padding(.vertical, 8)
+            }
+
+            if spaceList.spaces.isEmpty && home.chats.isEmpty {
+                EmptyStateView(showDmSheet: $showDmSheet, showSheet: $showSheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         }
@@ -61,9 +83,18 @@ struct MainView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-//                    Button("Create Space") {
-//                        showSheet = true
-//                    }
+                    Button {
+                        showDmSheet = true
+                    } label: {
+                        Text("New DM")
+                    }
+
+                    Button {
+                        showSheet = true
+                    } label: {
+                        Text("Create Space")
+                    }
+
                     Button("Logout", role: .destructive) {
                         Auth.shared.logOut()
                         do {
@@ -98,6 +129,7 @@ struct MainView: View {
 
 struct EmptyStateView: View {
     @Binding var showDmSheet: Bool
+    @Binding var showSheet: Bool
     var body: some View {
         VStack {
             Text("🏡")
@@ -112,9 +144,10 @@ struct EmptyStateView: View {
                 .foregroundColor(.secondary)
             HStack {
                 Button {
-                    // TODO: Create Space
+                    showSheet = true
                 } label: {
                     Text("Create Space")
+                        .foregroundColor(.primary)
                 }
                 .buttonStyle(.bordered)
                 .tint(.secondary)
@@ -123,6 +156,7 @@ struct EmptyStateView: View {
                     showDmSheet = true
                 } label: {
                     Text("New DM")
+                        .foregroundColor(.primary)
                 }
                 .buttonStyle(.bordered)
                 .tint(.secondary)

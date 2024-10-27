@@ -35,17 +35,31 @@ class DataManager: ObservableObject, @unchecked Sendable {
         return nil
     }
 
-    func createThread(spaceId: Int64, title: String) async throws -> Int64? {
+    func createThread(spaceId: Int64?, title: String, peerUserId: Int64? = nil) async throws -> Int64? {
         do {
-            try await database.dbWriter.write { db in
-                let thread = Chat(date: Date.now, type: .thread, title: title, spaceId: spaceId)
+            return try await database.dbWriter.write { db in
+                let currentUserId = Auth.shared.getCurrentUserId()
+                guard let currentUserId = currentUserId else {
+                    Log.shared.error("Current user not found")
+                    throw NSError(domain: "AuthError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Current user not found"])
+                }
+
+                // Create the chat
+                let thread = Chat(
+                    date: Date.now,
+                    type: .privateChat,
+                    title: title,
+                    spaceId: spaceId,
+                    peerUserId: peerUserId
+                )
                 try thread.save(db)
+
                 return thread.id
             }
         } catch {
             Log.shared.error("Failed to create thread", error: error)
+            throw error
         }
-        return nil
     }
 
     func getSpaces() async throws -> [ApiSpace] {
