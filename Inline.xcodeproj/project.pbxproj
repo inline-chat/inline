@@ -14,6 +14,8 @@
 		C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */; };
 		C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905D2CB9431900B78B8A /* InlineKit */; };
 		C38C90602CB9432200B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905F2CB9432200B78B8A /* InlineKit */; };
+		C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC99182CCE9AF7007F7F77 /* InlineUI */; };
+		C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC991A2CCE9AFF007F7F77 /* InlineUI */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
 		CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CD26CEAB2CB94E7900665A89 /* Sentry */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
@@ -57,6 +59,7 @@
 		C38A28462CA5AB9200D3DFB8 /* InlineIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28502CA5AB9200D3DFB8 /* InlineIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C3AA8E4E2CB942BF00800A03 /* InlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineKit; sourceTree = "<group>"; };
+		C3CC99172CCE9A7E007F7F77 /* InlineUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineUI; sourceTree = "<group>"; };
 		CD2661652CA01E3E00EB186F /* Inline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD2661752CA01E4000EB186F /* InlineMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD26617F2CA01E4000EB186F /* InlineMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -118,6 +121,7 @@
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
+				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
 				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
 			);
@@ -146,6 +150,7 @@
 				CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */,
 				CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */,
 				CDE9601A2CB94D17004C541C /* GRDB in Frameworks */,
+				C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -176,6 +181,7 @@
 		CD2660FB2CA01CAE00EB186F = {
 			isa = PBXGroup;
 			children = (
+				C3CC99172CCE9A7E007F7F77 /* InlineUI */,
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				CD2661782CA01E4000EB186F /* InlineMacTests */,
@@ -228,6 +234,7 @@
 				C38C905D2CB9431900B78B8A /* InlineKit */,
 				C35EC8212CC2A24A0067979B /* InlineKit */,
 				C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */,
+				C3CC99182CCE9AF7007F7F77 /* InlineUI */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -301,6 +308,7 @@
 				CDE960192CB94D17004C541C /* GRDB */,
 				CDE9601B2CB94D1C004C541C /* KeychainSwift */,
 				CD26CEAB2CB94E7900665A89 /* Sentry */,
+				C3CC991A2CCE9AFF007F7F77 /* InlineUI */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -1097,6 +1105,14 @@
 		C38C905F2CB9432200B78B8A /* InlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineKit;
+		};
+		C3CC99182CCE9AF7007F7F77 /* InlineUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineUI;
+		};
+		C3CC991A2CCE9AFF007F7F77 /* InlineUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineUI;
 		};
 		C3E6D5CA2CAE82B00048D2D8 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;

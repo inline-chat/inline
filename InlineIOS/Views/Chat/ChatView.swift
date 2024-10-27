@@ -1,5 +1,6 @@
 import Combine
 import InlineKit
+import InlineUI
 import SwiftUI
 import SwiftUIIntrospect
 
@@ -33,6 +34,9 @@ struct ChatView: View {
                             .foregroundColor(.secondary)
                             .font(.body)
                     }
+
+                    InitialsCircle(name: fullChatViewModel.chat?.title ?? "Chat", size: 26)
+                        .padding(.trailing, 6)
                     Text(fullChatViewModel.chat?.title ?? "Chat")
                         .font(.title3)
                         .fontWeight(.medium)

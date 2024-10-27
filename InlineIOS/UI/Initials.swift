@@ -1,32 +1,42 @@
 import SwiftUI
 
 struct InitialsCircle: View {
-  let name: String
+    let name: String
+    let size: CGFloat
 
-  private var initial: String {
-    String(name.prefix(1).uppercased())
-  }
-
-  private var color: Color {
-    let hash = name.hashValue
-    return Color(hue: Double(abs(hash) % 256) / 256, saturation: 0.7, brightness: 0.9)
-  }
-
-  var body: some View {
-    ZStack {
-      Circle()
-        .fill(color)
-
-      Text(initial)
-        .foregroundColor(.white)
-        .font(.system(size: 1000))
-        .minimumScaleFactor(0.01)
-        .padding(4)
+    private var initials: String {
+        name.components(separatedBy: " ")
+            .prefix(2)
+            .compactMap { $0.first }
+            .map(String.init)
+            .joined()
+            .uppercased()
     }
-    .frame(width: 40, height: 40)
-  }
+
+    private var color: Color {
+        let hash = name.hashValue
+        let grayValue = Double(abs(hash) % 40) / 100 + 0.8 // Range from 0.8 to 0.99
+        return Color(white: grayValue)
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(color)
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
+                )
+
+            Text(initials)
+                .foregroundColor(.gray)
+                .font(.system(size: size * 0.5, weight: .medium))
+                .minimumScaleFactor(0.5)
+        }
+        .frame(width: size, height: size)
+    }
 }
 
 #Preview {
-  InitialsCircle(name: "John Doe")
+    InitialsCircle(name: "John Doe", size: 40)
 }
