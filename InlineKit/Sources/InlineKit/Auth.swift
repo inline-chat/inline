@@ -42,7 +42,7 @@ public final class Auth: @unchecked Sendable {
         cachedUserId = getCurrentUserId()
     }
 
-    public var isLoggedIn: Bool {
+public var isLoggedIn: Bool {
         (cachedToken != nil) && (cachedUserId != nil)
     }
 

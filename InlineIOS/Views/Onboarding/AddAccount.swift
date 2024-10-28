@@ -8,143 +8,183 @@ enum UsernameStatus {
 }
 
 struct AddAccount: View {
-    @State var name = ""
-    @State var username = ""
-    @State var animate: Bool = false
-    @State var errorMsg: String = ""
-    @State var isInputValid: Bool = false
+    // MARK: - State
 
-    @FocusState private var isFocused: Bool
-    @FocusState private var isUsernameFocused: Bool
+    @State private var fullName = ""
+    @State private var username = ""
+    @State private var animate = false
+    @State private var errorMsg = ""
+    @State private var isInputValid = false
+    @State private var usernameStatus: UsernameStatus = .checking
 
-    private var placeHolder: String = "Dena"
+    // MARK: - Focus Management
 
-    @EnvironmentObject var nav: Navigation
-    @EnvironmentObject var api: ApiClient
-    @EnvironmentObject var userData: UserData
-    @Environment(\.appDatabase) var database
+    enum Field: Hashable {
+        case fullName
+        case username
+    }
 
-    @State var usernameStatus: UsernameStatus = .checking
+    @FocusState private var focusedField: Field?
 
-    @FormState var formState
+    // MARK: - Environment
+
+    @EnvironmentObject private var nav: Navigation
+    @EnvironmentObject private var api: ApiClient
+    @Environment(\.appDatabase) private var database
+    @FormState private var formState
+
+    // MARK: - Constants
+
+    private let placeHolder = "Dena"
+
+    // MARK: - Body
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            AnimatedLabel(animate: $animate, text: "Enter the name")
-            TextField(placeHolder, text: $name)
-                .focused($isFocused)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .font(.title2)
-                .fontWeight(.semibold)
-                .padding(.vertical, 8)
-                .onChange(of: isFocused) { _, newValue in
-                    withAnimation(.smooth(duration: 0.15)) {
-                        animate = newValue
-                    }
-                }
-                .onSubmit {
-                    isUsernameFocused = true
-                }
-            TextField("Username", text: $username)
-                .focused($isUsernameFocused)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .font(.title2)
-                .fontWeight(.semibold)
-                .padding(.vertical, 8)
-                .onChange(of: username) { _, newValue in
-                    errorMsg = ""
-                    let trimmedUsername = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmedUsername.isEmpty && trimmedUsername.count >= 2 {
-                        withAnimation(.smooth(duration: 0.15)) {
-                            usernameStatus = .checking
-                        }
-                        Task {
-                            do {
-                                try? await Task.sleep(for: .seconds(1.8))
-                                let result = try await api.checkUsername(username: trimmedUsername)
-
-                                withAnimation(.smooth(duration: 0.15)) {
-                                    usernameStatus = result.available ? .available : .taken
-                                }
-
-                            } catch {
-                                Log.shared.error("Failed to check username", error: error)
-                            }
-                        }
-                    } else {
-                        usernameStatus = .checking
-                    }
-                }
-                .overlay(alignment: .trailing) {
-                    if username.count >= 2 {
-                        switch usernameStatus {
-                        case .checking:
-                            Image(systemName: "hourglass")
-                                .font(.callout)
-                                .foregroundColor(.secondary)
-                        case .available:
-                            Image(systemName: "checkmark.circle")
-                                .font(.callout)
-                                .foregroundColor(.green)
-                        case .taken:
-                            Image(systemName: "xmark.circle")
-                                .font(.callout)
-                                .foregroundColor(.red)
-                        }
-                    }
-                }
-                .onSubmit {
-                    submitAccount()
-                }
-
-            Text(errorMsg)
-                .font(.callout)
-                .foregroundColor(.red)
-                .padding(.top, 8)
+            nameSection
+            usernameSection
+            errorSection
         }
         .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .safeAreaInset(edge: .bottom) {
-            Button(formState.isLoading ? "Creating Account..." : "Continue") {
-                submitAccount()
+        .safeAreaInset(edge: .bottom) { bottomButton }
+        .onChange(of: fullName) { validateInput() }
+        .onChange(of: username) { validateInput() }
+        .onAppear { focusedField = .fullName }
+    }
+
+    // MARK: - View Components
+
+    private var nameSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            AnimatedLabel(animate: $animate, text: "Setup your profile")
+            TextField(placeHolder, text: $fullName)
+                .focused($focusedField, equals: .fullName)
+                .textContentType(.name)
+                .textInputAutocapitalization(.words)
+                .font(.title2)
+                .fontWeight(.semibold)
+                .padding(.vertical, 8)
+                .onChange(of: focusedField) { _, newValue in
+                    withAnimation(.smooth(duration: 0.15)) {
+                        animate = newValue == .fullName
+                    }
+                }
+                .onSubmit { focusedField = .username }
+        }
+    }
+
+    private var usernameSection: some View {
+        TextField("Username", text: $username)
+            .focused($focusedField, equals: .username)
+            .textContentType(.username)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled(true)
+            .font(.title2)
+            .fontWeight(.semibold)
+            .padding(.vertical, 8)
+            .onChange(of: username) { _, newValue in
+                handleUsernameChange(newValue)
             }
-            .buttonStyle(SimpleButtonStyle())
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, OnboardingUtils.shared.hPadding)
-            .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-            .disabled(formState.isLoading)
-            .opacity(formState.isLoading ? 0.5 : 1)
+            .overlay(alignment: .trailing) {
+                usernameStatusIndicator
+            }
+            .onSubmit { submitAccount() }
+    }
+
+    @ViewBuilder
+    private var usernameStatusIndicator: some View {
+        if username.count >= 2 {
+            switch usernameStatus {
+            case .checking:
+                Image(systemName: "hourglass")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+            case .available:
+                Image(systemName: "checkmark.circle")
+                    .font(.callout)
+                    .foregroundColor(.green)
+            case .taken:
+                Image(systemName: "xmark.circle")
+                    .font(.callout)
+                    .foregroundColor(.red)
+            }
         }
-        .onChange(of: name) { _, _ in
-            validateInput()
+    }
+
+    private var errorSection: some View {
+        Text(errorMsg)
+            .font(.callout)
+            .foregroundColor(.red)
+            .padding(.top, 8)
+    }
+
+    private var bottomButton: some View {
+        Button(formState.isLoading ? "Creating Account..." : "Continue") {
+            submitAccount()
         }
-        .onChange(of: username) { _, _ in
-            validateInput()
+        .buttonStyle(SimpleButtonStyle())
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, OnboardingUtils.shared.hPadding)
+        .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+        .disabled(formState.isLoading)
+        .opacity(formState.isLoading ? 0.5 : 1)
+    }
+
+    // MARK: - Helper Methods
+
+    private func handleUsernameChange(_ newValue: String) {
+        errorMsg = ""
+        let trimmedUsername = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !trimmedUsername.isEmpty && trimmedUsername.count >= 2 {
+            checkUsername(trimmedUsername)
+        } else {
+            usernameStatus = .checking
+        }
+    }
+
+    private func checkUsername(_ username: String) {
+        Task {
+            do {
+                usernameStatus = .checking
+                try? await Task.sleep(for: .seconds(0.5))
+                let result = try await api.checkUsername(username: username)
+
+                withAnimation(.smooth(duration: 0.15)) {
+                    usernameStatus = result.available ? .available : .taken
+                }
+            } catch {
+                Log.shared.error("Failed to check username", error: error)
+            }
         }
     }
 
     private func validateInput() {
         errorMsg = ""
-        isInputValid = !name.isEmpty && !username.isEmpty && usernameStatus == .available
+        isInputValid = !fullName.isEmpty && !username.isEmpty && usernameStatus == .available
     }
 
-    func submitAccount() {
+    private func submitAccount() {
         Task {
             do {
                 formState.startLoading()
-                guard !name.isEmpty else {
+                guard !fullName.isEmpty else {
                     errorMsg = "Please enter your name"
                     formState.reset()
                     return
                 }
-                let result = try await api.updateProfile(firstName: name, lastName: "", username: username)
 
-                let user = User(from: result.user)
+                let (firstName, lastName) = parseNameComponents(from: fullName)
+                let result = try await api.updateProfile(
+                    firstName: firstName,
+                    lastName: lastName,
+                    username: username.lowercased()
+                )
+
+                print(result.user)
                 try await database.dbWriter.write { db in
-                    try user.save(db)
+                    try User(from: result.user).save(db)
                 }
 
                 formState.reset()
@@ -156,6 +196,17 @@ struct AddAccount: View {
                 isInputValid = false
             }
         }
+    }
+
+    private func parseNameComponents(from fullName: String) -> (firstName: String, lastName: String?) {
+        let formatter = PersonNameComponentsFormatter()
+        if let components = formatter.personNameComponents(from: fullName) {
+            if components.givenName == nil {
+                return (fullName, nil)
+            }
+            return (components.givenName ?? fullName, components.familyName)
+        }
+        return (fullName, nil)
     }
 }
 

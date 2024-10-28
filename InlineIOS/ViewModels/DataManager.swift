@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import InlineKit
 
 class DataManager: ObservableObject, @unchecked Sendable {
@@ -42,6 +43,10 @@ class DataManager: ObservableObject, @unchecked Sendable {
                 guard let currentUserId = currentUserId else {
                     Log.shared.error("Current user not found")
                     throw NSError(domain: "AuthError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Current user not found"])
+                }
+
+                if let existingThread = try Chat.filter(Column("peerUserId") == peerUserId).fetchOne(db) {
+                    return existingThread.id
                 }
 
                 // Create the chat

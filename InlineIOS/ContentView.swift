@@ -24,7 +24,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack(path: $nav.path) {
             VStack {
-                if Auth.shared.getToken() != nil {
+                if Auth.shared.isLoggedIn {
                     MainView()
                 } else {
                     Welcome()
