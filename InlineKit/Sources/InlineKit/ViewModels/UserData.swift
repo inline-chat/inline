@@ -16,9 +16,10 @@ public final class UserDataViewModel: ObservableObject {
     }
 
     func getUserData() {
+        let userId = self.userId
         cancellable = ValueObservation
             .tracking { db in
-                try User.fetchOne(db, id: self.userId)
+                try User.fetchOne(db, id: userId)
             }
             .publisher(in: db.dbWriter, scheduling: .immediate)
             .sink(
