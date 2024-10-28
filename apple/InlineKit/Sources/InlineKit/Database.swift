@@ -97,9 +97,9 @@ public extension AppDatabase {
         if let token = Auth.shared.getToken() {
             try await AppDatabase.shared.dbWriter
                 .barrierWriteWithoutTransaction { db in
-                try db.changePassphrase(token)
-                // maybe dbPool.invalidateReadOnlyConnections()???
-            }
+                    try db.changePassphrase(token)
+                    // maybe dbPool.invalidateReadOnlyConnections()???
+                }
         } else {
             Log.shared.warning("AppDatabase.authenticated called without token")
         }
@@ -109,23 +109,21 @@ public extension AppDatabase {
         _ = try AppDatabase.shared.dbWriter.write { db in
             try User.deleteAll(db)
         }
-        
-        
+
         // Optionally, delete the database file
         // Uncomment the next line if you want to delete the file
         // try deleteDatabaseFile()
-        
+
         // Reset the database passphrase to a default value
         try AppDatabase.shared.dbWriter.write { db in
             try db.changePassphrase("123")
         }
-        
+
         Log.shared.info("Database successfully deleted.")
     }
-    
-    
+
     static func loggedOut() throws {
-        try Self.clearDB()
+        try clearDB()
     }
 }
 
@@ -138,7 +136,7 @@ public extension AppDatabase {
         )
         let directoryURL = appSupportURL.appendingPathComponent("Database", isDirectory: true)
         let databaseURL = directoryURL.appendingPathComponent("db.sqlite")
-        
+
         if fileManager.fileExists(atPath: databaseURL.path) {
             try fileManager.removeItem(at: databaseURL)
             Log.shared.info("Database file successfully deleted.")
@@ -147,7 +145,6 @@ public extension AppDatabase {
         }
     }
 }
-
 
 // MARK: - Database Access: Reads
 
@@ -194,7 +191,21 @@ public extension AppDatabase {
             // * The device is out of space.
             // * The database could not be migrated to its latest schema version.
             // Check the error message to determine what the actual problem was.
-            fatalError("Unresolved error \(error)")
+            print("Unresolved error \(error)")
+
+            // handle db password issue and create a new one
+            if error.localizedDescription.contains("SQLite error 26") {
+                // re-create database and re-run
+                do {
+                    print("Re-creating database because token was lost")
+                    try AppDatabase.deleteDatabaseFile()
+                    return AppDatabase.makeShared()
+                } catch {
+                    fatalError("Unresolved error \(error)")
+                }
+            } else {
+                fatalError("Unresolved error \(error)")
+            }
         }
     }
 

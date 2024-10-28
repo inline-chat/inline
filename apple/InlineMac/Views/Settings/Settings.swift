@@ -26,13 +26,18 @@ struct SettingsView: View {
             }
             .tag(Tabs.account)
         }
+        .scenePadding()
         .navigationTitle("Settings")
     }
 }
 
 struct GeneralSettingsView: View {
+    @State var launchAtLogin: Bool = false
+
     var body: some View {
-        Text("Welcome to Inline!").padding(40)
+        Form {
+            Toggle("Launch at Login", isOn: self.$launchAtLogin)
+        }
     }
 }
 
@@ -40,17 +45,38 @@ struct AccountSettingsView: View {
     @EnvironmentObject private var mainWindowViewModel: MainWindowViewModel
 
     var body: some View {
-        Form {
-            Button("Log Out", role: .destructive) {
-                Auth.shared.logOut()
-                try? AppDatabase.loggedOut()
-                mainWindowViewModel.navigate(.onboarding)
+        HStack {
+            UserProfile()
+            Form {
+                Button("Log Out", role: .destructive) {
+                    Auth.shared.logOut()
+                    try? AppDatabase.loggedOut()
+                    self.mainWindowViewModel.navigate(.onboarding)
 
-                if let window = NSApplication.shared.keyWindow {
-                    window.close()
+                    if let window = NSApplication.shared.keyWindow {
+                        window.close()
+                    }
+                }
+            }.padding(40)
+        }
+    }
+
+    struct UserProfile: View {
+        var body: some View {
+            HStack {
+//                TODO: Initials
+                Circle()
+                    .foregroundStyle(.orange)
+                    .frame(width: 32, height: 32)
+
+                VStack(alignment: .leading) {
+                    Text("Mo")
+                        .font(.body)
+                    Text("mo@inline.chat")
+                        .font(.footnote)
                 }
             }
-        }.padding(40)
+        }
     }
 }
 

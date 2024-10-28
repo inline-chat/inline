@@ -19,6 +19,7 @@
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)keychainGroup</string>
+		<string>$(AppIdentifierPrefix)chat.inline.InlineMac</string>
 	</array>
 </dict>
 </plist>

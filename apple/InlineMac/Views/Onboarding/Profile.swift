@@ -99,6 +99,8 @@ struct OnboardingProfile: View {
                 try await database.dbWriter.write { db in
                     try User(from: result.user).save(db)
                 }
+                
+                self.onboardingViewModel.navigateAfterLogin()
             } catch {
                 formState.failed(error: error.localizedDescription)
             }

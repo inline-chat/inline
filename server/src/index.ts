@@ -10,10 +10,11 @@ Sentry.init({
 // Entry point for your Elysia server, ideal place for setting global plugin
 import { root } from "@in/server/controllers/root"
 import { waitlist } from "@in/server/controllers/extra/waitlist"
-import { Elysia } from "elysia"
+import { Elysia, t } from "elysia"
 import { there } from "./controllers/extra/there"
 import swagger from "@elysiajs/swagger"
 import { apiV1 } from "@in/server/controllers/v1"
+import { wsPrototype } from "@in/server/ws/prototype"
 
 const port = process.env["PORT"] || 8000
 
@@ -24,6 +25,7 @@ const app = new Elysia()
   .use(waitlist)
   .use(there)
   .use(apiV1)
+  .use(wsPrototype)
   .use(
     swagger({
       path: "/v1/docs",
@@ -31,10 +33,7 @@ const app = new Elysia()
       scalarConfig: {
         servers: [
           {
-            url:
-              process.env["NODE_ENV"] === "production"
-                ? "https://api.inline.chat"
-                : "http://localhost:8000",
+            url: process.env["NODE_ENV"] === "production" ? "https://api.inline.chat" : "http://localhost:8000",
             description: "Production API server",
           },
         ],
@@ -61,7 +60,5 @@ const app = new Elysia()
 
 // Run
 app.listen(port, (server) => {
-  console.info(
-    `🚧 Server is running on http://${server.hostname}:${server.port}`,
-  )
+  console.info(`🚧 Server is running on http://${server.hostname}:${server.port}`)
 })
