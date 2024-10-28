@@ -9,6 +9,7 @@ public final class Auth: @unchecked Sendable {
     private var cachedUserId: Int64?
     private let keychain: KeychainSwift
     private var accessGroup: String
+    private var keyChainPrefix: String
 
     public func saveToken(_ token: String) {
         keychain.set(token, forKey: "token")
@@ -24,8 +25,18 @@ public final class Auth: @unchecked Sendable {
     }
 
     private init() {
-        accessGroup = "2487AN8AL4.keychainGroup"
-        keychain = KeychainSwift()
+        #if os(macOS)
+            accessGroup = "2487AN8AL4.chat.inline.InlineMac"
+            #if DEBUG
+                keyChainPrefix = "inline_dev_"
+            #else
+                keyChainPrefix = "inline_"
+            #endif
+        #else
+            accessGroup = "2487AN8AL4.keychainGroup"
+            keyChainPrefix = ""
+        #endif
+        keychain = KeychainSwift(keyPrefix: keyChainPrefix)
         keychain.accessGroup = accessGroup
         cachedToken = keychain.get("token")
         cachedUserId = getCurrentUserId()
