@@ -25,24 +25,21 @@ struct ChatView: View {
             inputArea
         }
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden()
+//        .navigationBarBackButtonHidden()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 HStack(spacing: 2) {
-                    Button(action: { nav.pop() }) {
-                        Image(systemName: "chevron.left")
-                            .foregroundColor(.secondary)
-                            .font(.body)
-                    }
-
                     InitialsCircle(name: fullChatViewModel.chat?.title ?? "Chat", size: 26)
                         .padding(.trailing, 6)
                     Text(fullChatViewModel.chat?.title ?? "Chat")
                         .font(.title3)
                         .fontWeight(.medium)
                 }
+                .padding(.leading, -18)
             }
+ 
         }
+        .toolbarRole(.editor)
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }

@@ -14,8 +14,12 @@ struct MemberView: View {
     }
 
     var body: some View {
-        if let user = userDataViewModel.user {
-            Text(user.firstName ?? "")
+        HStack {
+            if let user = userDataViewModel.user {
+                InitialsCircle(name: user.firstName ?? "", size: 25)
+                    .padding(.trailing, 4)
+                Text(user.firstName ?? "")
+            }
         }
     }
 }

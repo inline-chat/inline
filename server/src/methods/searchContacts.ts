@@ -3,7 +3,7 @@ import { users } from "@in/server/db/schema"
 import { encodeUserInfo, TUserInfo } from "@in/server/models"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
-import { eq, sql } from "drizzle-orm"
+import { and, eq, not, sql } from "drizzle-orm"
 import { Type, type Static } from "@sinclair/typebox"
 
 type Context = {
@@ -28,7 +28,7 @@ export const handler = async (
       .select()
       .from(users)
       // case-insensitive version of the SQL LIKE
-      .where(sql`${users.username} ilike ${"%" + input.q + "%"}`)
+      .where(and(sql`${users.username} ilike ${"%" + input.q + "%"}`, not(eq(users.id, currentUserId))))
       .limit(input.limit ?? 10)
 
     return { users: result.map(encodeUserInfo) }

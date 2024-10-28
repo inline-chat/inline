@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { eq } from "drizzle-orm"
+import { and, eq, not } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
@@ -14,9 +14,15 @@ export const Response = Type.Object({
   available: Type.Boolean(),
 })
 
-export const handler = async (input: Static<typeof Input>, _: HandlerContext): Promise<Static<typeof Response>> => {
+export const handler = async (
+  input: Static<typeof Input>,
+  context: HandlerContext,
+): Promise<Static<typeof Response>> => {
   try {
-    const result = await db.select().from(users).where(eq(users.username, input.username))
+    const result = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.username, input.username), not(eq(users.id, context.currentUserId))))
 
     return { available: result.length === 0 }
   } catch (error) {
