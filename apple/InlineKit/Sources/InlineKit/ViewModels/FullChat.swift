@@ -19,9 +19,10 @@ public final class FullChatViewModel: ObservableObject {
     }
 
     func fetchMessages() {
+        let chatId = self.chatId
         messagesCancellable = ValueObservation
             .tracking { db in
-                try Message.filter(Column("chatId") == self.chatId)
+                try Message.filter(Column("chatId") == chatId)
                     .order(Column("date").desc)
                     .fetchAll(db)
             }
@@ -35,9 +36,10 @@ public final class FullChatViewModel: ObservableObject {
     }
 
     func fetchChat() {
+        let chatId = self.chatId
         chatCancellable = ValueObservation
             .tracking { db in
-                try Chat.fetchOne(db, id: self.chatId)
+                try Chat.fetchOne(db, id: chatId)
             }
             .publisher(in: db.dbWriter, scheduling: .immediate)
             .sink(

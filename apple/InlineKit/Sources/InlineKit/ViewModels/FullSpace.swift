@@ -22,9 +22,10 @@ public final class FullSpaceViewModel: ObservableObject {
     }
 
     func fetchSpace() {
+        let spaceId = self.spaceId
         spaceSancellable = ValueObservation
             .tracking { db in
-                try Space.fetchOne(db, id: self.spaceId)
+                try Space.fetchOne(db, id: spaceId)
             }
             .publisher(in: db.dbWriter, scheduling: .immediate)
             .sink(
@@ -35,9 +36,10 @@ public final class FullSpaceViewModel: ObservableObject {
     }
 
     func fetchMembers() {
+        let spaceId = self.spaceId
         membersSancellable = ValueObservation
             .tracking { db in
-                try Member.filter(Column("spaceId") == self.spaceId)
+                try Member.filter(Column("spaceId") == spaceId)
                     .fetchAll(db)
             }
             .publisher(in: db.dbWriter, scheduling: .immediate)
@@ -49,9 +51,10 @@ public final class FullSpaceViewModel: ObservableObject {
     }
 
     func fetchChats() {
+        let spaceId = self.spaceId
         chatsSancellable = ValueObservation
             .tracking { db in
-                try Chat.filter(Column("spaceId") == self.spaceId)
+                try Chat.filter(Column("spaceId") == spaceId)
                     .fetchAll(db)
             }
             .publisher(in: db.dbWriter, scheduling: .immediate)

@@ -19,7 +19,6 @@
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
 		CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CD26CEAB2CB94E7900665A89 /* Sentry */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
-		CDE9601A2CB94D17004C541C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960192CB94D17004C541C /* GRDB */; };
 		CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CDE9601B2CB94D1C004C541C /* KeychainSwift */; };
 /* End PBXBuildFile section */
 
@@ -159,7 +158,6 @@
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
 				CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */,
 				CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */,
-				CDE9601A2CB94D17004C541C /* GRDB in Frameworks */,
 				C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -315,7 +313,6 @@
 			packageProductDependencies = (
 				C38C905F2CB9432200B78B8A /* InlineKit */,
 				CDE960152CB94C4F004C541C /* SwiftUIIntrospect */,
-				CDE960192CB94D17004C541C /* GRDB */,
 				CDE9601B2CB94D1C004C541C /* KeychainSwift */,
 				CD26CEAB2CB94E7900665A89 /* Sentry */,
 				C3CC991A2CCE9AFF007F7F77 /* InlineUI */,
@@ -1070,10 +1067,10 @@
 		};
 		C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/duckduckgo/GRDB.swift";
+			repositoryURL = "https://github.com/inlinehq/GRDB.swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.4.2;
+				minimumVersion = 3.0.6;
 			};
 		};
 		CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */ = {
@@ -1139,11 +1136,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */;
 			productName = SwiftUIIntrospect;
-		};
-		CDE960192CB94D17004C541C /* GRDB */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
-			productName = GRDB;
 		};
 		CDE9601B2CB94D1C004C541C /* KeychainSwift */ = {
 			isa = XCSwiftPackageProductDependency;
