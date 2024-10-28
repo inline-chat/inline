@@ -12,6 +12,12 @@ struct CreateDm: View {
     @EnvironmentObject var nav: Navigation
     @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
 
+    enum Field {
+        case search
+    }
+
+    @FocusState private var focusedField: Field?
+
     var body: some View {
         NavigationView {
             VStack {
@@ -20,12 +26,16 @@ struct CreateDm: View {
                     .fontWeight(.medium)
                     .background(.clear)
                     .font(.body)
+                    .focused($focusedField, equals: .search)
                     .onChange(of: username) { newValue in
                         searchDebouncer.input = newValue
                     }
                     .onReceive(searchDebouncer.$debouncedInput) { debouncedValue in
                         guard let value = debouncedValue else { return }
                         searchUsers(query: value)
+                    }
+                    .onAppear {
+                        focusedField = .search
                     }
 
                 List(searchResults, id: \.id) { user in
@@ -45,9 +55,16 @@ struct CreateDm: View {
                             }
                         }
                     }) {
-                        HStack {
-                            InitialsCircle(name: user.firstName ?? "User", size: 25)
-                            Text(user.firstName ?? "User")
+                        HStack(alignment: .top) {
+                            InitialsCircle(name: user.firstName ?? "User", size: 28)
+                                .padding(.trailing, 4)
+                            VStack(alignment: .leading) {
+                                Text(user.firstName ?? "User")
+                                Text(user.username ?? "")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.top, -4)
                         }
                     }
                     .listRowBackground(Color.clear)

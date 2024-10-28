@@ -22,39 +22,47 @@ struct MainView: View {
 
     var body: some View {
         VStack {
-            if !spaceList.spaces.isEmpty {
-                List(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
-                    Text(space.name)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            nav.push(.space(id: space.id))
-                        }
-                }
-                .listStyle(.plain)
-                .padding(.vertical, 8)
-            }
-
-            if !home.chats.isEmpty {
-                List(home.chats.sorted(by: { $0.date > $1.date })) { chat in
-                    HStack {
-                        InitialsCircle(name: chat.title ?? "", size: 26)
-                            .padding(.trailing, 6)
-                        Text(chat.title ?? "")
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        nav.push(.chat(id: chat.id))
-                    }
-                }
-                .listStyle(.plain)
-                .padding(.vertical, 8)
-            }
-
             if spaceList.spaces.isEmpty && home.chats.isEmpty {
                 EmptyStateView(showDmSheet: $showDmSheet, showSheet: $showSheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else if !spaceList.spaces.isEmpty || !home.chats.isEmpty {
+                List {
+                    if !spaceList.spaces.isEmpty {
+                        Section(header: Text("Spaces")) {
+                            ForEach(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
+                                HStack {
+                                    InitialsCircle(name: space.name, size: 25)
+                                        .padding(.trailing, 4)
+                                    Text(space.name)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    nav.push(.space(id: space.id))
+                                }
+                            }
+                        }
+                    }
+
+                    if !home.chats.isEmpty {
+                        Section(header: Text("Direct Messages")) {
+                            ForEach(home.chats.sorted(by: { $0.date > $1.date })) { chat in
+                                HStack {
+                                    InitialsCircle(name: chat.title ?? "", size: 26)
+                                        .padding(.trailing, 6)
+                                    Text(chat.title ?? "")
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    nav.push(.chat(id: chat.id))
+                                }
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .padding(.vertical, 8)
             }
         }
         .onAppear {

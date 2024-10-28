@@ -32,10 +32,16 @@ struct SpaceView: View {
                 if let chats = fullSpaceViewModel.chats {
                     Section(header: Text("Threads")) {
                         ForEach(chats) { chat in
-                            Text(chat.title ?? "Thread")
-                                .onTapGesture {
-                                    nav.push(.chat(id: chat.id))
-                                }
+                            HStack {
+                                InitialsCircle(name: chat.title ?? "Thread", size: 25)
+                                    .padding(.trailing, 4)
+                                Text(chat.title ?? "Thread")
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                nav.push(.chat(id: chat.id))
+                            }
                         }
                     }
                 }
@@ -47,21 +53,16 @@ struct SpaceView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 HStack(spacing: 2) {
-                    Button(action: {
-                        nav.popToRoot()
-                    }) {
-                        Image(systemName: "chevron.left")
-                            .foregroundColor(.secondary)
-                            .font(.callout)
-                    }
-
                     if let space = fullSpaceViewModel.space {
+                        InitialsCircle(name: space.name ?? "Space", size: 26)
+                            .padding(.trailing, 6)
                         Text(space.name)
                             .font(.title3)
                             .fontWeight(.medium)
                             .foregroundColor(.primary)
                     }
                 }
+                .padding(.leading, -18)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
@@ -76,7 +77,8 @@ struct SpaceView: View {
                 }
             }
         }
-        .navigationBarBackButtonHidden(true)
+        .toolbarRole(.editor)
+
         .sheet(isPresented: $openCreateThreadSheet) {
             CreateThread(showSheet: $openCreateThreadSheet, spaceId: spaceId)
                 .presentationBackground(.thinMaterial)
