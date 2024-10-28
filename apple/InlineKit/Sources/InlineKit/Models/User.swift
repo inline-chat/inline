@@ -55,6 +55,7 @@ public extension User {
         email = apiUser.email
         firstName = apiUser.firstName
         lastName = apiUser.lastName
+        username = apiUser.username
         date = Self.fromTimestamp(from: apiUser.date)
     }
 
@@ -70,6 +71,7 @@ public extension User {
         case firstName
         case lastName
         case date
+        case username
     }
 
     init(from decoder: Decoder) throws {
@@ -79,6 +81,7 @@ public extension User {
         email = try container.decode(String.self, forKey: .email)
         firstName = try container.decode(String.self, forKey: .firstName)
         lastName = try container.decodeIfPresent(String.self, forKey: .lastName)
+        username = try container.decodeIfPresent(String.self, forKey: .username)
         date = try container.decodeIfPresent(Date.self, forKey: .date) ?? .now
     }
 }

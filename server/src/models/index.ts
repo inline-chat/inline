@@ -1,28 +1,15 @@
 // https://effect.website/docs/guides/schema/basic-usage
 
 import { t } from "elysia"
-import {
-  DbChat,
-  DbMember,
-  DbSpace,
-  DbUser,
-  type DbMessage,
-} from "@in/server/db/schema"
-import {
-  Type,
-  type Static,
-  type TSchema,
-  type StaticEncode,
-  type StaticDecode,
-} from "@sinclair/typebox"
+import { DbChat, DbMember, DbSpace, DbUser, type DbMessage } from "@in/server/db/schema"
+import { Type, type Static, type TSchema, type StaticEncode, type StaticDecode } from "@sinclair/typebox"
 import { Value } from "@sinclair/typebox/value"
 
 // const BigIntString = Type.Transform(Type.BigInt())
 //   .Decode((value) => String(value))
 //   .Encode((value) => BigInt(value))
 
-const Optional = <T extends TSchema>(schema: T) =>
-  Type.Union([Type.Null(), Type.Undefined(), schema])
+const Optional = <T extends TSchema>(schema: T) => Type.Union([Type.Null(), Type.Undefined(), schema])
 
 const encodeDate = (date: Date | number): number => {
   return typeof date === "number" ? date : date.getTime()
@@ -48,6 +35,7 @@ export const TUserInfo = Type.Object({
   id: Type.Integer(),
   firstName: Optional(Type.String()),
   lastName: Optional(Type.String()),
+  username: Optional(Type.String()),
   email: Optional(Type.String()),
   date: Type.Integer(),
 })
@@ -64,18 +52,12 @@ export const TMemberInfo = Type.Object({
   id: Type.Integer(),
   userId: Type.Integer(),
   spaceId: Type.Integer(),
-  role: Type.Union([
-    Type.Literal("owner"),
-    Type.Literal("admin"),
-    Type.Literal("member"),
-  ]),
+  role: Type.Union([Type.Literal("owner"), Type.Literal("admin"), Type.Literal("member")]),
   date: Type.Integer(),
 })
 export type TMemberInfo = StaticEncode<typeof TMemberInfo>
 
-export const encodeMemberInfo = (
-  member: DbMember | TMemberInfo,
-): TMemberInfo => {
+export const encodeMemberInfo = (member: DbMember | TMemberInfo): TMemberInfo => {
   return Value.Encode(TMemberInfo, {
     ...member,
     date: encodeDate(member.date),
@@ -109,9 +91,7 @@ export const TMessageInfo = Type.Object({
 })
 
 export type TMessageInfo = StaticEncode<typeof TMessageInfo>
-export const encodeMessageInfo = (
-  message: DbMessage | TMessageInfo,
-): TMessageInfo => {
+export const encodeMessageInfo = (message: DbMessage | TMessageInfo): TMessageInfo => {
   return Value.Encode(TMessageInfo, {
     ...message,
     date: encodeDate(message.date),

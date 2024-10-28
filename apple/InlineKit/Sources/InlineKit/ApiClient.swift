@@ -19,6 +19,7 @@ public enum Path: String {
     case getSpaces
     case createThread
     case checkUsername
+    case searchContacts
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -39,8 +40,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     private func request<T: Decodable & Sendable>(
         _ path: Path,
         queryItems: [URLQueryItem] = [],
-        includeToken: Bool = false) async throws -> T
-    {
+        includeToken: Bool = false
+    ) async throws -> T {
         guard var urlComponents = URLComponents(string: "\(baseURL)/\(path.rawValue)") else {
             throw APIError.invalidURL
         }
@@ -102,12 +103,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             .verifyCode,
             queryItems: [
                 URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
-            ])
+            ]
+        )
     }
 
     public func createSpace(name: String) async throws -> CreateSpace {
         try await request(
-            .createSpace, queryItems: [URLQueryItem(name: "name", value: name)], includeToken: true)
+            .createSpace, queryItems: [URLQueryItem(name: "name", value: name)], includeToken: true
+        )
     }
 
     public func updateProfile(firstName: String?, lastName: String?, username: String?) async throws
@@ -122,7 +125,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             queryItems.append(URLQueryItem(name: "lastName", value: lastName))
         }
         if let username = username {
-            queryItems.append(URLQueryItem(name: "username", value: username))
+            queryItems.append(URLQueryItem(name: "username", value: username ))
         }
 
         return try await request(.updateProfile, queryItems: queryItems, includeToken: true)
@@ -140,13 +143,23 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             queryItems: [
                 URLQueryItem(name: "title", value: title),
                 URLQueryItem(name: "spaceId", value: "\(spaceId)"),
-            ], includeToken: true)
+            ], includeToken: true
+        )
     }
 
     public func checkUsername(username: String) async throws -> CheckUsername {
         try await request(
             .checkUsername, queryItems: [URLQueryItem(name: "username", value: username)],
-            includeToken: true)
+            includeToken: true
+        )
+    }
+
+    public func searchContacts(query: String) async throws -> SearchContacts {
+        try await request(
+            .searchContacts,
+            queryItems: [URLQueryItem(name: "q", value: query)],
+            includeToken: true
+        )
     }
 }
 
@@ -176,7 +189,8 @@ public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
         } else {
             self = try .error(
                 errorCode: values.decode(Int.self, forKey: .errorCode),
-                description: values.decodeIfPresent(String.self, forKey: .description))
+                description: values.decodeIfPresent(String.self, forKey: .description)
+            )
         }
     }
 }
@@ -212,4 +226,8 @@ public struct CreateThread: Codable, Sendable {
 
 public struct CheckUsername: Codable, Sendable {
     public let available: Bool
+}
+
+public struct SearchContacts: Codable, Sendable {
+    public let users: [ApiUser]
 }

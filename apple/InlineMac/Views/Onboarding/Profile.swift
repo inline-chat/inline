@@ -95,7 +95,7 @@ struct OnboardingProfile: View {
                 let result = try await ApiClient.shared
                     .updateProfile(firstName: firstName, lastName: lastName, username: username)
                 
-                // Todo: handle errors
+                // TODO: handle errors
                 try await database.dbWriter.write { db in
                     try User(from: result.user).save(db)
                 }
