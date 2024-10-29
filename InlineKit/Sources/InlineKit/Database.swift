@@ -232,4 +232,16 @@ public extension AppDatabase {
         } catch {}
         return db
     }
+
+    static func emptyWithChat() -> AppDatabase {
+        let db = AppDatabase.empty()
+        do {
+            try db.dbWriter.write { db in
+                let chat = Chat(id: 1234, date: Date.now, type: .thread, title: "Main", spaceId: nil)
+
+                try chat.insert(db)
+            }
+        } catch {}
+        return db
+    }
 }
