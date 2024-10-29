@@ -6,10 +6,12 @@ import InlineKit
 struct InlineApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @StateObject var viewModel = MainWindowViewModel()
+    @StateObject var ws = WebSocketManager()
 
     var body: some Scene {
         WindowGroup(id: "main") {
             MainWindow()
+                .environmentObject(ws)
                 .environmentObject(viewModel)
                 .appDatabase(.shared)
         }
@@ -20,6 +22,7 @@ struct InlineApp: App {
 
         Settings {
             SettingsView()
+                .environmentObject(ws)
                 .environmentObject(viewModel)
                 .appDatabase(.shared)
         }

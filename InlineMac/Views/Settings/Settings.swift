@@ -43,16 +43,27 @@ struct GeneralSettingsView: View {
 
 struct AccountSettingsView: View {
     @EnvironmentObject private var mainWindowViewModel: MainWindowViewModel
+    @EnvironmentObject private var ws: WebSocketManager
 
     var body: some View {
         HStack {
             UserProfile()
             Form {
                 Button("Log Out", role: .destructive) {
+                    // TODO: Extract to toplevel
+                    // Clear creds
                     Auth.shared.logOut()
+                    
+                    // Stop WebSocket
+                    ws.loggedOut()
+                    
+                    // Clear database
                     try? AppDatabase.loggedOut()
+                    
+                    // Navigate outside of the app
                     self.mainWindowViewModel.navigate(.onboarding)
 
+                    // Close Settings
                     if let window = NSApplication.shared.keyWindow {
                         window.close()
                     }

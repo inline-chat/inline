@@ -3,6 +3,7 @@ import SwiftUI
 
 struct OnboardingEnterCode: View {
     @EnvironmentObject var onboardingViewModel: OnboardingViewModel
+    @EnvironmentObject var ws: WebSocketManager
     @FormState var formState
     @State var code = ""
     
@@ -97,11 +98,18 @@ struct OnboardingEnterCode: View {
                     email: self.onboardingViewModel.email
                 )
                 
+                // TODO: Extract to toplevel
+                // Save creds
                 Auth.shared.saveToken(result.token)
                 Auth.shared.saveCurrentUserId(userId: result.userId)
+                
+                // Change passphrase of database
                 try await AppDatabase.authenticated()
+                
+                // Establish WebSocket connection
+                ws.authenticated()
                     
-                // todo ...
+                // Navigate
                 if result.user.firstName == nil {
                     self.onboardingViewModel.navigate(to: .profile)
                 } else {

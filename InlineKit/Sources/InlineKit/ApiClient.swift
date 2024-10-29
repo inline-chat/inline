@@ -25,11 +25,14 @@ public enum Path: String {
 public final class ApiClient: ObservableObject, @unchecked Sendable {
     public static let shared = ApiClient()
     public init() {}
-    var baseURL: String {
+
+    private var baseURL: String {
         #if targetEnvironment(simulator)
             return "http://localhost:8000/v1"
-        #elseif DEBUG
+        #elseif DEBUG && os(iOS)
             return "http://192.168.3.122:8000/v1"
+        #elseif DEBUG && os(macOS)
+            return "http://localhost:8000/v1"
         #else
             return "https://api.inline.chat/v1"
         #endif
@@ -125,7 +128,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             queryItems.append(URLQueryItem(name: "lastName", value: lastName))
         }
         if let username = username {
-            queryItems.append(URLQueryItem(name: "username", value: username ))
+            queryItems.append(URLQueryItem(name: "username", value: username))
         }
 
         return try await request(.updateProfile, queryItems: queryItems, includeToken: true)
