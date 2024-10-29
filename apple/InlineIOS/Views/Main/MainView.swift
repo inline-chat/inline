@@ -11,6 +11,7 @@ struct MainView: View {
     @State var user: User? = nil
     @State var showSheet: Bool = false
     @State var showDmSheet: Bool = false
+
     init() {
         _spaceList = EnvironmentStateObject { env in
             SpaceListViewModel(db: env.appDatabase)
@@ -46,16 +47,16 @@ struct MainView: View {
 
                     if !home.chats.isEmpty {
                         Section(header: Text("Direct Messages")) {
-                            ForEach(home.chats.sorted(by: { $0.date > $1.date })) { chat in
+                            ForEach(home.chats.sorted(by: { $0.chat.date > $1.chat.date }), id: \.chat.id) { chat in
                                 HStack {
-                                    InitialsCircle(name: chat.title ?? "", size: 26)
-                                        .padding(.trailing, 6)
-                                    Text(chat.title ?? "")
+//                                    InitialsCircle(name: chat.type == .private ? chat.peer?.name ?? "" : chat.title ?? "", size: 26)
+//                                        .padding(.trailing, 6)
+//                                    Text(chat.type == .private ? chat.peer?.name ?? "" : chat.title ?? "")
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    nav.push(.chat(id: chat.id))
+                                    nav.push(.chat(id: chat.chat.id))
                                 }
                             }
                         }

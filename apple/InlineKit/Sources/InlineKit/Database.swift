@@ -57,11 +57,12 @@ public extension AppDatabase {
                 t.column("title", .text)
                 t.column("type", .integer).notNull().defaults(to: 0)
                 t.column("date", .datetime).notNull()
+                t.column("lastMessageId", .integer).references("message", column: "id", onDelete: .cascade)
             }
 
             try db.create(table: "message") { t in
-                t.primaryKey("globalId", .integer).notNull().unique()
-                t.column("id", .integer).notNull()
+                t.primaryKey("id", .integer).notNull().unique()
+
                 t.column("chatId", .integer).references("chat", column: "id", onDelete: .cascade)
                 t.column("fromId", .integer).references("user", column: "id", onDelete: .setNull)
                 t.column("date", .datetime).notNull()
