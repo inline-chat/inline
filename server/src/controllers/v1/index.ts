@@ -64,6 +64,12 @@ import {
   Response as SearchContactsResponse,
 } from "@in/server/methods/searchContacts"
 
+import {
+  handler as getChatHistoryHandler,
+  Input as GetChatHistoryInput,
+  Response as GetChatHistoryResponse,
+} from "@in/server/methods/getChatHistory"
+
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
@@ -83,6 +89,7 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(makeApiRoute("/createThread", CreateThreadInput, CreateThreadResponse, createThreadHandler))
       .use(makeApiRoute("/getUser", GetUserInput, GetUserResponse, getUserHandler))
       .use(makeApiRoute("/searchContacts", SearchContactsInput, SearchContactsResponse, searchContactsHandler))
+      .use(makeApiRoute("/getChatHistory", GetChatHistoryInput, GetChatHistoryResponse, getChatHistoryHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }

@@ -15,11 +15,12 @@
     "db:migrate": "cd server && bun run db:migrate"
   },
   "overrides": {
+    "elysia": "=1.1.22",
     "@sinclair/typebox": "0.32.34"
   },
   "dependencies": {
-    "elysia": "^1.1.22",
-    "@sinclair/typebox": "0.32.34"
+    "elysia": "=1.1.22",
+    "@sinclair/typebox": "=0.32.34"
   },
   "devDependencies": {
     "@types/bun": "^1.1.11"
