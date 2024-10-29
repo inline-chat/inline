@@ -59,7 +59,7 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
   path: Path,
   inputType: ISchema | TUndefined,
   outputType: OSchema,
-  method: (input: any, context: HandlerContext) => Promise<TDecodeType<OSchema>>,
+  method: (input: any, context: HandlerContext) => Promise<Static<OSchema>>,
 ) => {
   const response = TMakeApiResponse(outputType)
   const getRoute = new Elysia({ tags: ["GET"] }).use(authenticateGet).get(
@@ -105,7 +105,7 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
   path: Path,
   inputType: ISchema,
   outputType: OSchema,
-  method: (input: any, context: UnauthenticatedHandlerContext) => Promise<TDecodeType<OSchema>>,
+  method: (input: any, context: UnauthenticatedHandlerContext) => Promise<Static<OSchema>>,
 ) => {
   const response = TMakeApiResponse(outputType)
   const getRoute = new Elysia({ tags: ["GET"] }).get(

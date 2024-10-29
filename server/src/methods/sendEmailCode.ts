@@ -57,10 +57,6 @@ const getLoginCode = async (
   let existingUser = Boolean(existingUsers[0])
   let firstName = existingUsers[0]?.firstName ?? undefined
 
-  console.log("existingUsers", existingUsers)
-  console.log("existingUser", existingUser)
-  console.log("firstName", firstName)
-
   // check
   let existingCode = (
     await db
