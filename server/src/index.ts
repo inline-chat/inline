@@ -14,7 +14,7 @@ import { Elysia, t } from "elysia"
 import { there } from "./controllers/extra/there"
 import swagger from "@elysiajs/swagger"
 import { apiV1 } from "@in/server/controllers/v1"
-import { wsPrototype } from "@in/server/ws/prototype"
+import { webSocket } from "@in/server/ws"
 
 const port = process.env["PORT"] || 8000
 
@@ -22,10 +22,10 @@ const port = process.env["PORT"] || 8000
 
 const app = new Elysia()
   .use(root)
+  .use(apiV1)
+  .use(webSocket)
   .use(waitlist)
   .use(there)
-  .use(apiV1)
-  .use(wsPrototype)
   .use(
     swagger({
       path: "/v1/docs",
