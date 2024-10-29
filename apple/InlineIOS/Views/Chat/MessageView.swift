@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MessageView: View {
     let message: Message
+    @Environment(\.appDatabase) var database: AppDatabase
 
     init(message: Message) {
         self.message = message
@@ -18,6 +19,22 @@ struct MessageView: View {
             .cornerRadius(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(message.id)
+            .contextMenu {
+                Button("Copy") {
+                    UIPasteboard.general.string = message.text ?? ""
+                }
+                Button("Delete", role: .destructive) {
+                    Task {
+                        do {
+                            _ = try await database.dbWriter.write { db in
+                                try Message.deleteOne(db, id: message.id)
+                            }
+                        } catch {
+                            Log.shared.error("Failed to delete message", error: error)
+                        }
+                    }
+                }
+            }
     }
 }
 

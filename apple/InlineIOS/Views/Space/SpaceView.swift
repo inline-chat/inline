@@ -51,7 +51,7 @@ struct SpaceView: View {
         .frame(maxWidth: .infinity)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
+            ToolbarItem(placement: .principal) {
                 HStack(spacing: 2) {
                     if let space = fullSpaceViewModel.space {
                         InitialsCircle(name: space.name ?? "Space", size: 26)
@@ -62,7 +62,6 @@ struct SpaceView: View {
                             .foregroundColor(.primary)
                     }
                 }
-                .padding(.leading, -18)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {

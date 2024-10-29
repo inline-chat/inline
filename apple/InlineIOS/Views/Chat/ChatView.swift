@@ -25,9 +25,8 @@ struct ChatView: View {
             inputArea
         }
         .navigationBarTitleDisplayMode(.inline)
-//        .navigationBarBackButtonHidden()
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
+            ToolbarItem(placement: .principal) {
                 HStack(spacing: 2) {
                     InitialsCircle(name: fullChatViewModel.chat?.title ?? "Chat", size: 26)
                         .padding(.trailing, 6)
@@ -35,9 +34,7 @@ struct ChatView: View {
                         .font(.title3)
                         .fontWeight(.medium)
                 }
-                .padding(.leading, -18)
             }
- 
         }
         .toolbarRole(.editor)
         .onTapGesture {
@@ -106,5 +103,12 @@ struct ChatView: View {
         withAnimation {
             proxy.scrollTo(fullChatViewModel.messages.first?.id, anchor: .center)
         }
+    }
+}
+
+#Preview {
+    NavigationStack {
+        ChatView(chatId: 12344)
+            .appDatabase(.emptyWithChat())
     }
 }

@@ -85,9 +85,10 @@ export const encodeChatInfo = (chat: DbChat | TChatInfo): TChatInfo => {
 export const TMessageInfo = Type.Object({
   id: Type.Integer(),
   chatId: Type.Integer(),
-  userId: Type.Integer(),
-  content: Type.String(),
+  fromId: Type.Integer(),
+  text: Type.String(),
   date: Type.Integer(),
+  editDate: Optional(Type.Integer()),
 })
 
 export type TMessageInfo = StaticEncode<typeof TMessageInfo>
