@@ -1,8 +1,14 @@
 import Combine
 import GRDB
 
-public final class HomeViewModel: ObservableObject {
-    @Published public private(set) var chats: [Chat] = []
+public struct ChatItem: Codable, FetchableRecord, PersistableRecord, @unchecked Sendable, Hashable {
+    public var chat: Chat
+    public var peer: User?
+    public var lastMessage: Message?
+}
+
+public final class HomeViewModel: ObservableObject, @unchecked Sendable {
+    @Published public private(set) var chats: [ChatItem] = []
 
     private var cancellable: AnyCancellable?
     private var db: AppDatabase
@@ -14,7 +20,12 @@ public final class HomeViewModel: ObservableObject {
     func start() {
         cancellable = ValueObservation
             .tracking { db in
-                try Chat.filter(Column("spaceId") == nil).fetchAll(db)
+                try Chat
+                    .filter(Column("spaceId") == nil)
+                    .including(optional: Chat.peerUser)
+                    .including(optional: Chat.lastMessage)
+                    .asRequest(of: ChatItem.self)
+                    .fetchAll(db)
             }
             .publisher(in: db.dbWriter, scheduling: .immediate)
             .sink(
