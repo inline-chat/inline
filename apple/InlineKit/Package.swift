@@ -17,7 +17,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/inlinehq/GRDB.swift", from: "3.0.6"),
+        .package(url: "https://github.com/inlinehq/GRDB.swift", from: "3.0.8"),
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "8.36.0"),
         .package(url: "https://github.com/evgenyneu/keychain-swift.git", from: "24.0.0"),
 
