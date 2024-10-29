@@ -1070,7 +1070,7 @@
 			repositoryURL = "https://github.com/inlinehq/GRDB.swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 3.0.6;
+				minimumVersion = 3.0.8;
 			};
 		};
 		CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */ = {
