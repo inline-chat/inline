@@ -1,13 +1,6 @@
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
-import {
-  chats,
-  members,
-  spaces,
-  type DbChat,
-  type DbMember,
-  type DbSpace,
-} from "@in/server/db/schema"
+import { chats, members, spaces, type DbChat, type DbMember, type DbSpace } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -30,30 +23,15 @@ type Context = {
   currentUserId: number
 }
 
-type RawOutput = {
-  space: DbSpace
-  members: DbMember[]
-  chats: DbChat[]
-}
-
 export const Response = Type.Object({
   space: TSpaceInfo,
   members: Type.Array(TMemberInfo),
   chats: Type.Array(TChatInfo),
 })
 
-export const encode = (output: RawOutput): Static<typeof Response> => {
-  return {
-    space: encodeSpaceInfo(output.space),
-    members: output.members.map(encodeMemberInfo),
-    chats: output.chats.map(encodeChatInfo),
-  }
-}
+type Response = Static<typeof Response>
 
-export const handler = async (
-  input: Input,
-  context: Context,
-): Promise<RawOutput> => {
+export const handler = async (input: Input, context: Context): Promise<Response> => {
   try {
     const spaceId = parseInt(input.id, 10)
     if (isNaN(spaceId)) {
@@ -67,9 +45,9 @@ export const handler = async (
       .innerJoin(chats, eq(spaces.id, chats.spaceId))
 
     return {
-      space: result[0].spaces,
-      members: result.map((r) => r.members),
-      chats: result.map((r) => r.chats),
+      space: encodeSpaceInfo(result[0].spaces),
+      members: result.map((r) => encodeMemberInfo(r.members)),
+      chats: result.map((r) => encodeChatInfo(r.chats)),
     }
   } catch (error) {
     Log.shared.error("Failed to get space", error)
