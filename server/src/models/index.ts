@@ -86,7 +86,7 @@ export const TMessageInfo = Type.Object({
   id: Type.Integer(),
   chatId: Type.Integer(),
   fromId: Type.Integer(),
-  text: Type.String(),
+  text: Optional(Type.String()),
   date: Type.Integer(),
   editDate: Optional(Type.Integer()),
 })
