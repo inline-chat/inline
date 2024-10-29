@@ -76,6 +76,12 @@ import {
   Response as SendMessageResponse,
 } from "@in/server/methods/sendMessage"
 
+import {
+  handler as createPrivateChatHandler,
+  Input as CreatePrivateChatInput,
+  Response as CreatePrivateChatResponse,
+} from "@in/server/methods/createPrivateChat"
+
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
@@ -97,6 +103,9 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(makeApiRoute("/searchContacts", SearchContactsInput, SearchContactsResponse, searchContactsHandler))
       .use(makeApiRoute("/getChatHistory", GetChatHistoryInput, GetChatHistoryResponse, getChatHistoryHandler))
       .use(makeApiRoute("/sendMessage", SendMessageInput, SendMessageResponse, sendMessageHandler))
+      .use(
+        makeApiRoute("/createPrivateChat", CreatePrivateChatInput, CreatePrivateChatResponse, createPrivateChatHandler),
+      )
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }
