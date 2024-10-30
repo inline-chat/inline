@@ -48,7 +48,7 @@ const normalizeToken = (token: unknown): string | null => {
   return token.replace("Bearer ", "").trim()
 }
 
-const getUserIdFromToken = async (token: string): Promise<number> => {
+export const getUserIdFromToken = async (token: string): Promise<number> => {
   let supposedUserId = token.split(":")[0]
   let tokenHash = hashToken(token)
   let session = await db.query.sessions.findFirst({

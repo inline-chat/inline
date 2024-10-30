@@ -1,6 +1,9 @@
+import { Log } from "@in/server/utils/log"
 import { type ServerWebSocket } from "bun"
 import type { ElysiaWS } from "elysia/ws"
 import { nanoid } from "nanoid"
+
+const log = new Log("ws-connection")
 
 export class WsConnection {
   id: string
@@ -10,6 +13,14 @@ export class WsConnection {
   constructor(ws: ElysiaWS<ServerWebSocket<any>, any, any>) {
     this.id = nanoid()
     this.ws = ws
+
+    // Start timeout, if not authenticated in 20 seconds, close the connection
+    setTimeout(() => {
+      if (!this.userId) {
+        log.debug(`Connection ${this.id} not authenticated, closing`)
+        this.close()
+      }
+    }, 20000)
   }
 
   authenticate(userId: number) {
