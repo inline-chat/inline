@@ -1,5 +1,5 @@
 import Elysia, { t } from "elysia"
-import { ServerMessage, ClientMessage, ServerMessageKind, ClientMessageKind } from "./protocol"
+import { ServerMessage, ClientMessage, ServerMessageKind, ClientMessageKind, createMessage } from "./protocol"
 import { WsConnection } from "@in/server/ws/connections"
 import { Log } from "@in/server/utils/log"
 import { getUserIdFromToken } from "@in/server/controllers/plugins"
@@ -71,6 +71,14 @@ export const webSocket = new Elysia()
 
           ws.data.store.connection.authenticate(userIdFromToken)
           log.debug("authenticated connection", ws.data.store.connection.id, userIdFromToken)
+
+          ws.send(
+            createMessage({
+              kind: ServerMessageKind.ConnectionAck,
+              id: message.i,
+              payload: {},
+            }),
+          )
           break
         }
 

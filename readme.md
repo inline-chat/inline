@@ -17,4 +17,11 @@ bun db:migrate
 bun dev:server
 ```
 
+Setup Swift:
+
+```sh
+# Install Swift Protobuf
+brew install swift-protobuf
+```
+
 ## TBD

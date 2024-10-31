@@ -7,7 +7,7 @@ let package = Package(
     name: "InlineKit",
     platforms: [
         .iOS(.v17),
-        .macOS(.v12),
+        .macOS(.v13),
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
@@ -20,7 +20,7 @@ let package = Package(
         .package(url: "https://github.com/inlinehq/GRDB.swift", from: "3.0.8"),
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "8.36.0"),
         .package(url: "https://github.com/evgenyneu/keychain-swift.git", from: "24.0.0"),
-
+        .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.2")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.

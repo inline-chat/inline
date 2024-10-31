@@ -164,17 +164,17 @@ export const createMessage = (
     | {
         kind: ServerMessageKind.Response
         id: string
-        p: any
+        payload: any
       }
     | {
         kind: ServerMessageKind.Message
         id: string
-        p: any
+        payload: any
       }
     | {
         kind: ServerMessageKind.ConnectionAck
         id: string
-        p: {
+        payload: {
           //...
           _?: string
         }
@@ -212,7 +212,7 @@ export const createMessage = (
         i: data.id,
         t,
         k: data.kind,
-        p: data.p,
+        p: data.payload,
       }
 
     case ServerMessageKind.Message:
@@ -220,7 +220,7 @@ export const createMessage = (
         i: data.id,
         t,
         k: data.kind,
-        p: data.p,
+        p: data.payload,
       }
 
     case ServerMessageKind.ConnectionAck:
@@ -228,7 +228,7 @@ export const createMessage = (
         i: data.id,
         t,
         k: data.kind,
-        p: data.p,
+        p: data.payload,
       }
   }
 }

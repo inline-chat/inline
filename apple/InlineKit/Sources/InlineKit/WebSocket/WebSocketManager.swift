@@ -2,7 +2,7 @@ import Foundation
 
 // WebSocketClient implementation stays the same as before...
 
-enum ConnectionState {
+public enum ConnectionState {
     case connecting
     case updating
     case normal
@@ -11,10 +11,8 @@ enum ConnectionState {
 @MainActor
 public final class WebSocketManager: ObservableObject {
     private var client: WebSocketClient?
-    private var messageTask: Task<Void, Never>?
     private var log = Log.scoped("WebsocketManager")
-    
-    @Published private(set) var connectionState: ConnectionState = .connecting
+    @Published private(set) public var connectionState: ConnectionState = .connecting
     
     private var token = Auth.shared.getToken()
     private var userId = Auth.shared.getCurrentUserId()
@@ -26,16 +24,14 @@ public final class WebSocketManager: ObservableObject {
     }
     
     func disconnect() {
-        messageTask?.cancel()
-        messageTask = nil
-        connectionState = .connecting
-    
+        log.debug("disconnecting (manual)")
         Task {
             await client?.disconnect()
         }
     }
     
     deinit {
+        log.debug("deinit")
         // Create a new task to call disconnect on the main actor
         Task { @MainActor [self] in
             self.disconnect()
@@ -62,46 +58,29 @@ public final class WebSocketManager: ObservableObject {
         
         let client = WebSocketClient(
             url: URL(string: url)!,
-            reconnectionConfig: .init(maxAttempts: 300, backoff: 1.5)
+            reconnectionConfig: .init(maxAttempts: 300, backoff: 1.5),
+            credentials: WebSocketCredentials(token: token, userId: userId)
         )
         self.client = client
         
-        log.debug("connecting")
-        
         try await client.connect()
         
-        log.debug("connected")
-     
-        messageTask?.cancel()
-        messageTask = Task { [weak self] in
-            guard let self else { return }
-            
-            for await message in client.messageStream {
-                log.debug("message received \(message)")
-                await self.processMessage(message)
+        log.debug("ws connected")
+        
+        await client.addMessageHandler { [weak self] message in
+            Task { @MainActor in
+                self?.processMessage(message)
             }
         }
         
-        log.debug("authenticating as userId=\(userId)")
-        try await client
-            .send(
-                ClientMessage<ConnectionInitPayload>
-                    .createConnectionInit(
-                        token: token,
-                        userId: userId
-                    )
-            )
-        
+        await client.addStateObserver { [weak self] state in
+            Task { @MainActor in
+                self?.stateDidChange(state)
+            }
+        }
     }
     
-    func stop() async {
-        messageTask?.cancel()
-        messageTask = nil
-        await client?.disconnect()
-        client = nil
-    }
-    
-    private func processMessage(_ message: WebSocketMessage) async {
+    private func processMessage(_ message: WebSocketMessage) {
         switch message {
         case .string(let text):
             print("Received: \(text)")
@@ -110,26 +89,39 @@ public final class WebSocketManager: ObservableObject {
         }
     }
     
+    private func stateDidChange(_ state: WebSocketConnectionState) {
+        switch state {
+        case .connected:
+            connectionState = .normal
+        case .disconnected:
+            connectionState = .connecting
+        case .connecting:
+            connectionState = .updating
+        }
+    }
+    
     func send(_ text: String) async throws {
         log.debug("sending message \(text)")
         try await client?.send(text: text)
     }
     
+    // MARK: - Application Logic
+    
     public func loggedOut() {
         log.debug("logged out")
         // Clear cached creds
-        self.token = nil
-        self.userId = nil
+        token = nil
+        userId = nil
         
         // Disconnect
-        self.disconnect()
+        disconnect()
     }
     
     public func authenticated() {
         log.debug("authenticated")
         // Clear cached creds
-        self.token = Auth.shared.getToken()
-        self.userId = Auth.shared.getCurrentUserId()
+        token = Auth.shared.getToken()
+        userId = Auth.shared.getCurrentUserId()
         
         // Disconnect
         Task {

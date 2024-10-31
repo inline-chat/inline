@@ -12,7 +12,9 @@
     "build:server": "cd server && bun run build",
     "start:website": "cd website && bun run start",
     "start:server": "cd server && bun run start",
-    "db:migrate": "cd server && bun run db:migrate"
+    "db:migrate": "cd server && bun run db:migrate",
+    "proto:generate-ts": "npx protoc --ts_out ./server/protocol/ --proto_path protos protos/messages.proto",
+    "proto:generate-swift": "protoc --swift_out=./apple/InlineKit/Sources/InlineKit/Protocol --proto_path protos messages.proto"
   },
   "overrides": {
     "elysia": "=1.1.22",
@@ -23,6 +25,7 @@
     "@sinclair/typebox": "=0.32.34"
   },
   "devDependencies": {
+    "@protobuf-ts/plugin": "^2.9.4",
     "@types/bun": "^1.1.11"
   }
 }
