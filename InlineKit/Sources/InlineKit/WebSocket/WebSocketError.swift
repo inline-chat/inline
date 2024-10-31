@@ -5,9 +5,9 @@
 //  Created by Mohammad Rajabifard on 10/29/24.
 //
 
-
 // MARK: - Custom Error
 enum INWebSocketError: Error {
     case encodingFailed
-}
 
+    static let connectionTimeout = WebSocketError.disconnected
+}

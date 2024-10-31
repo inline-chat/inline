@@ -2,9 +2,6 @@ import InlineKit
 import SwiftUI
 
 struct SettingsView: View {
-    //    @AppStorage("showPreview") private var showPreview = true
-    //    @AppStorage("fontSize") private var fontSize = 12.0
-
     @State private var selectedTab: Tabs = .general
 
     enum Tabs: String, CaseIterable, Identifiable {
@@ -53,13 +50,13 @@ struct AccountSettingsView: View {
                     // TODO: Extract to toplevel
                     // Clear creds
                     Auth.shared.logOut()
-                    
+
                     // Stop WebSocket
                     ws.loggedOut()
-                    
+
                     // Clear database
                     try? AppDatabase.loggedOut()
-                    
+
                     // Navigate outside of the app
                     self.mainWindowViewModel.navigate(.onboarding)
 
@@ -75,7 +72,7 @@ struct AccountSettingsView: View {
     struct UserProfile: View {
         var body: some View {
             HStack {
-//                TODO: Initials
+                //                TODO: Initials
                 Circle()
                     .foregroundStyle(.orange)
                     .frame(width: 32, height: 32)

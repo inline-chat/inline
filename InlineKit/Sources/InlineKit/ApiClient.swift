@@ -55,8 +55,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             throw APIError.invalidURL
         }
 
-        print("url is \(url)")
-
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
 

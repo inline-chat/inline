@@ -138,7 +138,7 @@ extension ServerMessage {
 // MARK: - Client Message Creation Helper
 
 extension ClientMessage {
-    static func createConnectionInit(
+    static func connectionInit(
         token: String,
         userId: Int64
     ) -> ClientMessage<ConnectionInitPayload> {
