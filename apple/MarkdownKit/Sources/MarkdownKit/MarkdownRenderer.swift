@@ -48,6 +48,7 @@ public final class MarkdownRenderer {
     }
   }
 
+
   private func applyListFormatting(to text: NSMutableAttributedString) {
     // Handle both bullet and number lists
     let bulletPattern = "^- (.*?)$"
@@ -72,6 +73,8 @@ public final class MarkdownRenderer {
     }
   }
 
+
+  /// Range-based formatting
   private func applyFormatting(
     to text: NSMutableAttributedString,
     pattern: String,

@@ -1,10 +1,10 @@
 import Foundation
 
 public enum MarkdownFeature: CaseIterable {
-    case bold
-    case italic
-    case codeBlock
-    case bulletList
-    case numberList
-    case link
+  case bold /// **text**
+  case italic /// *text*
+  case codeBlock /// ```code```
+  case bulletList /// - item
+  case numberList /// 1. item
+  case link /// [text](url)
 }
