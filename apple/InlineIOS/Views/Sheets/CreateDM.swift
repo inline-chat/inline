@@ -42,11 +42,7 @@ struct CreateDm: View {
                     Button(action: {
                         Task {
                             do {
-                                if let threadId = try await dataManager.createThread(
-                                    spaceId: nil,
-                                    title: user.username ?? user.firstName ?? user.email ?? user.lastName ?? "User",
-                                    peerUserId: user.id
-                                ) {
+                                if let threadId = try await dataManager.createPrivateChat(peerId: user.id) {
                                     showSheet = false
                                     nav.push(.chat(id: threadId))
                                 }

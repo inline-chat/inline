@@ -6,7 +6,7 @@ import { Log } from "@in/server/utils/log"
 import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
-import { and, eq, or } from "drizzle-orm"
+import { and, eq, or, sql } from "drizzle-orm"
 
 export const Input = Type.Object({
   peerId: Type.String(),
@@ -41,7 +41,7 @@ export const handler = async (
         title: `${currentUserName[0].name} & ${peerName[0].name}`,
         spacePublic: false,
         date: new Date(),
-        threadNumber: 0,
+        threadNumber: null,
         minUserId: context.currentUserId < peerId ? context.currentUserId : peerId,
         maxUserId: context.currentUserId > peerId ? context.currentUserId : peerId,
       })

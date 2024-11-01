@@ -3,14 +3,14 @@ import InlineUI
 import SwiftUI
 
 struct MainView: View {
-    @EnvironmentObject var nav: Navigation
-    @Environment(\.appDatabase) var database
-    @EnvironmentObject var api: ApiClient
-    @EnvironmentStateObject var spaceList: SpaceListViewModel
-    @EnvironmentStateObject var home: HomeViewModel
-    @State var user: User? = nil
-    @State var showSheet: Bool = false
-    @State var showDmSheet: Bool = false
+    @EnvironmentObject private var nav: Navigation
+    @Environment(\.appDatabase) private var database
+    @EnvironmentObject private var api: ApiClient
+    @EnvironmentStateObject private var spaceList: SpaceListViewModel
+    @EnvironmentStateObject private var home: HomeViewModel
+    @State private var user: User? = nil
+    @State private var showSheet = false
+    @State private var showDmSheet = false
 
     init() {
         _spaceList = EnvironmentStateObject { env in
@@ -31,16 +31,10 @@ struct MainView: View {
                     if !spaceList.spaces.isEmpty {
                         Section(header: Text("Spaces")) {
                             ForEach(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
-                                HStack {
-                                    InitialsCircle(name: space.name, size: 25)
-                                        .padding(.trailing, 4)
-                                    Text(space.name)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    nav.push(.space(id: space.id))
-                                }
+                                SpaceRowView(space: space)
+                                    .onTapGesture {
+                                        nav.push(.space(id: space.id))
+                                    }
                             }
                         }
                     }
@@ -48,16 +42,10 @@ struct MainView: View {
                     if !home.chats.isEmpty {
                         Section(header: Text("Direct Messages")) {
                             ForEach(home.chats.sorted(by: { $0.chat.date > $1.chat.date }), id: \.chat.id) { chat in
-                                HStack {
-//                                    InitialsCircle(name: chat.type == .private ? chat.peer?.name ?? "" : chat.title ?? "", size: 26)
-//                                        .padding(.trailing, 6)
-//                                    Text(chat.type == .private ? chat.peer?.name ?? "" : chat.title ?? "")
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    nav.push(.chat(id: chat.chat.id))
-                                }
+                                ChatRowView(item: chat)
+                                    .onTapGesture {
+                                        nav.push(.chat(id: chat.chat.id))
+                                    }
                             }
                         }
                     }
@@ -137,6 +125,34 @@ struct MainView: View {
                 .presentationBackground(.thinMaterial)
                 .presentationCornerRadius(28)
         }
+    }
+}
+
+private struct SpaceRowView: View {
+    let space: Space
+
+    var body: some View {
+        HStack {
+            InitialsCircle(name: space.name, size: 25)
+                .padding(.trailing, 4)
+            Text(space.name)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ChatRowView: View {
+    let item: ChatItem
+
+    var body: some View {
+        HStack {
+            InitialsCircle(name: item.chat.type == .privateChat ? item.peer?.firstName ?? "" : item.chat.title ?? "", size: 26)
+                .padding(.trailing, 6)
+            Text(item.chat.type == .privateChat ? item.peer?.firstName ?? "" : item.chat.title ?? "")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 

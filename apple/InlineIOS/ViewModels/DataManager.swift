@@ -52,7 +52,7 @@ class DataManager: ObservableObject, @unchecked Sendable {
                 // Create the chat
                 let thread = Chat(
                     date: Date.now,
-                    type: .privateChat,
+                    type: .thread,
                     title: title,
                     spaceId: spaceId,
                     peerUserId: peerUserId
@@ -65,6 +65,22 @@ class DataManager: ObservableObject, @unchecked Sendable {
             Log.shared.error("Failed to create thread", error: error)
             throw error
         }
+    }
+
+    func createPrivateChat(peerId: Int64) async throws -> Int64? {
+        do {
+            let result = try await ApiClient.shared.createPrivateChat(peerId: peerId)
+            print("Result \(result)")
+            try await database.dbWriter.write { db in
+                let chat = Chat(from: result.chat)
+                try chat.save(db)
+            }
+
+            return result.chat.id
+        } catch {
+            Log.shared.error("Failed to create private chat", error: error)
+        }
+        return nil
     }
 
     func getSpaces() async throws -> [ApiSpace] {
