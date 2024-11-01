@@ -57,6 +57,7 @@
 		C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28462CA5AB9200D3DFB8 /* InlineIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28502CA5AB9200D3DFB8 /* InlineIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C38DF56E2CD4E45E005317A3 /* MarkdownKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = MarkdownKit; sourceTree = "<group>"; };
 		C3AA8E4E2CB942BF00800A03 /* InlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineKit; sourceTree = "<group>"; };
 		C3CC99172CCE9A7E007F7F77 /* InlineUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineUI; sourceTree = "<group>"; };
 		CD2661652CA01E3E00EB186F /* Inline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inline.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -189,6 +190,7 @@
 		CD2660FB2CA01CAE00EB186F = {
 			isa = PBXGroup;
 			children = (
+				C38DF56E2CD4E45E005317A3 /* MarkdownKit */,
 				C3CC99172CCE9A7E007F7F77 /* InlineUI */,
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
