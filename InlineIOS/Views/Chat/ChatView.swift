@@ -43,25 +43,8 @@ struct ChatView: View {
     }
 
     private var chatMessages: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(fullChatViewModel.messages.reversed()) { message in
-                        MessageView(message: message)
-                    }
-                }
-                .padding()
-            }
-            .onChange(of: fullChatViewModel.messages.count) { _ in
-                scrollToBottom(proxy: proxy)
-            }
-            .onAppear {
-                scrollToBottom(proxy: proxy)
-            }
-            .introspect(.scrollView, on: .iOS(.v13, .v14, .v15, .v16, .v17, .v18)) { scrollView in
-                scrollView.keyboardDismissMode = .interactive
-            }
-        }
+        MessagesCollectionView(messages: fullChatViewModel.messages)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var inputArea: some View {

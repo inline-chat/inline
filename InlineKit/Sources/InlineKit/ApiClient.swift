@@ -20,6 +20,7 @@ public enum Path: String {
     case createThread
     case checkUsername
     case searchContacts
+    case createPrivateChat
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -162,6 +163,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             includeToken: true
         )
     }
+
+    public func createPrivateChat(peerId: Int64) async throws -> CreatePrivateChat {
+        try await request(
+            .createPrivateChat,
+            queryItems: [URLQueryItem(name: "peerId", value: "\(peerId)")],
+            includeToken: true
+        )
+    }
 }
 
 /// Example
@@ -231,4 +240,8 @@ public struct CheckUsername: Codable, Sendable {
 
 public struct SearchContacts: Codable, Sendable {
     public let users: [ApiUser]
+}
+    
+public struct CreatePrivateChat: Codable, Sendable {
+    public let chat: ApiChat
 }
