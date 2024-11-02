@@ -7,9 +7,9 @@ struct ChatRowView: View {
 
     var body: some View {
         HStack {
-            InitialsCircle(name: item.chat.type == .privateChat ? item.peer?.firstName ?? "" : item.chat.title ?? "", size: 26)
+            InitialsCircle(name: item.chat.type == .privateChat ? item.user?.firstName ?? "" : item.chat.title ?? "", size: 26)
                 .padding(.trailing, 6)
-            Text(item.chat.type == .privateChat ? item.peer?.firstName ?? "" : item.chat.title ?? "")
+            Text(item.chat.type == .privateChat ? item.user?.firstName ?? "" : item.chat.title ?? "")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
