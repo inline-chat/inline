@@ -10,7 +10,7 @@ public struct ApiUser: Codable, Hashable, Sendable {
     public var username: String?
 }
 
-public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked Sendable {
+public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
     public var id: Int64
     public var email: String?
     public var firstName: String?
@@ -18,8 +18,8 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     public var date: Date?
     public var username: String?
 
-    public nonisolated(unsafe) static let members = hasMany(Member.self)
-    public nonisolated(unsafe) static let spaces = hasMany(Space.self, through: members, using: Member.space)
+    public static let members = hasMany(Member.self)
+    public static let spaces = hasMany(Space.self, through: members, using: Member.space)
 
     public var members: QueryInterfaceRequest<Member> {
         request(for: User.members)
@@ -29,12 +29,12 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
         request(for: User.spaces)
     }
 
-    public nonisolated(unsafe) static let chats = hasMany(Chat.self)
+    public static let chats = hasMany(Chat.self)
     public var chats: QueryInterfaceRequest<Chat> {
         request(for: User.chats)
     }
 
-    public nonisolated(unsafe) static let messages = hasMany(Message.self)
+    public static let messages = hasMany(Message.self)
     public var messages: QueryInterfaceRequest<Message> {
         request(for: User.messages)
     }
@@ -44,19 +44,34 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
         self.email = email
         self.firstName = firstName
         self.lastName = lastName
-        date = Date.now
+        self.date = Date.now
         self.username = username
+    }
+
+    // MARK: - Computed
+    private static let nameFormatter = PersonNameComponentsFormatter()
+    public var fullName: String {
+        get {
+            
+            let nameComponents = PersonNameComponents(
+                givenName: self.firstName,
+                familyName: self.lastName
+            )
+            
+            return Self.nameFormatter.string(from: nameComponents)
+        }
     }
 }
 
+
 public extension User {
     init(from apiUser: ApiUser) {
-        id = apiUser.id
-        email = apiUser.email
-        firstName = apiUser.firstName
-        lastName = apiUser.lastName
-        username = apiUser.username
-        date = Self.fromTimestamp(from: apiUser.date)
+        self.id = apiUser.id
+        self.email = apiUser.email
+        self.firstName = apiUser.firstName
+        self.lastName = apiUser.lastName
+        self.username = apiUser.username
+        self.date = Self.fromTimestamp(from: apiUser.date)
     }
 
     static func fromTimestamp(from: Int) -> Date {
@@ -77,11 +92,11 @@ public extension User {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        id = try container.decode(Int64.self, forKey: .id)
-        email = try container.decode(String.self, forKey: .email)
-        firstName = try container.decode(String.self, forKey: .firstName)
-        lastName = try container.decodeIfPresent(String.self, forKey: .lastName)
-        username = try container.decodeIfPresent(String.self, forKey: .username)
-        date = try container.decodeIfPresent(Date.self, forKey: .date) ?? .now
+        self.id = try container.decode(Int64.self, forKey: .id)
+        self.email = try container.decode(String.self, forKey: .email)
+        self.firstName = try container.decode(String.self, forKey: .firstName)
+        self.lastName = try container.decodeIfPresent(String.self, forKey: .lastName)
+        self.username = try container.decodeIfPresent(String.self, forKey: .username)
+        self.date = try container.decodeIfPresent(Date.self, forKey: .date) ?? .now
     }
 }

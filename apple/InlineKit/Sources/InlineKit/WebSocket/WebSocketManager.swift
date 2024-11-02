@@ -14,10 +14,19 @@ public final class WebSocketManager: ObservableObject {
     private var log = Log.scoped("WebsocketManager")
     @Published private(set) public var connectionState: ConnectionState = .connecting
     
-    private var token = Auth.shared.getToken()
-    private var userId = Auth.shared.getCurrentUserId()
+    private var token: String?
+    private var userId: Int64?
     
-    public init() {
+    convenience public init() {
+        self.init(token: Auth.shared.getToken(), userId: Auth.shared.getCurrentUserId())
+        Task {
+            try await self.start()
+        }
+    }
+    
+    public init(token: String?, userId: Int64?) {
+        self.token = token
+        self.userId = userId
         Task {
             try await self.start()
         }

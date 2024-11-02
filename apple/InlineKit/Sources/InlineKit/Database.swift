@@ -245,4 +245,30 @@ public extension AppDatabase {
         } catch {}
         return db
     }
+    
+    /// Used for previews
+    static func populated() -> AppDatabase {
+        let db = AppDatabase.empty()
+        do {
+           
+            try db.dbWriter.write { db in
+                // Add current user
+                let user = User(id: 1, email: "mo@inline.chat", firstName: "Mohamed", username: "mo")
+                try user.save(db)
+                
+                // Add spaces
+                let space1 = Space(id: 1, name: "Space 1 with data", date: Date.now)
+                let space2 = Space(id: 2, name: "Space 2", date: Date.now)
+                let space3 = Space(id: 3, name: "Space 3", date: Date.now)
+                try space1.insert(db)
+                try space2.insert(db)
+                try space3.insert(db)
+                
+                // Add chats to space 1
+                let chat = Chat(id: 1, date: Date.now, type: .thread, title: "Main", spaceId: 1)
+                try chat.insert(db)
+            }
+        } catch {}
+        return db
+    }
 }

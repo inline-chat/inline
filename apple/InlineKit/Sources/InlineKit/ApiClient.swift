@@ -21,6 +21,7 @@ public enum Path: String {
     case checkUsername
     case searchContacts
     case createPrivateChat
+    case getMe
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -71,13 +72,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             }
 
             switch httpResponse.statusCode {
-            case 200 ... 299:
+            case 200...299:
                 let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
                 switch apiResponse {
                 case let .success(data):
                     return data
                 case let .error(errorCode, description):
-                    throw APIError
+                    throw
+                        APIError
                         .error(errorCode: errorCode, description: description)
                 }
             case 429:
@@ -137,9 +139,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         try await request(.getSpaces, includeToken: true)
     }
 
-    public func createThread(title: String, spaceId: Int64) async throws ->
-        CreateThread
-    {
+    public func createThread(title: String, spaceId: Int64) async throws -> CreateThread {
         try await request(
             .createThread,
             queryItems: [
@@ -152,6 +152,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     public func checkUsername(username: String) async throws -> CheckUsername {
         try await request(
             .checkUsername, queryItems: [URLQueryItem(name: "username", value: username)],
+            includeToken: true
+        )
+    }
+
+    public func getMe() async throws -> GetMe {
+        try await request(
+            .getMe, queryItems: [],
             includeToken: true
         )
     }
@@ -241,7 +248,11 @@ public struct CheckUsername: Codable, Sendable {
 public struct SearchContacts: Codable, Sendable {
     public let users: [ApiUser]
 }
-    
+
 public struct CreatePrivateChat: Codable, Sendable {
     public let chat: ApiChat
+}
+
+public struct GetMe: Codable, Sendable {
+    public let user: ApiUser
 }

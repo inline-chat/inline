@@ -121,7 +121,7 @@ struct OnboardingProfile: View {
 
 #Preview {
     OnboardingProfile()
-        .appDatabase(.empty())
+        .appDatabase(AppDatabase.empty())
         .environmentObject(OnboardingViewModel())
         .frame(width: 900, height: 600)
 }
