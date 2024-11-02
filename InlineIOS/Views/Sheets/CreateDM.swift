@@ -1,5 +1,6 @@
 import GRDB
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct CreateDm: View {
@@ -52,7 +53,7 @@ struct CreateDm: View {
                         }
                     }) {
                         HStack(alignment: .top) {
-                            InitialsCircle(name: user.firstName ?? "User", size: 28)
+                            InitialsCircle(firstName: user.firstName ?? "User", lastName: user.lastName ?? nil, size: 28)
                                 .padding(.trailing, 4)
                             VStack(alignment: .leading) {
                                 Text(user.firstName ?? "User")

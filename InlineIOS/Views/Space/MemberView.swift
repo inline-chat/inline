@@ -1,5 +1,6 @@
 import GRDB
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct MemberView: View {
@@ -16,7 +17,7 @@ struct MemberView: View {
     var body: some View {
         HStack {
             if let user = userDataViewModel.user {
-                InitialsCircle(name: user.firstName ?? "", size: 25)
+                InitialsCircle(firstName: user.firstName ?? "", lastName: user.lastName ?? nil, size: 25)
                     .padding(.trailing, 4)
                 Text(user.firstName ?? "")
             }
