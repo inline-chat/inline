@@ -3,8 +3,8 @@ import GRDB
 
 public struct ChatItem: Codable, FetchableRecord, PersistableRecord, @unchecked Sendable, Hashable {
     public var chat: Chat
-    public var peer: User?
-    public var lastMessage: Message?
+    public var user: User?
+    public var message: Message?
 }
 
 public final class HomeViewModel: ObservableObject, @unchecked Sendable {
