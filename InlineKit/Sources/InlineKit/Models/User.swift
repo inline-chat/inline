@@ -49,20 +49,17 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     }
 
     // MARK: - Computed
+
     private static let nameFormatter = PersonNameComponentsFormatter()
     public var fullName: String {
-        get {
-            
-            let nameComponents = PersonNameComponents(
-                givenName: self.firstName,
-                familyName: self.lastName
-            )
-            
-            return Self.nameFormatter.string(from: nameComponents)
-        }
+        let nameComponents = PersonNameComponents(
+            givenName: self.firstName,
+            familyName: self.lastName
+        )
+
+        return Self.nameFormatter.string(from: nameComponents)
     }
 }
-
 
 public extension User {
     init(from apiUser: ApiUser) {

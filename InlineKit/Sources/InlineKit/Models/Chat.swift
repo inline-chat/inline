@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-public enum ChatType: String, Codable {
+public enum ChatType: String, Codable, Sendable {
     case privateChat = "private"
     case thread
 }
@@ -14,7 +14,7 @@ public struct ApiChat: Codable, Hashable, Sendable {
     public var threadNumber: Int
 }
 
-public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked Sendable {
+public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
     public var id: Int64
     public var date: Date
     public var type: ChatType
@@ -22,22 +22,22 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     public var spaceId: Int64?
     public var peerUserId: Int64?
 
-    public nonisolated(unsafe) static let space = belongsTo(Space.self)
+    public static let space = belongsTo(Space.self)
     public var space: QueryInterfaceRequest<Space> {
         request(for: Chat.space)
     }
 
-    public nonisolated(unsafe) static let lastMessage = hasOne(Message.self)
+    public static let lastMessage = hasOne(Message.self)
     public var lastMessage: QueryInterfaceRequest<Message> {
         request(for: Chat.lastMessage)
     }
 
-    public nonisolated(unsafe) static let messages = hasMany(Message.self)
+    public static let messages = hasMany(Message.self)
     public var messages: QueryInterfaceRequest<Message> {
         request(for: Chat.messages)
     }
 
-    public nonisolated(unsafe) static let peerUser = belongsTo(User.self)
+    public static let peerUser = belongsTo(User.self)
 
     public var peerUser: QueryInterfaceRequest<User> {
         request(for: Chat.peerUser)
