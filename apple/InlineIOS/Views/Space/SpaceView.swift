@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct SpaceView: View {
@@ -33,7 +34,7 @@ struct SpaceView: View {
                     Section(header: Text("Threads")) {
                         ForEach(chats) { chat in
                             HStack {
-                                InitialsCircle(name: chat.title ?? "Thread", size: 25)
+                                InitialsCircle(firstName: chat.title ?? "Thread", lastName: nil, size: 25)
                                     .padding(.trailing, 4)
                                 Text(chat.title ?? "Thread")
                             }
@@ -54,7 +55,7 @@ struct SpaceView: View {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 2) {
                     if let space = fullSpaceViewModel.space {
-                        InitialsCircle(name: space.name ?? "Space", size: 26)
+                        InitialsCircle(firstName: space.name ?? "Space", lastName: nil, size: 26)
                             .padding(.trailing, 6)
                         Text(space.name)
                             .font(.title3)
@@ -77,7 +78,6 @@ struct SpaceView: View {
             }
         }
         .toolbarRole(.editor)
-
         .sheet(isPresented: $openCreateThreadSheet) {
             CreateThread(showSheet: $openCreateThreadSheet, spaceId: spaceId)
                 .presentationBackground(.thinMaterial)

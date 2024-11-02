@@ -51,7 +51,7 @@ private extension ChatView {
 
     var chatHeader: some View {
         HStack(spacing: 2) {
-            InitialsCircle(name: fullChatViewModel.chat?.title ?? "Chat", size: 26)
+            InitialsCircle(firstName: fullChatViewModel.chat?.title ?? "Chat", lastName: nil, size: 26)
                 .padding(.trailing, 6)
             Text(fullChatViewModel.chat?.title ?? "Chat")
                 .font(.title3)
