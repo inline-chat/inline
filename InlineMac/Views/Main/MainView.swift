@@ -9,6 +9,11 @@ struct MainView: View {
 
     // Fetch authenticated user data
     @EnvironmentStateObject var rootData: RootData
+    
+    @StateObject var navigation = NavigationModel()
+    
+    /// 190 is minimum that fits both sidebar collapse button and plus button
+    private let MIN_SIDEBAR_WIDTH: CGFloat = 200
 
     init() {
         _rootData = EnvironmentStateObject { env in
@@ -20,11 +25,16 @@ struct MainView: View {
         NavigationSplitView {
             // TODO: check active space / chat / etc??
             HomeSidebar()
-                .navigationSplitViewColumnWidth(min: 160, ideal: 220, max: 380)
+                .navigationSplitViewColumnWidth(min: MIN_SIDEBAR_WIDTH, ideal: 240, max: 400)
         } detail: {
-            Text("You're logged in!")
+            Text("Welcome to Inline")
+        }
+        .navigationSplitViewStyle(.prominentDetail)
+        .sheet(isPresented: $navigation.createSpaceSheetPresented) {
+            CreateSpaceSheet()
         }
         .environmentObject(rootData)
+        .environmentObject(navigation)
         .task {
             rootData.fetch()
         }
@@ -34,4 +44,5 @@ struct MainView: View {
 #Preview {
     MainView()
         .previewsEnvironment(.empty)
+        .environmentObject(NavigationModel())
 }
