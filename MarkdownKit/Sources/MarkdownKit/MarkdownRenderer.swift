@@ -3,24 +3,44 @@ import Foundation
 import SwiftUI
 import UIKit
 
-public final class MarkdownRenderer {
+public final class MarkdownRenderer: Sendable {
   private let theme: MarkdownTheme
+  private let renderQueue = DispatchQueue(label: "com.inline.markdownkit.renderer")
 
   public init(theme: MarkdownTheme = .default) {
     self.theme = theme
   }
 
-  public func render(_ text: String) -> NSAttributedString {
-    let attributedString = NSMutableAttributedString(string: text)
+  public func render(_ text: String) async -> NSAttributedString {
+    return await withCheckedContinuation { continuation in
+      renderQueue.async {
+        let attributedString = NSMutableAttributedString(string: text)
 
-    // Apply formatting for each feature
-    applyBoldFormatting(to: attributedString)
-    applyItalicFormatting(to: attributedString)
-    applyCodeBlockFormatting(to: attributedString)
-    applyListFormatting(to: attributedString)
-    applyLinkFormatting(to: attributedString)
+        // Apply base attributes
+        let baseAttributes: [NSAttributedString.Key: Any] = [
+          .font: self.theme.normalFont,
+          .foregroundColor: self.theme.textColor,
+        ]
 
-    return attributedString
+        attributedString.addAttributes(
+          baseAttributes,
+          range: NSRange(location: 0, length: text.count)
+        )
+
+        // Apply markdown formatting in order
+        self.applyMarkdownFormatting(to: attributedString)
+
+        continuation.resume(returning: attributedString)
+      }
+    }
+  }
+
+  private func applyMarkdownFormatting(to text: NSMutableAttributedString) {
+    applyCodeBlockFormatting(to: text)
+    applyBoldFormatting(to: text)
+    applyItalicFormatting(to: text)
+    applyLinkFormatting(to: text)
+    applyListFormatting(to: text)
   }
 
   private func applyBoldFormatting(to text: NSMutableAttributedString) {
@@ -48,7 +68,6 @@ public final class MarkdownRenderer {
     }
   }
 
-
   private func applyListFormatting(to text: NSMutableAttributedString) {
     // Handle both bullet and number lists
     let bulletPattern = "^- (.*?)$"
@@ -73,29 +92,33 @@ public final class MarkdownRenderer {
     }
   }
 
-
   /// Range-based formatting
   private func applyFormatting(
     to text: NSMutableAttributedString,
     pattern: String,
     attributes: (NSRange) -> [NSAttributedString.Key: Any]
   ) {
-    let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines])
-    let range = NSRange(location: 0, length: text.length)
+    do {
+      let regex = try NSRegularExpression(pattern: pattern, options: [])
+      let range = NSRange(location: 0, length: text.length)
+      let matches = regex.matches(in: text.string, options: [], range: range)
 
-    regex?.enumerateMatches(in: text.string, options: [], range: range) { match, _, _ in
-      guard let match = match else { return }
-      let attributes = attributes(match.range)
-      text.addAttributes(attributes, range: match.range)
+      for match in matches.reversed() {
+        if match.numberOfRanges > 1 {
+          let contentRange = match.range(at: 1)
+          text.addAttributes(attributes(contentRange), range: contentRange)
+        }
+      }
+    } catch {
+      print("Regex error: \(error)")
     }
   }
 
   private func createListParagraphStyle() -> NSParagraphStyle {
-    let paragraphStyle = NSMutableParagraphStyle()
-    paragraphStyle.headIndent = 20.0 // Indent for the list content
-    paragraphStyle.firstLineHeadIndent = 20.0 // Indent for the bullet/number
-    paragraphStyle.paragraphSpacing = 8.0 // Space between list items
-    paragraphStyle.paragraphSpacingBefore = 8.0 // Space before list items
-    return paragraphStyle
+    let style = NSMutableParagraphStyle()
+    style.firstLineHeadIndent = 20
+    style.headIndent = 20
+    style.paragraphSpacing = 8
+    return style
   }
 }

@@ -14,6 +14,7 @@
 		C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */; };
 		C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905D2CB9431900B78B8A /* InlineKit */; };
 		C38C90602CB9432200B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905F2CB9432200B78B8A /* InlineKit */; };
+		C38DF5F82CD509D8005317A3 /* MarkdownKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38DF5F72CD509D8005317A3 /* MarkdownKit */; };
 		C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC99182CCE9AF7007F7F77 /* InlineUI */; };
 		C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC991A2CCE9AFF007F7F77 /* InlineUI */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
@@ -130,6 +131,7 @@
 				C35EC8222CC2A24A0067979B /* InlineKit in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
+				C38DF5F82CD509D8005317A3 /* MarkdownKit in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
@@ -245,6 +247,7 @@
 				C35EC8212CC2A24A0067979B /* InlineKit */,
 				C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */,
 				C3CC99182CCE9AF7007F7F77 /* InlineUI */,
+				C38DF5F72CD509D8005317A3 /* MarkdownKit */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -1116,6 +1119,10 @@
 		C38C905F2CB9432200B78B8A /* InlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineKit;
+		};
+		C38DF5F72CD509D8005317A3 /* MarkdownKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownKit;
 		};
 		C3CC99182CCE9AF7007F7F77 /* InlineUI */ = {
 			isa = XCSwiftPackageProductDependency;

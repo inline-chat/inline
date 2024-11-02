@@ -7,4 +7,5 @@ public enum MarkdownFeature: CaseIterable {
   case bulletList /// - item
   case numberList /// 1. item
   case link /// [text](url)
+  case autoFormatting /// Enable automatic markdown formatting
 }
