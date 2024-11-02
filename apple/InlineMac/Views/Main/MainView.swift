@@ -25,6 +25,9 @@ struct MainView: View {
             Text("You're logged in!")
         }
         .environmentObject(rootData)
+        .task {
+            rootData.fetch()
+        }
     }
 }
 

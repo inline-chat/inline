@@ -174,7 +174,12 @@ public extension AppDatabase {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
             // Open or create the database
+            #if DEBUG
+            let databaseURL = directoryURL.appendingPathComponent("db_dev.sqlite")
+            #else
             let databaseURL = directoryURL.appendingPathComponent("db.sqlite")
+            #endif
+            
             let config = AppDatabase.makeConfiguration()
             let dbPool = try DatabasePool(path: databaseURL.path, configuration: config)
             print("DB created in \(databaseURL) ")
