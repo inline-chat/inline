@@ -11,7 +11,8 @@ public struct ApiChat: Codable, Hashable, Sendable {
     public var date: Int
     public var title: String?
     public var spaceId: Int64?
-    public var threadNumber: Int
+    public var threadNumber: Int?
+    public var peerUserId: Int64?
 }
 
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
