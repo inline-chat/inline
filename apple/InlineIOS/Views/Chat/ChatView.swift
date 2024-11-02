@@ -1,6 +1,7 @@
 import Combine
 import InlineKit
 import InlineUI
+import MarkdownKit
 import SwiftUI
 import SwiftUIIntrospect
 
@@ -11,6 +12,13 @@ struct ChatView: View {
 
     var chatId: Int64
     @State private var text: String = ""
+    @State private var isEditing = false
+
+    // Create markdown editor
+    private let markdownEditor = MarkdownKit.editor()
+        .with(theme: .default)
+        .with(features: [.bold, .italic, .codeBlock, .bulletList, .numberList, .link])
+        .build()
 
     init(chatId: Int64) {
         self.chatId = chatId
@@ -35,6 +43,13 @@ struct ChatView: View {
                         .fontWeight(.medium)
                 }
             }
+
+            // Add markdown formatting toolbar when editing
+            if isEditing {
+                ToolbarItemGroup(placement: .keyboard) {
+                    markdownFormatButtons
+                }
+            }
         }
         .toolbarRole(.editor)
         .onTapGesture {
@@ -42,9 +57,24 @@ struct ChatView: View {
         }
     }
 
-    private var chatMessages: some View {
-        MessagesCollectionView(messages: fullChatViewModel.messages)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private var markdownFormatButtons: some View {
+        HStack {
+            Button(action: { formatText(.bold) }) {
+                Image(systemName: "bold")
+            }
+            Button(action: { formatText(.italic) }) {
+                Image(systemName: "italic")
+            }
+            Button(action: { formatText(.codeBlock) }) {
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+            }
+            Button(action: { formatText(.bulletList) }) {
+                Image(systemName: "list.bullet")
+            }
+            Button(action: { formatText(.numberList) }) {
+                Image(systemName: "list.number")
+            }
+        }
     }
 
     private var inputArea: some View {
@@ -52,8 +82,8 @@ struct ChatView: View {
             Divider()
                 .ignoresSafeArea()
             HStack {
-                TextField("Type a message", text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
+                MarkdownInputView(text: $text, isEditing: $isEditing)
+                    .frame(minHeight: 36, maxHeight: 120)
                     .onSubmit {
                         sendMessage()
                     }
@@ -67,6 +97,28 @@ struct ChatView: View {
             .padding()
         }
         .background(.clear)
+    }
+
+    private func formatText(_ feature: MarkdownFeature) {
+        switch feature {
+        case .bold:
+            markdownEditor.makeBold()
+        case .italic:
+            markdownEditor.makeItalic()
+        case .codeBlock:
+            markdownEditor.makeCodeBlock()
+        case .bulletList:
+            markdownEditor.addListItem()
+        case .numberList:
+            markdownEditor.addListItem(numbered: true)
+        default:
+            break
+        }
+    }
+
+    private var chatMessages: some View {
+        MessagesCollectionView(messages: fullChatViewModel.messages)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func sendMessage() {
@@ -85,6 +137,63 @@ struct ChatView: View {
     private func scrollToBottom(proxy: ScrollViewProxy) {
         withAnimation {
             proxy.scrollTo(fullChatViewModel.messages.first?.id, anchor: .center)
+        }
+    }
+}
+
+// Helper view to handle markdown input
+private struct MarkdownInputView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isEditing: Bool
+
+    func makeUIView(context: Context) -> MarkdownTextView {
+        let textView = MarkdownKit.editor()
+            .with(theme: .default)
+            .with(features: [.bold, .italic, .codeBlock, .bulletList, .numberList, .link, .autoFormatting])
+            .build()
+
+        textView.delegate = context.coordinator
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.backgroundColor = .clear
+        textView.isScrollEnabled = false
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        
+        return textView
+    }
+
+    func updateUIView(_ textView: MarkdownTextView, context _: Context) {
+        if textView.text != text {
+            textView.text = text
+        }
+        
+        let size = textView.sizeThatFits(CGSize(width: textView.frame.width, height: .infinity))
+        if textView.frame.size.height != size.height {
+            textView.frame.size.height = size.height
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: MarkdownInputView
+
+        init(parent: MarkdownInputView) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+
+        func textViewDidBeginEditing(_: UITextView) {
+            parent.isEditing = true
+        }
+
+        func textViewDidEndEditing(_: UITextView) {
+            parent.isEditing = false
         }
     }
 }

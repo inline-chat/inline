@@ -1,16 +1,20 @@
 import InlineKit
+import MarkdownKit
 import SwiftUI
 
 struct MessageView: View {
     let message: Message
     @Environment(\.appDatabase) var database: AppDatabase
+    private let markdownRenderer = MarkdownKit.renderer()
+        .with(theme: .default)
+        .build()
 
     init(message: Message) {
         self.message = message
     }
 
     var body: some View {
-        Text(message.text ?? "")
+        MessageContentView(text: message.text ?? "", renderer: markdownRenderer)
             .padding(10)
             .font(.body)
             .foregroundColor(.primary)
@@ -35,6 +39,28 @@ struct MessageView: View {
                     }
                 }
             }
+    }
+}
+
+// Helper view to handle markdown rendering
+private struct MessageContentView: UIViewRepresentable {
+    let text: String
+    let renderer: MarkdownRenderer
+
+    func makeUIView(context _: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isScrollEnabled = false
+        textView.backgroundColor = .clear
+        textView.textContainer.lineFragmentPadding = 0
+        textView.textContainerInset = .zero
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context _: Context) {
+        Task { @MainActor in
+            textView.attributedText = await renderer.render(text)
+        }
     }
 }
 
