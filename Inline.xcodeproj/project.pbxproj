@@ -432,7 +432,6 @@
 				C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */,
 				CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */,
-				C35EC8202CC2A24A0067979B /* XCLocalSwiftPackageReference "InlineKit" */,
 				CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -1044,13 +1043,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		C35EC8202CC2A24A0067979B /* XCLocalSwiftPackageReference "InlineKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = InlineKit;
-		};
-/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {

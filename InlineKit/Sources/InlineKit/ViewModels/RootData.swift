@@ -39,7 +39,7 @@ public class RootData: ObservableObject {
                 })
     }
     
-    func fetch() {
+    public func fetch() {
         Task { @MainActor in
             do {
                 Log.shared.debug("Fetching me")
@@ -50,7 +50,7 @@ public class RootData: ObservableObject {
                     try user.save(db)
                 }
             } catch {
-                Log.shared.error("Error fetching user")
+                Log.shared.error("Error fetching user", error: error)
             }
         }
     }

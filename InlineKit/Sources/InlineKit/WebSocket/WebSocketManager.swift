@@ -19,9 +19,6 @@ public final class WebSocketManager: ObservableObject {
     
     convenience public init() {
         self.init(token: Auth.shared.getToken(), userId: Auth.shared.getCurrentUserId())
-        Task {
-            try await self.start()
-        }
     }
     
     public init(token: String?, userId: Int64?) {

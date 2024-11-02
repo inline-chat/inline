@@ -1,6 +1,6 @@
-import SwiftUI
 import InlineKit
 import InlineUI
+import SwiftUI
 
 struct SelfUser: View {
     @EnvironmentObject var rootData: RootData
@@ -10,14 +10,14 @@ struct SelfUser: View {
     }
     
     var body: some View {
-        HStack {
-            UserAvatar(user: currentUser)
-                .frame(width: 32, height: 32)
+        HStack(spacing: 0) {
+            UserAvatar(user: currentUser, size: 24)
+                .padding(.trailing, 4)
                 
             Text(currentUser.firstName ?? "You")
-                .font(.body)
+                .font(.title3)
                 .foregroundStyle(.primary)
-        }
+        }.frame(height: 32)
     }
     
     func defaultUser() -> User {
