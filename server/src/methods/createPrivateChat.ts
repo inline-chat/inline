@@ -32,18 +32,25 @@ export const handler = async (
       .from(users)
       .where(eq(users.id, context.currentUserId))
 
+    const minUserId = context.currentUserId < peerId ? context.currentUserId : peerId
+    const maxUserId = context.currentUserId > peerId ? context.currentUserId : peerId
+    const title = `${currentUserName[0].name}, ${peerName[0].name}`
     const [chat] = await db
       .insert(chats)
       .values({
         spaceId: null,
         type: "private",
         // for debug
-        title: `${currentUserName[0].name} & ${peerName[0].name}`,
+        title,
         spacePublic: false,
         date: new Date(),
         threadNumber: null,
-        minUserId: context.currentUserId < peerId ? context.currentUserId : peerId,
-        maxUserId: context.currentUserId > peerId ? context.currentUserId : peerId,
+        minUserId,
+        maxUserId,
+      })
+      .onConflictDoUpdate({
+        target: [chats.minUserId, chats.maxUserId],
+        set: { title },
       })
       .returning()
 
