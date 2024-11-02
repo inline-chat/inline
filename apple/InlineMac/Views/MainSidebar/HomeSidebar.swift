@@ -1,20 +1,27 @@
 import InlineKit
 import SwiftUI
+import GRDBQuery
 
 struct HomeSidebar: View {
     @EnvironmentObject var ws: WebSocketManager
+    @EnvironmentObject var nav: NavigationModel
+
 
     var body: some View {
         List {
             NavigationLink(destination: Text("Home")) {
-                Label("Home", systemImage: "house")
+                SpaceItem()
             }
-            NavigationLink(destination: Text("Profile")) {
-                Label("Profile", systemImage: "person")
-            }
-
-            SpaceItem()
         }
+        .toolbar(content: {
+            ToolbarItem(placement: .automatic) {
+                Menu("New", systemImage: "plus") {
+                    Button("New Space") {
+                        nav.createSpaceSheetPresented = true
+                    }
+                }
+            }
+        })
         .listStyle(.sidebar)
         .safeAreaInset(edge: .top, content: {
             VStack(alignment: .leading) {
@@ -86,6 +93,7 @@ struct ConnectionStateOverlay: View {
     NavigationSplitView {
         HomeSidebar()
             .previewsEnvironment(.populated)
+            .environmentObject(NavigationModel())
     } detail: {
         Text("Welcome.")
     }
