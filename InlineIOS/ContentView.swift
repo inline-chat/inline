@@ -12,7 +12,10 @@ struct ContentView: View {
     @StateObject private var nav = Navigation()
     @StateObject var api = ApiClient()
     @StateObject var userData = UserData()
+
     @Environment(\.appDatabase) var database
+    @Environment(\.auth) private var auth
+
     @EnvironmentStateObject var dataManager: DataManager
 
     init() {
@@ -24,7 +27,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack(path: $nav.path) {
             VStack {
-                if Auth.shared.isLoggedIn {
+                if auth.isLoggedIn {
                     MainView()
                 } else {
                     Welcome()

@@ -17,6 +17,7 @@ struct Code: View {
     @EnvironmentObject var api: ApiClient
     @EnvironmentObject var userData: UserData
     @Environment(\.appDatabase) var database
+    @Environment(\.auth) private var auth
 
     init(email: String) {
         self.email = email
@@ -94,8 +95,8 @@ struct Code: View {
                 formState.startLoading()
                 let result = try await api.verifyCode(code: code, email: email)
                 print("TOKEN \(result.token)")
-                Auth.shared.saveToken(result.token)
-                Auth.shared.saveCurrentUserId(userId: result.userId)
+                auth.saveToken(result.token)
+                auth.saveCurrentUserId(userId: result.userId)
 
                 do {
                     try await AppDatabase.authenticated()

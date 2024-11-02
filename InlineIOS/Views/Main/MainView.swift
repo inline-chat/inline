@@ -5,6 +5,8 @@ import SwiftUI
 struct MainView: View {
     @EnvironmentObject private var nav: Navigation
     @Environment(\.appDatabase) private var database
+    @Environment(\.auth) private var auth
+
     @EnvironmentObject private var api: ApiClient
     @EnvironmentStateObject private var spaceList: SpaceListViewModel
     @EnvironmentStateObject private var home: HomeViewModel
@@ -58,7 +60,7 @@ struct MainView: View {
             Task {
                 do {
                     try await database.dbWriter.write { db in
-                        if let id = Auth.shared.getCurrentUserId() {
+                        if let id = auth.getCurrentUserId() {
                             let fetchedUser = try User.fetchOne(db, id: id)
                             if let user = fetchedUser {
                                 self.user = user
@@ -97,7 +99,7 @@ struct MainView: View {
                     }
 
                     Button("Logout", role: .destructive) {
-                        Auth.shared.logOut()
+                        auth.logOut()
                         do {
                             try AppDatabase.clearDB()
                         } catch {

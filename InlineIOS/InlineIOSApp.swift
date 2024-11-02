@@ -13,6 +13,8 @@ import SwiftUI
 @main
 struct InlineIOSApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject var ws = WebSocketManager()
+
     init() {
         SentrySDK.start { options in
             options.dsn = "https://1bd867ae25150dd18dad6100789649fd@o124360.ingest.us.sentry.io/4508058293633024"
@@ -33,7 +35,9 @@ struct InlineIOSApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .appDatabase(.shared)
+                .environmentObject(self.ws)
+                .environment(\.auth, Auth.shared)
+                .appDatabase(AppDatabase.shared)
         }
     }
 }
@@ -42,10 +46,13 @@ struct InlineIOSApp: App {
 
 extension EnvironmentValues {
     @Entry var appDatabase = AppDatabase.empty()
+    @Entry var auth = Auth.shared
 }
 
 extension View {
     func appDatabase(_ appDatabase: AppDatabase) -> some View {
-        self.environment(\.appDatabase, appDatabase)
+        self
+            .environment(\.appDatabase, appDatabase)
+            .databaseContext(.readWrite { appDatabase.dbWriter })
     }
 }
