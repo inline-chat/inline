@@ -3,6 +3,7 @@ import Foundation
 import KeychainSwift
 import SwiftUI
 
+// TODO: Remove @unchecked
 public final class Auth: @unchecked Sendable {
     public static let shared = Auth()
     private var cachedToken: String?
@@ -42,7 +43,22 @@ public final class Auth: @unchecked Sendable {
         cachedUserId = getCurrentUserId()
     }
 
-public var isLoggedIn: Bool {
+    private init(mockAuthenticated: Bool) {
+        keychain = KeychainSwift()
+        accessGroup = "2487AN8AL4.keychainGroup"
+        keyChainPrefix = "mock"
+
+        if mockAuthenticated {
+            cachedToken = "1:mockToken"
+            cachedUserId = 1
+        } else {
+            cachedToken = nil
+            cachedUserId = nil
+            keychain.clear()
+        }
+    }
+
+    public var isLoggedIn: Bool {
         (cachedToken != nil) && (cachedUserId != nil)
     }
 
@@ -68,5 +84,10 @@ public var isLoggedIn: Bool {
         // clear cache
         cachedToken = nil
         cachedUserId = nil
+    }
+
+    /// Used in previews
+    static public func mocked(authenticated: Bool) -> Auth {
+        Auth(mockAuthenticated: authenticated)
     }
 }

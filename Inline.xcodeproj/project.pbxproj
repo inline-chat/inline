@@ -17,6 +17,7 @@
 		C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC99182CCE9AF7007F7F77 /* InlineUI */; };
 		C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC991A2CCE9AFF007F7F77 /* InlineUI */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
+		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
 		CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CD26CEAB2CB94E7900665A89 /* Sentry */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CDE9601B2CB94D1C004C541C /* KeychainSwift */; };
@@ -156,6 +157,7 @@
 			files = (
 				CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
+				CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */,
 				CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */,
 				CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */,
 				C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */,
@@ -316,6 +318,7 @@
 				CDE9601B2CB94D1C004C541C /* KeychainSwift */,
 				CD26CEAB2CB94E7900665A89 /* Sentry */,
 				C3CC991A2CCE9AFF007F7F77 /* InlineUI */,
+				CD0A3CD92CD536DF0081AD69 /* GRDBQuery */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -430,6 +433,7 @@
 				C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */,
 				CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */,
 				C35EC8202CC2A24A0067979B /* XCLocalSwiftPackageReference "InlineKit" */,
+				CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -1073,6 +1077,14 @@
 				minimumVersion = 3.0.8;
 			};
 		};
+		CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/inlinehq/GRDBQuery";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.10.2;
+			};
+		};
 		CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/siteline/swiftui-introspect";
@@ -1127,6 +1139,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
+		};
+		CD0A3CD92CD536DF0081AD69 /* GRDBQuery */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */;
+			productName = GRDBQuery;
 		};
 		CD26CEAB2CB94E7900665A89 /* Sentry */ = {
 			isa = XCSwiftPackageProductDependency;

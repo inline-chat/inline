@@ -1,20 +1,34 @@
+import GRDB
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct MainView: View {
     @EnvironmentObject var windowViewModel: MainWindowViewModel
     @EnvironmentObject var ws: WebSocketManager
 
+    // Fetch authenticated user data
+    @EnvironmentStateObject var rootData: RootData
+
+    init() {
+        _rootData = EnvironmentStateObject { env in
+            RootData(db: env.appDatabase, auth: env.auth)
+        }
+    }
+
     var body: some View {
         NavigationSplitView {
-            List {}
+            // TODO: check active space / chat / etc??
+            HomeSidebar()
                 .navigationSplitViewColumnWidth(min: 160, ideal: 220, max: 380)
-                .safeAreaInset(edge: .top, content: {
-                    Text("Connection state : \(ws.connectionState)")
-                })
-
         } detail: {
             Text("You're logged in!")
         }
+        .environmentObject(rootData)
     }
+}
+
+#Preview {
+    MainView()
+        .previewsEnvironment(.empty)
 }

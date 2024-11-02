@@ -1,19 +1,20 @@
 import SwiftUI
 
 public struct InitialsCircle: View {
-    let name: String
+    let firstName: String
+    let lastName: String?
     let size: CGFloat
 
     // sdc
     private var initials: String {
-        name.components(separatedBy: " ")
-            .prefix(2)
-            .compactMap { $0.first }
-            .map(String.init)
+        [firstName, lastName].compactMap { $0?.first }.map(String.init)
             .joined()
             .uppercased()
     }
 
+    private var name: String {
+        return "\(firstName) \(lastName ?? "")"
+    }
     private var color: Color {
         let hash = name.hashValue
         let grayValue = Double(abs(hash) % 40) / 100 + 0.8 // Range from 0.8 to 0.99
@@ -39,5 +40,5 @@ public struct InitialsCircle: View {
 }
 
 #Preview {
-    InitialsCircle(name: "John Doe", size: 40)
+    InitialsCircle(firstName: "John", lastName: "Doe", size: 40)
 }

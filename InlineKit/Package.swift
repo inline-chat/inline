@@ -18,6 +18,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/inlinehq/GRDB.swift", from: "3.0.8"),
+        .package(url: "https://github.com/inlinehq/GRDBQuery", from: "0.10.2"),
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "8.36.0"),
         .package(url: "https://github.com/evgenyneu/keychain-swift.git", from: "24.0.0"),
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.2")
@@ -29,6 +30,7 @@ let package = Package(
             name: "InlineKit",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "GRDBQuery", package: "GRDBQuery"),
                 .product(name: "Sentry", package: "sentry-cocoa"),
                 .product(name: "KeychainSwift", package: "keychain-swift"),
             ]
