@@ -5,12 +5,16 @@ import SwiftUI
 import SwiftUIIntrospect
 
 struct ChatView: View {
+    // MARK: - Properties
+
     @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var dataManager: DataManager
 
-    var chatId: Int64
+    let chatId: Int64
     @State private var text: String = ""
+
+    // MARK: - Initialization
 
     init(chatId: Int64) {
         self.chatId = chatId
@@ -18,6 +22,8 @@ struct ChatView: View {
             FullChatViewModel(db: env.appDatabase, chatId: chatId)
         }
     }
+
+    // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,49 +33,74 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 2) {
-                    InitialsCircle(name: fullChatViewModel.chat?.title ?? "Chat", size: 26)
-                        .padding(.trailing, 6)
-                    Text(fullChatViewModel.chat?.title ?? "Chat")
-                        .font(.title3)
-                        .fontWeight(.medium)
-                }
+                chatHeader
             }
         }
         .toolbarRole(.editor)
-        .onTapGesture {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        }
+        .onTapGesture(perform: dismissKeyboard)
     }
+}
 
-    private var chatMessages: some View {
+// MARK: - View Components
+
+private extension ChatView {
+    var chatMessages: some View {
         MessagesCollectionView(messages: fullChatViewModel.messages)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var inputArea: some View {
+    var chatHeader: some View {
+        HStack(spacing: 2) {
+            InitialsCircle(name: fullChatViewModel.chat?.title ?? "Chat", size: 26)
+                .padding(.trailing, 6)
+            Text(fullChatViewModel.chat?.title ?? "Chat")
+                .font(.title3)
+                .fontWeight(.medium)
+        }
+    }
+
+    var inputArea: some View {
         VStack(spacing: 0) {
             Divider()
                 .ignoresSafeArea()
             HStack {
-                TextField("Type a message", text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .onSubmit {
-                        sendMessage()
-                    }
-                Button(action: sendMessage) {
-                    Image(systemName: "arrow.up")
-                        .foregroundColor(text.isEmpty ? .secondary : .blue)
-                        .font(.body)
-                }
-                .disabled(text.isEmpty)
+                messageTextField
+                sendButton
             }
             .padding()
         }
         .background(.clear)
     }
 
-    private func sendMessage() {
+    var messageTextField: some View {
+        TextField("Type a message", text: $text, axis: .vertical)
+            .textFieldStyle(.plain)
+            .onSubmit(sendMessage)
+    }
+
+    var sendButton: some View {
+        Button(action: sendMessage) {
+            Image(systemName: "arrow.up")
+                .foregroundColor(text.isEmpty ? .secondary : .blue)
+                .font(.body)
+        }
+        .disabled(text.isEmpty)
+    }
+}
+
+// MARK: - Actions
+
+private extension ChatView {
+    func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+
+    func sendMessage() {
         Task {
             do {
                 if !text.isEmpty {
@@ -77,17 +108,13 @@ struct ChatView: View {
                     text = ""
                 }
             } catch {
-                print("Failed to send message: \(error)")
+                Log.shared.error("Failed to send message", error: error)
             }
         }
     }
-
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        withAnimation {
-            proxy.scrollTo(fullChatViewModel.messages.first?.id, anchor: .center)
-        }
-    }
 }
+
+// MARK: - Preview
 
 #Preview {
     NavigationStack {
