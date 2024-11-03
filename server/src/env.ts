@@ -1,3 +1,5 @@
+import { $ } from "bun"
+
 export const isProd = process.env.NODE_ENV === "production"
 
 // REQUIRED FOR DEV AND PROD
@@ -44,3 +46,28 @@ optionalVariables.forEach((variable) => {
     console.warn(`${variable} env variable is not defined.`)
   }
 })
+
+// Build time variables
+export const version = process.env.VERSION || (await import("../package.json")).version
+export const gitCommitHash = process.env.GIT_COMMIT_HASH || (await $`git rev-parse HEAD`.text()).trim().slice(0, 7)
+export const buildDate = process.env.BUILD_DATE || new Date().toISOString()
+
+export const relativeBuildDate = () => {
+  let date = new Date(buildDate)
+  let diff = new Date().getTime() - date.getTime()
+  let seconds = Math.floor(diff / 1000)
+  let minutes = Math.floor(seconds / 60)
+  let hours = Math.floor(minutes / 60)
+  let days = Math.floor(hours / 24)
+  return `${days}d ${hours}h ${minutes}m ${seconds}s ago`
+}
+
+declare global {
+  namespace NodeJS {
+    interface ProcessEnv {
+      BUILD_DATE: string
+      GIT_COMMIT_HASH: string
+      VERSION: string
+    }
+  }
+}

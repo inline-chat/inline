@@ -4,8 +4,8 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "bun --watch src/index.ts",
-    "build": "bun build src/index.ts --target bun --outdir ./dist",
+    "dev": "NODE_ENV=development bun --watch src/index.ts",
+    "build": "NODE_ENV=production bun scripts/build.ts",
     "start": "NODE_ENV=production bun dist/index.js",
     "test": "bun test",
     "db:migrate": "bun scripts/migrate.ts",

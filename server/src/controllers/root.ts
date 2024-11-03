@@ -1,5 +1,11 @@
 import { Elysia } from "elysia"
 import { setup } from "@in/server/setup"
-import { version } from "../../package.json"
+import { gitCommitHash, relativeBuildDate, version } from "@in/server/env"
 
-export const root = new Elysia().use(setup).get("/", () => `🚧 Inline server running 🚧 ${version}`)
+export const root = new Elysia()
+  .use(setup)
+  .get(
+    "/",
+    () =>
+      `🚧 inline server is running • /** version: ${version} • deploy time: ${relativeBuildDate()} • commit: ${gitCommitHash} */`,
+  )

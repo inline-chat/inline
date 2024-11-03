@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/bun"
-import { SENTRY_DSN } from "@in/server/env"
+import { gitCommitHash, SENTRY_DSN, version } from "@in/server/env"
 
 Sentry.init({
   dsn: SENTRY_DSN,
@@ -19,6 +19,8 @@ import { webSocket } from "@in/server/ws"
 const port = process.env["PORT"] || 8000
 
 // Ensure to call this before importing any other modules!
+
+console.log(`🚧 Starting server... (${process.env.NODE_ENV}, ${version}, ${gitCommitHash})`)
 
 const app = new Elysia()
   .use(root)
@@ -60,5 +62,5 @@ const app = new Elysia()
 
 // Run
 app.listen(port, (server) => {
-  console.info(`🚧 Server is running on http://${server.hostname}:${server.port}`)
+  console.info(`✅ Server is running on http://${server.hostname}:${server.port}`)
 })
