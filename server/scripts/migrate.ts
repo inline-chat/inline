@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { resolve } from "path"
 
-export const DATABASE_URL = process.env["DATABASE_URL"] as string
+const DATABASE_URL = process.env["DATABASE_URL"] as string
 
 try {
   const migrationClient = postgres(DATABASE_URL, { max: 1 })
