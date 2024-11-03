@@ -4,7 +4,7 @@ import KeychainSwift
 import SwiftUI
 
 // TODO: Remove @unchecked
-public final class Auth: @unchecked Sendable {
+public final class Auth: ObservableObject, @unchecked Sendable {
     public static let shared = Auth()
     private var cachedToken: String?
     private var cachedUserId: Int64?
@@ -12,9 +12,16 @@ public final class Auth: @unchecked Sendable {
     private var accessGroup: String
     private var keyChainPrefix: String
 
+    @Published public var isLoggedIn: Bool
+
     public func saveToken(_ token: String) {
         keychain.set(token, forKey: "token")
         cachedToken = token
+        evaluateIsLoggedIn()
+    }
+
+    private func evaluateIsLoggedIn() {
+        isLoggedIn = cachedToken != nil && cachedUserId != nil
     }
 
     public func getToken() -> String? {
@@ -40,7 +47,9 @@ public final class Auth: @unchecked Sendable {
         keychain = KeychainSwift(keyPrefix: keyChainPrefix)
         keychain.accessGroup = accessGroup
         cachedToken = keychain.get("token")
-        cachedUserId = getCurrentUserId()
+        cachedUserId = Self.getCurrentUserId()
+
+        isLoggedIn = cachedToken != nil && cachedUserId != nil
     }
 
     private init(mockAuthenticated: Bool) {
@@ -56,22 +65,32 @@ public final class Auth: @unchecked Sendable {
             cachedUserId = nil
             keychain.clear()
         }
-    }
 
-    public var isLoggedIn: Bool {
-        (cachedToken != nil) && (cachedUserId != nil)
+        isLoggedIn = mockAuthenticated
     }
 
     public func saveCurrentUserId(userId: Int64) {
         UserDefaults.standard.set(userId, forKey: "userId")
+        cachedUserId = userId
+        evaluateIsLoggedIn()
     }
 
-    public func getCurrentUserId() -> Int64? {
+    static func getCurrentUserId() -> Int64? {
         let userDefaultsKey = "userId"
         if UserDefaults.standard.object(forKey: userDefaultsKey) != nil {
             return Int64(UserDefaults.standard.integer(forKey: userDefaultsKey))
         }
         return nil
+    }
+
+    public func getCurrentUserId() -> Int64? {
+        if let userId = self.cachedUserId {
+            return userId
+        } else {
+            let userId = Self.getCurrentUserId()
+            cachedUserId = userId
+            return userId
+        }
     }
 
     public func logOut() {
@@ -84,10 +103,11 @@ public final class Auth: @unchecked Sendable {
         // clear cache
         cachedToken = nil
         cachedUserId = nil
+        isLoggedIn = false
     }
 
     /// Used in previews
-    static public func mocked(authenticated: Bool) -> Auth {
+    public static func mocked(authenticated: Bool) -> Auth {
         Auth(mockAuthenticated: authenticated)
     }
 }
