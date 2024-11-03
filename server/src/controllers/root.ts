@@ -1,6 +1,6 @@
 import { Elysia } from "elysia"
 import { setup } from "@in/server/setup"
-import { gitCommitHash, relativeBuildDate, version } from "@in/server/env"
+import { gitCommitHash, relativeBuildDate, version } from "@in/server/buildEnv"
 
 export const root = new Elysia()
   .use(setup)

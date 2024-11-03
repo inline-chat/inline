@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/bun"
-import { gitCommitHash, SENTRY_DSN, version } from "@in/server/env"
+import { SENTRY_DSN } from "@in/server/env"
+import { gitCommitHash, version } from "@in/server/buildEnv"
 
 Sentry.init({
   dsn: SENTRY_DSN,
