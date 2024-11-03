@@ -55,13 +55,14 @@ export const buildDate = process.env.BUILD_DATE || new Date().toISOString()
 export const relativeBuildDate = () => {
   let date = new Date(buildDate)
   let diff = new Date().getTime() - date.getTime()
-  let seconds = Math.floor(diff / 1000)
-  let minutes = Math.floor(seconds / 60)
-  let hours = Math.floor(minutes / 60)
-  let days = Math.floor(hours / 24)
+
+  let seconds = Math.floor(diff / 1000) % 60
+  let minutes = Math.floor(diff / (1000 * 60)) % 60
+  let hours = Math.floor(diff / (1000 * 60 * 60)) % 24
+  let days = Math.floor(diff / (1000 * 60 * 60 * 24))
+
   return `${days}d ${hours}h ${minutes}m ${seconds}s ago`
 }
-
 declare global {
   namespace NodeJS {
     interface ProcessEnv {
