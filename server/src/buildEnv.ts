@@ -1,5 +1,4 @@
-import { isProd } from "@in/server/env"
-import { $ } from "bun"
+const isProd = process.env.NODE_ENV === "production"
 
 // Build time variables
 export const version = process.env.VERSION || (!isProd ? (await import("../package.json")).version : "N/A")
