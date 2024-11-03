@@ -48,8 +48,9 @@ optionalVariables.forEach((variable) => {
 })
 
 // Build time variables
-export const version = process.env.VERSION || (await import("../package.json")).version
-export const gitCommitHash = process.env.GIT_COMMIT_HASH || (await $`git rev-parse HEAD`.text()).trim().slice(0, 7)
+export const version = process.env.VERSION || (!isProd ? (await import("../package.json")).version : "N/A")
+export const gitCommitHash =
+  process.env.GIT_COMMIT_HASH || (!isProd ? (await $`git rev-parse HEAD`.text()).trim().slice(0, 7) : "N/A")
 export const buildDate = process.env.BUILD_DATE || new Date().toISOString()
 
 export const relativeBuildDate = () => {
