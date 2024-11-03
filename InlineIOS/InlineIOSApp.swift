@@ -18,12 +18,9 @@ struct InlineIOSApp: App {
     init() {
         SentrySDK.start { options in
             options.dsn = "https://1bd867ae25150dd18dad6100789649fd@o124360.ingest.us.sentry.io/4508058293633024"
-//            options.debug = true
+            // options.debug = true
 
-            // Enable tracing to capture 100% of transactions for tracing.
-            // Use 'options.tracesSampleRate' to set the sampling rate.
-            // We recommend setting a sample rate in production.
-            options.enableTracing = true
+            options.tracesSampleRate = 0.1
             options.attachViewHierarchy = true
             options.enableMetricKit = true
             options.enableTimeToFullDisplayTracing = true
@@ -39,20 +36,5 @@ struct InlineIOSApp: App {
                 .environment(\.auth, Auth.shared)
                 .appDatabase(AppDatabase.shared)
         }
-    }
-}
-
-// MARK: - Give SwiftUI access to the database
-
-extension EnvironmentValues {
-    @Entry var appDatabase = AppDatabase.empty()
-    @Entry var auth = Auth.shared
-}
-
-extension View {
-    func appDatabase(_ appDatabase: AppDatabase) -> some View {
-        self
-            .environment(\.appDatabase, appDatabase)
-            .databaseContext(.readWrite { appDatabase.dbWriter })
     }
 }

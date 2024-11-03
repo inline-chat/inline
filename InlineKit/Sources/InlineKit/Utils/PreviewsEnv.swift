@@ -1,15 +1,14 @@
 import GRDB
-import InlineKit
 import SwiftUI
 
-enum PreviewsEnvironemntPreset {
+public enum PreviewsEnvironemntPreset {
     case empty
     case populated
     case unauthenticated
 }
 
 extension View {
-    func previewsEnvironment(_ preset: PreviewsEnvironemntPreset) -> some View {
+    public func previewsEnvironment(_ preset: PreviewsEnvironemntPreset) -> some View {
         let appDatabase: AppDatabase = if preset == .populated {
             .populated()
         } else {
@@ -23,7 +22,7 @@ extension View {
             .databaseContext(.readWrite { appDatabase.dbWriter })
             .environmentObject(WebSocketManager(token: nil, userId: nil))
             .environmentObject(RootData(db: appDatabase, auth: auth))
-            .environmentObject(MainWindowViewModel())
+//            .environmentObject(MainWindowViewModel())
             .environment(\.auth, auth)
     }
 }
