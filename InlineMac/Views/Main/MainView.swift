@@ -6,11 +6,12 @@ import SwiftUI
 struct MainView: View {
     @EnvironmentObject var windowViewModel: MainWindowViewModel
     @EnvironmentObject var ws: WebSocketManager
+    @EnvironmentObject var navigation: NavigationModel
 
     // Fetch authenticated user data
     @EnvironmentStateObject var rootData: RootData
-    
-    @StateObject var navigation = NavigationModel()
+    @EnvironmentStateObject var dataManager: DataManager
+
     
     /// 190 is minimum that fits both sidebar collapse button and plus button
     private let MIN_SIDEBAR_WIDTH: CGFloat = 200
@@ -18,6 +19,9 @@ struct MainView: View {
     init() {
         _rootData = EnvironmentStateObject { env in
             RootData(db: env.appDatabase, auth: env.auth)
+        }
+        _dataManager = EnvironmentStateObject { env in
+            DataManager(database: env.appDatabase)
         }
     }
 
@@ -34,7 +38,7 @@ struct MainView: View {
             CreateSpaceSheet()
         }
         .environmentObject(rootData)
-        .environmentObject(navigation)
+        .environmentObject(dataManager)
         .task {
             rootData.fetch()
         }

@@ -13,6 +13,8 @@ struct MainWindowCommands: Commands {
                 Text("Updates on X")
             }
         }
+        
+        SidebarCommands()
     }
     
     private func openHelpWebsite() {
