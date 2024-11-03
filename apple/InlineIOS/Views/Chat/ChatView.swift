@@ -11,15 +11,25 @@ struct ChatView: View {
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var dataManager: DataManager
 
-    let chatId: Int64
+    var chatId: Int64
+    var item: ChatItem?
     @State private var text: String = ""
+
+    var title: String {
+        if item?.chat.type == .privateChat {
+            return item?.user?.firstName ?? "User"
+        } else {
+            return item?.chat.title ?? "Chat"
+        }
+    }
 
     // MARK: - Initialization
 
-    init(chatId: Int64) {
+    init(chatId: Int64, item: ChatItem?) {
         self.chatId = chatId
+        self.item = item
         _fullChatViewModel = EnvironmentStateObject { env in
-            FullChatViewModel(db: env.appDatabase, chatId: chatId)
+            FullChatViewModel(db: env.appDatabase, chatId: item?.chat.id ?? chatId)
         }
     }
 
@@ -51,9 +61,9 @@ private extension ChatView {
 
     var chatHeader: some View {
         HStack(spacing: 2) {
-            InitialsCircle(firstName: fullChatViewModel.chat?.title ?? "Chat", lastName: nil, size: 26)
+            InitialsCircle(firstName: title, lastName: nil, size: 26)
                 .padding(.trailing, 6)
-            Text(fullChatViewModel.chat?.title ?? "Chat")
+            Text(title)
                 .font(.title3)
                 .fontWeight(.medium)
         }
@@ -104,7 +114,7 @@ private extension ChatView {
         Task {
             do {
                 if !text.isEmpty {
-                    try await dataManager.sendMessage(chatId: chatId, text: text)
+                    try await dataManager.sendMessage(chatId: item?.chat.id ?? chatId, text: text)
                     text = ""
                 }
             } catch {
@@ -116,9 +126,9 @@ private extension ChatView {
 
 // MARK: - Preview
 
-#Preview {
-    NavigationStack {
-        ChatView(chatId: 12344)
-            .appDatabase(.emptyWithChat())
-    }
-}
+// #Preview {
+//    NavigationStack {
+//        ChatView(item: ChatItem(chat: Chat(id: 12344, type: .privateChat, title: "Chat", createdAt: .now(), updatedAt: .now()), user: nil))
+//            .appDatabase(.emptyWithChat())
+//    }
+// }

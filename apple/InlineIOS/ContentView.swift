@@ -47,8 +47,10 @@ struct ContentView: View {
                     AddAccount()
                 case let .space(id):
                     SpaceView(spaceId: id)
-                case let .chat(id):
-                    ChatView(chatId: id)
+                case let .chat(id, item):
+                    ChatView(chatId: id, item: item)
+                case .settings:
+                    Settings()
                 }
             }
         }

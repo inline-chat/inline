@@ -41,7 +41,7 @@ struct SpaceView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                nav.push(.chat(id: chat.id))
+                                nav.push(.chat(id: chat.id, item: nil))
                             }
                         }
                     }

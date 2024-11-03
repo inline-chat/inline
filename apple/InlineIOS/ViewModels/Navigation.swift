@@ -1,16 +1,18 @@
+import InlineKit
 import SwiftUI
 
 class Navigation: ObservableObject, @unchecked Sendable {
     static var shared = Navigation()
 
-    enum Destination: Hashable {
+    enum Destination: Hashable, Equatable {
         case welcome
         case email(prevEmail: String? = nil)
         case code(email: String)
         case main
         case addAccount
         case space(id: Int64)
-        case chat(id: Int64)
+        case chat(id: Int64, item: ChatItem?)
+        case settings
     }
 
     @Published var path = NavigationPath()

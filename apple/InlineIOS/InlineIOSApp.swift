@@ -38,3 +38,17 @@ struct InlineIOSApp: App {
         }
     }
 }
+
+// MARK: - Give SwiftUI access to the database
+
+extension EnvironmentValues {
+    @Entry var appDatabase = AppDatabase.empty()
+    @Entry var auth = Auth.shared
+}
+
+extension View {
+    func appDatabase(_ appDatabase: AppDatabase) -> some View {
+        environment(\.appDatabase, appDatabase)
+            .databaseContext(.readWrite { appDatabase.dbWriter })
+    }
+}
