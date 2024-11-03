@@ -20,11 +20,11 @@ struct Settings: View {
                 }
             }
 
-//            Section(header: Text("Actions")) {
-//                Button("Logout", role: .destructive) {
-//                    auth.logout()
-//                }
-//            }
+            Section(header: Text("Actions")) {
+                Button("Logout", role: .destructive) {
+                    auth.logOut()
+                }
+            }
         }
 //        .alert("Logout", isPresented: $showLogoutAlert) {
 //            Text("Are you sure you want to logout?")

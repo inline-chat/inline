@@ -9,7 +9,7 @@ public class UserData: ObservableObject, @unchecked Sendable {
     }
 
     public func getId() -> Int64? {
-        print("USERID GOTTEN \(userId)")
+        print("USERID GOTTEN \(String(describing: userId))")
         return userId
     }
 }

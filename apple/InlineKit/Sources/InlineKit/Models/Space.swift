@@ -12,9 +12,9 @@ public struct Space: FetchableRecord, Identifiable, Codable, Hashable, Persistab
     public var name: String
     public var date: Date
 
-    // Based on https://github.com/groue/GRDB.swift/discussions/1492, GRDB models can't be marked as sendable in GRDB < 6 so we should use nonisolated(unsafe). This issue was fixed in GRDB 7, but because we use GRDB + SQLCipher from Duck Duck Go, we can't upgrade GRDB from v 6 to 7, and the discussions and issues are not open.
-    public nonisolated(unsafe) static let members = hasMany(Member.self)
-    public nonisolated(unsafe) static let users = hasMany(User.self, through: members, using: Member.user)
+    // Based on https://github.com/groue/GRDB.swift/discussions/1492, GRDB models can't be marked as sendable in GRDB < 6 so we should use  . This issue was fixed in GRDB 7, but because we use GRDB + SQLCipher from Duck Duck Go, we can't upgrade GRDB from v 6 to 7, and the discussions and issues are not open.
+    public static let members = hasMany(Member.self)
+    public static let users = hasMany(User.self, through: members, using: Member.user)
 
     public var users: QueryInterfaceRequest<User> {
         request(for: Space.users)
@@ -24,7 +24,7 @@ public struct Space: FetchableRecord, Identifiable, Codable, Hashable, Persistab
         request(for: Space.members)
     }
 
-    public nonisolated(unsafe) static let chats = hasMany(Chat.self)
+    public static let chats = hasMany(Chat.self)
     public var chats: QueryInterfaceRequest<Chat> {
         request(for: Space.chats)
     }
