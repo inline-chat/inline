@@ -99,7 +99,7 @@ private extension MainView {
             ForEach(home.chats.sorted(by: { $0.chat.date > $1.chat.date }), id: \.chat.id) { chat in
                 ChatRowView(item: chat)
                     .onTapGesture {
-                        nav.push(.chat(id: chat.chat.id))
+                        nav.push(.chat(id: chat.chat.id, item: chat))
                     }
             }
         }
@@ -120,6 +120,14 @@ private extension MainView {
             }
 
             ToolbarItem(placement: .topBarTrailing) {
+                Button(action: {
+                    nav.push(.settings)
+                }) {
+                    Image(systemName: "gearshape")
+                        .tint(Color.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
                 Menu {
                     Button("New DM") { showDmSheet = true }
                     Button("Create Space") { showSheet = true }
