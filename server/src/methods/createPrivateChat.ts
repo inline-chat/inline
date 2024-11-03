@@ -54,6 +54,10 @@ export const handler = async (
       })
       .returning()
 
+    if (chat == undefined) {
+      throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to create private chat")
+    }
+
     let peerExistingDialog = await db
       .select()
       .from(dialogs)
