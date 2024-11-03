@@ -6,6 +6,17 @@ import { version } from "../package.json"
 const commitHash =
   process.env["SOURCE_COMMIT"] || (await $`git rev-parse HEAD`.quiet()).text().trim().slice(0, 7) || "N/A"
 
+// Migrate if run in production
+if (process.env.NODE_ENV === "production") {
+  console.log(`🚧 Migrating...`)
+  try {
+    await $`bun scripts/migrate.ts`.quiet()
+  } catch (error) {
+    console.error("🚨 Error migrating:", error)
+    process.exit(1)
+  }
+}
+
 console.log(`🚧 Building...`)
 
 await Bun.build({
