@@ -3,6 +3,7 @@ import InlineUI
 import SwiftUI
 
 /// The main view of the application showing spaces and direct messages
+
 struct MainView: View {
     // MARK: - Environment & State
 
@@ -10,6 +11,7 @@ struct MainView: View {
     @Environment(\.appDatabase) private var database
     @Environment(\.auth) private var auth
     @EnvironmentObject private var api: ApiClient
+    @EnvironmentObject private var ws: WebSocketManager
 
     // MARK: - View Models
 
@@ -21,6 +23,7 @@ struct MainView: View {
     @State private var user: User? = nil
     @State private var showSheet = false
     @State private var showDmSheet = false
+    @State private var connection: String = ""
 
     // MARK: - Initialization
 
@@ -112,31 +115,52 @@ private extension MainView {
                     Image(systemName: "house.fill")
                         .font(.callout)
                         .foregroundColor(.secondary)
-                        .padding(.trailing, 4)
-                    Text("Home")
-                        .font(.title3)
-                        .fontWeight(.semibold)
+                    //                        .padding(.trailing, 4)
+                    VStack(alignment: .leading) {
+                        Text("Home")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        if ws.connectionState != .normal {
+                            Text(connection)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .opacity(connection.isEmpty ? 0 : 1)
+                                .frame(alignment: .leading)
+                                .onChange(of: ws.connectionState) { _, _ in
+                                    if ws.connectionState == .normal {
+                                        connection = ""
+                                    } else if ws.connectionState == .connecting {
+                                        connection = "Connecting..."
+                                    } else if ws.connectionState == .updating {
+                                        connection = "Updating..."
+                                    }
+                                }
+                        }
+                    }
                 }
+//                }
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: {
-                    nav.push(.settings)
-                }) {
-                    Image(systemName: "gearshape")
-                        .tint(Color.secondary)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                Menu {
-                    Button("New DM") { showDmSheet = true }
-                    Button("Create Space") { showSheet = true }
-                    Button("Logout", role: .destructive) { handleLogout() }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .tint(Color.secondary)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+                HStack(spacing: 4) {
+                    Menu {
+                        Button("New DM") { showDmSheet = true }
+                        Button("Create Space") { showSheet = true }
+
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .tint(Color.secondary)
+                            .frame(width: 38, height: 38)
+                            .contentShape(Rectangle())
+                    }
+                    Button(action: {
+                        nav.push(.settings)
+                    }) {
+                        Image(systemName: "gearshape")
+                            .tint(Color.secondary)
+                            .frame(width: 38, height: 38)
+                            .contentShape(Rectangle())
+                    }
                 }
             }
         }
@@ -171,13 +195,5 @@ private extension MainView {
             Log.shared.error("Failed to delete DB and logout", error: error)
         }
         nav.popToRoot()
-    }
-}
-
-#Preview {
-    NavigationStack {
-        MainView()
-            .environmentObject(Navigation())
-            .appDatabase(.emptyWithSpaces())
     }
 }
