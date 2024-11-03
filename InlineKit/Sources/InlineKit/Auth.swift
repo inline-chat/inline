@@ -84,7 +84,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     }
 
     public func getCurrentUserId() -> Int64? {
-        if let userId = self.cachedUserId {
+        if let userId = cachedUserId {
             return userId
         } else {
             let userId = Self.getCurrentUserId()

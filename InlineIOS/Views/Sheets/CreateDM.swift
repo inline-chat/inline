@@ -28,7 +28,7 @@ struct CreateDm: View {
                     .background(.clear)
                     .font(.body)
                     .focused($focusedField, equals: .search)
-                    .onChange(of: username) { newValue in
+                    .onChange(of: username) { _, newValue in
                         searchDebouncer.input = newValue
                     }
                     .onReceive(searchDebouncer.$debouncedInput) { debouncedValue in
@@ -95,7 +95,7 @@ struct CreateDm: View {
                 try await database.dbWriter.write { db in
                     // Convert API users to local User models and save them
                     for apiUser in result.users {
-                        var user = User(
+                        let user = User(
                             id: apiUser.id,
                             email: apiUser.email,
                             firstName: apiUser.firstName,

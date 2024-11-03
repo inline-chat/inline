@@ -7,7 +7,7 @@ struct SpaceRowView: View {
 
     var body: some View {
         HStack {
-            InitialsCircle(firstName: space.name ?? "Space", lastName: nil, size: 25)
+            InitialsCircle(firstName: space.name, lastName: nil, size: 25)
                 .padding(.trailing, 4)
             Text(space.name)
         }

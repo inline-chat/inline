@@ -20,13 +20,13 @@ public struct Member: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public var spaceId: Int64
     public var role: MemberRole
     // Member -> Space
-    public nonisolated(unsafe) static let space = belongsTo(Space.self)
+    public static let space = belongsTo(Space.self)
     public var space: QueryInterfaceRequest<Space> {
         request(for: Member.space)
     }
 
     // Member -> User
-    public nonisolated(unsafe) static let user = belongsTo(User.self)
+    public static let user = belongsTo(User.self)
     public var user: QueryInterfaceRequest<User> {
         request(for: Member.user)
     }

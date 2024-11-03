@@ -55,7 +55,7 @@ struct SpaceView: View {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 2) {
                     if let space = fullSpaceViewModel.space {
-                        InitialsCircle(firstName: space.name ?? "Space", lastName: nil, size: 26)
+                        InitialsCircle(firstName: space.name, lastName: nil, size: 26)
                             .padding(.trailing, 6)
                         Text(space.name)
                             .font(.title3)

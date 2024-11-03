@@ -9,12 +9,12 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public var fromId: Int64
     public var editDate: Date?
 
-    public nonisolated(unsafe) static let chat = belongsTo(Chat.self)
+    public static let chat = belongsTo(Chat.self)
     public var chat: QueryInterfaceRequest<Chat> {
         request(for: Message.chat)
     }
 
-    public nonisolated(unsafe) static let from = belongsTo(User.self)
+    public static let from = belongsTo(User.self)
     public var from: QueryInterfaceRequest<User> {
         request(for: Message.from)
     }
