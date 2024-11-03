@@ -43,12 +43,8 @@ public class RootData: ObservableObject {
         Task { @MainActor in
             do {
                 Log.shared.debug("Fetching me")
-                let result = try await ApiClient.shared.getMe()
-                let user = User(from: result.user)
+                let user = try await DataManager.shared.fetchMe()
                 self.currentUser = user
-                try await self.db.dbWriter.write { db in
-                    try user.save(db)
-                }
             } catch {
                 Log.shared.error("Error fetching user", error: error)
             }

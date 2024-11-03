@@ -32,19 +32,5 @@ struct InlineApp: App {
                 .appDatabase(AppDatabase.shared)
         }
     }
-}
-
-// MARK: - Database
-
-extension EnvironmentValues {
-    @Entry var appDatabase = AppDatabase.empty()
-    @Entry var auth = Auth.shared
-}
-
-extension View {
-    func appDatabase(_ appDatabase: AppDatabase) -> some View {
-        self
-            .environment(\.appDatabase, appDatabase)
-            .databaseContext(.readWrite { appDatabase.dbWriter })
     }
 }

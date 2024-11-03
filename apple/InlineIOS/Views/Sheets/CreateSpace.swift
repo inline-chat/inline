@@ -10,7 +10,7 @@ struct CreateSpace: View {
     @EnvironmentObject var nav: Navigation
     @Environment(\.appDatabase) var database
     @EnvironmentObject var dataManager: DataManager
-    
+
     @Binding var showSheet: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -41,13 +41,13 @@ struct CreateSpace: View {
                     Task {
                         do {
                             formState.startLoading()
-                            let spaceId = try await dataManager.createSpace(name: name)
+                            let space = try await dataManager.createSpace(name: name)
                             formState.succeeded()
                             showSheet = false
-                            if let spaceId = spaceId {
-                                nav.push(.space(id: spaceId))
-                            }
+
+                            nav.push(.space(id: space.id))
                         } catch {
+                            // TODO: handle error
                             Log.shared.error("Failed to create space", error: error)
                         }
                     }
