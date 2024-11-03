@@ -1,8 +1,9 @@
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
-import { DATABASE_URL } from "../src/env"
 import { resolve } from "path"
+
+export const DATABASE_URL = process.env["DATABASE_URL"] as string
 
 try {
   const migrationClient = postgres(DATABASE_URL, { max: 1 })

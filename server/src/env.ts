@@ -1,5 +1,3 @@
-import { $ } from "bun"
-
 export const isProd = process.env.NODE_ENV === "production"
 
 // REQUIRED FOR DEV AND PROD
