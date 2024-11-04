@@ -1,14 +1,4 @@
-import {
-  pgTable,
-  varchar,
-  boolean,
-  timestamp,
-  bigint,
-  pgEnum,
-  makePgArray,
-  unique,
-  check,
-} from "drizzle-orm/pg-core"
+import { pgTable, varchar, boolean, timestamp, bigint, pgEnum, makePgArray, unique, check } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { sql } from "drizzle-orm"
@@ -50,24 +40,18 @@ export const chats = pgTable(
     maxUserId: integer("max_user_id").references(() => users.id),
 
     date: creationDate,
+
+    /** optional, required for private chats, peer user id */
+    peerUserId: integer("peer_user_id").references(() => users.id),
   },
   (table) => ({
     /** Ensure correctness */
-    userIdsCheckConstraint: check(
-      "user_ids_check",
-      sql`${table.minUserId} < ${table.maxUserId}`,
-    ),
+    userIdsCheckConstraint: check("user_ids_check", sql`${table.minUserId} < ${table.maxUserId}`),
     /** Ensure single private chat exists for each user pair */
-    userIdsUniqueContraint: unique("user_ids_unique").on(
-      table.minUserId,
-      table.maxUserId,
-    ),
+    userIdsUniqueContraint: unique("user_ids_unique").on(table.minUserId, table.maxUserId),
 
     /** Ensure unique space thread number */
-    spaceThreadNumberUniqueContraint: unique("space_thread_number_unique").on(
-      table.spaceId,
-      table.threadNumber,
-    ),
+    spaceThreadNumberUniqueContraint: unique("space_thread_number_unique").on(table.spaceId, table.threadNumber),
 
     /** Ensure maxMsgId is valid */
     maxMsgIdForeignKey: foreignKey({

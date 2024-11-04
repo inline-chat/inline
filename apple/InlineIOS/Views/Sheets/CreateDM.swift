@@ -45,7 +45,7 @@ struct CreateDm: View {
                             do {
                                 if let threadId = try await dataManager.createPrivateChat(peerId: user.id) {
                                     showSheet = false
-                                    nav.push(.chat(id: threadId, item: nil))
+                                    nav.push(.chat(peer: .privateChat(userId: threadId)))
                                 }
                             } catch {
                                 Log.shared.error("Failed to create thread", error: error)

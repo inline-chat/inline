@@ -71,6 +71,7 @@ export const TChatInfo = Type.Object({
   title: Optional(Type.String()),
   date: Type.Integer(),
   threadNumber: Optional(Type.Integer()),
+  peerUserId: Optional(Type.Integer()),
 })
 export type TChatInfo = StaticEncode<typeof TChatInfo>
 export const encodeChatInfo = (chat: DbChat | TChatInfo): TChatInfo => {

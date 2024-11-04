@@ -14,7 +14,7 @@ struct Settings: View {
                 HStack {
                     InitialsCircle(firstName: currentUser?.firstName ?? "User", lastName: currentUser?.lastName, size: 26)
                         .padding(.trailing, 6)
-                    Text(currentUser?.firstName ?? "Dena" + " " + (currentUser?.lastName ?? "Sohrabi"))
+                    Text(currentUser?.firstName ?? "Not loaded" + " " + (currentUser?.lastName ?? ""))
                         .font(.body)
                         .fontWeight(.medium)
                 }
@@ -22,7 +22,14 @@ struct Settings: View {
 
             Section(header: Text("Actions")) {
                 Button("Logout", role: .destructive) {
-                    auth.logOut()
+                    // Clear creds
+                    Auth.shared.logOut()
+
+                    // Stop WebSocket
+                    // ws.loggedOut()
+
+                    // Clear database
+                    try? AppDatabase.loggedOut()
                 }
             }
         }

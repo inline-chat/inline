@@ -42,10 +42,12 @@ struct CreateSpace: View {
                         do {
                             formState.startLoading()
                             let space = try await dataManager.createSpace(name: name)
+
                             formState.succeeded()
                             showSheet = false
 
                             nav.push(.space(id: space.id))
+
                         } catch {
                             // TODO: handle error
                             Log.shared.error("Failed to create space", error: error)
