@@ -10,9 +10,9 @@ public struct ApiChat: Codable, Hashable, Sendable {
     public var id: Int64
     public var date: Int
     public var title: String?
+    public var type: String
     public var spaceId: Int64?
     public var threadNumber: Int?
-    public var peerUserId: Int64?
 }
 
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -81,7 +81,7 @@ public extension Chat {
         date = Self.fromTimestamp(from: from.date)
         title = from.title
         spaceId = from.spaceId
-        type = .thread
+        type = from.type == "private" ? .privateChat : .thread
     }
 
     static func fromTimestamp(from: Int) -> Date {
