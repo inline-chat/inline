@@ -6,9 +6,10 @@ import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
 import { encodeUserInfo, TUserInfo } from "../models"
+import { TInputId } from "@in/server/types/methods"
 
 export const Input = Type.Object({
-  id: Type.Integer(),
+  id: TInputId,
 })
 
 export const Response = Type.Object({
@@ -17,7 +18,7 @@ export const Response = Type.Object({
 
 export const handler = async (input: Static<typeof Input>, _: HandlerContext): Promise<Static<typeof Response>> => {
   try {
-    const id = input.id
+    const id = Number(input.id)
     if (isNaN(id)) {
       throw new InlineError(InlineError.ApiError.BAD_REQUEST)
     }

@@ -12,9 +12,10 @@ import {
   TMemberInfo,
   TSpaceInfo,
 } from "@in/server/models"
+import { TInputId } from "@in/server/types/methods"
 
 export const Input = Type.Object({
-  id: Type.Integer(),
+  id: TInputId,
 })
 
 type Input = Static<typeof Input>
@@ -33,7 +34,7 @@ type Response = Static<typeof Response>
 
 export const handler = async (input: Input, context: Context): Promise<Response> => {
   try {
-    const spaceId = input.id
+    const spaceId = Number(input.id)
     if (isNaN(spaceId)) {
       throw new InlineError(InlineError.ApiError.BAD_REQUEST)
     }

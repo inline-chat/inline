@@ -7,10 +7,11 @@ import { eq, sql } from "drizzle-orm"
 import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
+import { TInputId } from "@in/server/types/methods"
 
 export const Input = Type.Object({
   title: Type.String(),
-  spaceId: Type.String(),
+  spaceId: TInputId,
 })
 
 export const Response = Type.Object({
@@ -22,7 +23,7 @@ export const handler = async (
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
-    const spaceId = parseInt(input.spaceId, 10)
+    const spaceId = Number(input.spaceId)
     if (isNaN(spaceId)) {
       throw new InlineError(InlineError.ApiError.SPACE_INVALID)
     }
