@@ -11,13 +11,13 @@ struct ChatView: View {
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var dataManager: DataManager
 
-    var peer: ChatPeer
+    var peer: Peer
 
     @State private var text: String = ""
 
     // MARK: - Initialization
 
-    init(peer: ChatPeer) {
+    init(peer: Peer) {
         self.peer = peer
         _fullChatViewModel = EnvironmentStateObject { env in
             FullChatViewModel(db: env.appDatabase, peer: peer)
@@ -25,7 +25,7 @@ struct ChatView: View {
     }
 
     var title: String {
-        if peer.isPrivate {
+        if case .user = peer {
             return fullChatViewModel.peerUser?.firstName ?? ""
         } else {
             return fullChatViewModel.chat?.title ?? ""

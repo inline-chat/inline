@@ -11,14 +11,23 @@ public final class FullChatViewModel: ObservableObject {
     private var peerUserCancellable: AnyCancellable?
 
     private var db: AppDatabase
-    private var peer: ChatPeer
+    private var peer: Peer
 
-    public init(db: AppDatabase, peer: ChatPeer) {
+    public init(db: AppDatabase, peer: Peer) {
         self.db = db
         self.peer = peer
         fetchChat()
-
         fetchMessages()
+    }
+
+    public func fetchChat() {
+        switch peer {
+        case let .thread(id):
+            fetchThreadChat(id)
+        case let .user(id):
+            fetchPrivateChat(id)
+            fetchPeerUser(id)
+        }
     }
 
     func fetchMessages() {
@@ -37,16 +46,6 @@ public final class FullChatViewModel: ObservableObject {
                     self?.messages = messages
                 }
             )
-    }
-
-    public func fetchChat() {
-        switch peer {
-        case let .thread(chatId):
-            fetchThreadChat(chatId)
-        case let .privateChat(userId):
-            fetchPrivateChat(userId)
-            fetchPeerUser(userId)
-        }
     }
 
     private func fetchThreadChat(_ chatId: Int64) {

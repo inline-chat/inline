@@ -7,9 +7,10 @@ import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
 import { and, eq } from "drizzle-orm"
+import { TInputId } from "../types/methods"
 
 export const Input = Type.Object({
-  peerId: Type.String(),
+  userId: TInputId,
   // TODO: Require access_hash to avoid spam
 })
 
@@ -22,7 +23,7 @@ export const handler = async (
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
-    const peerId = parseInt(input.peerId, 10)
+    const peerId = Number(input.userId)
     if (isNaN(peerId)) {
       throw new InlineError(InlineError.ApiError.PEER_INVALID)
     }
@@ -46,7 +47,6 @@ export const handler = async (
         date: new Date(),
         minUserId,
         maxUserId,
-        peerUserId: peerId,
       })
       .onConflictDoUpdate({
         target: [chats.minUserId, chats.maxUserId],

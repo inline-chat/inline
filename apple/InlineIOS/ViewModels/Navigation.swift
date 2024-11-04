@@ -11,7 +11,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
         case main
         case addAccount
         case space(id: Int64)
-        case chat(peer: ChatPeer)
+        case chat(peer: Peer)
         case settings
         
         func hash(into hasher: inout Hasher) {
