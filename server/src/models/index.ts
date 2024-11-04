@@ -91,8 +91,7 @@ export const TChatInfo = Type.Object({
   spaceId: Optional(Type.Integer()),
   publicThread: Optional(Type.Boolean()),
   threadNumber: Optional(Type.Integer()),
-  peerUserId: Optional(Type.Integer()),
-
+  // peerUserId: Optional(Type.Integer()),
   // Maybe if we count threads as channels in telegram, we need to have :
   // readInboxMaxId
   // readOutboxMaxId
