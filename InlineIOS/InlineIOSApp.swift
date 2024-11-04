@@ -14,7 +14,6 @@ import SwiftUI
 struct InlineIOSApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject var ws = WebSocketManager()
-
     init() {
         SentrySDK.start { options in
             options.dsn = "https://1bd867ae25150dd18dad6100789649fd@o124360.ingest.us.sentry.io/4508058293633024"
@@ -37,11 +36,4 @@ struct InlineIOSApp: App {
                 .appDatabase(AppDatabase.shared)
         }
     }
-}
-
-// MARK: - Give SwiftUI access to the database
-
-extension EnvironmentValues {
-    @Entry var appDatabase = AppDatabase.empty()
-    @Entry var auth = Auth.shared
 }

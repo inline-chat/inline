@@ -11,25 +11,24 @@ struct ChatView: View {
     @EnvironmentObject var nav: Navigation
     @EnvironmentObject var dataManager: DataManager
 
-    var chatId: Int64
-    var item: ChatItem?
-    @State private var text: String = ""
+    var peer: ChatPeer
 
-    var title: String {
-        if item?.chat.type == .privateChat {
-            return item?.user?.firstName ?? "User"
-        } else {
-            return item?.chat.title ?? "Chat"
-        }
-    }
+    @State private var text: String = ""
 
     // MARK: - Initialization
 
-    init(chatId: Int64, item: ChatItem?) {
-        self.chatId = chatId
-        self.item = item
+    init(peer: ChatPeer) {
+        self.peer = peer
         _fullChatViewModel = EnvironmentStateObject { env in
-            FullChatViewModel(db: env.appDatabase, chatId: item?.chat.id ?? chatId)
+            FullChatViewModel(db: env.appDatabase, peer: peer)
+        }
+    }
+
+    var title: String {
+        if peer.isPrivate {
+            return fullChatViewModel.peerUser?.firstName ?? ""
+        } else {
+            return fullChatViewModel.chat?.title ?? ""
         }
     }
 
@@ -114,8 +113,10 @@ private extension ChatView {
         Task {
             do {
                 if !text.isEmpty {
-                    try await dataManager.sendMessage(chatId: item?.chat.id ?? chatId, text: text)
-                    text = ""
+                    if let id = fullChatViewModel.chat?.id {
+                        try await dataManager.sendMessage(chatId: id, text: text)
+                        text = ""
+                    }
                 }
             } catch {
                 Log.shared.error("Failed to send message", error: error)

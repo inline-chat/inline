@@ -81,8 +81,10 @@ public extension AppDatabase {
     /// - parameter base: A base configuration.
     static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
         var config = base
+        print("makeConfiguration called")
 
         if let token = Auth.shared.getToken() {
+            print("Token in makeConfiguration \(token)")
             config.prepareDatabase { db in
                 try db.usePassphrase(token)
             }
@@ -96,11 +98,15 @@ public extension AppDatabase {
 
     static func authenticated() async throws {
         if let token = Auth.shared.getToken() {
-            try await AppDatabase.shared.dbWriter
-                .barrierWriteWithoutTransaction { db in
-                    try db.changePassphrase(token)
-                    // maybe dbPool.invalidateReadOnlyConnections()???
+            try await AppDatabase.shared.dbWriter.barrierWriteWithoutTransaction { db in
+                try db.changePassphrase(token)
+                try db.usePassphrase(token)
+                // Needed for stupid swift. actually smart. ew.
+                if let db = AppDatabase.shared.dbWriter as? DatabasePool {
+                    print("invalidateReadOnlyConnections")
+                    db.invalidateReadOnlyConnections()
                 }
+            }
         } else {
             Log.shared.warning("AppDatabase.authenticated called without token")
         }
@@ -109,6 +115,9 @@ public extension AppDatabase {
     static func clearDB() throws {
         _ = try AppDatabase.shared.dbWriter.write { db in
             try User.deleteAll(db)
+            try Chat.deleteAll(db)
+            try Message.deleteAll(db)
+            try Space.deleteAll(db)
         }
 
         // Optionally, delete the database file
@@ -174,14 +183,16 @@ public extension AppDatabase {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
             // Open or create the database
-            #if DEBUG
-            let databaseURL = directoryURL.appendingPathComponent("db_dev.sqlite")
-            #else
+//            #if DEBUG
+//            let databaseURL = directoryURL.appendingPathComponent("db_dev.sqlite")
+//            #else
             let databaseURL = directoryURL.appendingPathComponent("db.sqlite")
-            #endif
-            
+//            #endif
+
             let config = AppDatabase.makeConfiguration()
-            let dbPool = try DatabasePool(path: databaseURL.path, configuration: config)
+            let dbPool = try DatabaseQueue(path: databaseURL.path, configuration: config)
+            // Crashed iOS
+//            let dbPool = try DatabasePool(path: databaseURL.path, configuration: config)
             print("DB created in \(databaseURL) ")
             // Create the AppDatabase
             let appDatabase = try AppDatabase(dbPool)
@@ -250,17 +261,16 @@ public extension AppDatabase {
         } catch {}
         return db
     }
-    
+
     /// Used for previews
     static func populated() -> AppDatabase {
         let db = AppDatabase.empty()
         do {
-           
             try db.dbWriter.write { db in
                 // Add current user
                 let user = User(id: 1, email: "mo@inline.chat", firstName: "Mohamed", username: "mo")
                 try user.save(db)
-                
+
                 // Add spaces
                 let space1 = Space(id: 1, name: "Space 1 with data", date: Date.now)
                 let space2 = Space(id: 2, name: "Space 2", date: Date.now)
@@ -268,7 +278,7 @@ public extension AppDatabase {
                 try space1.insert(db)
                 try space2.insert(db)
                 try space3.insert(db)
-                
+
                 // Add chats to space 1
                 let chat = Chat(id: 1, date: Date.now, type: .thread, title: "Main", spaceId: 1)
                 try chat.insert(db)

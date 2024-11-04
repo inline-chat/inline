@@ -15,6 +15,7 @@ struct MainView: View {
 
     // MARK: - View Models
 
+    @EnvironmentStateObject private var dataManager: DataManager
     @EnvironmentStateObject private var spaceList: SpaceListViewModel
     @EnvironmentStateObject private var home: HomeViewModel
 
@@ -33,6 +34,9 @@ struct MainView: View {
         }
         _home = EnvironmentStateObject { env in
             HomeViewModel(db: env.appDatabase)
+        }
+        _dataManager = EnvironmentStateObject { env in
+            DataManager(database: env.appDatabase)
         }
     }
 
@@ -55,6 +59,14 @@ struct MainView: View {
             CreateDm(showSheet: $showDmSheet)
                 .presentationBackground(.thinMaterial)
                 .presentationCornerRadius(28)
+        }
+        .task {
+            do {
+                try await dataManager.fetchMe()
+                try await dataManager.loadSpaces()
+            } catch {
+                Log.shared.error("Failed to fetch user", error: error)
+            }
         }
     }
 }
@@ -102,7 +114,7 @@ private extension MainView {
             ForEach(home.chats.sorted(by: { $0.chat.date > $1.chat.date }), id: \.chat.id) { chat in
                 ChatRowView(item: chat)
                     .onTapGesture {
-                        nav.push(.chat(id: chat.chat.id, item: chat))
+                        nav.push(.chat(peer: .privateChat(userId: chat.chat.id)))
                     }
             }
         }

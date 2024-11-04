@@ -46,7 +46,7 @@ struct CreateThread: View {
                             formState.succeeded()
                             showSheet = false
                             if let threadId = threadId {
-                                nav.push(.chat(id: threadId, item: nil))
+                                nav.push(.chat(peer: .thread(chatId: threadId)))
                             }
                         } catch {
                             Log.shared.error("Failed to create space", error: error)
