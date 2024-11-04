@@ -1,24 +1,12 @@
-import {
-  pgTable,
-  varchar,
-  boolean,
-  timestamp,
-  bigint,
-  pgEnum,
-  makePgArray,
-  unique,
-  check,
-} from "drizzle-orm/pg-core"
+import { pgTable, timestamp, unique } from "drizzle-orm/pg-core"
 import { users } from "./users"
-import { spaces } from "./spaces"
-import { sql } from "drizzle-orm"
 import { text } from "drizzle-orm/pg-core"
 import { chats } from "./chats"
 import { bigserial } from "drizzle-orm/pg-core"
 import { integer } from "drizzle-orm/pg-core"
 import { index } from "drizzle-orm/pg-core"
 import { creationDate } from "@in/server/db/schema/common"
-import { AnyPgColumn } from "drizzle-orm/pg-core"
+import type { AnyPgColumn } from "drizzle-orm/pg-core"
 
 export const messages = pgTable(
   "messages",
@@ -49,14 +37,8 @@ export const messages = pgTable(
     date: creationDate,
   },
   (table) => ({
-    messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(
-      table.messageId,
-      table.chatId,
-    ),
-    messageIdPerChatIndex: index("msg_id_per_chat_index").on(
-      table.messageId,
-      table.chatId,
-    ),
+    messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(table.messageId, table.chatId),
+    messageIdPerChatIndex: index("msg_id_per_chat_index").on(table.messageId, table.chatId),
   }),
 )
 

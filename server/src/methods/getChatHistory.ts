@@ -7,7 +7,7 @@ import { type Static, Type } from "@sinclair/typebox"
 import { encodeMessageInfo, TMessageInfo } from "@in/server/models"
 
 export const Input = Type.Object({
-  id: Type.String(),
+  id: Type.Integer(),
   limit: Type.Optional(Type.Integer({ default: 50 })),
 })
 
@@ -23,11 +23,11 @@ export const Response = Type.Object({
 
 type Response = Static<typeof Response>
 
-export const handler = async (input: Input, context: Context): Promise<Response> => {
+export const handler = async (input: Input, _: Context): Promise<Response> => {
   try {
-    const chatId = parseInt(input.id, 10)
+    const chatId = input.id
     if (isNaN(chatId)) {
-      throw new InlineError(ErrorCodes.INVALID_INPUT, "Invalid chat ID")
+      throw new InlineError(InlineError.ApiError.PEER_INVALID)
     }
     const result = await db
       .select()
@@ -39,6 +39,6 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     return { messages: result.map(encodeMessageInfo) }
   } catch (error) {
     Log.shared.error("Failed to get chat history", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to get chat history")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }

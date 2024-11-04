@@ -8,6 +8,7 @@ export const TMakeApiResponse = <T extends TSchema>(type: T) => {
   const success = t.Object({ ok: t.Literal(true), result: type })
   const failure = t.Object({
     ok: t.Literal(false),
+    error: t.String(),
     errorCode: t.Optional(t.Number()),
     description: t.Optional(t.String()),
   })
@@ -21,26 +22,30 @@ export const handleError = new Elysia()
     if (code === "NOT_FOUND")
       return {
         ok: false,
+        error: "NOT_FOUND",
         errorCode: 404,
         description: "Method not found",
       }
     if (error instanceof InlineError) {
       return {
         ok: false,
+        error: error.type,
         errorCode: error.code,
-        description: error.message,
+        description: error.description,
       }
     } else if (code === "VALIDATION") {
       return {
         ok: false,
-        errorCode: ErrorCodes.INAVLID_ARGS,
+        error: "INVALID_ARGS",
+        errorCode: 400,
         description: "Validation error",
       }
     } else {
       Log.shared.error("Top level error, " + code, error)
       return {
         ok: false,
-        errorCode: ErrorCodes.SERVER_ERROR,
+        error: "SERVER_ERROR",
+        errorCode: 500,
         description: "Server error",
       }
     }

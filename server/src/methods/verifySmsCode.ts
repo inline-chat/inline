@@ -37,14 +37,14 @@ export const handler = async (
   try {
     // verify formatting
     if (isValidPhoneNumber(input.phoneNumber) === false) {
-      throw new InlineError(ErrorCodes.INAVLID_ARGS, "Invalid phone number format")
+      throw new InlineError(InlineError.ApiError.PHONE_INVALID)
     }
 
     // send sms code
     let response = await twilio.verify.checkVerificationToken(input.phoneNumber, input.code)
 
     if (response?.status !== "approved" || response?.valid === false || !response.to) {
-      throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to send sms code")
+      throw new InlineError(InlineError.ApiError.SMS_CODE_INVALID)
     }
 
     // Formatted in E.164 format. It's important to use this format for phone numbers.
@@ -64,6 +64,12 @@ export const handler = async (
     let deviceName = input.deviceName ?? null
     // create or fetch user by email
     let user = await getUserByPhoneNumber(phoneNumber)
+
+    if (!user) {
+      Log.shared.error("Failed to verify sms code", { phoneNumber })
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+
     let userId = user.id
 
     // save session
@@ -83,7 +89,7 @@ export const handler = async (
     return { userId: userId, token: token, user: encodeUserInfo(user) }
   } catch (error) {
     Log.shared.error("Failed to verify sms code", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to verify sms code")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
 

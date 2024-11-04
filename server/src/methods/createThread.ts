@@ -17,11 +17,14 @@ export const Response = Type.Object({
   chat: TChatInfo,
 })
 
-export const handler = async (input: Static<typeof Input>, _: HandlerContext): Promise<Static<typeof Response>> => {
+export const handler = async (
+  input: Static<typeof Input>,
+  context: HandlerContext,
+): Promise<Static<typeof Response>> => {
   try {
     const spaceId = parseInt(input.spaceId, 10)
     if (isNaN(spaceId)) {
-      throw new InlineError(ErrorCodes.SERVER_ERROR, "Invalid spaceId")
+      throw new InlineError(InlineError.ApiError.SPACE_INVALID)
     }
     var maxThreadNumber: number = await db
       // MAX function returns the maximum value in a set of values
@@ -35,18 +38,22 @@ export const handler = async (input: Static<typeof Input>, _: HandlerContext): P
     const chat = await db
       .insert(chats)
       .values({
-        spaceId: spaceId,
         type: "thread",
+        spaceId: spaceId,
         title: input.title,
-        spacePublic: true,
+        publicThread: true,
         date: new Date(),
         threadNumber: threadNumber,
       })
       .returning()
 
-    return { chat: encodeChatInfo(chat[0]) }
+    if (!chat[0]) {
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+
+    return { chat: encodeChatInfo(chat[0], { currentUserId: context.currentUserId }) }
   } catch (error) {
     Log.shared.error("Failed to create thread", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to create thread")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }

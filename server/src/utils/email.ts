@@ -2,6 +2,7 @@ import { EMAIL_PROVIDER } from "@in/server/config"
 
 import { sendEmail as sendEmailViaSES } from "@in/server/libs/ses"
 import { sendEmail as sendEmailViaResend } from "@in/server/libs/resend"
+import { isProd } from "@in/server/env"
 
 type SendEmailInput = {
   to: string
@@ -18,6 +19,23 @@ type SendEmailContent = CodeTemplateInput
 
 export const sendEmail = async (input: SendEmailInput) => {
   const template = getTemplate(input.content)
+
+  if (!isProd && !process.env["SEND_EMAIL"]) {
+    // let's log the email beautifully with formatting, subject, email, from and text so it's easy to read and matches the email
+    console.log(
+      `
+Subject: ${template.subject}
+To: ${input.to}
+From: team@inline.chat
+
+${template.text}
+
+// This is a preview email. To force sending the email, set SEND_EMAIL=1.
+    `.trim(),
+    )
+    return
+  }
+
   if (EMAIL_PROVIDER === "SES") {
     await sendEmailViaSES({
       to: input.to,
@@ -57,7 +75,6 @@ type TextTemplate = {
 }
 
 const getTemplate = (content: SendEmailContent): TextTemplate => {
-  console.log({ content })
   switch (content.template) {
     case "code":
       return CodeTemplate(content.variables)

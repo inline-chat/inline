@@ -33,7 +33,7 @@ export const handler = async (
 
     return { users: result.map(encodeUserInfo) }
   } catch (error) {
-    Log.shared.error("Failed to get me", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR)
+    Log.shared.error("Failed to search contacts", error)
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }

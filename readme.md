@@ -1,5 +1,7 @@
 # Inline
 
+[![Better Stack Badge](https://uptime.betterstack.com/status-badges/v2/monitor/1murw.svg)](https://uptime.betterstack.com/?utm_source=status_badge)
+
 [Inline](https://inline.chat) is a chat app for teams.
 
 ## Development

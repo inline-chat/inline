@@ -35,8 +35,16 @@ export const handler = async (
   { ip: requestIp }: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
+    if (input.code === "") {
+      throw new InlineError(InlineError.ApiError.EMAIL_CODE_EMPTY)
+    }
+
+    if (input.code.length < 6) {
+      throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
+    }
+
     if (isValidEmail(input.email) === false) {
-      throw new InlineError(ErrorCodes.INAVLID_ARGS, "Invalid email")
+      throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
     }
 
     let email = normalizeEmail(input.email)
@@ -60,6 +68,11 @@ export const handler = async (
 
     // create or fetch user by email
     let user = await getUserByEmail(email)
+
+    if (!user) {
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+
     let userId = user.id
 
     // save session
@@ -78,8 +91,8 @@ export const handler = async (
 
     return { userId: userId, token: token, user: encodeUserInfo(user) }
   } catch (error) {
-    Log.shared.error("Failed to send email code", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to send email code")
+    Log.shared.error("Failed to verify email code", error)
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
 

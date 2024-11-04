@@ -41,6 +41,10 @@ export const handler = async (
         .returning()
     )[0]
 
+    if (!space) {
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+
     // Create the space membership
     let member = (
       await db
@@ -53,6 +57,10 @@ export const handler = async (
         .returning()
     )[0]
 
+    if (!member) {
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+
     // Create the main chat
     let mainChat = (
       await db
@@ -61,7 +69,7 @@ export const handler = async (
           spaceId: space.id,
           type: "thread",
           title: "Main",
-          spacePublic: true,
+          publicThread: true,
           description: "Main chat for everyone in the space",
           threadNumber: 1,
         })
@@ -72,10 +80,12 @@ export const handler = async (
     return {
       space: encodeSpaceInfo(output.space),
       member: encodeMemberInfo(output.member),
-      chats: output.chats.map(encodeChatInfo),
+      chats: output.chats
+        .map((c) => c && encodeChatInfo(c, { currentUserId: context.currentUserId }))
+        .filter((c) => c !== undefined),
     }
   } catch (error) {
     Log.shared.error("Failed to create space", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to create space")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }

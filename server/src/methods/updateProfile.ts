@@ -26,21 +26,34 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
       // check username is available if it's set
       let isAvailable = await checkUsernameAvailable(input.username)
       if (!isAvailable) {
-        throw new InlineError(ErrorCodes.INAVLID_ARGS, "Username is already taken")
+        throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
       }
     }
 
     let props: DbNewUser = {}
-    if ("firstName" in input) props.firstName = input.firstName ?? null
+    if ("firstName" in input) {
+      if (input.firstName.length < 1) {
+        throw new InlineError(InlineError.ApiError.FIRST_NAME_INVALID)
+      }
+      props.firstName = input.firstName ?? null
+    }
     if ("lastName" in input) props.lastName = input.lastName ?? null
-    if ("username" in input) props.username = input.username ?? null
+    if ("username" in input) {
+      if (input.username.length < 2) {
+        throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
+      }
+      props.username = input.username ?? null
+    }
 
     let user = await db.update(users).set(props).where(eq(users.id, context.currentUserId)).returning()
-
+    if (!user[0]) {
+      Log.shared.error("Failed to set profile", { userId: context.currentUserId })
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
     return { user: encodeUserInfo(user[0]) }
   } catch (error) {
     Log.shared.error("Failed to set profile", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to set profile")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
 

@@ -16,7 +16,7 @@ export const authenticate = new Elysia({ name: "authenticate" }).state("currentU
     let auth = headers["authorization"]
     let token = normalizeToken(auth)
     if (!token) {
-      throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
+      throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
     }
 
     store.currentUserId = await getUserIdFromToken(token)
@@ -34,7 +34,7 @@ export const authenticateGet = new Elysia({ name: "authenticate" }).state("curre
     let auth = params.token ?? headers["authorization"]
     let token = normalizeToken(auth)
     if (!token) {
-      throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
+      throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
     }
 
     store.currentUserId = await getUserIdFromToken(token)
@@ -55,15 +55,15 @@ export const getUserIdFromToken = async (token: string): Promise<number> => {
     where: and(eq(sessions.tokenHash, tokenHash), isNull(sessions.revoked)),
   })
 
-  if (!session) {
-    throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
+  if (!session || !supposedUserId) {
+    throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
   }
 
   // TODO: update last active
 
   if (session.userId !== parseInt(supposedUserId, 10)) {
     console.error("userId mismatch", session.userId, supposedUserId)
-    throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
+    throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
   }
 
   return session.userId

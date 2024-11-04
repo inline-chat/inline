@@ -6,10 +6,11 @@ import { Log } from "@in/server/utils/log"
 import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
-import { and, eq, or, sql } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 
 export const Input = Type.Object({
   peerId: Type.String(),
+  // TODO: Require access_hash to avoid spam
 })
 
 export const Response = Type.Object({
@@ -23,7 +24,7 @@ export const handler = async (
   try {
     const peerId = parseInt(input.peerId, 10)
     if (isNaN(peerId)) {
-      throw new InlineError(ErrorCodes.SERVER_ERROR, "Invalid peerId")
+      throw new InlineError(InlineError.ApiError.PEER_INVALID)
     }
 
     const peerName = await db.select({ name: users.firstName }).from(users).where(eq(users.id, peerId))
@@ -32,19 +33,17 @@ export const handler = async (
       .from(users)
       .where(eq(users.id, context.currentUserId))
 
+    const firstUserName = currentUserName[0]?.name
+    const secondUserName = peerName[0]?.name
     const minUserId = context.currentUserId < peerId ? context.currentUserId : peerId
     const maxUserId = context.currentUserId > peerId ? context.currentUserId : peerId
-    const title = `${currentUserName[0]?.name ?? ""}, ${peerName[0]?.name ?? ""}`
+    const title = firstUserName && secondUserName ? `${firstUserName}, ${secondUserName}` : null
     const [chat] = await db
       .insert(chats)
       .values({
-        spaceId: null,
-        type: "private",
-        // for debug
         title,
-        spacePublic: false,
+        type: "private",
         date: new Date(),
-        threadNumber: null,
         minUserId,
         maxUserId,
         peerUserId: peerId,
@@ -55,8 +54,9 @@ export const handler = async (
       })
       .returning()
 
-    if (chat == undefined) {
-      throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to create private chat")
+    if (!chat) {
+      Log.shared.error("Failed to create private chat")
+      throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
     let peerExistingDialog = await db
@@ -89,9 +89,9 @@ export const handler = async (
         },
       ])
     }
-    return { chat: encodeChatInfo(chat) }
+    return { chat: encodeChatInfo(chat, { currentUserId: context.currentUserId }) }
   } catch (error) {
     Log.shared.error("Failed to create private chat", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to create private chat")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }

@@ -1,6 +1,5 @@
 import { Elysia, t } from "elysia"
 import { setup } from "@in/server/setup"
-import { insertIntoWaitlist } from "@in/server/db/models/waitlist"
 import { insertThereUser } from "../../db/models/there"
 
 export const there = new Elysia({ prefix: "/api/there" }).use(setup).post(

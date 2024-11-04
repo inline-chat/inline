@@ -66,7 +66,7 @@ export const webSocket = new Elysia()
           let userIdFromToken = await getUserIdFromToken(token)
           if (userIdFromToken !== userId) {
             log.warn(`userId mismatch userIdFromToken: ${userIdFromToken}, userId: ${userId}`)
-            throw new InlineError(ErrorCodes.UNAUTHORIZED, "Unauthorized")
+            throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
           }
 
           ws.data.store.connection.authenticate(userIdFromToken)

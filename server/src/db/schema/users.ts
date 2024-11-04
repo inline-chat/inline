@@ -1,19 +1,6 @@
 import { SQL, sql } from "drizzle-orm"
-import {
-  integer,
-  pgEnum,
-  pgTable,
-  serial,
-  uniqueIndex,
-  varchar,
-  boolean,
-  timestamp,
-  text,
-  bigserial,
-  bigint,
-  AnyPgColumn,
-} from "drizzle-orm/pg-core"
-import { pgSchema, pgSequence } from "drizzle-orm/pg-core"
+import { integer, pgTable, uniqueIndex, varchar, boolean, timestamp, type AnyPgColumn } from "drizzle-orm/pg-core"
+import { pgSequence } from "drizzle-orm/pg-core"
 
 // custom lower function
 export function lower(email: AnyPgColumn): SQL {
@@ -46,9 +33,7 @@ export const users = pgTable(
     date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
   },
   (table) => ({
-    users_username_unique: uniqueIndex("users_username_unique").on(
-      lower(table.username),
-    ),
+    users_username_unique: uniqueIndex("users_username_unique").on(lower(table.username)),
   }),
 )
 

@@ -7,9 +7,9 @@ import { type Static, Type } from "@sinclair/typebox"
 import { encodeMessageInfo, TMessageInfo } from "@in/server/models"
 
 export const Input = Type.Object({
-  chatId: Type.String(),
+  // TODO: change to PeerId
+  chatId: Type.Integer(),
   text: Type.String(),
-  peerUserIds: Type.Array(Type.String()),
 })
 
 type Input = Static<typeof Input>
@@ -26,9 +26,9 @@ type Response = Static<typeof Response>
 
 export const handler = async (input: Input, context: Context): Promise<Response> => {
   try {
-    const chatId = parseInt(input.chatId, 10)
+    const chatId = input.chatId
     if (isNaN(chatId)) {
-      throw new InlineError(ErrorCodes.INVALID_INPUT, "Invalid chat ID")
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
     }
 
     var prevMessageId: number = await db
@@ -49,12 +49,17 @@ export const handler = async (input: Input, context: Context): Promise<Response>
 
     await db
       .update(chats)
-      .set({ maxMsgId: prevMessageId + 1 })
+      .set({ lastMsgId: prevMessageId + 1 })
       .where(eq(chats.id, chatId))
+
+    if (!newMessage) {
+      Log.shared.error("Failed to send message")
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
 
     return { message: encodeMessageInfo(newMessage) }
   } catch (error) {
-    Log.shared.error("Failed to get chat history", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to get chat history")
+    Log.shared.error("Failed to send message", error)
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }

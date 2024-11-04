@@ -25,13 +25,13 @@ export const handler = async (
   try {
     // verify formatting
     if (isValidPhoneNumber(input.phoneNumber) === false) {
-      throw new InlineError(ErrorCodes.INAVLID_ARGS, "Invalid phone number format")
+      throw new InlineError(InlineError.ApiError.PHONE_INVALID)
     }
 
     // validate phone number via twilio lookups
     const lookup = await twilio.lookups.phoneNumbers(input.phoneNumber)
     if (lookup.valid === false) {
-      throw new InlineError(ErrorCodes.INAVLID_ARGS, "Invalid phone number")
+      throw new InlineError(InlineError.ApiError.PHONE_INVALID)
     }
 
     // lookup.phone_number is in E.164 format
@@ -40,7 +40,7 @@ export const handler = async (
     let response = await twilio.verify.sendVerificationToken(lookup.phone_number, "sms")
 
     if (response?.status !== "pending") {
-      throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to send sms code")
+      throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
     console.log("sending sms code to", lookup.phone_number)
@@ -60,6 +60,6 @@ export const handler = async (
     }
   } catch (error) {
     Log.shared.error("Failed to send sms code", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to send sms code")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }

@@ -27,7 +27,7 @@ export const handler = async (
     return { available: result.length === 0 }
   } catch (error) {
     Log.shared.error("Failed to check username", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to check username")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
 

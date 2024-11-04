@@ -1,4 +1,4 @@
-# General JS world 
+# General JS world
 **/.cache
 **/build
 .env
@@ -82,7 +82,6 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-
 .DS_Store
 /Packages
 xcuserdata/
@@ -91,3 +90,5 @@ DerivedData/
 **/.swiftpm/configuration/registries.json
 **/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 **/.netrc
+
+server/dist

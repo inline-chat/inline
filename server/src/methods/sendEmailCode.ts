@@ -27,7 +27,7 @@ export const handler = async (
 ): Promise<Static<typeof Response>> => {
   try {
     if (isValidEmail(input.email) === false) {
-      throw new InlineError(ErrorCodes.INAVLID_ARGS, "Invalid email")
+      throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
     }
 
     let email = normalizeEmail(input.email)
@@ -41,7 +41,7 @@ export const handler = async (
     return { existingUser }
   } catch (error) {
     Log.shared.error("Failed to send email code", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR, "Failed to send email code")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
 
@@ -93,9 +93,5 @@ const getLoginCode = async (
 }
 
 const sendEmailCode = async (email: string, code: string, firstName: string | undefined) => {
-  if (isProd || process.env["SEND_EMAIL"]) {
-    await sendEmail({ to: email, content: { template: "code", variables: { code, firstName } } })
-  } else {
-    console.info(`Sending email to ${email} with code ${code}. To send emails in dev, set SEND_EMAIL=1.`)
-  }
+  await sendEmail({ to: email, content: { template: "code", variables: { code, firstName } } })
 }

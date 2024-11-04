@@ -22,10 +22,13 @@ export const handler = async (
 ): Promise<Static<typeof Response>> => {
   try {
     let user = await db.select().from(users).where(eq(users.id, currentUserId))
-
+    if (!user[0]) {
+      Log.shared.error("Failed to get me")
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
     return { user: encodeUserInfo(user[0]) }
   } catch (error) {
     Log.shared.error("Failed to get me", error)
-    throw new InlineError(ErrorCodes.SERVER_ERROR)
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
