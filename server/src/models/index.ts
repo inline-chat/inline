@@ -1,8 +1,12 @@
-// https://effect.website/docs/guides/schema/basic-usage
-
-import { t } from "elysia"
-import { DbChat, DbMember, DbSpace, DbUser, type DbMessage } from "@in/server/db/schema"
-import { Type, type Static, type TSchema, type StaticEncode, type StaticDecode } from "@sinclair/typebox"
+import {
+  type DbChat,
+  type DbMember,
+  type DbSpace,
+  type DbUser,
+  type DbMessage,
+  type DbDialog,
+} from "@in/server/db/schema"
+import { Type, type TSchema, type StaticEncode } from "@sinclair/typebox"
 import { Value } from "@sinclair/typebox/value"
 
 // const BigIntString = Type.Transform(Type.BigInt())
@@ -64,21 +68,74 @@ export const encodeMemberInfo = (member: DbMember | TMemberInfo): TMemberInfo =>
   })
 }
 
+export const TPeerInfo = Type.Union([
+  Type.Object({ userId: Type.Integer() }),
+  Type.Object({ threadId: Type.Integer() }),
+])
+
+export const TInputPeerInfo = Type.Union([
+  Type.Object({ userId: Type.Integer() }),
+  Type.Object({ threadId: Type.Integer() }),
+])
+
 // Chat -------------
 export const TChatInfo = Type.Object({
   id: Type.Integer(),
-  spaceId: Optional(Type.Integer()),
-  title: Optional(Type.String()),
+  type: Type.Union([Type.Literal("private"), Type.Literal("thread")]),
+  peer: TPeerInfo,
   date: Type.Integer(),
+  lastMsgId: Optional(Type.Integer()),
+
+  // For space threads
+  title: Optional(Type.String()),
+  spaceId: Optional(Type.Integer()),
+  publicThread: Optional(Type.Boolean()),
   threadNumber: Optional(Type.Integer()),
   peerUserId: Optional(Type.Integer()),
+
+  // Maybe if we count threads as channels in telegram, we need to have :
+  // readInboxMaxId
+  // readOutboxMaxId
+  // pts?
 })
 export type TChatInfo = StaticEncode<typeof TChatInfo>
-export const encodeChatInfo = (chat: DbChat | TChatInfo): TChatInfo => {
+export const encodeChatInfo = (chat: DbChat, { currentUserId }: { currentUserId: number }): TChatInfo => {
   return Value.Encode(TChatInfo, {
     ...chat,
+    peer: chat.spaceId
+      ? { threadId: chat.id }
+      : { userId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId },
     date: encodeDate(chat.date),
-    threadNumber: chat.threadNumber ? chat.threadNumber : undefined,
+  })
+}
+
+// PeerNotifySettings
+export const TPeerNotifySettings = Type.Object({
+  showPreviews: Optional(Type.Boolean()),
+  silent: Optional(Type.Boolean()),
+  // muteUntil: Optional(Type.Integer()),
+})
+
+// Dialog -------------
+// Telegram Ref: https://core.telegram.org/constructor/dialog
+export const TDialogInfo = Type.Object({
+  peer: TPeerInfo,
+  pinned: Optional(Type.Boolean()),
+  spaceId: Optional(Type.Integer()), // if part of space
+  readInboxMaxId: Optional(Type.Integer()),
+  readOutboxMaxId: Optional(Type.Integer()),
+  // lastMsgId: Optional(Type.Integer()),
+  // unreadCount: Optional(Type.Integer()),
+  // unreadMentionsCount: Optional(Type.Integer()), // https://core.telegram.org/api/mentions
+  // unreadReactionsCount: Optional(Type.Integer()),
+  // pinnedMsgId: Optional(Type.Integer()),
+  // peerNotifySettings: Optional(TPeerNotifySettings),
+})
+export type TDialogInfo = StaticEncode<typeof TDialogInfo>
+export const encodeDialogInfo = (dialog: DbDialog): TDialogInfo => {
+  return Value.Encode(TDialogInfo, {
+    ...dialog,
+    peer: dialog.peerUserId ? { userId: dialog.peerUserId } : { threadId: dialog.chatId },
   })
 }
 
@@ -90,6 +147,9 @@ export const TMessageInfo = Type.Object({
   text: Optional(Type.String()),
   date: Type.Integer(),
   editDate: Optional(Type.Integer()),
+
+  // https://core.telegram.org/api/mentions
+  mentioned: Optional(Type.Boolean()),
 })
 
 export type TMessageInfo = StaticEncode<typeof TMessageInfo>

@@ -50,6 +50,20 @@
       "when": 1729607177541,
       "tag": "0006_session_info",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1730650114391,
+      "tag": "0007_dialogs",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1730650934205,
+      "tag": "0008_dialog_chat_not_null",
+      "breakpoints": true
     }
   ]
 }
