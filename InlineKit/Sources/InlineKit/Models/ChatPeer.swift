@@ -1,38 +1,49 @@
 import Foundation
 import GRDB
 
-public enum ChatPeer: Hashable, Equatable {
-  case privateChat(userId: Int64)
-  case thread(chatId: Int64)
-
-  public var isPrivate: Bool {
-    switch self {
-    case .privateChat:
-      return true
-    case .thread:
-      return false
+public enum Peer: Codable, Hashable, Sendable {
+    case user(id: Int64)
+    case thread(id: Int64)
+    
+    private enum CodingKeys: String, CodingKey {
+        case userId
+        case threadId
     }
-  }
-
-  public func hash(into hasher: inout Hasher) {
-    switch self {
-    case let .privateChat(userId):
-      hasher.combine(0)
-      hasher.combine(userId)
-    case let .thread(chatId):
-      hasher.combine(1)
-      hasher.combine(chatId)
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        if let userId = try container.decodeIfPresent(Int64.self, forKey: .userId) {
+            self = .user(id: userId)
+        } else if let threadId = try container.decodeIfPresent(Int64.self, forKey: .threadId) {
+            self = .thread(id: threadId)
+        } else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: container.codingPath,
+                    debugDescription: "Invalid peer type - must contain either userId or threadId"
+                )
+            )
+        }
     }
-  }
-
-  public static func == (lhs: ChatPeer, rhs: ChatPeer) -> Bool {
-    switch (lhs, rhs) {
-    case let (.privateChat(lhsId), .privateChat(rhsId)):
-      return lhsId == rhsId
-    case let (.thread(lhsId), .thread(rhsId)):
-      return lhsId == rhsId
-    default:
-      return false
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        switch self {
+        case .user(let id):
+            try container.encode(id, forKey: .userId)
+        case .thread(let id):
+            try container.encode(id, forKey: .threadId)
+        }
     }
-  }
+    
+    public var isPrivate: Bool {
+        switch self {
+        case .user:
+            return true
+        case .thread:
+            return false
+        }
+    }
 }

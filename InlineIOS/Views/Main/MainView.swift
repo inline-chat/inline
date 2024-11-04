@@ -114,7 +114,7 @@ private extension MainView {
             ForEach(home.chats.sorted(by: { $0.chat.date > $1.chat.date }), id: \.chat.id) { chat in
                 ChatRowView(item: chat)
                     .onTapGesture {
-                        nav.push(.chat(peer: .privateChat(userId: chat.chat.id)))
+                        nav.push(.chat(peer: .user(id: chat.chat.id)))
                     }
             }
         }
