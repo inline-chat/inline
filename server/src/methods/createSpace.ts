@@ -37,6 +37,7 @@ export const handler = async (
         .values({
           name: input.name,
           handle: input.handle ?? null,
+          creatorId: context.currentUserId,
         })
         .returning()
     )[0]
