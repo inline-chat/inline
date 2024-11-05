@@ -71,6 +71,12 @@ public extension AppDatabase {
             }
         }
 
+        migrator.registerMigration("space creator") { db in
+            try db.alter(table: "space") { t in
+                t.add(column: "creator", .boolean)
+            }
+        }
+
         return migrator
     }
 }

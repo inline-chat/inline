@@ -3,6 +3,8 @@ import InlineUI
 import SwiftUI
 
 struct SpaceItem: View {
+    @EnvironmentObject var dataManager: DataManager
+    
     var space: Space
     
     var body: some View {
@@ -12,12 +14,12 @@ struct SpaceItem: View {
             Text(space.name)
         }.contextMenu {
             // Only creators can delete space for now
-            if space.creator == true {
+            if let creator = space.creator, creator == true {
                 Button("Delete Space", role: .destructive) {
                     act(.delete)
                 }
             } else {
-                Button("Leave Space") {
+                Button("Leave Space", role: .destructive) {
                     act(.leave)
                 }
             }
@@ -34,9 +36,9 @@ struct SpaceItem: View {
             // TODO:
             switch action {
             case .delete:
-                try await ApiClient.shared.deleteSpace(spaceId: space.id)
+                try await dataManager.deleteSpace(spaceId: space.id)
             case .leave:
-                try await ApiClient.shared.leaveSpace(spaceId: space.id)
+                try await dataManager.leaveSpace(spaceId: space.id)
             }
         }
     }
