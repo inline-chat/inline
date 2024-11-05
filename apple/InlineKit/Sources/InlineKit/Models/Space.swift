@@ -7,7 +7,7 @@ public struct ApiSpace: FetchableRecord, Identifiable, Codable, Hashable, Persis
     public var name: String
     public var date: Int
     
-    // Extra 
+    // Extra
     public var creator: Bool?
 }
 

@@ -18,7 +18,7 @@ export const creationDate = timestamp("date", {
   .defaultNow()
   .notNull()
 
-export const date = timestamp("date", {
+export const date = timestamp({
   mode: "date",
   precision: 3,
 })

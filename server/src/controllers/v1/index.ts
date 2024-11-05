@@ -57,30 +57,36 @@ import {
   Input as GetUserInput,
   Response as GetUserResponse,
 } from "@in/server/methods/getUser"
-
 import {
   handler as searchContactsHandler,
   Input as SearchContactsInput,
   Response as SearchContactsResponse,
 } from "@in/server/methods/searchContacts"
-
 import {
   handler as getChatHistoryHandler,
   Input as GetChatHistoryInput,
   Response as GetChatHistoryResponse,
 } from "@in/server/methods/getChatHistory"
-
 import {
   handler as sendMessageHandler,
   Input as SendMessageInput,
   Response as SendMessageResponse,
 } from "@in/server/methods/sendMessage"
-
 import {
   handler as createPrivateChatHandler,
   Input as CreatePrivateChatInput,
   Response as CreatePrivateChatResponse,
 } from "@in/server/methods/createPrivateChat"
+import {
+  handler as deleteSpaceHandler,
+  Input as DeleteSpaceInput,
+  Response as DeleteSpaceResponse,
+} from "@in/server/methods/deleteSpace"
+import {
+  handler as leaveSpaceHandler,
+  Input as LeaveSpaceInput,
+  Response as LeaveSpaceResponse,
+} from "@in/server/methods/leaveSpace"
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
@@ -106,6 +112,8 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(
         makeApiRoute("/createPrivateChat", CreatePrivateChatInput, CreatePrivateChatResponse, createPrivateChatHandler),
       )
+      .use(makeApiRoute("/deleteSpace", DeleteSpaceInput, DeleteSpaceResponse, deleteSpaceHandler))
+      .use(makeApiRoute("/leaveSpace", LeaveSpaceInput, LeaveSpaceResponse, leaveSpaceHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }

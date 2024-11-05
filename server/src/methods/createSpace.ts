@@ -78,7 +78,7 @@ export const handler = async (
 
     const output = { space, member, chats: [mainChat] }
     return {
-      space: encodeSpaceInfo(output.space),
+      space: encodeSpaceInfo(output.space, { currentUserId: context.currentUserId }),
       member: encodeMemberInfo(output.member),
       chats: output.chats
         .map((c) => c && encodeChatInfo(c, { currentUserId: context.currentUserId }))

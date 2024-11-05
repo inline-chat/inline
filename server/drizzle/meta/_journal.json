@@ -64,6 +64,20 @@
       "when": 1730650934205,
       "tag": "0008_dialog_chat_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1730815711753,
+      "tag": "0009_space_creator",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1730816139256,
+      "tag": "0010_space_deleted",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,7 @@ export const ApiError = {
   FIRST_NAME_INVALID: ["FIRST_NAME_INVALID", 400, "The first name is invalid"],
   LAST_NAME_INVALID: ["LAST_NAME_INVALID", 400, "The last name is invalid"],
   USERNAME_INVALID: ["USERNAME_INVALID", 400, "The username is invalid"],
+  USER_NOT_PARTICIPANT: ["USER_NOT_PARTICIPANT", 400, "The user is not a participant of the space/chat"],
 
   // 404 NOT_FOUND
   METHOD_NOT_FOUND: ["METHOD_NOT_FOUND", 404, "Method not found"],

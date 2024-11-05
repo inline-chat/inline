@@ -50,7 +50,7 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     }
 
     return {
-      space: encodeSpaceInfo(result[0].spaces),
+      space: encodeSpaceInfo(result[0].spaces, { currentUserId: context.currentUserId }),
       members: result.map((r) => encodeMemberInfo(r.members)),
       chats: result.map((r) => encodeChatInfo(r.chats, { currentUserId: context.currentUserId })),
     }

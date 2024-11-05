@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { and, eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { members, spaces } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
@@ -23,7 +23,17 @@ export const handler = async (_: undefined, context: HandlerContext): Promise<St
       .select()
       .from(members)
       .where(eq(members.userId, context.currentUserId))
-      .innerJoin(spaces, and(eq(members.spaceId, spaces.id), eq(members.userId, context.currentUserId)))
+      .innerJoin(
+        spaces,
+        and(
+          // Join on space id
+          eq(members.spaceId, spaces.id),
+          // Only get memberships for ourself
+          eq(members.userId, context.currentUserId),
+          // Filter deleted
+          isNull(spaces.deleted),
+        ),
+      )
 
     const output = {
       spaces: result.map((r) => r.spaces),
@@ -31,7 +41,7 @@ export const handler = async (_: undefined, context: HandlerContext): Promise<St
     }
 
     return {
-      spaces: output.spaces.map(encodeSpaceInfo),
+      spaces: output.spaces.map((s) => encodeSpaceInfo(s, { currentUserId: context.currentUserId })),
       members: output.members.map(encodeMemberInfo),
     }
   } catch (error) {

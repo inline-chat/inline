@@ -19,18 +19,27 @@ const encodeDate = (date: Date | number): number => {
   return typeof date === "number" ? date : date.getTime()
 }
 
+//INTERNAL TYPES
+type UserContext = {
+  currentUserId: number
+}
+
 /// Space  -------------
 export const TSpaceInfo = Type.Object({
   id: Type.Integer(),
   name: Type.String(),
   handle: Optional(Type.String()),
   date: Type.Integer(),
+
+  /** Is the current user the creator of the space */
+  creator: Type.Boolean(),
 })
 export type TSpaceInfo = StaticEncode<typeof TSpaceInfo>
-export const encodeSpaceInfo = (space: DbSpace | TSpaceInfo): TSpaceInfo => {
+export const encodeSpaceInfo = (space: DbSpace, context: UserContext): TSpaceInfo => {
   return Value.Encode(TSpaceInfo, {
     ...space,
     date: encodeDate(space.date),
+    creator: space.creatorId === context.currentUserId,
   })
 }
 

@@ -5,6 +5,7 @@ enum DataManagerError: Error {
     case networkError
     case apiError(description: String, code: Int)
     case localSaveError
+    case notAuthorized
 }
 
 // ?? should we use main actor here?
@@ -137,8 +138,60 @@ public class DataManager: ObservableObject {
     public func sendMessage(chatId: Int64, text: String) async throws {
         log.debug("sendMessage")
         try await database.dbWriter.write { db in
-            let message = Message(date: Date.now, text: text, chatId: chatId, fromId: Auth.shared.getCurrentUserId()!)
+            let message = Message(
+                date: Date.now, text: text, chatId: chatId, fromId: Auth.shared.getCurrentUserId()!
+            )
             try message.save(db)
         }
     }
+
+    public func deleteSpace(spaceId: Int64) async throws {
+        log.debug("deleteSpace")
+        do {
+//            Use for user ID
+//            guard let currentUserId = Auth.shared.getCurrentUserId() else {
+//                throw DataManagerError.notAuthorized
+//            }
+
+            let _ = try await ApiClient.shared.deleteSpace(spaceId: spaceId)
+
+            try await database.dbWriter.write { db in
+                try Space.deleteOne(db, id: spaceId)
+
+                try Member
+                    .filter(Column("spaceId") == spaceId)
+                    .deleteAll(db)
+
+                try Chat
+                    .filter(Column("spaceId") == spaceId)
+                    .deleteAll(db)
+            }
+        } catch {
+            Log.shared.error("Failed to delete space", error: error)
+            throw error
+        }
+    }
+
+    public func leaveSpace(spaceId: Int64) async throws {
+        log.debug("leaveSpace")
+        do {
+            let _ = try await ApiClient.shared.leaveSpace(spaceId: spaceId)
+
+            try await database.dbWriter.write { db in
+                try Space.deleteOne(db, id: spaceId)
+
+                try Member
+                    .filter(Column("spaceId") == spaceId)
+                    .deleteAll(db)
+
+                try Chat
+                    .filter(Column("spaceId") == spaceId)
+                    .deleteAll(db)
+            }
+        } catch {
+            Log.shared.error("Failed to leave space", error: error)
+            throw error
+        }
+    }
+
 }

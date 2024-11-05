@@ -18,21 +18,16 @@ export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
-  try {
-    const spaceId = normalizeId(input.spaceId)
+  const spaceId = normalizeId(input.spaceId)
 
-    // Authorize if user is creator of space
-    await Authorize.spaceCreator(spaceId, context.currentUserId)
+  // Authorize if user is creator of space
+  await Authorize.spaceCreator(spaceId, context.currentUserId)
 
-    // Delete space
-    await deleteSpace(spaceId)
+  // Delete space
+  await deleteSpace(spaceId)
 
-    // no payload
-    return undefined
-  } catch (error) {
-    Log.shared.error("Failed to check username", error)
-    throw new InlineError(InlineError.ApiError.INTERNAL)
-  }
+  // no payload on success
+  return undefined
 }
 
 /// HELPER FUNCTIONS ///
