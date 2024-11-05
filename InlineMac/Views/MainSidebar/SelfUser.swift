@@ -11,13 +11,13 @@ struct SelfUser: View {
     
     var body: some View {
         HStack(spacing: 0) {
-            UserAvatar(user: currentUser, size: 24)
-                .padding(.trailing, 4)
+            UserAvatar(user: currentUser, size: Theme.sidebarIconSize)
+                .padding(.trailing, Theme.iconSpacing)
                 
             Text(currentUser.firstName ?? "You")
-                .font(.title3)
+                .font(.body)
                 .foregroundStyle(.primary)
-        }.frame(height: 32)
+        }.frame(height: Theme.sidebarIconSize)
     }
     
     func defaultUser() -> User {
@@ -27,5 +27,6 @@ struct SelfUser: View {
 
 #Preview {
     SelfUser()
+        .frame(width: 200)
         .previewsEnvironment(.populated)
 }

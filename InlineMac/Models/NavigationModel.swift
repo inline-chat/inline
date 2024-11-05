@@ -1,11 +1,11 @@
 import SwiftUI
 
-enum Peer: Codable {
+enum Peer: Hashable, Codable {
     case user(id: Int64)
     case thread(id: Int64)
 }
 
-enum NavigationRoute: Codable {
+enum NavigationRoute: Hashable, Codable {
     case home
     case space(id: Int64)
     case chat(peer: Peer)

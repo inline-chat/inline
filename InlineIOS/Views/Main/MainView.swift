@@ -63,7 +63,7 @@ struct MainView: View {
         .task {
             do {
                 try await dataManager.fetchMe()
-                try await dataManager.loadSpaces()
+                try await dataManager.getSpaces()
             } catch {
                 Log.shared.error("Failed to fetch user", error: error)
             }

@@ -1,16 +1,27 @@
 import InlineKit
 import SwiftUI
-import GRDBQuery
 
 struct HomeSidebar: View {
     @EnvironmentObject var ws: WebSocketManager
     @EnvironmentObject var nav: NavigationModel
+    @EnvironmentObject var data: DataManager
 
+    @EnvironmentStateObject var model: SpaceListViewModel
+
+    init() {
+        _model = EnvironmentStateObject { env in
+            SpaceListViewModel(db: env.appDatabase)
+        }
+    }
 
     var body: some View {
         List {
-            NavigationLink(destination: Text("Home")) {
-                SpaceItem()
+            Section("Spaces") {
+                ForEach(model.spaces) { space in
+                    NavigationLink(value: NavigationRoute.space(id: space.id)) {
+                        SpaceItem(space: space)
+                    }
+                }
             }
         }
         .toolbar(content: {
@@ -27,12 +38,30 @@ struct HomeSidebar: View {
             VStack(alignment: .leading) {
                 SelfUser()
                     .padding(.horizontal)
+
+                SearchBar()
+                    .padding(.horizontal)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         })
         .overlay(alignment: .bottom, content: {
             ConnectionStateOverlay()
         })
+        .task {
+            do {
+                let _ = try await data.getSpaces()
+            } catch {
+                // TODO: handle error? keep on loading? retry? (@mo)
+            }
+        }
+    }
+}
+
+struct SearchBar: View {
+    @State private var searchText = ""
+
+    var body: some View {
+        GrayTextField("Search", text: $searchText, size: .small)
     }
 }
 
@@ -47,7 +76,7 @@ struct ConnectionStateOverlay: View {
             }
         }.task {
             if ws.connectionState != .normal {
-                show = true;
+                show = true
             }
         }
         .onChange(of: ws.connectionState) { newValue in

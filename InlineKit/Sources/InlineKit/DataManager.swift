@@ -47,20 +47,15 @@ public class DataManager: ObservableObject {
             let space = Space(from: result.space)
             try await database.dbWriter.write { db in
                 try space.save(db)
-                print("Space: \(space)")
 
                 let member = Member(from: result.member)
                 try member.save(db)
-                print("Member: \(member)")
 
                 // Create main thread (default)
                 for chat in result.chats {
                     let thread = Chat(from: chat)
                     try thread.save(db)
-                    print("Thread: \(thread)")
                 }
-
-                print("Space returned: \(space)")
             }
 
             // Return for navigating to space using id
@@ -112,9 +107,10 @@ public class DataManager: ObservableObject {
         return nil
     }
 
-    // loadSpaces?
-    public func loadSpaces() async throws -> [Space] {
-        log.debug("loadSpaces")
+    /// Get list of user spaces and saves them
+    @discardableResult
+    public func getSpaces() async throws -> [Space] {
+        log.debug("getSpaces")
         do {
             let result = try await ApiClient.shared.getSpaces()
 
