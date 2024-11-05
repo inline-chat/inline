@@ -12,6 +12,8 @@ export const ApiError = {
   EMAIL_INVALID: ["EMAIL_INVALID", 400, "The email is invalid"],
   PEER_INVALID: ["PEER_INVALID", 400, "The peer (chat or user) is invalid"],
   SPACE_INVALID: ["SPACE_INVALID", 400, "The space is invalid"],
+  SPACE_CREATOR_REQUIRED: ["SPACE_CREATOR_REQUIRED", 400, "You must be the creator of space for this action"],
+  SPACE_ADMIN_REQUIRED: ["SPACE_ADMIN_REQUIRED", 400, "You must be an admin of space for this action"],
   USER_INVALID: ["USER_INVALID", 400, "The user is invalid"],
   EMAIL_CODE_INVALID: ["EMAIL_CODE_INVALID", 400, "The email code is invalid"],
   EMAIL_CODE_EMPTY: ["EMAIL_CODE_EMPTY", 400, "The email code is empty"],

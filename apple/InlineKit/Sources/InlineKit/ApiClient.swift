@@ -22,6 +22,8 @@ public enum Path: String {
     case searchContacts
     case createPrivateChat
     case getMe
+    case deleteSpace
+    case leaveSpace
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -178,6 +180,22 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             includeToken: true
         )
     }
+    
+    public func deleteSpace(spaceId: Int64) async throws -> EmptyPayload {
+        try await request(
+            .deleteSpace,
+            queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
+            includeToken: true
+        )
+    }
+    
+    public func leaveSpace(spaceId: Int64) async throws -> EmptyPayload {
+        try await request(
+            .leaveSpace,
+            queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
+            includeToken: true
+        )
+    }
 }
 
 /// Example
@@ -202,7 +220,11 @@ public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         if try values.decode(Bool.self, forKey: .ok) {
-            self = try .success(values.decodeIfPresent(T.self, forKey: .result)!)
+            if T.self == EmptyPayload.self {
+                self = .success(EmptyPayload() as! T)
+            } else {
+                self = try .success(values.decode(T.self, forKey: .result))
+            }
         } else {
             self = try .error(
                 errorCode: values.decode(Int.self, forKey: .errorCode),
@@ -255,4 +277,7 @@ public struct CreatePrivateChat: Codable, Sendable {
 
 public struct GetMe: Codable, Sendable {
     public let user: ApiUser
+}
+
+public struct EmptyPayload: Codable, Sendable {
 }

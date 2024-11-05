@@ -20,6 +20,9 @@ struct MainWindow: View {
                     blendingMode: .behindWindow
                 )
                 .ignoresSafeArea(.all)
+                .transition(
+                    .opacity
+                )
                 
                 Onboarding()
                     .transition(

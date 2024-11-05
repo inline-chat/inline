@@ -12,10 +12,6 @@ struct MainView: View {
     @EnvironmentStateObject var rootData: RootData
     @EnvironmentStateObject var dataManager: DataManager
 
-    
-    /// 190 is minimum that fits both sidebar collapse button and plus button
-    private let MIN_SIDEBAR_WIDTH: CGFloat = 200
-
     init() {
         _rootData = EnvironmentStateObject { env in
             RootData(db: env.appDatabase, auth: env.auth)
@@ -29,9 +25,26 @@ struct MainView: View {
         NavigationSplitView {
             // TODO: check active space / chat / etc??
             HomeSidebar()
-                .navigationSplitViewColumnWidth(min: MIN_SIDEBAR_WIDTH, ideal: 240, max: 400)
+                .navigationDestination(for: NavigationRoute.self) { route in
+                    // WIP
+                    switch route {
+                    case .home:
+                        Text("Home")
+                    case .space(let id):
+                        Text("Space \(id)")
+                            .navigationTitle("Space")
+                    case .chat(let peer):
+                        Text("Chat \(peer)")
+                            .navigationTitle("Chat")
+                    }
+                }
+                // it must be below nav destination or it's not enforced
+                .navigationSplitViewColumnWidth(min: Theme.minimumSidebarWidth, ideal: 240, max: 400)
         } detail: {
-            Text("Welcome to Inline")
+            NavigationStack(path: $navigation.path) {
+                Text("Welcome to Inline")
+                    .navigationTitle("Home")
+            }
         }
         .navigationSplitViewStyle(.prominentDetail)
         .sheet(isPresented: $navigation.createSpaceSheetPresented) {
