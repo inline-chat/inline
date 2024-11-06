@@ -7,6 +7,8 @@ struct Settings: View {
     @Query(CurrentUser())
     var currentUser: User?
     @Environment(\.auth) var auth
+    @EnvironmentObject private var ws: WebSocketManager
+    @EnvironmentObject private var nav: Navigation
 
     var body: some View {
         List {
@@ -26,10 +28,11 @@ struct Settings: View {
                     Auth.shared.logOut()
 
                     // Stop WebSocket
-                    // ws.loggedOut()
+                    ws.loggedOut()
 
                     // Clear database
                     try? AppDatabase.loggedOut()
+                    nav.push(.welcome)
                 }
             }
         }

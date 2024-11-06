@@ -1,3 +1,4 @@
+import GRDBQuery
 import InlineKit
 import SwiftUI
 
@@ -115,7 +116,11 @@ struct Code: View {
                 }
 
                 formState.reset()
-                nav.push(.addAccount)
+                if result.user.firstName == nil {
+                    nav.push(.addAccount)
+                } else {
+                    nav.push(.main)
+                }
 
             } catch let error as APIError {
                 errorMsg = "Please try again."
