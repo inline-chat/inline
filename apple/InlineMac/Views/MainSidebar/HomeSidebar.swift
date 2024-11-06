@@ -18,9 +18,8 @@ struct HomeSidebar: View {
         List {
             Section("Spaces") {
                 ForEach(model.spaces) { space in
-                    NavigationLink(value: NavigationRoute.space(id: space.id)) {
-                        SpaceItem(space: space)
-                    }
+                    SpaceItem(space: space)
+                        .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
                 }
             }
         }
@@ -37,12 +36,10 @@ struct HomeSidebar: View {
         .safeAreaInset(edge: .top, content: {
             VStack(alignment: .leading) {
                 SelfUser()
-                    .padding(.horizontal)
-
                 SearchBar()
-                    .padding(.horizontal)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
         })
         .overlay(alignment: .bottom, content: {
             ConnectionStateOverlay()
@@ -120,7 +117,7 @@ struct ConnectionStateOverlay: View {
 
 #Preview {
     NavigationSplitView {
-        HomeSidebar()
+        HomeSidebar(namespace: Namespace().wrappedValue)
             .previewsEnvironment(.populated)
             .environmentObject(NavigationModel())
     } detail: {

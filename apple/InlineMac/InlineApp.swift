@@ -22,7 +22,7 @@ struct InlineApp: App {
                 .appDatabase(AppDatabase.shared)
         }
         .defaultSize(width: 900, height: 600)
-//        .windowStyle(.hiddenTitleBar)
+        .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
         .commands {
             MainWindowCommands()
