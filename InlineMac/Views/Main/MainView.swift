@@ -23,37 +23,37 @@ struct MainView: View {
 
     var body: some View {
         NavigationSplitView {
-            // TODO: check active space / chat / etc??
-            HomeSidebar()
-                .navigationDestination(for: NavigationRoute.self) { route in
-                    // WIP
-                    switch route {
-                    case .home:
-                        Text("Home")
-                    case .space(let id):
-                        Text("Space \(id)")
-                            .navigationTitle("Space")
-                    case .chat(let peer):
-                        Text("Chat \(peer)")
-                            .navigationTitle("Chat")
-                    }
-                }
-                // it must be below nav destination or it's not enforced
+            // ZStack needed for the transition to work
+            self.sidebar
                 .navigationSplitViewColumnWidth(min: Theme.minimumSidebarWidth, ideal: 240, max: 400)
         } detail: {
-            NavigationStack(path: $navigation.path) {
-                Text("Welcome to Inline")
-                    .navigationTitle("Home")
+            NavigationStack(path: self.$navigation.path) {
+                if let spaceId = navigation.activeSpaceId {
+//                    SpaceView(spaceId: spaceId)
+                    Text("Space View")
+                } else {
+                    Text("Welcome to Inline")
+                }
             }
         }
-        .navigationSplitViewStyle(.prominentDetail)
         .sheet(isPresented: $navigation.createSpaceSheetPresented) {
             CreateSpaceSheet()
         }
         .environmentObject(rootData)
         .environmentObject(dataManager)
         .task {
-            rootData.fetch()
+            self.rootData.fetch()
+        }
+    }
+
+    @Namespace private var sidebarNamespace
+
+    @ViewBuilder
+    var sidebar: some View {
+        if let spaceId = navigation.activeSpaceId {
+            SpaceSidebar(spaceId: spaceId, namespace: sidebarNamespace)
+        } else {
+            HomeSidebar(namespace: sidebarNamespace)
         }
     }
 }

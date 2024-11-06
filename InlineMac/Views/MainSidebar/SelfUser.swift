@@ -12,7 +12,7 @@ struct SelfUser: View {
     var body: some View {
         HStack(spacing: 0) {
             UserAvatar(user: currentUser, size: Theme.sidebarIconSize)
-                .padding(.trailing, Theme.iconSpacing)
+                .padding(.trailing, Theme.sidebarIconSpacing)
                 
             Text(currentUser.firstName ?? "You")
                 .font(.body)
