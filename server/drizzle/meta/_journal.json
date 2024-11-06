@@ -78,6 +78,13 @@
       "when": 1730816139256,
       "tag": "0010_space_deleted",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1730910900372,
+      "tag": "0011_fix_user_ids_on_chat",
+      "breakpoints": true
     }
   ]
 }

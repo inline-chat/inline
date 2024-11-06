@@ -34,6 +34,7 @@ export const handleError = new Elysia()
         description: error.description,
       }
     } else if (code === "VALIDATION") {
+      console.error(error)
       return {
         ok: false,
         error: "INVALID_ARGS",

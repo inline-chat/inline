@@ -63,10 +63,25 @@ struct MainView: View {
         .task {
             do {
                 try await dataManager.fetchMe()
-                try await dataManager.getSpaces()
+               
             } catch {
                 Log.shared.error("Failed to fetch user", error: error)
             }
+            do {
+                try await dataManager.getPrivateChats()
+               
+            } catch {
+                Log.shared.error("Failed to getPrivateChats", error: error)
+            }
+            do {
+                try await dataManager.getSpaces()
+               
+            } catch {
+                Log.shared.error("Failed to getSpaces", error: error)
+            }
+            
+         
+           
         }
     }
 }
@@ -114,7 +129,9 @@ private extension MainView {
             ForEach(home.chats.sorted(by: { $0.chat.date > $1.chat.date }), id: \.chat.id) { chat in
                 ChatRowView(item: chat)
                     .onTapGesture {
-                        nav.push(.chat(peer: .user(id: chat.chat.id)))
+                        if let id = chat.user?.id {
+                            nav.push(.chat(peer: .user(id: id)))
+                        }
                     }
             }
         }

@@ -40,7 +40,7 @@ export const chats = pgTable(
   },
   (table) => ({
     /** Ensure correctness */
-    userIdsCheckConstraint: check("user_ids_check", sql`${table.minUserId} < ${table.maxUserId}`),
+    userIdsCheckConstraint: check("user_ids_check", sql`${table.minUserId} <= ${table.maxUserId}`),
     /** Ensure single private chat exists for each user pair */
     userIdsUniqueContraint: unique("user_ids_unique").on(table.minUserId, table.maxUserId),
 

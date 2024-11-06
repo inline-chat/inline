@@ -28,17 +28,25 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.PEER_INVALID)
     }
 
-    const peerName = await db.select({ name: users.firstName }).from(users).where(eq(users.id, peerId))
+    // For self-chat, both minUserId and maxUserId will be currentUserId
+    const isSelfChat = peerId === context.currentUserId
+    let minUserId, maxUserId
+
+    if (isSelfChat) {
+      minUserId = maxUserId = context.currentUserId
+    } else {
+      minUserId = context.currentUserId < peerId ? context.currentUserId : peerId
+      maxUserId = context.currentUserId > peerId ? context.currentUserId : peerId
+    }
+
     const currentUserName = await db
       .select({ name: users.firstName })
       .from(users)
       .where(eq(users.id, context.currentUserId))
+      .then((result) => result[0]?.name)
 
-    const firstUserName = currentUserName[0]?.name
-    const secondUserName = peerName[0]?.name
-    const minUserId = context.currentUserId < peerId ? context.currentUserId : peerId
-    const maxUserId = context.currentUserId > peerId ? context.currentUserId : peerId
-    const title = firstUserName && secondUserName ? `${firstUserName}, ${secondUserName}` : null
+    const title = isSelfChat ? `${currentUserName} (You)` : null
+
     const [chat] = await db
       .insert(chats)
       .values({
@@ -59,36 +67,21 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    let peerExistingDialog = await db
-      .select()
-      .from(dialogs)
-      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, peerId)))
-      .then((result) => result[0])
-
-    let currentUserExistingDialog = await db
+    // Create dialog entry for self-chat
+    const existingDialog = await db
       .select()
       .from(dialogs)
       .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, context.currentUserId)))
       .then((result) => result[0])
 
-    if (peerExistingDialog == null) {
-      await db.insert(dialogs).values([
-        {
-          chatId: chat.id,
-          userId: peerId,
-          date: new Date(),
-        },
-      ])
+    if (!existingDialog) {
+      await db.insert(dialogs).values({
+        chatId: chat.id,
+        userId: context.currentUserId,
+        date: new Date(),
+      })
     }
-    if (currentUserExistingDialog == null) {
-      await db.insert(dialogs).values([
-        {
-          chatId: chat.id,
-          userId: context.currentUserId,
-          date: new Date(),
-        },
-      ])
-    }
+
     return { chat: encodeChatInfo(chat, { currentUserId: context.currentUserId }) }
   } catch (error) {
     Log.shared.error("Failed to create private chat", error)

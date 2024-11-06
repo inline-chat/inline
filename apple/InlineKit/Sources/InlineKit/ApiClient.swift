@@ -24,6 +24,7 @@ public enum Path: String {
     case getMe
     case deleteSpace
     case leaveSpace
+    case getPrivateChats
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -74,7 +75,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             }
 
             switch httpResponse.statusCode {
-            case 200...299:
+            case 200 ... 299:
                 let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
                 switch apiResponse {
                 case let .success(data):
@@ -176,11 +177,11 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     public func createPrivateChat(peerId: Int64) async throws -> CreatePrivateChat {
         try await request(
             .createPrivateChat,
-            queryItems: [URLQueryItem(name: "peerId", value: "\(peerId)")],
+            queryItems: [URLQueryItem(name: "userId", value: "\(peerId)")],
             includeToken: true
         )
     }
-    
+
     public func deleteSpace(spaceId: Int64) async throws -> EmptyPayload {
         try await request(
             .deleteSpace,
@@ -188,13 +189,20 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             includeToken: true
         )
     }
-    
+
     public func leaveSpace(spaceId: Int64) async throws -> EmptyPayload {
         try await request(
             .leaveSpace,
             queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
             includeToken: true
         )
+    }
+
+    public func getPrivateChats() async throws -> GetPrivateChats {
+        print("API CALLED")
+        let result: GetPrivateChats = try await request(.getPrivateChats, includeToken: true)
+        print("getPrivateChats resultttttt \(result)")
+        return result
     }
 }
 
@@ -279,5 +287,8 @@ public struct GetMe: Codable, Sendable {
     public let user: ApiUser
 }
 
-public struct EmptyPayload: Codable, Sendable {
+public struct EmptyPayload: Codable, Sendable {}
+
+public struct GetPrivateChats: Codable, Sendable {
+    public let chats: [ApiChat]
 }
