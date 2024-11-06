@@ -22,7 +22,7 @@ struct SpaceView: View {
     var body: some View {
         VStack {
             List {
-                if let members = fullSpaceViewModel.members {
+                if let members = fullSpaceViewModel.members, members.count > 0 {
                     Section(header: Text("Members")) {
                         ForEach(members) { member in
                             MemberView(userId: member.userId)
@@ -33,7 +33,7 @@ struct SpaceView: View {
                     }
                 }
 
-                if let chats = fullSpaceViewModel.chats {
+                if let chats = fullSpaceViewModel.chats, chats.count > 0 {
                     Section(header: Text("Threads")) {
                         ForEach(chats) { chat in
                             HStack {

@@ -34,7 +34,6 @@ export const handler = async (
     await db.insert(chats).values({
       type: "private",
       date: new Date(),
-
       minUserId: context.currentUserId,
       maxUserId: context.currentUserId,
       title: "Saved Messages",
