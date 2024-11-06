@@ -13,6 +13,7 @@ public struct ApiChat: Codable, Hashable, Sendable {
     public var type: String
     public var spaceId: Int64?
     public var threadNumber: Int?
+    public var peer: Peer?
 }
 
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -82,6 +83,16 @@ public extension Chat {
         title = from.title
         spaceId = from.spaceId
         type = from.type == "private" ? .privateChat : .thread
+        peerUserId = if let peer = from.peer {
+            switch peer {
+            case let .user(id):
+                id
+            case .thread:
+                nil
+            }
+        } else {
+            nil
+        }
     }
 
     static func fromTimestamp(from: Int) -> Date {

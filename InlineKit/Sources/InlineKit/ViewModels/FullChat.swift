@@ -88,12 +88,14 @@ public final class FullChatViewModel: ObservableObject {
     public func fetchPeerUser(_ userId: Int64) {
         peerUserCancellable = ValueObservation
             .tracking { db in
-                try User.fetchOne(db, id: userId)
+                print("peer user id : \(userId)")
+                return try User.fetchOne(db, id: userId)
             }
             .publisher(in: db.dbWriter, scheduling: .immediate)
             .sink(
                 receiveCompletion: { _ in /* ignore error */ },
                 receiveValue: { [weak self] user in
+                    print("Fetched user : \(user)")
                     self?.peerUser = user
                 }
             )

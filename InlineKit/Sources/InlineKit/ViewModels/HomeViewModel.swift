@@ -31,7 +31,7 @@ public final class HomeViewModel: ObservableObject, @unchecked Sendable {
             .sink(
                 receiveCompletion: { _ in /* ignore error */ },
                 receiveValue: { [weak self] chats in
-                    print("CHATS \(chats)")
+                    
                     self?.chats = chats
                 }
             )

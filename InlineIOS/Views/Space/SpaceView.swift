@@ -7,7 +7,7 @@ struct SpaceView: View {
 
     @Environment(\.appDatabase) var database
     @EnvironmentObject var nav: Navigation
-
+    @EnvironmentObject var dataManager: DataManager
     @EnvironmentStateObject var fullSpaceViewModel: FullSpaceViewModel
 
     init(spaceId: Int64) {
@@ -26,6 +26,9 @@ struct SpaceView: View {
                     Section(header: Text("Members")) {
                         ForEach(members) { member in
                             MemberView(userId: member.userId)
+                                .onTapGesture {
+                                    nav.push(.chat(peer: .user(id: member.userId)))
+                                }
                         }
                     }
                 }
