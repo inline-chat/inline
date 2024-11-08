@@ -4,8 +4,6 @@ import { gitCommitHash, relativeBuildDate, version } from "@in/server/buildEnv"
 
 export const root = new Elysia()
   .use(setup)
-  .get(
-    "/",
-    () =>
-      `🚧 inline server is running • /** version: ${version} • deploy time: ${relativeBuildDate()} • commit: ${gitCommitHash} */`,
-  )
+  // DO NOT MODIFY THIS INITIAL PART OF MESSAGE
+  // THIS IS MATCHED IN UPTIME MONITOR
+  .get("/", () => `🚧 inline server is running • v${version} • deployed ${relativeBuildDate()} • ${gitCommitHash}`)
