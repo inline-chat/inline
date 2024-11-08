@@ -25,6 +25,9 @@ public enum Path: String {
     case deleteSpace
     case leaveSpace
     case getPrivateChats
+    case getPinnedDialogs
+    case getOpenDialogs
+    case getSpaceMembers
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -75,7 +78,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             }
 
             switch httpResponse.statusCode {
-            case 200 ... 299:
+            case 200...299:
                 let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
                 switch apiResponse {
                 case let .success(data):
@@ -204,6 +207,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         print("getPrivateChats resultttttt \(result)")
         return result
     }
+    //
+    //    public func getFullSpace(spaceId: Int64) async throws -> FullSpacePayload {
+    //        try await request(
+    //            .getFullSpace,
+    //            queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
+    //            includeToken: true
+    //        )
+    //    }
 }
 
 /// Example
@@ -291,4 +302,19 @@ public struct EmptyPayload: Codable, Sendable {}
 
 public struct GetPrivateChats: Codable, Sendable {
     public let chats: [ApiChat]
+}
+
+public struct SpaceMembersPayload: Codable, Sendable {
+    public let members: [ApiMember]
+    public let users: [ApiUser]
+    // chats too?
+}
+
+public struct PinnedDialogsPayload: Codable, Sendable {
+    // Threads you need in sidebar
+    public let chats: [ApiChat]
+    // Last messages for those threads
+    public let messages: [ApiMessage]
+    // Users you need in sidebar and senders of last messages
+    public let dialogs: [ApiDialog]
 }

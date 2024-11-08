@@ -1,13 +1,9 @@
+import InlineKit
 import SwiftUI
 
-enum Peer: Hashable, Codable {
-    case user(id: Int64)
-    case thread(id: Int64)
-}
-
 enum NavigationRoute: Hashable, Codable {
-    case home
-    case space(id: Int64)
+    case homeRoot
+    case spaceRoot
     case chat(peer: Peer)
 }
 
@@ -17,33 +13,76 @@ enum PrimarySheet: Codable {
 
 @MainActor
 class NavigationModel: ObservableObject {
-    @Published var path: [NavigationRoute] = []
+    @Published var homePath: NavigationPath = .init()
     @Published var activeSpaceId: Int64?
-    @Published var goingHome: Bool = false
-
+    
+    @Published private var spacePathDict: [Int64: NavigationPath] = [:]
+    @Published private var spaceSelectionDict: [Int64: NavigationRoute] = [:]
+    
+    var spacePath: Binding<NavigationPath> {
+        Binding(
+            get: { [weak self] in
+                guard let self,
+                      let activeSpaceId else { return NavigationPath() }
+                return spacePathDict[activeSpaceId] ?? NavigationPath()
+            },
+            set: { [weak self] newValue in
+                guard let self,
+                      let activeSpaceId else { return }
+                Task { @MainActor in
+                    self.spacePathDict[activeSpaceId] = newValue
+                }
+            }
+        )
+    }
+    
+    var spaceSelection: Binding<NavigationRoute> {
+        Binding(
+            get: { [weak self] in
+                guard let self,
+                      let activeSpaceId else { return .spaceRoot }
+                return spaceSelectionDict[activeSpaceId] ?? .spaceRoot
+            },
+            set: { [weak self] newValue in
+                guard let self,
+                      let activeSpaceId else { return }
+                Task { @MainActor in
+                    self.spaceSelectionDict[activeSpaceId] = newValue
+                }
+            }
+        )
+    }
+    
     func navigate(to route: NavigationRoute) {
-        path.append(route)
+        if let activeSpaceId {
+            spacePathDict[activeSpaceId, default: NavigationPath()].append(route)
+        } else {
+            homePath.append(route)
+        }
     }
-
+    
     func openSpace(id: Int64) {
-        goingHome = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.activeSpaceId = id
+        activeSpaceId = id
+        // TODO: Load from persistence layer
+        if spacePathDict[id] == nil {
+            spacePathDict[id] = NavigationPath()
         }
     }
-
+    
     func goHome() {
-        goingHome = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.activeSpaceId = nil
+        activeSpaceId = nil
+        // TODO: Load from persistence layer
+    }
+    
+    func navigateBack() {
+        if let activeSpaceId {
+            spacePathDict[activeSpaceId]?.removeLast()
+        } else {
+            homePath.removeLast()
         }
     }
-
-    func navigateBack() {
-        path.removeLast()
-    }
-
+    
     // MARK: - Sheets
-
+    
     @Published var createSpaceSheetPresented: Bool = false
 }

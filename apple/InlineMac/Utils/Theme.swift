@@ -12,4 +12,6 @@ struct Theme {
     static let sidebarItemRadius: CGFloat = 6
     static let sidebarItemPadding: CGFloat = 4
     static let sidebarItemHeight: CGFloat = 30
+    static let sidebarTopItemFont: Font = .system(size: 14, weight: .semibold)
+    static let sidebarTopItemHeight: CGFloat = 34
 }

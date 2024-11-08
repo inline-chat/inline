@@ -9,7 +9,7 @@ struct SpaceSidebar: View {
     @EnvironmentStateObject var fullSpace: FullSpaceViewModel
 
     var spaceId: Int64
-    
+
     init(spaceId: Int64) {
         self.spaceId = spaceId
         _fullSpace = EnvironmentStateObject { env in
@@ -18,9 +18,9 @@ struct SpaceSidebar: View {
     }
 
     var body: some View {
-        List {
+        List(selection: navigation.spaceSelection) {
             Section("Threads") {
-                NavigationLink(destination: Text("Hi")) {
+                NavigationLink(value: NavigationRoute.chat(peer: Peer(threadId: 1))) {
                     Text("Main")
                 }
             }
@@ -40,12 +40,11 @@ struct SpaceSidebar: View {
                     .buttonStyle(.plain)
 
                     Text(fullSpace.space?.name ?? "")
-                        .font(.title2)
-                        .fontWeight(.bold)
+                        .font(Theme.sidebarTopItemFont)
                     Spacer()
-                }
+                }.frame(height: Theme.sidebarTopItemHeight)
 
-                SearchBar()
+                SidebarSearchBar()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal)
@@ -55,21 +54,15 @@ struct SpaceSidebar: View {
             ConnectionStateOverlay()
         })
         .task {
-            do {
-                // Fetch full space
-            } catch {
-                // TODO: handle error? keep on loading? retry? (@mo)
-            }
+//            await data.getFullSpace(spaceId: spaceId)
         }
     }
 }
 
 @available(macOS 14, *)
 #Preview {
-    @Previewable @Namespace var namespace
-
     NavigationSplitView {
-        SpaceSidebar(spaceId: 2, namespace: namespace)
+        SpaceSidebar(spaceId: 2)
             .previewsEnvironment(.populated)
             .environmentObject(NavigationModel())
     } detail: {

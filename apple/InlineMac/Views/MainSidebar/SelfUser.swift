@@ -13,11 +13,12 @@ struct SelfUser: View {
         HStack(spacing: 0) {
             UserAvatar(user: currentUser, size: Theme.sidebarIconSize)
                 .padding(.trailing, Theme.sidebarIconSpacing)
-                
+            
             Text(currentUser.firstName ?? "You")
-                .font(.body)
+                .font(Theme.sidebarTopItemFont)
                 .foregroundStyle(.primary)
-        }.frame(height: Theme.sidebarIconSize)
+        }
+        .frame(height: Theme.sidebarTopItemHeight)
     }
     
     func defaultUser() -> User {

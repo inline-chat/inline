@@ -16,7 +16,7 @@ struct MainWindow: View {
                 
             case .onboarding:
                 VisualEffectView(
-                    material: .popover,
+                    material: .sidebar,
                     blendingMode: .behindWindow
                 )
                 .ignoresSafeArea(.all)
@@ -73,13 +73,13 @@ class MainWindowViewModel: ObservableObject {
         switch route {
         case .main:
             // Main style
-            window.titleVisibility = .hidden
+//            window.titleVisibility = .hidden
             window.isMovableByWindowBackground = false
             window.isOpaque = true
             window.backgroundColor = NSColor.windowBackgroundColor
         case .onboarding:
             // onboarding style
-            window.titleVisibility = .hidden
+//            window.titleVisibility = .hidden
             window.isMovableByWindowBackground = true
             window.isOpaque = false
             window.backgroundColor = NSColor.clear

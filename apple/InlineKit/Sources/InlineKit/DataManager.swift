@@ -15,13 +15,13 @@ enum DataManagerError: Error {
 public class DataManager: ObservableObject {
     private var database: AppDatabase
     private var log = Log.scoped("DataManager")
-    
+
     public init(database: AppDatabase) {
         self.database = database
     }
-    
+
     public static let shared = DataManager(database: AppDatabase.shared)
-    
+
     public func fetchMe() async throws -> User {
         log.debug("fetchMe")
         do {
@@ -39,7 +39,7 @@ public class DataManager: ObservableObject {
             throw error
         }
     }
-    
+
     public func createSpace(name: String) async throws -> Space {
         log.debug("createSpace")
         do {
@@ -48,17 +48,17 @@ public class DataManager: ObservableObject {
             let space = Space(from: result.space)
             try await database.dbWriter.write { db in
                 try space.save(db)
-                
+
                 let member = Member(from: result.member)
                 try member.save(db)
-                
+
                 // Create main thread (default)
                 for chat in result.chats {
                     let thread = Chat(from: chat)
                     try thread.save(db)
                 }
             }
-            
+
             // Return for navigating to space using id
             return space
         } catch {
@@ -66,14 +66,14 @@ public class DataManager: ObservableObject {
             throw error
         }
     }
-    
+
     public func createThread(spaceId: Int64, title: String?) async throws -> Int64? {
         log.debug("createThread")
         do {
             return try await database.dbWriter.write { db in
-                
+
                 // TODO: API call to create thread
-                
+
                 // Create the chat
                 let thread = Chat(
                     date: Date.now,
@@ -82,7 +82,7 @@ public class DataManager: ObservableObject {
                     spaceId: spaceId
                 )
                 try thread.save(db)
-                
+
                 return thread.id
             }
         } catch {
@@ -90,31 +90,31 @@ public class DataManager: ObservableObject {
             throw error
         }
     }
-    
+
     public func createPrivateChat(peerId: Int64) async throws -> Int64? {
         log.debug("createPrivateChat")
         do {
             let result = try await ApiClient.shared.createPrivateChat(peerId: peerId)
-            
+
             try await database.dbWriter.write { db in
                 let chat = Chat(from: result.chat)
                 try chat.save(db)
             }
-            
+
             return result.chat.id
         } catch {
             Log.shared.error("Failed to create private chat", error: error)
         }
         return nil
     }
-    
+
     /// Get list of user spaces and saves them
     @discardableResult
     public func getSpaces() async throws -> [Space] {
         log.debug("getSpaces")
         do {
             let result = try await ApiClient.shared.getSpaces()
-            
+
             let spaces = try await database.dbWriter.write { db in
                 let spaces = result.spaces.map { space in
                     Space(from: space)
@@ -128,23 +128,29 @@ public class DataManager: ObservableObject {
                 }
                 return spaces
             }
-            
+
             return spaces
         } catch {
             throw error
         }
     }
-    
-    public func sendMessage(chatId: Int64, text: String) async throws {
+
+    public func sendMessage(peerId: Peer, text: String) async throws {
         log.debug("sendMessage")
         try await database.dbWriter.write { db in
             let message = Message(
-                date: Date.now, text: text, chatId: chatId, fromId: Auth.shared.getCurrentUserId()!
+                fromId: Auth.shared.getCurrentUserId()!,
+                date: Date.now,
+                text: text,
+                peerUserId: peerId.isPrivate ? peerId.id : nil,
+                peerThreadId: peerId.isThread ? peerId.id : nil,
+                out: true
             )
             try message.save(db)
         }
+        // TODO: Trigger remote call
     }
-    
+
     public func deleteSpace(spaceId: Int64) async throws {
         log.debug("deleteSpace")
         do {
@@ -152,16 +158,16 @@ public class DataManager: ObservableObject {
             //            guard let currentUserId = Auth.shared.getCurrentUserId() else {
             //                throw DataManagerError.notAuthorized
             //            }
-            
+
             let _ = try await ApiClient.shared.deleteSpace(spaceId: spaceId)
-            
+
             try await database.dbWriter.write { db in
                 try Space.deleteOne(db, id: spaceId)
-                
+
                 try Member
                     .filter(Column("spaceId") == spaceId)
                     .deleteAll(db)
-                
+
                 try Chat
                     .filter(Column("spaceId") == spaceId)
                     .deleteAll(db)
@@ -171,19 +177,19 @@ public class DataManager: ObservableObject {
             throw error
         }
     }
-    
+
     public func leaveSpace(spaceId: Int64) async throws {
         log.debug("leaveSpace")
         do {
             let _ = try await ApiClient.shared.leaveSpace(spaceId: spaceId)
-            
+
             try await database.dbWriter.write { db in
                 try Space.deleteOne(db, id: spaceId)
-                
+
                 try Member
                     .filter(Column("spaceId") == spaceId)
                     .deleteAll(db)
-                
+
                 try Chat
                     .filter(Column("spaceId") == spaceId)
                     .deleteAll(db)
@@ -193,13 +199,13 @@ public class DataManager: ObservableObject {
             throw error
         }
     }
-    
+
     @discardableResult
     public func getPrivateChats() async throws -> [Chat] {
         log.debug("getPrivateChats")
         do {
             let result = try await ApiClient.shared.getPrivateChats()
-            
+
             let chats = try await database.dbWriter.write { db in
                 let chats = result.chats.map { chat in
                     Chat(from: chat)
@@ -208,14 +214,31 @@ public class DataManager: ObservableObject {
                 try chats.forEach { chat in
                     try chat.save(db)
                 }
-                
+
                 return chats
             }
-            
+
             print("getPrivateChats result: \(chats)")
             return chats
         } catch {
             throw error
         }
     }
+    //    public func getFullSpace(spaceId: Int64) async throws -> Space {
+    ////        log.debug("getFullSpace")
+    ////        do {
+    ////            let result = try await ApiClient.shared.getFullSpace(spaceId: spaceId)
+    ////            let space = Space(from: result.space)
+    ////            try await database.dbWriter.write { db in
+    ////                try space.save(db)
+    ////                for member in result.members {
+    ////                    let member = Member(from: member)
+    ////                    try member.save(db)
+    ////                }
+    ////            }
+    ////        } catch {
+    ////            Log.shared.error("Failed to get full space", error: error)
+    ////            throw error
+    ////        }
+    //    }
 }

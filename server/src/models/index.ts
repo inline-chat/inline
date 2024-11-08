@@ -127,13 +127,13 @@ export const TPeerNotifySettings = Type.Object({
 // Dialog -------------
 // Telegram Ref: https://core.telegram.org/constructor/dialog
 export const TDialogInfo = Type.Object({
-  peer: TPeerInfo,
+  peerId: TPeerInfo,
   pinned: Optional(Type.Boolean()),
-  spaceId: Optional(Type.Integer()), // if part of space
+  spaceId: Optional(Type.Integer()),
+  unreadCount: Optional(Type.Integer()),
   readInboxMaxId: Optional(Type.Integer()),
   readOutboxMaxId: Optional(Type.Integer()),
   // lastMsgId: Optional(Type.Integer()),
-  // unreadCount: Optional(Type.Integer()),
   // unreadMentionsCount: Optional(Type.Integer()), // https://core.telegram.org/api/mentions
   // unreadReactionsCount: Optional(Type.Integer()),
   // pinnedMsgId: Optional(Type.Integer()),
