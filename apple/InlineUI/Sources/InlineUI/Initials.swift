@@ -91,6 +91,18 @@ public struct InitialsCircle: View {
         return colorScheme == .dark ? baseColor.opacity(0.8) : baseColor
     }
     
+    private var brighterBackgroundColor: Color {
+        backgroundColor.adjustBrightness(by: 0.8)
+    }
+    
+    private var backgroundGradient: LinearGradient {
+        LinearGradient(
+            colors: [brighterBackgroundColor, backgroundColor],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+    
     public init(firstName: String, lastName: String? = nil, size: CGFloat = 32) {
         self.firstName = firstName
         self.lastName = lastName
@@ -99,11 +111,7 @@ public struct InitialsCircle: View {
     
     public var body: some View {
         Circle()
-            .fill(backgroundColor)
-//            .overlay(
-//                Circle()
-//                    .strokeBorder(borderColor, lineWidth: size * 0.03)
-//            )
+            .fill(backgroundGradient)
             .overlay(
                 Text(initials)
                     .foregroundColor(.white)
@@ -116,7 +124,8 @@ public struct InitialsCircle: View {
     }
 }
 
-// Color extension for hex initialization
+// MARK: - Color Extensions
+
 private extension Color {
     init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
@@ -141,6 +150,42 @@ private extension Color {
             opacity: Double(a) / 255
         )
     }
+    
+    func adjustBrightness(by amount: Double) -> Color {
+        #if os(iOS)
+        guard let components = UIColor(self).cgColor.components,
+              components.count >= 3 else { return self }
+        
+        let r = components[0]
+        let g = components[1]
+        let b = components[2]
+        let alpha = components.count >= 4 ? components[3] : 1.0
+        
+        return Color(
+            .sRGB,
+            red: min(r + amount, 1.0),
+            green: min(g + amount, 1.0),
+            blue: min(b + amount, 1.0),
+            opacity: alpha
+        )
+        #else
+        guard let components = NSColor(self).cgColor.components,
+              components.count >= 3 else { return self }
+        
+        let r = components[0]
+        let g = components[1]
+        let b = components[2]
+        let alpha = components.count >= 4 ? components[3] : 1.0
+        
+        return Color(
+            .sRGB,
+            red: min(r + amount, 1.0),
+            green: min(g + amount, 1.0),
+            blue: min(b + amount, 1.0),
+            opacity: alpha
+        )
+        #endif
+    }
 }
 
 #Preview("InitialsCircle Grid") {
@@ -156,10 +201,6 @@ private extension Color {
                 InitialsCircle(firstName: "Sarah", lastName: "Wilson", size: 60)
                 InitialsCircle(firstName: "David", lastName: "Miller", size: 60)
                 InitialsCircle(firstName: "Lisa", lastName: "Anderson", size: 60)
-                InitialsCircle(firstName: "James", lastName: "Taylor", size: 60)
-                InitialsCircle(firstName: "Emily", lastName: "Thomas", size: 60)
-                InitialsCircle(firstName: "William", lastName: "Moore", size: 60)
-                InitialsCircle(firstName: "Olivia", lastName: "Jackson", size: 60)
                 
                 // Tech Industry Names
                 InitialsCircle(firstName: "Sam", lastName: "Altman", size: 60)
@@ -168,40 +209,10 @@ private extension Color {
                 InitialsCircle(firstName: "Sundar", lastName: "Pichai", size: 60)
                 
                 // International Names
-                InitialsCircle(firstName: "Dena", lastName: "Sohrabi", size: 60)
-                InitialsCircle(firstName: "Mo", lastName: "Rajabi", size: 60)
-                InitialsCircle(firstName: "Dina", lastName: "Peo", size: 60)
                 InitialsCircle(firstName: "Yuki", lastName: "Tanaka", size: 60)
-                
-                // Additional Diverse Names
-                InitialsCircle(firstName: "Carlos", lastName: "Rodriguez", size: 60)
-                InitialsCircle(firstName: "Priya", lastName: "Patel", size: 60)
                 InitialsCircle(firstName: "Wei", lastName: "Chen", size: 60)
                 InitialsCircle(firstName: "Sofia", lastName: "Martinez", size: 60)
-                
-                // More International Names
                 InitialsCircle(firstName: "Ahmed", lastName: "Hassan", size: 60)
-                InitialsCircle(firstName: "Maria", lastName: "Silva", size: 60)
-                InitialsCircle(firstName: "Lars", lastName: "Nielsen", size: 60)
-                InitialsCircle(firstName: "Anna", lastName: "Kowalski", size: 60)
-                
-                // Additional Names
-                InitialsCircle(firstName: "Zara", lastName: "Khan", size: 60)
-                InitialsCircle(firstName: "Leo", lastName: "Wong", size: 60)
-                InitialsCircle(firstName: "Nina", lastName: "Ivanova", size: 60)
-                InitialsCircle(firstName: "Kai", lastName: "Zhang", size: 60)
-                
-                // Single Letter Names
-                InitialsCircle(firstName: "J", lastName: "Smith", size: 60)
-                InitialsCircle(firstName: "K", lastName: "Park", size: 60)
-                InitialsCircle(firstName: "A", lastName: "Jones", size: 60)
-                InitialsCircle(firstName: "Z", lastName: "Wang", size: 60)
-                
-                // Names with Special Characters
-                InitialsCircle(firstName: "José", lastName: "García", size: 60)
-                InitialsCircle(firstName: "François", lastName: "Dubois", size: 60)
-                InitialsCircle(firstName: "Søren", lastName: "Jensen", size: 60)
-                InitialsCircle(firstName: "Björn", lastName: "Larsson", size: 60)
             }
             .frame(height: 60)
         }

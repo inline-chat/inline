@@ -29,12 +29,20 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
         request(for: Chat.space)
     }
 
-    public static let lastMessage = hasOne(Message.self)
+    public static let lastMessage = hasOne(
+        Message.self,
+        using: ForeignKey(["id"], to: ["chatId"])
+    )
+
     public var lastMessage: QueryInterfaceRequest<Message> {
         request(for: Chat.lastMessage)
     }
 
-    public static let messages = hasMany(Message.self)
+    public static let messages = hasMany(
+        Message.self,
+        using: ForeignKey(["id"], to: ["chatId"])
+    )
+
     public var messages: QueryInterfaceRequest<Message> {
         request(for: Chat.messages)
     }
