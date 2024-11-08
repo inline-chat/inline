@@ -39,5 +39,14 @@ struct MessageView: View {
 }
 
 #Preview {
-    MessageView(message: Message(date: Date.now, text: "Hello, world!", chatId: 1, fromId: 1))
+    MessageView(
+        message: Message(
+            id: 1,
+            fromId: 1,
+            date: Date(),
+            text: "Hello, world!",
+            peerUserId: 1,
+            peerThreadId: nil
+        )
+    )
 }

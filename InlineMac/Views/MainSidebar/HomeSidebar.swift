@@ -36,7 +36,7 @@ struct HomeSidebar: View {
         .safeAreaInset(edge: .top, content: {
             VStack(alignment: .leading) {
                 SelfUser()
-                SearchBar()
+                SidebarSearchBar()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal)
@@ -51,14 +51,6 @@ struct HomeSidebar: View {
                 // TODO: handle error? keep on loading? retry? (@mo)
             }
         }
-    }
-}
-
-struct SearchBar: View {
-    @State private var searchText = ""
-
-    var body: some View {
-        GrayTextField("Search", text: $searchText, size: .small)
     }
 }
 
@@ -117,7 +109,7 @@ struct ConnectionStateOverlay: View {
 
 #Preview {
     NavigationSplitView {
-        HomeSidebar(namespace: Namespace().wrappedValue)
+        HomeSidebar()
             .previewsEnvironment(.populated)
             .environmentObject(NavigationModel())
     } detail: {

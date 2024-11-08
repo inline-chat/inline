@@ -77,6 +77,35 @@ public extension AppDatabase {
             }
         }
 
+        migrator.registerMigration("dialog") { db in
+            try db.create(table: "dialog") { t in
+                t.primaryKey("id", .integer).notNull().unique()
+                t.column("peerUserId", .integer).references("user", column: "id", onDelete: .setNull)
+                t.column("peerThreadId", .integer).references("chat", column: "id", onDelete: .setNull)
+                t.column("spaceId", .integer).references("space", column: "id", onDelete: .setNull)
+                t.column("unreadCount", .integer)
+                t.column("readInboxMaxId", .integer)
+                t.column("readOutboxMaxId", .integer)
+                t.column("pinned", .boolean)
+            }
+
+            // Add new columns
+            try db.alter(table: "message") { t in
+                t.add(column: "peerUserId", .integer).references("user", column: "id", onDelete: .setNull)
+                t.add(column: "peerThreadId", .integer).references("chat", column: "id", onDelete: .setNull)
+                t.add(column: "mentioned", .boolean)
+                t.add(column: "out", .boolean)
+                t.add(column: "pinned", .boolean)
+            }
+
+            // Migrate existing data: copy chatId to peerThreadId
+            try db.execute(sql: """
+                UPDATE message 
+                SET peerThreadId = chatId 
+                WHERE chatId IS NOT NULL
+            """)
+        }
+
         return migrator
     }
 }

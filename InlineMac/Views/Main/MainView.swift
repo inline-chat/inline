@@ -23,18 +23,9 @@ struct MainView: View {
 
     var body: some View {
         NavigationSplitView {
-            // ZStack needed for the transition to work
-            self.sidebar
-                .navigationSplitViewColumnWidth(min: Theme.minimumSidebarWidth, ideal: 240, max: 400)
+            sidebar
         } detail: {
-            NavigationStack(path: self.$navigation.path) {
-                if let spaceId = navigation.activeSpaceId {
-//                    SpaceView(spaceId: spaceId)
-                    Text("Space View")
-                } else {
-                    Text("Welcome to Inline")
-                }
-            }
+            detail
         }
         .sheet(isPresented: $navigation.createSpaceSheetPresented) {
             CreateSpaceSheet()
@@ -48,12 +39,47 @@ struct MainView: View {
 
     @Namespace private var sidebarNamespace
 
-    @ViewBuilder
     var sidebar: some View {
-        if let spaceId = navigation.activeSpaceId {
-            SpaceSidebar(spaceId: spaceId, namespace: sidebarNamespace)
-        } else {
-            HomeSidebar(namespace: sidebarNamespace)
+        Group {
+            if let spaceId = navigation.activeSpaceId {
+                SpaceSidebar(spaceId: spaceId)
+            } else {
+                HomeSidebar()
+            }
+        }
+        .navigationSplitViewColumnWidth(min: Theme.minimumSidebarWidth, ideal: 240, max: 400)
+    }
+
+    var detail: some View {
+        Group {
+            if let spaceId = navigation.activeSpaceId {
+                NavigationStack(path: navigation.spacePath) {
+                    renderSpaceRoute(for: navigation.spaceSelection.wrappedValue, spaceId: spaceId)
+                        .navigationDestination(for: NavigationRoute.self) { route in
+                            renderSpaceRoute(for: route, spaceId: spaceId)
+                        }
+                }
+            } else {
+                NavigationStack(path: $navigation.homePath) {
+                    Text("Welcome to Inline")
+                        .navigationTitle("Home")
+                }
+            }
+        }
+    }
+
+    func renderSpaceRoute(for destination: NavigationRoute, spaceId: Int64) -> some View {
+        Group {
+            switch destination {
+            case .spaceRoot:
+                SpaceView(spaceId: spaceId)
+            case .chat(let peer):
+                Text("Peer \(peer)")
+
+            case .homeRoot:
+                // Not for space
+                Text("")
+            }
         }
     }
 }

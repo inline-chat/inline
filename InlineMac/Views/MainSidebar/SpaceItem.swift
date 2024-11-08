@@ -112,10 +112,7 @@ struct SpaceItem: View {
     }
 
     private func navigateOutOfSpace() {
-        print("Navigating out of space \(nav.path)")
-        if nav.path.last == .space(id: space.id) {
-            nav.navigate(to: .home)
-        }
+        // todo
     }
 }
 

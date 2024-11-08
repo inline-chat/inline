@@ -1,12 +1,43 @@
 import Foundation
 import GRDB
 
-public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked Sendable {
+public struct ApiMessage: Codable, Hashable, Sendable {
+    public var id: Int64
+    public var peerId: Peer
+    public var fromId: Int64
+    // Raw message text
+    public var text: String?
+    public var mentioned: Bool?
+    public var pinned: Bool?
+    public var out: Bool?
+    public var editDate: Int?
+    public var date: Int
+}
+
+public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
     public var id: Int64
     public var date: Date
+    
+    // Raw message text
     public var text: String?
-    public var chatId: Int64
+    
+    // One of these must be set
+    public var peerUserId: Int64?
+    public var peerThreadId: Int64?
+    
+    // Sent from user
     public var fromId: Int64
+    
+    // Are we mentioned in this message?
+    public var mentioned: Bool?
+    
+    // Is this message outgoing?
+    public var out: Bool?
+    
+    // is this message pinned?
+    public var pinned: Bool?
+    
+    // If message was edited
     public var editDate: Date?
 
     public static let chat = belongsTo(Chat.self)
@@ -19,33 +50,31 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
         request(for: Message.from)
     }
 
-    public init(id: Int64 = Int64.random(in: 1 ... 5000), date: Date, text: String?, chatId: Int64, fromId: Int64, editDate: Date? = nil) {
+    public init(
+        id: Int64 = Int64.random(in: 1 ... 5000),
+        fromId: Int64,
+        date: Date,
+        text: String?,
+        peerUserId: Int64?,
+        peerThreadId: Int64?,
+        out: Bool? = nil,
+        mentioned: Bool? = nil,
+        pinned: Bool? = nil,
+        editDate: Date? = nil)
+    {
         self.id = id
         self.date = date
         self.text = text
-        self.chatId = chatId
         self.fromId = fromId
+        self.peerUserId = peerUserId
+        self.peerThreadId = peerThreadId
         self.editDate = editDate
-    }
-}
-
-public extension Message {
-    enum CodingKeys: String, CodingKey {
-        case id
-        case date
-        case text
-        case chatId
-        case fromId
-        case editDate
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(Int64.self, forKey: .id)
-        date = try container.decode(Date.self, forKey: .date)
-        text = try container.decodeIfPresent(String.self, forKey: .text)
-        chatId = try container.decode(Int64.self, forKey: .chatId)
-        fromId = try container.decode(Int64.self, forKey: .fromId)
-        editDate = try container.decodeIfPresent(Date.self, forKey: .editDate)
+        self.out = out
+        self.mentioned = mentioned
+        self.pinned = pinned
+            
+        if peerUserId == nil && peerThreadId == nil {
+            fatalError("One of peerUserId or peerThreadId must be set")
+        }
     }
 }

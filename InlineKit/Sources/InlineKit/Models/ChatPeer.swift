@@ -2,12 +2,21 @@ import Foundation
 import GRDB
 
 public enum Peer: Codable, Hashable, Sendable {
-    case user(id: Int64)
-    case thread(id: Int64)
+     case user(id: Int64)
+     case thread(id: Int64)
     
     private enum CodingKeys: String, CodingKey {
         case userId
         case threadId
+    }
+    
+    public var id: Int64 {
+        switch self {
+        case .user(let id):
+            return id
+        case .thread(let id):
+            return id
+        }
     }
     
     public init(from decoder: Decoder) throws {
@@ -27,6 +36,15 @@ public enum Peer: Codable, Hashable, Sendable {
         }
     }
     
+    public init(userId: Int64) {
+        self = .user(id: userId)
+    }
+    
+    public init(threadId: Int64) {
+        self = .thread(id: threadId)
+    }
+        
+    
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
@@ -44,6 +62,15 @@ public enum Peer: Codable, Hashable, Sendable {
             return true
         case .thread:
             return false
+        }
+    }
+    
+    public var isThread: Bool {
+        switch self {
+        case .user:
+            return false
+        case .thread:
+            return true
         }
     }
 }

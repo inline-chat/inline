@@ -114,7 +114,7 @@ private extension ChatView {
             do {
                 if !text.isEmpty {
                     if let id = fullChatViewModel.chat?.id {
-                        try await dataManager.sendMessage(chatId: id, text: text)
+                        try await dataManager.sendMessage(peerId: self.peer, text: text)
                         text = ""
                     }
                 }
