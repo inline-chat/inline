@@ -32,8 +32,10 @@ struct MainView: View {
         }
         .environmentObject(rootData)
         .environmentObject(dataManager)
-        .task {
-            self.rootData.fetch()
+        .onAppear {
+            
+                self.rootData.fetch()
+            
         }
     }
 
