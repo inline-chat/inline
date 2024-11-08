@@ -161,7 +161,7 @@ export const TMessageInfo = Type.Object({
 })
 
 export type TMessageInfo = StaticEncode<typeof TMessageInfo>
-export const encodeMessageInfo = (message: DbMessage | TMessageInfo): TMessageInfo => {
+export const encodeMessageInfo = (message: DbMessage | TMessageInfo, p0: { currentUserId: number }): TMessageInfo => {
   return Value.Encode(TMessageInfo, {
     ...message,
     date: encodeDate(message.date),

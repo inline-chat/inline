@@ -1,7 +1,8 @@
+
+import GRDB
 import InlineKit
 import InlineUI
 import SwiftUI
-
 /// The main view of the application showing spaces and direct messages
 
 struct MainView: View {
@@ -12,6 +13,7 @@ struct MainView: View {
     @Environment(\.auth) private var auth
     @EnvironmentObject private var api: ApiClient
     @EnvironmentObject private var ws: WebSocketManager
+    @EnvironmentStateObject var root: RootData
 
     // MARK: - View Models
 
@@ -21,14 +23,20 @@ struct MainView: View {
 
     // MARK: - State
 
-    @State private var user: User? = nil
     @State private var showSheet = false
     @State private var showDmSheet = false
     @State private var connection: String = ""
 
+    var user: User? {
+        root.currentUser
+    }
+
     // MARK: - Initialization
 
     init() {
+        _root = EnvironmentStateObject { env in
+            RootData(db: env.appDatabase, auth: Auth.shared)
+        }
         _spaceList = EnvironmentStateObject { env in
             SpaceListViewModel(db: env.appDatabase)
         }
@@ -46,7 +54,6 @@ struct MainView: View {
         VStack {
             contentView
         }
-        .onAppear(perform: fetchUser)
         .toolbar { toolbarContent }
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden()
@@ -62,26 +69,17 @@ struct MainView: View {
         }
         .task {
             do {
-                try await dataManager.fetchMe()
-               
-            } catch {
-                Log.shared.error("Failed to fetch user", error: error)
-            }
-            do {
                 try await dataManager.getPrivateChats()
-               
+
             } catch {
                 Log.shared.error("Failed to getPrivateChats", error: error)
             }
             do {
                 try await dataManager.getSpaces()
-               
+
             } catch {
                 Log.shared.error("Failed to getSpaces", error: error)
             }
-            
-         
-           
         }
     }
 }
@@ -141,12 +139,12 @@ private extension MainView {
         Group {
             ToolbarItem(placement: .topBarLeading) {
                 HStack {
-                    Image(systemName: "house.fill")
-                        .font(.callout)
-                        .foregroundColor(.secondary)
-                    //                        .padding(.trailing, 4)
+                    if let user = user {
+                        UserAvatar(user: user, size: 26)
+                            .padding(.trailing, 4)
+                    }
                     VStack(alignment: .leading) {
-                        Text("Home")
+                        Text(user?.firstName ?? user?.lastName ?? user?.email ?? "User")
                             .font(.title3)
                             .fontWeight(.semibold)
                         if ws.connectionState != .normal {
@@ -199,23 +197,6 @@ private extension MainView {
 // MARK: - Helper Methods
 
 private extension MainView {
-    func fetchUser() {
-        Task {
-            do {
-                try await database.dbWriter.write { db in
-                    if let id = auth.getCurrentUserId() {
-                        let fetchedUser = try User.fetchOne(db, id: id)
-                        if let user = fetchedUser {
-                            self.user = user
-                        }
-                    }
-                }
-            } catch {
-                Log.shared.error("Failed to get user", error: error)
-            }
-        }
-    }
-
     func handleLogout() {
         auth.logOut()
         do {

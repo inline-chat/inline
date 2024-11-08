@@ -8,7 +8,7 @@ import { encodeMessageInfo, TMessageInfo } from "@in/server/models"
 
 export const Input = Type.Object({
   // TODO: change to PeerId
-  chatId: Type.Integer(),
+  chatId: Type.String(),
   text: Type.String(),
 })
 
@@ -26,7 +26,7 @@ type Response = Static<typeof Response>
 
 export const handler = async (input: Input, context: Context): Promise<Response> => {
   try {
-    const chatId = input.chatId
+    const chatId = Number(input.chatId)
     if (isNaN(chatId)) {
       throw new InlineError(InlineError.ApiError.BAD_REQUEST)
     }
@@ -44,6 +44,7 @@ export const handler = async (input: Input, context: Context): Promise<Response>
         text: input.text,
         fromId: context.currentUserId,
         messageId: prevMessageId + 1,
+        date: new Date(),
       })
       .returning()
 
@@ -57,7 +58,7 @@ export const handler = async (input: Input, context: Context): Promise<Response>
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    return { message: encodeMessageInfo(newMessage) }
+    return { message: encodeMessageInfo(newMessage, { currentUserId: context.currentUserId }) }
   } catch (error) {
     Log.shared.error("Failed to send message", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
