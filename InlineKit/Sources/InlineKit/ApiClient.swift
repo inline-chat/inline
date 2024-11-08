@@ -215,6 +215,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     //            includeToken: true
     //        )
     //    }
+
+    public func sendMessage(chatId: Int64, text: String) async throws -> SendMessage {
+        try await request(.sendMessage, queryItems: [URLQueryItem(name: "chatId", value: "\(chatId)"), URLQueryItem(name: "text", value: text)], includeToken: true)
+    }
 }
 
 /// Example
@@ -317,4 +321,6 @@ public struct PinnedDialogsPayload: Codable, Sendable {
     public let messages: [ApiMessage]
     // Users you need in sidebar and senders of last messages
     public let dialogs: [ApiDialog]
+public struct SendMessage: Codable, Sendable {
+    public let message: ApiMessage
 }

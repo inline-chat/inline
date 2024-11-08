@@ -3,7 +3,6 @@ import InlineKit
 import InlineUI
 import SwiftUI
 import SwiftUIIntrospect
-
 struct ChatView: View {
     // MARK: - Properties
 
