@@ -82,6 +82,14 @@ class NavigationModel: ObservableObject {
         }
     }
     
+    // Called on logout
+    func reset() {
+        activeSpaceId = nil
+        homePath = .init()
+        spacePathDict = [:]
+        spaceSelectionDict = [:]
+    }
+    
     // MARK: - Sheets
     
     @Published var createSpaceSheetPresented: Bool = false

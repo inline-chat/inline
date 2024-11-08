@@ -13,22 +13,25 @@ struct OnboardingWelcome: View {
             
             Spacer()
             
-            Text("Hey There.")
+//            Text("Hey There")
+            Text("Welcome to Inline")
                 .font(
-                    .custom(Fonts.RedHatDisplay, size: 42, relativeTo: .title)
+                    .custom(Fonts.RedHatDisplay, size: 36, relativeTo: .title)
                 ).fontWeight(.bold)
-                .padding(.bottom, 1)
+                .padding(.bottom, 0.5)
             
-            Text("Ready for a new way to chat at work?")
+//            Text("Welcome to Inline, \nthe all new way to chat with your team.")
+            Text("It's an all new way to chat with your team.")
                 .font(.system(size: 21.0, weight: .medium))
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
             
             Spacer()
             
             GrayButton {
                 onboardingViewModel.navigate(to: .enterEmail)
             } label: {
-                Text("Continue").padding(.horizontal, 60)
+                Text("Get Started").padding(.horizontal, 60)
             }
             .padding(.bottom, 30)
             
