@@ -22,7 +22,7 @@ struct MainView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $windowViewModel.columnVisibility) {
             sidebar
         } detail: {
             detail
@@ -33,9 +33,7 @@ struct MainView: View {
         .environmentObject(rootData)
         .environmentObject(dataManager)
         .onAppear {
-            
-                self.rootData.fetch()
-            
+            self.rootData.fetch()
         }
     }
 

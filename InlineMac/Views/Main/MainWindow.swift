@@ -20,9 +20,6 @@ struct MainWindow: View {
                     blendingMode: .behindWindow
                 )
                 .ignoresSafeArea(.all)
-                .transition(
-                    .opacity
-                )
                 
                 Onboarding()
                     .transition(
@@ -44,15 +41,18 @@ enum TopLevelRoute {
 
 class MainWindowViewModel: ObservableObject {
     @Published var topLevelRoute: TopLevelRoute
+    @Published var columnVisibility: NavigationSplitViewVisibility
     
     init() {
         if Auth.shared.isLoggedIn {
             topLevelRoute = .main
+            columnVisibility = .automatic
         } else {
             topLevelRoute = .onboarding
+            columnVisibility = .detailOnly
         }
     }
-     
+    
     private var window: NSWindow?
     
     func windowInititized(_ window: NSWindow) {
@@ -61,6 +61,7 @@ class MainWindowViewModel: ObservableObject {
     }
     
     func navigate(_ route: TopLevelRoute) {
+        columnVisibility = route == .main ? .automatic : .detailOnly
         topLevelRoute = route
         setupWindow(for: topLevelRoute)
     }
@@ -73,13 +74,15 @@ class MainWindowViewModel: ObservableObject {
         switch route {
         case .main:
             // Main style
-//            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = false
+            window.titleVisibility = .visible
             window.isMovableByWindowBackground = false
             window.isOpaque = true
             window.backgroundColor = NSColor.windowBackgroundColor
         case .onboarding:
             // onboarding style
-//            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
             window.isMovableByWindowBackground = true
             window.isOpaque = false
             window.backgroundColor = NSColor.clear
@@ -98,7 +101,7 @@ struct VisualEffectView: NSViewRepresentable {
         view.material = material
         view.blendingMode = blendingMode
         view.state = .active
-
+        
         return view
     }
     
