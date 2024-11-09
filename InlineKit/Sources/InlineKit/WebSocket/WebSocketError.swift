@@ -7,7 +7,7 @@
 
 // MARK: - Custom Error
 enum INWebSocketError: Error {
-    case encodingFailed
+  case encodingFailed
 
-    static let connectionTimeout = WebSocketError.disconnected
+  static let connectionTimeout = WebSocketError.disconnected
 }

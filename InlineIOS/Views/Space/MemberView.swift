@@ -4,27 +4,27 @@ import InlineUI
 import SwiftUI
 
 struct MemberView: View {
-    var userId: Int64
-    @EnvironmentStateObject var userDataViewModel: UserDataViewModel
+  var userId: Int64
+  @EnvironmentStateObject var userDataViewModel: UserDataViewModel
 
-    init(userId: Int64) {
-        self.userId = userId
-        _userDataViewModel = EnvironmentStateObject { env in
-            UserDataViewModel(db: env.appDatabase, userId: userId)
-        }
+  init(userId: Int64) {
+    self.userId = userId
+    _userDataViewModel = EnvironmentStateObject { env in
+      UserDataViewModel(db: env.appDatabase, userId: userId)
     }
+  }
 
-    var body: some View {
-        HStack {
-            if let user = userDataViewModel.user {
-                InitialsCircle(firstName: user.firstName ?? "", lastName: user.lastName ?? nil, size: 25)
-                    .padding(.trailing, 4)
-                Text(user.firstName ?? "")
-            }
-        }
+  var body: some View {
+    HStack {
+      if let user = userDataViewModel.user {
+        InitialsCircle(firstName: user.firstName ?? "", lastName: user.lastName ?? nil, size: 25)
+          .padding(.trailing, 4)
+        Text(user.firstName ?? "")
+      }
     }
+  }
 }
 
 #Preview {
-    MemberView(userId: Int64.random(in: 1 ... 500))
+  MemberView(userId: Int64.random(in: 1...500))
 }

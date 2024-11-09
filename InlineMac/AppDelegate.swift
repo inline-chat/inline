@@ -9,12 +9,12 @@ import AppKit
 import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        // Disable native tabbing
-        NSWindow.allowsAutomaticWindowTabbing = false
-    }
-    
-    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
-        return true
-    }
+  func applicationWillFinishLaunching(_ notification: Notification) {
+    // Disable native tabbing
+    NSWindow.allowsAutomaticWindowTabbing = false
+  }
+
+  func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+    return true
+  }
 }
