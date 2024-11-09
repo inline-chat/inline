@@ -37,8 +37,6 @@ struct MainView: View {
     }
   }
 
-  @Namespace private var sidebarNamespace
-
   var sidebar: some View {
     Group {
       if let spaceId = navigation.activeSpaceId {
@@ -86,6 +84,5 @@ struct MainView: View {
 
 #Preview {
   MainView()
-    .previewsEnvironment(.empty)
-    .environmentObject(NavigationModel())
+    .previewsEnvironmentForMac(.empty)
 }

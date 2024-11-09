@@ -1,13 +1,22 @@
 import SwiftUI
 
 struct GrayButton<Label>: View
-where Label: View {
+  where Label: View
+{
   var action: () -> Void
   var label: Label
+  var size: ButtonSize
 
-  init(action: @escaping @MainActor () -> Void, @ViewBuilder label: () -> Label) {
+  enum ButtonSize {
+    case small
+    case medium
+    case large
+  }
+
+  init(size: ButtonSize? = nil, action: @escaping @MainActor () -> Void, @ViewBuilder label: () -> Label) {
     self.action = action
     self.label = label()
+    self.size = size ?? .large
   }
 
   @FocusState private var isFocused: Bool
@@ -16,7 +25,7 @@ where Label: View {
   var body: some View {
     if #available(macOS 14.0, *) {
       Button(action: action, label: { label })
-        .buttonStyle(GrayButtonStyle(isFocused: isFocused, hovered: hovered))
+        .buttonStyle(GrayButtonStyle(size: size, isFocused: isFocused, hovered: hovered))
         .focusEffectDisabled(true)
         .focused($isFocused)
         .onHover {
@@ -24,28 +33,58 @@ where Label: View {
         }
     } else {
       Button(action: action, label: { label })
-        .buttonStyle(GrayButtonStyle())
+        .buttonStyle(GrayButtonStyle(size: size))
     }
   }
 
   struct GrayButtonStyle: ButtonStyle {
     var isFocused: Bool
     var hovered: Bool
+    var size: ButtonSize
 
-    init(isFocused: Bool, hovered: Bool) {
-      self.isFocused = isFocused
-      self.hovered = hovered
+    init(size: ButtonSize, isFocused: Bool? = nil, hovered: Bool? = nil) {
+      self.isFocused = isFocused ?? false
+      self.hovered = hovered ?? false
+      self.size = size
     }
 
-    init() {
-      self.isFocused = false
-      self.hovered = false
+    var font: Font {
+      switch size {
+      case .small:
+        return Font.system(size: 13, weight: .regular)
+      case .medium:
+        return Font.system(size: 15, weight: .regular)
+      case .large:
+        return Font.system(size: 17, weight: .regular)
+      }
+    }
+
+    var height: CGFloat {
+      switch size {
+      case .small:
+        return 24
+      case .medium:
+        return 28
+      case .large:
+        return 36
+      }
+    }
+
+    var cornerRadius: CGFloat {
+      switch size {
+      case .small:
+        return 6
+      case .medium:
+        return 8
+      case .large:
+        return 10
+      }
     }
 
     func makeBody(configuration: Configuration) -> some View {
       let background: Color =
         configuration.isPressed
-        ? .primary.opacity(0.15) : hovered ? .primary.opacity(0.13) : .primary.opacity(0.09)
+          ? .primary.opacity(0.15) : hovered ? .primary.opacity(0.13) : .primary.opacity(0.09)
       //            let background: Color = .accentColor
       let scale: CGFloat = configuration.isPressed ? 0.95 : 1
       let textOpacity: Double = configuration.isPressed ? 0.8 : 0.95
@@ -53,15 +92,15 @@ where Label: View {
         (isFocused ? 100 : 0) + (configuration.isPressed ? 10 : 0) + (hovered ? 1 : 0)
 
       return configuration.label
-        .font(.system(size: 15, weight: .regular))
-        .frame(height: 38)
+        .font(font)
+        .frame(height: height)
         .padding(.horizontal)
         .background(background)
         .foregroundStyle(.primary.opacity(textOpacity))
-        .cornerRadius(10)
+        .cornerRadius(cornerRadius)
         .overlay(content: {
           if isFocused {
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: cornerRadius)
               .stroke(lineWidth: 1.0)
               .foregroundStyle(.primary.opacity(0.3))
           }
