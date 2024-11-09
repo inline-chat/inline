@@ -92,3 +92,5 @@ DerivedData/
 **/.netrc
 
 server/dist
+
+buildServer.json
