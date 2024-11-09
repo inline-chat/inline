@@ -15,7 +15,7 @@ let package = Package(
     .library(
       name: "InlineKit",
       targets: ["InlineKit"]
-    ),
+    )
   ],
   dependencies: [
     .package(url: "https://github.com/inlinehq/GRDB.swift", from: "3.0.8"),
@@ -36,7 +36,7 @@ let package = Package(
         .product(name: "KeychainSwift", package: "keychain-swift"),
       ],
       swiftSettings: [
-        .swiftLanguageMode(.v6),
+        .swiftLanguageMode(.v6)
       ]
     ),
 

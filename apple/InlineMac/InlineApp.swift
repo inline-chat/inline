@@ -11,7 +11,7 @@ struct InlineApp: App {
   @StateObject var ws = WebSocketManager()
   @StateObject var navigation = NavigationModel()
   @StateObject var auth = Auth.shared
-    
+
   var body: some Scene {
     WindowGroup(id: "main") {
       MainWindow()
@@ -29,7 +29,7 @@ struct InlineApp: App {
     .windowToolbarStyle(.unified)
     .commands {
       MainWindowCommands()
-            
+
       // Create Space
       if auth.isLoggedIn {
         CommandGroup(after: .newItem) {
@@ -39,7 +39,7 @@ struct InlineApp: App {
         }
       }
     }
-        
+
     Settings {
       SettingsView()
         .environmentObject(self.ws)
@@ -49,36 +49,36 @@ struct InlineApp: App {
         .appDatabase(AppDatabase.shared)
     }
   }
-    
+
   // Resets all state and data
   func logOut() {
     // Clear creds
     Auth.shared.logOut()
-        
+
     // Stop WebSocket
     ws.loggedOut()
-        
+
     // Clear database
     try? AppDatabase.loggedOut()
-        
+
     // Navigate outside of the app
     viewModel.navigate(.onboarding)
-        
+
     // Reset internal navigation
     navigation.reset()
-        
+
     // Close Settings
     if let window = NSApplication.shared.keyWindow {
       window.close()
     }
   }
-    
+
   // -----
   private func createSpace() {
     navigation.createSpaceSheetPresented = true
   }
 }
 
-public extension EnvironmentValues {
-  @Entry var logOut: () -> Void = {}
+extension EnvironmentValues {
+  @Entry public var logOut: () -> Void = {}
 }
