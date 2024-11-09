@@ -5,8 +5,7 @@ struct CreateSpaceSheet: View {
     @State private var spaceName: String = ""
     @FormState var formState
     @Environment(\.appDatabase) var db
-    @Environment (\.dismiss) var dismiss
-
+    @Environment(\.dismiss) var dismiss
     
     var body: some View {
         VStack {

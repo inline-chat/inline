@@ -6,79 +6,79 @@ import SwiftUI
 
 @main
 struct InlineApp: App {
-    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
-    @StateObject var viewModel = MainWindowViewModel()
-    @StateObject var ws = WebSocketManager()
-    @StateObject var navigation = NavigationModel()
-    @StateObject var auth = Auth.shared
+  @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
+  @StateObject var viewModel = MainWindowViewModel()
+  @StateObject var ws = WebSocketManager()
+  @StateObject var navigation = NavigationModel()
+  @StateObject var auth = Auth.shared
     
-    var body: some Scene {
-        WindowGroup(id: "main") {
-            MainWindow()
-                .environmentObject(self.ws)
-                .environmentObject(self.viewModel)
-                .environmentObject(self.navigation)
-                .environment(\.auth, auth)
-                .appDatabase(AppDatabase.shared)
-                .environment(\.logOut, logOut)
-        }
-        .defaultSize(width: 900, height: 600)
-        .windowStyle(
-            viewModel.topLevelRoute == .onboarding ? .hiddenTitleBar : .init()
-        )
-        .windowToolbarStyle(.unified)
-        .commands {
-            MainWindowCommands()
+  var body: some Scene {
+    WindowGroup(id: "main") {
+      MainWindow()
+        .environmentObject(self.ws)
+        .environmentObject(self.viewModel)
+        .environmentObject(self.navigation)
+        .environment(\.auth, auth)
+        .appDatabase(AppDatabase.shared)
+        .environment(\.logOut, logOut)
+    }
+    .defaultSize(width: 900, height: 600)
+    .windowStyle(
+      viewModel.topLevelRoute == .onboarding ? .hiddenTitleBar : .init()
+    )
+    .windowToolbarStyle(.unified)
+    .commands {
+      MainWindowCommands()
             
-            // Create Space
-            if auth.isLoggedIn {
-                CommandGroup(after: .newItem) {
-                    Button(action: createSpace) {
-                        Text("Create Space")
-                    }
-                }
-            }
+      // Create Space
+      if auth.isLoggedIn {
+        CommandGroup(after: .newItem) {
+          Button(action: createSpace) {
+            Text("Create Space")
+          }
         }
-        
-        Settings {
-            SettingsView()
-                .environmentObject(self.ws)
-                .environmentObject(self.viewModel)
-                .environment(\.auth, Auth.shared)
-                .environment(\.logOut, logOut)
-                .appDatabase(AppDatabase.shared)
-        }
+      }
     }
+        
+    Settings {
+      SettingsView()
+        .environmentObject(self.ws)
+        .environmentObject(self.viewModel)
+        .environment(\.auth, Auth.shared)
+        .environment(\.logOut, logOut)
+        .appDatabase(AppDatabase.shared)
+    }
+  }
     
-    // Resets all state and data
-    func logOut() {
-        // Clear creds
-        Auth.shared.logOut()
+  // Resets all state and data
+  func logOut() {
+    // Clear creds
+    Auth.shared.logOut()
         
-        // Stop WebSocket
-        ws.loggedOut()
+    // Stop WebSocket
+    ws.loggedOut()
         
-        // Clear database
-        try? AppDatabase.loggedOut()
+    // Clear database
+    try? AppDatabase.loggedOut()
         
-        // Navigate outside of the app
-        viewModel.navigate(.onboarding)
+    // Navigate outside of the app
+    viewModel.navigate(.onboarding)
         
-        // Reset internal navigation
-        navigation.reset()
+    // Reset internal navigation
+    navigation.reset()
         
-        // Close Settings
-        if let window = NSApplication.shared.keyWindow {
-            window.close()
-        }
+    // Close Settings
+    if let window = NSApplication.shared.keyWindow {
+      window.close()
     }
+  }
     
-    // -----
-    private func createSpace() {
-        navigation.createSpaceSheetPresented = true
-    }
+  // -----
+  private func createSpace() {
+    navigation.createSpaceSheetPresented = true
+  }
 }
 
 public extension EnvironmentValues {
-    @Entry var logOut: () -> Void = {}
+  @Entry var logOut: () -> Void = {}
 }
