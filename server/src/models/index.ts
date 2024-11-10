@@ -142,8 +142,12 @@ export const TDialogInfo = Type.Object({
 export type TDialogInfo = StaticEncode<typeof TDialogInfo>
 export const encodeDialogInfo = (dialog: DbDialog): TDialogInfo => {
   return Value.Encode(TDialogInfo, {
-    ...dialog,
-    peer: dialog.peerUserId ? { userId: dialog.peerUserId } : { threadId: dialog.chatId },
+    peerId: dialog.peerUserId ? { userId: dialog.peerUserId } : { threadId: dialog.chatId },
+    pinned: dialog.pinned,
+    spaceId: dialog.spaceId,
+    unreadCount: 0,
+    readInboxMaxId: dialog.readInboxMaxId,
+    readOutboxMaxId: dialog.readOutboxMaxId,
   })
 }
 
@@ -158,12 +162,18 @@ export const TMessageInfo = Type.Object({
 
   // https://core.telegram.org/api/mentions
   mentioned: Optional(Type.Boolean()),
+  out: Optional(Type.Boolean()),
+  pinned: Optional(Type.Boolean()),
 })
 
 export type TMessageInfo = StaticEncode<typeof TMessageInfo>
-export const encodeMessageInfo = (message: DbMessage | TMessageInfo, p0: { currentUserId: number }): TMessageInfo => {
+export const encodeMessageInfo = (
+  message: DbMessage | TMessageInfo,
+  context: { currentUserId: number },
+): TMessageInfo => {
   return Value.Encode(TMessageInfo, {
     ...message,
+    out: message.fromId === context.currentUserId,
     date: encodeDate(message.date),
   })
 }

@@ -97,6 +97,11 @@ import {
   Input as GetSpaceMembersInput,
   Response as GetSpaceMembersResponse,
 } from "@in/server/methods/getSpaceMembers"
+import {
+  handler as getDialogsHandler,
+  Input as GetDialogsInput,
+  Response as GetDialogsResponse,
+} from "@in/server/methods/getDialogs"
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
@@ -126,6 +131,7 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(makeApiRoute("/leaveSpace", LeaveSpaceInput, LeaveSpaceResponse, leaveSpaceHandler))
       .use(makeApiRoute("/getPrivateChats", GetPrivateChatsInput, GetPrivateChatsResponse, getPrivateChatsHandler))
       .use(makeApiRoute("/getSpaceMembers", GetSpaceMembersInput, GetSpaceMembersResponse, getSpaceMembersHandler))
+      .use(makeApiRoute("/getDialogs", GetDialogsInput, GetDialogsResponse, getDialogsHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }

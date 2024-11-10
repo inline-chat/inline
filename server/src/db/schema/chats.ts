@@ -7,6 +7,7 @@ import { integer } from "drizzle-orm/pg-core"
 import { messages } from "@in/server/db/schema/messages"
 import { foreignKey } from "drizzle-orm/pg-core"
 import { text } from "drizzle-orm/pg-core"
+import { dialogs } from "@in/server/db/schema/dialogs"
 
 export const chatTypeEnum = pgEnum("chat_types", ["private", "thread"])
 
@@ -56,7 +57,7 @@ export const chats = pgTable(
   }),
 )
 
-export const chatsRelations = relations(chats, ({ one }) => ({
+export const chatsRelations = relations(chats, ({ one, many }) => ({
   space: one(spaces, {
     fields: [chats.spaceId],
     references: [spaces.id],
@@ -66,6 +67,8 @@ export const chatsRelations = relations(chats, ({ one }) => ({
     fields: [chats.lastMsgId],
     references: [messages.messageId],
   }),
+
+  dialogs: many(dialogs),
 }))
 
 export type DbChat = typeof chats.$inferSelect

@@ -21,11 +21,12 @@ struct SpaceSidebar: View {
   var body: some View {
     List {
       Section("Threads") {
-        ChatSideItem(
-          selectedRoute: navigation.spaceSelection,
-          item:
-          SpaceSidebarItem(peerId: Peer(threadId: 1), title: "Main")
-        )
+        ForEach(fullSpace.chats, id: \.peerId) { chat in
+          ChatSideItem(
+            selectedRoute: navigation.spaceSelection,
+            item: SpaceSidebarItem(peerId: chat.peerId, title: chat.chat.title ?? "")
+          )
+        }
       }
     }
     .listRowInsets(EdgeInsets())

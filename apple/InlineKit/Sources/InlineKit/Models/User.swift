@@ -29,9 +29,9 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     request(for: User.spaces)
   }
 
-  public static let chats = hasMany(Chat.self)
-  public var chats: QueryInterfaceRequest<Chat> {
-    request(for: User.chats)
+  public static let chat = hasOne(Chat.self)
+  public var chat: QueryInterfaceRequest<Chat> {
+    request(for: User.chat)
   }
 
   public static let messages = hasMany(Message.self)

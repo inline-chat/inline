@@ -34,7 +34,7 @@ export const handleError = new Elysia()
         description: error.description,
       }
     } else if (code === "VALIDATION") {
-      console.error(error)
+      console.error("VALIDATION ERROR", error)
       return {
         ok: false,
         error: "INVALID_ARGS",
@@ -42,7 +42,7 @@ export const handleError = new Elysia()
         description: "Validation error",
       }
     } else {
-      Log.shared.error("Top level error, " + code, error)
+      Log.shared.error("Top level error" + code, error)
       return {
         ok: false,
         error: "SERVER_ERROR",

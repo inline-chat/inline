@@ -270,6 +270,7 @@ public class DataManager: ObservableObject {
 
       log.debug("saved dialogs")
     } catch {
+      log.error("Failed to get dialogs", error: error)
       throw error
     }
   }

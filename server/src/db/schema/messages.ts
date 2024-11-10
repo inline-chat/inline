@@ -7,6 +7,7 @@ import { integer } from "drizzle-orm/pg-core"
 import { index } from "drizzle-orm/pg-core"
 import { creationDate } from "@in/server/db/schema/common"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
+import { relations } from "drizzle-orm"
 
 export const messages = pgTable(
   "messages",
@@ -41,6 +42,10 @@ export const messages = pgTable(
     messageIdPerChatIndex: index("msg_id_per_chat_index").on(table.messageId, table.chatId),
   }),
 )
+
+export const messageRelations = relations(messages, ({ one }) => ({
+  from: one(users, { fields: [messages.fromId], references: [users.id] }),
+}))
 
 export type DbMessage = typeof messages.$inferSelect
 export type DbNewMessage = typeof messages.$inferInsert
