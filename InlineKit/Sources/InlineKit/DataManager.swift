@@ -224,21 +224,53 @@ public class DataManager: ObservableObject {
       throw error
     }
   }
-  //    public func getFullSpace(spaceId: Int64) async throws -> Space {
-  ////        log.debug("getFullSpace")
-  ////        do {
-  ////            let result = try await ApiClient.shared.getFullSpace(spaceId: spaceId)
-  ////            let space = Space(from: result.space)
-  ////            try await database.dbWriter.write { db in
-  ////                try space.save(db)
-  ////                for member in result.members {
-  ////                    let member = Member(from: member)
-  ////                    try member.save(db)
-  ////                }
-  ////            }
-  ////        } catch {
-  ////            Log.shared.error("Failed to get full space", error: error)
-  ////            throw error
-  ////        }
-  //    }
+
+  public func getDialogs(spaceId: Int64) async throws {
+    log.debug("get dialogs")
+    do {
+      // Fetch
+      let result = try await ApiClient.shared.getDialogs(spaceId: spaceId)
+
+      log.debug("fetched dialogs")
+
+      // Save
+      try await database.dbWriter.write { db in
+        // Save dialogs
+        let dialogs = result.dialogs.map { dialog in
+          Dialog(from: dialog)
+        }
+        try dialogs.forEach { dialog in
+          try dialog.save(db)
+        }
+
+        // Save chats
+        let chats = result.chats.map { chat in
+          Chat(from: chat)
+        }
+        try chats.forEach { chat in
+          try chat.save(db)
+        }
+
+        // Save messages
+        let messages = result.messages.map { message in
+          Message(from: message)
+        }
+        try messages.forEach { message in
+          try message.save(db)
+        }
+
+        // Save users
+        let users = result.users.map { user in
+          User(from: user)
+        }
+        try users.forEach { user in
+          try user.save(db)
+        }
+      }
+
+      log.debug("saved dialogs")
+    } catch {
+      throw error
+    }
+  }
 }

@@ -40,6 +40,20 @@ struct InlineApp: App {
       }
     }
 
+    // Chat single window
+    WindowGroup(for: Peer.self) { $peerId in
+      if let peerId = peerId {
+        ChatView(peerId: peerId)
+          .environmentObject(self.ws)
+          .environmentObject(self.viewModel)
+          .environment(\.auth, Auth.shared)
+          .environment(\.logOut, logOut)
+          .appDatabase(AppDatabase.shared)
+      } else {
+        Text("No chat selected.")
+      }
+    }
+
     Settings {
       SettingsView()
         .environmentObject(self.ws)
@@ -79,6 +93,6 @@ struct InlineApp: App {
   }
 }
 
-extension EnvironmentValues {
-  @Entry public var logOut: () -> Void = {}
+public extension EnvironmentValues {
+  @Entry var logOut: () -> Void = {}
 }

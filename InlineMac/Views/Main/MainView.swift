@@ -71,9 +71,10 @@ struct MainView: View {
       switch destination {
       case .spaceRoot:
         SpaceView(spaceId: spaceId)
+        
       case .chat(let peer):
-        Text("Peer \(peer)")
-
+        ChatView(peerId: peer)
+        
       case .homeRoot:
         // Not for space
         Text("")

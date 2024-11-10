@@ -56,6 +56,16 @@ class NavigationModel: ObservableObject {
       }
     )
   }
+  
+  
+  // Used from sidebars
+  func select(_ route: NavigationRoute) {
+    if let activeSpaceId {
+      spaceSelectionDict[activeSpaceId] = route
+    } else {
+      // todo
+    }
+  }
 
   func navigate(to route: NavigationRoute) {
     if let activeSpaceId {
