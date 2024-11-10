@@ -1,0 +1,2 @@
+# Your dev API IP/hostname eg. 192.168.1.100 or mac.local
+DEV_HOST = $(API_BASE_URL_VALUE) 
