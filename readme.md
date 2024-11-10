@@ -26,4 +26,11 @@ Setup Swift:
 brew install swift-protobuf
 ```
 
+Development Setup
+
+### Use xcconfig
+
+1. Copy `Config.xcconfig.template` to `Config.xcconfig`
+2. Edit `Config.xcconfig` and set your local development machine's IP address
+
 ## TBD

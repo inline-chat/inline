@@ -12,12 +12,12 @@ public enum ConnectionState {
 public final class WebSocketManager: ObservableObject {
   private var client: WebSocketClient?
   private var log = Log.scoped("WebsocketManager")
-  @Published private(set) public var connectionState: ConnectionState = .connecting
+  @Published public private(set) var connectionState: ConnectionState = .connecting
 
   private var token: String?
   private var userId: Int64?
 
-  convenience public init() {
+  public convenience init() {
     self.init(token: Auth.shared.getToken(), userId: Auth.shared.getCurrentUserId())
   }
 
@@ -48,9 +48,9 @@ public final class WebSocketManager: ObservableObject {
     #if targetEnvironment(simulator)
       return "ws://localhost:8000/ws"
     #elseif DEBUG && os(iOS)
-      return "ws://192.168.3.122:8000/ws"
+      return "ws://\(ProjectConfig.devHost):8000/ws"
     #elseif DEBUG && os(macOS)
-      return "ws://localhost:8000/ws"
+      return "ws://\(ProjectConfig.devHost):8000/ws"
     #else
       return "wss://api.inline.chat/ws"
     #endif
@@ -62,8 +62,13 @@ public final class WebSocketManager: ObservableObject {
       return
     }
 
+    guard let url = URL(string: url) else {
+      log.error("Invalid URL: \(url)")
+      return
+    }
+
     let client = WebSocketClient(
-      url: URL(string: url)!,
+      url: url,
       reconnectionConfig: .init(maxAttempts: 300, backoff: 1.5),
       credentials: WebSocketCredentials(token: token, userId: userId)
     )
