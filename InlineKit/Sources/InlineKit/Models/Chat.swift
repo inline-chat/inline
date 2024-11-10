@@ -14,6 +14,7 @@ public struct ApiChat: Codable, Hashable, Sendable {
   public var spaceId: Int64?
   public var threadNumber: Int?
   public var peer: Peer?
+  public var lastMsgId: Int64?
 }
 
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -23,6 +24,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var title: String?
   public var spaceId: Int64?
   public var peerUserId: Int64?
+  public var lastMsgId: Int64?
 
   public static let space = belongsTo(Space.self)
   public var space: QueryInterfaceRequest<Space> {
@@ -31,7 +33,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
   public static let lastMessage = hasOne(
     Message.self,
-    using: ForeignKey(["id"], to: ["chatId"])
+    using: ForeignKey(["id"], to: ["lastMsgId"])
   )
 
   public var lastMessage: QueryInterfaceRequest<Message> {
@@ -63,6 +65,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.title = title
     self.spaceId = spaceId
     self.peerUserId = peerUserId
+    self.lastMsgId = nil
   }
 }
 
@@ -105,6 +108,7 @@ extension Chat {
       } else {
         nil
       }
+    lastMsgId = from.lastMsgId
   }
 
   public static func fromTimestamp(from: Int) -> Date {

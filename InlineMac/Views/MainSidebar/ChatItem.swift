@@ -1,23 +1,12 @@
 import InlineKit
 import SwiftUI
 
-struct SpaceSidebarItem: Identifiable {
-  let peerId: Peer
-  
-  // Any extra data useful for rendering the item without fetching more data
-  let title: String
-  
-  var id: String {
-    peerId.id.description
-  }
-}
-
 struct ChatSideItem: View {
   @Binding var selectedRoute: NavigationRoute
   @State private var isHovered = false
   @Environment(\.openWindow) var openWindow
   
-  let item: SpaceSidebarItem
+  let item: SpaceChatItem
   
   // Gesture state
   @GestureState private var pressState = false
@@ -26,12 +15,16 @@ struct ChatSideItem: View {
     .chat(peer: item.peerId)
   }
   
+  var title: String {
+    item.chat.title ?? item.user?.fullName ?? "Chat"
+  }
+  
   var body: some View {
     HStack(spacing: 8) {
       Image(systemName: "bubble.middle.bottom")
         .frame(width: 16, height: 16)
         
-      Text(item.title)
+      Text(title)
         .lineLimit(1)
         
       Spacer()

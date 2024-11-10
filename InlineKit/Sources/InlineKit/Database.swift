@@ -14,8 +14,8 @@ public final class AppDatabase: Sendable {
 
 // MARK: - Migrations
 
-extension AppDatabase {
-  public var migrator: DatabaseMigrator {
+public extension AppDatabase {
+  var migrator: DatabaseMigrator {
     var migrator = DatabaseMigrator()
 
     migrator.registerMigration("v0") { db in
@@ -101,10 +101,16 @@ extension AppDatabase {
       // Migrate existing data: copy chatId to peerThreadId
       try db.execute(
         sql: """
-              UPDATE message 
-              SET peerThreadId = chatId 
-              WHERE chatId IS NOT NULL
-          """)
+            UPDATE message 
+            SET peerThreadId = chatId 
+            WHERE chatId IS NOT NULL
+        """)
+    }
+
+    migrator.registerMigration("fix last message") { db in
+      try db.alter(table: "chat") { t in
+        t.rename(column: "lastMessageId", to: "lastMsgId")
+      }
     }
 
     return migrator
@@ -113,9 +119,9 @@ extension AppDatabase {
 
 // MARK: - Database Configuration
 
-extension AppDatabase {
+public extension AppDatabase {
   /// - parameter base: A base configuration.
-  public static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
+  static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
     var config = base
     print("makeConfiguration called")
 
@@ -132,7 +138,7 @@ extension AppDatabase {
     return config
   }
 
-  public static func authenticated() async throws {
+  static func authenticated() async throws {
     if let token = Auth.shared.getToken() {
       try await AppDatabase.shared.dbWriter.barrierWriteWithoutTransaction { db in
         try db.changePassphrase(token)
@@ -148,7 +154,7 @@ extension AppDatabase {
     }
   }
 
-  public static func clearDB() throws {
+  static func clearDB() throws {
     _ = try AppDatabase.shared.dbWriter.write { db in
       try User.deleteAll(db)
       try Chat.deleteAll(db)
@@ -168,13 +174,13 @@ extension AppDatabase {
     Log.shared.info("Database successfully deleted.")
   }
 
-  public static func loggedOut() throws {
+  static func loggedOut() throws {
     try clearDB()
   }
 }
 
-extension AppDatabase {
-  public static func deleteDatabaseFile() throws {
+public extension AppDatabase {
+  static func deleteDatabaseFile() throws {
     let fileManager = FileManager.default
     let appSupportURL = try fileManager.url(
       for: .applicationSupportDirectory, in: .userDomainMask,
@@ -194,18 +200,18 @@ extension AppDatabase {
 
 // MARK: - Database Access: Reads
 
-extension AppDatabase {
+public extension AppDatabase {
   /// Provides a read-only access to the database.
-  public var reader: any GRDB.DatabaseReader {
+  var reader: any GRDB.DatabaseReader {
     dbWriter
   }
 }
 
 // MARK: - The database for the application
 
-extension AppDatabase {
+public extension AppDatabase {
   /// The database for the application
-  public static let shared = makeShared()
+  static let shared = makeShared()
 
   private static func makeShared() -> AppDatabase {
     do {
@@ -263,14 +269,14 @@ extension AppDatabase {
   }
 
   /// Creates an empty database for SwiftUI previews
-  public static func empty() -> AppDatabase {
+  static func empty() -> AppDatabase {
     // Connect to an in-memory database
     // Refrence https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/databaseconnections
     let dbQueue = try! DatabaseQueue(configuration: AppDatabase.makeConfiguration())
     return try! AppDatabase(dbQueue)
   }
 
-  public static func emptyWithSpaces() -> AppDatabase {
+  static func emptyWithSpaces() -> AppDatabase {
     let db = AppDatabase.empty()
     do {
       try db.dbWriter.write { db in
@@ -286,7 +292,7 @@ extension AppDatabase {
     return db
   }
 
-  public static func emptyWithChat() -> AppDatabase {
+  static func emptyWithChat() -> AppDatabase {
     let db = AppDatabase.empty()
     do {
       try db.dbWriter.write { db in
@@ -299,7 +305,7 @@ extension AppDatabase {
   }
 
   /// Used for previews
-  public static func populated() -> AppDatabase {
+  static func populated() -> AppDatabase {
     let db = AppDatabase.empty()
     do {
       try db.dbWriter.write { db in
