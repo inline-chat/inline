@@ -7,6 +7,7 @@ struct SpaceSidebar: View {
   @EnvironmentObject var data: DataManager
 
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
+  @Environment(\.openWindow) var openWindow
 
   var spaceId: Int64
 
@@ -18,13 +19,17 @@ struct SpaceSidebar: View {
   }
 
   var body: some View {
-    List(selection: navigation.spaceSelection) {
+    List {
       Section("Threads") {
-        NavigationLink(value: NavigationRoute.chat(peer: Peer(threadId: 1))) {
-          Text("Main")
-        }
+        ChatSideItem(
+          selectedRoute: navigation.spaceSelection,
+          item:
+          SpaceSidebarItem(peerId: Peer(threadId: 1), title: "Main")
+        )
       }
     }
+    .listRowInsets(EdgeInsets())
+    .listRowBackground(Color.clear)
     .listStyle(.sidebar)
     .safeAreaInset(
       edge: .top,
@@ -60,7 +65,9 @@ struct SpaceSidebar: View {
       }
     )
     .task {
-      //            await data.getFullSpace(spaceId: spaceId)
+      do {
+        try await data.getDialogs(spaceId: spaceId)
+      } catch {}
     }
   }
 }

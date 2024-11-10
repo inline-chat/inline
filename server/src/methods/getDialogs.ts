@@ -21,10 +21,14 @@ export const Input = Type.Object({
 export const Response = Type.Object({
   dialogs: Type.Array(TDialogInfo),
   chats: Type.Array(TChatInfo),
+
   /** Last messages for each dialog */
   messages: Type.Array(TMessageInfo),
+
   /** Users that are senders of last messages */
   // users: Type.Array(TUserInfo),
+
+  // TODO: Pagination
 })
 
 export const handler = async (
@@ -44,7 +48,7 @@ export const handler = async (
       dialogs: dialogs.map(encodeDialogInfo),
       chats: dialogs.map((d) => encodeChatInfo(d.chat, { currentUserId })),
       messages: dialogs
-        .map((d) => (d.chat?.lastMsg ? encodeMessageInfo(d.chat?.lastMsg) : null))
+        .map((d) => (d.chat?.lastMsg ? encodeMessageInfo(d.chat?.lastMsg, { currentUserId }) : null))
         .filter(Boolean) as TMessageInfo[],
       // users: [],
     }

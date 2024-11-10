@@ -29,6 +29,7 @@ public enum Path: String {
   case getOpenDialogs
   case getSpaceMembers
   case sendMessage
+  case getDialogs
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -209,7 +210,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     return result
   }
 
-  //
+  public func getDialogs(spaceId: Int64) async throws -> GetDialogs {
+    try await request(
+      .getDialogs, queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
+      includeToken: true
+    )
+  }
+
   //    public func getFullSpace(spaceId: Int64) async throws -> FullSpacePayload {
   //        try await request(
   //            .getFullSpace,
@@ -331,4 +338,15 @@ public struct PinnedDialogsPayload: Codable, Sendable {
 
 public struct SendMessage: Codable, Sendable {
   public let message: ApiMessage
+}
+
+public struct GetDialogs: Codable, Sendable {
+  // Threads
+  public let chats: [ApiChat]
+  // Last messages for those threads
+  public let messages: [ApiMessage]
+  // Users you need in sidebar and senders of last messages
+  public let dialogs: [ApiDialog]
+  // Users mentioned in last messages
+  public let users: [ApiUser]
 }

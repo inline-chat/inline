@@ -78,4 +78,19 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       fatalError("One of peerUserId or peerThreadId must be set")
     }
   }
+
+  public init(from: ApiMessage) {
+    self.init(
+      id: from.id,
+      fromId: from.fromId,
+      date: Date(timeIntervalSince1970: TimeInterval(from.date)),
+      text: from.text,
+      peerUserId: from.peerId.id,
+      peerThreadId: from.peerId.id,
+      out: from.out,
+      mentioned: from.mentioned,
+      pinned: from.pinned,
+      editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+    )
+  }
 }
