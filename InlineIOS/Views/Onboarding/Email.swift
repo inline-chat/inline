@@ -12,7 +12,7 @@ struct Email: View {
 
   private var placeHolder: String = "dena@example.com"
 
-  @EnvironmentObject var nav: Navigation
+  @EnvironmentObject var nav: OnboardingNavigation
   @EnvironmentObject var api: ApiClient
 
   init(prevEmail: String? = nil) {

@@ -9,7 +9,7 @@ import CoreHaptics
 import SwiftUI
 
 struct Welcome: View {
-  @EnvironmentObject var nav: Navigation
+  @EnvironmentObject var nav: OnboardingNavigation
   @State private var engine: CHHapticEngine?
   @State private var displayedText = ""
   @State private var showCaret = false
