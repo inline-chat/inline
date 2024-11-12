@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { chats, dialogs, users } from "@in/server/db/schema"
-import { encodeChatInfo, TChatInfo } from "@in/server/models"
+import { encodeChatInfo, encodeDialogInfo, TChatInfo, TDialogInfo } from "@in/server/models"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import type { Static } from "elysia"
@@ -16,6 +16,7 @@ export const Input = Type.Object({
 
 export const Response = Type.Object({
   chat: TChatInfo,
+  dialog: TDialogInfo,
 })
 
 export const handler = async (
@@ -67,22 +68,36 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    // Create dialog entry for self-chat
-    const existingDialog = await db
-      .select()
-      .from(dialogs)
-      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, context.currentUserId)))
-      .then((result) => result[0])
-
-    if (!existingDialog) {
-      await db.insert(dialogs).values({
+    // Create dialog entries for both users
+    await db.insert(dialogs).values([
+      {
         chatId: chat.id,
-        userId: context.currentUserId,
+        userId: minUserId,
+        peerUserId: maxUserId,
         date: new Date(),
-      })
+      },
+      {
+        chatId: chat.id,
+        userId: maxUserId,
+        peerUserId: minUserId,
+        date: new Date(),
+      },
+    ])
+
+    // After creating the dialogs, get the current user's dialog
+    const currentUserDialog = await db.query.dialogs.findFirst({
+      where: and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, context.currentUserId)),
+    })
+
+    if (!currentUserDialog) {
+      Log.shared.error("Failed to find created dialog")
+      throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    return { chat: encodeChatInfo(chat, { currentUserId: context.currentUserId }) }
+    return {
+      chat: encodeChatInfo(chat, { currentUserId: context.currentUserId }),
+      dialog: encodeDialogInfo(currentUserDialog),
+    }
   } catch (error) {
     Log.shared.error("Failed to create private chat", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)

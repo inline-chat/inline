@@ -189,7 +189,9 @@ export const handler = async (
   let result = {
     dialogs: dialogs.map(encodeDialogInfo),
     chats: chats.map((d) => encodeChatInfo(d, { currentUserId })),
-    messages: messages.map((m) => encodeMessageInfo(m, { currentUserId })),
+    messages: messages.map((m) =>
+      encodeMessageInfo(m, { peerId: { userId: m.fromId }, currentUserId: context.currentUserId }),
+    ),
     users: users.map(encodeUserInfo),
   }
 

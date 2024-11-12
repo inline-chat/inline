@@ -8,7 +8,7 @@ import { encodeMessageInfo, TMessageInfo } from "@in/server/models"
 
 export const Input = Type.Object({
   id: Type.Integer(),
-  limit: Type.Optional(Type.Integer({ default: 50 })),
+  limit: Type.Optional(Type.Integer({ default: 500 })),
 })
 
 type Input = Static<typeof Input>
