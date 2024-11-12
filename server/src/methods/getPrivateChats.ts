@@ -37,14 +37,20 @@ export const handler = async (
     })
   }
 
-  const result = await db
-    .select()
-    .from(chats)
-    .where(and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))))
-    .leftJoin(dialogs, eq(chats.id, dialogs.chatId))
-
-  const chatsEncoded = result.map((c) => encodeChatInfo(c.chats, { currentUserId }))
-  const dialogsEncoded = result.flatMap((c) => (c.dialogs ? [encodeDialogInfo(c.dialogs)] : []))
+  const result = await db.query.chats.findMany({
+    where: and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))),
+    with: {
+      dialogs: true,
+    },
+  })
+  // const result = await db
+  //   .select()
+  //   .from(chats)
+  //   .where(and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))))
+  //   .leftJoin(dialogs, eq(chats.id, dialogs.chatId))
+  console.log("getPrivateChats result", result)
+  const chatsEncoded = result.map((c) => encodeChatInfo(c, { currentUserId }))
+  const dialogsEncoded = result.flatMap((c) => c.dialogs.map((d) => encodeDialogInfo(d)))
   return {
     chats: chatsEncoded,
     dialogs: dialogsEncoded,

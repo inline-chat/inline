@@ -10,7 +10,7 @@ import { and, eq } from "drizzle-orm"
 import { TInputId } from "../types/methods"
 
 export const Input = Type.Object({
-  userId: TInputId,
+  userId: Type.String(),
   // TODO: Require access_hash to avoid spam
 })
 
@@ -31,14 +31,8 @@ export const handler = async (
 
     // For self-chat, both minUserId and maxUserId will be currentUserId
     const isSelfChat = peerId === context.currentUserId
-    let minUserId, maxUserId
-
-    if (isSelfChat) {
-      minUserId = maxUserId = context.currentUserId
-    } else {
-      minUserId = context.currentUserId < peerId ? context.currentUserId : peerId
-      maxUserId = context.currentUserId > peerId ? context.currentUserId : peerId
-    }
+    const minUserId = isSelfChat ? context.currentUserId : Math.min(context.currentUserId, peerId)
+    const maxUserId = isSelfChat ? context.currentUserId : Math.max(context.currentUserId, peerId)
 
     const currentUserName = await db
       .select({ name: users.firstName })
@@ -48,6 +42,7 @@ export const handler = async (
 
     const title = isSelfChat ? `${currentUserName} (You)` : null
 
+    // Create or get existing chat
     const [chat] = await db
       .insert(chats)
       .values({
@@ -68,35 +63,29 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    // Create dialog entries for both users
-    await db.insert(dialogs).values([
-      {
+    // Create or update dialog for current user only
+    const [dialog] = await db
+      .insert(dialogs)
+      .values({
         chatId: chat.id,
-        userId: minUserId,
-        peerUserId: maxUserId,
+        userId: context.currentUserId,
+        peerUserId: isSelfChat ? context.currentUserId : peerId,
         date: new Date(),
-      },
-      {
-        chatId: chat.id,
-        userId: maxUserId,
-        peerUserId: minUserId,
-        date: new Date(),
-      },
-    ])
+      })
+      .onConflictDoUpdate({
+        target: [dialogs.chatId, dialogs.userId],
+        set: { date: new Date() },
+      })
+      .returning()
 
-    // After creating the dialogs, get the current user's dialog
-    const currentUserDialog = await db.query.dialogs.findFirst({
-      where: and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, context.currentUserId)),
-    })
-
-    if (!currentUserDialog) {
-      Log.shared.error("Failed to find created dialog")
+    if (!dialog) {
+      Log.shared.error("Failed to create dialog")
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
     return {
       chat: encodeChatInfo(chat, { currentUserId: context.currentUserId }),
-      dialog: encodeDialogInfo(currentUserDialog),
+      dialog: encodeDialogInfo(dialog),
     }
   } catch (error) {
     Log.shared.error("Failed to create private chat", error)
