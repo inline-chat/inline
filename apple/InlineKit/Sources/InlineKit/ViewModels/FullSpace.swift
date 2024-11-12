@@ -4,7 +4,7 @@ import GRDB
 public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendable, Hashable,
   Identifiable
 {
-  public var dialog: Dialog?
+  public var dialog: Dialog
   // Useful for threads
   public var chat: Chat
   // Only for private chats

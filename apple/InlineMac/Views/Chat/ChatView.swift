@@ -52,9 +52,12 @@ struct ChatView: View {
       Button {
         Task {
           do {
+            guard let chatId = fullChat.chat?.id else { return }
+            
             // Send message
             try await data
               .sendMessage(
+                chatId: chatId,
                 peerUserId: nil,
                 peerThreadId: nil,
                 text: text,

@@ -178,6 +178,7 @@ export const encodeMessageInfo = (
     date: encodeDate(message.date),
     editDate: message.editDate ? encodeDate(message.editDate) : null,
     peerId: context.peerId,
+    chatId: message.chatId,
     mentioned: false,
     pinned: false,
   })

@@ -5,6 +5,7 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var id: Int64
   public var peerId: Peer
   public var fromId: Int64
+  public var chatId: Int64
   // Raw message text
   public var text: String?
   public var mentioned: Bool?
@@ -30,6 +31,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   // One of these must be set
   public var peerUserId: Int64?
   public var peerThreadId: Int64?
+  public var chatId: Int64
 
   // Sent from user
   public var fromId: Int64
@@ -63,6 +65,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     text: String?,
     peerUserId: Int64?,
     peerThreadId: Int64?,
+    chatId: Int64,
     out: Bool? = nil,
     mentioned: Bool? = nil,
     pinned: Bool? = nil,
@@ -75,6 +78,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.peerUserId = peerUserId
     self.peerThreadId = peerThreadId
     self.editDate = editDate
+    self.chatId = chatId
     self.out = out
     self.mentioned = mentioned
     self.pinned = pinned
@@ -92,6 +96,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       text: from.text,
       peerUserId: from.peerId.isPrivate ? from.peerId.id : nil,
       peerThreadId: from.peerId.isThread ? from.peerId.id : nil,
+      chatId: from.chatId,
       out: from.out,
       mentioned: from.mentioned,
       pinned: from.pinned,
