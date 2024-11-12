@@ -2,9 +2,16 @@ import Combine
 import GRDB
 
 public final class FullChatViewModel: ObservableObject {
-  @Published public private(set) var chat: Chat?
+  @Published public private(set) var chatItem: SpaceChatItem?
   @Published public private(set) var messages: [Message] = []
-  @Published public private(set) var peerUser: User?
+
+  public var chat: Chat? {
+    chatItem?.chat
+  }
+
+  public var peerUser: User? {
+    chatItem?.user
+  }
 
   private var chatCancellable: AnyCancellable?
   private var messagesCancellable: AnyCancellable?
@@ -17,17 +24,38 @@ public final class FullChatViewModel: ObservableObject {
     self.db = db
     self.peer = peer
     fetchChat()
+    // TODO: Improve this
     fetchMessages()
   }
 
-  public func fetchChat() {
-    switch peer {
-    case let .thread(id):
-      fetchThreadChat(id)
-    case let .user(id):
-      fetchPrivateChat(id)
-      fetchPeerUser(id)
-    }
+  func fetchChat() {
+    let peerId = peer
+    chatCancellable = ValueObservation
+      .tracking { db in
+        try Dialog.filter(id: Dialog.getDialogId(peerId: peerId))
+          .including(
+            optional: Dialog.peerThread
+              .including(optional: Chat.lastMessage)
+          )
+          .including(
+            optional: Dialog.peerUser
+              .including(optional: User.chat)
+          )
+          .asRequest(of: SpaceChatItem.self)
+          .fetchAll(db)
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .sink(
+        receiveCompletion: { print("Failed to get full chat \($0)") },
+        receiveValue: { [weak self] chats in
+          self?.chatItem = chats.first
+          
+          // TODO: improve this
+          if self?.chatItem != nil {
+            self?.fetchMessages()
+          }
+        }
+      )
   }
 
   func fetchMessages() {
@@ -35,73 +63,17 @@ public final class FullChatViewModel: ObservableObject {
 
     messagesCancellable =
       ValueObservation
-      .tracking { db in
-        try Message.filter(Column("chatId") == chatId)
-          .order(Column("date").desc)
-          .fetchAll(db)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { _ in /* ignore error */ },
-        receiveValue: { [weak self] messages in
-          self?.messages = messages
+        .tracking { db in
+          try Message.filter(Column("chatId") == chatId)
+            .order(Column("date").desc)
+            .fetchAll(db)
         }
-      )
-  }
-
-  private func fetchThreadChat(_ chatId: Int64) {
-    chatCancellable =
-      ValueObservation
-      .tracking { db in
-        try Chat.fetchOne(db, id: chatId)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { _ in /* ignore error */ },
-        receiveValue: { [weak self] chat in
-          self?.chat = chat
-          if chat != nil {
-            self?.fetchMessages()
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { _ in /* ignore error */ },
+          receiveValue: { [weak self] messages in
+            self?.messages = messages
           }
-        }
-      )
-  }
-
-  private func fetchPrivateChat(_ userId: Int64) {
-    chatCancellable =
-      ValueObservation
-      .tracking { db in
-        try Chat
-          //                    .filter(Column("type") == ChatType.privateChat.rawValue)
-          .filter(Column("peerUserId") == userId)
-          .fetchOne(db)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { _ in /* ignore error */ },
-        receiveValue: { [weak self] chat in
-          self?.chat = chat
-          if chat != nil {
-            self?.fetchMessages()
-          }
-        }
-      )
-  }
-
-  public func fetchPeerUser(_ userId: Int64) {
-    peerUserCancellable =
-      ValueObservation
-      .tracking { db in
-        print("peer user id : \(userId)")
-        return try User.fetchOne(db, id: userId)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { _ in /* ignore error */ },
-        receiveValue: { [weak self] user in
-          print("Fetched user : \(user)")
-          self?.peerUser = user
-        }
-      )
+        )
   }
 }

@@ -23,15 +23,15 @@ struct HomeSidebar: View {
         }
       }
     }
-    .toolbar(content: {
-      ToolbarItem(placement: .automatic) {
-        Menu("New", systemImage: "plus") {
-          Button("New Space") {
-            nav.createSpaceSheetPresented = true
-          }
-        }
-      }
-    })
+//    .toolbar(content: {
+//      ToolbarItem(placement: .automatic) {
+//        Menu("New", systemImage: "plus") {
+//          Button("New Space") {
+//            nav.createSpaceSheetPresented = true
+//          }
+//        }
+//      }
+//    })
     .listStyle(.sidebar)
     .safeAreaInset(
       edge: .top,

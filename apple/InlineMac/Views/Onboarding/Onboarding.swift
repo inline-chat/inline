@@ -71,6 +71,7 @@ enum OnboardingRoute {
   case profile
 }
 
+@MainActor
 class OnboardingViewModel: ObservableObject {
   //    @Published fileprivate var path: NavigationPath = .init()
   @Published fileprivate var path: [OnboardingRoute] = [.welcome]

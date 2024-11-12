@@ -10,8 +10,7 @@ public struct ApiDialog: Codable, Hashable, Sendable {
   public var readOutboxMaxId: Int64?
 }
 
-public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable
-{
+public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
   // Equal to peerId it contains information about. For threads bit sign will be "-" and users positive.
   public var id: Int64
   public var peerUserId: Int64?
@@ -38,17 +37,17 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   }
 }
 
-extension Dialog {
-  public init(from: ApiDialog) {
+public extension Dialog {
+  init(from: ApiDialog) {
     switch from.peerId {
     case .user(let id):
       self.peerUserId = id
       self.peerThreadId = nil
-      self.id = id
+      self.id = Self.getDialogId(peerUserId: id)
     case .thread(let id):
       self.peerUserId = nil
       self.peerThreadId = id
-      self.id = -id
+      self.id = Self.getDialogId(peerThreadId: id)
     }
 
     self.spaceId = from.spaceId
@@ -56,5 +55,22 @@ extension Dialog {
     self.readInboxMaxId = from.readInboxMaxId
     self.readOutboxMaxId = from.readOutboxMaxId
     self.pinned = from.pinned
+  }
+
+  static func getDialogId(peerUserId: Int64) -> Int64 {
+    peerUserId
+  }
+
+  static func getDialogId(peerThreadId: Int64) -> Int64 {
+    -peerThreadId
+  }
+
+  static func getDialogId(peerId: Peer) -> Int64 {
+    switch peerId {
+    case .user(let id):
+      return Self.getDialogId(peerUserId: id)
+    case .thread(let id):
+      return Self.getDialogId(peerThreadId: id)
+    }
   }
 }
