@@ -99,6 +99,8 @@ public class DataManager: ObservableObject {
       try await database.dbWriter.write { db in
         let chat = Chat(from: result.chat)
         try chat.save(db)
+        let dialog = Dialog(from: result.dialog)
+        try dialog.save(db)
       }
 
       return result.chat.id
@@ -201,7 +203,17 @@ public class DataManager: ObservableObject {
 
         return chats
       }
+      let dialogs = try await database.dbWriter.write { db in
+        let dialogs = result.dialogs.map { dialog in
+          Dialog(from: dialog)
+        }
+        print("getPrivateChats dialogs: \(dialogs)")
+        try dialogs.forEach { dialog in
+          try dialog.save(db)
+        }
 
+        return dialogs
+      }
       print("getPrivateChats result: \(chats)")
       return chats
     } catch {

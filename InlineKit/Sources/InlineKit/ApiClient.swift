@@ -325,6 +325,7 @@ public struct SearchContacts: Codable, Sendable {
 
 public struct CreatePrivateChat: Codable, Sendable {
   public let chat: ApiChat
+  public let dialog: ApiDialog
 }
 
 public struct GetMe: Codable, Sendable {
@@ -335,6 +336,7 @@ public struct EmptyPayload: Codable, Sendable {}
 
 public struct GetPrivateChats: Codable, Sendable {
   public let chats: [ApiChat]
+  public let dialogs: [ApiDialog]
 }
 
 public struct SpaceMembersPayload: Codable, Sendable {
