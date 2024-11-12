@@ -1,12 +1,12 @@
 import { db } from "@in/server/db"
 import { chats, dialogs, users } from "@in/server/db/schema"
-import { encodeChatInfo, encodeDialogInfo, TChatInfo, TDialogInfo } from "@in/server/models"
+import { encodeChatInfo, encodeDialogInfo, TChatInfo, TDialogInfo, TUserInfo, encodeUserInfo } from "@in/server/models"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
-import { and, eq } from "drizzle-orm"
+import { and, eq, or } from "drizzle-orm"
 import { TInputId } from "../types/methods"
 
 export const Input = Type.Object({
@@ -17,6 +17,7 @@ export const Input = Type.Object({
 export const Response = Type.Object({
   chat: TChatInfo,
   dialog: TDialogInfo,
+  peerUsers: Type.Array(TUserInfo),
 })
 
 export const handler = async (
@@ -83,9 +84,16 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
+    // Fetch peer users (both current user and the peer)
+    const peerUsers = await db
+      .select()
+      .from(users)
+      .where(or(eq(users.id, context.currentUserId), eq(users.id, peerId)))
+
     return {
       chat: encodeChatInfo(chat, { currentUserId: context.currentUserId }),
       dialog: encodeDialogInfo(dialog),
+      peerUsers: peerUsers.map((user) => encodeUserInfo(user)),
     }
   } catch (error) {
     Log.shared.error("Failed to create private chat", error)

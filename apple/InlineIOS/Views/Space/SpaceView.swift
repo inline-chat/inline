@@ -86,6 +86,14 @@ struct SpaceView: View {
         .presentationBackground(.thinMaterial)
         .presentationCornerRadius(28)
     }
+    .task {
+      do {
+        try await dataManager.getDialogs(spaceId: spaceId)
+
+      } catch {
+        Log.shared.error("Failed to getPrivateChats", error: error)
+      }
+    }
   }
 }
 
