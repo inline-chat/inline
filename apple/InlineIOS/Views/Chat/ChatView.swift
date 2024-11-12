@@ -114,10 +114,15 @@ extension ChatView {
     Task {
       do {
         if !text.isEmpty {
-          if let id = fullChatViewModel.chat?.id {
-            try await dataManager.sendMessage(peerId: self.peer, text: text)
-            text = ""
-          }
+          print("sendMessage Sending message: \(text)")
+          print("sendMessage peer : \(peer)")
+          try await dataManager.sendMessage(
+            peerUserId: nil,
+            peerThreadId: nil,
+            text: text,
+            peerId: peer
+          )
+          text = ""
         }
       } catch {
         Log.shared.error("Failed to send message", error: error)

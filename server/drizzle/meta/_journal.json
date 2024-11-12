@@ -85,6 +85,13 @@
       "when": 1730910900372,
       "tag": "0011_fix_user_ids_on_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1731423567337,
+      "tag": "0012_add_peer_on_message",
+      "breakpoints": true
     }
   ]
 }

@@ -61,15 +61,7 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     try {
       const encodedMessage = encodeMessageInfo(
         {
-          id: newMessage.messageId,
-          chatId: newMessage.chatId,
-          fromId: newMessage.fromId,
-          text: newMessage.text,
-          date: newMessage.date.getTime(),
-          editDate: newMessage.editDate?.getTime() ?? null,
-          mentioned: false,
-          out: newMessage.fromId === context.currentUserId,
-          pinned: false,
+          ...newMessage,
         },
         { currentUserId: context.currentUserId },
       )
