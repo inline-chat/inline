@@ -107,7 +107,8 @@ public extension AppDatabase {
         """)
     }
 
-    migrator.registerMigration("fix last message") { db in      
+    migrator.registerMigration("fix last message") { db in
+      
       try db.alter(table: "chat") { t in
         t.rename(column: "lastMessageId", to: "lastMsgId")
       }

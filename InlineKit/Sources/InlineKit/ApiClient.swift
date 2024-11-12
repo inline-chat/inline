@@ -40,9 +40,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     #if targetEnvironment(simulator)
       return "http://localhost:8000/v1"
     #elseif DEBUG && os(iOS)
-    return "http://\(ProjectConfig.devHost):8000/v1"
+      return "http://\(ProjectConfig.devHost):8000/v1"
     #elseif DEBUG && os(macOS)
-    return "http://\(ProjectConfig.devHost):8000/v1"
+      return "http://\(ProjectConfig.devHost):8000/v1"
     #else
       return "https://api.inline.chat/v1"
     #endif
@@ -227,11 +227,15 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   //        )
   //    }
 
-  public func sendMessage(chatId: Int64, text: String) async throws -> SendMessage {
+  public func sendMessage(peerUserId: Int64, peerThreadId: Int64, text: String) async throws
+    -> SendMessage
+  {
     try await request(
       .sendMessage,
       queryItems: [
-        URLQueryItem(name: "chatId", value: "\(chatId)"), URLQueryItem(name: "text", value: text),
+        URLQueryItem(name: "peerUserId", value: "\(peerUserId)"),
+        URLQueryItem(name: "peerThreadId", value: "\(peerThreadId)"),
+        URLQueryItem(name: "text", value: text),
       ], includeToken: true)
   }
 }
