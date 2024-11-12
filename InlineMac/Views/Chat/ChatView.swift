@@ -6,6 +6,7 @@ struct ChatView: View {
 
   @EnvironmentStateObject var fullChat: FullChatViewModel
   @EnvironmentObject var window: MainWindowViewModel
+  @EnvironmentObject var data: DataManager
 
   var item: SpaceChatItem? {
     fullChat.chatItem
@@ -26,8 +27,58 @@ struct ChatView: View {
     }
   }
 
+  @ViewBuilder
+  var content: some View {
+    VStack {
+      Text(fullChat.chat?.id.description ?? "NO ID")
+      List {
+        ForEach(fullChat.messages, id: \.id) { message in
+          MessageView(message: message)
+        }
+      }
+
+      compose
+    }
+  }
+
+  @State private var text: String = ""
+
+  @ViewBuilder
+  var compose: some View {
+    HStack {
+      TextField("Type a message", text: $text)
+        .textFieldStyle(.roundedBorder)
+        .padding(.horizontal, 8)
+      Button {
+        Task {
+          do {
+            // Send message
+            try await data
+              .sendMessage(
+                peerUserId: nil,
+                peerThreadId: nil,
+                text: text,
+                peerId: self.peerId
+              )
+          }catch {
+            Log.shared.error("Failed to send message", error: error)
+          }
+        }
+      } label: {
+        Image(systemName: "paperplane")
+          .resizable()
+          .scaledToFit()
+          .frame(width: 20, height: 20)
+          .padding(8)
+          .background(Color.accentColor)
+          .clipShape(Circle())
+      }
+      .buttonStyle(.plain)
+    }
+  }
+
   var body: some View {
-    Text(title)
+    content
       // Hide default title. No way to achieve this without this for now
       .navigationTitle("")
 //      .navigationSubtitle(subtitle)
@@ -47,7 +98,6 @@ struct ChatView: View {
           }
           .frame(minWidth: 80, maxWidth: .infinity, alignment: .leading)
         }
-        
 
         // Required to clear up the space for nav title
         ToolbarItem(placement: .principal) {
