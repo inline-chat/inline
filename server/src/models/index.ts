@@ -184,16 +184,19 @@ export const encodeMessageInfo = (
   for (const error of errors) {
     console.log("Errors", error)
   }
-  return Value.Encode(TMessageInfo, {
-    ...message,
-    id: message.messageId,
-    out: message.fromId === context.currentUserId,
-    date: encodeDate(message.date),
-    editDate: message.editDate ? encodeDate(message.editDate) : null,
-    peerId: context.peerId,
-    mentioned: false,
-    pinned: false,
-  })
+  return Value.Encode(
+    TMessageInfo,
+    Value.Clean(TMessageInfo, {
+      ...message,
+      id: message.messageId,
+      out: message.fromId === context.currentUserId,
+      date: encodeDate(message.date),
+      editDate: message.editDate ? encodeDate(message.editDate) : null,
+      peerId: context.peerId,
+      mentioned: false,
+      pinned: false,
+    }),
+  )
 }
 
 // # Updates

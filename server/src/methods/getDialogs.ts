@@ -78,9 +78,9 @@ export const handler = async (
     }
 
     // TODO: Deduplicate users
-    // if (d.chat?.lastMsg?.from) {
-    //   users.push(d.chat?.lastMsg?.from)
-    // }
+    if (d.chat?.lastMsg?.from) {
+      users.push(d.chat?.lastMsg?.from)
+    }
   })
 
   // Find private dialogs for members of this space
@@ -130,7 +130,11 @@ export const handler = async (
     publicChats.forEach((c) => {
       if (c.lastMsg) {
         messages.push(encodeMessageInfo(c.lastMsg, { currentUserId, peerId: peerIdFromChat(c, { currentUserId }) }))
+        if (c.lastMsg.from) {
+          users.push(c.lastMsg.from)
+        }
       }
+
       if (c) {
         chats.push(c)
       }
@@ -171,6 +175,9 @@ export const handler = async (
         messages.push(
           encodeMessageInfo(d.chat?.lastMsg, { currentUserId, peerId: peerIdFromChat(d.chat, { currentUserId }) }),
         )
+        if (d.chat?.lastMsg.from) {
+          users.push(d.chat?.lastMsg.from)
+        }
       }
       if (d.chat) {
         chats.push(d.chat)
@@ -189,8 +196,6 @@ export const handler = async (
   messages = messages.filter((m, index, self) => index === self.findIndex((t) => t.id === m.id))
   users = users.filter((u, index, self) => index === self.findIndex((t) => t.id === u.id))
 
-  console.log("pre encode", { dialogs, chats, messages, users })
-
   let result = {
     dialogs: dialogs.map(encodeDialogInfo),
     chats: chats.map((d) => encodeChatInfo(d, { currentUserId })),
@@ -198,7 +203,7 @@ export const handler = async (
     users: users.map(encodeUserInfo),
   }
 
-  console.log("result", result)
+  console.log("get dialogs result", result)
 
   return result
 }

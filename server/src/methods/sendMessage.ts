@@ -78,6 +78,8 @@ export const handler = async (input: Input, context: Context): Promise<Response>
       currentUserId: context.currentUserId,
       peerId: peerId,
     })
+
+    console.log("encodedMessage", encodedMessage)
     return { message: encodedMessage }
   } catch (encodeError) {
     Log.shared.error("Failed to encode message", {

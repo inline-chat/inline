@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 public struct ApiMessage: Codable, Hashable, Sendable {
-  public var messageId: Int64
+  public var id: Int64
   public var peerId: Peer
   public var fromId: Int64
   // Raw message text
@@ -16,7 +16,12 @@ public struct ApiMessage: Codable, Hashable, Sendable {
 
 public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable
 {
-  public var id: Int64
+  // Locally autoincremented id
+  public var id: Int64?
+  
+  // From API, unique per chat
+  public var messageId: Int64
+  
   public var date: Date
 
   // Raw message text
@@ -52,7 +57,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   }
 
   public init(
-    id: Int64 = Int64.random(in: 1...5000),
+    messageId: Int64,
     fromId: Int64,
     date: Date,
     text: String?,
@@ -63,7 +68,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     pinned: Bool? = nil,
     editDate: Date? = nil
   ) {
-    self.id = id
+    self.messageId = messageId
     self.date = date
     self.text = text
     self.fromId = fromId
@@ -81,12 +86,12 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   public init(from: ApiMessage) {
     self.init(
-      id: from.messageId,
+      messageId: from.id,
       fromId: from.fromId,
       date: Date(timeIntervalSince1970: TimeInterval(from.date)),
       text: from.text,
-      peerUserId: from.peerId.id,
-      peerThreadId: from.peerId.id,
+      peerUserId: from.peerId.isPrivate ? from.peerId.id : nil,
+      peerThreadId: from.peerId.isThread ? from.peerId.id : nil,
       out: from.out,
       mentioned: from.mentioned,
       pinned: from.pinned,
