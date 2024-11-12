@@ -22,9 +22,9 @@ struct SpaceView: View {
   var body: some View {
     VStack {
       List {
-        if let members = fullSpaceViewModel.members, members.count > 0 {
+        if fullSpaceViewModel.members.count > 0 {
           Section(header: Text("Members")) {
-            ForEach(members) { member in
+            ForEach(fullSpaceViewModel.members) { member in
               MemberView(userId: member.userId)
                 .onTapGesture {
                   nav.push(.chat(peer: .user(id: member.userId)))
@@ -33,18 +33,18 @@ struct SpaceView: View {
           }
         }
 
-        if let chats = fullSpaceViewModel.chats, chats.count > 0 {
+        if fullSpaceViewModel.chats.count > 0 {
           Section(header: Text("Threads")) {
-            ForEach(chats) { chat in
+            ForEach(fullSpaceViewModel.chats, id: \.self) { _ in
               HStack {
-                InitialsCircle(firstName: chat.title ?? "Thread", lastName: nil, size: 25)
+                InitialsCircle(firstName: "Thread", lastName: nil, size: 25)
                   .padding(.trailing, 4)
-                Text(chat.title ?? "Thread")
+                Text("Thread")
               }
               .frame(maxWidth: .infinity, alignment: .leading)
               .contentShape(Rectangle())
               .onTapGesture {
-                nav.push(.chat(peer: .thread(id: chat.id)))
+//                                nav.push(.chat(peer: chat.))
               }
             }
           }
@@ -90,5 +90,5 @@ struct SpaceView: View {
 }
 
 #Preview {
-  SpaceView(spaceId: Int64.random(in: 1...500))
+  SpaceView(spaceId: Int64.random(in: 1 ... 500))
 }

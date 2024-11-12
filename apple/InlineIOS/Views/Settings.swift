@@ -4,14 +4,15 @@ import InlineUI
 import SwiftUI
 
 struct Settings: View {
-  @Query(CurrentUser())
-  var currentUser: User?
-  @Environment(\.auth) var auth
-  @EnvironmentObject private var ws: WebSocketManager
-  @EnvironmentObject private var nav: Navigation
+    @Query(CurrentUser())
+    var currentUser: User?
+    @Environment(\.auth) var auth
+    @EnvironmentObject private var ws: WebSocketManager
+    @EnvironmentObject private var nav: Navigation
+    @EnvironmentObject private var onboardingNav: OnboardingNavigation
 
-  var body: some View {
-    List {
+    var body: some View {
+        List {
       Section(header: Text("Account")) {
         HStack {
           InitialsCircle(
@@ -24,33 +25,33 @@ struct Settings: View {
         }
       }
 
-      Section(header: Text("Actions")) {
-        Button("Logout", role: .destructive) {
-          // Clear creds
-          Auth.shared.logOut()
+            Section(header: Text("Actions")) {
+                Button("Logout", role: .destructive) {
+                    // Clear creds
+                    Auth.shared.logOut()
 
-          // Stop WebSocket
-          ws.loggedOut()
+                    // Stop WebSocket
+                    ws.loggedOut()
 
-          // Clear database
-          try? AppDatabase.loggedOut()
-          nav.push(.welcome)
+                    // Clear database
+                    try? AppDatabase.loggedOut()
+                    onboardingNav.push(.welcome)
+                }
+            }
         }
-      }
+        //        .alert("Logout", isPresented: $showLogoutAlert) {
+        //            Text("Are you sure you want to logout?")
+        //            Button("Cancel", role: .cancel) {
+        //                showLogoutAlert = false
+        //            }
+        //            Button("Logout", role: .destructive) {
+        //                auth.logout()
+        //            }
+        //        }
     }
-    //        .alert("Logout", isPresented: $showLogoutAlert) {
-    //            Text("Are you sure you want to logout?")
-    //            Button("Cancel", role: .cancel) {
-    //                showLogoutAlert = false
-    //            }
-    //            Button("Logout", role: .destructive) {
-    //                auth.logout()
-    //            }
-    //        }
-  }
 }
 
 #Preview("Settings") {
-  Settings()
-    .environmentObject(RootData(db: AppDatabase.empty(), auth: Auth.shared))
+    Settings()
+        .environmentObject(RootData(db: AppDatabase.empty(), auth: Auth.shared))
 }

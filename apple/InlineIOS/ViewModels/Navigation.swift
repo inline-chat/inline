@@ -1,83 +1,126 @@
 import InlineKit
 import SwiftUI
 
+@MainActor
 class Navigation: ObservableObject, @unchecked Sendable {
-  static var shared = Navigation()
+    static let shared = Navigation()
 
-  enum Destination: Hashable, Equatable {
-    case welcome
-    case email(prevEmail: String? = nil)
-    case code(email: String)
-    case main
-    case addAccount
-    case space(id: Int64)
-    case chat(peer: Peer)
-    case settings
+    // MARK: - Destinations
 
-    func hash(into hasher: inout Hasher) {
-      switch self {
-      case .welcome:
-        hasher.combine(0)
-      case .email(let prevEmail):
-        hasher.combine(1)
-        hasher.combine(prevEmail)
-      case .code(let email):
-        hasher.combine(2)
-        hasher.combine(email)
-      case .main:
-        hasher.combine(3)
-      case .addAccount:
-        hasher.combine(4)
-      case .space(let id):
-        hasher.combine(5)
-        hasher.combine(id)
-      case .chat(let peer):
-        hasher.combine(6)
-        hasher.combine(peer)
-      case .settings:
-        hasher.combine(7)
-      }
+    enum Destination: Identifiable, Hashable {
+        case main
+        case space(id: Int64)
+        case chat(peer: Peer)
+        case settings
+        case contacts
+        case createSpace
+        case createDM
+        case createThread(spaceId: Int64)
+
+        // MARK: - Identifiable Conformance
+
+        var id: String {
+            switch self {
+            case .main: return "main"
+            case .space(let id): return "space-\(id)"
+            case .chat(let peer): return "chat-\(peer.hashValue)"
+            case .settings: return "settings"
+            case .contacts: return "contacts"
+            case .createSpace: return "createSpace"
+            case .createDM: return "createDM"
+            case .createThread(let spaceId): return "createThread-\(spaceId)"
+            }
+        }
     }
 
-    static func == (lhs: Destination, rhs: Destination) -> Bool {
-      switch (lhs, rhs) {
-      case (.welcome, .welcome):
-        return true
-      case (.email(let lhsEmail), .email(let rhsEmail)):
-        return lhsEmail == rhsEmail
-      case (.code(let lhsEmail), .code(let rhsEmail)):
-        return lhsEmail == rhsEmail
-      case (.main, .main):
-        return true
-      case (.addAccount, .addAccount):
-        return true
-      case (.space(let lhsId), .space(let rhsId)):
-        return lhsId == rhsId
-      case (.chat(let lhsPeer), .chat(let rhsPeer)):
-        return lhsPeer == rhsPeer
-      case (.settings, .settings):
-        return true
-      default:
-        return false
-      }
+    // MARK: - Navigation State
+
+    @Published private(set) var path = NavigationPath()
+    @Published var activeSheet: Destination?
+    @Published private(set) var activeDestination: Destination = .main
+
+    // MARK: - Tab Navigation
+
+    @Published var selectedTab: TabItem = .home
+    @Published private var navigationStacks: [TabItem: NavigationPath] = [
+        .home: NavigationPath(),
+        .contacts: NavigationPath(),
+        .settings: NavigationPath(),
+    ]
+
+    @Published var isTabBarVisible: Bool = true
+
+    // MARK: - Navigation Actions
+
+    func push(_ destination: Destination) {
+        switch destination {
+        case .chat:
+            isTabBarVisible = false
+            activeDestination = destination
+            navigationStacks[selectedTab]?.append(destination)
+        case .createSpace, .createDM, .createThread:
+            activeSheet = destination
+        default:
+            isTabBarVisible = true
+            activeDestination = destination
+            navigationStacks[selectedTab]?.append(destination)
+        }
     }
-  }
 
-  @Published var path = NavigationPath()
-
-  var activeDestination: Destination = .welcome
-  func push(_ destination: Destination) {
-    activeDestination = destination
-    path.append(destination)
-  }
-
-  func popToRoot() {
-    path.removeLast(path.count)
-  }
-
-  func pop() {
-    if !path.isEmpty {
-      path.removeLast()
+    func popPush(_ destination: Destination) {
+        activeDestination = destination
+        navigationStacks[selectedTab] = NavigationPath()
+        navigationStacks[selectedTab]?.append(destination)
     }
-  }
+
+    func popToRoot() {
+        navigationStacks[selectedTab] = NavigationPath()
+        isTabBarVisible = true
+    }
+
+    func pop() {
+        if let stack = navigationStacks[selectedTab], !stack.isEmpty {
+            navigationStacks[selectedTab]?.removeLast()
+            if stack.count <= 1 {
+                isTabBarVisible = true
+            }
+        }
+    }
+
+    func dismissSheet() {
+        activeSheet = nil
+    }
+
+    // MARK: - Reset
+
+    func reset() {
+        path = NavigationPath()
+        activeSheet = nil
+        activeDestination = .main
+        selectedTab = .home
+        navigationStacks = [
+            .home: NavigationPath(),
+            .contacts: NavigationPath(),
+            .settings: NavigationPath(),
+        ]
+        isTabBarVisible = true
+    }
+
+    // MARK: - Navigation Stack Access
+
+    var currentStack: NavigationPath {
+        navigationStacks[selectedTab] ?? NavigationPath()
+    }
+
+    var currentStackBinding: Binding<NavigationPath> {
+        Binding(
+            get: { [weak self] in
+                self?.navigationStacks[self?.selectedTab ?? .home] ?? NavigationPath()
+            },
+            set: { [weak self] newValue in
+                guard let self = self else { return }
+                self.navigationStacks[self.selectedTab] = newValue
+            }
+        )
+    }
 }
