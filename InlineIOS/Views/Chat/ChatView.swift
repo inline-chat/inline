@@ -117,6 +117,7 @@ extension ChatView {
           print("sendMessage Sending message: \(text)")
           print("sendMessage peer : \(peer)")
           try await dataManager.sendMessage(
+            chatId: fullChatViewModel.chat?.id ?? 0,
             peerUserId: nil,
             peerThreadId: nil,
             text: text,
