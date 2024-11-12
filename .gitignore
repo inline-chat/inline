@@ -96,7 +96,7 @@ server/dist
 buildServer.json
 
 apple/Config.xcconfig
-apple/Config.release.xcconfig
+# apple/Config.release.xcconfig
 apple/Config.prod.xcconfig
 apple/Config.dev.xcconfig
 apple/Config.staging.xcconfig
