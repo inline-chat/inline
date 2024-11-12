@@ -196,7 +196,7 @@ public class DataManager: ObservableObject {
         // Save chats first with lastMsgId set to nil
         let chats = result.chats.map { chat in
           var chat = Chat(from: chat)
-          chat.lastMsgId = nil  // Set to nil to avoid foreign key constraint
+          chat.lastMsgId = nil // Set to nil to avoid foreign key constraint
           return chat
         }
         try chats.forEach { chat in
@@ -209,13 +209,6 @@ public class DataManager: ObservableObject {
         }
         try dialogs.forEach { dialog in
           try dialog.save(db)
-        }
-
-        // Now update chats with correct lastMsgId values
-        for (index, chat) in chats.enumerated() {
-          var updatedChat = chat
-          updatedChat.lastMsgId = result.chats[index].lastMsgId
-          try updatedChat.save(db)
         }
 
         return chats
@@ -244,7 +237,7 @@ public class DataManager: ObservableObject {
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil  // todo: fix
+          chat.lastMsgId = nil // TODO: fix
 
           return chat
         }
