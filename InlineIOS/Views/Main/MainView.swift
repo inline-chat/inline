@@ -76,6 +76,7 @@ struct MainView: View {
       } catch {
         Log.shared.error("Failed to getPrivateChats", error: error)
       }
+   
       do {
         try await dataManager.getSpaces()
 
