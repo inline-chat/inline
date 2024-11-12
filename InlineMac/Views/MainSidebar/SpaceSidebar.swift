@@ -21,10 +21,10 @@ struct SpaceSidebar: View {
   var body: some View {
     List {
       Section("Threads") {
-        ForEach(fullSpace.chats, id: \.peerId) { chat in
+        ForEach(fullSpace.chats, id: \.peerId) { item in
           ChatSideItem(
             selectedRoute: navigation.spaceSelection,
-            item: SpaceSidebarItem(peerId: chat.peerId, title: chat.chat.title ?? "")
+            item: item
           )
         }
       }
@@ -49,6 +49,7 @@ struct SpaceSidebar: View {
 
             Text(fullSpace.space?.name ?? "")
               .font(Theme.sidebarTopItemFont)
+            
             Spacer()
           }.frame(height: Theme.sidebarTopItemHeight)
 

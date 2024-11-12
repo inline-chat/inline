@@ -1,5 +1,6 @@
 import InlineKit
 import SwiftUI
+import Combine
 
 enum NavigationRoute: Hashable, Codable {
   case homeRoot
@@ -13,19 +14,24 @@ enum PrimarySheet: Codable {
 
 @MainActor
 class NavigationModel: ObservableObject {
-  @Published var homePath: NavigationPath = .init()
+    
+  static let shared = NavigationModel()
+  
+  @Published var homePath: [NavigationRoute] = []
   @Published var activeSpaceId: Int64?
 
-  @Published private var spacePathDict: [Int64: NavigationPath] = [:]
+  @Published private var spacePathDict: [Int64: [NavigationRoute]] = [:]
   @Published private var spaceSelectionDict: [Int64: NavigationRoute] = [:]
+  
+  public var windowManager: MainWindowViewModel?
 
-  var spacePath: Binding<NavigationPath> {
+  var spacePath: Binding<[NavigationRoute]> {
     Binding(
       get: { [weak self] in
         guard let self,
           let activeSpaceId
-        else { return NavigationPath() }
-        return spacePathDict[activeSpaceId] ?? NavigationPath()
+        else { return [] }
+        return spacePathDict[activeSpaceId] ?? []
       },
       set: { [weak self] newValue in
         guard let self,
@@ -33,6 +39,7 @@ class NavigationModel: ObservableObject {
         else { return }
         Task { @MainActor in
           self.spacePathDict[activeSpaceId] = newValue
+          self.windowManager?.setUpForInnerRoute(newValue.last ?? .spaceRoot)
         }
       }
     )
@@ -52,9 +59,25 @@ class NavigationModel: ObservableObject {
         else { return }
         Task { @MainActor in
           self.spaceSelectionDict[activeSpaceId] = newValue
+          self.windowManager?.setUpForInnerRoute(newValue)
         }
       }
     )
+  }
+  
+  private var cancellables = Set<AnyCancellable>()
+  
+  init() {
+    setupSubscriptions()
+  }
+  
+  private func setupSubscriptions() {
+    $activeSpaceId
+      .sink { [weak self] newValue in
+        guard let self, let spaceId = newValue else { return }
+        self.windowManager?.setUpForInnerRoute(self.spaceSelectionDict[spaceId] ?? .spaceRoot)
+      }
+      .store(in: &cancellables)
   }
   
   
@@ -62,6 +85,7 @@ class NavigationModel: ObservableObject {
   func select(_ route: NavigationRoute) {
     if let activeSpaceId {
       spaceSelectionDict[activeSpaceId] = route
+      self.windowManager?.setUpForInnerRoute(route)
     } else {
       // todo
     }
@@ -69,9 +93,11 @@ class NavigationModel: ObservableObject {
 
   func navigate(to route: NavigationRoute) {
     if let activeSpaceId {
-      spacePathDict[activeSpaceId, default: NavigationPath()].append(route)
+      spacePathDict[activeSpaceId, default: []].append(route)
+      self.windowManager?.setUpForInnerRoute(route)
     } else {
       homePath.append(route)
+      self.windowManager?.setUpForInnerRoute(route)
     }
   }
 
@@ -79,20 +105,24 @@ class NavigationModel: ObservableObject {
     activeSpaceId = id
     // TODO: Load from persistence layer
     if spacePathDict[id] == nil {
-      spacePathDict[id] = NavigationPath()
+      spacePathDict[id] = []
+      self.windowManager?.setUpForInnerRoute(.spaceRoot)
     }
   }
 
   func goHome() {
     activeSpaceId = nil
     // TODO: Load from persistence layer
+    self.windowManager?.setUpForInnerRoute(.homeRoot)
   }
 
   func navigateBack() {
     if let activeSpaceId {
       spacePathDict[activeSpaceId]?.removeLast()
+      self.windowManager?.setUpForInnerRoute(spacePathDict[activeSpaceId]?.last ?? .spaceRoot)
     } else {
       homePath.removeLast()
+      self.windowManager?.setUpForInnerRoute(homePath.last ?? .homeRoot)
     }
   }
 
@@ -102,6 +132,14 @@ class NavigationModel: ObservableObject {
     homePath = .init()
     spacePathDict = [:]
     spaceSelectionDict = [:]
+  }
+  
+  var currentRoute: NavigationRoute {
+    if let activeSpaceId {
+      return spaceSelectionDict[activeSpaceId] ?? .spaceRoot
+    } else {
+      return homePath.last ?? .homeRoot
+    }
   }
 
   // MARK: - Sheets

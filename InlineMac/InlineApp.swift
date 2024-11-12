@@ -26,7 +26,7 @@ struct InlineApp: App {
     .windowStyle(
       viewModel.topLevelRoute == .onboarding ? .hiddenTitleBar : .init()
     )
-    .windowToolbarStyle(.unified)
+    .windowToolbarStyle(.unified(showsTitle: false))
     .commands {
       MainWindowCommands()
 
@@ -53,6 +53,8 @@ struct InlineApp: App {
         Text("No chat selected.")
       }
     }
+    .windowToolbarStyle(.unified(showsTitle: false))
+    .defaultSize(width: 680, height: 600)
 
     Settings {
       SettingsView()

@@ -3,6 +3,12 @@ import Foundation
 import SwiftUI
 
 struct Theme {
+  // MARK: - Window
+  static let windowMinimumSize: CGSize = .init(width: 320, height: 300)
+  
+  // MARK: - Main View & Split View
+  static let collapseSidebarAtWindowSize: CGFloat = 500
+  
   // MARK: - Sidebar
   /// 190 is minimum that fits both sidebar collapse button and plus button
   static let minimumSidebarWidth: CGFloat = 200
