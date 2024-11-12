@@ -135,22 +135,6 @@ public class DataManager: ObservableObject {
     }
   }
 
-  public func sendMessage(peerId: Peer, text: String) async throws {
-    log.debug("sendMessage")
-    try await database.dbWriter.write { db in
-      let message = Message(
-        fromId: Auth.shared.getCurrentUserId()!,
-        date: Date.now,
-        text: text,
-        peerUserId: peerId.isPrivate ? peerId.id : nil,
-        peerThreadId: peerId.isThread ? peerId.id : nil,
-        out: true
-      )
-      try message.save(db)
-    }
-    // TODO: Trigger remote call
-  }
-
   public func deleteSpace(spaceId: Int64) async throws {
     log.debug("deleteSpace")
     do {
@@ -272,6 +256,41 @@ public class DataManager: ObservableObject {
     } catch {
       log.error("Failed to get dialogs", error: error)
       throw error
+    }
+  }
+
+  public func sendMessage(peerUserId: Int64?, peerThreadId: Int64?, text: String, peerId: Peer?)
+    async throws
+  {
+    let finalPeerUserId: Int64?
+    let finalPeerThreadId: Int64?
+
+    if let peerId = peerId {
+      switch peerId {
+      case .user(let id):
+        finalPeerUserId = id
+        finalPeerThreadId = nil
+      case .thread(let id):
+        finalPeerUserId = nil
+        finalPeerThreadId = id
+      }
+    } else {
+      finalPeerUserId = peerUserId
+      finalPeerThreadId = peerThreadId
+    }
+
+    log.debug(
+      "sendMessage with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
+    )
+
+    let result = try await ApiClient.shared.sendMessage(
+      peerUserId: finalPeerUserId,
+      peerThreadId: finalPeerThreadId,
+      text: text
+    )
+
+    try await database.dbWriter.write { db in
+      try Message(from: result.message).save(db)
     }
   }
 }
