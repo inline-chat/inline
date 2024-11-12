@@ -186,7 +186,7 @@ export const handler = async (
   // Deduplicate result arrays by id
   dialogs = dialogs.filter((d, index, self) => index === self.findIndex((t) => t.id === d.id))
   chats = chats.filter((c, index, self) => index === self.findIndex((t) => t.id === c.id))
-  messages = messages.filter((m, index, self) => index === self.findIndex((t) => t.messageId === m.messageId))
+  messages = messages.filter((m, index, self) => index === self.findIndex((t) => t.id === m.id))
   users = users.filter((u, index, self) => index === self.findIndex((t) => t.id === u.id))
 
   console.log("pre encode", { dialogs, chats, messages, users })
