@@ -168,7 +168,7 @@ export const createMessage = (
       }
     | {
         kind: ServerMessageKind.Message
-        id: string
+
         payload: any
       }
     | {
@@ -217,7 +217,7 @@ export const createMessage = (
 
     case ServerMessageKind.Message:
       return {
-        i: data.id,
+        i: nanoid(8),
         t,
         k: data.kind,
         p: data.payload,

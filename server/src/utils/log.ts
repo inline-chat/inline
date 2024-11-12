@@ -1,4 +1,5 @@
-// TODO: Log errors to sentry
+import * as Sentry from "@sentry/bun"
+import { styleText } from "node:util"
 
 export class Log {
   static shared = new Log("shared")
@@ -10,22 +11,29 @@ export class Log {
     errorOrMetadata?: unknown | Error | Record<string, unknown>,
     metadata?: Record<string, unknown>,
   ): void {
+    const scopeColored = styleText("red", this.scope)
     if (typeof messageOrError === "string") {
-      console.error(this.scope, messageOrError, errorOrMetadata, metadata)
+      console.error(scopeColored, messageOrError, errorOrMetadata, metadata)
+      Sentry.captureException(new Error(messageOrError), { extra: errorOrMetadata as Record<string, unknown> })
     } else {
-      console.error(this.scope, messageOrError, errorOrMetadata, metadata)
+      console.error(scopeColored, messageOrError, errorOrMetadata, metadata)
+      Sentry.captureException(messageOrError)
     }
   }
 
   warn(messageOrError: string | unknown, error?: unknown | Error): void {
+    const scopeColored = styleText("yellow", this.scope)
     if (typeof messageOrError === "string") {
-      console.warn(this.scope, messageOrError, error)
+      console.warn(scopeColored, messageOrError, error)
+      Sentry.captureMessage(messageOrError, "warning")
     } else {
-      console.warn(this.scope, messageOrError)
+      console.warn(scopeColored, messageOrError)
+      Sentry.captureMessage(String(messageOrError), "warning")
     }
   }
 
   debug(...args: any[]): void {
-    console.debug(this.scope, ...args)
+    const scopeColored = styleText("blue", this.scope)
+    console.debug(scopeColored, ...args)
   }
 }

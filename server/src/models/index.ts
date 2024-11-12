@@ -154,12 +154,12 @@ export const encodeDialogInfo = (dialog: DbDialog): TDialogInfo => {
 // Message -------------
 export const TMessageInfo = Type.Object({
   id: Type.Integer(),
+  peerId: TPeerInfo,
   chatId: Type.Integer(),
   fromId: Type.Integer(),
   text: Optional(Type.String()),
   date: Type.Integer(),
   editDate: Optional(Type.Integer()),
-  peerId: TPeerInfo,
   // https://core.telegram.org/api/mentions
   mentioned: Optional(Type.Boolean()),
   out: Optional(Type.Boolean()),
@@ -182,3 +182,27 @@ export const encodeMessageInfo = (
     pinned: false,
   })
 }
+
+// # Updates
+// To add updates, just add a new object to the union. With exactly one property: eg. "newMessage", "editedMessage", "deletedMessage" etc.
+// then include any required fields in a object a the value of the property.
+const UpdateBase = {
+  updateId: Type.Integer(),
+} as const
+
+export const TNewMessageUpdate = Type.Object({
+  ...UpdateBase,
+  newMessage: Type.Object({
+    message: TMessageInfo,
+  }),
+})
+
+export const TMessageEditedUpdate = Type.Object({
+  ...UpdateBase,
+  editMessage: Type.Object({
+    message: TMessageInfo,
+  }),
+})
+
+export const TUpdate = Type.Union([TNewMessageUpdate, TMessageEditedUpdate])
+export type TUpdate = StaticEncode<typeof TUpdate>

@@ -1,63 +1,84 @@
 import { Log } from "@in/server/utils/log"
+import type { ServerMessageType } from "@in/server/ws/protocol"
 import { type ServerWebSocket } from "bun"
 import type { ElysiaWS } from "elysia/ws"
 import { nanoid } from "nanoid"
 
-const log = new Log("ws-connection")
+const log = new Log("ws-connections")
 
-export class WsConnection {
-  id: string
-  private ws: ElysiaWS<ServerWebSocket<any>>
-  private userId?: number
+const CLOSE_UNAUTHENTICATED_TIMEOUT = 20_000
 
-  constructor(ws: ElysiaWS<ServerWebSocket<any>, any, any>) {
-    this.id = nanoid()
-    this.ws = ws
+class ConnectionManager {
+  private connections: Map<string, { ws: ElysiaWS<ServerWebSocket<any>>; userId?: number }> = new Map()
+  private authenticatedUsers: Map<number, Set<string>> = new Map()
+
+  addConnection(ws: ElysiaWS<ServerWebSocket<any>, any, any>): string {
+    log.debug("Adding new connection")
+    const id = nanoid()
+    this.connections.set(id, { ws })
 
     // Start timeout, if not authenticated in 20 seconds, close the connection
     setTimeout(() => {
-      if (!this.userId) {
-        log.debug(`Connection ${this.id} not authenticated, closing`)
-        this.close()
+      const connection = this.connections.get(id)
+      if (connection && !connection.userId) {
+        log.debug(`Connection ${id} not authenticated, closing`)
+        this.closeConnection(id)
       }
-    }, 20000)
+    }, CLOSE_UNAUTHENTICATED_TIMEOUT)
+
+    return id
   }
 
-  authenticate(userId: number) {
-    this.userId = userId
-    authenticatedConnections.set(this.userId, this)
-  }
-
-  close() {
-    try {
-      this.ws.close()
-    } catch (error) {
-      console.error(error)
-    }
-    this.remove()
-  }
-
-  remove() {
-    connections.delete(this.id)
-    if (this.userId) {
-      authenticatedConnections.delete(this.userId)
+  authenticateConnection(id: string, userId: number) {
+    log.debug(`Authenticating connection ${id} for user ${userId}`)
+    const connection = this.connections.get(id)
+    if (connection) {
+      connection.userId = userId
+      if (!this.authenticatedUsers.has(userId)) {
+        this.authenticatedUsers.set(userId, new Set())
+      }
+      this.authenticatedUsers.get(userId)?.add(id)
     }
   }
 
-  save() {
-    connections.set(this.id, this)
+  closeConnection(id: string) {
+    log.debug(`Closing connection ${id}`)
+    const connection = this.connections.get(id)
+    if (connection) {
+      try {
+        connection.ws.close()
+      } catch (error) {
+        console.error(error)
+      }
+      this.removeConnection(id)
+    }
+  }
+
+  removeConnection(id: string) {
+    log.debug(`Removing connection ${id}`)
+    const connection = this.connections.get(id)
+    if (connection) {
+      this.connections.delete(id)
+      if (connection.userId) {
+        const userConnections = this.authenticatedUsers.get(connection.userId)
+        userConnections?.delete(id)
+        if (userConnections && userConnections.size === 0) {
+          this.authenticatedUsers.delete(connection.userId)
+        }
+      }
+    }
+  }
+
+  sendToUser(userId: number, message: ServerMessageType) {
+    log.debug(`Sending message to user ${userId}`)
+    const userConnections = this.authenticatedUsers.get(userId)
+    if (userConnections) {
+      userConnections.forEach((connectionId) => {
+        const connection = this.connections.get(connectionId)
+        connection?.ws.send(message)
+      })
+    }
   }
 }
 
-/**
- * Map of all connections by id
- */
-export const connections = new Map<string, WsConnection>()
-/**
- * Map of authenticated connections by user id
- */
-export const authenticatedConnections = new Map<number, WsConnection>()
-
-export const getConnection = (id: string) => {
-  return connections.get(id)
-}
+export const connectionManager = new ConnectionManager()

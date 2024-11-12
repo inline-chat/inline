@@ -1,6 +1,6 @@
 import Elysia, { t } from "elysia"
 import { ServerMessage, ClientMessage, ServerMessageKind, ClientMessageKind, createMessage } from "./protocol"
-import { WsConnection } from "@in/server/ws/connections"
+import { connectionManager } from "@in/server/ws/connections"
 import { Log } from "@in/server/utils/log"
 import { getUserIdFromToken } from "@in/server/controllers/plugins"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
@@ -9,7 +9,7 @@ const log = new Log("ws")
 
 export const webSocket = new Elysia()
   .state("userId", undefined as number | undefined)
-  .state("connection", undefined as WsConnection | undefined)
+  .state("connectionId", undefined as string | undefined)
   .ws("/ws", {
     // ------------------------------------------------------------
     // CONFIG
@@ -38,19 +38,21 @@ export const webSocket = new Elysia()
        */
 
       // Save
-      const connection = new WsConnection(ws)
-      connection.save()
-      ws.data.store.connection = connection
+      const connectionId = connectionManager.addConnection(ws)
+      ws.data.store.connectionId = connectionId
 
-      log.debug("new ws connection", connection.id)
+      log.debug("new ws connection", connectionId)
     },
 
     close(ws) {
       // TODO: Delete socket from our cache
-      log.debug("ws connection closed", ws.data.store.connection?.id)
+      log.debug("ws connection closed", ws.data.store.connectionId)
 
       // Clean up
-      ws.data.store.connection?.remove()
+      const connectionId = ws.data.store.connectionId
+      if (connectionId) {
+        connectionManager.closeConnection(connectionId)
+      }
     },
 
     async message(ws, message) {
@@ -58,7 +60,7 @@ export const webSocket = new Elysia()
         case ClientMessageKind.ConnectionInit: {
           log.debug("ws connection init")
 
-          if (!ws.data.store.connection) {
+          if (!ws.data.store.connectionId) {
             log.warn("no connection found when authenticating")
             return
           }
@@ -69,8 +71,8 @@ export const webSocket = new Elysia()
             throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
           }
 
-          ws.data.store.connection.authenticate(userIdFromToken)
-          log.debug("authenticated connection", ws.data.store.connection.id, userIdFromToken)
+          connectionManager.authenticateConnection(ws.data.store.connectionId, userIdFromToken)
+          log.debug("authenticated connection", ws.data.store.connectionId, userIdFromToken)
 
           ws.send(
             createMessage({

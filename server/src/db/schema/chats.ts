@@ -37,6 +37,9 @@ export const chats = pgTable(
     /** optional, required for private chats, greatest user id */
     maxUserId: integer("max_user_id").references(() => users.id),
 
+    // /** required for updates sequence */
+    // pts: integer(),
+
     date: creationDate,
   },
   (table) => ({
