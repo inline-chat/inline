@@ -38,15 +38,15 @@ struct MessageView: View {
   }
 }
 
-#Preview {
-  MessageView(
-    message: Message(
-      id: 1,
-      fromId: 1,
-      date: Date(),
-      text: "Hello, world!",
-      peerUserId: 1,
-      peerThreadId: nil
-    )
-  )
-}
+// #Preview {
+//  MessageView(
+//    message: Message(
+//      id: 1,
+//      fromId: 1,
+//      date: Date(),
+//      text: "Hello, world!",
+//      peerUserId: 1,
+//      peerThreadId: nil
+//    )
+//  )
+// }

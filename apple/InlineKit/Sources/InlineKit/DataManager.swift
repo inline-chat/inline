@@ -193,27 +193,34 @@ public class DataManager: ObservableObject {
       let result = try await ApiClient.shared.getPrivateChats()
 
       let chats = try await database.dbWriter.write { db in
+        // Save chats first with lastMsgId set to nil
         let chats = result.chats.map { chat in
-          Chat(from: chat)
+          var chat = Chat(from: chat)
+          chat.lastMsgId = nil  // Set to nil to avoid foreign key constraint
+          return chat
         }
-        print("getPrivateChats chats: \(chats)")
         try chats.forEach { chat in
           try chat.save(db)
         }
 
-        return chats
-      }
-      let dialogs = try await database.dbWriter.write { db in
+        // Save dialogs
         let dialogs = result.dialogs.map { dialog in
           Dialog(from: dialog)
         }
-        print("getPrivateChats dialogs: \(dialogs)")
         try dialogs.forEach { dialog in
           try dialog.save(db)
         }
 
-        return dialogs
+        // Now update chats with correct lastMsgId values
+        for (index, chat) in chats.enumerated() {
+          var updatedChat = chat
+          updatedChat.lastMsgId = result.chats[index].lastMsgId
+          try updatedChat.save(db)
+        }
+
+        return chats
       }
+
       print("getPrivateChats result: \(chats)")
       return chats
     } catch {
@@ -233,12 +240,12 @@ public class DataManager: ObservableObject {
       try await database.dbWriter.write { db in
 
         // Save chats
-        let chats = result.chats.map {  chat in
-          
+        let chats = result.chats.map { chat in
+
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil // todo: fix
-          
+          chat.lastMsgId = nil  // todo: fix
+
           return chat
         }
         try chats.forEach { chat in
@@ -252,7 +259,7 @@ public class DataManager: ObservableObject {
         try users.forEach { user in
           try user.save(db)
         }
-        
+
         // Save messages
         let messages = result.messages.map { message in
           Message(from: message)
