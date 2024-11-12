@@ -284,7 +284,7 @@ public class DataManager: ObservableObject {
     }
   }
 
-  public func sendMessage(peerUserId: Int64?, peerThreadId: Int64?, text: String, peerId: Peer?)
+  public func sendMessage(chatId: Int64, peerUserId: Int64?, peerThreadId: Int64?, text: String, peerId: Peer?)
     async throws
   {
     let finalPeerUserId: Int64?
@@ -315,7 +315,8 @@ public class DataManager: ObservableObject {
     )
 
     try await database.dbWriter.write { db in
-      try Message(from: result.message).save(db)
+      let message = Message(from: result.message)
+      try message.save(db)
     }
   }
 }

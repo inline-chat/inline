@@ -32,7 +32,8 @@ public final class FullChatViewModel: ObservableObject {
     let peerId = peer
     chatCancellable = ValueObservation
       .tracking { db in
-        try Dialog.filter(id: Dialog.getDialogId(peerId: peerId))
+        try Dialog
+          .filter(id: Dialog.getDialogId(peerId: peerId))
           .including(
             optional: Dialog.peerThread
               .including(optional: Chat.lastMessage)
@@ -48,8 +49,9 @@ public final class FullChatViewModel: ObservableObject {
       .sink(
         receiveCompletion: { print("Failed to get full chat \($0)") },
         receiveValue: { [weak self] chats in
+          print("Got full chat \(chats.first)")
           self?.chatItem = chats.first
-          
+
           // TODO: improve this
           if self?.chatItem != nil {
             self?.fetchMessages()

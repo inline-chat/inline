@@ -114,6 +114,13 @@ public extension AppDatabase {
             WHERE chatId IS NOT NULL
         """)
     }
+    
+//    migrator.registerMigration("message.chatId") { db in
+//      // Add new columns
+//      try db.alter(table: "message") { t in
+//        t.add(column: "chatId", .integer).references("chat", column: "id", onDelete: .setNull)
+//      }
+//    }
 
     migrator.registerMigration("fix last message") { db in
 
