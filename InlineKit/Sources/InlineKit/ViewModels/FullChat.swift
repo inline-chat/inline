@@ -30,7 +30,8 @@ public final class FullChatViewModel: ObservableObject {
 
   func fetchChat() {
     let peerId = peer
-    chatCancellable = ValueObservation
+    chatCancellable =
+      ValueObservation
       .tracking { db in
         try Dialog
           .filter(id: Dialog.getDialogId(peerId: peerId))
@@ -53,29 +54,35 @@ public final class FullChatViewModel: ObservableObject {
           self?.chatItem = chats.first
 
           // TODO: improve this
-          if self?.chatItem != nil {
-            self?.fetchMessages()
-          }
         }
       )
   }
 
   func fetchMessages() {
-    guard let chatId = chat?.id else { return }
-
+    let peer = self.peer
     messagesCancellable =
       ValueObservation
-        .tracking { db in
-          try Message.filter(Column("chatId") == chatId)
-            .order(Column("date").desc)
+      .tracking { db in
+        print("I'm getting messages \(peer)")
+        if case .thread(let id) = peer {
+          return try Message.filter(Column("peerThreadId") == id)
             .fetchAll(db)
+        } else if case .user(let id) = peer {
+          return try Message.filter(Column("peerUserId") == id)
+            .fetchAll(db)
+        } else {
+          return []
         }
-        .publisher(in: db.dbWriter, scheduling: .immediate)
-        .sink(
-          receiveCompletion: { _ in /* ignore error */ },
-          receiveValue: { [weak self] messages in
-            self?.messages = messages
-          }
-        )
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .sink(
+        receiveCompletion: { error in
+          print("Failed to get messages \(error)")
+        },
+        receiveValue: { [weak self] messages in
+          print("Got messages \(messages)")
+          self?.messages = messages
+        }
+      )
   }
 }
