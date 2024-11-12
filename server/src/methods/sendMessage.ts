@@ -4,7 +4,9 @@ import { chats, messages } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Optional, type Static, Type } from "@sinclair/typebox"
-import { encodeMessageInfo, TInputPeerInfo, TMessageInfo, TPeerInfo } from "@in/server/models"
+import { encodeMessageInfo, TInputPeerInfo, TMessageInfo, TPeerInfo, type TUpdateInfo } from "@in/server/models"
+import { createMessage, ServerMessageKind } from "@in/server/ws/protocol"
+import { connectionManager } from "@in/server/ws/connections"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -124,4 +126,21 @@ export const getChatIdFromPeer = async (
   }
 
   throw new InlineError(InlineError.ApiError.PEER_INVALID)
+}
+
+// HERE YOU ARE DENA
+const sendMessageUpdate = ({
+  message,
+  sendToUserId,
+}: {
+  message: TMessageInfo
+  sendToUserId: number
+  currentUserId: number
+  sendToSelf: boolean
+}) => {
+  const update: TUpdateInfo = {
+    newMessage: { message },
+  }
+
+  connectionManager.sendToUser(sendToUserId, createMessage({ kind: ServerMessageKind.Message, payload: update }))
 }

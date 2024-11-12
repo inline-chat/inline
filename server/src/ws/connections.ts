@@ -48,7 +48,7 @@ class ConnectionManager {
       try {
         connection.ws.close()
       } catch (error) {
-        console.error(error)
+        log.error(error)
       }
       this.removeConnection(id)
     }

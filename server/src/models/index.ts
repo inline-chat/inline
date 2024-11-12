@@ -187,22 +187,20 @@ export const encodeMessageInfo = (
 // To add updates, just add a new object to the union. With exactly one property: eg. "newMessage", "editedMessage", "deletedMessage" etc.
 // then include any required fields in a object a the value of the property.
 const UpdateBase = {
-  updateId: Type.Integer(),
+  // updateId: Type.Integer(),
 } as const
 
 export const TNewMessageUpdate = Type.Object({
-  ...UpdateBase,
   newMessage: Type.Object({
     message: TMessageInfo,
   }),
 })
 
 export const TMessageEditedUpdate = Type.Object({
-  ...UpdateBase,
   editMessage: Type.Object({
     message: TMessageInfo,
   }),
 })
 
 export const TUpdate = Type.Union([TNewMessageUpdate, TMessageEditedUpdate])
-export type TUpdate = StaticEncode<typeof TUpdate>
+export type TUpdateInfo = StaticEncode<typeof TUpdate>
