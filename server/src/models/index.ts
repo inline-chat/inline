@@ -16,7 +16,7 @@ import { Value } from "@sinclair/typebox/value"
 const Optional = <T extends TSchema>(schema: T) => Type.Union([Type.Null(), Type.Undefined(), schema])
 
 const encodeDate = (date: Date | number): number => {
-  return typeof date === "number" ? date : date.getTime()
+  return typeof date === "number" ? date : Math.floor(date.getTime() / 1000)
 }
 
 //INTERNAL TYPES

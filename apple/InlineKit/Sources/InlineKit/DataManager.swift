@@ -204,7 +204,7 @@ public class DataManager: ObservableObject {
           return chat
         }
         try chats.forEach { chat in
-          try chat.save(db)
+          try chat.save(db, onConflict: .replace)
         }
 
         // Save dialogs
@@ -212,8 +212,15 @@ public class DataManager: ObservableObject {
           Dialog(from: dialog)
         }
         try dialogs.forEach { dialog in
-          try dialog.save(db)
+          try dialog.save(db, onConflict: .replace)
         }
+
+        // // Now update chats with correct lastMsgId values
+        // for (index, chat) in chats.enumerated() {
+        //   var updatedChat = chat
+        //   updatedChat.lastMsgId = result.chats[index].lastMsgId
+        //   try updatedChat.save(db, onConflict: .replace)
+        // }
 
         return chats
       }
@@ -246,7 +253,7 @@ public class DataManager: ObservableObject {
           return chat
         }
         try chats.forEach { chat in
-          try chat.save(db)
+          try chat.save(db, onConflict: .replace)
         }
 
         // Save users
@@ -254,7 +261,7 @@ public class DataManager: ObservableObject {
           User(from: user)
         }
         try users.forEach { user in
-          try user.save(db)
+          try user.save(db, onConflict: .replace)
         }
 
         // Save messages
@@ -262,7 +269,7 @@ public class DataManager: ObservableObject {
           Message(from: message)
         }
         try messages.forEach { message in
-          try message.save(db)
+          try message.save(db, onConflict: .replace)
         }
 
         // Save dialogs
@@ -270,7 +277,7 @@ public class DataManager: ObservableObject {
           Dialog(from: dialog)
         }
         try dialogs.forEach { dialog in
-          try dialog.save(db)
+          try dialog.save(db, onConflict: .replace)
         }
       }
 
