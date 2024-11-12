@@ -175,5 +175,6 @@ export const encodeMessageInfo = (
     ...message,
     out: message.fromId === context.currentUserId,
     date: encodeDate(message.date),
+    editDate: message.editDate ? encodeDate(message.editDate) : null,
   })
 }
