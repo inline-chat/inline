@@ -171,6 +171,19 @@ export const encodeMessageInfo = (
   message: DbMessage,
   context: { currentUserId: number; peerId: StaticEncode<typeof TPeerInfo> },
 ): TMessageInfo => {
+  const errors = Value.Errors(TMessageInfo, {
+    ...message,
+    id: message.messageId,
+    out: message.fromId === context.currentUserId,
+    date: encodeDate(message.date),
+    editDate: message.editDate ? encodeDate(message.editDate) : null,
+    peerId: context.peerId,
+    mentioned: false,
+    pinned: false,
+  })
+  for (const error of errors) {
+    console.log("Errors", error)
+  }
   return Value.Encode(TMessageInfo, {
     ...message,
     id: message.messageId,

@@ -11,6 +11,7 @@ import {
   TChatInfo,
   TDialogInfo,
   TMessageInfo,
+  TPeerInfo,
   TUserInfo,
 } from "@in/server/models"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
@@ -54,7 +55,7 @@ export const handler = async (
   let dialogs: schema.DbDialog[] = []
   let users: schema.DbUser[] = []
   let chats: schema.DbChat[] = []
-  let messages: schema.DbMessage[] = []
+  let messages: TMessageInfo[] = []
 
   const existingThreadDialogs = await db.query.dialogs.findMany({
     where: and(eq(schema.dialogs.userId, currentUserId), eq(schema.dialogs.spaceId, spaceId ?? sql`null`)),
@@ -67,7 +68,9 @@ export const handler = async (
     dialogs.push(d)
 
     if (d.chat?.lastMsg) {
-      messages.push(d.chat?.lastMsg)
+      messages.push(
+        encodeMessageInfo(d.chat?.lastMsg, { currentUserId, peerId: peerIdFromChat(d.chat, { currentUserId }) }),
+      )
     }
 
     if (d.chat) {
@@ -126,7 +129,7 @@ export const handler = async (
     // Push last messages and chats of public chats
     publicChats.forEach((c) => {
       if (c.lastMsg) {
-        messages.push(c.lastMsg)
+        messages.push(encodeMessageInfo(c.lastMsg, { currentUserId, peerId: peerIdFromChat(c, { currentUserId }) }))
       }
       if (c) {
         chats.push(c)
@@ -165,7 +168,9 @@ export const handler = async (
       // }
 
       if (d.chat?.lastMsg) {
-        messages.push(d.chat?.lastMsg)
+        messages.push(
+          encodeMessageInfo(d.chat?.lastMsg, { currentUserId, peerId: peerIdFromChat(d.chat, { currentUserId }) }),
+        )
       }
       if (d.chat) {
         chats.push(d.chat)
@@ -189,13 +194,27 @@ export const handler = async (
   let result = {
     dialogs: dialogs.map(encodeDialogInfo),
     chats: chats.map((d) => encodeChatInfo(d, { currentUserId })),
-    messages: messages.map((m) =>
-      encodeMessageInfo(m, { peerId: { userId: m.fromId }, currentUserId: context.currentUserId }),
-    ),
+    messages: messages,
     users: users.map(encodeUserInfo),
   }
 
   console.log("result", result)
 
   return result
+}
+
+import type { StaticEncode } from "@sinclair/typebox/type"
+
+function peerIdFromChat(chat: schema.DbChat, context: { currentUserId: number }): StaticEncode<typeof TPeerInfo> {
+  if (chat.type === "private") {
+    if (chat.minUserId === context.currentUserId) {
+      return { userId: chat.minUserId }
+    } else if (chat.maxUserId === context.currentUserId) {
+      return { userId: chat.maxUserId }
+    } else {
+      Log.shared.error("Unknown peerId", { chatId: chat.id, currentUserId: context.currentUserId })
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+  }
+  return { threadId: chat.id }
 }

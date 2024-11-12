@@ -72,6 +72,7 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     .set({ lastMsgId: prevMessageId + 1 })
     .where(eq(chats.id, chatId))
   console.log("NewMessage", newMessage)
+  console.log("PeerId", peerId)
   try {
     const encodedMessage = encodeMessageInfo(newMessage, {
       currentUserId: context.currentUserId,
