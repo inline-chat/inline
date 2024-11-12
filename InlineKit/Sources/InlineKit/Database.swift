@@ -18,6 +18,12 @@ public extension AppDatabase {
   var migrator: DatabaseMigrator {
     var migrator = DatabaseMigrator()
 
+    #if DEBUG
+      // Speed up development by nuking the database when migrations change
+      // See <https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/migrations#The-eraseDatabaseOnSchemaChange-Option>
+      migrator.eraseDatabaseOnSchemaChange = true
+    #endif
+
     migrator.registerMigration("v0") { db in
       try db.create(table: "user") { t in
         t.primaryKey("id", .integer).notNull().unique()
@@ -49,7 +55,7 @@ public extension AppDatabase {
       }
     }
 
-    migrator.registerMigration("Chat flow") { db in
+    migrator.registerMigration("Chat flow 2") { db in
       try db.create(table: "chat") { t in
         t.primaryKey("id", .integer).notNull().unique()
         t.column("spaceId", .integer).references("space", column: "id", onDelete: .cascade)
@@ -61,13 +67,15 @@ public extension AppDatabase {
       }
 
       try db.create(table: "message") { t in
-        t.primaryKey("id", .integer).notNull().unique()
-
+        t.autoIncrementedPrimaryKey("id").notNull().unique()
+        t.column("messageId", .integer).notNull()
         t.column("chatId", .integer).references("chat", column: "id", onDelete: .cascade)
         t.column("fromId", .integer).references("user", column: "id", onDelete: .setNull)
         t.column("date", .datetime).notNull()
         t.column("text", .text)
         t.column("editDate", .datetime)
+
+        t.uniqueKey(["messageId", "chatId"])
       }
     }
 
@@ -108,7 +116,7 @@ public extension AppDatabase {
     }
 
     migrator.registerMigration("fix last message") { db in
-      
+
       try db.alter(table: "chat") { t in
         t.rename(column: "lastMessageId", to: "lastMsgId")
       }

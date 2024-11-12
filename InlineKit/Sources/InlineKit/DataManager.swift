@@ -231,28 +231,18 @@ public class DataManager: ObservableObject {
 
       // Save
       try await database.dbWriter.write { db in
-        // Save dialogs
-        let dialogs = result.dialogs.map { dialog in
-          Dialog(from: dialog)
-        }
-        try dialogs.forEach { dialog in
-          try dialog.save(db)
-        }
 
         // Save chats
-        let chats = result.chats.map { chat in
-          Chat(from: chat)
+        let chats = result.chats.map {  chat in
+          
+          var chat = Chat(from: chat)
+          // to avoid foriegn key constraint
+          chat.lastMsgId = nil // todo: fix
+          
+          return chat
         }
         try chats.forEach { chat in
           try chat.save(db)
-        }
-
-        // Save messages
-        let messages = result.messages.map { message in
-          Message(from: message)
-        }
-        try messages.forEach { message in
-          try message.save(db)
         }
 
         // Save users
@@ -261,6 +251,22 @@ public class DataManager: ObservableObject {
         }
         try users.forEach { user in
           try user.save(db)
+        }
+        
+        // Save messages
+        let messages = result.messages.map { message in
+          Message(from: message)
+        }
+        try messages.forEach { message in
+          try message.save(db)
+        }
+
+        // Save dialogs
+        let dialogs = result.dialogs.map { dialog in
+          Dialog(from: dialog)
+        }
+        try dialogs.forEach { dialog in
+          try dialog.save(db)
         }
       }
 
