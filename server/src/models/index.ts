@@ -159,7 +159,7 @@ export const TMessageInfo = Type.Object({
   text: Optional(Type.String()),
   date: Type.Integer(),
   editDate: Optional(Type.Integer()),
-  peerId: TChatInfo,
+  peerId: TPeerInfo,
   // https://core.telegram.org/api/mentions
   mentioned: Optional(Type.Boolean()),
   out: Optional(Type.Boolean()),
@@ -167,17 +167,18 @@ export const TMessageInfo = Type.Object({
 })
 
 export type TMessageInfo = StaticEncode<typeof TMessageInfo>
-export const encodeMessageInfo = (message: DbMessage, context: { currentUserId: number }): TMessageInfo => {
+export const encodeMessageInfo = (
+  message: DbMessage,
+  context: { currentUserId: number; peerId: StaticEncode<typeof TPeerInfo> },
+): TMessageInfo => {
   return Value.Encode(TMessageInfo, {
     ...message,
+    id: message.messageId,
     out: message.fromId === context.currentUserId,
     date: encodeDate(message.date),
     editDate: message.editDate ? encodeDate(message.editDate) : null,
-    peerId: {
-      id: message.chatId,
-      type: "thread",
-      peer: message.peerUserId ? { userId: message.peerUserId } : { threadId: message.chatId },
-      date: encodeDate(message.date),
-    },
+    peerId: context.peerId,
+    mentioned: false,
+    pinned: false,
   })
 }

@@ -27,9 +27,6 @@ export const messages = pgTable(
         onDelete: "cascade",
       }),
 
-    /** optional, if for a private chat */
-    peerUserId: integer("peer_user_id").references(() => users.id),
-
     /** required, chat it belongs to */
     fromId: integer("from_id")
       .notNull()

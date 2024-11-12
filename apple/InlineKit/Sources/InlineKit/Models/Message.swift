@@ -14,7 +14,8 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var date: Int
 }
 
-public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
+public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable
+{
   public var id: Int64
   public var date: Date
 
@@ -51,7 +52,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   }
 
   public init(
-    id: Int64 = Int64.random(in: 1 ... 5000),
+    id: Int64 = Int64.random(in: 1...5000),
     fromId: Int64,
     date: Date,
     text: String?,

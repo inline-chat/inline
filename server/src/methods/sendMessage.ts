@@ -4,11 +4,12 @@ import { chats, messages } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Optional, type Static, Type } from "@sinclair/typebox"
-import { encodeMessageInfo, TInputPeerInfo, TMessageInfo } from "@in/server/models"
+import { encodeMessageInfo, TInputPeerInfo, TMessageInfo, TPeerInfo } from "@in/server/models"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
   text: Type.String(),
+
   peerUserId: Optional(Type.String()),
   peerThreadId: Optional(Type.String()),
 })
@@ -26,74 +27,71 @@ export const Response = Type.Object({
 type Response = Static<typeof Response>
 
 export const handler = async (input: Input, context: Context): Promise<Response> => {
+  const peerId = input.peerUserId
+    ? { userId: Number(input.peerUserId) }
+    : input.peerThreadId
+    ? { threadId: Number(input.peerThreadId) }
+    : input.peerId
+
+  if (!peerId) {
+    throw new InlineError(InlineError.ApiError.PEER_INVALID)
+  }
+
+  // Get or validate chat ID from peer info
+  const chatId = await getChatIdFromPeer(peerId, context)
+
+  // Get the last message ID for this chat to maintain sequence
+  const prevMessageId = await db
+    .select({ messageId: sql<number>`MAX(${messages.messageId})` })
+    .from(messages)
+    .where(eq(messages.chatId, chatId))
+    .then(([result]) => result?.messageId ?? 0)
+
+  // Insert the new message
+  const [newMessage] = await db
+    .insert(messages)
+    .values({
+      chatId: chatId,
+      text: input.text,
+      fromId: context.currentUserId,
+      messageId: prevMessageId + 1,
+      date: new Date(),
+    })
+    .returning()
+
+  if (!newMessage) {
+    Log.shared.error("Failed to send message")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
+  }
+
+  // Update the chat's last message ID
+  await db
+    .update(chats)
+    .set({ lastMsgId: prevMessageId + 1 })
+    .where(eq(chats.id, chatId))
+  console.log("NewMessage", newMessage)
   try {
-    let chatId = await getChatIdFromPeer(input.peerId, input.peerUserId, input.peerThreadId, context)
-    console.log("chatId is", chatId)
-
-    var prevMessageId: number = await db
-      .select({ messageId: sql<number>`MAX(${messages.messageId})` })
-      .from(messages)
-      .where(eq(messages.chatId, chatId))
-      .then(([result]) => result?.messageId ?? 0)
-    console.log("prevMessageId", prevMessageId)
-    const [newMessage] = await db
-      .insert(messages)
-      .values({
-        chatId: chatId,
-        text: input.text,
-        fromId: context.currentUserId,
-        messageId: prevMessageId + 1,
-        date: new Date(),
-      })
-      .returning()
-    console.log("newMessage", newMessage)
-
-    await db
-      .update(chats)
-      .set({ lastMsgId: prevMessageId + 1 })
-      .where(eq(chats.id, chatId))
-
-    if (!newMessage) {
-      Log.shared.error("Failed to send message")
-      throw new InlineError(InlineError.ApiError.INTERNAL)
-    }
-
-    try {
-      const encodedMessage = encodeMessageInfo(
-        {
-          ...newMessage,
-        },
-        { currentUserId: context.currentUserId },
-      )
-
-      return { message: encodedMessage }
-    } catch (encodeError) {
-      Log.shared.error("Failed to encode message", {
-        error: encodeError,
-        message: newMessage,
-        schema: TMessageInfo,
-      })
-      throw new InlineError(InlineError.ApiError.INTERNAL)
-    }
-  } catch (error) {
-    Log.shared.error("Failed to send message", error)
+    const encodedMessage = encodeMessageInfo(newMessage, {
+      currentUserId: context.currentUserId,
+      peerId: peerId,
+    })
+    return { message: encodedMessage }
+  } catch (encodeError) {
+    Log.shared.error("Failed to encode message", {
+      error: encodeError,
+      message: newMessage,
+    })
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
 
 export const getChatIdFromPeer = async (
-  peer: Static<typeof TInputPeerInfo> | undefined,
-  peerUId: string | undefined,
-  peerTId: string | undefined,
+  peer: Static<typeof TInputPeerInfo>,
   context: { currentUserId: number },
 ): Promise<number> => {
-  // For threads, chatId is the same as threadId
-  let peerUserId = peerUId ? Number(peerUId) : undefined
-  let peerThreadId = peerTId ? Number(peerTId) : undefined
-
   // Handle thread chat
-  if ((peer && "threadId" in peer) || peerThreadId) {
-    const threadId = peerThreadId ?? (peer && "threadId" in peer ? peer.threadId : undefined)
+  if ("threadId" in peer) {
+    const threadId = peer.threadId
     if (!threadId || isNaN(threadId)) {
       throw new InlineError(InlineError.ApiError.PEER_INVALID)
     }
@@ -101,8 +99,8 @@ export const getChatIdFromPeer = async (
   }
 
   // Handle user chat
-  if ((peer && "userId" in peer) || peerUserId) {
-    const userId = peerUserId ?? (peer && "userId" in peer ? peer.userId : undefined)
+  if ("userId" in peer) {
+    const userId = peer.userId
     if (!userId || isNaN(userId)) {
       throw new InlineError(InlineError.ApiError.PEER_INVALID)
     }
