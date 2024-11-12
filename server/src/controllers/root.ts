@@ -11,11 +11,13 @@ export const root = new Elysia()
   .get("/", () => {
     let title = `🚧 inline server is running`
     let subtitle = `v${version} • deployed ${relativeBuildDate()} • ${gitCommitHash}`
+
     let html = `
       <html>
         <head>
           <title>~/dev/inline</title>
-          <link rel="icon" href="https://inline.chat/favicon.ico" />
+          <link href="https://inline.chat/favicon-white.png" rel="icon" media="(prefers-color-scheme: dark)" />
+          <link href="https://inline.chat/favicon-black.png" rel="icon" media="(prefers-color-scheme: light)" />
           <style>
           html {
               padding: 0;
