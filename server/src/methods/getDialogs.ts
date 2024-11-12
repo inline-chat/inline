@@ -34,188 +34,166 @@ export const Response = Type.Object({
   // TODO: Pagination
 })
 
+// This API is not paginated and mostly as a placeholder for future specialized methods
+// but until then we don't want to fuck our server with heavy queries
 const MAX_LIMIT = 100
 
 export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
-  const spaceId = validateSpaceId(input?.spaceId)
-  const currentUserId = context.currentUserId
-
-  let { dialogs, users, chats, messages } = await fetchExistingDialogs(currentUserId, spaceId)
-
-  if (spaceId) {
-    const publicChats = await fetchPublicChats(spaceId, currentUserId)
-    const newDialogs = await createDialogsForPublicChats(publicChats, currentUserId, spaceId)
-    dialogs.push(...newDialogs)
-    const { messages: newMessages, chats: newChats } = extractMessagesAndChats(publicChats)
-    messages.push(...newMessages)
-    chats.push(...newChats)
-
-    const spaceMembers = await fetchSpaceMembers(spaceId)
-    const privateDialogs = await fetchPrivateDialogs(currentUserId, spaceMembers)
-    dialogs.push(...privateDialogs)
-    const { messages: privateMessages, chats: privateChats } = extractMessagesAndChats(privateDialogs)
-    messages.push(...privateMessages)
-    chats.push(...privateChats)
-    users.push(...spaceMembers.map((m) => m.user))
-  }
-
-  const deduplicatedResults = deduplicateResults(dialogs, chats, messages, users)
-
-  console.log("pre encode", deduplicatedResults)
-
-  let result = {
-    dialogs: deduplicatedResults.dialogs.map(encodeDialogInfo),
-    chats: deduplicatedResults.chats.map((d) => encodeChatInfo(d, { currentUserId })),
-    messages: deduplicatedResults.messages.map((m) => encodeMessageInfo(m, { currentUserId })),
-    users: deduplicatedResults.users.map(encodeUserInfo),
-  }
-
-  console.log("result", result)
-
-  return result
-}
-
-const validateSpaceId = (spaceIdInput: any): number | null => {
-  const spaceId = spaceIdInput ? Number(spaceIdInput) : null
+  const spaceId = input?.spaceId ? Number(input.spaceId) : null
   if (spaceId && isNaN(spaceId)) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-  console.log("spaceId", spaceId)
-  return spaceId
-}
 
-const fetchExistingDialogs = async (
-  currentUserId: number,
-  spaceId: number | null,
-): Promise<{
-  dialogs: schema.DbDialog[]
-  users: schema.DbUser[]
-  chats: schema.DbChat[]
-  messages: schema.DbMessage[]
-}> => {
+  console.log("spaceId", spaceId)
+  const currentUserId = context.currentUserId
+
+  // Buckets for results
+  let dialogs: schema.DbDialog[] = []
+  let users: schema.DbUser[] = []
+  let chats: schema.DbChat[] = []
+  let messages: schema.DbMessage[] = []
+
   const existingThreadDialogs = await db.query.dialogs.findMany({
     where: and(eq(schema.dialogs.userId, currentUserId), eq(schema.dialogs.spaceId, spaceId ?? sql`null`)),
     with: { chat: { with: { lastMsg: { with: { from: true } } } } },
     limit: MAX_LIMIT,
   })
 
-  const dialogs: schema.DbDialog[] = []
-  const users: schema.DbUser[] = []
-  const chats: schema.DbChat[] = []
-  const messages: schema.DbMessage[] = []
-
+  // Push all dialogs to the arrays
   existingThreadDialogs.forEach((d) => {
     dialogs.push(d)
+
     if (d.chat?.lastMsg) {
       messages.push(d.chat?.lastMsg)
     }
+
     if (d.chat) {
       chats.push(d.chat)
     }
+
+    // TODO: Deduplicate users
+    // if (d.chat?.lastMsg?.from) {
+    //   users.push(d.chat?.lastMsg?.from)
+    // }
   })
 
-  return { dialogs, users, chats, messages }
-}
-
-const fetchPublicChats = async (spaceId: number, currentUserId: number): Promise<schema.DbChat[]> => {
-  return await db.query.chats.findMany({
-    where: and(eq(schema.chats.spaceId, spaceId), eq(schema.chats.type, "thread"), eq(schema.chats.publicThread, true)),
-    with: {
-      dialogs: {
-        where: eq(schema.dialogs.userId, currentUserId),
+  // Find private dialogs for members of this space
+  if (spaceId) {
+    // Check for thread public chats that are not in dialogs
+    const publicChats = await db.query.chats.findMany({
+      where: and(
+        eq(schema.chats.spaceId, spaceId),
+        eq(schema.chats.type, "thread"),
+        eq(schema.chats.publicThread, true),
+      ),
+      with: {
+        dialogs: {
+          where: eq(schema.dialogs.userId, currentUserId),
+        },
+        lastMsg: { with: { from: true } },
       },
-      lastMsg: { with: { from: true } },
-    },
-  })
-}
+    })
 
-const createDialogsForPublicChats = async (
-  publicChats: schema.DbChat[],
-  currentUserId: number,
-  spaceId: number,
-): Promise<schema.DbDialog[]> => {
-  return await db.transaction(async (tx) => {
-    const newDialogs: schema.DbDialog[] = []
-    for (const c of publicChats) {
-      if (c.dialogs.length === 0) {
-        const newDialog = await tx
-          .insert(schema.dialogs)
-          .values({
-            chatId: c.id,
-            userId: currentUserId,
-            spaceId: spaceId,
-          })
-          .returning()
-        if (newDialog[0]) {
-          newDialogs.push(newDialog[0])
+    // Make dialogs for each public chat that doesn't have one yet
+    let result = await db.transaction(async (tx) => {
+      const newDialogs: schema.DbDialog[] = []
+      for (const c of publicChats) {
+        if (c.dialogs.length === 0) {
+          const newDialog = await tx
+            .insert(schema.dialogs)
+            .values({
+              chatId: c.id,
+              userId: currentUserId,
+              spaceId: spaceId,
+            })
+            .returning()
+          if (newDialog[0]) {
+            newDialogs.push(newDialog[0])
+          }
         }
       }
-    }
-    return newDialogs
-  })
-}
+      return newDialogs
+    })
 
-const extractMessagesAndChats = (
-  items: (schema.DbChat | schema.DbDialog)[],
-): { messages: schema.DbMessage[]; chats: schema.DbChat[] } => {
-  const messages: schema.DbMessage[] = []
-  const chats: schema.DbChat[] = []
-  items.forEach((item) => {
-    if ("lastMsg" in item && item.lastMsg) {
-      messages.push(item.lastMsg)
-    }
-    if ("chat" in item && item.chat) {
-      chats.push(item.chat)
-    }
-  })
-  return { messages, chats }
-}
+    // Push newly created dialogs to the arrays
+    result.forEach((d) => {
+      dialogs.push(d)
+    })
 
-const fetchSpaceMembers = async (spaceId: number): Promise<schema.DbUser[]> => {
-  const space = await db.query.spaces.findFirst({
-    where: eq(schema.spaces.id, spaceId),
-    with: {
-      members: {
-        with: {
-          user: true,
+    // Push last messages and chats of public chats
+    publicChats.forEach((c) => {
+      if (c.lastMsg) {
+        messages.push(c.lastMsg)
+      }
+      if (c) {
+        chats.push(c)
+      }
+    })
+
+    // Find members of this space
+    const space = await db.query.spaces.findFirst({
+      where: eq(schema.spaces.id, spaceId),
+      with: {
+        members: {
+          with: {
+            user: true,
+          },
+          limit: MAX_LIMIT,
         },
-        limit: MAX_LIMIT,
       },
-    },
-  })
-  return space?.members || []
-}
+    })
 
-const fetchPrivateDialogs = async (
-  currentUserId: number,
-  spaceMembers: schema.DbMember[],
-): Promise<schema.DbDialog[]> => {
-  return await db.query.dialogs.findMany({
-    where: and(
-      eq(schema.dialogs.userId, currentUserId),
-      inArray(
-        schema.dialogs.peerUserId,
-        spaceMembers.map((m) => m.user.id),
+    const privateDialogs = await db.query.dialogs.findMany({
+      where: and(
+        eq(schema.dialogs.userId, currentUserId),
+        inArray(schema.dialogs.peerUserId, space?.members.map((m) => m.user.id) ?? []),
       ),
-    ),
-    with: { chat: { with: { lastMsg: { with: { from: true } } } } },
-    limit: MAX_LIMIT,
-  })
-}
+      with: { chat: { with: { lastMsg: { with: { from: true } } } } },
+      limit: MAX_LIMIT,
+    })
 
-const deduplicateResults = (
-  dialogs: schema.DbDialog[],
-  chats: schema.DbChat[],
-  messages: schema.DbMessage[],
-  users: schema.DbUser[],
-): { dialogs: schema.DbDialog[]; chats: schema.DbChat[]; messages: schema.DbMessage[]; users: schema.DbUser[] } => {
-  return {
-    dialogs: dialogs.filter((d, index, self) => index === self.findIndex((t) => t.id === d.id)),
-    chats: chats.filter((c, index, self) => index === self.findIndex((t) => t.id === c.id)),
-    messages: messages.filter((m, index, self) => index === self.findIndex((t) => t.messageId === m.messageId)),
-    users: users.filter((u, index, self) => index === self.findIndex((t) => t.id === u.id)),
+    // Push all private dialogs to the arrays
+    privateDialogs.forEach((d) => {
+      dialogs.push(d)
+
+      // TODO: Deduplicate users
+      // if (d.chat?.lastMsg?.from) {
+      //   users.push(d.chat?.lastMsg?.from)
+      // }
+
+      if (d.chat?.lastMsg) {
+        messages.push(d.chat?.lastMsg)
+      }
+      if (d.chat) {
+        chats.push(d.chat)
+      }
+    })
+
+    // Push users
+    space?.members.forEach((m) => {
+      users.push(m.user)
+    })
   }
+
+  // Deduplicate result arrays by id
+  dialogs = dialogs.filter((d, index, self) => index === self.findIndex((t) => t.id === d.id))
+  chats = chats.filter((c, index, self) => index === self.findIndex((t) => t.id === c.id))
+  messages = messages.filter((m, index, self) => index === self.findIndex((t) => t.messageId === m.messageId))
+  users = users.filter((u, index, self) => index === self.findIndex((t) => t.id === u.id))
+
+  console.log("pre encode", { dialogs, chats, messages, users })
+
+  let result = {
+    dialogs: dialogs.map(encodeDialogInfo),
+    chats: chats.map((d) => encodeChatInfo(d, { currentUserId })),
+    messages: messages.map((m) => encodeMessageInfo(m, { currentUserId })),
+    users: users.map(encodeUserInfo),
+  }
+
+  console.log("result", result)
+
+  return result
 }
