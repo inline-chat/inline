@@ -16,6 +16,13 @@ export default defineConfig({
     styleX({}),
   ],
 
+  css: {
+    transformer: "lightningcss",
+  },
+  build: {
+    cssMinify: "lightningcss",
+  },
+
   server: {
     port: 8001,
   },

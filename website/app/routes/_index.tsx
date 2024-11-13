@@ -28,11 +28,18 @@ export const links: LinksFunction = () => {
   ]
 }
 
+const addTransitionEffect = () => {
+  const style = document.createElement("style")
+  style.textContent = "*, div { transition: all 300ms ease-out !important; }"
+  document.head.appendChild(style)
+
+  setTimeout(() => {
+    document.head.removeChild(style)
+  }, 200)
+}
+
 const messagesLength = 4
-const apiEndpoint =
-  process.env.NODE_ENV == "production"
-    ? "https://headline.inline.chat"
-    : "http://localhost:8000"
+const apiEndpoint = process.env.NODE_ENV == "production" ? "https://api.inline.chat" : "http://localhost:8000"
 const centerWidth = 983
 const centerHeight = 735
 const cardRadius = 22
@@ -45,12 +52,14 @@ export default function Index() {
   const [failed, setFailed] = useState(false)
   const [subscribed, setSubscribed] = useState(false)
   const [isntInitialRender, setIsntInitialRender] = useState(false)
+  const [hasInteracted, setHasInteracted] = useState(false)
 
   const [formActive, setFormActive] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setIsntInitialRender(true)
+    setMousePosition({ x: document.documentElement.clientWidth / 2, y: document.documentElement.clientHeight / 2 })
   }, [])
 
   const lastPlayedAtRef = useRef(0)
@@ -72,6 +81,12 @@ export default function Index() {
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
       setMousePosition({ x: event.clientX, y: event.clientY })
+      if (!hasInteracted) {
+        addTransitionEffect()
+        setTimeout(() => {
+          setHasInteracted(true)
+        }, 50)
+      }
     }
 
     window.addEventListener("mousemove", handleMouseMove)
@@ -79,7 +94,7 @@ export default function Index() {
     return () => {
       window.removeEventListener("mousemove", handleMouseMove)
     }
-  }, [])
+  }, [hasInteracted])
 
   const calculateParallax = () => {
     if (typeof document === "undefined") return { x: 0, y: 0 }
@@ -99,11 +114,8 @@ export default function Index() {
   const parallaxOffset = calculateParallax()
 
   return (
-    <motion.div className="font-sans p-4" {...stylex.props(styles.root)}>
-      <motion.div
-        {...stylex.props(styles.centerBox, styles.center)}
-        id="center"
-      >
+    <motion.div {...stylex.props(styles.root)}>
+      <motion.div {...stylex.props(styles.centerBox, styles.center)} id="center">
         <motion.div
           {...stylex.props(styles.centerBox, styles.bg)}
           initial={{ filter: "brightness(1)" }}
@@ -112,16 +124,16 @@ export default function Index() {
           }}
           style={{
             position: "absolute",
-            transform: `translate(${parallaxOffset.x * 0.2}px, ${
-              parallaxOffset.y * 0.15
-            }px)`,
-
-            boxShadow: `${parallaxOffset.x * 1.8}px ${
-              20 + parallaxOffset.y * 1
-            }px 20px -10px rgba(0, 0, 0, 0.2)`,
+            transform: hasInteracted
+              ? `translate(${parallaxOffset.x * 0.2}px, ${parallaxOffset.y * 0.15}px)`
+              : undefined,
+            boxShadow: hasInteracted
+              ? `${parallaxOffset.x * 1.8}px ${20 + parallaxOffset.y * 1}px 20px -10px rgba(0, 0, 0, 0.2)`
+              : undefined,
           }}
         >
-          <div
+          <motion.div
+            animate={{ opacity: 0.18 }}
             style={{
               position: "absolute",
               zIndex: 2,
@@ -135,10 +147,11 @@ export default function Index() {
               rgba(255,255,255,0.4) 50%,
               rgba(255,255,255,0.1) 55%,
               rgba(255,255,255,0) 70%)`,
-              opacity: 0.18,
-              transform: `scale(1.5) translateX(${
-                parallaxOffset.x * -2
-              }px) translateY(${parallaxOffset.y * -1}px)`,
+              // opacity: 0.18,
+              opacity: 0,
+              transform: `scale(1.5) ${
+                hasInteracted ? `translateX(${parallaxOffset.x * -2}px) translateY(${parallaxOffset.y * -1}px)` : ""
+              }`,
               pointerEvents: "none",
               boxShadow: "inset 0px 10px 80px 120px rgba(255, 255, 255, 1)",
             }}
@@ -189,10 +202,10 @@ export default function Index() {
           >
             {message === 0 && (
               <>
-                Chat that isn't from{" "}
+                Chat that isn&apos;t from{" "}
                 <span
                   {...stylex.props(styles.dated)}
-                  onPointerEnter={(e) => {
+                  onPointerEnter={() => {
                     // limit it to once per 2s
                     if (Date.now() - lastPlayedAtRef.current < 1500) return
                     const audio = new Audio("/sounds/slack-notification.mp3")
@@ -215,8 +228,7 @@ export default function Index() {
             transition={{ delay: 0.1, duration: 0.2 }}
             animate={fontAvailable ? { opacity: 1, y: 0, scale: 1 } : undefined}
           >
-            We’re building a native, high-quality messaging app for teams who
-            crave the best.
+            We're building a native, high-quality messaging app for teams who crave the best.
           </motion.p>
 
           <motion.div
@@ -265,8 +277,7 @@ export default function Index() {
                       body: JSON.stringify({
                         email,
                         userAgent: navigator.userAgent,
-                        timeZone:
-                          Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                       }),
                     })
                       .then(() => {
@@ -284,17 +295,14 @@ export default function Index() {
                         revert()
                       })
                   }}
-                  {...stylex.props(
-                    styles.emailForm,
-                    focused ? styles.emailFormActive : null,
-                  )}
+                  {...stylex.props(styles.emailForm, focused ? styles.emailFormActive : null)}
                   style={{
                     top: 0,
                     overflow: "hidden",
                     position: "absolute",
-                    transform: `translate(${parallaxOffset.x * 0.2 * -1}px, ${
-                      parallaxOffset.y * 0.1 * -1
-                    }px)`,
+                    transform: hasInteracted
+                      ? `translate(${parallaxOffset.x * 0.2 * -1}px, ${parallaxOffset.y * 0.1 * -1}px)`
+                      : undefined,
                   }}
                 >
                   <motion.input
@@ -339,11 +347,7 @@ export default function Index() {
                 <motion.div
                   key="btn"
                   {...stylex.props(styles.button)}
-                  initial={
-                    isntInitialRender
-                      ? { opacity: 0, width: 0, scale: 0.6 }
-                      : undefined
-                  }
+                  initial={isntInitialRender ? { opacity: 0, width: 0, scale: 0.6 } : undefined}
                   animate={{
                     opacity: 1,
                     width: 300,
@@ -353,9 +357,9 @@ export default function Index() {
                   style={{
                     top: 0,
                     position: "absolute",
-                    transform: `translate(${parallaxOffset.x * 0.2 * -1}px, ${
-                      parallaxOffset.y * 0.1 * -1
-                    }px)`,
+                    transform: hasInteracted
+                      ? `translate(${parallaxOffset.x * 0.2 * -1}px, ${parallaxOffset.y * 0.1 * -1}px)`
+                      : undefined,
                   }}
                   onClick={(e) => {
                     e.preventDefault()
@@ -371,9 +375,7 @@ export default function Index() {
                   <span
                     style={{
                       display: "block",
-                      transform: `translate(${
-                        parallaxOffset.x * 0.08 * -1
-                      }px, 0px)`,
+                      transform: `translate(${parallaxOffset.x * 0.08 * -1}px, 0px)`,
                       whiteSpace: "nowrap",
                     }}
                   >
@@ -437,23 +439,12 @@ export default function Index() {
       </motion.div>
 
       {/* == */}
-      <div {...stylex.props(styles.footer)}>
+      <footer {...stylex.props(styles.footer)}>
         <div>
-          <div>
-            Early access starting in Oct-Nov 2024 for macOS and iOS • Written in
-            Swift.
-          </div>
+          <div>Early access starting in November 2024 for macOS and iOS • Written in Swift</div>
         </div>
 
         <div {...stylex.props(styles.footerSecondRow)}>
-          <a
-            href="mailto:hey@inline.chat"
-            target="_blank"
-            rel="noopener noreferrer"
-            {...stylex.props(styles.footerLink)}
-          >
-            hey@inline.chat
-          </a>
           <div>
             <a
               href="https://x.com/intent/follow?screen_name=inline_chat"
@@ -466,25 +457,48 @@ export default function Index() {
           </div>
           <div>
             <a
-              href="https://noor.to"
+              href="https://github.com/inlinehq"
               target="_blank"
               rel="noopener noreferrer"
               {...stylex.props(styles.footerLink)}
             >
+              GitHub
+            </a>
+          </div>
+          <div>
+            <a
+              href="https://status.inline.chat"
+              target="_blank"
+              rel="noopener noreferrer"
+              {...stylex.props(styles.footerLink)}
+            >
+              Status
+            </a>
+          </div>
+          <div>
+            <a href="https://noor.to" target="_blank" rel="noopener noreferrer" {...stylex.props(styles.footerLink)}>
               Our previous app
             </a>
           </div>
+          <a
+            href="mailto:hey@inline.chat"
+            target="_blank"
+            rel="noopener noreferrer"
+            {...stylex.props(styles.footerLink)}
+          >
+            hey@inline.chat
+          </a>
         </div>
 
         <div {...stylex.props(styles.footerSecondRow)}>
           <div {...stylex.props(styles.copyRight)}>© 2024 Inline Chat</div>
         </div>
-      </div>
+      </footer>
     </motion.div>
   )
 }
 
-let flash = stylex.keyframes({
+const flash = stylex.keyframes({
   "0%": { opacity: 1 },
   "50%": { opacity: 0.5 },
   "100%": { opacity: 1 },
@@ -506,8 +520,8 @@ const styles = stylex.create({
       "@media (max-width: 1000px)": "flex-start",
     },
     padding: {
-      default: "0",
-      "@media (max-width: 1000px)": 12,
+      default: "1rem", // This replaces the Tailwind p-4 class
+      "@media (max-width: 1000px)": "12px",
     },
     paddingTop: {
       default: 32,
@@ -681,8 +695,7 @@ const styles = stylex.create({
       ":active": "rgba(255,255,255,0.35)",
     },
     boxShadow: {
-      default:
-        "inset 0 1px 0 0 rgba(255, 255, 255, 0.2), 0 -1px 2px 2px rgba(255, 255, 255, 0.05)",
+      default: "inset 0 1px 0 0 rgba(255, 255, 255, 0.2), 0 -1px 2px 2px rgba(255, 255, 255, 0.05)",
       ":hover":
         "inset 0 1px 0 0 rgba(255, 255, 255, 0.5), 0 -1px 2px 2px rgba(255, 255, 255, 0.1), 0 -3px 6px 5px rgba(255, 255, 255, 0.06)",
     },
@@ -701,8 +714,7 @@ const styles = stylex.create({
     textDecoration: "none",
     fontSize: { default: 18, "@media (max-width: 500px)": 15 },
     fontWeight: "700",
-    transition:
-      "background-color 0.15s ease-out, transform 0.18s ease-out, box-shadow 0.15s ease-out",
+    transition: "background-color 0.15s ease-out, transform 0.18s ease-out, box-shadow 0.15s ease-out",
   },
 
   emailForm: {
@@ -717,8 +729,7 @@ const styles = stylex.create({
       ":active": "rgba(255,255,255,0.35)",
     },
     boxShadow: {
-      default:
-        "inset 0 1px 0 0 rgba(255, 255, 255, 0.2), 0 -1px 2px 2px rgba(255, 255, 255, 0.05)",
+      default: "inset 0 1px 0 0 rgba(255, 255, 255, 0.2), 0 -1px 2px 2px rgba(255, 255, 255, 0.05)",
       ":hover":
         "inset 0 1px 0 0 rgba(255, 255, 255, 0.5), 0 -1px 2px 2px rgba(255, 255, 255, 0.1), 0 -3px 6px 5px rgba(255, 255, 255, 0.06)",
     },
@@ -736,8 +747,7 @@ const styles = stylex.create({
     textDecoration: "none",
     fontSize: { default: 18, "@media (max-width: 500px)": 15 },
     fontWeight: "700",
-    transition:
-      "background-color 0.15s ease-out, transform 0.18s ease-out, box-shadow 0.15s ease-out",
+    transition: "background-color 0.15s ease-out, transform 0.18s ease-out, box-shadow 0.15s ease-out",
   },
 
   emailFormActive: {
@@ -826,7 +836,7 @@ const styles = stylex.create({
       ":hover": 1,
     },
     marginLeft: {
-      default: 24,
+      default: 12,
       "@media (max-width: 500px)": 0,
     },
     transition: "color 0.12s ease-out",
@@ -846,5 +856,51 @@ const styles = stylex.create({
       default: "paused",
       ":hover": "running",
     },
+  },
+
+  columns: {
+    width: "100%",
+    display: "grid",
+    gridTemplateColumns: {
+      default: "1fr 1fr",
+      "@media (max-width: 600px)": "1fr",
+    },
+    gap: 40,
+    marginBottom: 32,
+  },
+
+  footerColumn: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: {
+      default: "flex-start",
+      "@media (max-width: 600px)": "center",
+    },
+    textAlign: {
+      default: "left",
+      "@media (max-width: 600px)": "center",
+    },
+  },
+
+  footerLogo: {
+    marginBottom: 16,
+  },
+
+  footerText: {
+    marginTop: 12,
+    opacity: 0.9,
+  },
+
+  footerColumnTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 16,
+    opacity: 0.9,
+  },
+
+  footerLinks: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
   },
 })
