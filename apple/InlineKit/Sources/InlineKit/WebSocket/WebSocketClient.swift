@@ -32,7 +32,6 @@ struct WebSocketCredentials: Sendable {
 
 actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   private var webSocketTask: URLSessionWebSocketTask?
-  private var messageStreamContinuation: AsyncStream<WebSocketMessage>.Continuation?
   private var connectionState: WebSocketConnectionState = .disconnected
   private var reconnectAttempts = 0
   private var isActive = true
@@ -71,7 +70,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     session = URLSession(
       configuration: configuration,
       delegate: self,
-      delegateQueue: nil  // Using nil lets URLSession create its own queue
+      delegateQueue: nil // Using nil lets URLSession create its own queue
     )
   }
 
@@ -164,7 +163,6 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     isActive = false
     webSocketTask?.cancel(with: .normalClosure, reason: nil)
     webSocketTask = nil
-    messageStreamContinuation?.finish()
 
     connectionState = .disconnected
     notifyStateChange()
@@ -280,9 +278,9 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
 
         switch message {
         case .string(let text):
-          messageStreamContinuation?.yield(.string(text))
+          notifyMessageReceived(.string(text))
         case .data(let data):
-          messageStreamContinuation?.yield(.data(data))
+          notifyMessageReceived(.data(data))
         @unknown default:
           throw WebSocketError.invalidMessage
         }
@@ -308,8 +306,8 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
 
   private func attemptReconnection() async {
     guard reconnectionConfig.maxAttempts > 0,
-      reconnectAttempts < reconnectionConfig.maxAttempts,
-      isActive
+          reconnectAttempts < reconnectionConfig.maxAttempts,
+          isActive
     else {
       return
     }

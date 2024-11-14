@@ -82,7 +82,6 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     sendMessageUpdate({
       message: encodedMessage,
       currentUserId: context.currentUserId,
-      sendToSelf: true,
     })
 
     return { message: encodedMessage }
@@ -154,9 +153,5 @@ const sendMessageUpdate = async ({ message, currentUserId }: { message: TMessage
       updateGroup.spaceId,
       createMessage({ kind: ServerMessageKind.Message, payload: update }),
     )
-  }
-
-  if (sendToSelf) {
-    connectionManager.sendToUser(currentUserId, createMessage({ kind: ServerMessageKind.Message, payload: update }))
   }
 }
