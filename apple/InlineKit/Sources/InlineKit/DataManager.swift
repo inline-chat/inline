@@ -57,6 +57,10 @@ public class DataManager: ObservableObject {
           let thread = Chat(from: chat)
           try thread.save(db)
         }
+        for dialog in result.dialogs {
+          let dialog = Dialog(from: dialog)
+          try dialog.save(db)
+        }
       }
 
       // Return for navigating to space using id
@@ -91,27 +95,26 @@ public class DataManager: ObservableObject {
     }
   }
 
-  public func createPrivateChat(peerId: Int64) async throws -> Int64? {
+  public func createPrivateChat(userId: Int64) async throws -> Peer {
     log.debug("createPrivateChat")
     do {
-      let result = try await ApiClient.shared.createPrivateChat(peerId: peerId)
-
+      let result = try await ApiClient.shared.createPrivateChat(userId: userId)
+      print("Result \(result)")
       try await database.dbWriter.write { db in
         let chat = Chat(from: result.chat)
         try chat.save(db)
         let dialog = Dialog(from: result.dialog)
         try dialog.save(db)
-        let peerUsers = result.peerUsers.map { User(from: $0) }
-        try peerUsers.forEach { user in
-          try user.save(db)
-        }
+        let user = User(from: result.user)
+        try user.save(db)
+        print("Saved!!!!")
       }
 
-      return result.chat.id
+      return Peer.user(id: result.user.id)
     } catch {
       Log.shared.error("Failed to create private chat", error: error)
+      throw error
     }
-    return nil
   }
 
   /// Get list of user spaces and saves them
@@ -197,17 +200,23 @@ public class DataManager: ObservableObject {
       let result = try await ApiClient.shared.getPrivateChats()
 
       let chats = try await database.dbWriter.write { db in
-        // Save chats first with lastMsgId set to nil
+        // First save peer users if they exist
+        let peerUsers = result.peerUsers.map { User(from: $0) }
+        try peerUsers.forEach { user in
+          try user.save(db, onConflict: .replace)
+        }
+
+        // Then save chats with lastMsgId set to nil
         let chats = result.chats.map { chat in
           var chat = Chat(from: chat)
-          chat.lastMsgId = nil  // Set to nil to avoid foreign key constraint
+          chat.lastMsgId = nil // Set to nil to avoid foreign key constraint
           return chat
         }
         try chats.forEach { chat in
           try chat.save(db, onConflict: .replace)
         }
 
-        // Save dialogs
+        // Finally save dialogs
         let dialogs = result.dialogs.map { dialog in
           Dialog(from: dialog)
         }
@@ -215,19 +224,13 @@ public class DataManager: ObservableObject {
           try dialog.save(db, onConflict: .replace)
         }
 
-        // // Now update chats with correct lastMsgId values
-        // for (index, chat) in chats.enumerated() {
-        //   var updatedChat = chat
-        //   updatedChat.lastMsgId = result.chats[index].lastMsgId
-        //   try updatedChat.save(db, onConflict: .replace)
-        // }
-
         return chats
       }
 
       print("getPrivateChats result: \(chats)")
       return chats
     } catch {
+      Log.shared.error("Failed to get private chats", error: error)
       throw error
     }
   }
@@ -248,7 +251,7 @@ public class DataManager: ObservableObject {
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil  // TODO: fix
+          chat.lastMsgId = nil // TODO: fix
 
           return chat
         }

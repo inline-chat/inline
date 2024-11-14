@@ -19,12 +19,11 @@ public extension AppDatabase {
     var migrator = DatabaseMigrator()
 
     #if DEBUG
-      // Speed up development by nuking the database when migrations change
-      // See <https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/migrations#The-eraseDatabaseOnSchemaChange-Option>
       migrator.eraseDatabaseOnSchemaChange = true
     #endif
 
-    migrator.registerMigration("v0") { db in
+    migrator.registerMigration("v1") { db in
+      // User table
       try db.create(table: "user") { t in
         t.primaryKey("id", .integer).notNull().unique()
         t.column("email", .text)
@@ -33,17 +32,16 @@ public extension AppDatabase {
         t.column("username", .text)
         t.column("date", .datetime).notNull()
       }
-    }
 
-    // Migrations for future application versions will be inserted here:
-    migrator.registerMigration("Space flow") { db in
-
+      // Space table
       try db.create(table: "space") { t in
         t.primaryKey("id", .integer).notNull().unique()
         t.column("name", .text).notNull()
         t.column("date", .datetime).notNull()
+        t.column("creator", .boolean)
       }
 
+      // Member table
       try db.create(table: "member") { t in
         t.primaryKey("id", .integer).notNull().unique()
         t.column("userId", .integer).references("user", column: "id", onDelete: .setNull)
@@ -53,9 +51,8 @@ public extension AppDatabase {
 
         t.uniqueKey(["userId", "spaceId"])
       }
-    }
 
-    migrator.registerMigration("Chat flow 2") { db in
+      // Chat table
       try db.create(table: "chat") { t in
         t.primaryKey("id", .integer).notNull().unique()
         t.column("spaceId", .integer).references("space", column: "id", onDelete: .cascade)
@@ -63,29 +60,29 @@ public extension AppDatabase {
         t.column("title", .text)
         t.column("type", .integer).notNull().defaults(to: 0)
         t.column("date", .datetime).notNull()
-        t.column("lastMessageId", .integer).references("message", column: "id", onDelete: .cascade)
+        t.column("lastMsgId", .integer)
+        t.foreignKey(["id", "lastMsgId"], references: "message", columns: ["chatId", "messageId"], onDelete: .setNull, onUpdate: .cascade, deferred: true)
       }
 
+      // Message table
       try db.create(table: "message") { t in
-        t.autoIncrementedPrimaryKey("id").notNull().unique()
+        t.autoIncrementedPrimaryKey("globalId").unique()
         t.column("messageId", .integer).notNull()
         t.column("chatId", .integer).references("chat", column: "id", onDelete: .cascade)
         t.column("fromId", .integer).references("user", column: "id", onDelete: .setNull)
         t.column("date", .datetime).notNull()
         t.column("text", .text)
         t.column("editDate", .datetime)
+        t.column("peerUserId", .integer).references("user", column: "id", onDelete: .setNull)
+        t.column("peerThreadId", .integer).references("chat", column: "id", onDelete: .setNull)
+        t.column("mentioned", .boolean)
+        t.column("out", .boolean)
+        t.column("pinned", .boolean)
 
         t.uniqueKey(["messageId", "chatId"])
       }
-    }
 
-    migrator.registerMigration("space creator") { db in
-      try db.alter(table: "space") { t in
-        t.add(column: "creator", .boolean)
-      }
-    }
-
-    migrator.registerMigration("dialog") { db in
+      // Dialog table
       try db.create(table: "dialog") { t in
         t.primaryKey("id", .integer).notNull().unique()
         t.column("peerUserId", .integer).references("user", column: "id", onDelete: .setNull)
@@ -95,37 +92,6 @@ public extension AppDatabase {
         t.column("readInboxMaxId", .integer)
         t.column("readOutboxMaxId", .integer)
         t.column("pinned", .boolean)
-      }
-
-      // Add new columns
-      try db.alter(table: "message") { t in
-        t.add(column: "peerUserId", .integer).references("user", column: "id", onDelete: .setNull)
-        t.add(column: "peerThreadId", .integer).references("chat", column: "id", onDelete: .setNull)
-        t.add(column: "mentioned", .boolean)
-        t.add(column: "out", .boolean)
-        t.add(column: "pinned", .boolean)
-      }
-
-      // Migrate existing data: copy chatId to peerThreadId
-      try db.execute(
-        sql: """
-            UPDATE message 
-            SET peerThreadId = chatId 
-            WHERE chatId IS NOT NULL
-        """)
-    }
-    
-//    migrator.registerMigration("message.chatId") { db in
-//      // Add new columns
-//      try db.alter(table: "message") { t in
-//        t.add(column: "chatId", .integer).references("chat", column: "id", onDelete: .setNull)
-//      }
-//    }
-
-    migrator.registerMigration("fix last message") { db in
-
-      try db.alter(table: "chat") { t in
-        t.rename(column: "lastMessageId", to: "lastMsgId")
       }
     }
 

@@ -1,12 +1,12 @@
 import { db } from "@in/server/db"
-import { chats, dialogs, users } from "@in/server/db/schema"
+import { chats, dialogs, users, type DbDialog } from "@in/server/db/schema"
 import { encodeChatInfo, encodeDialogInfo, TChatInfo, TDialogInfo, TUserInfo, encodeUserInfo } from "@in/server/models"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
-import { and, eq, or } from "drizzle-orm"
+import { and, eq, inArray, not, or } from "drizzle-orm"
 import { TInputId } from "../types/methods"
 
 export const Input = Type.Object({
@@ -17,7 +17,7 @@ export const Input = Type.Object({
 export const Response = Type.Object({
   chat: TChatInfo,
   dialog: TDialogInfo,
-  peerUsers: Type.Array(TUserInfo),
+  user: TUserInfo,
 })
 
 export const handler = async (
@@ -64,36 +64,84 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
+    let d: DbDialog[] = []
     // Create or update dialog for current user only
-    const [dialog] = await db
-      .insert(dialogs)
-      .values({
-        chatId: chat.id,
-        userId: context.currentUserId,
-        peerUserId: isSelfChat ? context.currentUserId : peerId,
-        date: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: [dialogs.chatId, dialogs.userId],
-        set: { date: new Date() },
-      })
-      .returning()
+    if (minUserId === maxUserId) {
+      let [dialog] = await db
+        .insert(dialogs)
+        .values({
+          chatId: chat.id,
+          userId: context.currentUserId,
+          peerUserId: context.currentUserId,
+          date: new Date(),
+        })
+        .onConflictDoNothing()
+        .returning()
 
-    if (!dialog) {
-      Log.shared.error("Failed to create dialog")
-      throw new InlineError(InlineError.ApiError.INTERNAL)
+      if (!dialog) {
+        dialog = await db.query.dialogs.findFirst({
+          where: and(
+            eq(dialogs.userId, context.currentUserId),
+            eq(dialogs.peerUserId, context.currentUserId),
+            eq(dialogs.chatId, chat.id),
+          ),
+        })
+      }
+
+      if (!dialog) {
+        Log.shared.error("Failed to create dialog")
+        throw new InlineError(InlineError.ApiError.INTERNAL)
+      }
+      d = [dialog]
+    } else {
+      const result = await db
+        .insert(dialogs)
+        .values([
+          {
+            chatId: chat.id,
+            userId: minUserId,
+            peerUserId: maxUserId,
+            date: new Date(),
+          },
+          {
+            chatId: chat.id,
+            userId: maxUserId,
+            peerUserId: minUserId,
+            date: new Date(),
+          },
+        ])
+        .onConflictDoUpdate({
+          target: [dialogs.chatId, dialogs.userId],
+          set: { date: new Date() },
+        })
+        .returning()
+
+      if (!result) {
+        Log.shared.error("Failed to create dialog")
+        throw new InlineError(InlineError.ApiError.INTERNAL)
+      }
+      d = result
     }
 
     // Fetch peer users (both current user and the peer)
-    const peerUsers = await db
-      .select()
-      .from(users)
-      .where(or(eq(users.id, context.currentUserId), eq(users.id, peerId)))
+    const [user] = await db.select().from(users).where(eq(users.id, peerId))
+
+    if (!user) {
+      Log.shared.error("Failed to get user")
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+
+    const [returningDialog] = d.filter((d) => d.userId === context.currentUserId)
+
+    if (!returningDialog) {
+      Log.shared.error("Failed to get dialog")
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
 
     return {
       chat: encodeChatInfo(chat, { currentUserId: context.currentUserId }),
-      dialog: encodeDialogInfo(dialog),
-      peerUsers: peerUsers.map((user) => encodeUserInfo(user)),
+      dialog: encodeDialogInfo(returningDialog),
+      user: encodeUserInfo(user),
     }
   } catch (error) {
     Log.shared.error("Failed to create private chat", error)

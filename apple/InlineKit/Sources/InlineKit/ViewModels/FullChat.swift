@@ -32,57 +32,58 @@ public final class FullChatViewModel: ObservableObject {
     let peerId = peer
     chatCancellable =
       ValueObservation
-      .tracking { db in
-        try Dialog
-          .filter(id: Dialog.getDialogId(peerId: peerId))
-          .including(
-            optional: Dialog.peerThread
-              .including(optional: Chat.lastMessage)
-          )
-          .including(
-            optional: Dialog.peerUser
-              .including(optional: User.chat)
-          )
-          .asRequest(of: SpaceChatItem.self)
-          .fetchAll(db)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { print("Failed to get full chat \($0)") },
-        receiveValue: { [weak self] chats in
-          print("Got full chat \(chats.first)")
-          self?.chatItem = chats.first
-
-          // TODO: improve this
+        .tracking { db in
+          try Dialog
+            .filter(id: Dialog.getDialogId(peerId: peerId))
+//            .including(
+//              optional: Dialog.peerThread
+//                .including(optional: Chat.lastMessage)
+//            )
+            .including(
+              optional: Dialog.peerUser
+                .including(optional: User.chat
+                  .including(optional: Chat.lastMessage))
+            )
+            .asRequest(of: SpaceChatItem.self)
+            .fetchAll(db)
         }
-      )
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { print("Failed to get full chat \($0)") },
+          receiveValue: { [weak self] chats in
+            print("Got full chat \(chats.first)")
+            self?.chatItem = chats.first
+
+            // TODO: improve this
+          }
+        )
   }
 
   func fetchMessages() {
     let peer = self.peer
     messagesCancellable =
       ValueObservation
-      .tracking { db in
-        print("I'm getting messages \(peer)")
-        if case .thread(let id) = peer {
-          return try Message.filter(Column("peerThreadId") == id)
-            .fetchAll(db)
-        } else if case .user(let id) = peer {
-          return try Message.filter(Column("peerUserId") == id)
-            .fetchAll(db)
-        } else {
-          return []
+        .tracking { db in
+          print("I'm getting messages \(peer)")
+          if case .thread(let id) = peer {
+            return try Message.filter(Column("peerThreadId") == id)
+              .fetchAll(db)
+          } else if case .user(let id) = peer {
+            return try Message.filter(Column("peerUserId") == id)
+              .fetchAll(db)
+          } else {
+            return []
+          }
         }
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { error in
-          print("Failed to get messages \(error)")
-        },
-        receiveValue: { [weak self] messages in
-          print("Got messages \(messages)")
-          self?.messages = messages
-        }
-      )
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { error in
+            print("Failed to get messages \(error)")
+          },
+          receiveValue: { [weak self] messages in
+            print("Got messages \(messages)")
+            self?.messages = messages
+          }
+        )
   }
 }

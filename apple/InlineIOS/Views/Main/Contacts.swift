@@ -92,8 +92,8 @@ struct Contacts: View {
         try await database.reader.read { db in
           searchResults =
             try User
-            .filter(Column("username").like("%\(query.lowercased())%"))
-            .fetchAll(db)
+              .filter(Column("username").like("%\(query.lowercased())%"))
+              .fetchAll(db)
         }
 
         await MainActor.run {
@@ -120,11 +120,10 @@ struct Contacts: View {
   private func startChat(with user: User) {
     Task {
       do {
-        if let threadId = try await dataManager.createPrivateChat(peerId: user.id) {
-          nav.push(.chat(peer: .user(id: threadId)))
-        }
+        let peer = try await dataManager.createPrivateChat(userId: user.id)
+        nav.push(.chat(peer: peer))
       } catch {
-        Log.shared.error("Failed to create chat", error: error)
+//        Log.shared.error("Failed to create chat", error: error)
       }
     }
   }
