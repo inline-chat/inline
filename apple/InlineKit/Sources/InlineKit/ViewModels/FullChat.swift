@@ -33,19 +33,30 @@ public final class FullChatViewModel: ObservableObject {
     chatCancellable =
       ValueObservation
         .tracking { db in
-          try Dialog
-            .filter(id: Dialog.getDialogId(peerId: peerId))
-//            .including(
-//              optional: Dialog.peerThread
-//                .including(optional: Chat.lastMessage)
-//            )
-            .including(
-              optional: Dialog.peerUser
-                .including(optional: User.chat
-                  .including(optional: Chat.lastMessage))
-            )
-            .asRequest(of: SpaceChatItem.self)
-            .fetchAll(db)
+          switch peerId {
+          case .user(_):
+            // Fetch private chat
+            try Dialog
+              .filter(id: Dialog.getDialogId(peerId: peerId))
+              .including(
+                optional: Dialog.peerUser
+                  .including(optional: User.chat
+                    .including(optional: Chat.lastMessage))
+              )
+              .asRequest(of: SpaceChatItem.self)
+              .fetchAll(db)
+
+          case .thread(_):
+            // Fetch thread chat
+            try Dialog
+              .filter(id: Dialog.getDialogId(peerId: peerId))
+              .including(
+                optional: Dialog.peerThread
+                  .including(optional: Chat.lastMessage)
+              )
+              .asRequest(of: SpaceChatItem.self)
+              .fetchAll(db)
+          }
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
