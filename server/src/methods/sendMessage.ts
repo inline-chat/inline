@@ -1,12 +1,13 @@
 import { db } from "@in/server/db"
 import { desc, eq, sql, and } from "drizzle-orm"
-import { chats, messages } from "@in/server/db/schema"
+import { chats, dialogs, messages, type DbChat } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Optional, type Static, Type } from "@sinclair/typebox"
 import { encodeMessageInfo, TInputPeerInfo, TMessageInfo, TPeerInfo, type TUpdateInfo } from "@in/server/models"
 import { createMessage, ServerMessageKind } from "@in/server/ws/protocol"
 import { connectionManager } from "@in/server/ws/connections"
+import { getUpdateGroup } from "@in/server/utils/updates"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -71,15 +72,19 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     .update(chats)
     .set({ lastMsgId: prevMessageId + 1 })
     .where(eq(chats.id, chatId))
-  console.log("NewMessage", newMessage)
-  console.log("PeerId", peerId)
+
   try {
     const encodedMessage = encodeMessageInfo(newMessage, {
       currentUserId: context.currentUserId,
       peerId: peerId,
     })
 
-    console.log("encodedMessage", encodedMessage)
+    sendMessageUpdate({
+      message: encodedMessage,
+      currentUserId: context.currentUserId,
+      sendToSelf: true,
+    })
+
     return { message: encodedMessage }
   } catch (encodeError) {
     Log.shared.error("Failed to encode message", {
@@ -125,25 +130,33 @@ export const getChatIdFromPeer = async (
       return existingChat.id
     }
 
-    throw new InlineError(InlineError.ApiError.INVALID_RECIPIENT_TYPE)
+    // create new chat???
+    throw new InlineError(InlineError.ApiError.PEER_INVALID)
   }
 
   throw new InlineError(InlineError.ApiError.PEER_INVALID)
 }
 
 // HERE YOU ARE DENA
-const sendMessageUpdate = ({
-  message,
-  sendToUserId,
-}: {
-  message: TMessageInfo
-  sendToUserId: number
-  currentUserId: number
-  sendToSelf: boolean
-}) => {
+const sendMessageUpdate = async ({ message, currentUserId }: { message: TMessageInfo; currentUserId: number }) => {
   const update: TUpdateInfo = {
     newMessage: { message },
   }
+  const peerId = message.peerId
+  const updateGroup = await getUpdateGroup(peerId, { currentUserId })
 
-  connectionManager.sendToUser(sendToUserId, createMessage({ kind: ServerMessageKind.Message, payload: update }))
+  if (updateGroup.type === "users") {
+    updateGroup.userIds.forEach((userId) => {
+      connectionManager.sendToUser(userId, createMessage({ kind: ServerMessageKind.Message, payload: update }))
+    })
+  } else if (updateGroup.type === "space") {
+    connectionManager.sendToSpace(
+      updateGroup.spaceId,
+      createMessage({ kind: ServerMessageKind.Message, payload: update }),
+    )
+  }
+
+  if (sendToSelf) {
+    connectionManager.sendToUser(currentUserId, createMessage({ kind: ServerMessageKind.Message, payload: update }))
+  }
 }

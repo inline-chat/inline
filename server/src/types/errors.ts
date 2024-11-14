@@ -11,7 +11,6 @@ export const ApiError = {
   PHONE_INVALID: ["PHONE_INVALID", 400, "The phone number is invalid"],
   EMAIL_INVALID: ["EMAIL_INVALID", 400, "The email is invalid"],
   PEER_INVALID: ["PEER_INVALID", 400, "The peer (chat or user) is invalid"],
-  INVALID_RECIPIENT_TYPE: ["INVALID_RECIPIENT_TYPE", 400, "Invalid recipient type for this operation"],
   SPACE_INVALID: ["SPACE_INVALID", 400, "The space is invalid"],
   SPACE_CREATOR_REQUIRED: ["SPACE_CREATOR_REQUIRED", 400, "You must be the creator of space for this action"],
   SPACE_ADMIN_REQUIRED: ["SPACE_ADMIN_REQUIRED", 400, "You must be an admin of space for this action"],

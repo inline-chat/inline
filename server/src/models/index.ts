@@ -81,9 +81,10 @@ export const TPeerInfo = Type.Union([
   Type.Object({ userId: Type.Integer() }),
   Type.Object({ threadId: Type.Integer() }),
 ])
+export type TPeerInfo = StaticEncode<typeof TPeerInfo>
 
 export const TInputPeerInfo = Type.Union([
-  Type.Object({ userId: Type.Integer() }),
+  Type.Object({ userId: Type.Integer() }), // todo: use input id
   Type.Object({ threadId: Type.Integer() }),
 ])
 

@@ -36,4 +36,9 @@ export class Log {
     const scopeColored = styleText("blue", this.scope)
     console.debug(scopeColored, ...args)
   }
+
+  trace(...args: any[]): void {
+    const scopeColored = styleText("magenta", this.scope)
+    console.trace(scopeColored, ...args)
+  }
 }

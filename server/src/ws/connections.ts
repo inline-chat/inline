@@ -1,6 +1,9 @@
+import { getSpaceIdsForUser } from "@in/server/db/models/spaces"
 import { Log } from "@in/server/utils/log"
-import type { ServerMessageType } from "@in/server/ws/protocol"
-import { type ServerWebSocket } from "bun"
+import { ServerMessage, type ServerMessageType } from "@in/server/ws/protocol"
+import { WebSocketTopic } from "@in/server/ws/topics"
+import { Value } from "@sinclair/typebox/value"
+import { type Server, type ServerWebSocket } from "bun"
 import type { ElysiaWS } from "elysia/ws"
 import { nanoid } from "nanoid"
 
@@ -9,8 +12,14 @@ const log = new Log("ws-connections")
 const CLOSE_UNAUTHENTICATED_TIMEOUT = 20_000
 
 class ConnectionManager {
+  private server: Server | undefined
   private connections: Map<string, { ws: ElysiaWS<ServerWebSocket<any>>; userId?: number }> = new Map()
   private authenticatedUsers: Map<number, Set<string>> = new Map()
+  private userSpaceIds: Map<number, number[]> = new Map()
+
+  setServer(server: Server) {
+    this.server = server
+  }
 
   addConnection(ws: ElysiaWS<ServerWebSocket<any>, any, any>): string {
     log.debug("Adding new connection")
@@ -35,7 +44,9 @@ class ConnectionManager {
     if (connection) {
       connection.userId = userId
       if (!this.authenticatedUsers.has(userId)) {
+        // User is connecting for the first time, populate the cache
         this.authenticatedUsers.set(userId, new Set())
+        this.subscribeUserToSpaceIds(userId)
       }
       this.authenticatedUsers.get(userId)?.add(id)
     }
@@ -69,6 +80,7 @@ class ConnectionManager {
     }
   }
 
+  // TODO: refactor to use publish
   sendToUser(userId: number, message: ServerMessageType) {
     log.debug(`Sending message to user ${userId}`)
     const userConnections = this.authenticatedUsers.get(userId)
@@ -77,6 +89,70 @@ class ConnectionManager {
         const connection = this.connections.get(connectionId)
         connection?.ws.send(message)
       })
+    }
+  }
+
+  async sendToSpace(spaceId: number, message: ServerMessageType) {
+    log.debug(`Sending message to space ${spaceId}`)
+    this.publish(WebSocketTopic.Space(spaceId), message)
+  }
+
+  subscribeToSpace(userId: number, spaceId: number): void {
+    log.debug(`Subscribing to space ${spaceId} for user ${userId}`)
+    // TODO: Implement
+
+    const userConnections = this.authenticatedUsers.get(userId)
+    if (userConnections) {
+      userConnections.forEach((connectionId) => {
+        const connection = this.connections.get(connectionId)
+        connection?.ws.subscribe(WebSocketTopic.Space(spaceId))
+      })
+    }
+  }
+
+  // ------------------------------------------------------------------------------------------------
+  // Private methods
+  // ------------------------------------------------------------------------------------------------
+
+  private async getUserSpaceIds(userId: number): Promise<number[]> {
+    return await getSpaceIdsForUser(userId)
+  }
+
+  private async cacheUserSpaceIds(userId: number): Promise<number[]> {
+    if (this.userSpaceIds.has(userId)) {
+      // Already cached
+      return this.userSpaceIds.get(userId) ?? []
+    }
+
+    const spaceIds = await this.getUserSpaceIds(userId)
+    this.userSpaceIds.set(userId, spaceIds)
+    return spaceIds
+  }
+
+  private async subscribeUserToSpaceIds(userId: number): Promise<void> {
+    const spaceIds = await this.cacheUserSpaceIds(userId)
+    if (!spaceIds) return
+
+    spaceIds.forEach((spaceId) => {
+      this.subscribeToSpace(userId, spaceId)
+    })
+  }
+
+  private publish(topic: string, message: ServerMessageType) {
+    if (this.server) {
+      const encoded = Value.Encode(ServerMessage, Value.Clean(ServerMessage, message))
+      let status = this.server.publish(topic, JSON.stringify(encoded))
+
+      if (status === 0) {
+        log.error(`Failed to publish message to topic ${topic}`, status)
+      } else if (status === -1) {
+        log.debug(`Published message to topic ${topic}`)
+      } else {
+        // Success
+        log.trace(`Published message to topic ${topic} with bytes ${status}`)
+      }
+    } else {
+      log.error("No server set, cannot publish")
     }
   }
 }
