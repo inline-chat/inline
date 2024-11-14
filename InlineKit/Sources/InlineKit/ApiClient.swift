@@ -80,7 +80,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200...299:
+      case 200 ... 299:
         let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
         switch apiResponse {
         case let .success(data):
@@ -181,10 +181,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func createPrivateChat(peerId: Int64) async throws -> CreatePrivateChat {
+  public func createPrivateChat(userId: Int64) async throws -> CreatePrivateChat {
     try await request(
       .createPrivateChat,
-      queryItems: [URLQueryItem(name: "userId", value: "\(peerId)")],
+      queryItems: [URLQueryItem(name: "userId", value: "\(userId)")],
       includeToken: true
     )
   }
@@ -231,7 +231,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     -> SendMessage
   {
     var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "text", value: text)
+      URLQueryItem(name: "text", value: text),
     ]
 
     if let peerUserId = peerUserId {
@@ -300,6 +300,7 @@ public struct CreateSpace: Codable, Sendable {
   public let space: ApiSpace
   public let member: ApiMember
   public let chats: [ApiChat]
+  public let dialogs: [ApiDialog]
 }
 
 public struct UpdateProfile: Codable, Sendable {
@@ -326,7 +327,7 @@ public struct SearchContacts: Codable, Sendable {
 public struct CreatePrivateChat: Codable, Sendable {
   public let chat: ApiChat
   public let dialog: ApiDialog
-  public let peerUsers: [ApiUser]
+  public let user: ApiUser
 }
 
 public struct GetMe: Codable, Sendable {
@@ -338,6 +339,7 @@ public struct EmptyPayload: Codable, Sendable {}
 public struct GetPrivateChats: Codable, Sendable {
   public let chats: [ApiChat]
   public let dialogs: [ApiDialog]
+  public let peerUsers: [ApiUser]
 }
 
 public struct SpaceMembersPayload: Codable, Sendable {

@@ -33,7 +33,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
   public static let lastMessage = hasOne(
     Message.self,
-    using: ForeignKey(["id"], to: ["lastMsgId"])
+    using: ForeignKey(["chatId", "messageId"], to: ["id", "lastMsgId"])
   )
 
   public var lastMessage: QueryInterfaceRequest<Message> {
@@ -41,8 +41,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 
   public static let messages = hasMany(
-    Message.self,
-    using: ForeignKey(["id"], to: ["chatId"])
+    Message.self
   )
 
   public var messages: QueryInterfaceRequest<Message> {
@@ -56,7 +55,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 
   public init(
-    id: Int64 = Int64.random(in: 1...50000), date: Date, type: ChatType, title: String?,
+    id: Int64 = Int64.random(in: 1 ... 50000), date: Date, type: ChatType, title: String?,
     spaceId: Int64?, peerUserId: Int64? = nil
   ) {
     self.id = id
@@ -65,12 +64,12 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.title = title
     self.spaceId = spaceId
     self.peerUserId = peerUserId
-    self.lastMsgId = nil
+    lastMsgId = nil
   }
 }
 
-extension Chat {
-  public enum CodingKeys: String, CodingKey {
+public extension Chat {
+  enum CodingKeys: String, CodingKey {
     case id
     case date
     case type
@@ -79,7 +78,7 @@ extension Chat {
     case peerUserId
   }
 
-  public init(from decoder: Decoder) throws {
+  init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     id = try container.decode(Int64.self, forKey: .id)
     date = try container.decode(Date.self, forKey: .date)
@@ -90,28 +89,29 @@ extension Chat {
   }
 }
 
-extension Chat {
-  public init(from: ApiChat) {
+public extension Chat {
+  init(from: ApiChat) {
     id = from.id
     date = Self.fromTimestamp(from: from.date)
     title = from.title
     spaceId = from.spaceId
     type = from.type == "private" ? .privateChat : .thread
     peerUserId =
-      if let peer = from.peer {
-        switch peer {
-        case let .user(id):
-          id
-        case .thread:
-          nil
-        }
-      } else {
+      if let peer = from.peer
+    {
+      switch peer {
+      case let .user(id):
+        id
+      case .thread:
         nil
       }
+    } else {
+      nil
+    }
     lastMsgId = from.lastMsgId
   }
 
-  public static func fromTimestamp(from: Int) -> Date {
+  static func fromTimestamp(from: Int) -> Date {
     return Date(timeIntervalSince1970: Double(from) / 1000)
   }
 }
