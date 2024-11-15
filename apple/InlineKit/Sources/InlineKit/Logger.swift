@@ -49,8 +49,14 @@ public final class Log: @unchecked Sendable {
   ) {
     let timestamp = Self.dateFormatter.string(from: Date())
     let fileName = (file as NSString).lastPathComponent
-    let logMessage =
-      "\(timestamp) \(level.rawValue) [\(scope)] [\(fileName):\(line) \(function)] \(message) \(error?.localizedDescription ?? "")"
+    #if DEBUG
+    // Don't log time when in debug mode cleaner logs
+      let logMessage =
+        "\(level.rawValue) [\(scope)]: \(message) \(error?.localizedDescription ?? "") - [\(fileName):\(line) \(function)]"
+    #else
+      let logMessage =
+        "\(timestamp) \(level.rawValue) [\(scope)] [\(fileName):\(line) \(function)] \(message) \(error?.localizedDescription ?? "")"
+    #endif
 
     print(logMessage)
 
