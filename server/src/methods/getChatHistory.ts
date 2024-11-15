@@ -1,14 +1,18 @@
 import { db } from "@in/server/db"
-import { desc, eq } from "drizzle-orm"
+import { asc, desc, eq } from "drizzle-orm"
 import { messages } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
-import { type Static, Type } from "@sinclair/typebox"
-import { encodeMessageInfo, TMessageInfo } from "@in/server/models"
+import { Optional, type Static, Type } from "@sinclair/typebox"
+import { encodeMessageInfo, TInputPeerInfo, TMessageInfo } from "@in/server/models"
+import { getChatIdFromPeer } from "./sendMessage"
 
 export const Input = Type.Object({
-  id: Type.Integer(),
-  limit: Type.Optional(Type.Integer({ default: 500 })),
+  peerId: Optional(TInputPeerInfo),
+  peerUserId: Optional(Type.String()),
+  peerThreadId: Optional(Type.String()),
+
+  limit: Type.Optional(Type.Integer({ default: 70 })),
 })
 
 type Input = Static<typeof Input>
@@ -23,22 +27,36 @@ export const Response = Type.Object({
 
 type Response = Static<typeof Response>
 
-export const handler = async (input: Input, _: Context): Promise<Response> => {
-  try {
-    const chatId = input.id
-    if (isNaN(chatId)) {
-      throw new InlineError(InlineError.ApiError.PEER_INVALID)
-    }
-    const result = await db
-      .select()
-      .from(messages)
-      .where(eq(messages.chatId, chatId))
-      .orderBy(desc(messages.date))
-      .limit(input.limit ?? 50)
+export const handler = async (input: Input, context: Context): Promise<Response> => {
+  const peerId = input.peerUserId
+    ? { userId: Number(input.peerUserId) }
+    : input.peerThreadId
+    ? { threadId: Number(input.peerThreadId) }
+    : input.peerId
 
-    return { messages: result.map(encodeMessageInfo) }
-  } catch (error) {
-    Log.shared.error("Failed to get chat history", error)
-    throw new InlineError(InlineError.ApiError.INTERNAL)
+  if (!peerId) {
+    throw new InlineError(InlineError.ApiError.PEER_INVALID)
+  }
+
+  const chatId = await getChatIdFromPeer(peerId, context)
+
+  if (isNaN(chatId)) {
+    throw new InlineError(InlineError.ApiError.PEER_INVALID)
+  }
+
+  const result = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.chatId, chatId))
+    .orderBy(asc(messages.date))
+    .limit(input.limit ?? 70)
+
+  return {
+    messages: result.map((m) =>
+      encodeMessageInfo(m, {
+        currentUserId: context.currentUserId,
+        peerId: peerId,
+      }),
+    ),
   }
 }

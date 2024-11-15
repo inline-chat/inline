@@ -30,6 +30,7 @@ public enum Path: String {
   case getSpaceMembers
   case sendMessage
   case getDialogs
+  case getChatHistory
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -80,7 +81,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200 ... 299:
+      case 200...299:
         let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
         switch apiResponse {
         case let .success(data):
@@ -231,7 +232,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     -> SendMessage
   {
     var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "text", value: text),
+      URLQueryItem(name: "text", value: text)
     ]
 
     if let peerUserId = peerUserId {
@@ -247,6 +248,22 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       queryItems: queryItems,
       includeToken: true
     )
+  }
+
+  public func getChatHistory(peerUserId: Int64?, peerThreadId: Int64?) async throws
+    -> GetChatHistory
+  {
+    var queryItems: [URLQueryItem] = []
+
+    if let peerUserId = peerUserId {
+      queryItems.append(URLQueryItem(name: "peerUserId", value: "\(peerUserId)"))
+    }
+
+    if let peerThreadId = peerThreadId {
+      queryItems.append(URLQueryItem(name: "peerThreadId", value: "\(peerThreadId)"))
+    }
+
+    return try await request(.getChatHistory, queryItems: queryItems, includeToken: true)
   }
 }
 
@@ -370,4 +387,10 @@ public struct GetDialogs: Codable, Sendable {
   public let dialogs: [ApiDialog]
   // Users mentioned in last messages
   public let users: [ApiUser]
+}
+
+public struct GetChatHistory: Codable, Sendable {
+  // Sorted by date asc
+  // Limited by 70 by default
+  public let messages: [ApiMessage]
 }
