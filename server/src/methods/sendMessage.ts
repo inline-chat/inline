@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { desc, eq, sql, and } from "drizzle-orm"
-import { chats, dialogs, messages, type DbChat } from "@in/server/db/schema"
+import { chats, dialogs, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Optional, type Static, Type } from "@sinclair/typebox"
@@ -80,7 +80,8 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     })
 
     sendMessageUpdate({
-      message: encodedMessage,
+      message: newMessage,
+      peerId,
       currentUserId: context.currentUserId,
     })
 
@@ -137,21 +138,53 @@ export const getChatIdFromPeer = async (
 }
 
 // HERE YOU ARE DENA
-const sendMessageUpdate = async ({ message, currentUserId }: { message: TMessageInfo; currentUserId: number }) => {
-  const update: TUpdateInfo = {
-    newMessage: { message },
-  }
-  const peerId = message.peerId
+const sendMessageUpdate = async ({
+  peerId,
+  message,
+  currentUserId,
+}: {
+  peerId: TPeerInfo
+  message: DbMessage
+  currentUserId: number
+}) => {
   const updateGroup = await getUpdateGroup(peerId, { currentUserId })
 
   if (updateGroup.type === "users") {
     updateGroup.userIds.forEach((userId) => {
-      connectionManager.sendToUser(userId, createMessage({ kind: ServerMessageKind.Message, payload: update }))
+      const update: TUpdateInfo = {
+        newMessage: {
+          message: encodeMessageInfo(message, {
+            // must encode for the user we're sending to
+            currentUserId: userId,
+            //  customize this per user (e.g. threadId)
+            peerId: userId === currentUserId ? peerId : { userId: currentUserId },
+          }),
+        },
+      }
+
+      connectionManager.sendToUser(
+        userId,
+        createMessage({ kind: ServerMessageKind.Message, payload: { updates: [update] } }),
+      )
     })
   } else if (updateGroup.type === "space") {
-    connectionManager.sendToSpace(
-      updateGroup.spaceId,
-      createMessage({ kind: ServerMessageKind.Message, payload: update }),
-    )
+    const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
+    Log.shared.debug(`Sending message to space ${updateGroup.spaceId}`, { userIds })
+    userIds.forEach((userId) => {
+      const update: TUpdateInfo = {
+        newMessage: {
+          message: encodeMessageInfo(message, {
+            // must encode for the user we're sending to
+            currentUserId: userId,
+            peerId,
+          }),
+        },
+      }
+
+      connectionManager.sendToUser(
+        userId,
+        createMessage({ kind: ServerMessageKind.Message, payload: { updates: [update] } }),
+      )
+    })
   }
 }

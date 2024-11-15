@@ -56,7 +56,12 @@ struct ClientMessage<Payload: Codable>: Codable {
 extension ServerMessage {
   typealias Error = ServerMessage<ErrorPayload>
   typealias Generic<T: Codable> = ServerMessage<T>
-  typealias Empty = ServerMessage
+  typealias Empty = ServerMessage<EmptyPayload>
+  typealias UpdateMessage = ServerMessage<ServerMessagePayload>
+}
+
+struct ServerMessagePayload: Codable {
+  let updates: [Update]?
 }
 
 extension ClientMessage {

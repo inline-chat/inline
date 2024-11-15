@@ -11,10 +11,12 @@ struct MainWindow: View {
     ZStack {
       switch viewModel.topLevelRoute {
       case .main:
-        MainView()
-          .transition(
-            .opacity
-          )
+        AuthenticatedWindowWrapper {
+          MainView()
+            .transition(
+              .opacity
+            )
+        }
 
       case .onboarding:
         VisualEffectView(

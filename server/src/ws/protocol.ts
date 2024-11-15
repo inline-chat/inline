@@ -3,6 +3,7 @@ import { t, type Static } from "elysia"
 // Methods
 import { Input as GetMeInput } from "@in/server/methods/getMe"
 import { nanoid } from "nanoid/non-secure"
+import { TUpdate } from "@in/server/models"
 
 const Methods = t.Union([
   t.Object({
@@ -34,7 +35,9 @@ export const ServerMessage = t.Union([
     /** Kind */
     k: t.Literal(ServerMessageKind.Message),
     /** Payload */
-    p: t.Any(),
+    p: t.Object({
+      updates: t.Optional(t.Array(TUpdate)),
+    }),
   }),
 
   // Response
@@ -168,7 +171,6 @@ export const createMessage = (
       }
     | {
         kind: ServerMessageKind.Message
-
         payload: any
       }
     | {

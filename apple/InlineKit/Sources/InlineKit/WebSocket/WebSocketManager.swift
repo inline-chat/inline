@@ -97,6 +97,18 @@ public final class WebSocketManager: ObservableObject {
     switch message {
     case .string(let text):
       print("Received: \(text)")
+      // Decode message as update
+      if let serverMessage = decodeServerMessage(data: text) {
+        switch serverMessage.k {
+        case .message:
+          if let updates = serverMessage.p?.updates {
+            updatesManager.applyBatch(updates: updates)
+          }
+        default:
+          break
+        }
+      }
+
     case .data(let data):
       print("Received: \(data)")
     }
@@ -140,6 +152,16 @@ public final class WebSocketManager: ObservableObject {
     Task {
       // TODO: handle saving this task
       try await self.start()
+    }
+  }
+
+  private func decodeServerMessage(data: String) -> ServerMessage.UpdateMessage? {
+    let decoder = JSONDecoder()
+    do {
+      return try decoder.decode(ServerMessage<ServerMessagePayload>.self, from: data.data(using: .utf8)!)
+    } catch {
+      log.error("Failed to decode server message", error: error)
+      return nil
     }
   }
 }

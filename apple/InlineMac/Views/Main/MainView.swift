@@ -8,22 +8,24 @@ struct MainView: View {
   @EnvironmentObject var window: MainWindowViewModel
   @EnvironmentObject var ws: WebSocketManager
   @EnvironmentObject var navigation: NavigationModel
+  @EnvironmentObject var rootData: RootData
+  @EnvironmentObject var dataManager: DataManager
   
   // Fetch authenticated user data
-  @EnvironmentStateObject var rootData: RootData
-  @EnvironmentStateObject var dataManager: DataManager
+//  @EnvironmentStateObject var rootData: RootData
+//  @EnvironmentStateObject var dataManager: DataManager
   
   @State private var windowSizeCancellable: AnyCancellable?
   @State private var disableAutoCollapse = false
   @State private var autoCollapsed = false
   
   init() {
-    _rootData = EnvironmentStateObject { env in
-      RootData(db: env.appDatabase, auth: env.auth)
-    }
-    _dataManager = EnvironmentStateObject { env in
-      DataManager(database: env.appDatabase)
-    }
+//    _rootData = EnvironmentStateObject { env in
+//      RootData(db: env.appDatabase, auth: env.auth)
+//    }
+//    _dataManager = EnvironmentStateObject { env in
+//      DataManager(database: env.appDatabase)
+//    }
   }
   
   var body: some View {

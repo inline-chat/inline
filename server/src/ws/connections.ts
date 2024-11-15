@@ -15,6 +15,7 @@ class ConnectionManager {
   private server: Server | undefined
   private connections: Map<string, { ws: ElysiaWS<ServerWebSocket<any>>; userId?: number }> = new Map()
   private authenticatedUsers: Map<number, Set<string>> = new Map()
+  private usersBySpaceId: Map<number, Set<number>> = new Map()
   private userSpaceIds: Map<number, number[]> = new Map()
 
   setServer(server: Server) {
@@ -97,10 +98,23 @@ class ConnectionManager {
     this.publish(WebSocketTopic.Space(spaceId), message)
   }
 
+  getSpaceUserIds(spaceId: number): number[] {
+    return Array.from(this.usersBySpaceId.get(spaceId) ?? [])
+  }
+
   subscribeToSpace(userId: number, spaceId: number): void {
     log.debug(`Subscribing to space ${spaceId} for user ${userId}`)
     // TODO: Implement
 
+    // Cache the user in the space
+    let spaceConnections = this.usersBySpaceId.get(spaceId)
+    if (!spaceConnections) {
+      spaceConnections = new Set()
+      this.usersBySpaceId.set(spaceId, spaceConnections)
+    }
+    spaceConnections.add(userId)
+
+    // Subscribe the user to the space
     const userConnections = this.authenticatedUsers.get(userId)
     if (userConnections) {
       userConnections.forEach((connectionId) => {

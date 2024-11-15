@@ -14,6 +14,7 @@ class UpdatesManager {
   }
 
   func applyBatch(updates: [Update]) {
+    log.debug("applying \(updates.count) updates")
     do {
       try database.dbWriter.write { db in
         for update in updates {
@@ -29,16 +30,16 @@ class UpdatesManager {
 
 // MARK: Types
 
-struct Update {
+struct Update: Codable {
   /// New message received
   var newMessage: UpdateNewMessage?
 }
 
-struct UpdateNewMessage {
+struct UpdateNewMessage: Codable {
   var message: ApiMessage
 
   func apply(db: Database) throws {
     let message = Message(from: message)
-    try message.save(db)
+    try message.save(db, onConflict: .replace)
   }
 }
