@@ -76,7 +76,7 @@ struct MainView: View {
       } catch {
         Log.shared.error("Failed to getPrivateChats", error: error)
       }
-   
+
       do {
         try await dataManager.getSpaces()
 
@@ -174,19 +174,11 @@ private extension MainView {
       ToolbarItem(id: "MainToolbarTrailing", placement: .topBarTrailing) {
         HStack(spacing: 4) {
           Menu {
-            Button("New DM") { showDmSheet = true }
+//            Button("New DM") { showDmSheet = true }
             Button("Create Space") { showSheet = true }
 
           } label: {
-            Image(systemName: "ellipsis")
-              .tint(Color.secondary)
-              .frame(width: 38, height: 38)
-              .contentShape(Rectangle())
-          }
-          Button(action: {
-            nav.push(.settings)
-          }) {
-            Image(systemName: "gearshape")
+            Image(systemName: "plus")
               .tint(Color.secondary)
               .frame(width: 38, height: 38)
               .contentShape(Rectangle())
