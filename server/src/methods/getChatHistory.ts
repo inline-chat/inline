@@ -48,7 +48,7 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     .select()
     .from(messages)
     .where(eq(messages.chatId, chatId))
-    .orderBy(asc(messages.date))
+    .orderBy(desc(messages.date))
     .limit(input.limit ?? 70)
 
   return {
