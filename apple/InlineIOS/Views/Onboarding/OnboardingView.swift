@@ -16,6 +16,8 @@ struct OnboardingView: View {
             AddAccount()
           case .welcome:
             Welcome()
+          case .main:
+            MainView()
           }
         }
     }

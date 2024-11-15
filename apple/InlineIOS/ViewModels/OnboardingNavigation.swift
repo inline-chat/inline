@@ -5,6 +5,7 @@ enum OnboardingStep: Identifiable, Hashable {
   case email(prevEmail: String? = nil)
   case code(email: String)
   case profile
+  case main
 
   var id: String {
     switch self {
@@ -12,6 +13,7 @@ enum OnboardingStep: Identifiable, Hashable {
     case .email(let prevEmail): return "email-\(prevEmail ?? "")"
     case .code(let email): return "code-\(email)"
     case .profile: return "profile"
+    case .main: return "main"
     }
   }
 }
