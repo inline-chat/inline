@@ -32,6 +32,7 @@ extension AppDatabase {
         t.column("lastName", .text)
         t.column("username", .text)
         t.column("date", .datetime).notNull()
+
       }
 
       // Space table
@@ -83,6 +84,7 @@ extension AppDatabase {
         t.column("pinned", .boolean)
 
         t.uniqueKey(["messageId", "chatId"])
+
       }
 
       // Dialog table

@@ -15,7 +15,8 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var date: Int
 }
 
-public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
+public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable
+{
   // Locally autoincremented id
   public var globalId: Int64?
 
@@ -56,7 +57,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.chat)
   }
 
-  public static let from = belongsTo(User.self)
+  public static let from = belongsTo(User.self, using: ForeignKey(["fromId"], to: ["id"]))
   public var from: QueryInterfaceRequest<User> {
     request(for: Message.from)
   }
