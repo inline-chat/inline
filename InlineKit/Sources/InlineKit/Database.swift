@@ -5,6 +5,7 @@ import GRDB
 
 public final class AppDatabase: Sendable {
   public let dbWriter: any DatabaseWriter
+  static let log = Log.scoped("AppDatabase")
 
   public init(_ dbWriter: any GRDB.DatabaseWriter) throws {
     self.dbWriter = dbWriter
@@ -105,10 +106,11 @@ public extension AppDatabase {
   /// - parameter base: A base configuration.
   static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
     var config = base
-    print("makeConfiguration called")
 
     if let token = Auth.shared.getToken() {
-      print("Token in makeConfiguration \(token)")
+      #if DEBUG
+        log.debug("Database passphrase: \(token)")
+      #endif
       config.prepareDatabase { db in
         try db.usePassphrase(token)
       }
@@ -132,7 +134,7 @@ public extension AppDatabase {
         }
       }
     } else {
-      Log.shared.warning("AppDatabase.authenticated called without token")
+      log.warning("AppDatabase.authenticated called without token")
     }
   }
 
@@ -153,7 +155,7 @@ public extension AppDatabase {
       try db.changePassphrase("123")
     }
 
-    Log.shared.info("Database successfully deleted.")
+    log.info("Database successfully deleted.")
   }
 
   static func loggedOut() throws {
@@ -173,9 +175,9 @@ public extension AppDatabase {
 
     if fileManager.fileExists(atPath: databaseURL.path) {
       try fileManager.removeItem(at: databaseURL)
-      Log.shared.info("Database file successfully deleted.")
+      log.info("Database file successfully deleted.")
     } else {
-      Log.shared.warning("Database file not found.")
+      log.warning("Database file not found.")
     }
   }
 }
@@ -217,7 +219,10 @@ public extension AppDatabase {
       let dbPool = try DatabaseQueue(path: databaseURL.path, configuration: config)
       // Crashed iOS
       //            let dbPool = try DatabasePool(path: databaseURL.path, configuration: config)
-      print("DB created in \(databaseURL) ")
+      
+      var path = databaseURL.path(percentEncoded: false)
+      path.replace(" ", with: "\\ ")
+      log.debug("Database path: \(path)")
       // Create the AppDatabase
       let appDatabase = try AppDatabase(dbPool)
 
@@ -232,13 +237,13 @@ public extension AppDatabase {
       // * The device is out of space.
       // * The database could not be migrated to its latest schema version.
       // Check the error message to determine what the actual problem was.
-      print("Unresolved error \(error)")
+      log.error("Unresolved error", error: error)
 
       // handle db password issue and create a new one
       if error.localizedDescription.contains("SQLite error 26") {
         // re-create database and re-run
         do {
-          print("Re-creating database because token was lost")
+          log.info("Re-creating database because token was lost")
           try AppDatabase.deleteDatabaseFile()
           return AppDatabase.makeShared()
         } catch {
