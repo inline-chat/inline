@@ -15,7 +15,9 @@ struct MessagesCollectionView: UIViewRepresentable {
     collectionView.backgroundColor = .clear
     collectionView.delegate = context.coordinator
     collectionView.dataSource = context.coordinator
-    collectionView.register(MessageCell.self, forCellWithReuseIdentifier: "MessageCell")
+
+    // Register cell with UIHostingConfiguration
+    collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "MessageCell")
 
     // Enable bottom-up scrolling
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
@@ -55,21 +57,24 @@ struct MessagesCollectionView: UIViewRepresentable {
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath)
       -> UICollectionViewCell
     {
-      guard
-        let cell = collectionView.dequeueReusableCell(
-          withReuseIdentifier: "MessageCell", for: indexPath) as? MessageCell
-      else {
-        return UICollectionViewCell()
+      let cell = collectionView.dequeueReusableCell(
+        withReuseIdentifier: "MessageCell", for: indexPath)
+      let message = messages[indexPath.item]
+
+      // Configure cell using UIHostingConfiguration
+      cell.contentConfiguration = UIHostingConfiguration {
+        MessageView(message: message)
       }
 
-      let message = messages[indexPath.item]
-      cell.configure(with: message)
+      // Apply transform to maintain correct orientation
       cell.transform = CGAffineTransform(scaleX: 1, y: -1)
+
       return cell
     }
 
     func collectionView(
-      _ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout,
+      _ collectionView: UICollectionView,
+      layout collectionViewLayout: UICollectionViewLayout,
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
       let message = messages[indexPath.item]
@@ -80,29 +85,5 @@ struct MessagesCollectionView: UIViewRepresentable {
         in: CGSize(width: width, height: .infinity))
       return CGSize(width: width, height: size.height)
     }
-  }
-}
-
-class MessageCell: UICollectionViewCell {
-  private var hostingController: UIHostingController<MessageView>?
-
-  func configure(with message: Message) {
-    hostingController?.view.removeFromSuperview()
-    hostingController = nil
-
-    let messageView = MessageView(message: message)
-    let host = UIHostingController(rootView: messageView)
-    hostingController = host
-
-    host.view.frame = contentView.bounds
-    host.view.backgroundColor = .clear
-    host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    contentView.addSubview(host.view)
-  }
-
-  override func prepareForReuse() {
-    super.prepareForReuse()
-    hostingController?.view.removeFromSuperview()
-    hostingController = nil
   }
 }

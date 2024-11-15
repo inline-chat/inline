@@ -1,43 +1,100 @@
+import GRDB
 import InlineKit
 import SwiftUI
 
 struct MessageView: View {
+  // MARK: - Properties
+
   let message: Message
   @Environment(\.appDatabase) var database: AppDatabase
+  @EnvironmentStateObject var fullMessage: FullMessageViewModel
+
+  // MARK: - Initialization
 
   init(message: Message) {
     self.message = message
+    _fullMessage = EnvironmentStateObject { env in
+      FullMessageViewModel(db: env.appDatabase, messageId: message.id)
+    }
   }
 
+  var alignment: Alignment {
+    message.out == true ? .trailing : .leading
+  }
+
+  // MARK: - Body
+
   var body: some View {
-    Text(message.text ?? "")
-      .padding(10)
-      .font(.body)
-      .foregroundColor(.primary)
-      .frame(minWidth: 40, alignment: .leading)
-      .background(Color(.systemGray6).opacity(0.7))
-      .cornerRadius(16)
-      .id(message.id)
-      .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 16))
-      .contextMenu {
-        Button("Copy") {
-          UIPasteboard.general.string = message.text ?? ""
-        }
-        Button("Delete", role: .destructive) {
-          Task {
-            do {
-              _ = try await database.dbWriter.write { db in
-                try Message.deleteOne(db, id: message.id)
-              }
-            } catch {
-              Log.shared.error("Failed to delete message", error: error)
-            }
-          }
-        }
+    HStack {
+      if message.out == true {
+        Spacer()
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
+
+      messageBubble
+
+      if message.out != true {
+        Spacer()
+      }
+    }
+    .frame(maxWidth: .infinity, minHeight: 66, alignment: alignment)
   }
 }
+
+// MARK: - Components
+
+private extension MessageView {
+  var messageBubble: some View {
+    VStack(alignment: .leading) {
+      userNameText
+      messageText
+    }
+
+    .padding(10)
+    .background(Color(.systemGray6).opacity(0.7))
+    .id(message.id)
+    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 16))
+    .cornerRadius(16)
+    .contextMenu { contextMenuButtons }
+    .frame(maxWidth: UIScreen.main.bounds.width * 0.75, alignment: alignment)
+  }
+
+  var userNameText: some View {
+    Text(fullMessage.fullMessage?.user?.fullName ?? "")
+      .font(.subheadline)
+      .foregroundColor(.secondary)
+      .fontWeight(.medium)
+  }
+
+  var messageText: some View {
+    Text(fullMessage.fullMessage?.message.text ?? "")
+      .font(.body)
+      .foregroundColor(.primary)
+  }
+
+  var contextMenuButtons: some View {
+    Group {
+      Button("Copy") {
+        UIPasteboard.general.string = message.text ?? ""
+      }
+    }
+  }
+}
+
+// MARK: - Actions
+
+private extension MessageView {
+  func deleteMessage() async {
+    do {
+      _ = try await database.dbWriter.write { db in
+        try Message.deleteOne(db, id: message.id)
+      }
+    } catch {
+      Log.shared.error("Failed to delete message", error: error)
+    }
+  }
+}
+
+// MARK: - Preview
 
 #Preview("Message Preview Group") {
   VStack(alignment: .leading, spacing: 12) {

@@ -14,6 +14,7 @@ struct ChatView: View {
   var peer: Peer
 
   @State private var text: String = ""
+  @State private var timer: AnyCancellable?
 
   // MARK: - Initialization
 
@@ -49,13 +50,39 @@ struct ChatView: View {
     .toolbar(.hidden, for: .tabBar)
     .onTapGesture(perform: dismissKeyboard)
     .onAppear {
-      Task {
-        try await dataManager.getChatHistory(
-          peerUserId: nil,
-          peerThreadId: nil,
-          peerId: peer
-        )
+      startPolling()
+    }
+    .onDisappear {
+      stopPolling()
+    }
+  }
+
+  // MARK: - Polling
+
+  private func startPolling() {
+    // Initial fetch
+    fetchMessages()
+
+    // Start timer for periodic fetches
+    timer = Timer.publish(every: 3, on: .main, in: .common)
+      .autoconnect()
+      .sink { _ in
+        fetchMessages()
       }
+  }
+
+  private func stopPolling() {
+    timer?.cancel()
+    timer = nil
+  }
+
+  private func fetchMessages() {
+    Task {
+      try await dataManager.getChatHistory(
+        peerUserId: nil,
+        peerThreadId: nil,
+        peerId: peer
+      )
     }
   }
 }
