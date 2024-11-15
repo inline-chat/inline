@@ -118,23 +118,27 @@ struct MainView: View {
   }
   
   private func setUpSidebarAutoCollapse() {
-    // Listen to window size for collapsing sidebar
-    windowSizeCancellable = window.windowSize
-      .sink { size in
-        // Prevent conflict with default animation when user is uncollapsing the sidebar
-        if disableAutoCollapse { return }
-        if size.width < Theme.collapseSidebarAtWindowSize {
-          if window.columnVisibility != .detailOnly {
-            window.columnVisibility = .detailOnly
-            autoCollapsed = true
-          }
-        } else {
-          if autoCollapsed && window.columnVisibility == .detailOnly {
-            window.columnVisibility = .automatic
-            autoCollapsed = false
+    Task { @MainActor in
+      // delay
+      try await Task.sleep(for: .milliseconds(300))
+      // Listen to window size for collapsing sidebar
+      windowSizeCancellable = window.windowSize
+        .sink { size in
+          // Prevent conflict with default animation when user is uncollapsing the sidebar
+          if disableAutoCollapse { return }
+          if size.width < Theme.collapseSidebarAtWindowSize {
+            if window.columnVisibility != .detailOnly {
+              window.columnVisibility = .detailOnly
+              autoCollapsed = true
+            }
+          } else {
+            if autoCollapsed && window.columnVisibility == .detailOnly {
+              window.columnVisibility = .automatic
+              autoCollapsed = false
+            }
           }
         }
-      }
+    }
   }
 }
 
