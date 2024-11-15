@@ -19,6 +19,7 @@ struct MessageView: View {
       .cornerRadius(16)
       .frame(maxWidth: .infinity, alignment: .leading)
       .id(message.id)
+      .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 16))
       .contextMenu {
         Button("Copy") {
           UIPasteboard.general.string = message.text ?? ""
@@ -35,6 +36,7 @@ struct MessageView: View {
           }
         }
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
