@@ -328,4 +328,47 @@ public class DataManager: ObservableObject {
       try message.save(db)
     }
   }
+
+  public func getChatHistory(
+    peerUserId: Int64?,
+    peerThreadId: Int64?,
+    peerId: Peer?
+  ) async throws -> [Message] {
+    let finalPeerUserId: Int64?
+    let finalPeerThreadId: Int64?
+
+    if let peerId = peerId {
+      switch peerId {
+      case .user(let id):
+        finalPeerUserId = id
+        finalPeerThreadId = nil
+      case .thread(let id):
+        finalPeerUserId = nil
+        finalPeerThreadId = id
+      }
+    } else {
+      finalPeerUserId = peerUserId
+      finalPeerThreadId = peerThreadId
+    }
+
+    log.debug(
+      "sendMessage with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
+    )
+
+    let result = try await ApiClient.shared.getChatHistory(
+      peerUserId: finalPeerUserId,
+      peerThreadId: finalPeerThreadId
+    )
+
+    print("getChatHistory result: \(result)")
+    let messages: [Message] = try await database.dbWriter.write { db in
+      let messages = result.messages.map { Message(from: $0) }
+      try messages.forEach { message in
+        try message.save(db, onConflict: .replace)
+      }
+      return messages
+    }
+
+    return messages
+  }
 }

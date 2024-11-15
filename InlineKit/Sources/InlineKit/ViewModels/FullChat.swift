@@ -34,19 +34,20 @@ public final class FullChatViewModel: ObservableObject {
       ValueObservation
         .tracking { db in
           switch peerId {
-          case .user(_):
+          case .user:
             // Fetch private chat
             try Dialog
               .filter(id: Dialog.getDialogId(peerId: peerId))
               .including(
                 optional: Dialog.peerUser
-                  .including(optional: User.chat
-                    .including(optional: Chat.lastMessage))
+                  .including(
+                    optional: User.chat
+                      .including(optional: Chat.lastMessage))
               )
               .asRequest(of: SpaceChatItem.self)
               .fetchAll(db)
 
-          case .thread(_):
+          case .thread:
             // Fetch thread chat
             try Dialog
               .filter(id: Dialog.getDialogId(peerId: peerId))
@@ -79,9 +80,12 @@ public final class FullChatViewModel: ObservableObject {
           if case .thread(let id) = peer {
             return try Message.filter(Column("peerThreadId") == id)
               .fetchAll(db)
+              .sorted(by: { $0.date > $1.date })
+
           } else if case .user(let id) = peer {
             return try Message.filter(Column("peerUserId") == id)
               .fetchAll(db)
+              .sorted(by: { $0.date > $1.date })
           } else {
             return []
           }
