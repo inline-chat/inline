@@ -323,9 +323,20 @@ public class DataManager: ObservableObject {
       text: text
     )
 
-    try await database.dbWriter.write { db in
-      let message = Message(from: result.message)
-      try message.save(db)
+    print("sendMessage result: \(result)")
+    Task { @MainActor in
+      try await database.dbWriter.write { db in
+          
+        
+        
+        let message = Message(from: result.message)
+        do {
+          try message.save(db)
+        } catch {
+          Log.shared.error("Failed to save message", error: error)
+          throw error
+        }
+      }
     }
   }
 

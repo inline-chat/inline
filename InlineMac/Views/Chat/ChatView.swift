@@ -5,7 +5,6 @@ struct ChatView: View {
   let peerId: Peer
 
   @EnvironmentStateObject var fullChat: FullChatViewModel
-  @EnvironmentObject var window: MainWindowViewModel
   @EnvironmentObject var data: DataManager
 
   var item: SpaceChatItem? {
@@ -53,6 +52,9 @@ struct ChatView: View {
         Task {
           do {
             guard let chatId = fullChat.chat?.id else { return }
+            
+            print("Sending message to chat \(chatId)")
+            print("Sending message to chat \(self.peerId)")
             
             // Send message
             try await data

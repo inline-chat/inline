@@ -11,7 +11,7 @@ struct InlineApp: App {
   @StateObject var ws = WebSocketManager()
   @StateObject var navigation = NavigationModel()
   @StateObject var auth = Auth.shared
-
+  
   var body: some Scene {
     WindowGroup(id: "main") {
       MainWindow()
@@ -29,7 +29,7 @@ struct InlineApp: App {
     .windowToolbarStyle(.unified(showsTitle: false))
     .commands {
       MainWindowCommands()
-
+      
       // Create Space
       if auth.isLoggedIn {
         CommandGroup(after: .newItem) {
@@ -39,23 +39,25 @@ struct InlineApp: App {
         }
       }
     }
-
+    
     // Chat single window
     WindowGroup(for: Peer.self) { $peerId in
-      if let peerId = peerId {
-        ChatView(peerId: peerId)
-          .environmentObject(self.ws)
-          .environmentObject(self.viewModel)
-          .environment(\.auth, Auth.shared)
-          .environment(\.logOut, logOut)
-          .appDatabase(AppDatabase.shared)
-      } else {
-        Text("No chat selected.")
+      AuthenticatedWindowWrapper {
+        if let peerId = peerId {
+          ChatView(peerId: peerId)
+        } else {
+          Text("No chat selected.")
+        }
       }
+      .environmentObject(self.ws)
+      .environmentObject(self.viewModel)
+      .environment(\.auth, Auth.shared)
+      .environment(\.logOut, logOut)
+      .appDatabase(AppDatabase.shared)
     }
     .windowToolbarStyle(.unified(showsTitle: false))
     .defaultSize(width: 680, height: 600)
-
+    
     Settings {
       SettingsView()
         .environmentObject(self.ws)
@@ -65,30 +67,30 @@ struct InlineApp: App {
         .appDatabase(AppDatabase.shared)
     }
   }
-
+  
   // Resets all state and data
   func logOut() {
     // Clear creds
     Auth.shared.logOut()
-
+    
     // Stop WebSocket
     ws.loggedOut()
-
+    
     // Clear database
     try? AppDatabase.loggedOut()
-
+    
     // Navigate outside of the app
     viewModel.navigate(.onboarding)
-
+    
     // Reset internal navigation
     navigation.reset()
-
+    
     // Close Settings
     if let window = NSApplication.shared.keyWindow {
       window.close()
     }
   }
-
+  
   // -----
   private func createSpace() {
     navigation.createSpaceSheetPresented = true
