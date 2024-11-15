@@ -75,6 +75,7 @@ struct Welcome: View {
         Spacer()
       }
     }
+    .navigationBarBackButtonHidden()
   }
 
   private func animateText() {
