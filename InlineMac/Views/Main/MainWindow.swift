@@ -47,7 +47,7 @@ class MainWindowViewModel: ObservableObject {
   @Published var topLevelRoute: TopLevelRoute
   @Published var columnVisibility: NavigationSplitViewVisibility
 
-  public var windowSize: CurrentValueSubject<CGSize, Never> = .init(.zero)
+  public var windowSize: PassthroughSubject<CGSize, Never> = .init()
   public var currentSize: CGSize = .zero
 
   private var cancellables = Set<AnyCancellable>()
@@ -55,7 +55,7 @@ class MainWindowViewModel: ObservableObject {
   init() {
     if Auth.shared.isLoggedIn {
       topLevelRoute = .main
-      columnVisibility = .automatic
+      columnVisibility = .all
     } else {
       topLevelRoute = .onboarding
       columnVisibility = .detailOnly
