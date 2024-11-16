@@ -9,6 +9,8 @@ struct SpaceSidebar: View {
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
   @Environment(\.openWindow) var openWindow
 
+  @State var search: String = ""
+
   var spaceId: Int64
 
   init(spaceId: Int64) {
@@ -49,11 +51,11 @@ struct SpaceSidebar: View {
 
             Text(fullSpace.space?.name ?? "")
               .font(Theme.sidebarTopItemFont)
-            
+
             Spacer()
           }.frame(height: Theme.sidebarTopItemHeight)
 
-          SidebarSearchBar()
+          SidebarSearchBar(text: $search)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
