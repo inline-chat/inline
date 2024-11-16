@@ -29,15 +29,15 @@ export const handler = async (
     if (isValidEmail(input.email) === false) {
       throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
     }
-
+    console.log("break point 1")
     let email = normalizeEmail(input.email)
-
+    console.log("break point 2")
     // store code
     let { code, existingUser, firstName } = await getLoginCode(email)
-
+    console.log("break point 3")
     // send code to email
     await sendEmailCode(email, code, firstName)
-
+    console.log("break point 4")
     return { existingUser }
   } catch (error) {
     Log.shared.error("Failed to send email code", error)
