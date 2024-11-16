@@ -13,7 +13,13 @@ struct ChatRowView: View {
         lastName: item.chat.type == .privateChat ? item.user?.lastName ?? "" : nil, size: 26
       )
       .padding(.trailing, 6)
-      Text(item.chat.type == .privateChat ? item.user?.firstName ?? "" : item.chat.title ?? "")
+      VStack(alignment: .leading) {
+        Text(item.chat.type == .privateChat ? item.user?.firstName ?? "" : item.chat.title ?? "")
+          .fontWeight(.medium)
+        Text(item.message?.text ?? "")
+          .font(.body)
+          .foregroundColor(.secondary)
+      }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())

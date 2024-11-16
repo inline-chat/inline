@@ -41,5 +41,8 @@ struct UpdateNewMessage: Codable {
   func apply(db: Database) throws {
     let message = Message(from: message)
     try message.save(db, onConflict: .replace)
+    var chat = try Chat.fetchOne(db, id: message.chatId)
+    chat?.lastMsgId = message.messageId
+    try chat?.save(db)
   }
 }
