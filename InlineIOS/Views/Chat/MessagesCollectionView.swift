@@ -16,7 +16,7 @@ struct MessagesCollectionView: UIViewRepresentable {
     collectionView.delegate = context.coordinator
     collectionView.dataSource = context.coordinator
 
-    // Register cell with UIHostingConfiguration
+    // Register cell with UIHostingConfigurationn
     collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "MessageCell")
 
     // Enable bottom-up scrolling
