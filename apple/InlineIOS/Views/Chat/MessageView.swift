@@ -37,6 +37,7 @@ struct MessageView: View {
       }
 
       messageBubble
+        
 
       if fullMessage.message.out != true {
         Spacer()
