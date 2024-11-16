@@ -5,115 +5,137 @@ import SwiftUI
 
 // TODO: Remove @unchecked
 public final class Auth: ObservableObject, @unchecked Sendable {
-    public static let shared = Auth()
-    private var cachedToken: String?
-    private var cachedUserId: Int64?
-    private var profileCompleted: Bool?
-    private let keychain: KeychainSwift
-    private var accessGroup: String
-    private var keyChainPrefix: String
+  let log = Log.scoped("Auth")
+  public static let shared = Auth()
+  private var cachedToken: String?
+  private var cachedUserId: Int64?
+  private var profileCompleted: Bool?
+  private let keychain: KeychainSwift
+  private var accessGroup: String
+  private var keyChainPrefix: String
+  private let userDefaultsPrefix: String
 
-    @Published public var isLoggedIn: Bool
+  @Published public var isLoggedIn: Bool
 
-    public func saveToken(_ token: String) {
-        keychain.set(token, forKey: "token")
-        cachedToken = token
-        evaluateIsLoggedIn()
+  public func saveToken(_ token: String) {
+    keychain.set(token, forKey: "token")
+    cachedToken = token
+    evaluateIsLoggedIn()
+  }
+
+  public func saveProfileCompleted(_ profileCompleted: Bool) {
+    self.profileCompleted = profileCompleted
+    evaluateIsLoggedIn()
+  }
+
+  private func evaluateIsLoggedIn() {
+    isLoggedIn = cachedToken != nil && cachedUserId != nil && profileCompleted != nil && profileCompleted == true
+  }
+
+  public func getToken() -> String? {
+    if cachedToken == nil {
+      cachedToken = keychain.get("token")
     }
 
-    public func saveProfileCompleted(_ profileCompleted: Bool) {
-        self.profileCompleted = profileCompleted
-        evaluateIsLoggedIn()
+    return cachedToken
+  }
+
+  private init() {
+    #if os(macOS)
+      accessGroup = "2487AN8AL4.chat.inline.InlineMac"
+      #if DEBUG
+        keyChainPrefix = "inline_dev_"
+      #else
+        keyChainPrefix = "inline_"
+      #endif
+    #else
+      accessGroup = "2487AN8AL4.keychainGroup"
+      keyChainPrefix = ""
+    #endif
+
+    // Check if user profile is set so we need to log in to another account
+    if let userProfile = ProjectConfig.userProfile {
+      log.debug("Using user profile \(userProfile)")
+      keyChainPrefix = "\(keyChainPrefix)\(userProfile)_"
+      userDefaultsPrefix = "\(userProfile)_"
+    } else {
+      userDefaultsPrefix = ""
     }
 
-    private func evaluateIsLoggedIn() {
-        isLoggedIn = cachedToken != nil && cachedUserId != nil && profileCompleted != nil && profileCompleted == true
+    keychain = KeychainSwift(keyPrefix: keyChainPrefix)
+    keychain.accessGroup = accessGroup
+    cachedToken = keychain.get("token")
+    // temp so it doesn't error out
+    isLoggedIn = false
+    cachedUserId = getCurrentUserId()
+    isLoggedIn = cachedToken != nil && cachedUserId != nil
+  }
+
+  private init(mockAuthenticated: Bool) {
+    keychain = KeychainSwift()
+    accessGroup = "2487AN8AL4.keychainGroup"
+    keyChainPrefix = "mock"
+    userDefaultsPrefix = "mock"
+
+    if mockAuthenticated {
+      cachedToken = "1:mockToken"
+      cachedUserId = 1
+    } else {
+      cachedToken = nil
+      cachedUserId = nil
+      keychain.clear()
     }
 
-    public func getToken() -> String? {
-        if cachedToken == nil {
-            cachedToken = keychain.get("token")
-        }
+    isLoggedIn = mockAuthenticated
+  }
 
-        return cachedToken
+  var userIdKey: String {
+    "\(userDefaultsPrefix)userId"
+  }
+
+  public func saveCurrentUserId(userId: Int64) {
+    UserDefaults.standard.set(userId, forKey: userIdKey)
+    cachedUserId = userId
+    evaluateIsLoggedIn()
+  }
+
+  func getCurrentUserId() -> Int64? {
+    if let userId = cachedUserId {
+      return userId
+    } else {
+      if UserDefaults.standard.object(forKey: userIdKey) != nil {
+        let cachedUserId = Int64(UserDefaults.standard.integer(forKey: userIdKey))
+        return cachedUserId
+      }
     }
+    return nil
+  }
 
-    private init() {
-        #if os(macOS)
-            accessGroup = "2487AN8AL4.chat.inline.InlineMac"
-            #if DEBUG
-                keyChainPrefix = "inline_dev_"
-            #else
-                keyChainPrefix = "inline_"
-            #endif
-        #else
-            accessGroup = "2487AN8AL4.keychainGroup"
-            keyChainPrefix = ""
-        #endif
-        keychain = KeychainSwift(keyPrefix: keyChainPrefix)
-        keychain.accessGroup = accessGroup
-        cachedToken = keychain.get("token")
-        cachedUserId = Self.getCurrentUserId()
+//  public func getCurrentUserId() -> Int64? {
+//    if let userId = cachedUserId {
+//      return userId
+//    } else {
+//      let userId = Self.getCurrentUserId()
+//      cachedUserId = userId
+//      return userId
+//    }
+//  }
 
-        isLoggedIn = cachedToken != nil && cachedUserId != nil
-    }
+  public func logOut() {
+    // clear userId
+    UserDefaults.standard.removeObject(forKey: userIdKey)
 
-    private init(mockAuthenticated: Bool) {
-        keychain = KeychainSwift()
-        accessGroup = "2487AN8AL4.keychainGroup"
-        keyChainPrefix = "mock"
+    // clear token
+    keychain.delete("token")
 
-        if mockAuthenticated {
-            cachedToken = "1:mockToken"
-            cachedUserId = 1
-        } else {
-            cachedToken = nil
-            cachedUserId = nil
-            keychain.clear()
-        }
+    // clear cache
+    cachedToken = nil
+    cachedUserId = nil
+    isLoggedIn = false
+  }
 
-        isLoggedIn = mockAuthenticated
-    }
-
-    public func saveCurrentUserId(userId: Int64) {
-        UserDefaults.standard.set(userId, forKey: "userId")
-        cachedUserId = userId
-        evaluateIsLoggedIn()
-    }
-
-    static func getCurrentUserId() -> Int64? {
-        let userDefaultsKey = "userId"
-        if UserDefaults.standard.object(forKey: userDefaultsKey) != nil {
-            return Int64(UserDefaults.standard.integer(forKey: userDefaultsKey))
-        }
-        return nil
-    }
-
-    public func getCurrentUserId() -> Int64? {
-        if let userId = cachedUserId {
-            return userId
-        } else {
-            let userId = Self.getCurrentUserId()
-            cachedUserId = userId
-            return userId
-        }
-    }
-
-    public func logOut() {
-        // clear userId
-        UserDefaults.standard.removeObject(forKey: "userId")
-
-        // clear token
-        keychain.delete("token")
-
-        // clear cache
-        cachedToken = nil
-        cachedUserId = nil
-        isLoggedIn = false
-    }
-
-    /// Used in previews
-    public static func mocked(authenticated: Bool) -> Auth {
-        Auth(mockAuthenticated: authenticated)
-    }
+  /// Used in previews
+  public static func mocked(authenticated: Bool) -> Auth {
+    Auth(mockAuthenticated: authenticated)
+  }
 }
