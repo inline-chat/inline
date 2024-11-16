@@ -68,33 +68,13 @@ struct ChatView: View {
 
 // MARK: - View Components
 
-private extension ChatView {
-  var chatMessages: some View {
-    ScrollViewReader { proxy in
-      ScrollView {
-        LazyVStack(spacing: 8) {
-          ForEach(fullChatViewModel.fullMessages) { fullMessage in
-            MessageView(fullMessage: fullMessage)
-              .id(fullMessage.message.id)
-            // .flipped()
-          }
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-      }
-//      .defaultScrollAnchor(.top)
-      // .flipped()
-      .onChange(of: fullChatViewModel.fullMessages) { _ in
-        if let lastMessage = fullChatViewModel.fullMessages.last {
-          withAnimation {
-            proxy.scrollTo(lastMessage.id, anchor: .bottom)
-          }
-        }
-      }
-    }
+extension ChatView {
+  fileprivate var chatMessages: some View {
+    MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
+      .padding(.vertical, 8)
   }
 
-  var chatHeader: some View {
+  fileprivate var chatHeader: some View {
     HStack(spacing: 2) {
       InitialsCircle(firstName: title, lastName: nil, size: 26)
         .padding(.trailing, 6)
@@ -104,7 +84,7 @@ private extension ChatView {
     }
   }
 
-  var inputArea: some View {
+  fileprivate var inputArea: some View {
     VStack(spacing: 0) {
       Divider()
         .ignoresSafeArea()
@@ -117,13 +97,13 @@ private extension ChatView {
     .background(.clear)
   }
 
-  var messageTextField: some View {
+  fileprivate var messageTextField: some View {
     TextField("Type a message", text: $text, axis: .vertical)
       .textFieldStyle(.plain)
       .onSubmit(sendMessage)
   }
 
-  var sendButton: some View {
+  fileprivate var sendButton: some View {
     Button(action: sendMessage) {
       Image(systemName: "arrow.up")
         .foregroundColor(text.isEmpty ? .secondary : .blue)
@@ -135,8 +115,8 @@ private extension ChatView {
 
 // MARK: - Actions
 
-private extension ChatView {
-  func dismissKeyboard() {
+extension ChatView {
+  fileprivate func dismissKeyboard() {
     UIApplication.shared.sendAction(
       #selector(UIResponder.resignFirstResponder),
       to: nil,
@@ -145,7 +125,7 @@ private extension ChatView {
     )
   }
 
-  func sendMessage() {
+  fileprivate func sendMessage() {
     Task {
       do {
         if !text.isEmpty {
@@ -167,9 +147,9 @@ private extension ChatView {
   }
 }
 
-// extension View {
-//   func flipped() -> some View {
-//     rotationEffect(.init(radians: .pi))
-//       .scaleEffect(x: -1, y: 1, anchor: .center)
-//   }
-// }
+extension View {
+  func flipped() -> some View {
+    rotationEffect(.init(radians: .pi))
+      .scaleEffect(x: -1, y: 1, anchor: .center)
+  }
+}

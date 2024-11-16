@@ -94,7 +94,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
               .including(optional: Message.from)
               .asRequest(of: FullMessage.self)
               .fetchAll(db)
-              .sorted(by: { $0.message.date < $1.message.date })
+              .sorted(by: { $0.message.date > $1.message.date })
 
           } else if case .user(let id) = peer {
             return try Message
@@ -102,7 +102,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
               .including(optional: Message.from)
               .asRequest(of: FullMessage.self)
               .fetchAll(db)
-              .sorted(by: { $0.message.date < $1.message.date })
+              .sorted(by: { $0.message.date > $1.message.date })
 
 //          if let chatId = self.chat?.id {
 //            return try Message
