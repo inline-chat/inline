@@ -1,9 +1,20 @@
 import Combine
 import GRDB
 
-public final class FullChatViewModel: ObservableObject {
+public struct FullMessage: Codable, FetchableRecord, PersistableRecord, Sendable, Hashable,
+  Identifiable
+{
+  public var user: User?
+  public var message: Message
+
+  public var id: Int64 {
+    message.id
+  }
+}
+
+public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   @Published public private(set) var chatItem: SpaceChatItem?
-  @Published public private(set) var messages: [Message] = []
+  @Published public private(set) var fullMessages: [FullMessage] = []
 
   public var chat: Chat? {
     chatItem?.chat
@@ -78,14 +89,26 @@ public final class FullChatViewModel: ObservableObject {
         .tracking { db in
           print("I'm getting messages \(peer)")
           if case .thread(let id) = peer {
-            return try Message.filter(Column("peerThreadId") == id)
+            return try Message
+              .filter(Column("peerThreadId") == id)
+              .including(optional: Message.from)
+              .asRequest(of: FullMessage.self)
               .fetchAll(db)
-              .sorted(by: { $0.date > $1.date })
+              .sorted(by: { $0.message.date < $1.message.date })
 
           } else if case .user(let id) = peer {
-            return try Message.filter(Column("peerUserId") == id)
+            return try Message
+              .filter(Column("peerUserId") == id)
+              .including(optional: Message.from)
+              .asRequest(of: FullMessage.self)
               .fetchAll(db)
-              .sorted(by: { $0.date > $1.date })
+              .sorted(by: { $0.message.date < $1.message.date })
+
+//          if let chatId = self.chat?.id {
+//            return try Message
+//              .filter(Column("chatId") == chatId)
+//              .fetchAll(db)
+//              .sorted(by: { $0.date < $1.date })
           } else {
             return []
           }
@@ -97,7 +120,7 @@ public final class FullChatViewModel: ObservableObject {
           },
           receiveValue: { [weak self] messages in
             print("Got messages \(messages)")
-            self?.messages = messages
+            self?.fullMessages = messages
           }
         )
   }

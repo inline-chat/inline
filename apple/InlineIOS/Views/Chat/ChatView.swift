@@ -2,7 +2,6 @@ import Combine
 import InlineKit
 import InlineUI
 import SwiftUI
-import SwiftUIIntrospect
 
 struct ChatView: View {
   // MARK: - Properties
@@ -14,7 +13,6 @@ struct ChatView: View {
   var peer: Peer
 
   @State private var text: String = ""
-  @State private var timer: AnyCancellable?
 
   // MARK: - Initialization
 
@@ -50,31 +48,11 @@ struct ChatView: View {
     .toolbar(.hidden, for: .tabBar)
     .onTapGesture(perform: dismissKeyboard)
     .onAppear {
-      startPolling()
+      fetchMessages()
     }
     .onDisappear {
-      stopPolling()
       nav.setToolbarVisibility(true)
     }
-  }
-
-  // MARK: - Polling
-
-  private func startPolling() {
-    // Initial fetch
-    fetchMessages()
-
-    // Start timer for periodic fetches
-    timer = Timer.publish(every: 3, on: .main, in: .common)
-      .autoconnect()
-      .sink { _ in
-        fetchMessages()
-      }
-  }
-
-  private func stopPolling() {
-    timer?.cancel()
-    timer = nil
   }
 
   private func fetchMessages() {
@@ -90,13 +68,33 @@ struct ChatView: View {
 
 // MARK: - View Components
 
-extension ChatView {
-  fileprivate var chatMessages: some View {
-    MessagesCollectionView(messages: fullChatViewModel.messages)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
+private extension ChatView {
+  var chatMessages: some View {
+    ScrollViewReader { proxy in
+      ScrollView {
+        LazyVStack(spacing: 8) {
+          ForEach(fullChatViewModel.fullMessages) { fullMessage in
+            MessageView(fullMessage: fullMessage)
+              .id(fullMessage.message.id)
+            // .flipped()
+          }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+      }
+//      .defaultScrollAnchor(.top)
+      // .flipped()
+      .onChange(of: fullChatViewModel.fullMessages) { _ in
+        if let lastMessage = fullChatViewModel.fullMessages.last {
+          withAnimation {
+            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+          }
+        }
+      }
+    }
   }
 
-  fileprivate var chatHeader: some View {
+  var chatHeader: some View {
     HStack(spacing: 2) {
       InitialsCircle(firstName: title, lastName: nil, size: 26)
         .padding(.trailing, 6)
@@ -106,7 +104,7 @@ extension ChatView {
     }
   }
 
-  fileprivate var inputArea: some View {
+  var inputArea: some View {
     VStack(spacing: 0) {
       Divider()
         .ignoresSafeArea()
@@ -119,13 +117,13 @@ extension ChatView {
     .background(.clear)
   }
 
-  fileprivate var messageTextField: some View {
+  var messageTextField: some View {
     TextField("Type a message", text: $text, axis: .vertical)
       .textFieldStyle(.plain)
       .onSubmit(sendMessage)
   }
 
-  fileprivate var sendButton: some View {
+  var sendButton: some View {
     Button(action: sendMessage) {
       Image(systemName: "arrow.up")
         .foregroundColor(text.isEmpty ? .secondary : .blue)
@@ -137,8 +135,8 @@ extension ChatView {
 
 // MARK: - Actions
 
-extension ChatView {
-  fileprivate func dismissKeyboard() {
+private extension ChatView {
+  func dismissKeyboard() {
     UIApplication.shared.sendAction(
       #selector(UIResponder.resignFirstResponder),
       to: nil,
@@ -147,7 +145,7 @@ extension ChatView {
     )
   }
 
-  fileprivate func sendMessage() {
+  func sendMessage() {
     Task {
       do {
         if !text.isEmpty {
@@ -169,11 +167,9 @@ extension ChatView {
   }
 }
 
-// MARK: - Preview
-
-// #Preview {
-//    NavigationStack {
-//        ChatView(item: ChatItem(chat: Chat(id: 12344, type: .privateChat, title: "Chat", createdAt: .now(), updatedAt: .now()), user: nil))
-//            .appDatabase(.emptyWithChat())
-//    }
+// extension View {
+//   func flipped() -> some View {
+//     rotationEffect(.init(radians: .pi))
+//       .scaleEffect(x: -1, y: 1, anchor: .center)
+//   }
 // }
