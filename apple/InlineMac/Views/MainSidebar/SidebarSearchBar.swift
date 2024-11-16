@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct SidebarSearchBar: View {
-  @State private var searchText = ""
+  var text: Binding<String>
 
   var body: some View {
-    GrayTextField("Search", text: $searchText, size: .small)
+    GrayTextField("Search", text: text, size: .small)
   }
 }

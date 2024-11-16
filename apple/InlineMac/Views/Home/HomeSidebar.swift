@@ -8,6 +8,8 @@ struct HomeSidebar: View {
 
   @EnvironmentStateObject var model: SpaceListViewModel
 
+  @State var search: String = ""
+
   init() {
     _model = EnvironmentStateObject { env in
       SpaceListViewModel(db: env.appDatabase)
@@ -16,29 +18,33 @@ struct HomeSidebar: View {
 
   var body: some View {
     List {
-      Section("Spaces") {
-        ForEach(model.spaces) { space in
-          SpaceItem(space: space)
-            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+      if search.count == 0 {
+        Section("Spaces") {
+          ForEach(model.spaces) { space in
+            SpaceItem(space: space)
+              .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+          }
         }
+      } else {
+        Text("searching \(search)")
       }
     }
-//    .toolbar(content: {
-//      ToolbarItem(placement: .automatic) {
-//        Menu("New", systemImage: "plus") {
-//          Button("New Space") {
-//            nav.createSpaceSheetPresented = true
-//          }
-//        }
-//      }
-//    })
+    .toolbar(content: {
+      ToolbarItem(placement: .automatic) {
+        Menu("New", systemImage: "plus") {
+          Button("New Space") {
+            nav.createSpaceSheetPresented = true
+          }
+        }
+      }
+    })
     .listStyle(.sidebar)
     .safeAreaInset(
       edge: .top,
       content: {
         VStack(alignment: .leading) {
           SelfUser()
-          SidebarSearchBar()
+          SidebarSearchBar(text: $search)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
