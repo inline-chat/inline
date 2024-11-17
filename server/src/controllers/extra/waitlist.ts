@@ -12,11 +12,11 @@ export const waitlist = new Elysia({ prefix: "/waitlist" })
       try {
         // Send user data to Telegram API
         const telegramToken = process.env["TELEGRAM_TOKEN"]
-        const chatId = "2262866594"
+        const chatId = "-1002262866594"
         const emailParts = body.email?.split("@")
         const nameFromEmail = emailParts?.[0]?.replace(/[^a-zA-Z0-9]/g, " ")
         const message = `New Subscriber: \n\nEmail: ${body.email} \nName: ${nameFromEmail} \nTime Zone: ${body.timeZone} \n\n\n☕️ SHIP FASTER DENA & MO!!!`
-        await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+        let result = await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -26,6 +26,7 @@ export const waitlist = new Elysia({ prefix: "/waitlist" })
             text: message,
           }),
         })
+        console.log("Message sent to Telegram:", await result.json())
       } catch (error) {
         console.error("Error sending message to Telegram:", error)
       }
