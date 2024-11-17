@@ -37,7 +37,6 @@ struct MessageView: View {
       }
 
       messageBubble
-        
 
       if fullMessage.message.out != true {
         Spacer()
@@ -140,7 +139,7 @@ private extension MessageView {
 //    // Thread message from Bob
 //    MessageView(
 //      fullMessage: Message(
-//        messageId: 3,
+//        messageId: 4,
 //        fromId: 3, // Bob's ID
 //        date: Date().addingTimeInterval(-7000),
 //        text: "Let's build something awesome!",
