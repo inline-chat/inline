@@ -80,6 +80,9 @@ struct MainView: View {
           }
       } else {
         HomeRoot()
+          .navigationDestination(for: NavigationRoute.self) { route in
+            renderHomeRoute(for: route)
+          }
       }
     }
   }
@@ -104,6 +107,22 @@ struct MainView: View {
       case .homeRoot:
         // Not for space
         HomeRoot()
+      }
+    }
+  }
+  
+  func renderHomeRoute(for destination: NavigationRoute) -> some View {
+    Group {
+      switch destination {
+      case .chat(let peer):
+        ChatView(peerId: peer)
+        
+      case .homeRoot:
+        HomeRoot()
+        
+      case .spaceRoot:
+        // Not for home
+        Text("")
       }
     }
   }

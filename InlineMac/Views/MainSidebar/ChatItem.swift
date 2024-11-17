@@ -16,7 +16,7 @@ struct ChatSideItem: View {
   }
   
   var title: String {
-    item.chat.title ?? item.user?.fullName ?? "Chat"
+    item.chat?.title ?? item.user?.fullName ?? "Chat"
   }
   
   var body: some View {

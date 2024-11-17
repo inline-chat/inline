@@ -19,6 +19,7 @@ struct SpaceItem: View {
       content
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+    .focusable()
     .buttonStyle(.plain)
     .padding(.horizontal, -Theme.sidebarItemPadding)
     // Actions on space

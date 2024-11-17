@@ -8,6 +8,19 @@ public struct ApiUser: Codable, Hashable, Sendable {
   public var lastName: String?
   public var date: Int
   public var username: String?
+
+  public static let preview = Self(
+    id: 1,
+    email: "mo@inline.chat",
+    firstName: "Mo",
+    lastName: nil,
+    date: 162579240,
+    username: "mo"
+  )
+  
+  public var anyName: String {
+    self.firstName ?? self.username ?? email?.components(separatedBy: "@").first ?? "User \(id)"
+  }
 }
 
 public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -40,7 +53,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 
   public init(
-    id: Int64 = Int64.random(in: 1...5000), email: String?, firstName: String?,
+    id: Int64 = Int64.random(in: 1 ... 5000), email: String?, firstName: String?,
     lastName: String? = nil, username: String? = nil
   ) {
     self.id = id
@@ -64,8 +77,8 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 }
 
-extension User {
-  public init(from apiUser: ApiUser) {
+public extension User {
+  init(from apiUser: ApiUser) {
     self.id = apiUser.id
     self.email = apiUser.email
     self.firstName = apiUser.firstName
@@ -74,13 +87,13 @@ extension User {
     self.date = Self.fromTimestamp(from: apiUser.date)
   }
 
-  public static func fromTimestamp(from: Int) -> Date {
+  static func fromTimestamp(from: Int) -> Date {
     return Date(timeIntervalSince1970: Double(from) / 1000)
   }
 }
 
-extension User {
-  public enum CodingKeys: String, CodingKey {
+public extension User {
+  enum CodingKeys: String, CodingKey {
     case id
     case email
     case firstName
@@ -89,7 +102,7 @@ extension User {
     case username
   }
 
-  public init(from decoder: Decoder) throws {
+  init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
 
     self.id = try container.decode(Int64.self, forKey: .id)

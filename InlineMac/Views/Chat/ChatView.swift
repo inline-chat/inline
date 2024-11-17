@@ -31,8 +31,8 @@ struct ChatView: View {
     VStack {
       Text(fullChat.chat?.id.description ?? "NO ID")
       List {
-        ForEach(fullChat.messages, id: \.id) { message in
-          MessageView(message: message)
+        ForEach(fullChat.fullMessages, id: \.id) { message in
+          MessageView(message: message.message)
         }
       }
 
