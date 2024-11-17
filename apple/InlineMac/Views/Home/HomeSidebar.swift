@@ -5,10 +5,23 @@ struct HomeSidebar: View {
   @EnvironmentObject var ws: WebSocketManager
   @EnvironmentObject var nav: NavigationModel
   @EnvironmentObject var data: DataManager
+  @EnvironmentObject var overlay: OverlayManager
+  @Environment(\.appDatabase) var db
 
   @EnvironmentStateObject var model: SpaceListViewModel
 
-  @State var search: String = ""
+  @StateObject var search = GlobalSearch()
+  @FocusState private var isSearching: Bool
+//  @FocusState private var focused: Focusables?
+
+//  var isSearching: Bool {
+//    focused == .search
+//  }
+//
+//  enum Focusables: Equatable {
+//    case search
+//    case selfUser
+//  }
 
   init() {
     _model = EnvironmentStateObject { env in
@@ -18,15 +31,10 @@ struct HomeSidebar: View {
 
   var body: some View {
     List {
-      if search.count == 0 {
-        Section("Spaces") {
-          ForEach(model.spaces) { space in
-            SpaceItem(space: space)
-              .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-          }
-        }
+      if search.hasResults || (isSearching && search.canSearch) {
+        searchView
       } else {
-        Text("searching \(search)")
+        spacesAndUsersView
       }
     }
     .toolbar(content: {
@@ -44,7 +52,7 @@ struct HomeSidebar: View {
       content: {
         VStack(alignment: .leading) {
           SelfUser()
-          SidebarSearchBar(text: $search)
+          searchBar
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
@@ -61,6 +69,92 @@ struct HomeSidebar: View {
         let _ = try await data.getSpaces()
       } catch {
         // TODO: handle error? keep on loading? retry? (@mo)
+      }
+    }
+  }
+
+  var searchBar: some View {
+    SidebarSearchBar(text: $search.query)
+      .focused($isSearching)
+      .onChange(of: search.query) { _ in
+        search.search()
+      }
+      .background {
+        KeyPressHandler {
+          if isSearching {
+            if $0.keyCode == 53 { // ESC key code
+              search.clear()
+              isSearching = false
+              return nil
+            }
+          }
+
+          return $0
+        }
+      }
+  }
+
+  @ViewBuilder
+  var spacesAndUsersView: some View {
+    Section("Spaces") {
+      ForEach(model.spaces) { space in
+        SpaceItem(space: space)
+          .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+      }
+    }
+  }
+
+  // The view when user focuses the search input shows up
+  @ViewBuilder
+  var searchView: some View {
+    if search.hasResults {
+      Section("Users") {
+        ForEach(search.results, id: \.self) { result in
+          switch result {
+          case .users(let user):
+            RemoteUserItem(user: user, action: {
+              remoteUserPressed(user: user)
+            })
+            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+          }
+        }
+      }
+    } else {
+      HStack {
+        if search.isLoading {
+          Text("Searching...")
+        } else if let error = search.error {
+          Text("Failed to load: \(error.localizedDescription)")
+        } else if !search.query.isEmpty {
+          // User searched, loading is done, but we didn't find a result
+          Text("No user found.")
+        } else {
+          Text("Search by username to start a chat.")
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .lineLimit(2)
+      .font(.body)
+      .foregroundStyle(.secondary)
+      .multilineTextAlignment(.center)
+      .padding()
+    }
+  }
+
+  private func remoteUserPressed(user: ApiUser) {
+    // Save user
+
+    Task { @MainActor in
+      do {
+        try await data.createPrivateChatWithOptimistic(user: user)
+
+        // Clear search
+        search.clear()
+        isSearching = false
+
+        nav.navigate(to: .chat(peer: .user(id: user.id)))
+      } catch {
+        overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
       }
     }
   }

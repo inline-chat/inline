@@ -7,5 +7,6 @@ public extension View {
       .previewsEnvironment(preset)
       .environmentObject(MainWindowViewModel())
       .environmentObject(NavigationModel())
+      .environmentObject(OverlayManager())
   }
 }

@@ -117,6 +117,40 @@ public class DataManager: ObservableObject {
     }
   }
 
+  public func createPrivateChatWithOptimistic(user: ApiUser) async throws {
+    log.debug("createPrivateChat with optimistic")
+
+    // Optimistic
+    try await database.dbWriter.write { db in
+      let dialog = Dialog(optimisticForUserId: user.id)
+      try dialog.save(db, onConflict: .ignore)
+      let user = User(from: user)
+      try user.save(db, onConflict: .ignore)
+    }
+    log.debug("saved optimistic")
+
+    let userId = user.id
+    
+    // Do in background
+    Task { @MainActor in
+      do {
+        // Remote call
+        let result = try await ApiClient.shared.createPrivateChat(userId: userId)
+        try await database.dbWriter.write { db in
+          let chat = Chat(from: result.chat)
+          try chat.save(db, onConflict: .replace)
+          let dialog = Dialog(from: result.dialog)
+          try dialog.save(db, onConflict: .replace)
+          let user = User(from: result.user)
+          try user.save(db, onConflict: .replace)
+        }
+      } catch {
+        Log.shared.error("Failed to create private chat", error: error)
+        throw error
+      }
+    }
+  }
+
   /// Get list of user spaces and saves them
   @discardableResult
   public func getSpaces() async throws -> [Space] {
@@ -326,9 +360,7 @@ public class DataManager: ObservableObject {
     print("sendMessage result: \(result)")
     Task { @MainActor in
       try await database.dbWriter.write { db in
-          
-        
-        
+
         let message = Message(from: result.message)
         do {
           try message.save(db)

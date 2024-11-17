@@ -11,6 +11,7 @@ struct InlineApp: App {
   @StateObject var ws = WebSocketManager()
   @StateObject var navigation = NavigationModel()
   @StateObject var auth = Auth.shared
+  @StateObject var overlay = OverlayManager()
   
   var body: some Scene {
     WindowGroup(id: "main") {
@@ -20,6 +21,7 @@ struct InlineApp: App {
         .environmentObject(self.navigation)
         .environment(\.auth, auth)
         .appDatabase(AppDatabase.shared)
+        .environmentObject(overlay)
         .environment(\.logOut, logOut)
     }
     .defaultSize(width: 900, height: 600)
@@ -51,6 +53,7 @@ struct InlineApp: App {
       }
       .environmentObject(self.ws)
       .environmentObject(self.viewModel)
+      .environmentObject(overlay)
       .environment(\.auth, Auth.shared)
       .environment(\.logOut, logOut)
       .appDatabase(AppDatabase.shared)
@@ -65,6 +68,7 @@ struct InlineApp: App {
         .environment(\.auth, Auth.shared)
         .environment(\.logOut, logOut)
         .appDatabase(AppDatabase.shared)
+        .environmentObject(overlay)
     }
   }
   

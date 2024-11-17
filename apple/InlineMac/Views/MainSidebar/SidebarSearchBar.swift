@@ -5,5 +5,7 @@ struct SidebarSearchBar: View {
 
   var body: some View {
     GrayTextField("Search", text: text, size: .small)
+      .submitLabel(.search)
+      .autocorrectionDisabled()
   }
 }
