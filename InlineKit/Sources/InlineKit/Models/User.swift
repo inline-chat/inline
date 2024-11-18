@@ -17,9 +17,9 @@ public struct ApiUser: Codable, Hashable, Sendable {
     date: 162579240,
     username: "mo"
   )
-  
+
   public var anyName: String {
-    self.firstName ?? self.username ?? email?.components(separatedBy: "@").first ?? "User \(id)"
+    self.firstName ?? self.username ?? self.email?.components(separatedBy: "@").first ?? "User \(self.id)"
   }
 }
 
@@ -51,6 +51,14 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var messages: QueryInterfaceRequest<Message> {
     request(for: User.messages)
   }
+
+  public static let deletedInstance = Self(
+    id: -1,
+    email: nil,
+    firstName: "Deleted",
+    lastName: nil,
+    username: nil
+  )
 
   public init(
     id: Int64 = Int64.random(in: 1 ... 5000), email: String?, firstName: String?,
