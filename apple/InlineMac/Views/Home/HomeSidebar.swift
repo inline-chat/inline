@@ -9,23 +9,17 @@ struct HomeSidebar: View {
   @Environment(\.appDatabase) var db
 
   @EnvironmentStateObject var model: SpaceListViewModel
+  @EnvironmentStateObject var home: HomeViewModel
 
   @StateObject var search = GlobalSearch()
   @FocusState private var isSearching: Bool
-//  @FocusState private var focused: Focusables?
-
-//  var isSearching: Bool {
-//    focused == .search
-//  }
-//
-//  enum Focusables: Equatable {
-//    case search
-//    case selfUser
-//  }
 
   init() {
     _model = EnvironmentStateObject { env in
       SpaceListViewModel(db: env.appDatabase)
+    }
+    _home = EnvironmentStateObject { env in
+      HomeViewModel(db: env.appDatabase)
     }
   }
 
@@ -102,6 +96,15 @@ struct HomeSidebar: View {
           .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
       }
     }
+    
+    Section("Private Messages") {
+      ForEach(home.chats) { chat in
+        UserItem(user: chat.user, action: {
+          userPressed(user: chat.user)
+        })
+          .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+      }
+    }
   }
 
   // The view when user focuses the search input shows up
@@ -157,6 +160,11 @@ struct HomeSidebar: View {
         overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
       }
     }
+  }
+  
+  private func userPressed(user: User) {
+    // Open chat in home
+    nav.navigate(to: .chat(peer: .user(id: user.id)))
   }
 }
 

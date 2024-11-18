@@ -127,13 +127,14 @@ private extension MainView {
 
   var chatsSection: some View {
     Section(header: Text("Direct Messages")) {
-      ForEach(home.chats.sorted(by: { $0.chat.date > $1.chat.date }), id: \.chat.id) { chat in
+      ForEach(
+        home.chats,
+        // .sorted(by: { $0.chat?.date ?? $0.user.date > $1.chat?.date ?? $1.user.date }),
+        id: \.user.id
+      ) { chat in
         ChatRowView(item: chat)
           .onTapGesture {
-            if let id = chat.user?.id {
-              nav.push(.chat(peer: .user(id: chat.chat.peerUserId ?? id)))
-              print("ChatUserId \(id) \(chat.chat.peerUserId)")
-            }
+            nav.push(.chat(peer: .user(id: chat.user.id)))
           }
       }
     }
