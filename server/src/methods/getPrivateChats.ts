@@ -5,7 +5,6 @@ import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
-import { normalizeId, TInputId } from "@in/server/types/methods"
 import { Authorize } from "@in/server/utils/authorize"
 import { encodeChatInfo, encodeDialogInfo, encodeUserInfo, TChatInfo, TDialogInfo, TUserInfo } from "../models"
 
@@ -17,10 +16,7 @@ export const Response = Type.Object({
   peerUsers: Type.Array(TUserInfo),
 })
 
-export const handler = async (
-  input: Static<typeof Input>,
-  context: HandlerContext,
-): Promise<Static<typeof Response>> => {
+export const handler = async (_: Static<typeof Input>, context: HandlerContext): Promise<Static<typeof Response>> => {
   const currentUserId = context.currentUserId
 
   const hasSelfChat = await db

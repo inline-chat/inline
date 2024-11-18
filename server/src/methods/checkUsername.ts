@@ -19,12 +19,8 @@ export const handler = async (
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
-    const result = await db
-      .select()
-      .from(users)
-      .where(and(eq(users.username, input.username), not(eq(users.id, context.currentUserId))))
-
-    return { available: result.length === 0 }
+    const available = await checkUsernameAvailable(input.username, { userId: context.currentUserId })
+    return { available }
   } catch (error) {
     Log.shared.error("Failed to check username", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
@@ -32,10 +28,14 @@ export const handler = async (
 }
 
 /// HELPER FUNCTIONS ///
-export const checkUsernameAvailable = async (username: string) => {
+export const checkUsernameAvailable = async (username: string, context: { userId?: number }) => {
   const normalizedUsername = username.toLowerCase().trim()
   const result = await db.query.users.findFirst({
-    where: eq(users.username, normalizedUsername),
+    where: and(
+      eq(users.username, normalizedUsername),
+      // If the user ID is provided, we don't want to check against the current user
+      not(eq(users.id, context.userId ?? 0)),
+    ),
     columns: { username: true },
   })
 

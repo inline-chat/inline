@@ -35,7 +35,7 @@ export const Response = Type.Object({
 
 type Response = Static<typeof Response>
 
-export const handler = async (input: Input, context: Context): Promise<Response> => {
+export const handler = async (input: Input, _: Context): Promise<Response> => {
   const spaceId = Number(input.spaceId)
 
   // Validate

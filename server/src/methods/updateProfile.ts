@@ -24,7 +24,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
   try {
     if (input.username) {
       // check username is available if it's set
-      let isAvailable = await checkUsernameAvailable(input.username)
+      let isAvailable = await checkUsernameAvailable(input.username, { userId: context.currentUserId })
       if (!isAvailable) {
         throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
       }
