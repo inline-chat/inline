@@ -103,6 +103,12 @@ import {
   Response as GetDialogsResponse,
 } from "@in/server/methods/getDialogs"
 
+import {
+  handler as savePushNotificationHandler,
+  Input as SavePushNotificationInput,
+  Response as SavePushNotificationResponse,
+} from "@in/server/methods/savePushNotification"
+
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
@@ -132,6 +138,14 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(makeApiRoute("/getPrivateChats", GetPrivateChatsInput, GetPrivateChatsResponse, getPrivateChatsHandler))
       .use(makeApiRoute("/getSpaceMembers", GetSpaceMembersInput, GetSpaceMembersResponse, getSpaceMembersHandler))
       .use(makeApiRoute("/getDialogs", GetDialogsInput, GetDialogsResponse, getDialogsHandler))
+      .use(
+        makeApiRoute(
+          "/savePushNotification",
+          SavePushNotificationInput,
+          SavePushNotificationResponse,
+          savePushNotificationHandler,
+        ),
+      )
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }
