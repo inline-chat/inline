@@ -23,8 +23,9 @@
     "@sinclair/typebox": "0.32.34"
   },
   "dependencies": {
-    "elysia": "=1.1.22",
-    "@sinclair/typebox": "=0.32.34"
+    "@sinclair/typebox": "=0.32.34",
+    "apn": "^2.2.0",
+    "elysia": "=1.1.22"
   },
   "devDependencies": {
     "@protobuf-ts/plugin": "^2.9.4",
