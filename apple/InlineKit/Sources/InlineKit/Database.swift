@@ -128,7 +128,6 @@ public extension AppDatabase {
     if let token = Auth.shared.getToken() {
       try await AppDatabase.shared.dbWriter.barrierWriteWithoutTransaction { db in
         try db.changePassphrase(token)
-        try db.usePassphrase(token)
         // Needed for stupid swift. actually smart. ew.
         if let db = AppDatabase.shared.dbWriter as? DatabasePool {
           print("invalidateReadOnlyConnections")
@@ -142,10 +141,28 @@ public extension AppDatabase {
 
   static func clearDB() throws {
     _ = try AppDatabase.shared.dbWriter.write { db in
-      try User.deleteAll(db)
-      try Chat.deleteAll(db)
-      try Message.deleteAll(db)
-      try Space.deleteAll(db)
+
+      // Disable foreign key checks temporarily
+      try db.execute(sql: "PRAGMA foreign_keys = OFF")
+
+      // Get all table names excluding sqlite_* tables
+      let tables = try String.fetchAll(db, sql: """
+      SELECT name FROM sqlite_master 
+      WHERE type = 'table' 
+      AND name NOT LIKE 'sqlite_%'
+      AND name NOT LIKE 'grdb_%'
+      """)
+
+      // Delete all rows from each table
+      for table in tables {
+        try db.execute(sql: "DELETE FROM \(table)")
+
+        // Reset the auto-increment counters
+        try db.execute(sql: "DELETE FROM sqlite_sequence WHERE name = ?", arguments: [table])
+      }
+
+      // Re-enable foreign key checks
+      try db.execute(sql: "PRAGMA foreign_keys = ON")
     }
 
     // Optionally, delete the database file
