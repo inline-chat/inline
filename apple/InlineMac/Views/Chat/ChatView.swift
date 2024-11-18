@@ -1,5 +1,6 @@
 import InlineKit
 import SwiftUI
+import SwiftUIIntrospect
 
 struct ChatView: View {
   let peerId: Peer
@@ -22,20 +23,50 @@ struct ChatView: View {
   public init(peerId: Peer) {
     self.peerId = peerId
     _fullChat = EnvironmentStateObject { env in
-      FullChatViewModel(db: env.appDatabase, peer: peerId)
+      FullChatViewModel(db: env.appDatabase, peer: peerId, reversed: false)
     }
   }
 
   @ViewBuilder
   var content: some View {
-    VStack {
-      Text(fullChat.chat?.id.description ?? "NO ID")
-      List {
-        ForEach(fullChat.fullMessages, id: \.id) { message in
-          MessageView(message: message.message)
+
+    // SwiftUI-based
+    messageList
+      .environmentObject(fullChat)
+
+    // // AppKit-based
+    // MessagesCollectionView(
+    //   onCopy: { copiedText in
+    //     print("Copied text: \(copiedText)")
+    //   }
+    // )
+    // .frame(maxWidth: .infinity, maxHeight: .infinity)
+    // .environmentObject(fullChat)
+  }
+
+  @ViewBuilder
+  var messageList: some View {
+    ScrollView(.vertical) {
+      LazyVStack(pinnedViews: [.sectionFooters]) {
+        ForEach(fullChat.messagesInSections) { section in
+          Section(footer: DateBadge(date: section.date).flippedUpsideDown()) {
+            ForEach(section.messages) { fullMessage in
+              MessageView(fullMessage: fullMessage)
+                .flippedUpsideDown()
+                .id(fullMessage.id)
+            }
+          }
         }
       }
-
+      .frame(maxWidth: .infinity, minHeight: 0)
+    }
+    .flippedUpsideDown()
+    .introspect(.scrollView, on: .macOS(.v13, .v14, .v15)) { scrollView in
+      scrollView.horizontalScrollElasticity = .none
+      scrollView.hasHorizontalScroller = false  // Add this line
+    }
+    .scrollBounceBehavior(.basedOnSize)
+    .safeAreaInset(edge: .bottom, alignment: .center, spacing: nil) {
       compose
     }
   }
@@ -52,10 +83,10 @@ struct ChatView: View {
         Task {
           do {
             guard let chatId = fullChat.chat?.id else { return }
-            
+
             print("Sending message to chat \(chatId)")
             print("Sending message to chat \(self.peerId)")
-            
+
             // Send message
             try await data
               .sendMessage(
@@ -65,7 +96,7 @@ struct ChatView: View {
                 text: text,
                 peerId: self.peerId
               )
-          }catch {
+          } catch {
             Log.shared.error("Failed to send message", error: error)
           }
         }
@@ -86,7 +117,7 @@ struct ChatView: View {
     content
       // Hide default title. No way to achieve this without this for now
       .navigationTitle("")
-//      .navigationSubtitle(subtitle)
+      //      .navigationSubtitle(subtitle)
       .toolbar {
         ToolbarItem(placement: .navigation) {
           HStack {
@@ -110,7 +141,8 @@ struct ChatView: View {
         }
 
         ToolbarItem(placement: .primaryAction) {
-          Button {} label: {
+          Button {
+          } label: {
             Label("Info", systemImage: "info.circle")
               .help("Chat Info")
           }

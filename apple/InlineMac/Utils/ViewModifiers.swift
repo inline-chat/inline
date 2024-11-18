@@ -41,3 +41,10 @@ extension View {
     AnyView(self)
   }
 }
+
+
+extension View {
+  func flippedUpsideDown() -> some View {
+    scaleEffect(CGSize(width: 1.0, height: -1.0))
+  }
+}
