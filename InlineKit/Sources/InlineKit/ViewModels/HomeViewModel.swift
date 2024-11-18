@@ -1,17 +1,21 @@
 import Combine
 import GRDB
 
-public struct ChatItem: Codable, FetchableRecord, PersistableRecord, @unchecked Sendable, Hashable {
-  public var chat: Chat
-  public var user: User?
+public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable, Identifiable {
+  public var dialog: Dialog
+  public var user: User
+  public var chat: Chat?
   public var message: Message?
+  
+  public var id: Int64 { user.id }
 }
 
-public final class HomeViewModel: ObservableObject, @unchecked Sendable {
-  @Published public private(set) var chats: [ChatItem] = []
+public final class HomeViewModel: ObservableObject {
+  @Published public private(set) var chats: [HomeChatItem] = []
 
   private var cancellable: AnyCancellable?
   private var db: AppDatabase
+  
   public init(db: AppDatabase) {
     self.db = db
     start()
@@ -21,11 +25,15 @@ public final class HomeViewModel: ObservableObject, @unchecked Sendable {
     cancellable =
       ValueObservation
       .tracking { db in
-        try Chat
-          .filter(Column("spaceId") == nil)
-          .including(optional: Chat.peerUser)
-          .including(optional: Chat.lastMessage)
-          .asRequest(of: ChatItem.self)
+        try Dialog
+          .filter(Column("peerUserId") != nil)
+          .including(
+            required: Dialog.peerUser
+              .including(
+                optional: User.chat
+                  .including(optional: Chat.lastMessage))
+          )
+          .asRequest(of: HomeChatItem.self)
           .fetchAll(db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)

@@ -2,6 +2,7 @@ import InlineKit
 import SwiftUI
 
 struct OnboardingProfile: View {
+  @EnvironmentObject var mainWindowViewModel: MainWindowViewModel
   @EnvironmentObject var onboardingViewModel: OnboardingViewModel
   @Environment(\.appDatabase) var database
   @FormState var formState
@@ -38,7 +39,7 @@ struct OnboardingProfile: View {
         }
 
       self.usernameField
-        .focused(self.$focusedField, equals: .name)
+        .focused(self.$focusedField, equals: .username)
         .disabled(self.formState.isLoading)
         .padding(.bottom, 10)
         .onSubmit {
@@ -97,10 +98,10 @@ struct OnboardingProfile: View {
 
         // TODO: handle errors
         try await database.dbWriter.write { db in
-          try User(from: result.user).save(db)
+          try User(from: result.user).save(db, onConflict: .ignore)
         }
 
-        self.onboardingViewModel.navigateAfterLogin()
+        self.mainWindowViewModel.navigate(.main)
       } catch {
         formState.failed(error: error.localizedDescription)
       }
