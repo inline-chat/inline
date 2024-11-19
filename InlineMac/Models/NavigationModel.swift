@@ -1,6 +1,6 @@
+import Combine
 import InlineKit
 import SwiftUI
-import Combine
 
 enum NavigationRoute: Hashable, Codable {
   case homeRoot
@@ -14,28 +14,27 @@ enum PrimarySheet: Codable {
 
 @MainActor
 class NavigationModel: ObservableObject {
-    
   static let shared = NavigationModel()
-  
+
   @Published var homePath: [NavigationRoute] = []
   @Published var activeSpaceId: Int64?
 
   @Published private var spacePathDict: [Int64: [NavigationRoute]] = [:]
   @Published private var spaceSelectionDict: [Int64: NavigationRoute] = [:]
-  
+
   public var windowManager: MainWindowViewModel?
 
   var spacePath: Binding<[NavigationRoute]> {
     Binding(
       get: { [weak self] in
         guard let self,
-          let activeSpaceId
+              let activeSpaceId
         else { return [] }
         return spacePathDict[activeSpaceId] ?? []
       },
       set: { [weak self] newValue in
         guard let self,
-          let activeSpaceId
+              let activeSpaceId
         else { return }
         Task { @MainActor in
           self.spacePathDict[activeSpaceId] = newValue
@@ -49,13 +48,13 @@ class NavigationModel: ObservableObject {
     Binding(
       get: { [weak self] in
         guard let self,
-          let activeSpaceId
+              let activeSpaceId
         else { return .spaceRoot }
         return spaceSelectionDict[activeSpaceId] ?? .spaceRoot
       },
       set: { [weak self] newValue in
         guard let self,
-          let activeSpaceId
+              let activeSpaceId
         else { return }
         Task { @MainActor in
           self.spaceSelectionDict[activeSpaceId] = newValue
@@ -64,13 +63,13 @@ class NavigationModel: ObservableObject {
       }
     )
   }
-  
+
   private var cancellables = Set<AnyCancellable>()
-  
+
   init() {
     setupSubscriptions()
   }
-  
+
   private func setupSubscriptions() {
     $activeSpaceId
       .sink { [weak self] newValue in
@@ -79,13 +78,12 @@ class NavigationModel: ObservableObject {
       }
       .store(in: &cancellables)
   }
-  
-  
+
   // Used from sidebars
   func select(_ route: NavigationRoute) {
     if let activeSpaceId {
       spaceSelectionDict[activeSpaceId] = route
-      self.windowManager?.setUpForInnerRoute(route)
+      windowManager?.setUpForInnerRoute(route)
     } else {
       // todo
     }
@@ -94,10 +92,10 @@ class NavigationModel: ObservableObject {
   func navigate(to route: NavigationRoute) {
     if let activeSpaceId {
       spacePathDict[activeSpaceId, default: []].append(route)
-      self.windowManager?.setUpForInnerRoute(route)
+      windowManager?.setUpForInnerRoute(route)
     } else {
       homePath.append(route)
-      self.windowManager?.setUpForInnerRoute(route)
+      windowManager?.setUpForInnerRoute(route)
     }
   }
 
@@ -106,23 +104,24 @@ class NavigationModel: ObservableObject {
     // TODO: Load from persistence layer
     if spacePathDict[id] == nil {
       spacePathDict[id] = []
-      self.windowManager?.setUpForInnerRoute(.spaceRoot)
+      windowManager?.setUpForInnerRoute(.spaceRoot)
     }
   }
 
   func goHome() {
     activeSpaceId = nil
     // TODO: Load from persistence layer
-    self.windowManager?.setUpForInnerRoute(.homeRoot)
+    let currentHomeRoute = homePath.last ?? .homeRoot
+    windowManager?.setUpForInnerRoute(currentHomeRoute)
   }
 
   func navigateBack() {
     if let activeSpaceId {
       spacePathDict[activeSpaceId]?.removeLast()
-      self.windowManager?.setUpForInnerRoute(spacePathDict[activeSpaceId]?.last ?? .spaceRoot)
+      windowManager?.setUpForInnerRoute(spacePathDict[activeSpaceId]?.last ?? .spaceRoot)
     } else {
       homePath.removeLast()
-      self.windowManager?.setUpForInnerRoute(homePath.last ?? .homeRoot)
+      windowManager?.setUpForInnerRoute(homePath.last ?? .homeRoot)
     }
   }
 
@@ -133,7 +132,7 @@ class NavigationModel: ObservableObject {
     spacePathDict = [:]
     spaceSelectionDict = [:]
   }
-  
+
   var currentRoute: NavigationRoute {
     if let activeSpaceId {
       return spaceSelectionDict[activeSpaceId] ?? .spaceRoot

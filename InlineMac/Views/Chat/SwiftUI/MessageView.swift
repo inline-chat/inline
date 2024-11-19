@@ -65,3 +65,8 @@ struct MessageView: View {
       .fixedSize(horizontal: false, vertical: true)
   }
 }
+
+
+//#Preview {
+//  MessageView(fullMessage: FullMessage.preview)
+//}
