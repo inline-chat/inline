@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 import SwiftUIIntrospect
 
@@ -17,7 +18,7 @@ struct ChatView: View {
   }
 
   var subtitle: String {
-    "public"
+    "online"
   }
 
   public init(peerId: Peer) {
@@ -29,10 +30,8 @@ struct ChatView: View {
 
   @ViewBuilder
   var content: some View {
-
     // SwiftUI-based
     messageList
-      .environmentObject(fullChat)
 
     // // AppKit-based
     // MessagesCollectionView(
@@ -63,7 +62,7 @@ struct ChatView: View {
     .flippedUpsideDown()
     .introspect(.scrollView, on: .macOS(.v13, .v14, .v15)) { scrollView in
       scrollView.horizontalScrollElasticity = .none
-      scrollView.hasHorizontalScroller = false  // Add this line
+      scrollView.hasHorizontalScroller = false // Add this line
     }
     .scrollBounceBehavior(.basedOnSize)
     .safeAreaInset(edge: .bottom, alignment: .center, spacing: nil) {
@@ -121,7 +120,14 @@ struct ChatView: View {
       .toolbar {
         ToolbarItem(placement: .navigation) {
           HStack {
-            ChatIcon()
+            if let user = fullChat.chatItem?.user {
+              ChatIcon(peer: .user(user))
+            } else if let chat = fullChat.chatItem?.chat {
+              ChatIcon(peer: .chat(chat))
+            } else {
+              // TODO: Handle
+            }
+
             VStack(alignment: .leading) {
               Text(title)
                 .font(.headline)
@@ -141,8 +147,7 @@ struct ChatView: View {
         }
 
         ToolbarItem(placement: .primaryAction) {
-          Button {
-          } label: {
+          Button {} label: {
             Label("Info", systemImage: "info.circle")
               .help("Chat Info")
           }
@@ -152,9 +157,25 @@ struct ChatView: View {
 }
 
 struct ChatIcon: View {
+  enum PeerType {
+    case chat(Chat)
+    case user(User)
+  }
+
+  let size: CGFloat = 34
+
+  var peer: PeerType
+
   var body: some View {
-    Image(systemName: "person.fill")
-      .resizable()
-      .scaledToFit()
+    switch peer {
+    case .chat:
+      Image(systemName: "bubble.middle.bottom.fill")
+        .resizable()
+        .scaledToFit()
+        .frame(width: size, height: size)
+
+    case .user(let user):
+      UserAvatar(user: user, size: size)
+    }
   }
 }

@@ -107,4 +107,14 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
     )
   }
+
+  public static let preview = Message(
+    messageId: 1,
+    fromId: 1,
+    date: Date(),
+    text: "Hello, world!",
+    peerUserId: 2,
+    peerThreadId: nil,
+    chatId: 1
+  )
 }

@@ -10,6 +10,8 @@ public struct FullMessage: Codable, FetchableRecord, PersistableRecord, Sendable
   public var id: Int64 {
     message.id
   }
+
+//  public static let preview = FullMessage(user: User, message: Message)
 }
 
 public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
@@ -37,7 +39,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   private var peerUserCancellable: AnyCancellable?
 
   private var db: AppDatabase
-  private var peer: Peer
+  public var peer: Peer
   private var reversed: Bool
 
   public init(db: AppDatabase, peer: Peer, reversed: Bool = false) {
