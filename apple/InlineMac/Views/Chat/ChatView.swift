@@ -6,8 +6,12 @@ import SwiftUIIntrospect
 struct ChatView: View {
   let peerId: Peer
 
-  @EnvironmentStateObject var fullChat: FullChatViewModel
   @EnvironmentObject var data: DataManager
+
+  @StateObject var chatFocus = ChatFocus()
+  @StateObject var scroller = ChatScroller()
+
+  @EnvironmentStateObject var fullChat: FullChatViewModel
 
   var item: SpaceChatItem? {
     fullChat.chatItem
@@ -24,92 +28,122 @@ struct ChatView: View {
   public init(peerId: Peer) {
     self.peerId = peerId
     _fullChat = EnvironmentStateObject { env in
-      FullChatViewModel(db: env.appDatabase, peer: peerId, reversed: false)
+      FullChatViewModel(db: env.appDatabase, peer: peerId, reversed: true)
     }
   }
 
   @ViewBuilder
   var content: some View {
-    // SwiftUI-based
     messageList
+      .task {
+        await fetch()
+      }
+      .environmentObject(scroller)
+      .environmentObject(chatFocus)
+      .background {
+        KeyPressHandler {
+          // Return key code
+          if $0.keyCode == 36, $0.modifierFlags.contains(.command) {
+            if chatFocus.focusedField != .compose {
+              chatFocus.focusCompose()
+              return nil
+            } else {
+              // it's focused, so send?
+            }
+          }
 
-    // // AppKit-based
-    // MessagesCollectionView(
-    //   onCopy: { copiedText in
-    //     print("Copied text: \(copiedText)")
-    //   }
-    // )
-    // .frame(maxWidth: .infinity, maxHeight: .infinity)
-    // .environmentObject(fullChat)
+          return $0
+        }
+      }
   }
+
+  @State var scrollProxy: ScrollViewProxy? = nil
 
   @ViewBuilder
   var messageList: some View {
-    ScrollView(.vertical) {
-      LazyVStack(pinnedViews: [.sectionFooters]) {
-        ForEach(fullChat.messagesInSections) { section in
-          Section(footer: DateBadge(date: section.date).flippedUpsideDown()) {
-            ForEach(section.messages) { fullMessage in
-              MessageView(fullMessage: fullMessage)
-                .flippedUpsideDown()
-                .id(fullMessage.id)
+    ScrollViewReader { proxy in
+      ScrollView(.vertical) {
+        if fullChat.fullMessages.isEmpty {
+          Text("No messages.")
+        } else {
+          LazyVStack(pinnedViews: [.sectionFooters]) {
+            ForEach(fullChat.messagesInSections) { section in
+              Section(footer: DateBadge(date: section.date) {
+                scrollTo(section: section, animate: true)
+              }.flippedUpsideDown()
+              ) {
+                ForEach(section.messages, id: \.message.globalId) { fullMessage in
+                  // it's last (first), use as scroll for next section by putting it below (above)
+                  if section.messages.first == fullMessage {
+                    Color.clear
+                      .frame(height: 1)
+                      .id("section_\(fullChat.getPrevSectionDate(section: section)?.timeIntervalSince1970 ?? 0)")
+                  }
+
+                  // Calculate
+                  let isFirstOfSenderGroup = deriveMessageProps(fullMessage, section)
+
+                  MessageView(fullMessage: fullMessage, showsSender: isFirstOfSenderGroup)
+                    .flippedUpsideDown()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .id(fullMessage.message.globalId) // to avoid flashes
+                    .onAppear {
+                      print("fullChat.fullMessages.first?.message.globalId \( fullChat.fullMessages.first?.message.globalId)")
+                    }
+                }
+              }
             }
           }
+          .animation(
+            .snappy.speed(2),
+            value: fullChat.fullMessages.first?.message.globalId
+          )
+          .frame(maxWidth: .infinity, minHeight: 0)
+          .padding(.horizontal, 12)
         }
       }
-      .frame(maxWidth: .infinity, minHeight: 0)
-    }
-    .flippedUpsideDown()
-    .introspect(.scrollView, on: .macOS(.v13, .v14, .v15)) { scrollView in
-      scrollView.horizontalScrollElasticity = .none
-      scrollView.hasHorizontalScroller = false // Add this line
-    }
-    .scrollBounceBehavior(.basedOnSize)
-    .safeAreaInset(edge: .bottom, alignment: .center, spacing: nil) {
-      compose
+      .flippedUpsideDown()
+      .introspect(.scrollView, on: .macOS(.v13, .v14, .v15)) { scrollView in
+        scrollView.horizontalScrollElasticity = .none
+        scrollView.hasHorizontalScroller = false // Add this line
+      }
+      .scrollBounceBehavior(.basedOnSize)
+      .safeAreaInset(edge: .bottom, alignment: .center, spacing: nil) {
+        compose
+      }
+      .onAppear {
+        // Configure Scroller
+        scrollProxy = proxy
+        scroller.hook(
+          scrollToMessage: { messageId, animate in
+            self.scrollTo(messageId: messageId, animate: animate)
+          },
+          scrollToBottom: { animated in
+            self.scrollToBottom(animated: animated)
+          }
+        )
+
+        // Focus Compose
+        chatFocus.focusCompose()
+      }
+      // Less than 200 UI gets weird and cuts off at random edges
+      .frame(minHeight: 200)
     }
   }
 
-  @State private var text: String = ""
+//
+//  @ViewBuilder
+//  func atBottomThing(_ section: FullChatSection, _ fullMessage: FullMessage) -> some View {
+//
+//  }
 
   @ViewBuilder
   var compose: some View {
-    HStack {
-      TextField("Type a message", text: $text)
-        .textFieldStyle(.roundedBorder)
-        .padding(.horizontal, 8)
-      Button {
-        Task {
-          do {
-            guard let chatId = fullChat.chat?.id else { return }
-
-            print("Sending message to chat \(chatId)")
-            print("Sending message to chat \(self.peerId)")
-
-            // Send message
-            try await data
-              .sendMessage(
-                chatId: chatId,
-                peerUserId: nil,
-                peerThreadId: nil,
-                text: text,
-                peerId: self.peerId
-              )
-          } catch {
-            Log.shared.error("Failed to send message", error: error)
-          }
-        }
-      } label: {
-        Image(systemName: "paperplane")
-          .resizable()
-          .scaledToFit()
-          .frame(width: 20, height: 20)
-          .padding(8)
-          .background(Color.accentColor)
-          .clipShape(Circle())
-      }
-      .buttonStyle(.plain)
-    }
+    Compose(
+      chatId: fullChat.chat?.id,
+      peerId: peerId,
+      topMsgId: fullChat.topMessage?.message.messageId
+    )
   }
 
   var body: some View {
@@ -154,28 +188,62 @@ struct ChatView: View {
         }
       }
   }
-}
 
-struct ChatIcon: View {
-  enum PeerType {
-    case chat(Chat)
-    case user(User)
+  /// Fetch chat history
+  private func fetch() async {
+    do {
+      let _ = try await data.getChatHistory(peerUserId: nil, peerThreadId: nil, peerId: peerId)
+    } catch {
+      Log.shared.error("Failed to get chat history", error: error)
+    }
   }
 
-  let size: CGFloat = 34
+  private func deriveMessageProps(_ fullMessage: FullMessage, _ section: FullChatSection) -> Bool {
+    let indexOf = section.messages.firstIndex(of: fullMessage) ?? 0
+    let sectionCount = section.messages.count
+    let prevMessage = indexOf + 1 < sectionCount ? section.messages[indexOf + 1] : nil // + bc reverse
+    //    let nextMessage = indexOf > 0 ? section.messages[indexOf - 1] : nil // - bc reverse
+    let isFirstOfSenderGroup = (prevMessage?.user?.id ?? -1) != (fullMessage.user?.id ?? -2)
 
-  var peer: PeerType
+    return isFirstOfSenderGroup
+  }
 
-  var body: some View {
-    switch peer {
-    case .chat:
-      Image(systemName: "bubble.middle.bottom.fill")
-        .resizable()
-        .scaledToFit()
-        .frame(width: size, height: size)
+  private func scrollTo(section: FullChatSection, animate: Bool = true) {
+    withAnimation(animate ? .easeOut : nil) {
+      scrollProxy?.scrollTo("section_\(section.date.timeIntervalSince1970)", anchor: .bottom)
+    }
+  }
 
-    case .user(let user):
-      UserAvatar(user: user, size: size)
+  private func scrollTo(messageId: Int64, animate: Bool = true) {
+    guard let globalId = fullChat.getGlobalId(forMessageId: messageId) else {
+      return
+    }
+    scrollTo(globalId: globalId, animate: animate)
+  }
+
+  private func scrollTo(globalId: Int64, animate: Bool = true) {
+    if animate {
+      withAnimation(.easeOut) {
+        scrollProxy?.scrollTo(globalId, anchor: .center)
+      }
+    } else {
+      scrollProxy?.scrollTo(globalId, anchor: .center)
+    }
+  }
+
+  private func scrollToBottom(animated: Bool) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+      if animated {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+          if let id = fullChat.fullMessages.first?.message.globalId {
+            scrollTo(globalId: id)
+          }
+        }
+      } else {
+        if let id = fullChat.fullMessages.first?.message.globalId {
+          scrollTo(globalId: id)
+        }
+      }
     }
   }
 }

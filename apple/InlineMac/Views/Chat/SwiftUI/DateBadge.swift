@@ -4,6 +4,12 @@ import SwiftUI
 
 struct DateBadge: View {
   var date: Date
+  var action: (() -> Void)?
+
+  init(date: Date, action: (() -> Void)? = nil) {
+    self.date = date
+    self.action = action
+  }
 
   enum Day {
     case today
@@ -32,11 +38,18 @@ struct DateBadge: View {
   var body: some View {
     HStack {
       Text(day.description)
+        .font(.body)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 2)
+        .background(.regularMaterial)
+        .clipShape(Capsule(style: .circular))
     }
-    .padding(.horizontal, 4)
-    .background(Color.gray.opacity(0.1))
-    .cornerRadius(12)
-    .frame(height: 20)
-    .contentShape(Capsule(style: .circular))
+    // Used to add distance to the top edge
+    .padding(.top, 10)
+    .contentShape(Rectangle())
+    .onTapGesture {
+      action?()
+    }
   }
 }
