@@ -30,9 +30,19 @@ struct Email: View {
         .font(.title2)
         .fontWeight(.semibold)
         .padding(.vertical, 8)
+        .onSubmit {
+          submit()
+        }
         .onChange(of: isFocused) { _, newValue in
           withAnimation(.smooth(duration: 0.15)) {
             animate = newValue
+          }
+        }
+        .onChange(of: isInputValid) {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            withAnimation {
+              isInputValid = true
+            }
           }
         }
       Text(errorMsg)
