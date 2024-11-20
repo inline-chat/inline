@@ -130,7 +130,7 @@ public class DataManager: ObservableObject {
     log.debug("saved optimistic")
 
     let userId = user.id
-    
+
     // Do in background
     Task { @MainActor in
       do {
@@ -326,7 +326,7 @@ public class DataManager: ObservableObject {
   }
 
   public func sendMessage(
-    chatId: Int64, peerUserId: Int64?, peerThreadId: Int64?, text: String, peerId: Peer?
+    chatId: Int64, peerUserId: Int64?, peerThreadId: Int64?, text: String, peerId: Peer?, randomId: Int64? // for now nilable
   )
     async throws
   {
@@ -354,19 +354,22 @@ public class DataManager: ObservableObject {
     let result = try await ApiClient.shared.sendMessage(
       peerUserId: finalPeerUserId,
       peerThreadId: finalPeerThreadId,
-      text: text
+      text: text,
+      randomId: randomId
     )
 
-    print("sendMessage result: \(result)")
+    
     Task { @MainActor in
-      try await database.dbWriter.write { db in
-
-        let message = Message(from: result.message)
-        do {
-          try message.save(db)
-        } catch {
-          Log.shared.error("Failed to save message", error: error)
-          throw error
+      // Don't apply local changes if randomId is set which means optimistic update was handled
+      if randomId == nil {
+        try await database.dbWriter.write { db in
+          let message = Message(from: result.message)
+          do {
+            try message.save(db)
+          } catch {
+            Log.shared.error("Failed to save message", error: error)
+            throw error
+          }
         }
       }
     }
@@ -407,7 +410,7 @@ public class DataManager: ObservableObject {
     let messages: [Message] = try await database.dbWriter.write { db in
       let messages = result.messages.map { Message(from: $0) }
       try messages.forEach { message in
-        try message.save(db, onConflict: .replace)
+        try message.save(db, onConflict: .ignore)
       }
       return messages
     }

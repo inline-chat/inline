@@ -220,5 +220,12 @@ export const TMessageEditedUpdate = Type.Object({
   }),
 })
 
-export const TUpdate = Type.Union([TNewMessageUpdate, TMessageEditedUpdate])
+export const TUpdateMessageIdUpdate = Type.Object({
+  updateMessageId: Type.Object({
+    messageId: Type.Integer(),
+    randomId: Type.String(),
+  }),
+})
+export type TUpdateMessageIdUpdate = StaticEncode<typeof TUpdateMessageIdUpdate>
+export const TUpdate = Type.Union([TNewMessageUpdate, TMessageEditedUpdate, TUpdateMessageIdUpdate])
 export type TUpdateInfo = StaticEncode<typeof TUpdate>

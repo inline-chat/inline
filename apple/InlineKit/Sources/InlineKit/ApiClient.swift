@@ -229,7 +229,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   //        )
   //    }
 
-  public func sendMessage(peerUserId: Int64?, peerThreadId: Int64?, text: String) async throws
+  public func sendMessage(peerUserId: Int64?, peerThreadId: Int64?, text: String, randomId: Int64?) async throws
     -> SendMessage
   {
     var queryItems: [URLQueryItem] = [
@@ -242,6 +242,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     if let peerThreadId = peerThreadId {
       queryItems.append(URLQueryItem(name: "peerThreadId", value: "\(peerThreadId)"))
+    }
+    
+    if let randomId = randomId {
+      queryItems.append(URLQueryItem(name: "randomId", value: "\(randomId)"))
     }
 
     return try await request(

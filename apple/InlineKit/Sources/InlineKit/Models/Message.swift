@@ -23,7 +23,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var id: Int64 {
     messageId
   }
-
+  
+  // Only set for outgoing messages
+  public var randomId: Int64?
+  
   // From API, unique per chat
   public var messageId: Int64
 
@@ -64,6 +67,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   public init(
     messageId: Int64,
+    randomId: Int64? = nil,
     fromId: Int64,
     date: Date,
     text: String?,
@@ -76,6 +80,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     editDate: Date? = nil
   ) {
     self.messageId = messageId
+    self.randomId = randomId
     self.date = date
     self.text = text
     self.fromId = fromId

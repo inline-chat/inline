@@ -60,9 +60,7 @@
         "waitlist_email_unique": {
           "name": "waitlist_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "checkConstraints": {}
@@ -110,9 +108,7 @@
         "there_users_email_unique": {
           "name": "there_users_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "checkConstraints": {}
@@ -207,16 +203,12 @@
         "users_email_unique": {
           "name": "users_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         },
         "users_phone_number_unique": {
           "name": "users_phone_number_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "phone_number"
-          ]
+          "columns": ["phone_number"]
         }
       },
       "checkConstraints": {}
@@ -329,12 +321,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -399,16 +387,12 @@
         "login_codes_email_unique": {
           "name": "login_codes_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         },
         "login_codes_phone_number_unique": {
           "name": "login_codes_phone_number_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "phone_number"
-          ]
+          "columns": ["phone_number"]
         }
       },
       "checkConstraints": {}
@@ -461,12 +445,8 @@
           "name": "spaces_creatorId_users_id_fk",
           "tableFrom": "spaces",
           "tableTo": "users",
-          "columnsFrom": [
-            "creatorId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["creatorId"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -476,9 +456,7 @@
         "spaces_handle_unique": {
           "name": "spaces_handle_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "handle"
-          ]
+          "columns": ["handle"]
         }
       },
       "checkConstraints": {}
@@ -527,12 +505,8 @@
           "name": "members_user_id_users_id_fk",
           "tableFrom": "members",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -540,12 +514,8 @@
           "name": "members_space_id_spaces_id_fk",
           "tableFrom": "members",
           "tableTo": "spaces",
-          "columnsFrom": [
-            "space_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -555,10 +525,7 @@
         "members_user_id_space_id_unique": {
           "name": "members_user_id_space_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "space_id"
-          ]
+          "columns": ["user_id", "space_id"]
         }
       },
       "checkConstraints": {}
@@ -659,12 +626,8 @@
           "name": "chats_space_id_spaces_id_fk",
           "tableFrom": "chats",
           "tableTo": "spaces",
-          "columnsFrom": [
-            "space_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -672,12 +635,8 @@
           "name": "chats_min_user_id_users_id_fk",
           "tableFrom": "chats",
           "tableTo": "users",
-          "columnsFrom": [
-            "min_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["min_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -685,12 +644,8 @@
           "name": "chats_max_user_id_users_id_fk",
           "tableFrom": "chats",
           "tableTo": "users",
-          "columnsFrom": [
-            "max_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["max_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -698,14 +653,8 @@
           "name": "last_msg_id_fk",
           "tableFrom": "chats",
           "tableTo": "messages",
-          "columnsFrom": [
-            "id",
-            "last_msg_id"
-          ],
-          "columnsTo": [
-            "chat_id",
-            "message_id"
-          ],
+          "columnsFrom": ["id", "last_msg_id"],
+          "columnsTo": ["chat_id", "message_id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -715,18 +664,12 @@
         "user_ids_unique": {
           "name": "user_ids_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "min_user_id",
-            "max_user_id"
-          ]
+          "columns": ["min_user_id", "max_user_id"]
         },
         "space_thread_number_unique": {
           "name": "space_thread_number_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "space_id",
-            "thread_number"
-          ]
+          "columns": ["space_id", "thread_number"]
         }
       },
       "checkConstraints": {
@@ -812,12 +755,8 @@
           "name": "messages_chat_id_chats_id_fk",
           "tableFrom": "messages",
           "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["chat_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -825,12 +764,8 @@
           "name": "messages_from_id_users_id_fk",
           "tableFrom": "messages",
           "tableTo": "users",
-          "columnsFrom": [
-            "from_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["from_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -840,10 +775,7 @@
         "msg_id_per_chat_unique": {
           "name": "msg_id_per_chat_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "message_id",
-            "chat_id"
-          ]
+          "columns": ["message_id", "chat_id"]
         }
       },
       "checkConstraints": {}
@@ -914,12 +846,8 @@
           "name": "dialogs_user_id_users_id_fk",
           "tableFrom": "dialogs",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -927,12 +855,8 @@
           "name": "dialogs_chat_id_chats_id_fk",
           "tableFrom": "dialogs",
           "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["chat_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -940,12 +864,8 @@
           "name": "dialogs_peer_user_id_users_id_fk",
           "tableFrom": "dialogs",
           "tableTo": "users",
-          "columnsFrom": [
-            "peer_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["peer_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -953,12 +873,8 @@
           "name": "dialogs_space_id_spaces_id_fk",
           "tableFrom": "dialogs",
           "tableTo": "spaces",
-          "columnsFrom": [
-            "space_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -968,10 +884,7 @@
         "chat_id_user_id_unique": {
           "name": "chat_id_user_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "chat_id",
-            "user_id"
-          ]
+          "columns": ["chat_id", "user_id"]
         }
       },
       "checkConstraints": {}
@@ -981,28 +894,17 @@
     "public.client_type": {
       "name": "client_type",
       "schema": "public",
-      "values": [
-        "ios",
-        "macos",
-        "web"
-      ]
+      "values": ["ios", "macos", "web"]
     },
     "public.member_roles": {
       "name": "member_roles",
       "schema": "public",
-      "values": [
-        "owner",
-        "admin",
-        "member"
-      ]
+      "values": ["owner", "admin", "member"]
     },
     "public.chat_types": {
       "name": "chat_types",
       "schema": "public",
-      "values": [
-        "private",
-        "thread"
-      ]
+      "values": ["private", "thread"]
     }
   },
   "schemas": {},

@@ -1,4 +1,4 @@
-import { pgTable, timestamp, unique } from "drizzle-orm/pg-core"
+import { bigint, pgTable, timestamp, unique } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { text } from "drizzle-orm/pg-core"
 import { chats } from "./chats"
@@ -16,6 +16,9 @@ export const messages = pgTable(
 
     // sequencial within one chat
     messageId: integer("message_id").notNull(),
+
+    // random id, used for optimistic update and deduplication
+    randomId: bigint("random_id", { mode: "bigint" }),
 
     /** message raw text, optional */
     text: text(),
@@ -40,6 +43,7 @@ export const messages = pgTable(
   (table) => ({
     messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(table.messageId, table.chatId),
     messageIdPerChatIndex: index("msg_id_per_chat_index").on(table.messageId, table.chatId),
+    randomIdPerSenderIndex: unique("random_id_per_sender_unique").on(table.randomId, table.fromId),
   }),
 )
 

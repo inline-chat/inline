@@ -17,6 +17,8 @@ export const Input = Type.Object({
 
   peerUserId: Optional(Type.String()),
   peerThreadId: Optional(Type.String()),
+
+  randomId: Optional(Type.String()), // string but it's int64
 })
 
 type Input = Static<typeof Input>
@@ -38,6 +40,8 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     : input.peerThreadId
     ? { threadId: Number(input.peerThreadId) }
     : input.peerId
+
+  const randomId = input.randomId ? BigInt(input.randomId) : undefined
 
   if (!peerId) {
     throw new InlineError(InlineError.ApiError.PEER_INVALID)
@@ -61,6 +65,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       text: input.text,
       fromId: context.currentUserId,
       messageId: prevMessageId + 1,
+      randomId: randomId ?? null,
       date: new Date(),
     })
     .returning()
@@ -159,6 +164,13 @@ const sendMessageUpdate = async ({
 }) => {
   const updateGroup = await getUpdateGroup(peerId, { currentUserId })
 
+  const updateMessageId: TUpdateInfo = {
+    updateMessageId: {
+      randomId: message.randomId?.toString() ?? "",
+      messageId: message.messageId,
+    },
+  }
+
   if (updateGroup.type === "users") {
     updateGroup.userIds.forEach((userId) => {
       const update: TUpdateInfo = {
@@ -172,10 +184,9 @@ const sendMessageUpdate = async ({
         },
       }
 
-      connectionManager.sendToUser(
-        userId,
-        createMessage({ kind: ServerMessageKind.Message, payload: { updates: [update] } }),
-      )
+      const updates = userId === currentUserId ? [updateMessageId, update] : [update]
+
+      connectionManager.sendToUser(userId, createMessage({ kind: ServerMessageKind.Message, payload: { updates } }))
     })
   } else if (updateGroup.type === "space") {
     const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
