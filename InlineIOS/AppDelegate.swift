@@ -33,7 +33,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   }
 
   public func requestPushNotifications() {
-    print("Requestedd")
     registerForPushNotifications()
   }
 
@@ -41,7 +40,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     let notificationCenter = UNUserNotificationCenter.current()
     notificationCenter.delegate = self
     notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-      print("Permission granted: \(granted)")
+
       guard granted else { return }
       self.getNotificationSettings()
     }
@@ -49,7 +48,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
   func getNotificationSettings() {
     UNUserNotificationCenter.current().getNotificationSettings { settings in
-      print("Notification settings: \(settings)")
+
       guard settings.authorizationStatus == .authorized else { return }
       DispatchQueue.main.async {
         UIApplication.shared.registerForRemoteNotifications()
@@ -57,6 +56,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
   }
 
+  #if DEBUG
   // This delegate method is called when the app is in foreground
   func userNotificationCenter(
     _ center: UNUserNotificationCenter,
@@ -66,16 +66,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // For iOS 14 and later
     completionHandler([.banner, .sound, .badge])
   }
+  #endif
 
   func application(
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
-//    let tokenParts = deviceToken.map { data in String(format: "%02.2hhx", data) }
-//    let token = tokenParts.joined()
     let deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
 
-    print("deviceToken \(deviceToken)")
     Task {
       try await ApiClient.shared.savePushNotification(
         pushToken: deviceToken
@@ -95,9 +93,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
-    if let response = response.notification.request.content.userInfo["response"] as? String {
-      print("Response: \(response)")
-    }
+    if let response = response.notification.request.content.userInfo["response"] as? String {}
   }
 }
 
@@ -105,7 +101,6 @@ public class NotificationHandler: ObservableObject {
   @Published var authenticated: Bool = false
 
   public func setAuthenticated(value: Bool) {
-    print("Setting authenticated to \(value)")
     DispatchQueue.main.async {
       self.authenticated = value
       NotificationCenter.default.post(name: .authenticationChanged, object: value)
