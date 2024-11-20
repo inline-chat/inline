@@ -61,6 +61,7 @@ struct HomeSidebar: View {
     .task {
       do {
         let _ = try await data.getSpaces()
+        let _ = try await data.getPrivateChats()
       } catch {
         // TODO: handle error? keep on loading? retry? (@mo)
       }

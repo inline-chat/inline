@@ -102,7 +102,9 @@ public final class WebSocketManager: ObservableObject {
         switch serverMessage.k {
         case .message:
           if let updates = serverMessage.p?.updates {
-            updatesManager.applyBatch(updates: updates)
+            Task {
+              await updatesManager.applyBatch(updates: updates)
+            }
           }
         default:
           break

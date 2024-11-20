@@ -5,30 +5,41 @@ import SwiftUI
 struct MessageView: View {
   // Props
   var fullMessage: FullMessage
-  var showsAvatar: Bool = true
-  var showsName: Bool = true
+  var showsSender: Bool = true
   
   // Computed
   var from: User {
     fullMessage.user ?? User.deletedInstance
   }
 
+  var showsAvatar: Bool { showsSender }
+  var showsName: Bool { showsSender }
+  
   var message: Message {
     fullMessage.message
   }
   
   // Constants
-  static let avatarSize: CGFloat = 32
+  static let avatarSize: CGFloat = 28
 
   // View renderers
   var body: some View {
     HStack(alignment: .top, spacing: 0) {
-      avatar
+      avatar.padding(.trailing, 8)
       content
       
       Spacer(minLength: 0)
     }
     .fixedSize(horizontal: false, vertical: true) // Add this line
+    .contentShape(Rectangle())
+    .contextMenu {
+      Button("ID: \(message.id)") {}.disabled(true)
+        
+      Button("Copy") {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.text ?? "", forType: .string)
+      }
+    }
   }
   
   @ViewBuilder
@@ -37,8 +48,8 @@ struct MessageView: View {
       UserAvatar(user: from, size: Self.avatarSize)
         .frame(width: Self.avatarSize, height: Self.avatarSize)
     } else {
-      EmptyView()
-        .frame(width: Self.avatarSize, height: Self.avatarSize)
+      Color.clear
+        .frame(width: Self.avatarSize, height: 1)
     }
   }
   
@@ -57,16 +68,17 @@ struct MessageView: View {
   @ViewBuilder
   var header: some View {
     Text(from.firstName ?? from.username ?? "")
+      .font(.body.weight(.medium))
   }
   
   @ViewBuilder
   var messageContent: some View {
     Text(message.text ?? "empty")
       .fixedSize(horizontal: false, vertical: true)
+      .textSelection(.enabled)
   }
 }
 
-
-//#Preview {
+// #Preview {
 //  MessageView(fullMessage: FullMessage.preview)
-//}
+// }
