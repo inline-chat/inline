@@ -19,21 +19,42 @@ export const Response = Type.Object({
 export const handler = async (_: Static<typeof Input>, context: HandlerContext): Promise<Static<typeof Response>> => {
   const currentUserId = context.currentUserId
 
-  const hasSelfChat = await db
+  const selfChatInfo = await db
     .select()
     .from(chats)
     .where(and(eq(chats.type, "private"), eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId)))
+    .leftJoin(dialogs, eq(chats.id, dialogs.chatId))
+  let selfChat = selfChatInfo[0]?.chats
+  let selfChatDialog = selfChatInfo[0]?.dialogs
 
-  if (!hasSelfChat) {
-    await db.insert(chats).values({
-      type: "private",
-      date: new Date(),
-      minUserId: currentUserId,
-      maxUserId: currentUserId,
-      title: "Saved Messages",
-    })
+  // -------------------------------------------------------------------------------------------------------------------
+  // Recover from issues with self chat
+  if (!selfChat) {
+    const [newSelfChat] = await db
+      .insert(chats)
+      .values({
+        type: "private",
+        date: new Date(),
+        minUserId: currentUserId,
+        maxUserId: currentUserId,
+        title: "Saved Messages",
+      })
+      .returning()
+    selfChat = newSelfChat
+  }
+  if (!selfChatDialog && selfChat) {
+    const [newSelfChatDialog] = await db
+      .insert(dialogs)
+      .values({
+        chatId: selfChat.id,
+        userId: currentUserId,
+      })
+      .returning()
+    selfChatDialog = newSelfChatDialog
   }
 
+  // -------------------------------------------------------------------------------------------------------------------
+  // Get all private chats
   const result = await db.query.chats.findMany({
     where: and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))),
     with: {
@@ -51,14 +72,14 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
         ),
       ),
     )
-  console.log("getPrivateChats result", result)
-  const chatsEncoded = result.map((c) => encodeChatInfo(c, { currentUserId }))
-  const dialogsEncoded = result.flatMap((c) => c.dialogs.map((d) => encodeDialogInfo(d)))
-  const peerUsersEncoded = peerUsers.map((u) => encodeUserInfo(u))
 
-  console.log("getPrivateChats chatsEncoded", chatsEncoded)
-  console.log("getPrivateChats dialogsEncoded", dialogsEncoded)
-  console.log("getPrivateChats peerUsersEncoded", peerUsersEncoded)
+  const chatsEncoded = [selfChat ?? null, ...result]
+    .filter((c) => c != null)
+    .map((c) => encodeChatInfo(c, { currentUserId }))
+  const dialogsEncoded = result.flatMap((c) =>
+    [selfChatDialog ?? null, ...c.dialogs].filter((d) => d != null).map((d) => encodeDialogInfo(d)),
+  )
+  const peerUsersEncoded = peerUsers.map((u) => encodeUserInfo(u))
 
   return {
     chats: chatsEncoded,
