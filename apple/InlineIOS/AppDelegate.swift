@@ -16,10 +16,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       options.debug = false
     }
 
-    if notificationHandler.authenticated {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleAuthenticationChange(_:)),
+      name: .authenticationChanged,
+      object: nil
+    )
+
+    return true
+  }
+
+  @objc private func handleAuthenticationChange(_ notification: Notification) {
+    if let authenticated = notification.object as? Bool, authenticated {
       requestPushNotifications()
     }
-    return true
   }
 
   public func requestPushNotifications() {
@@ -80,9 +90,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 }
 
 public class NotificationHandler: ObservableObject {
-  var authenticated: Bool = false
+  @Published var authenticated: Bool = false
+
   public func setAuthenticated(value: Bool) {
     print("Setting authenticated to \(value)")
-    authenticated = value
+    DispatchQueue.main.async {
+      self.authenticated = value
+      NotificationCenter.default.post(name: .authenticationChanged, object: value)
+    }
   }
+}
+
+extension Notification.Name {
+  static let authenticationChanged = Notification.Name("authenticationChanged")
 }
