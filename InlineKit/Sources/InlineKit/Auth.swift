@@ -8,7 +8,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   let log = Log.scoped("Auth")
   public static let shared = Auth()
   private var cachedToken: String?
-  private var cachedUserId: Int64?
+  var cachedUserId: Int64?
   private var profileCompleted: Bool?
   private let keychain: KeychainSwift
   private var accessGroup: String
@@ -29,7 +29,9 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   }
 
   private func evaluateIsLoggedIn() {
-    isLoggedIn = cachedToken != nil && cachedUserId != nil && profileCompleted != nil && profileCompleted == true
+    isLoggedIn =
+      cachedToken != nil && cachedUserId != nil && profileCompleted != nil
+      && profileCompleted == true
   }
 
   public func getToken() -> String? {
@@ -99,7 +101,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     evaluateIsLoggedIn()
   }
 
-  func getCurrentUserId() -> Int64? {
+  public func getCurrentUserId() -> Int64? {
     if let userId = cachedUserId {
       return userId
     } else {
@@ -111,15 +113,15 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     return nil
   }
 
-//  public func getCurrentUserId() -> Int64? {
-//    if let userId = cachedUserId {
-//      return userId
-//    } else {
-//      let userId = Self.getCurrentUserId()
-//      cachedUserId = userId
-//      return userId
-//    }
-//  }
+  //  public func getCurrentUserId() -> Int64? {
+  //    if let userId = cachedUserId {
+  //      return userId
+  //    } else {
+  //      let userId = Self.getCurrentUserId()
+  //      cachedUserId = userId
+  //      return userId
+  //    }
+  //  }
 
   public func logOut() {
     // clear userId

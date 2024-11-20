@@ -35,6 +35,7 @@ struct InlineIOSApp: App {
         .environmentObject(self.ws)
         .environment(\.auth, Auth.shared)
         .appDatabase(AppDatabase.shared)
+        .environmentObject(appDelegate.notificationHandler)
     }
   }
 }
