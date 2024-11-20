@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { desc, eq, sql, and } from "drizzle-orm"
-import { chats, dialogs, messages, sessions, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { chats, dialogs, messages, sessions, users, type DbChat, type DbMessage } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Optional, type Static, Type } from "@sinclair/typebox"
@@ -10,6 +10,7 @@ import { connectionManager } from "@in/server/ws/connections"
 import { getUpdateGroup } from "@in/server/utils/updates"
 import * as APN from "apn"
 import type { HandlerContext } from "../controllers/v1/helpers"
+import { apnProvider } from "../libs/apn"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -93,11 +94,16 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       currentUserId: context.currentUserId,
     })
 
+    const title: string = await db
+      .select({ firstName: users.firstName, username: users.username })
+      .from(users)
+      .where(eq(users.id, context.currentUserId))
+      .then(([user]) => user?.firstName ?? user?.username ?? "New Message")
+
     sendPushNotification({
       userId: Number(input.peerUserId) ?? 0,
-      title: "New Message",
+      title: title,
       message: input.text,
-      sessionId: context.currentSessionId,
     })
 
     return { message: encodedMessage }
@@ -210,33 +216,15 @@ const sendMessageUpdate = async ({
   }
 }
 
-const sendPushNotification = async ({
-  userId,
-  title,
-  message,
-  sessionId,
-}: {
-  userId: number
-  title: string
-  message: string
-  sessionId: number
-}) => {
+const sendPushNotification = async ({ userId, title, message }: { userId: number; title: string; message: string }) => {
   try {
-    const [userSession] = await db.select().from(sessions).where(eq(sessions.id, sessionId))
+    // Get all sessions for the user
+    const userSessions = await db.select().from(sessions).where(eq(sessions.userId, userId))
 
-    if (!userSession?.applePushToken) {
+    if (!userSessions.length) {
+      Log.shared.debug("No active sessions found for user", { userId })
       return
     }
-
-    // Configure APN provider
-    const apnProvider = new APN.Provider({
-      token: {
-        key: process.env["APN_KEY_PATH"] ?? "",
-        keyId: process.env["APN_KEY_ID"] ?? "",
-        teamId: process.env["APN_TEAM_ID"] ?? "",
-      },
-      production: process.env["NODE_ENV"] === "production",
-    })
 
     // Configure notification
     const notification = new APN.Notification({
@@ -249,19 +237,27 @@ const sendPushNotification = async ({
       sound: "default",
     })
 
-    // Send notification
-    const result = await apnProvider.send(notification, userSession.applePushToken)
-
-    if (result.failed.length > 0) {
-      Log.shared.error("Failed to send push notification", {
-        error: result.failed[0]?.response,
-        userId,
-        applePushToken: userSession.applePushToken,
-      })
+    for (const session of userSessions) {
+      if (!session.applePushToken) continue
+      try {
+        const result = await apnProvider.send(notification, session.applePushToken)
+        if (result.failed.length > 0) {
+          Log.shared.error("Failed to send push notification", {
+            errors: result.failed.map((f) => f.response),
+            userId,
+          })
+        } else {
+          Log.shared.debug("Push notification sent successfully", {
+            userId,
+          })
+        }
+      } catch (error) {
+        Log.shared.error("Error sending push notification", {
+          error,
+          userId,
+        })
+      }
     }
-
-    // Shutdown provider
-    apnProvider.shutdown()
   } catch (error) {
     Log.shared.error("Error sending push notification", {
       error,

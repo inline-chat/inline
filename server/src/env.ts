@@ -12,6 +12,10 @@ export const TWILIO_VERIFY_SERVICE_SID = process.env["TWILIO_VERIFY_SERVICE_SID"
 export const SENTRY_DSN = process.env["SENTRY_DSN"] as string
 export const RESEND_API_KEY = process.env["RESEND_API_KEY"] as string
 
+export const APN_KEY = process.env["APN_KEY"] as string
+export const APN_KEY_ID = process.env["APN_KEY_ID"] as string
+export const APN_TEAM_ID = process.env["APN_TEAM_ID"] as string
+
 // OPTIONAL
 export const IPINFO_TOKEN = process.env["IPINFO_TOKEN"]
 
@@ -24,6 +28,9 @@ const requiredProductionVariables = [
   "TWILIO_VERIFY_SERVICE_SID",
   "SENTRY_DSN",
   "RESEND_API_KEY",
+  "APN_KEY",
+  "APN_KEY_ID",
+  "APN_TEAM_ID",
 ]
 
 for (const variable of requiredProductionVariables) {
