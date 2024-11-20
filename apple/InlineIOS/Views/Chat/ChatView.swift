@@ -138,6 +138,7 @@ private extension ChatView {
             text: text,
             peerId: peer
           )
+
           text = ""
         }
       } catch {

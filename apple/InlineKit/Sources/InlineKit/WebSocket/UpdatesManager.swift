@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineKit
 
 class UpdatesManager {
   private var database: AppDatabase = .shared

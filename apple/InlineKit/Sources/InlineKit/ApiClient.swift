@@ -31,6 +31,7 @@ public enum Path: String {
   case sendMessage
   case getDialogs
   case getChatHistory
+  case savePushNotification
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -81,7 +82,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200...299:
+      case 200 ... 299:
         let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
         switch apiResponse {
         case let .success(data):
@@ -232,7 +233,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     -> SendMessage
   {
     var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "text", value: text)
+      URLQueryItem(name: "text", value: text),
     ]
 
     if let peerUserId = peerUserId {
@@ -264,6 +265,17 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
 
     return try await request(.getChatHistory, queryItems: queryItems, includeToken: true)
+  }
+
+  public func savePushNotification(pushToken: String) async throws -> EmptyPayload {
+    try await request(
+      .savePushNotification,
+      queryItems: [
+        URLQueryItem(name: "applePushToken", value: pushToken),
+
+      ],
+      includeToken: true
+    )
   }
 }
 

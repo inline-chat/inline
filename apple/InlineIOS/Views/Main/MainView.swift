@@ -15,6 +15,7 @@ struct MainView: View {
   @EnvironmentObject private var ws: WebSocketManager
   @EnvironmentObject private var dataManager: DataManager
   @EnvironmentStateObject var root: RootData
+  @EnvironmentObject private var notificationHandler: NotificationHandler
 
   // MARK: - View Models
 
@@ -70,6 +71,7 @@ struct MainView: View {
     }
 
     .task {
+      notificationHandler.setAuthenticated(value: true)
       do {
         try await dataManager.getPrivateChats()
 
@@ -175,7 +177,7 @@ private extension MainView {
       ToolbarItem(id: "MainToolbarTrailing", placement: .topBarTrailing) {
         HStack(spacing: 4) {
           Menu {
-//            Button("New DM") { showDmSheet = true }
+            //            Button("New DM") { showDmSheet = true }
             Button("Create Space") { showSheet = true }
 
           } label: {

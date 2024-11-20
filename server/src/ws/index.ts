@@ -66,13 +66,13 @@ export const webSocket = new Elysia()
           }
           let { token, userId } = message.p
           let userIdFromToken = await getUserIdFromToken(token)
-          if (userIdFromToken !== userId) {
+          if (userIdFromToken.userId !== userId) {
             log.warn(`userId mismatch userIdFromToken: ${userIdFromToken}, userId: ${userId}`)
             throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
           }
 
-          connectionManager.authenticateConnection(ws.data.store.connectionId, userIdFromToken)
-          log.debug("authenticated connection", ws.data.store.connectionId, userIdFromToken)
+          connectionManager.authenticateConnection(ws.data.store.connectionId, userIdFromToken.userId)
+          log.debug("authenticated connection", ws.data.store.connectionId, userIdFromToken.userId)
 
           ws.send(
             createMessage({

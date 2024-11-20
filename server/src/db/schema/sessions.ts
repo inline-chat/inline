@@ -19,6 +19,7 @@ export const sessions = pgTable("sessions", {
   timezone: text(),
   ip: text(),
   deviceName: text(),
+  applePushToken: text(),
 
   // client and device info
   clientType: clientTypeEnum("client_type"),

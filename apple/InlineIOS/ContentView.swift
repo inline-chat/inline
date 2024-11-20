@@ -67,6 +67,7 @@ struct ContentView: View {
     .environmentObject(api)
     .environmentObject(userData)
     .environmentObject(dataManager)
+
   }
 
   @ViewBuilder

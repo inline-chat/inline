@@ -54,6 +54,7 @@ export const handleError = new Elysia()
 
 export type HandlerContext = {
   currentUserId: number
+  currentSessionId: number
   ip: string | undefined
 }
 
@@ -76,7 +77,7 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
         request.headers.get("cf-connecting-ip") ??
         request.headers.get("x-real-ip") ??
         server?.requestIP(request)?.address
-      const context = { currentUserId: store.currentUserId, ip }
+      const context = { currentUserId: store.currentUserId, currentSessionId: store.currentSessionId, ip }
       let result = await method(input, context)
       return { ok: true, result } as any
     },
@@ -94,7 +95,11 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
         request.headers.get("cf-connecting-ip") ??
         request.headers.get("x-real-ip") ??
         server?.requestIP(request)?.address
-      const context = { currentUserId: store.currentUserId, ip }
+      const context = {
+        currentUserId: store.currentUserId,
+        currentSessionId: store.currentSessionId,
+        ip,
+      }
       let result = await method(input, context)
       return { ok: true, result } as any
     },
