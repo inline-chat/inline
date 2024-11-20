@@ -97,6 +97,13 @@ public extension AppDatabase {
         t.column("pinned", .boolean)
       }
     }
+    
+    migrator.registerMigration("v2") { db in
+      // Message table
+      try db.alter(table: "message") { t in
+        t.add(column: "randomId", .integer)//.unique()
+      }
+    }
 
     return migrator
   }
