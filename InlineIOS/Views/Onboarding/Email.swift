@@ -10,7 +10,7 @@ struct Email: View {
   @FormState var formState
   @State private var isInputValid: Bool = false
 
-  private var placeHolder: String = "dena@example.com"
+  private var placeHolder: String = "name@example.com"
 
   @EnvironmentObject var nav: OnboardingNavigation
   @EnvironmentObject var api: ApiClient

@@ -33,7 +33,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   }
 
   public func requestPushNotifications() {
-    print("Requesteddd")
+    print("Requestedd")
     registerForPushNotifications()
   }
 
@@ -57,16 +57,28 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
   }
 
+  // This delegate method is called when the app is in foreground
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    // For iOS 14 and later
+    completionHandler([.banner, .sound, .badge])
+  }
+
   func application(
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
-    let tokenParts = deviceToken.map { data in String(format: "%02.2hhx", data) }
+//    let tokenParts = deviceToken.map { data in String(format: "%02.2hhx", data) }
+//    let token = tokenParts.joined()
+    let deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
 
-    let token = tokenParts.joined()
+    print("deviceToken \(deviceToken)")
     Task {
       try await ApiClient.shared.savePushNotification(
-        pushToken: token
+        pushToken: deviceToken
       )
     }
 
