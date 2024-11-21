@@ -18,6 +18,10 @@ struct MessageView: View {
     fullMessage.message.out == true ? .trailing : .leading
   }
 
+  var out: Bool {
+    fullMessage.message.out == true
+  }
+
   private var formattedDate: String {
     let formatter = DateFormatter()
     if Calendar.current.isDateInToday(fullMessage.message.date) {
@@ -42,46 +46,44 @@ struct MessageView: View {
         Spacer()
       }
     }
-    .frame(maxWidth: .infinity, minHeight: 66, alignment: alignment)
   }
 }
 
 // MARK: - Components
 
-private extension MessageView {
-  var messageBubble: some View {
+extension MessageView {
+  fileprivate var messageBubble: some View {
+    //    VStack(alignment: alignment == .leading ? .leading : .trailing, spacing: 2) {
+    //      userNameText
     VStack(alignment: .leading, spacing: 4) {
-      userNameText
-
       HStack(alignment: .bottom, spacing: 0) {
         Text(fullMessage.message.text ?? "")
           .font(.body)
-          .foregroundColor(.primary)
+          .foregroundColor(out ? .white : .primary)
           .multilineTextAlignment(.leading)
-        //
-        // Text("  \(formattedDate)")  // Added space before timestamp
-        //   .font(.caption2)
-        //   .foregroundColor(.secondary)
-        //   .baselineOffset(-1)  // Slight adjustment to align with last text line
+          .fixedSize(horizontal: false, vertical: true)
+          .lineLimit(nil)
       }
     }
-    .padding(10)
-    .background(Color(.systemGray6).opacity(0.7))
+    .padding(.horizontal, 10)
+    .padding(.vertical, 8)
+    .background(out ? .blue : Color(.systemGray6).opacity(0.7))
+    .cornerRadius(18)
     .id(fullMessage.message.id)
-    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 16))
-    .cornerRadius(16)
+    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 18))
     .contextMenu { contextMenuButtons }
     .frame(maxWidth: UIScreen.main.bounds.width * 0.75, alignment: alignment)
+    //    }
   }
 
-  var userNameText: some View {
+  fileprivate var userNameText: some View {
     Text(fullMessage.user?.fullName ?? "")
       .font(.subheadline)
       .foregroundColor(.secondary)
       .fontWeight(.medium)
   }
 
-  var contextMenuButtons: some View {
+  fileprivate var contextMenuButtons: some View {
     Group {
       Button("Copy") {
         UIPasteboard.general.string = fullMessage.message.text ?? ""
@@ -92,8 +94,8 @@ private extension MessageView {
 
 // MARK: - Actions
 
-private extension MessageView {
-  func deleteMessage() async {
+extension MessageView {
+  fileprivate func deleteMessage() async {
     do {
       _ = try await database.dbWriter.write { db in
         try Message.deleteOne(db, id: fullMessage.message.id)
