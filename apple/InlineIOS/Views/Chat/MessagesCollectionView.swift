@@ -81,8 +81,8 @@ struct MessagesCollectionView: UIViewRepresentable {
         withReuseIdentifier: "MessageCell", for: indexPath)
       let fullMessage = fullMessages[indexPath.item]
 
-      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 20.0 : 1.0
-      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 20.0 : 1.0
+      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 25.0 : 1.0
+      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 25.0 : 1.0
       cell.contentConfiguration = UIHostingConfiguration {
         // VStack(spacing: 0) {
         MessageView(fullMessage: fullMessage)
@@ -102,8 +102,8 @@ struct MessagesCollectionView: UIViewRepresentable {
       let fullMessage = fullMessages[indexPath.item]
       let width = collectionView.bounds.width - 32
 
-      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 20.0 : 1.0
-      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 20.0 : 1.0
+      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 25.0 : 1.0
+      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 25.0 : 1.0
 
       // Calculate message size without padding
       let messageView = MessageView(fullMessage: fullMessage)
