@@ -35,20 +35,8 @@ struct ChatView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      if fullChatViewModel.fullMessages.count == 0 {
-        VStack {
-          Text("💬")
-            .font(.largeTitle)
-          Text("No messages yet")
-            .font(.title3)
-            .fontWeight(.medium)
-        }
-        .animation(.easeInOut(duration: 0.3), value: fullChatViewModel.fullMessages.isEmpty)
+      chatMessages
 
-        .frame(maxHeight: .infinity)
-      } else {
-        chatMessages
-      }
       inputArea
     }
     .navigationBarTitleDisplayMode(.inline)
@@ -149,9 +137,8 @@ private extension ChatView {
             peerId: peer,
             randomId: randomId
           )
-
-          text = ""
         }
+        text = ""
       } catch {
         Log.shared.error("Failed to send message", error: error)
       }
