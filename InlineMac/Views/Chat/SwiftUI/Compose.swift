@@ -25,8 +25,10 @@ struct Compose: View {
   }
   
   var body: some View {
-    HStack(alignment: .bottom, spacing: 8) {
-//      ZStack(alignment: .topLeading) {
+    HStack(alignment: .bottom, spacing: 0) {
+      attachmentButton
+        .frame(height: minHeight, alignment: .center)
+
       CustomTextEditor(
         text: $text,
         minHeight: minHeight,
@@ -60,24 +62,77 @@ struct Compose: View {
             )
         }
       }
-//      }
       .animation(.smoothSnappy, value: text.isEmpty)
-      
+     
+      sendButton
+        .frame(height: minHeight, alignment: .center)
+        .transition(.scale(scale: 0.8).combined(with: .opacity))
+    }
+    .animation(.easeOut.speed(4), value: canSend)
+    .padding(.horizontal, 8)
+    .background(.regularMaterial)
+  }
+  
+  @State var attachmentOverlayOpen = false
+  
+  @ViewBuilder
+  var attachmentButton: some View {
+    Button {
+      // open picker
+      withAnimation(.smoothSnappy) {
+        attachmentOverlayOpen.toggle()
+      }
+    } label: {
+      Image(systemName: "plus")
+        .resizable()
+        .scaledToFit()
+        .foregroundStyle(.secondary)
+    }
+    .buttonStyle(
+      CircleButtonStyle(
+        size: 30,
+        backgroundColor: .clear,
+        hoveredBackgroundColor: .gray.opacity(0.1)
+      )
+    )
+    .background(alignment: .bottomLeading) {
+      if attachmentOverlayOpen {
+        VStack {
+          Text("Soon you can attach photos and files from here!").padding()
+        }.frame(width: 140, height: 140)
+          .background(.regularMaterial)
+          .zIndex(2)
+          .cornerRadius(12)
+          .offset(x: 10, y: -50)
+          .transition(.scale(scale: 0, anchor: .bottomLeading).combined(with: .opacity))
+      }
+    }
+  }
+  
+  var canSend: Bool {
+    !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+  
+  @ViewBuilder
+  var sendButton: some View {
+    if canSend {
       Button {
         send()
       } label: {
-        Image(systemName: "paperplane")
+        //        Image(systemName: "arrow.up")
+        Image(systemName: "paperplane.fill")
           .resizable()
           .scaledToFit()
-          .frame(width: 20, height: 20)
-          .padding(8)
-          .background(Color.accentColor)
-          .clipShape(Circle())
+          .foregroundStyle(.white)
       }
-      .buttonStyle(.plain)
-      .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      .buttonStyle(
+        CircleButtonStyle(
+          size: 30,
+          backgroundColor: .accentColor,
+          hoveredBackgroundColor: .accentColor.opacity(0.8)
+        )
+      )
     }
-    .background(.regularMaterial)
   }
   
   private func handleEditorEvent(_ event: ComposeTextEditorEvent) {
@@ -88,20 +143,53 @@ struct Compose: View {
     case .blur:
       focus.focusedField = nil
       
-    case .returnKeyPress:
-      // Single return creates a new line
-      break
-      
-    case .commandReturnKeyPress:
-      // Cmd+Return sends the message
+    case .send:
       send()
       
-    case .escapeKeyPress:
-      // Clear focus and optionally clear text
+    case .insertNewline:
+      // Do nothing - let the text view handle the newline
+      break
+      
+    case .dismiss:
       focus.focusedField = nil
     }
   }
   
+  struct CircleButtonStyle: ButtonStyle {
+    let size: CGFloat
+    let backgroundColor: Color
+    let hoveredBackground: Color
+    
+    @State private var isHovering = false
+    
+    init(
+      size: CGFloat = 32,
+      backgroundColor: Color = .blue,
+      hoveredBackgroundColor: Color = .blue.opacity(0.8)
+    ) {
+      self.size = size
+      self.backgroundColor = backgroundColor
+      self.hoveredBackground = hoveredBackgroundColor
+    }
+    
+    func makeBody(configuration: Configuration) -> some View {
+      configuration.label
+        .padding(8)
+        .frame(width: size, height: size)
+        .background(
+          Circle()
+            .fill(isHovering ? hoveredBackground : backgroundColor)
+        )
+        .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+        .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+        .onHover { hovering in
+          withAnimation(.easeInOut(duration: 0.2)) {
+            isHovering = hovering
+          }
+        }
+    }
+  }
+ 
   private func send() {
     print("send \(text)")
     Task {
@@ -156,9 +244,9 @@ struct Compose: View {
 enum ComposeTextEditorEvent {
   case focus
   case blur
-  case returnKeyPress
-  case commandReturnKeyPress
-  case escapeKeyPress
+  case send
+  case insertNewline
+  case dismiss
 }
 
 struct CustomTextEditor: NSViewRepresentable {
@@ -382,27 +470,30 @@ struct CustomTextEditor: NSViewRepresentable {
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
       switch commandSelector {
       case #selector(NSResponder.insertNewline(_:)):
-        print("Enter")
-        if NSEvent.modifierFlags.contains(.command) {
-          print("Enter + command")
-          parent.onEvent(.commandReturnKeyPress)
-          return true
+        let hasShiftModifier = NSEvent.modifierFlags.contains(.shift)
+        
+        if hasShiftModifier {
+          parent.onEvent(.insertNewline)
+          updateHeightIfNeeded(for: textView)
+          return false
+        } else {
+          // Only send if there's actual content
+          if !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parent.onEvent(.send)
+            return true
+          }
+          return false
         }
-        parent.onEvent(.returnKeyPress)
-        updateHeightIfNeeded(for: textView)
-
-        return false
         
       case #selector(NSResponder.cancelOperation(_:)):
-        print("Esc")
-        parent.onEvent(.escapeKeyPress)
+        parent.onEvent(.dismiss)
         return true
         
       default:
         return false
       }
     }
-    
+
     func textViewDidBecomeFirstResponder(_ notification: Notification) {
       parent.onEvent(.focus)
     }
