@@ -33,60 +33,50 @@ class Navigation: ObservableObject, @unchecked Sendable {
     }
   }
 
-  // MARK: - Navigation State
-
-  @Published private(set) var path = NavigationPath()
+  // MARK: - Published Properties
+  @Published private var navigationPath = NavigationPath()
   @Published var activeSheet: Destination?
-  @Published private(set) var activeDestination: Destination = .main
+  @Published var activeDestination: Destination?
 
-  // MARK: - Tab Navigation
+  // MARK: - Computed Properties
+  var currentStack: NavigationPath {
+    navigationPath
+  }
 
-  @Published var selectedTab: TabItem = .home
-  @Published private var navigationStacks: [TabItem: NavigationPath] = [
-    .home: NavigationPath(),
-    .contacts: NavigationPath(),
-    .settings: NavigationPath(),
-  ]
-
-  @Published var isTabBarVisible: Bool = true
+  var currentStackBinding: Binding<NavigationPath> {
+    Binding(
+      get: { self.navigationPath },
+      set: { self.navigationPath = $0 }
+    )
+  }
 
   // MARK: - Navigation Actions
-
-  func setToolbarVisibility(_ isTabBarVisible: Bool) {
-    self.isTabBarVisible = isTabBarVisible
-  }
   func push(_ destination: Destination) {
     switch destination {
     case .chat:
-      isTabBarVisible = false
       activeDestination = destination
-      navigationStacks[selectedTab]?.append(destination)
+      navigationPath.append(destination)
     case .createSpace, .createDM, .createThread:
       activeSheet = destination
     default:
-      isTabBarVisible = true
       activeDestination = destination
-      navigationStacks[selectedTab]?.append(destination)
+      navigationPath.append(destination)
     }
   }
 
   func popPush(_ destination: Destination) {
     activeDestination = destination
-    navigationStacks[selectedTab] = NavigationPath()
-    navigationStacks[selectedTab]?.append(destination)
+    navigationPath = NavigationPath()
+    navigationPath.append(destination)
   }
 
   func popToRoot() {
-    navigationStacks[selectedTab] = NavigationPath()
-    isTabBarVisible = true
+    navigationPath = NavigationPath()
   }
 
   func pop() {
-    if let stack = navigationStacks[selectedTab], !stack.isEmpty {
-      navigationStacks[selectedTab]?.removeLast()
-      if stack.count <= 1 {
-        isTabBarVisible = true
-      }
+    if !navigationPath.isEmpty {
+      navigationPath.removeLast()
     }
   }
 
@@ -97,33 +87,8 @@ class Navigation: ObservableObject, @unchecked Sendable {
   // MARK: - Reset
 
   func reset() {
-    path = NavigationPath()
+    navigationPath = NavigationPath()
     activeSheet = nil
     activeDestination = .main
-    selectedTab = .home
-    navigationStacks = [
-      .home: NavigationPath(),
-      .contacts: NavigationPath(),
-      .settings: NavigationPath(),
-    ]
-    isTabBarVisible = true
-  }
-
-  // MARK: - Navigation Stack Access
-
-  var currentStack: NavigationPath {
-    navigationStacks[selectedTab] ?? NavigationPath()
-  }
-
-  var currentStackBinding: Binding<NavigationPath> {
-    Binding(
-      get: { [weak self] in
-        self?.navigationStacks[self?.selectedTab ?? .home] ?? NavigationPath()
-      },
-      set: { [weak self] newValue in
-        guard let self = self else { return }
-        self.navigationStacks[self.selectedTab] = newValue
-      }
-    )
   }
 }

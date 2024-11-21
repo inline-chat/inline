@@ -5,6 +5,7 @@ import UIKit
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
+  let nav = Navigation()
   func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -57,15 +58,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   }
 
   #if DEBUG
-  // This delegate method is called when the app is in foreground
-  func userNotificationCenter(
-    _ center: UNUserNotificationCenter,
-    willPresent notification: UNNotification,
-    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-  ) {
-    // For iOS 14 and later
-    completionHandler([.banner, .sound, .badge])
-  }
+    // This delegate method is called when the app is in foreground
+    func userNotificationCenter(
+      _ center: UNUserNotificationCenter,
+      willPresent notification: UNNotification,
+      withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+      // For iOS 14 and later
+      completionHandler([.banner, .sound, .badge])
+    }
   #endif
 
   func application(
@@ -88,12 +89,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didFailToRegisterForRemoteNotificationsWithError error: Error
   ) {}
 
-  // This method will be called when the user taps on the notification
   func userNotificationCenter(
-    _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
-    if let response = response.notification.request.content.userInfo["response"] as? String {}
+    let userInfo = response.notification.request.content.userInfo
+
+    if let userId = userInfo["userId"] as? Int {
+      // Add a small delay to ensure app is ready
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+        self.nav.push(.chat(peer: .user(id: Int64(userId))))
+        completionHandler()
+      }
+    }
   }
 }
 

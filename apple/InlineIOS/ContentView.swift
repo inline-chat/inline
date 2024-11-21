@@ -9,7 +9,7 @@ import InlineKit
 import SwiftUI
 
 struct ContentView: View {
-  @StateObject private var nav = Navigation()
+  @EnvironmentObject private var nav: Navigation
   @StateObject private var onboardingNav = OnboardingNavigation()
   @StateObject var api = ApiClient()
   @StateObject var userData = UserData()
@@ -25,35 +25,11 @@ struct ContentView: View {
   var body: some View {
     Group {
       if auth.isLoggedIn {
-        TabView(selection: $nav.selectedTab) {
-          NavigationStack(path: nav.currentStackBinding) {
-            MainView()
-              .navigationDestination(for: Navigation.Destination.self) { destination in
-                destinationView(for: destination)
-              }
-          }
-          .tag(TabItem.home)
-
-          NavigationStack(path: nav.currentStackBinding) {
-            Contacts()
-              .navigationDestination(for: Navigation.Destination.self) { destination in
-                destinationView(for: destination)
-              }
-          }
-          .tag(TabItem.contacts)
-
-          NavigationStack(path: nav.currentStackBinding) {
-            Settings()
-              .navigationDestination(for: Navigation.Destination.self) { destination in
-                destinationView(for: destination)
-              }
-          }
-          .tag(TabItem.settings)
-        }
-        .overlay(alignment: .bottom) {
-          if nav.isTabBarVisible {
-            CustomTabBar(selectedTab: $nav.selectedTab)
-          }
+        NavigationStack(path: nav.currentStackBinding) {
+          MainView()
+            .navigationDestination(for: Navigation.Destination.self) { destination in
+              destinationView(for: destination)
+            }
         }
         .sheet(item: $nav.activeSheet) { destination in
           sheetContent(for: destination)
@@ -67,7 +43,6 @@ struct ContentView: View {
     .environmentObject(api)
     .environmentObject(userData)
     .environmentObject(dataManager)
-
   }
 
   @ViewBuilder

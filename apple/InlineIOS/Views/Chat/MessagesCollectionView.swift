@@ -25,6 +25,14 @@ struct MessagesCollectionView: UIViewRepresentable {
     collectionView.alwaysBounceVertical = true
     collectionView.keyboardDismissMode = .none
 
+    // Add rotation observer
+    NotificationCenter.default.addObserver(
+      context.coordinator,
+      selector: #selector(Coordinator.orientationDidChange),
+      name: UIDevice.orientationDidChangeNotification,
+      object: nil
+    )
+
     return collectionView
   }
 
@@ -46,6 +54,56 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     init(fullMessages: [FullMessage]) {
       self.fullMessages = fullMessages
+      super.init()
+    }
+
+    @objc func orientationDidChange(_ notification: Notification) {
+      guard
+        let collectionView = (notification.object as? UIDevice)?.keyWindow?.rootViewController?.view
+          .findCollectionView()
+      else {
+        return
+      }
+
+      // Wait for rotation animation to complete
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        guard let self = self else { return }
+
+        UIView.performWithoutAnimation {
+          // Reset and reapply collection view transform
+          collectionView.transform = .identity
+          collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
+
+          // Update layout
+          collectionView.collectionViewLayout.invalidateLayout()
+          collectionView.setNeedsLayout()
+          collectionView.layoutIfNeeded()
+
+          // Force update all visible cells
+          collectionView.visibleCells.forEach { cell in
+            cell.transform = .identity
+            cell.transform = CGAffineTransform(scaleX: 1, y: -1)
+          }
+
+          if !self.fullMessages.isEmpty {
+            collectionView.scrollToItem(
+              at: IndexPath(item: 0, section: 0), at: .bottom, animated: false)
+          }
+        }
+      }
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+      guard let collectionView = scrollView as? UICollectionView else { return }
+
+      // Ensure all visible cells have correct transform
+      collectionView.visibleCells.forEach { cell in
+        if cell.transform == .identity {
+          UIView.performWithoutAnimation {
+            cell.transform = CGAffineTransform(scaleX: 1, y: -1)
+          }
+        }
+      }
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int)
@@ -78,22 +136,22 @@ struct MessagesCollectionView: UIViewRepresentable {
       -> UICollectionViewCell
     {
       let cell = collectionView.dequeueReusableCell(
-        withReuseIdentifier: "MessageCell", for: indexPath)
+        withReuseIdentifier: "MessageCell", for: indexPath
+      )
       let fullMessage = fullMessages[indexPath.item]
 
       let topPadding = isTransitionFromOtherSender(at: indexPath) ? 25.0 : 1.0
       let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 25.0 : 1.0
       cell.contentConfiguration = UIHostingConfiguration {
-        // VStack(spacing: 0) {
         MessageView(fullMessage: fullMessage)
           .padding(.bottom, topPadding)
           .padding(.top, bottomPadding)
-        // }
       }
 
       cell.transform = CGAffineTransform(scaleX: 1, y: -1)
       return cell
     }
+
     func collectionView(
       _ collectionView: UICollectionView,
       layout collectionViewLayout: UICollectionViewLayout,
@@ -105,12 +163,10 @@ struct MessagesCollectionView: UIViewRepresentable {
       let topPadding = isTransitionFromOtherSender(at: indexPath) ? 25.0 : 1.0
       let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 25.0 : 1.0
 
-      // Calculate message size without padding
       let messageView = MessageView(fullMessage: fullMessage)
       let messageSize = UIHostingController(rootView: messageView).sizeThatFits(
         in: CGSize(width: width, height: .infinity))
 
-      // Add both paddings to total height
       return CGSize(width: width, height: messageSize.height + bottomPadding + topPadding)
     }
 
@@ -153,5 +209,33 @@ struct MessagesCollectionView: UIViewRepresentable {
     ) -> CGSize {
       return .zero
     }
+  }
+}
+
+// Helper extension to find CollectionView in view hierarchy
+extension UIView {
+  fileprivate func findCollectionView() -> UICollectionView? {
+    if let collectionView = self as? UICollectionView {
+      return collectionView
+    }
+
+    for subview in subviews {
+      if let found = subview.findCollectionView() {
+        return found
+      }
+    }
+
+    return nil
+  }
+}
+
+// Helper extension to get key window
+extension UIDevice {
+  fileprivate var keyWindow: UIWindow? {
+    UIApplication.shared.connectedScenes
+      .filter { $0.activationState == .foregroundActive }
+      .first(where: { $0 is UIWindowScene })
+      .flatMap { $0 as? UIWindowScene }?.windows
+      .first(where: { $0.isKeyWindow })
   }
 }

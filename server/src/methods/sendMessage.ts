@@ -235,6 +235,9 @@ const sendPushNotification = async ({ userId, title, message }: { userId: number
       topic: "chat.inline.InlineIOS",
       pushType: "alert",
       sound: "default",
+      payload: {
+        userId: userId,
+      },
     })
 
     for (const session of userSessions) {

@@ -35,7 +35,20 @@ struct ChatView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      chatMessages
+      if fullChatViewModel.fullMessages.count == 0 {
+        VStack {
+          Text("💬")
+            .font(.largeTitle)
+          Text("No messages yet")
+            .font(.title3)
+            .fontWeight(.medium)
+        }
+        .animation(.easeInOut(duration: 0.3), value: fullChatViewModel.fullMessages.isEmpty)
+
+        .frame(maxHeight: .infinity)
+      } else {
+        chatMessages
+      }
       inputArea
     }
     .navigationBarTitleDisplayMode(.inline)
@@ -49,9 +62,6 @@ struct ChatView: View {
     .onTapGesture(perform: dismissKeyboard)
     .onAppear {
       fetchMessages()
-    }
-    .onDisappear {
-      nav.setToolbarVisibility(true)
     }
   }
 
@@ -68,13 +78,13 @@ struct ChatView: View {
 
 // MARK: - View Components
 
-extension ChatView {
-  fileprivate var chatMessages: some View {
+private extension ChatView {
+  var chatMessages: some View {
     MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
       .padding(.vertical, 8)
   }
 
-  fileprivate var chatHeader: some View {
+  var chatHeader: some View {
     HStack(spacing: 2) {
       InitialsCircle(firstName: title, lastName: nil, size: 26)
         .padding(.trailing, 6)
@@ -84,7 +94,7 @@ extension ChatView {
     }
   }
 
-  fileprivate var inputArea: some View {
+  var inputArea: some View {
     VStack(spacing: 0) {
       Divider()
         .ignoresSafeArea()
@@ -97,13 +107,13 @@ extension ChatView {
     .background(.clear)
   }
 
-  fileprivate var messageTextField: some View {
+  var messageTextField: some View {
     TextField("Type a message", text: $text, axis: .vertical)
       .textFieldStyle(.plain)
       .onSubmit(sendMessage)
   }
 
-  fileprivate var sendButton: some View {
+  var sendButton: some View {
     Button(action: sendMessage) {
       Image(systemName: "arrow.up")
         .foregroundColor(text.isEmpty ? .secondary : .blue)
@@ -115,8 +125,8 @@ extension ChatView {
 
 // MARK: - Actions
 
-extension ChatView {
-  fileprivate func dismissKeyboard() {
+private extension ChatView {
+  func dismissKeyboard() {
     UIApplication.shared.sendAction(
       #selector(UIResponder.resignFirstResponder),
       to: nil,
@@ -125,11 +135,11 @@ extension ChatView {
     )
   }
 
-  fileprivate func sendMessage() {
+  func sendMessage() {
     Task {
       do {
         if !text.isEmpty {
-          let randomId = Int64.random(in: Int64.min...Int64.max)
+          let randomId = Int64.random(in: Int64.min ... Int64.max)
 
           try await dataManager.sendMessage(
             chatId: fullChatViewModel.chat?.id ?? 0,
