@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate --schema src/db/schema/index.ts --out drizzle --dialect postgresql --name",
     "db:push": "drizzle-kit push --schema src/db/schema/index.ts --dialect postgresql",
     "db:drop": "drizzle-kit drop --out drizzle",
-    "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql"
+    "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql",
+    "drizzle:up": "drizzle-kit up --dialect=postgresql"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.675.0",
@@ -23,7 +24,7 @@
     "@elysiajs/html": "^1.1.1",
     "@elysiajs/swagger": "^1.1.5",
     "@sentry/bun": "^8.32.0",
-    "drizzle-orm": "^0.35.2",
+    "drizzle-orm": "^0.36.3",
     "elysia-helmet": "^2.0.0",
     "elysia-rate-limit": "^4.1.0",
     "nanoid": "^5.0.7",
@@ -35,6 +36,6 @@
   "devDependencies": {
     "@types/bun": "^1.1.10",
     "@types/nanoid-dictionary": "^4.2.3",
-    "drizzle-kit": "^0.26.2"
+    "drizzle-kit": "^0.28.1"
   }
 }

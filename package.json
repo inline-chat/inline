@@ -25,10 +25,12 @@
   "dependencies": {
     "@sinclair/typebox": "=0.32.34",
     "apn": "^2.2.0",
+    "drizzle-kit": "^0.28.1",
+    "drizzle-orm": "^0.36.3",
     "elysia": "=1.1.22"
   },
   "devDependencies": {
     "@protobuf-ts/plugin": "^2.9.4",
-    "@types/bun": "^1.1.11"
+    "@types/bun": "^1.1.13"
   }
 }

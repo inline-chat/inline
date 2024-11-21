@@ -32,6 +32,8 @@ struct InlineApp: App {
     .commands {
       MainWindowCommands()
       
+      TextEditingCommands()
+      
       // Create Space
       if auth.isLoggedIn {
         CommandGroup(after: .newItem) {
