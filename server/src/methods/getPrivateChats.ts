@@ -47,6 +47,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
       .insert(dialogs)
       .values({
         chatId: selfChat.id,
+        peerUserId: currentUserId,
         userId: currentUserId,
       })
       .returning()
