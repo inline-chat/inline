@@ -170,14 +170,28 @@ struct CustomTextEditor: NSViewRepresentable {
 
   var horizontalPadding: CGFloat = 8
   var verticalPadding: CGFloat = 6
-  var font: NSFont = .systemFont(ofSize: NSFont.systemFontSize)
+  var font: NSFont = .preferredFont(forTextStyle: .body)
   
   func makeCoordinator() -> Coordinator {
     Coordinator(self)
   }
   
-  func makeScrollView() -> NSScrollView {
-    let scrollView = NSScrollView()
+  let paragraphStyle: NSParagraphStyle = {
+    let paragraph = NSParagraphStyle.default.mutableCopy() as! NSMutableParagraphStyle
+    let lineSpacing: CGFloat = 0.0
+    paragraph.lineSpacing = lineSpacing
+    paragraph.baseWritingDirection = .natural
+    return paragraph
+  }()
+  
+  // line height based on current typing font and current typing paragraph
+  var typingLineHeight: CGFloat {
+    let lineHeightMultiple = paragraphStyle.lineHeightMultiple.isAlmostZero() ? 1.0 : paragraphStyle.lineHeightMultiple
+    return calculateDefaultLineHeight(for: font) * lineHeightMultiple
+  }
+  
+  func makeScrollView() -> ComposeScrollView {
+    let scrollView = ComposeScrollView()
     scrollView.drawsBackground = false
     scrollView.hasVerticalScroller = false
     scrollView.hasHorizontalRuler = false
@@ -185,7 +199,7 @@ struct CustomTextEditor: NSViewRepresentable {
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.contentInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
     scrollView.verticalScrollElasticity = .none
-    
+   
     return scrollView
   }
   
@@ -204,24 +218,19 @@ struct CustomTextEditor: NSViewRepresentable {
     textView.autoresizingMask = [.width]
     textView.isHorizontallyResizable = false
 
-    let paragraphStyle = NSMutableParagraphStyle()
-    let lineSpacing: CGFloat = 0.0
-    paragraphStyle.lineSpacing = lineSpacing
-    paragraphStyle.baseWritingDirection = .natural
-
     textView.typingAttributes = [
-      .paragraphStyle: paragraphStyle, // H/T Daniel Jalkut
-      .font: font, // Fall back to system font if we can't unwrap font argument
+      .paragraphStyle: paragraphStyle,
+      .font: font,
       .foregroundColor: NSColor.labelColor
     ]
     
     // Insets
-    let lineHeight = textView.font?.boundingRectForFont.height ?? 0
+    let lineHeight = typingLineHeight
     textView.textContainerInset = NSSize(
       width: 0,
       height: (minHeight - lineHeight) / 2
     )
-
+    
     return textView
   }
   
@@ -239,6 +248,12 @@ struct CustomTextEditor: NSViewRepresentable {
     // initial set
 //      context.coordinator.updateHeightIfNeeded(for: textView)
     
+    // Handle scroll view frame changes
+    scrollView.onFrameChange = { [weak textView] _ in
+      guard let textView else { return }
+      context.coordinator.updateHeightIfNeeded(for: textView)
+    }
+
     return scrollView
   }
   
@@ -253,27 +268,22 @@ struct CustomTextEditor: NSViewRepresentable {
     }
     
     // Handle focus updates
-    if isFocused {
-      if let firstResponder = textView.window?.firstResponder {
-        if !firstResponder.isEqual(textView) {
-          DispatchQueue.main.async {
-            textView.window?.makeFirstResponder(textView)
-          }
-        }
-      } else {
-        DispatchQueue.main.async {
-          textView.window?.makeFirstResponder(textView)
-        }
-      }
-    } else {
-      if let firstResponder = textView.window?.firstResponder, firstResponder.isEqual(textView) {
-        DispatchQueue.main.async {
-          textView.window?.makeFirstResponder(nil)
-        }
-      }
-    }
+    handleFocusUpdate(for: textView)
   }
   
+  private func handleFocusUpdate(for textView: NSTextView) {
+    guard let window = textView.window else { return }
+    
+    let shouldBeFocused = isFocused
+    let isFocused = window.firstResponder === textView
+    
+    guard shouldBeFocused != isFocused else { return }
+    
+    DispatchQueue.main.async {
+      window.makeFirstResponder(shouldBeFocused ? textView : nil)
+    }
+  }
+
   class Coordinator: NSObject, NSTextViewDelegate {
     var parent: CustomTextEditor
     var lastHeight: CGFloat = 0
@@ -303,36 +313,38 @@ struct CustomTextEditor: NSViewRepresentable {
     }
     
     func updateHeightIfNeeded(for textView: NSTextView) {
-      let contentHeight = calculateContentHeight(for: textView)
-      let lineHeight = textView.font?.boundingRectForFont.height ?? 0
+      guard let layoutManager = textView.layoutManager,
+            let textContainer = textView.textContainer else { return }
+      
+      layoutManager.ensureLayout(for: textContainer)
+      let contentHeight = layoutManager.usedRect(for: textContainer).height
       
       var newHeight = contentHeight + (parent.verticalPadding * 2)
       newHeight = max(parent.minHeight, min(parent.maxHeight, newHeight))
       
-      print("newHeight \(newHeight)")
-      // Enable vertical scrolling if content exceeds maxHeight
-//      parent.scrollView.verticalScrollElasticity = contentHeight > parent.maxHeight ? .allowed : .none
-      
+      // Only update if significant change
 //      if abs(newHeight - lastHeight) > 0.1 {
-      lastHeight = newHeight
-      parent.height = newHeight
-    
-      // Update insets based on content
-      if contentHeight <= lineHeight {
-        print("single line \(lineHeight)")
-        textView.textContainerInset = NSSize(
-          width: 0,
-          height: (parent.minHeight - lineHeight) / 2
-        )
-      } else {
-        textView.textContainerInset = NSSize(
-          width: 0,
-          height: parent.verticalPadding
-        )
-      }
+        lastHeight = newHeight
+        parent.height = newHeight
+        
+        textView.layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: 0, length: textView.string.count), actualCharacterRange: nil)
+        updateTextViewInsets(textView, contentHeight: contentHeight)
+        
 //      }
     }
-    
+
+    private func updateTextViewInsets(_ textView: NSTextView, contentHeight: CGFloat) {
+      let lineHeight = parent.typingLineHeight
+      let newInsets = NSSize(
+        width: 0,
+        height: contentHeight <= lineHeight ?
+          (parent.minHeight - lineHeight) / 2 :
+          parent.verticalPadding
+      )
+      
+      textView.textContainerInset = newInsets
+    }
+
     func textViewDidChangeSelection(_ notification: Notification) {
       guard let textView = notification.object as? NSTextView else { return }
       // Handle selection changes if needed
@@ -391,6 +403,18 @@ class CustomTextView: NSTextView {
     }
     
     super.keyDown(with: event)
+  }
+}
+
+final class ComposeScrollView: NSScrollView {
+  var onFrameChange: ((NSRect) -> Void)?
+  
+  override var frame: NSRect {
+    didSet {
+      if frame.width != oldValue.width {
+        onFrameChange?(frame)
+      }
+    }
   }
 }
 
