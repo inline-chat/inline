@@ -26,25 +26,25 @@ struct Compose: View {
   
   var body: some View {
     HStack(alignment: .bottom, spacing: 8) {
-      ZStack(alignment: .topLeading) {
-        CustomTextEditor(
-          text: $text,
-          minHeight: minHeight,
-          maxHeight: 160,
-          height: $editorHeight,
-          onEvent: handleEditorEvent,
-          isFocused: Binding(
-            get: { focus.focusedField == .compose },
-            set: { newValue in
-              focus.focusedField = newValue ? .compose : nil
-            }
-          ),
-          horizontalPadding: horizontalPadding,
-          verticalPadding: 4,
-          font: .systemFont(ofSize: 13)
-        )
-        .frame(height: editorHeight)
-        
+//      ZStack(alignment: .topLeading) {
+      CustomTextEditor(
+        text: $text,
+        minHeight: minHeight,
+        height: $editorHeight,
+        onEvent: handleEditorEvent,
+        isFocused: Binding(
+          get: { focus.focusedField == .compose },
+          set: { newValue in
+            focus.focusedField = newValue ? .compose : nil
+          }
+        ),
+        horizontalPadding: horizontalPadding,
+        verticalPadding: 4,
+        font: .systemFont(ofSize: 13)
+      )
+      .frame(height: editorHeight)
+      
+      .background(alignment: .leading) {
         if text.isEmpty {
           Text("Write a message")
             .foregroundStyle(.tertiary)
@@ -60,6 +60,7 @@ struct Compose: View {
             )
         }
       }
+//      }
       .animation(.smoothSnappy, value: text.isEmpty)
       
       Button {
@@ -163,7 +164,6 @@ enum ComposeTextEditorEvent {
 struct CustomTextEditor: NSViewRepresentable {
   @Binding var text: String
   var minHeight: CGFloat
-  var maxHeight: CGFloat
   @Binding var height: CGFloat
   var onEvent: (ComposeTextEditorEvent) -> Void
   @Binding var isFocused: Bool
@@ -253,6 +253,14 @@ struct CustomTextEditor: NSViewRepresentable {
       guard let textView else { return }
       context.coordinator.updateHeightIfNeeded(for: textView)
     }
+    
+    // Handle window size changes
+    NotificationCenter.default.addObserver(
+      context.coordinator,
+      selector: #selector(Coordinator.windowDidResize(_:)),
+      name: NSWindow.didResizeNotification,
+      object: nil
+    )
 
     return scrollView
   }
@@ -283,10 +291,20 @@ struct CustomTextEditor: NSViewRepresentable {
       window.makeFirstResponder(shouldBeFocused ? textView : nil)
     }
   }
+  
+  private func calculateMaxHeight(for window: NSWindow?) -> CGFloat {
+    guard let window else { return 300 } // Fallback value
+    let windowHeight = window.frame.height
+    let maxHeight = windowHeight * 0.6
+    
+    // Add safety bounds
+    return min(max(maxHeight, 100), 500)
+  }
 
   class Coordinator: NSObject, NSTextViewDelegate {
     var parent: CustomTextEditor
     var lastHeight: CGFloat = 0
+    var currentMaxHeight: CGFloat = 300 // Default value
 
     init(_ parent: CustomTextEditor) {
       self.parent = parent
@@ -304,6 +322,16 @@ struct CustomTextEditor: NSViewRepresentable {
       updateHeightIfNeeded(for: textView)
     }
     
+    @objc func windowDidResize(_ notification: Notification) {
+      guard let window = notification.object as? NSWindow,
+            let textView = window.firstResponder as? NSTextView,
+            textView.delegate === self else { return }
+      
+      // Update max height based on new window size
+      currentMaxHeight = parent.calculateMaxHeight(for: window)
+      updateHeightIfNeeded(for: textView)
+    }
+    
     func calculateContentHeight(for textView: NSTextView) -> CGFloat {
       guard let layoutManager = textView.layoutManager,
             let textContainer = textView.textContainer else { return 0 }
@@ -316,21 +344,22 @@ struct CustomTextEditor: NSViewRepresentable {
       guard let layoutManager = textView.layoutManager,
             let textContainer = textView.textContainer else { return }
       
+      // Update max height based on current window
+      currentMaxHeight = parent.calculateMaxHeight(for: textView.window)
+      
       layoutManager.ensureLayout(for: textContainer)
       let contentHeight = layoutManager.usedRect(for: textContainer).height
       
       var newHeight = contentHeight + (parent.verticalPadding * 2)
-      newHeight = max(parent.minHeight, min(parent.maxHeight, newHeight))
+      newHeight = max(parent.minHeight, min(currentMaxHeight, newHeight))
       
       // Only update if significant change
 //      if abs(newHeight - lastHeight) > 0.1 {
-        lastHeight = newHeight
-        parent.height = newHeight
+      lastHeight = newHeight
+      parent.height = newHeight
         
-        textView.layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: 0, length: textView.string.count), actualCharacterRange: nil)
-        updateTextViewInsets(textView, contentHeight: contentHeight)
-        
-//      }
+      textView.layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: 0, length: textView.string.count), actualCharacterRange: nil)
+      updateTextViewInsets(textView, contentHeight: contentHeight)
     }
 
     private func updateTextViewInsets(_ textView: NSTextView, contentHeight: CGFloat) {
@@ -360,7 +389,7 @@ struct CustomTextEditor: NSViewRepresentable {
           return true
         }
         parent.onEvent(.returnKeyPress)
-//        updateHeightIfNeeded(for: textView)
+        updateHeightIfNeeded(for: textView)
 
         return false
         
