@@ -59,8 +59,9 @@ struct UpdateUpdateMessageId: Codable {
 
   func apply(db: Database) throws {
     if let randomId = Int64(randomId) {
-      var message = try Message.filter(Column("randomId") == randomId).fetchOne(db)
-      print("found message by randomId \(message)")
+      let message = try Message.filter(Column("randomId") == randomId).fetchOne(
+        db
+      )
       if var message = message {
         message.messageId = self.messageId
         try message.save(db)
