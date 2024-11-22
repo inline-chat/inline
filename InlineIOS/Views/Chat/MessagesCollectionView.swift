@@ -159,6 +159,31 @@ struct MessagesCollectionView: UIViewRepresentable {
       previousMessageCount = messages.count
     }
 
+    private func animateNewMessages(
+      _ newMessages: [FullMessage], in collectionView: UICollectionView
+    ) {
+      guard !newMessages.isEmpty else { return }
+
+      let indexPaths = newMessages.enumerated().map { IndexPath(item: $0.offset, section: 0) }
+      let cells = indexPaths.compactMap { collectionView.cellForItem(at: $0) }
+
+      cells.enumerated().forEach { index, cell in
+        // Ensure content view has correct transform
+        cell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
+
+        // Initial animation state
+        let scale = CGAffineTransform(scaleX: 0.98, y: 0.98)
+        let translation = CGAffineTransform(translationX: 0, y: -24)
+        cell.transform = scale.concatenating(translation)
+
+        UIView.animate(
+          withDuration: 0.35,
+          delay: Double(index) * 0.04,
+          usingSpringWithDamping: 0.82,
+          initialSpringVelocity: 0.4,
+          options: [.curveEaseOut, .allowUserInteraction]
+        ) {
+          cell.transform = .identity
         }
       }
     }
