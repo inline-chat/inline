@@ -12,7 +12,7 @@ struct ChatView: View {
 
   var peer: Peer
 
-  @State private var text: String = ""
+  @State public var text: String = ""
 
   // MARK: - Initialization
 
@@ -66,13 +66,13 @@ struct ChatView: View {
 
 // MARK: - View Components
 
-private extension ChatView {
-  var chatMessages: some View {
+extension ChatView {
+  fileprivate var chatMessages: some View {
     MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
       .padding(.vertical, 8)
   }
 
-  var chatHeader: some View {
+  fileprivate var chatHeader: some View {
     HStack(spacing: 2) {
       InitialsCircle(firstName: title, lastName: nil, size: 26)
         .padding(.trailing, 6)
@@ -82,30 +82,39 @@ private extension ChatView {
     }
   }
 
-  var inputArea: some View {
-    VStack(spacing: 0) {
-      Divider()
-        .ignoresSafeArea()
-      HStack {
-        messageTextField
-        sendButton
-      }
-      .padding()
+  fileprivate var inputArea: some View {
+
+    HStack {
+      ComposeView(messageText: $text)
+
+      sendButton
+
     }
-    .background(.clear)
+    .padding(.vertical, 6)
+    .padding(.horizontal)
+    .overlay(alignment: .top) {
+      Divider()
+        .padding(.top, -8)
+
+    }
+
   }
 
-  var messageTextField: some View {
+  fileprivate var messageTextField: some View {
     TextField("Type a message", text: $text, axis: .vertical)
       .textFieldStyle(.plain)
       .onSubmit(sendMessage)
   }
 
-  var sendButton: some View {
+  fileprivate var sendButton: some View {
     Button(action: sendMessage) {
-      Image(systemName: "arrow.up")
+      Image(systemName: "paperplane.fill")
         .foregroundColor(text.isEmpty ? .secondary : .blue)
-        .font(.body)
+        .font(.system(size: 20, weight: .semibold))
+        .contentTransition(.symbolEffect(.replace.offUp.byLayer))
+        .scaleEffect(text.isEmpty ? 0.9 : 1.0)
+        .rotationEffect(.degrees(text.isEmpty ? 0 : 45))
+        .animation(.spring(response: 0.4, dampingFraction: 0.6), value: text.isEmpty)
     }
     .disabled(text.isEmpty)
   }
@@ -113,8 +122,8 @@ private extension ChatView {
 
 // MARK: - Actions
 
-private extension ChatView {
-  func dismissKeyboard() {
+extension ChatView {
+  fileprivate func dismissKeyboard() {
     UIApplication.shared.sendAction(
       #selector(UIResponder.resignFirstResponder),
       to: nil,
@@ -123,11 +132,11 @@ private extension ChatView {
     )
   }
 
-  func sendMessage() {
+  fileprivate func sendMessage() {
     Task {
       do {
         if !text.isEmpty {
-          let randomId = Int64.random(in: Int64.min ... Int64.max)
+          let randomId = Int64.random(in: Int64.min...Int64.max)
 
           try await dataManager.sendMessage(
             chatId: fullChatViewModel.chat?.id ?? 0,
@@ -138,7 +147,9 @@ private extension ChatView {
             randomId: randomId
           )
         }
-        text = ""
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+          text = ""
+        }
       } catch {
         Log.shared.error("Failed to send message", error: error)
       }
