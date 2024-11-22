@@ -35,7 +35,7 @@ struct MessageView: View {
   // MARK: - Body
 
   var body: some View {
-    HStack {
+    HStack(spacing: 0) {
       if fullMessage.message.out == true {
         Spacer()
       }
@@ -46,6 +46,7 @@ struct MessageView: View {
         Spacer()
       }
     }
+
   }
 }
 
@@ -72,7 +73,7 @@ extension MessageView {
     .id(fullMessage.message.id)
     .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 18))
     .contextMenu { contextMenuButtons }
-    .frame(maxWidth: UIScreen.main.bounds.width * 0.75, alignment: alignment)
+    // .frame(maxWidth: UIScreen.main.bounds.width * 0.75, alignment: alignment)
     //    }
   }
 
