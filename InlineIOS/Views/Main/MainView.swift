@@ -24,8 +24,6 @@ struct MainView: View {
 
   // MARK: - State
 
-  @State private var showSheet = false
-  @State private var showDmSheet = false
   @State private var connection: String = ""
 
   var user: User? {
@@ -58,17 +56,6 @@ struct MainView: View {
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
-    .sheet(isPresented: $showSheet) {
-      CreateSpace(showSheet: $showSheet)
-        .presentationBackground(.thinMaterial)
-        .presentationCornerRadius(28)
-    }
-
-    .sheet(isPresented: $showDmSheet) {
-      CreateDm(showSheet: $showDmSheet)
-        .presentationBackground(.thinMaterial)
-        .presentationCornerRadius(28)
-    }
 
     .task {
       notificationHandler.setAuthenticated(value: true)
@@ -91,18 +78,18 @@ struct MainView: View {
 
 // MARK: - View Components
 
-private extension MainView {
+extension MainView {
   @ViewBuilder
-  var contentView: some View {
+  fileprivate var contentView: some View {
     if spaceList.spaces.isEmpty && home.chats.isEmpty {
-      EmptyStateView(showDmSheet: $showDmSheet, showSheet: $showSheet)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+      // EmptyStateView()
+      //   .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     } else {
       contentList
     }
   }
 
-  var contentList: some View {
+  fileprivate var contentList: some View {
     List {
       if !spaceList.spaces.isEmpty {
         spacesSection
@@ -116,7 +103,7 @@ private extension MainView {
     .padding(.vertical, 8)
   }
 
-  var spacesSection: some View {
+  fileprivate var spacesSection: some View {
     Section(header: Text("Spaces")) {
       ForEach(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
         SpaceRowView(space: space)
@@ -127,7 +114,7 @@ private extension MainView {
     }
   }
 
-  var chatsSection: some View {
+  fileprivate var chatsSection: some View {
     Section(header: Text("Direct Messages")) {
       ForEach(
         home.chats,
@@ -142,7 +129,7 @@ private extension MainView {
     }
   }
 
-  var toolbarContent: some ToolbarContent {
+  fileprivate var toolbarContent: some ToolbarContent {
     Group {
       ToolbarItem(id: "UserAvatar", placement: .topBarLeading) {
         HStack {
@@ -175,11 +162,19 @@ private extension MainView {
       }
 
       ToolbarItem(id: "MainToolbarTrailing", placement: .topBarTrailing) {
-        HStack(spacing: 4) {
-          Menu {
-            //            Button("New DM") { showDmSheet = true }
-            Button("Create Space") { showSheet = true }
+        HStack(spacing: 2) {
+          Button {
+            nav.push(.settings)
+          } label: {
+            Image(systemName: "gearshape")
+              .tint(Color.secondary)
+              .frame(width: 38, height: 38)
+              .contentShape(Rectangle())
+          }
 
+          Menu {
+            Button("New DM") { nav.push(.createDM) }
+            Button("Create Space") { nav.push(.createSpace) }
           } label: {
             Image(systemName: "plus")
               .tint(Color.secondary)
@@ -214,8 +209,8 @@ private extension MainView {
 
 // MARK: - Helper Methods
 
-private extension MainView {
-  func handleLogout() {
+extension MainView {
+  fileprivate func handleLogout() {
     auth.logOut()
     do {
       try AppDatabase.clearDB()

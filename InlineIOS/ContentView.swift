@@ -68,16 +68,20 @@ struct ContentView: View {
     switch destination {
     case .createSpace:
       CreateSpace(showSheet: .constant(true))
-        .presentationBackground(.thinMaterial)
-        .presentationCornerRadius(28)
+        .presentationBackground(.ultraThickMaterial)
+        .presentationCornerRadius(18)
     case .createDM:
       CreateDm(showSheet: .constant(true))
-        .presentationBackground(.thinMaterial)
-        .presentationCornerRadius(28)
+        .presentationBackground(.ultraThickMaterial)
+        .presentationCornerRadius(18)
     case .createThread(let spaceId):
       CreateThread(showSheet: .constant(true), spaceId: spaceId)
-        .presentationBackground(.thinMaterial)
-        .presentationCornerRadius(28)
+        .presentationBackground(.ultraThickMaterial)
+        .presentationCornerRadius(18)
+    case .settings:
+      Settings()
+        .presentationBackground(.ultraThickMaterial)
+        .presentationCornerRadius(18)
     default:
       EmptyView()
     }
