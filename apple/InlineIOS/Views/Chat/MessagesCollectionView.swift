@@ -21,8 +21,8 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     // Enable bottom-up scrolling
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-    collectionView.contentInset = UIEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
-    collectionView.alwaysBounceVertical = true
+    collectionView.contentInset = UIEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
+
     collectionView.keyboardDismissMode = .none
 
     // Add rotation observer
@@ -58,6 +58,7 @@ struct MessagesCollectionView: UIViewRepresentable {
     }
 
     @objc func orientationDidChange(_ notification: Notification) {
+      // TODO: Give a reference of current collection view not any collection view
       guard
         let collectionView = (notification.object as? UIDevice)?.keyWindow?.rootViewController?.view
           .findCollectionView()
@@ -140,8 +141,8 @@ struct MessagesCollectionView: UIViewRepresentable {
       )
       let fullMessage = fullMessages[indexPath.item]
 
-      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 25.0 : 1.0
-      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 25.0 : 1.0
+      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 1.0
+      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 24.0 : 1.0
       cell.contentConfiguration = UIHostingConfiguration {
         MessageView(fullMessage: fullMessage)
           .padding(.bottom, topPadding)
@@ -158,10 +159,11 @@ struct MessagesCollectionView: UIViewRepresentable {
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
       let fullMessage = fullMessages[indexPath.item]
-      let width = collectionView.bounds.width - 32
+      // Cause padding horizontal
+      let width = collectionView.bounds.width - 16
 
-      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 25.0 : 1.0
-      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 25.0 : 1.0
+      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 1.0
+      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 24.0 : 1.0
 
       let messageView = MessageView(fullMessage: fullMessage)
       let messageSize = UIHostingController(rootView: messageView).sizeThatFits(
