@@ -9,6 +9,7 @@ struct ChatView: View {
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var dataManager: DataManager
+  @Environment(\.appDatabase) var database
 
   var peer: Peer
 
@@ -128,33 +129,48 @@ struct ChatView: View {
   }
 
   func sendMessage() {
-    let messageToSend = text
-
-    withAnimation(.punchySnappy) {
-      text = ""
-    }
-
-    // Add haptic feedback
-    let generator = UIImpactFeedbackGenerator(style: .medium)
-    generator.impactOccurred()
-
-    // Send message
     Task {
       do {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard let chatId = fullChatViewModel.chat?.id else { return }
+
+        let messageText = text
+        text = ""
+
+        // Add haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
+        let peerThreadId: Int64? = if case .thread(let id) = peer { id } else { nil }
+
         let randomId = Int64.random(in: Int64.min...Int64.max)
+        let message = Message(
+          messageId: -randomId,
+          randomId: randomId,
+          fromId: Auth.shared.getCurrentUserId()!,
+          date: Date(),
+          text: messageText,
+          peerUserId: peerUserId,
+          peerThreadId: peerThreadId,
+          chatId: chatId,
+          out: true
+        )
+
+        try await database.dbWriter.write { db in
+          try message.save(db)
+        }
+
         try await dataManager.sendMessage(
-          chatId: fullChatViewModel.chat?.id ?? 0,
-          peerUserId: nil,
-          peerThreadId: nil,
-          text: messageToSend,
+          chatId: chatId,
+          peerUserId: peerUserId,
+          peerThreadId: peerThreadId,
+          text: messageText,
           peerId: peer,
           randomId: randomId
         )
       } catch {
-        withAnimation(.smoothSnappy) {
-          text = messageToSend
-        }
         Log.shared.error("Failed to send message", error: error)
+        // Optionally show error to user
       }
     }
   }
