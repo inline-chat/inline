@@ -25,7 +25,7 @@ final class ChatHeaderView: UIView {
 
   private let nameLabel: UILabel = {
     let label = UILabel()
-    label.font = .systemFont(ofSize: 16, weight: .medium)
+    label.font = .systemFont(ofSize: 19, weight: .medium)
     label.textAlignment = .center
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
@@ -53,8 +53,8 @@ final class ChatHeaderView: UIView {
     backgroundColor = .clear
 
     let centerStack = UIStackView(arrangedSubviews: [avatarView, nameLabel])
-    centerStack.axis = .vertical
-    centerStack.spacing = 4
+    centerStack.axis = .horizontal
+    centerStack.spacing = 8
     centerStack.alignment = .center
     centerStack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -67,12 +67,12 @@ final class ChatHeaderView: UIView {
       backButton.widthAnchor.constraint(equalToConstant: 44),
       backButton.heightAnchor.constraint(equalToConstant: 44),
 
-      centerStack.centerXAnchor.constraint(equalTo: centerXAnchor),
-      centerStack.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-      centerStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+      centerStack.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: -2),
+      centerStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+      centerStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
 
-      avatarView.widthAnchor.constraint(equalToConstant: 45),
-      avatarView.heightAnchor.constraint(equalToConstant: 45),
+      avatarView.widthAnchor.constraint(equalToConstant: 28),
+      avatarView.heightAnchor.constraint(equalToConstant: 28),
     ])
 
     backButton.addTarget(self, action: #selector(backButtonTapped), for: .touchUpInside)
@@ -89,7 +89,7 @@ final class ChatHeaderView: UIView {
     nameLabel.text = user.firstName
 
     // Create and set up new hosting controller
-    let avatar = UserAvatar(user: user, size: 36)
+    let avatar = UserAvatar(user: user, size: 26)
     let hostingController = UIHostingController(rootView: avatar)
     self.hostingController = hostingController
 

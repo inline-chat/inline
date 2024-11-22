@@ -47,23 +47,20 @@ struct ChatView: View {
             nav.pop()
           }
         )
-        .frame(height: 75)
+        .frame(height: 45)
         .background(Color.clear.edgesIgnoringSafeArea(.all))
       }
-
     }
     .navigationBarHidden(true)
     .onAppear {
       fetchMessages()
     }
-
   }
 
   // MARK: - View Components
 
   private var chatMessages: some View {
     MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
-
   }
 
   private var inputArea: some View {
@@ -82,13 +79,10 @@ struct ChatView: View {
   private var sendButton: some View {
     Button(action: sendMessage) {
       Image(systemName: "paperplane.fill")
-        .foregroundColor(text.isEmpty ? .secondary : .blue)
+        .foregroundColor(text.isEmpty ? .clear : .blue)
         .font(.system(size: 20, weight: .semibold))
-        .contentTransition(.symbolEffect(.replace.offUp.byLayer))
-        .scaleEffect(text.isEmpty ? 0.9 : 1.0)
-        .rotationEffect(.degrees(text.isEmpty ? 0 : 45))
-        .animation(.spring(response: 0.4, dampingFraction: 0.6), value: text.isEmpty)
     }
+    .transition(.scale(scale: 0.8).combined(with: .opacity))
     .disabled(text.isEmpty)
   }
 
@@ -128,7 +122,7 @@ struct ChatView: View {
             randomId: randomId
           )
         }
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+        withAnimation(.punchySnappy) {
           text = ""
         }
       } catch {
