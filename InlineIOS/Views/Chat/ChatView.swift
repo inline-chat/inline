@@ -68,6 +68,7 @@ struct ChatView: View {
       ComposeView(messageText: $text)
       sendButton
     }
+    .animation(.smoothSnappy, value: !text.isEmpty)
     .padding(.vertical, 6)
     .padding(.horizontal)
     .overlay(alignment: .top) {
@@ -76,14 +77,30 @@ struct ChatView: View {
     }
   }
 
-  private var sendButton: some View {
-    Button(action: sendMessage) {
-      Image(systemName: "paperplane.fill")
-        .foregroundColor(text.isEmpty ? .clear : .blue)
-        .font(.system(size: 20, weight: .semibold))
+  var sendButton: some View {
+    Group {
+      if !text.isEmpty {
+        Button(action: sendMessage) {
+          Image(systemName: "paperplane.fill")
+            .foregroundStyle(.blue)
+            .font(.system(size: 20, weight: .semibold))
+            .frame(width: 30, height: 30)
+
+        }
+        .transition(
+          .asymmetric(
+            insertion: .scale(scale: 0.6)
+              .combined(with: .opacity)
+              .combined(with: .offset(x: -10)),
+            removal: .scale(scale: 0.6)
+              .combined(with: .opacity)
+              .combined(with: .offset(x: -10))
+          )
+        )
+      } else {
+        EmptyView()
+      }
     }
-    .transition(.scale(scale: 0.8).combined(with: .opacity))
-    .disabled(text.isEmpty)
   }
 
   // MARK: - Methods
@@ -107,25 +124,33 @@ struct ChatView: View {
     )
   }
 
-  private func sendMessage() {
+  func sendMessage() {
+    let messageToSend = text
+
+    withAnimation(.punchySnappy) {
+      text = ""
+    }
+
+    // Add haptic feedback
+    let generator = UIImpactFeedbackGenerator(style: .medium)
+    generator.impactOccurred()
+
+    // Send message
     Task {
       do {
-        if !text.isEmpty {
-          let randomId = Int64.random(in: Int64.min...Int64.max)
-
-          try await dataManager.sendMessage(
-            chatId: fullChatViewModel.chat?.id ?? 0,
-            peerUserId: nil,
-            peerThreadId: nil,
-            text: text,
-            peerId: peer,
-            randomId: randomId
-          )
-        }
-        withAnimation(.punchySnappy) {
-          text = ""
-        }
+        let randomId = Int64.random(in: Int64.min...Int64.max)
+        try await dataManager.sendMessage(
+          chatId: fullChatViewModel.chat?.id ?? 0,
+          peerUserId: nil,
+          peerThreadId: nil,
+          text: messageToSend,
+          peerId: peer,
+          randomId: randomId
+        )
       } catch {
+        withAnimation(.smoothSnappy) {
+          text = messageToSend
+        }
         Log.shared.error("Failed to send message", error: error)
       }
     }

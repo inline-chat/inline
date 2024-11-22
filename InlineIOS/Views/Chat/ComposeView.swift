@@ -34,7 +34,7 @@ struct ComposeView: View {
           .transition(
             .asymmetric(
               insertion: .offset(x: 40),
-              removal: .offset(x: -40)
+              removal: .offset(x: 40)
             )
             .combined(with: .opacity)
           )
