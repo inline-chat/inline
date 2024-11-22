@@ -17,7 +17,9 @@ final class ChatHeaderView: UIView {
 
   private let avatarView: UIView = {
     let view = UIView()
+    view.backgroundColor = .clear
     view.translatesAutoresizingMaskIntoConstraints = false
+
     return view
   }()
 
@@ -48,7 +50,7 @@ final class ChatHeaderView: UIView {
   // MARK: - Setup
 
   private func setupViews() {
-    backgroundColor = .systemBackground
+    backgroundColor = .clear
 
     let centerStack = UIStackView(arrangedSubviews: [avatarView, nameLabel])
     centerStack.axis = .vertical
@@ -90,6 +92,10 @@ final class ChatHeaderView: UIView {
     let avatar = UserAvatar(user: user, size: 36)
     let hostingController = UIHostingController(rootView: avatar)
     self.hostingController = hostingController
+
+    // Add these lines to ensure transparency
+    hostingController.view.backgroundColor = .clear
+    hostingController.view.isOpaque = false
 
     // Add the hosting controller's view directly without managing the controller hierarchy
     hostingController.view.translatesAutoresizingMaskIntoConstraints = false
