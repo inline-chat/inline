@@ -12,7 +12,7 @@ struct ChatView: View {
 
   var peer: Peer
 
-  @State public var text: String = ""
+  @State private var text: String = ""
 
   // MARK: - Initialization
 
@@ -35,78 +35,47 @@ struct ChatView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      chatMessages
+      if let user = fullChatViewModel.peerUser {
+        ChatHeaderViewRepresentable(
+          user: user,
+          onBack: {
+            nav.pop()
+          }
+        )
+        .frame(height: 75)
+      }
 
+      chatMessages
       inputArea
     }
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .principal) {
-        chatHeader
-      }
-    }
-    .toolbarRole(.editor)
-    .toolbar(.hidden, for: .tabBar)
-    .onTapGesture(perform: dismissKeyboard)
+    .navigationBarHidden(true)
     .onAppear {
       fetchMessages()
     }
+
   }
 
-  private func fetchMessages() {
-    Task {
-      try await dataManager.getChatHistory(
-        peerUserId: nil,
-        peerThreadId: nil,
-        peerId: peer
-      )
-    }
-  }
-}
+  // MARK: - View Components
 
-// MARK: - View Components
-
-extension ChatView {
-  fileprivate var chatMessages: some View {
+  private var chatMessages: some View {
     MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
       .padding(.vertical, 8)
   }
 
-  fileprivate var chatHeader: some View {
-    HStack(spacing: 2) {
-      InitialsCircle(firstName: title, lastName: nil, size: 26)
-        .padding(.trailing, 6)
-      Text(title)
-        .font(.title3)
-        .fontWeight(.medium)
-    }
-  }
-
-  fileprivate var inputArea: some View {
-
+  private var inputArea: some View {
     HStack {
       ComposeView(messageText: $text)
-
       sendButton
-
     }
     .padding(.vertical, 6)
     .padding(.horizontal)
     .overlay(alignment: .top) {
       Divider()
         .padding(.top, -8)
-
     }
-
   }
 
-  fileprivate var messageTextField: some View {
-    TextField("Type a message", text: $text, axis: .vertical)
-      .textFieldStyle(.plain)
-      .onSubmit(sendMessage)
-  }
-
-  fileprivate var sendButton: some View {
+  private var sendButton: some View {
     Button(action: sendMessage) {
       Image(systemName: "paperplane.fill")
         .foregroundColor(text.isEmpty ? .secondary : .blue)
@@ -118,12 +87,20 @@ extension ChatView {
     }
     .disabled(text.isEmpty)
   }
-}
 
-// MARK: - Actions
+  // MARK: - Methods
 
-extension ChatView {
-  fileprivate func dismissKeyboard() {
+  private func fetchMessages() {
+    Task {
+      try await dataManager.getChatHistory(
+        peerUserId: nil,
+        peerThreadId: nil,
+        peerId: peer
+      )
+    }
+  }
+
+  private func dismissKeyboard() {
     UIApplication.shared.sendAction(
       #selector(UIResponder.resignFirstResponder),
       to: nil,
@@ -132,7 +109,7 @@ extension ChatView {
     )
   }
 
-  fileprivate func sendMessage() {
+  private func sendMessage() {
     Task {
       do {
         if !text.isEmpty {
@@ -156,6 +133,8 @@ extension ChatView {
     }
   }
 }
+
+// MARK: - Helper Extensions
 
 extension View {
   func flipped() -> some View {
