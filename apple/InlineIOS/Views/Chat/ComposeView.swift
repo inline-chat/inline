@@ -16,7 +16,7 @@ struct ComposeView: View {
       )
       .frame(height: textViewHeight)
       .background(Color.clear)
-      .animation(.smoothSnappyLong, value: textViewHeight)
+      .animation(.smoothSnappy, value: textViewHeight)
       .onChange(of: messageText) { _, newValue in
         if newValue.isEmpty {
           withAnimation(.smoothSnappy) {
@@ -34,7 +34,7 @@ struct ComposeView: View {
           .transition(
             .asymmetric(
               insertion: .offset(x: 40),
-              removal: .offset(x: 40)
+              removal: .offset(x: -40)
             )
             .combined(with: .opacity)
           )

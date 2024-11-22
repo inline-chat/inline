@@ -4,13 +4,6 @@ import SwiftUI
 extension Animation {
   public static var smoothSnappy: Animation {
     .interpolatingSpring(
-      duration: 0.12,
-      bounce: 0
-    )
-  }
-
-  public static var smoothSnappyLong: Animation {
-    .interpolatingSpring(
       duration: 0.25,
       bounce: 0
     )
