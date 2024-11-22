@@ -35,6 +35,11 @@ struct ChatView: View {
 
   var body: some View {
     VStack(spacing: 0) {
+      chatMessages
+      inputArea
+    }
+
+    .safeAreaInset(edge: .top) {
       if let user = fullChatViewModel.peerUser {
         ChatHeaderViewRepresentable(
           user: user,
@@ -43,10 +48,9 @@ struct ChatView: View {
           }
         )
         .frame(height: 75)
+        .background(Color.clear.edgesIgnoringSafeArea(.all))
       }
 
-      chatMessages
-      inputArea
     }
     .navigationBarHidden(true)
     .onAppear {
@@ -59,7 +63,7 @@ struct ChatView: View {
 
   private var chatMessages: some View {
     MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
-      .padding(.vertical, 8)
+
   }
 
   private var inputArea: some View {
