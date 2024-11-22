@@ -36,9 +36,11 @@ struct ChatView: View {
   var body: some View {
     VStack(spacing: 0) {
       chatMessages
+
+    }
+    .safeAreaInset(edge: .bottom) {
       inputArea
     }
-
     .safeAreaInset(edge: .top) {
       if let user = fullChatViewModel.peerUser {
         ChatHeaderViewRepresentable(
@@ -75,6 +77,7 @@ struct ChatView: View {
       Divider()
         .padding(.top, -8)
     }
+    .background(Color(.systemBackground))
   }
 
   var sendButton: some View {
