@@ -75,7 +75,8 @@ class Navigation: ObservableObject, @unchecked Sendable {
   }
 
   func pop() {
-    if !navigationPath.isEmpty {
+    guard !navigationPath.isEmpty else { return }
+    withAnimation(.snappy) {
       navigationPath.removeLast()
     }
   }
