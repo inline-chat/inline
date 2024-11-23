@@ -1,9 +1,16 @@
 import { Elysia, t } from "elysia"
 import { setup } from "@in/server/setup"
 import { insertIntoWaitlist } from "@in/server/db/models/waitlist"
+import { db } from "@in/server/db"
+import { type NewWaitlistSubscriber, waitlist as wdb } from "@in/server/db/schema"
+import { sql, count } from "drizzle-orm"
 
 export const waitlist = new Elysia({ prefix: "/waitlist" })
   .use(setup)
+  .get("/super_secret_sub_count", async () => {
+    const [result] = await db.select({ count: count() }).from(wdb)
+    return result?.count
+  })
   .post(
     "/subscribe",
     async ({ body }) => {
