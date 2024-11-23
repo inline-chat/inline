@@ -40,6 +40,7 @@ struct MessageView: View {
         NSPasteboard.general.setString(message.text ?? "", forType: .string)
       }
     }
+    .scaleEffect(x: 1, y: -1, anchor: .center)
   }
   
   @ViewBuilder

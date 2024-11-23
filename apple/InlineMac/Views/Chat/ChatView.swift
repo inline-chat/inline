@@ -34,27 +34,33 @@ struct ChatView: View {
 
   @ViewBuilder
   var content: some View {
-    messageList
-      .task {
-        await fetch()
-      }
-      .environmentObject(scroller)
-      .environmentObject(chatFocus)
-      .background {
-        KeyPressHandler {
-          // Return key code
-          if $0.keyCode == 36, $0.modifierFlags.contains(.command) {
-            if chatFocus.focusedField != .compose {
-              chatFocus.focusCompose()
-              return nil
-            } else {
-              // it's focused, so send?
-            }
-          }
+//    messageList
+    VStack(spacing: 0) {
+      MessagesList()
 
-          return $0
+      compose
+    }
+    .task {
+      await fetch()
+    }
+    .environmentObject(scroller)
+    .environmentObject(chatFocus)
+    .environmentObject(fullChat)
+    .background {
+      KeyPressHandler {
+        // Return key code
+        if $0.keyCode == 36, $0.modifierFlags.contains(.command) {
+          if chatFocus.focusedField != .compose {
+            chatFocus.focusCompose()
+            return nil
+          } else {
+            // it's focused, so send?
+          }
         }
+        
+        return $0
       }
+    }
   }
 
   @State var scrollProxy: ScrollViewProxy? = nil
@@ -88,7 +94,7 @@ struct ChatView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .id(fullMessage.message.globalId) // to avoid flashes
                     .onAppear {
-                      print("fullChat.fullMessages.first?.message.globalId \( fullChat.fullMessages.first?.message.globalId)")
+                      print("fullChat.fullMessages.first?.message.globalId \(fullChat.fullMessages.first?.message.globalId)")
                     }
                 }
               }
