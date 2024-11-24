@@ -15,7 +15,7 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var date: Int
 }
 
-public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable
+public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable, Equatable
 {
   // Locally autoincremented id
   public var globalId: Int64?

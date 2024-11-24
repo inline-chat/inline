@@ -1,26 +1,40 @@
 // MessageView.swift
 import AppKit
 import InlineKit
+import InlineUI
+import SwiftUI
+
+struct MessageViewProps: Equatable, Codable, Hashable {
+  /// Used to show sender and photo
+  var firstInGroup: Bool
+  
+  /// Used in cache key
+  func toString() -> String {
+    "\(firstInGroup)"
+  }
+}
 
 class MessageViewAppKit: NSView {
-  static let avatarSize: CGFloat = 28
+  static let avatarSize: CGFloat = Theme.messageAvatarSize
   
   // MARK: - Properties
+
   private var fullMessage: FullMessage
-  private var showsSender: Bool
+  private var props: MessageViewProps
   
   private var from: User {
     fullMessage.user ?? User.deletedInstance
   }
   
-  private var showsAvatar: Bool { showsSender }
-  private var showsName: Bool { showsSender }
+  private var showsAvatar: Bool { props.firstInGroup }
+  private var showsName: Bool { props.firstInGroup }
   
   private var message: Message {
     fullMessage.message
   }
   
   // MARK: - UI Components
+
   private lazy var avatarView: UserAvatarView = {
     let view = UserAvatarView(frame: .zero)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -62,18 +76,21 @@ class MessageViewAppKit: NSView {
   }()
   
   // MARK: - Initialization
-  init(fullMessage: FullMessage, showsSender: Bool = true) {
+
+  init(fullMessage: FullMessage, props: MessageViewProps) {
     self.fullMessage = fullMessage
-    self.showsSender = showsSender
+    self.props = props
     super.init(frame: .zero)
     setupView()
   }
-  
+    
+  @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
   
   // MARK: - Setup
+
   private func setupView() {
     addSubview(horizontalStackView)
     
@@ -98,7 +115,7 @@ class MessageViewAppKit: NSView {
     }
     
     contentStackView.addArrangedSubview(messageLabel)
-    messageLabel.stringValue = message.text ?? "empty"
+    messageLabel.stringValue = message.text ?? ""
     
     NSLayoutConstraint.activate([
       horizontalStackView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -130,6 +147,7 @@ class MessageViewAppKit: NSView {
   }
   
   // MARK: - Actions
+
   @objc private func copyMessage() {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(message.text ?? "", forType: .string)
@@ -137,6 +155,7 @@ class MessageViewAppKit: NSView {
 }
 
 // MARK: - NSMenuDelegate
+
 extension MessageViewAppKit: NSMenuDelegate {
   func menuWillOpen(_ menu: NSMenu) {
     // Add any additional menu handling if needed
@@ -144,15 +163,54 @@ extension MessageViewAppKit: NSMenuDelegate {
 }
 
 // MARK: - UserAvatarView
+
 class UserAvatarView: NSView {
+  var prevUser: User?
   var user: User? {
     didSet {
       updateAvatar()
     }
   }
   
+  private var hostingController: NSHostingController<UserAvatar>?
+  
+  init(user: User) {
+    self.user = user
+    super.init(frame: .zero)
+  }
+  
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+  }
+  
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+  }
+
   private func updateAvatar() {
-    // Implement avatar rendering logic here
-    // This would depend on your UserAvatar SwiftUI implementation
+    guard let user = user else { return }
+    if let hostingController = hostingController {
+      if user != prevUser {
+        let swiftUIView = UserAvatar(user: user, size: Theme.messageAvatarSize)
+        hostingController.rootView = swiftUIView
+      }
+    } else {
+      let swiftUIView = UserAvatar(user: user, size: Theme.messageAvatarSize)
+      hostingController = NSHostingController(rootView: swiftUIView)
+      
+      if let hostView = hostingController?.view {
+        hostView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hostView)
+        
+        NSLayoutConstraint.activate([
+          hostView.leadingAnchor.constraint(equalTo: leadingAnchor),
+          hostView.trailingAnchor.constraint(equalTo: trailingAnchor),
+          hostView.topAnchor.constraint(equalTo: topAnchor),
+          hostView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+      }
+    }
+    
+    prevUser = user
   }
 }

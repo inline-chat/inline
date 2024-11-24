@@ -2,13 +2,15 @@ import Combine
 import GRDB
 
 public struct FullMessage: Codable, FetchableRecord, PersistableRecord, Sendable, Hashable,
-  Identifiable
+  Identifiable, Equatable
 {
   public var user: User?
   public var message: Message
 
+  // stable id
   public var id: Int64 {
-    message.id
+    message.globalId ?? message.id
+//    message.id
   }
 
 //  public static let preview = FullMessage(user: User, message: Message)

@@ -20,4 +20,7 @@ struct Theme {
   static let sidebarItemHeight: CGFloat = 30
   static let sidebarTopItemFont: Font = .system(size: 14, weight: .semibold)
   static let sidebarTopItemHeight: CGFloat = 34
+  
+  // MARK: - Message View
+  static let messageAvatarSize: CGFloat = 28
 }

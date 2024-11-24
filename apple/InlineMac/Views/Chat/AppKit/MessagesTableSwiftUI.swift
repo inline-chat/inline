@@ -12,7 +12,7 @@ struct MessagesList: NSViewControllerRepresentable {
   
   func makeNSViewController(context: Context) -> MessagesTableView {
     let controller = MessagesTableView()
-    controller.update(with: messageStore.fullMessages.reversed())
+    controller.update(with: messageStore.fullMessages)
     return controller
   }
   
@@ -56,3 +56,4 @@ struct MessagesList: NSViewControllerRepresentable {
 //    }
 //  }
 //}
+
