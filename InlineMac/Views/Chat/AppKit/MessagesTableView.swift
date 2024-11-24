@@ -11,7 +11,6 @@ class MessagesTableView: NSViewController {
   private var pendingMessages: [FullMessage] = []
   private let sizeCalculator = MessageSizeCalculator()
   private var sizeCache = NSCache<NSString, NSValue>()
-  private let visibleRowsTracker = VisibleRowsTracker()
 
   private let defaultRowHeight = 44.0
   
@@ -22,11 +21,10 @@ class MessagesTableView: NSViewController {
     table.rowSizeStyle = .custom
     table.selectionHighlightStyle = .none
     table.intercellSpacing = NSSize(width: 0, height: 0)
-//    table.usesAutomaticRowHeights = false
     table.usesAutomaticRowHeights = false
-    table.rowHeight = defaultRowHeight // Set an average expected height
+    table.rowHeight = defaultRowHeight
+    table.layer?.backgroundColor = .clear
 
-//    table.wantsLayer = true
     let column = NSTableColumn(identifier: .init("messageColumn"))
     column.isEditable = false
     table.addTableColumn(column)
@@ -43,6 +41,7 @@ class MessagesTableView: NSViewController {
     let scroll = NSScrollView()
     scroll.hasVerticalScroller = true
     scroll.borderType = .noBorder
+    scroll.drawsBackground = false // Add this line
     scroll.backgroundColor = .clear
     scroll.documentView = tableView
     scroll.wantsLayer = true
@@ -55,12 +54,15 @@ class MessagesTableView: NSViewController {
     scroll.scrollerStyle = .overlay
     scroll.verticalScrollElasticity = .allowed
     scroll.autohidesScrollers = true
+    scroll.contentView.layer?.backgroundColor = .clear
 
     return scroll
   }()
   
   override func loadView() {
     view = NSView()
+    view.wantsLayer = true
+    view.layer?.backgroundColor = .clear
     setupViews()
   }
 
@@ -139,14 +141,23 @@ class MessagesTableView: NSViewController {
   }
   
   @objc func scrollViewBoundsChanged(notification: Notification) {
+    if needsInitialScroll {
+      // reports inaccurate heights at this point
+      return
+    }
+    
     let scrollOffset = scrollView.contentView.bounds.origin
     let viewportSize = scrollView.contentView.bounds.size
     let contentSize = scrollView.documentView?.frame.size ?? .zero
     let maxScrollableHeight = contentSize.height - viewportSize.height
     let currentScrollOffset = scrollOffset.y
+    print("🔍 Scroll offset: \(currentScrollOffset), max: \(maxScrollableHeight)")
     isAtBottom = abs(currentScrollOffset - maxScrollableHeight) <= 10.0
     
-    recalculateVisibleHeightsWithCache()
+    DispatchQueue.main.async { [weak self] in
+      // Update visible rows and a few more if width changed we need to update our cache with this hint
+      self?.recalculateVisibleHeightsWithCache()
+    }
   }
   
   @objc func scrollViewFrameChanged(notification: Notification) {
@@ -365,23 +376,7 @@ extension MessagesTableView: NSTableViewDelegate {
       
     let finalSize = NSSize(width: availableWidth, height: size.height)
     sizeCache.setObject(NSValue(size: finalSize), forKey: cacheKey)
-    print("📏 Calculated size for row: \(row) width = \(finalSize)")
+//    print("📏 Calculated size for row: \(row) width = \(finalSize)")
     return finalSize.height
-  }
-}
-
-// VisibleRowsTracker.swift
-final class VisibleRowsTracker {
-  private var visibleRows = IndexSet()
-  private var preloadWindow: Int = 5
-  
-  func update(visibleIndexes: IndexSet, totalCount: Int) {
-    let minRow = max(0, visibleIndexes.first ?? 0 - preloadWindow)
-    let maxRow = min(totalCount - 1, visibleIndexes.last ?? 0 + preloadWindow)
-    visibleRows = IndexSet(integersIn: minRow ... maxRow)
-  }
-  
-  func shouldCalculateSize(for row: Int) -> Bool {
-    visibleRows.contains(row)
   }
 }
