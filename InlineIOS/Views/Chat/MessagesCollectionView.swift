@@ -63,6 +63,7 @@ struct MessagesCollectionView: UIViewRepresentable {
       let messageId: Int64
       let offsetFromTop: CGFloat
     }
+
     private var scrollAnchor: ScrollAnchor?
 
     init(fullMessages: [FullMessage]) {
@@ -145,6 +146,7 @@ struct MessagesCollectionView: UIViewRepresentable {
         }
       }
     }
+
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
@@ -187,14 +189,33 @@ struct MessagesCollectionView: UIViewRepresentable {
       captureScrollPosition(collectionView)
 
       let oldCount = fullMessages.count
+      let oldMessages = fullMessages
       fullMessages = messages
 
       updateSnapshot(with: messages, animated: false)
 
-      // Restore scroll position after layout
+      // Only scroll to bottom if the new message is from us
       if messages.count > oldCount {
-        DispatchQueue.main.async { [weak self] in
-          self?.restoreScrollPosition(collectionView)
+        let newMessages = messages.filter { message in
+          !oldMessages.contains { $0.message.id == message.message.id }
+        }
+
+        // Check if any of the new messages are from us
+        let hasOurNewMessage = newMessages.contains { $0.message.out == true }
+
+        if hasOurNewMessage {
+          DispatchQueue.main.async { [weak self] in
+            collectionView.scrollToItem(
+              at: IndexPath(item: 0, section: 0),
+              at: .bottom,
+              animated: true
+            )
+          }
+        } else {
+          // Restore previous scroll position for messages from others
+          DispatchQueue.main.async { [weak self] in
+            self?.restoreScrollPosition(collectionView)
+          }
         }
       }
 
