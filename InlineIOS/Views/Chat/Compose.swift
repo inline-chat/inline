@@ -25,10 +25,15 @@ struct Compose: UIViewRepresentable {
     textView.layer.borderWidth = 0
     textView.layer.borderColor = UIColor.clear.cgColor
     textView.borderStyle = .none
+
     // Appearance configuration
     textView.font = .preferredFont(forTextStyle: .body)
     textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
     textView.textContainer.lineFragmentPadding = 0
+
+    // Animation improvements
+    textView.layoutManager.allowsNonContiguousLayout = false
+    textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
     // Accessibility
     textView.adjustsFontForContentSizeCategory = true
@@ -38,26 +43,26 @@ struct Compose: UIViewRepresentable {
   }
 
   func updateUIView(_ uiView: UITextView, context: Context) {
-    // Only update if text has changed from external source
     if uiView.text != text && uiView.text != placeholder {
       updateTextViewState(uiView)
     }
 
-    // Update height based on content
-    let size = uiView.sizeThatFits(CGSize(width: uiView.bounds.width, height: .infinity))
-    let newHeight = min(size.height, maxHeight)
-    if height != newHeight {
-      height = newHeight
+    DispatchQueue.main.async {
+      let size = uiView.sizeThatFits(CGSize(width: uiView.bounds.width, height: .infinity))
+      let newHeight = min(size.height, maxHeight)
+      if height != newHeight {
+        withAnimation(.smoothSnappy) {
+          height = newHeight
+        }
+      }
     }
   }
 
   private func updateTextViewState(_ textView: UITextView) {
-    if textView.text == text {
-      return
-    }
+    if textView.text == text { return }
 
     textView.text = text
-    textView.textColor = .label // System default text color (black in light mode, white in dark mode)
+    textView.textColor = .label
   }
 
   class Coordinator: NSObject, UITextViewDelegate {
@@ -70,9 +75,10 @@ struct Compose: UIViewRepresentable {
     func textViewDidChange(_ textView: UITextView) {
       parent.text = textView.text
 
-      // Update height
       let size = textView.sizeThatFits(CGSize(width: textView.bounds.width, height: .infinity))
-      parent.height = min(size.height, parent.maxHeight)
+      withAnimation(.smoothSnappy) {
+        parent.height = min(size.height, parent.maxHeight)
+      }
     }
 
     func textViewDidBeginEditing(_ textView: UITextView) {}

@@ -58,6 +58,13 @@ struct MessagesCollectionView: UIViewRepresentable {
     private var previousMessageCount: Int = 0
     private var isPerformingBatchUpdate = false
 
+    // Scroll position tracking
+    private struct ScrollAnchor {
+      let messageId: Int64
+      let offsetFromTop: CGFloat
+    }
+    private var scrollAnchor: ScrollAnchor?
+
     init(fullMessages: [FullMessage]) {
       self.fullMessages = fullMessages
       self.previousMessageCount = fullMessages.count
@@ -138,21 +145,56 @@ struct MessagesCollectionView: UIViewRepresentable {
         }
       }
     }
+    private func captureScrollPosition(_ collectionView: UICollectionView) {
+      // Only capture if we're not at the top (y: 0 in flipped scroll view)
+      guard collectionView.contentOffset.y > 0,
+        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+        visibleIndexPaths.item < fullMessages.count
+      else {
+        scrollAnchor = nil
+        return
+      }
+
+      let anchorMessage = fullMessages[visibleIndexPaths.item]
+      let cell = collectionView.cellForItem(at: visibleIndexPaths)
+      let cellFrame = cell?.frame ?? .zero
+      let offsetFromTop = collectionView.contentOffset.y - cellFrame.minY
+
+      scrollAnchor = ScrollAnchor(
+        messageId: anchorMessage.message.id,
+        offsetFromTop: offsetFromTop
+      )
+    }
+
+    private func restoreScrollPosition(_ collectionView: UICollectionView) {
+      guard let anchor = scrollAnchor,
+        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+      else {
+        return
+      }
+
+      let indexPath = IndexPath(item: anchorIndex, section: 0)
+
+      // Get the frame of the anchor cell
+      if let attributes = collectionView.layoutAttributesForItem(at: indexPath) {
+        let targetOffset = attributes.frame.minY + anchor.offsetFromTop
+        collectionView.setContentOffset(CGPoint(x: 0, y: targetOffset), animated: false)
+      }
+    }
 
     func updateMessages(_ messages: [FullMessage], in collectionView: UICollectionView) {
-      let oldCount = self.fullMessages.count
-      self.fullMessages = messages
+      // Capture scroll position before update if needed
+      captureScrollPosition(collectionView)
 
-      // Apply updates immediately without waiting
+      let oldCount = fullMessages.count
+      fullMessages = messages
+
       updateSnapshot(with: messages, animated: false)
 
-      // Handle new messages if any
+      // Restore scroll position after layout
       if messages.count > oldCount {
-        let newMessages = messages.prefix(messages.count - oldCount)
-
-        // Optimize animation by doing it in next run loop
         DispatchQueue.main.async { [weak self] in
-          self?.animateNewMessages(Array(newMessages), in: collectionView)
+          self?.restoreScrollPosition(collectionView)
         }
       }
 

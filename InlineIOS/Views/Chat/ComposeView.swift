@@ -38,8 +38,8 @@ struct ComposeView: View {
             )
             .combined(with: .opacity)
           )
+          .animation(.smoothSnappy, value: messageText.isEmpty)
       }
     }
-    .animation(.smoothSnappy, value: messageText.isEmpty)
   }
 }
