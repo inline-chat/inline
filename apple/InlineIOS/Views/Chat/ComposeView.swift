@@ -17,29 +17,25 @@ struct ComposeView: View {
       .frame(height: textViewHeight)
       .background(Color.clear)
       .animation(.smoothSnappy, value: textViewHeight)
-      .onChange(of: messageText) { _, newValue in
-        if newValue.isEmpty {
-          withAnimation(.smoothSnappy) {
-            textViewHeight = 40
-          }
+
+      ZStack {
+        if messageText.isEmpty {
+          Text("Write a message")
+            .foregroundStyle(.tertiary)
+            .padding(.leading, 6)
+            .allowsHitTesting(false)
+            .frame(height: textViewHeight)
+            .transition(
+              .asymmetric(
+                insertion: .offset(x: 40),
+                removal: .offset(x: 40)
+              )
+              .combined(with: .opacity)
+            )
         }
       }
-
-      if messageText.isEmpty {
-        Text("Write a message")
-          .foregroundStyle(.tertiary)
-          .padding(.leading, 6)
-          .allowsHitTesting(false)
-          .frame(height: textViewHeight)
-          .transition(
-            .asymmetric(
-              insertion: .offset(x: 40),
-              removal: .offset(x: 40)
-            )
-            .combined(with: .opacity)
-          )
-          .animation(.smoothSnappy, value: messageText.isEmpty)
-      }
+      .animation(.smoothSnappy, value: messageText.isEmpty)
     }
+    .animation(.smoothSnappy, value: messageText.isEmpty)
   }
 }

@@ -211,6 +211,7 @@ struct MessagesCollectionView: UIViewRepresentable {
               animated: true
             )
           }
+
         } else {
           // Restore previous scroll position for messages from others
           DispatchQueue.main.async { [weak self] in

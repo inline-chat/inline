@@ -61,17 +61,23 @@ struct ChatView: View {
   }
 
   // MARK: - View Components
-
+  @ViewBuilder
   private var chatMessages: some View {
     MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
   }
 
+  @ViewBuilder
   private var inputArea: some View {
     HStack {
       ComposeView(messageText: $text)
-      sendButton
+      ZStack {
+        sendButton
+          .transition(.scale(scale: 0.8).combined(with: .opacity))
+      }
+      .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
+
     }
-    .animation(.smoothSnappy, value: !text.isEmpty)
+    .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
     .padding(.vertical, 6)
     .padding(.horizontal)
     .overlay(alignment: .top) {
@@ -81,28 +87,15 @@ struct ChatView: View {
     .background(Color(.systemBackground))
   }
 
+  @ViewBuilder
   var sendButton: some View {
-    Group {
-      if !text.isEmpty {
-        Button(action: sendMessage) {
-          Image(systemName: "paperplane.fill")
-            .foregroundStyle(.blue)
-            .font(.system(size: 20, weight: .semibold))
-            .frame(width: 30, height: 30)
+    if !text.isEmpty {
+      Button(action: sendMessage) {
+        Image(systemName: "paperplane.fill")
+          .foregroundStyle(.blue)
+          .font(.system(size: 20, weight: .semibold))
+          .frame(width: 30, height: 30)
 
-        }
-        .transition(
-          .asymmetric(
-            insertion: .scale(scale: 0.6)
-              .combined(with: .opacity)
-              .combined(with: .offset(x: -10)),
-            removal: .scale(scale: 0.6)
-              .combined(with: .opacity)
-              .combined(with: .offset(x: -10))
-          )
-        )
-      } else {
-        EmptyView()
       }
     }
   }
