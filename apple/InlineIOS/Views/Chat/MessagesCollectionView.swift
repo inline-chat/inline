@@ -150,8 +150,8 @@ struct MessagesCollectionView: UIViewRepresentable {
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
-        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-        visibleIndexPaths.item < fullMessages.count
+            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+            visibleIndexPaths.item < fullMessages.count
       else {
         scrollAnchor = nil
         return
@@ -170,7 +170,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
-        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
       else {
         return
       }
@@ -210,8 +210,9 @@ struct MessagesCollectionView: UIViewRepresentable {
               at: .bottom,
               animated: true
             )
+            // Add animation for new messages
+            self?.animateNewMessages(newMessages, in: collectionView)
           }
-
         } else {
           // Restore previous scroll position for messages from others
           DispatchQueue.main.async { [weak self] in
@@ -241,7 +242,7 @@ struct MessagesCollectionView: UIViewRepresentable {
         cell.transform = scale.concatenating(translation)
 
         UIView.animate(
-          withDuration: 0.35,
+          withDuration: 0.22,
           delay: Double(index) * 0.04,
           usingSpringWithDamping: 0.82,
           initialSpringVelocity: 0.4,
