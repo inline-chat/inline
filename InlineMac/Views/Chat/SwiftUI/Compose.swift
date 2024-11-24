@@ -34,12 +34,6 @@ struct Compose: View {
         minHeight: minHeight,
         height: $editorHeight,
         onEvent: handleEditorEvent,
-        isFocused: Binding(
-          get: { focus.focusedField == .compose },
-          set: { newValue in
-            focus.focusedField = newValue ? .compose : nil
-          }
-        ),
         horizontalPadding: horizontalPadding,
         verticalPadding: 4,
         font: .systemFont(ofSize: 13)
@@ -254,7 +248,7 @@ struct CustomTextEditor: NSViewRepresentable {
   var minHeight: CGFloat
   @Binding var height: CGFloat
   var onEvent: (ComposeTextEditorEvent) -> Void
-  @Binding var isFocused: Bool
+//  @Binding var isFocused: Bool
 
   var horizontalPadding: CGFloat = 8
   var verticalPadding: CGFloat = 6
@@ -349,6 +343,10 @@ struct CustomTextEditor: NSViewRepresentable {
       name: NSWindow.didResizeNotification,
       object: nil
     )
+    
+    DispatchQueue.main.async {
+      focus(for: textView)
+    }
 
     return scrollView
   }
@@ -364,20 +362,26 @@ struct CustomTextEditor: NSViewRepresentable {
     }
     
     // Handle focus updates
-    handleFocusUpdate(for: textView)
+//    handleFocusUpdate(for: textView)
   }
   
-  private func handleFocusUpdate(for textView: NSTextView) {
+//  private func handleFocusUpdate(for textView: NSTextView) {
+//    guard let window = textView.window else { return }
+//
+//    let shouldBeFocused = isFocused
+//    let isFocused = window.firstResponder === textView
+//
+//    guard shouldBeFocused != isFocused else { return }
+//
+//    DispatchQueue.main.async {
+//      window.makeFirstResponder(shouldBeFocused ? textView : nil)
+//    }
+//  }
+  
+  private func focus(for textView: NSTextView) {
     guard let window = textView.window else { return }
-    
-    let shouldBeFocused = isFocused
-    let isFocused = window.firstResponder === textView
-    
-    guard shouldBeFocused != isFocused else { return }
-    
-    DispatchQueue.main.async {
-      window.makeFirstResponder(shouldBeFocused ? textView : nil)
-    }
+    // Focus the text view
+    window.makeFirstResponder(textView)
   }
   
   private func calculateMaxHeight(for window: NSWindow?) -> CGFloat {

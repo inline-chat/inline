@@ -5,23 +5,28 @@ import SwiftUI
 
 class MessagesTableView: NSViewController {
   private var messages: [FullMessage] = []
+
+  private var scrollObserver: NSObjectProtocol?
+
   private var pendingMessages: [FullMessage] = []
   private let sizeCalculator = MessageSizeCalculator()
   private var sizeCache = NSCache<NSString, NSValue>()
   
   private lazy var tableView: NSTableView = {
     let table = NSTableView()
-    table.translatesAutoresizingMaskIntoConstraints = false
     table.backgroundColor = .clear
     table.headerView = nil
     table.rowSizeStyle = .custom
     table.selectionHighlightStyle = .none
-    table.intercellSpacing = NSSize(width: 0, height: 1)
-    
+    table.intercellSpacing = NSSize(width: 0, height: 0)
+//    table.wantsLayer = true
     let column = NSTableColumn(identifier: .init("messageColumn"))
     column.isEditable = false
     table.addTableColumn(column)
     
+    // Important: Enable automatic resizing
+    table.autoresizingMask = [.width, .height]
+
     table.delegate = self
     table.dataSource = self
     return table
@@ -29,11 +34,20 @@ class MessagesTableView: NSViewController {
   
   private lazy var scrollView: NSScrollView = {
     let scroll = NSScrollView()
-    scroll.translatesAutoresizingMaskIntoConstraints = false
     scroll.hasVerticalScroller = true
     scroll.borderType = .noBorder
     scroll.backgroundColor = .clear
     scroll.documentView = tableView
+    scroll.wantsLayer = true
+//    scroll.layerContentsRedrawPolicy = .onSetNeedsDisplay
+    scroll.translatesAutoresizingMaskIntoConstraints = false
+    
+    // Important: Set these properties
+    scroll.hasVerticalScroller = true
+    scroll.verticalScrollElasticity = .allowed
+    scroll.autohidesScrollers = true
+    scroll.contentView.postsBoundsChangedNotifications = true
+
     return scroll
   }()
   
@@ -41,15 +55,21 @@ class MessagesTableView: NSViewController {
     view = NSView()
     setupViews()
   }
+
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    setupScrollObserver()
+  }
   
   private func setupViews() {
     view.addSubview(scrollView)
     
+    // Set up constraints
     NSLayoutConstraint.activate([
+      scrollView.topAnchor.constraint(equalTo: view.topAnchor),
       scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      scrollView.topAnchor.constraint(equalTo: view.topAnchor),
-      scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+      scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
   }
   
@@ -57,18 +77,88 @@ class MessagesTableView: NSViewController {
     guard messages.count > 0 else { return }
     
     let lastRow = messages.count - 1
-    tableView.scrollRowToVisible(lastRow)
     
     if animated {
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.3
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+        context.duration = 0.25
+        context.allowsImplicitAnimation = true
+        tableView.scrollRowToVisible(lastRow)
       }
-    } else {
-      scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+    else {
+      tableView.scrollRowToVisible(lastRow)
+    }
+//    if animated {
+//      NSAnimationContext.runAnimationGroup { context in
+//        context.duration = 0.3
+//        scrollView.reflectScrolledClipView(scrollView.contentView)
+//      }
+//    } else {
+//      scrollView.reflectScrolledClipView(scrollView.contentView)
+//    }
+  }
+
+  private var lastContentHeight: CGFloat = 0
+  
+  // Add this property to track content size changes
+  private var contentSizeObserver: NSKeyValueObservation?
+  
+  private func setupScrollObserver() {
+    // Use direct observation for immediate response
+    scrollView.contentView.postsFrameChangedNotifications = true
+    scrollView.contentView.postsBoundsChangedNotifications = true
+    
+    // Observe document view's frame changes
+    contentSizeObserver = scrollView.documentView?.observe(\.frame) { [weak self] view, _ in
+      guard let self = self else { return }
+      let newHeight = view.frame.height
+      if abs(newHeight - lastContentHeight) > 0.5 {
+        handleContentSizeChange(newHeight)
+      }
+    }
+    
+    NotificationCenter.default.addObserver(self,
+                                           selector: #selector(scrollViewFrameChanged),
+                                           name: NSView.frameDidChangeNotification,
+                                           object: scrollView.contentView)
+    NotificationCenter.default.addObserver(self,
+                                           selector: #selector(scrollViewBoundsChanged),
+                                           name: NSView.boundsDidChangeNotification,
+                                           object: scrollView.contentView)
+  }
+  
+  private var isAtBottom = true
+  
+  private var prevContentSize: CGSize = .zero
+  
+  private func handleContentSizeChange(_ newHeight: CGFloat) {
+    lastContentHeight = newHeight
+    
+    if isAtBottom {
+//      scrollToBottom(animated: false)
     }
   }
   
+  @objc func scrollViewBoundsChanged(notification: Notification) {
+    // Get scroll offset
+    let scrollOffset = scrollView.contentView.bounds.origin
+    // Get viewport size
+    let viewportSize = scrollView.contentView.bounds.size
+    // Get content size
+    let contentSize = scrollView.documentView?.frame.size ?? .zero
+    // Calculate if we're near the bottom (within 1 point)
+    let maxScrollableHeight = contentSize.height - viewportSize.height
+    let currentScrollOffset = scrollOffset.y
+    isAtBottom = abs(currentScrollOffset - maxScrollableHeight) <= 5.0
+  }
+  
+  @objc func scrollViewFrameChanged(notification: Notification) {
+    if isAtBottom {
+      // Scroll to bottom
+//      scrollToBottom(animated: false)
+    }
+  }
+
   private var lastKnownWidth: CGFloat = 0
   private var needsInitialScroll = true
   
@@ -79,6 +169,7 @@ class MessagesTableView: NSViewController {
     if abs(newWidth - lastKnownWidth) > 1.0 {
       lastKnownWidth = newWidth
       invalidateSizeCache()
+      // Performance bottlneck, only reload indexes that their height changes
       tableView.reloadData()
     }
     
@@ -87,43 +178,123 @@ class MessagesTableView: NSViewController {
       needsInitialScroll = false
     }
   }
-  
-  func update(with messages: [FullMessage]) {
-    guard !messages.isEmpty else { return }
+
+  func update(with newMessages: [FullMessage]) {
+    guard !newMessages.isEmpty else { return }
     
-    pendingMessages = messages
-    needsInitialScroll = true
+    // Compare using identifiers to ensure we catch all changes
+//    let hasChanges = messages.count != newMessages.count ||
+//      zip(messages, newMessages).contains { $0.id != $1.id }
+//    
+//    guard hasChanges else {
+//      print("⚠️ Skipping update - no actual changes detected")
+//      return
+//    }
+
     
-    applyPendingUpdates()
+    
+//    DispatchQueue.main.async { [weak self] in
+//      guard let self = self else { return }
+      self.performUpdate(with: newMessages, isInitialUpdate: self.messages.isEmpty || needsInitialScroll)
+//    }
   }
   
-  private var isPerformingBatchUpdates = false
-  private func applyPendingUpdates() {
-    guard !isPerformingBatchUpdates else { return }
+  private func performUpdate(with newMessages: [FullMessage], isInitialUpdate: Bool = false) {
+    print("📝 Updating table - Current: \(messages.count), New: \(newMessages.count)")
     
     let oldMessages = messages
-    messages = pendingMessages
     
-    let differences = pendingMessages.difference(from: oldMessages) { $0.id == $1.id }
+    // Explicitly calculate insertions and removals
+    let oldIds = Set(oldMessages.map { $0.id })
+    let newIds = Set(newMessages.map { $0.id })
     
-    guard !differences.isEmpty else { return }
+    let insertedIds = newIds.subtracting(oldIds)
+    let removedIds = oldIds.subtracting(newIds)
     
-    isPerformingBatchUpdates = true
-    tableView.beginUpdates()
+    let insertions = newMessages.enumerated()
+      .filter { insertedIds.contains($0.element.id) }
+      .map { $0.offset }
     
-    for change in differences {
-      switch change {
-      case .insert(let offset, _, _):
-        tableView.insertRows(at: IndexSet(integer: offset), withAnimation: .effectFade)
-      case .remove(let offset, _, _):
-        tableView.removeRows(at: IndexSet(integer: offset), withAnimation: .effectFade)
+    let removals = oldMessages.enumerated()
+      .filter { removedIds.contains($0.element.id) }
+      .map { $0.offset }
+    
+    print("🔍 Found \(insertions.count) insertions at: \(insertions)")
+    print("🔍 Found \(removals.count) removals at: \(removals)")
+    
+    let wasAtBottom = isAtBottom
+    
+    // Update data source first
+    messages = newMessages
+    
+    // Batch all visual updates
+    NSAnimationContext.runAnimationGroup { _ in
+      tableView.beginUpdates()
+      
+      if !removals.isEmpty {
+        tableView.removeRows(at: IndexSet(removals), withAnimation: .effectFade)
       }
+      
+      if !insertions.isEmpty {
+        tableView
+          .insertRows(
+            at: IndexSet(insertions),
+            withAnimation: .effectFade
+          )
+      }
+      
+      tableView.endUpdates()
+      
+      // Handle scroll position
+      if wasAtBottom && !isInitialUpdate {
+        DispatchQueue.main.async {
+          self.scrollToBottom(animated: true)
+        }
+      }
+      
+    } completionHandler: { [weak self] in
+      guard let self = self else { return }
+      
+      // Verify the update
+      let actualRows = self.tableView.numberOfRows
+      let expectedRows = self.messages.count
+          
+      if actualRows != expectedRows {
+        print("⚠️ Row count mismatch - forcing reload")
+        self.tableView.reloadData()
+      }
+      
+      // Force layout update
+      // Probably unneccessary
+      self.tableView.layout()
+      self.tableView.needsDisplay = true
     }
-    
-    tableView.endUpdates()
-    isPerformingBatchUpdates = false
   }
   
+  private func getVisibleRowIndexes() -> IndexSet {
+    let visibleRect = tableView.visibleRect
+    let visibleRange = tableView.rows(in: visibleRect)
+    return IndexSet(integersIn: Int(visibleRange.location) ..< Int(visibleRange.location + visibleRange.length))
+  }
+  
+  private func validateVisibleRows() {
+    let visibleIndexes = getVisibleRowIndexes()
+    tableView.noteHeightOfRows(withIndexesChanged: visibleIndexes)
+  }
+  
+  private func handleWidthChange(_ newWidth: CGFloat) {
+    let visibleIndexes = getVisibleRowIndexes()
+    
+    // Add buffer rows above and below visible area
+    let minRow = max(0, visibleIndexes.first ?? 0 - 5)
+    let maxRow = min(messages.count - 1, visibleIndexes.last ?? 0 + 5)
+    
+    let expandedIndexes = IndexSet(integersIn: minRow ... maxRow)
+    
+    invalidateSizeCache()
+    tableView.noteHeightOfRows(withIndexesChanged: expandedIndexes)
+  }
+
   private func invalidateSizeCache() {
     sizeCache.removeAllObjects()
   }
@@ -145,64 +316,40 @@ extension MessagesTableView: NSTableViewDelegate {
     let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MessageTableCell
       ?? MessageTableCell()
     cell.identifier = identifier
-    cell.configure(with: message, showsSender: true)
+    // TODO:
+    cell.configure(with: message, props: MessageViewProps(firstInGroup: true))
     return cell
   }
     
   func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-    guard row >= 0, row < messages.count else { return 44 } // Default height if invalid row
+    guard row >= 0, row < messages.count else {
+      Log.shared.warning("Invalid row: \(row)")
+      return 44
+    } // Default height if invalid row
       
     let message = messages[row]
-    let cacheKey = "\(message.id):\(tableView.bounds.width)" as NSString
+    let width = tableView.bounds.width
+    let cacheKey = "\(message.id):\(Int(width))" as NSString
+    print("Row: \(row), Cache key: \(cacheKey)")
       
     if let cachedSize = sizeCache.object(forKey: cacheKey)?.sizeValue {
       return cachedSize.height
     }
+    
+    // TODO:
+    let props = MessageViewProps(
+      firstInGroup: true
+    )
       
     let availableWidth = tableView.bounds.width - 16
     let size = sizeCalculator.calculateSize(
-      for: message.message.text ?? " ",
+      for: message,
+      with: props,
       width: availableWidth
     )
       
-    let finalSize = NSSize(width: availableWidth, height: size.height + 16)
+    let finalSize = NSSize(width: availableWidth, height: size.height)
     sizeCache.setObject(NSValue(size: finalSize), forKey: cacheKey)
     return finalSize.height
-  }
-}
-
-class MessageTableCell: NSTableCellView {
-  private var messageView: MessageViewAppKit?
-  
-  override init(frame: NSRect) {
-    super.init(frame: frame)
-    setupView()
-  }
-  
-  required init?(coder: NSCoder) {
-    super.init(coder: coder)
-    setupView()
-  }
-  
-  private func setupView() {
-    wantsLayer = true
-    layer?.backgroundColor = .clear
-  }
-  
-  func configure(with fullMessage: FullMessage, showsSender: Bool) {
-    messageView?.removeFromSuperview()
-    
-    let newMessageView = MessageViewAppKit(fullMessage: fullMessage, showsSender: showsSender)
-    newMessageView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(newMessageView)
-    
-    NSLayoutConstraint.activate([
-      newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      newMessageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      newMessageView.topAnchor.constraint(equalTo: topAnchor),
-      newMessageView.bottomAnchor.constraint(equalTo: bottomAnchor)
-    ])
-    
-    messageView = newMessageView
   }
 }

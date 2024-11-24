@@ -23,7 +23,7 @@ public struct ApiUser: Codable, Hashable, Sendable {
   }
 }
 
-public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
+public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable, Equatable {
   public var id: Int64
   public var email: String?
   public var firstName: String?
