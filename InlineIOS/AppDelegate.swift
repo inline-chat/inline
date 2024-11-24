@@ -57,17 +57,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
   }
 
-  #if DEBUG
-    // This delegate method is called when the app is in foreground
-    func userNotificationCenter(
-      _ center: UNUserNotificationCenter,
-      willPresent notification: UNNotification,
-      withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-      // For iOS 14 and later
-      completionHandler([.banner, .sound, .badge])
-    }
-  #endif
+//  #if DEBUG
+//    // This delegate method is called when the app is in foreground
+//    func userNotificationCenter(
+//      _ center: UNUserNotificationCenter,
+//      willPresent notification: UNNotification,
+//      withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+//    ) {
+//      // For iOS 14 and later
+//      completionHandler([.banner, .sound, .badge])
+//    }
+//  #endif
 
   func application(
     _ application: UIApplication,
