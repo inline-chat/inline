@@ -7,72 +7,27 @@ public struct InitialsCircle: View {
   @Environment(\.colorScheme) private var colorScheme
 
   private enum ColorPalette {
-    // Color groups organized by hue for better variety
+    // Carefully selected colors that are visually distinct and work well in both light and dark modes
     static let colors: [Color] = [
-      // Blues
-      .init(hex: "2196F3"),  // Blue
-      .init(hex: "1976D2"),  // Dark Blue
-      .init(hex: "03A9F4"),  // Light Blue
-      .init(hex: "039BE5"),  // Ocean Blue
-      .init(hex: "0288D1"),  // Deep Blue
+      // Vibrant Base Colors
+      .init(hex: "3B82F6"),  // Bright Blue
+      .init(hex: "7C3AED"),  // Bright Purple
+      .init(hex: "059669"),  // Bright Emerald
+      .init(hex: "E11D48"),  // Bright Rose
+      .init(hex: "F97316"),  // Bright Orange
 
-      // Purples
-      .init(hex: "9C27B0"),  // Purple
-      .init(hex: "673AB7"),  // Deep Purple
-      .init(hex: "7E57C2"),  // Medium Purple
-      .init(hex: "5E35B1"),  // Rich Purple
-      .init(hex: "BA68C8"),  // Light Purple
-
-      // Reds
-      .init(hex: "F44336"),  // Red
-      .init(hex: "E91E63"),  // Pink
-      .init(hex: "D81B60"),  // Deep Pink
-      .init(hex: "C2185B"),  // Dark Pink
-      .init(hex: "FF5252"),  // Bright Red
-
-      // Oranges
-      .init(hex: "FF9800"),  // Orange
-      .init(hex: "FF5722"),  // Deep Orange
-      .init(hex: "F4511E"),  // Burnt Orange
-      .init(hex: "FB8C00"),  // Medium Orange
-      .init(hex: "FF7043"),  // Light Orange
-
-      // Greens
-      .init(hex: "4CAF50"),  // Green
-      .init(hex: "009688"),  // Teal
-      .init(hex: "00897B"),  // Dark Teal
-      .init(hex: "43A047"),  // Medium Green
-      .init(hex: "66BB6A"),  // Light Green
-
-      // Warm Colors
-      .init(hex: "FFC107"),  // Amber
-      .init(hex: "FF9800"),  // Orange
-      .init(hex: "FFA726"),  // Light Orange
-      .init(hex: "FFB300"),  // Medium Amber
-      .init(hex: "FFD54F"),  // Light Amber
-
-      // Cool Colors
-      .init(hex: "00BCD4"),  // Cyan
-      .init(hex: "00ACC1"),  // Dark Cyan
-      .init(hex: "26C6DA"),  // Light Cyan
-      .init(hex: "00B0FF"),  // Light Blue
-      .init(hex: "0091EA"),  // Deep Light Blue
-
-      // Additional Colors
-      .init(hex: "795548"),  // Brown
-      .init(hex: "607D8B"),  // Blue Grey
-      .init(hex: "546E7A"),  // Dark Blue Grey
-      .init(hex: "78909C"),  // Medium Blue Grey
-      .init(hex: "8D6E63"),  // Light Brown
+      // Rich Medium Tones
+      .init(hex: "1E40AF"),  // Deep Blue
+      .init(hex: "4C1D95"),  // Deep Purple
+      .init(hex: "064E3B"),  // Deep Emerald
+      .init(hex: "BE123C"),  // Deep Rose
+      .init(hex: "C2410C"),  // Deep Orange
     ]
 
-    static subscript(index: Int) -> Color {
-      colors[index % colors.count]
-    }
-
     static func color(for name: String) -> Color {
-      let hash = abs(name.hashValue)
-      return colors[hash % colors.count]
+      // Create a stable hash by summing ASCII values
+      let stableHash = name.utf8.reduce(0) { $0 + Int($1) }
+      return colors[stableHash % colors.count]
     }
   }
 
@@ -86,18 +41,22 @@ public struct InitialsCircle: View {
   }
 
   private var backgroundColor: Color {
-    let hash = abs(firstName.hashValue &+ (lastName?.hashValue ?? 0))
-    let baseColor = ColorPalette[hash % ColorPalette.colors.count]
-    return colorScheme == .dark ? baseColor.opacity(0.8) : baseColor
+    let fullName = [firstName, lastName].compactMap { $0 }.joined()
+    return colorScheme == .dark
+      ? ColorPalette.color(for: fullName).opacity(0.8)
+      : ColorPalette.color(for: fullName)
   }
 
-  private var brighterBackgroundColor: Color {
-    backgroundColor.adjustBrightness(by: 0.8)
+  private var foregroundColor: Color {
+    colorScheme == .dark ? .white : backgroundColor
   }
 
   private var backgroundGradient: LinearGradient {
     LinearGradient(
-      colors: [brighterBackgroundColor, backgroundColor],
+      colors: [
+        backgroundColor.opacity(0.1),
+        backgroundColor.opacity(0.3),
+      ],
       startPoint: .topLeading,
       endPoint: .bottomTrailing
     )
@@ -114,8 +73,8 @@ public struct InitialsCircle: View {
       .fill(backgroundGradient)
       .overlay(
         Text(initials)
-          .foregroundColor(.white)
-          .font(.system(size: size * 0.4, weight: .medium))
+          .foregroundColor(foregroundColor.opacity(0.8))
+          .font(.system(size: size * 0.5, weight: .medium))
           .minimumScaleFactor(0.5)
           .lineLimit(1)
       )
