@@ -27,8 +27,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
       newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
       newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
       newMessageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: topPadding),
-      newMessageView.bottomAnchor.constraint(
-        equalTo: contentView.bottomAnchor, constant: -bottomPadding),
+      newMessageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: 0),
     ])
 
     messageView = newMessageView

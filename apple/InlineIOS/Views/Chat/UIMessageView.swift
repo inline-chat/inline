@@ -59,13 +59,13 @@ class UIMessageView: UIView {
       // Message label constraints - centered
       messageLabel.centerXAnchor.constraint(equalTo: bubbleView.centerXAnchor),
       messageLabel.centerYAnchor.constraint(equalTo: bubbleView.centerYAnchor),
-      messageLabel.topAnchor.constraint(lessThanOrEqualTo: bubbleView.topAnchor, constant: 8),
+      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
       messageLabel.bottomAnchor.constraint(
-        lessThanOrEqualTo: bubbleView.bottomAnchor, constant: -8),
+        equalTo: bubbleView.bottomAnchor, constant: -8),
       messageLabel.leadingAnchor.constraint(
-        lessThanOrEqualTo: bubbleView.leadingAnchor, constant: 10),
+        equalTo: bubbleView.leadingAnchor, constant: 10),
       messageLabel.trailingAnchor.constraint(
-        lessThanOrEqualTo: bubbleView.trailingAnchor, constant: -10),
+        equalTo: bubbleView.trailingAnchor, constant: -10),
 
     ])
 

@@ -90,10 +90,9 @@ struct MessagesCollectionView: UIViewRepresentable {
           return nil
         }
 
-        let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 1.0
-        let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 24.0 : 1.0
+        let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 2.0
 
-        cell.configure(with: fullMessage, topPadding: topPadding, bottomPadding: bottomPadding)
+        cell.configure(with: fullMessage, topPadding: topPadding, bottomPadding: 0)
 
         return cell
       }
@@ -276,12 +275,17 @@ struct MessagesCollectionView: UIViewRepresentable {
       guard indexPath.item < fullMessages.count else { return false }
 
       let currentMessage = fullMessages[indexPath.item]
-      let previousIndex = indexPath.item - 1
+      let previousIndex = indexPath.item + 1  // Note: +1 because messages are reversed
 
-      guard previousIndex >= 0, previousIndex < fullMessages.count else { return false }
+      // If this is the first message in a group from the same sender,
+      // check if the previous message was from a different sender
+      guard previousIndex < fullMessages.count else { return true }
       let previousMessage = fullMessages[previousIndex]
 
-      return currentMessage.message.out != previousMessage.message.out
+      // Check if this is the first message in a sequence from the same sender
+      let isFirstInGroup = currentMessage.message.out != previousMessage.message.out
+
+      return isFirstInGroup
     }
 
     private func isTransitionToOtherSender(at indexPath: IndexPath) -> Bool {
@@ -308,8 +312,7 @@ struct MessagesCollectionView: UIViewRepresentable {
       let fullMessage = fullMessages[indexPath.item]
       let width = collectionView.bounds.width - 16
 
-      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 1.0
-      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 24.0 : 1.0
+      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 2.0
 
       let messageView = UIMessageView(fullMessage: fullMessage)
       messageView.frame = CGRect(
@@ -320,7 +323,7 @@ struct MessagesCollectionView: UIViewRepresentable {
         verticalFittingPriority: .fittingSizeLevel
       )
 
-      return CGSize(width: width, height: size.height + topPadding + bottomPadding)
+      return CGSize(width: width, height: size.height + topPadding)
     }
 
     func collectionView(

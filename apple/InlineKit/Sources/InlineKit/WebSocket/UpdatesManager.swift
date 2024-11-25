@@ -46,7 +46,7 @@ struct UpdateNewMessage: Codable {
 
   func apply(db: Database) throws {
     let message = Message(from: message)
-    try message.save(db, onConflict: .ignore) // NOTE: @Mo: we ignore to avoid animation issues for our own messages
+    try message.save(db, onConflict: .ignore)  // NOTE: @Mo: we ignore to avoid animation issues for our own messages
     var chat = try Chat.fetchOne(db, id: message.chatId)
     chat?.lastMsgId = message.messageId
     try chat?.save(db)
@@ -65,7 +65,11 @@ struct UpdateUpdateMessageId: Codable {
       if var message = message {
         message.messageId = self.messageId
         try message.save(db)
+        var chat = try Chat.fetchOne(db, id: message.chatId)
+        chat?.lastMsgId = message.messageId
+        try chat?.save(db)
       }
+
     }
   }
 }

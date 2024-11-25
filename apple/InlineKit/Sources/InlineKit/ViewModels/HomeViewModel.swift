@@ -1,12 +1,14 @@
 import Combine
 import GRDB
 
-public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable, Identifiable {
+public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable,
+  Identifiable
+{
   public var dialog: Dialog
   public var user: User
   public var chat: Chat?
   public var message: Message?
-  
+
   public var id: Int64 { user.id }
 }
 
@@ -15,7 +17,7 @@ public final class HomeViewModel: ObservableObject {
 
   private var cancellable: AnyCancellable?
   private var db: AppDatabase
-  
+
   public init(db: AppDatabase) {
     self.db = db
     start()
@@ -40,7 +42,6 @@ public final class HomeViewModel: ObservableObject {
       .sink(
         receiveCompletion: { _ in /* ignore error */ },
         receiveValue: { [weak self] chats in
-
           self?.chats = chats
         }
       )
