@@ -78,9 +78,9 @@ struct MainView: View {
 
 // MARK: - View Components
 
-extension MainView {
+private extension MainView {
   @ViewBuilder
-  fileprivate var contentView: some View {
+  var contentView: some View {
     if spaceList.spaces.isEmpty && home.chats.isEmpty {
       // EmptyStateView()
       //   .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -89,12 +89,18 @@ extension MainView {
     }
   }
 
-  fileprivate var contentList: some View {
+  var contentList: some View {
     List {
-      if !spaceList.spaces.isEmpty {
-        spacesSection
-      }
+      // HStack {
+      //   Spacer()
+      //   Text("Spaces Coming Soon...")
+      //     .foregroundColor(.secondary)
+      //     .font(.subheadline)
+      //     .padding(.vertical, 6)
+      //   Spacer()
 
+      // }
+      // .listRowSeparator(.hidden)
       if !home.chats.isEmpty {
         chatsSection
       }
@@ -103,7 +109,7 @@ extension MainView {
     .padding(.vertical, 8)
   }
 
-  fileprivate var spacesSection: some View {
+  var spacesSection: some View {
     Section(header: Text("Spaces")) {
       ForEach(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
         SpaceRowView(space: space)
@@ -114,12 +120,10 @@ extension MainView {
     }
   }
 
-  fileprivate var chatsSection: some View {
-    Section(header: Text("Direct Messages")) {
+  var chatsSection: some View {
+    Section {
       ForEach(
-        home.chats,
-        // .sorted(by: { $0.chat?.date ?? $0.user.date > $1.chat?.date ?? $1.user.date }),
-        id: \.user.id
+        home.chats, id: \.user.id
       ) { chat in
         ChatRowView(item: chat)
           .onTapGesture {
@@ -129,7 +133,7 @@ extension MainView {
     }
   }
 
-  fileprivate var toolbarContent: some ToolbarContent {
+  var toolbarContent: some ToolbarContent {
     Group {
       ToolbarItem(id: "UserAvatar", placement: .topBarLeading) {
         HStack {
@@ -172,15 +176,25 @@ extension MainView {
               .contentShape(Rectangle())
           }
 
-          Menu {
-            Button("New DM") { nav.push(.createDM) }
-            Button("Create Space") { nav.push(.createSpace) }
+          Button {
+            nav.push(.createDM)
           } label: {
-            Image(systemName: "plus")
+            Image(systemName: "square.and.pencil")
               .tint(Color.secondary)
               .frame(width: 38, height: 38)
               .contentShape(Rectangle())
           }
+          .padding(.top, -6)
+
+          // Menu {
+          //   Button("New DM") { nav.push(.createDM) }
+          //   Button("Create Space") { nav.push(.createSpace) }
+          // } label: {
+          //   Image(systemName: "plus")
+          //     .tint(Color.secondary)
+          //     .frame(width: 38, height: 38)
+          //     .contentShape(Rectangle())
+          // }
         }
       }
 
@@ -209,8 +223,8 @@ extension MainView {
 
 // MARK: - Helper Methods
 
-extension MainView {
-  fileprivate func handleLogout() {
+private extension MainView {
+  func handleLogout() {
     auth.logOut()
     do {
       try AppDatabase.clearDB()

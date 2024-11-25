@@ -74,6 +74,7 @@ struct ContentView: View {
       CreateDm(showSheet: .constant(true))
         .presentationBackground(.ultraThickMaterial)
         .presentationCornerRadius(18)
+        .presentationDetents([.medium, .large])
     case .createThread(let spaceId):
       CreateThread(showSheet: .constant(true), spaceId: spaceId)
         .presentationBackground(.ultraThickMaterial)

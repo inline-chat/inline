@@ -25,7 +25,7 @@ final class ChatHeaderView: UIView {
 
   private let nameLabel: UILabel = {
     let label = UILabel()
-    label.font = .systemFont(ofSize: 19, weight: .medium)
+    label.font = .systemFont(ofSize: 17, weight: .medium)
     label.textAlignment = .center
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
@@ -48,29 +48,27 @@ final class ChatHeaderView: UIView {
   }
 
   // MARK: - Setup
-
   private func setupViews() {
     backgroundColor = .clear
 
-    let centerStack = UIStackView(arrangedSubviews: [avatarView, nameLabel])
-    centerStack.axis = .horizontal
-    centerStack.spacing = 8
-    centerStack.alignment = .center
-    centerStack.translatesAutoresizingMaskIntoConstraints = false
-
     addSubview(backButton)
-    addSubview(centerStack)
+    addSubview(avatarView)
+    addSubview(nameLabel)
 
     NSLayoutConstraint.activate([
-      backButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      // Back button constraints
+      backButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
       backButton.centerYAnchor.constraint(equalTo: centerYAnchor),
       backButton.widthAnchor.constraint(equalToConstant: 44),
       backButton.heightAnchor.constraint(equalToConstant: 44),
 
-      centerStack.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: -2),
-      centerStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-      centerStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+      // Name label constraints - centered in view
+      nameLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+      nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
+      // Avatar view constraints - to the right of the name label
+      avatarView.leadingAnchor.constraint(equalTo: trailingAnchor, constant: -38),
+      avatarView.centerYAnchor.constraint(equalTo: centerYAnchor),
       avatarView.widthAnchor.constraint(equalToConstant: 28),
       avatarView.heightAnchor.constraint(equalToConstant: 28),
     ])

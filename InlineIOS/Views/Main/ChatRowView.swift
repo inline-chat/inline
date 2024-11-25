@@ -1,6 +1,7 @@
 import InlineKit
 import InlineUI
 import SwiftUI
+import UIKit
 
 struct ChatRowView: View {
   let item: HomeChatItem
@@ -10,12 +11,8 @@ struct ChatRowView: View {
 
   var body: some View {
     HStack {
-      InitialsCircle(
-        firstName: type == .privateChat
-          ? item.user.firstName ?? "" : item.chat?.title ?? "",
-        lastName: item.chat?.type == .privateChat ? item.user.lastName ?? "" : nil, size: 26
-      )
-      .padding(.trailing, 6)
+      UserAvatar(user: item.user, size: 28)
+        .padding(.trailing, 6)
       VStack(alignment: .leading) {
         Text(type == .privateChat ? item.user.firstName ?? "" : item.chat?.title ?? "")
           .fontWeight(.medium)
@@ -24,7 +21,9 @@ struct ChatRowView: View {
           .foregroundColor(.secondary)
       }
     }
+    .frame(height: 48)
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
+
   }
 }
