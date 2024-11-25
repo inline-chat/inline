@@ -11,7 +11,9 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     collectionView.backgroundColor = .clear
     collectionView.delegate = context.coordinator
-    collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "MessageCell")
+    collectionView.register(
+      MessageCollectionViewCell.self,
+      forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier)
 
     // Base transform for bottom-up scrolling
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
@@ -79,15 +81,19 @@ struct MessagesCollectionView: UIViewRepresentable {
         [weak self] collectionView, indexPath, fullMessage in
         guard let self else { return nil }
 
-        let cell = collectionView.dequeueReusableCell(
-          withReuseIdentifier: "MessageCell",
-          for: indexPath
-        )
+        guard
+          let cell = collectionView.dequeueReusableCell(
+            withReuseIdentifier: MessageCollectionViewCell.reuseIdentifier,
+            for: indexPath
+          ) as? MessageCollectionViewCell
+        else {
+          return nil
+        }
 
-        configureCell(cell, at: indexPath, with: fullMessage)
+        let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 1.0
+        let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 24.0 : 1.0
 
-        // Apply transform immediately after configuration
-        cell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
+        cell.configure(with: fullMessage, topPadding: topPadding, bottomPadding: bottomPadding)
 
         return cell
       }
@@ -97,21 +103,6 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     private func applyInitialData() {
       updateSnapshot(with: fullMessages, animated: false)
-    }
-
-    private func configureCell(
-      _ cell: UICollectionViewCell,
-      at indexPath: IndexPath,
-      with message: FullMessage
-    ) {
-      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 1.0
-      let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 24.0 : 1.0
-
-      cell.contentConfiguration = UIHostingConfiguration {
-        MessageView(fullMessage: message)
-          .padding(.bottom, topPadding)
-          .padding(.top, bottomPadding)
-      }
     }
 
     private func updateSnapshot(with messages: [FullMessage], animated: Bool) {
@@ -150,8 +141,8 @@ struct MessagesCollectionView: UIViewRepresentable {
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
-            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-            visibleIndexPaths.item < fullMessages.count
+        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+        visibleIndexPaths.item < fullMessages.count
       else {
         scrollAnchor = nil
         return
@@ -170,7 +161,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
-            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
       else {
         return
       }
@@ -320,11 +311,16 @@ struct MessagesCollectionView: UIViewRepresentable {
       let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 1.0
       let bottomPadding = isTransitionToOtherSender(at: indexPath) ? 24.0 : 1.0
 
-      let messageView = MessageView(fullMessage: fullMessage)
-      let messageSize = UIHostingController(rootView: messageView).sizeThatFits(
-        in: CGSize(width: width, height: .infinity))
+      let messageView = UIMessageView(fullMessage: fullMessage)
+      messageView.frame = CGRect(
+        x: 0, y: 0, width: width, height: UIView.layoutFittingCompressedSize.height)
+      let size = messageView.systemLayoutSizeFitting(
+        CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+        withHorizontalFittingPriority: .required,
+        verticalFittingPriority: .fittingSizeLevel
+      )
 
-      return CGSize(width: width, height: messageSize.height + topPadding + bottomPadding)
+      return CGSize(width: width, height: size.height + topPadding + bottomPadding)
     }
 
     func collectionView(
