@@ -1,8 +1,7 @@
+import AppKit
 import InlineKit
 import InlineUI
-import AppKit
 import SwiftUI
-
 
 class MessageTableCell: NSTableCellView {
   private var messageView: MessageViewAppKit?
@@ -25,10 +24,11 @@ class MessageTableCell: NSTableCellView {
   
   func configure(with fullMessage: FullMessage, props: MessageViewProps) {
     // Skip update if content hasn't changed
-//    guard currentContent?.message.id != fullMessage.id ||
+//    guard currentContent?.message != fullMessage ||
 //      currentContent?.props != props else { return }
-//    
+
     currentContent = (fullMessage, props)
+    
     updateContent()
   }
   
@@ -50,6 +50,9 @@ class MessageTableCell: NSTableCellView {
     ])
     
     messageView = newMessageView
+    
+    // Force layout update
+    layoutSubtreeIfNeeded()
   }
   
 //  // Add prepareForReuse to reset state if needed

@@ -36,11 +36,13 @@ struct ChatView: View {
 
   @ViewBuilder
   var content: some View {
-//    messageList
-    VStack(spacing: 0) {
-      MessagesList()
+    GeometryReader { geo in
+      //    messageList
+      VStack(spacing: 0) {
+        MessagesList(width: geo.size.width)
 
-      compose
+        compose
+      }
     }
     .task {
       await fetch()
@@ -59,7 +61,7 @@ struct ChatView: View {
             // it's focused, so send?
           }
         }
-        
+
         return $0
       }
     }
