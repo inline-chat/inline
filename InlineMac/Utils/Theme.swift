@@ -35,4 +35,7 @@ struct Theme {
   static let messageTextLineFragmentPadding: CGFloat = 0
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
+  
+  // MARK: - Chat View
+  static let messageListBottomInset: CGFloat = 10
 }
