@@ -299,6 +299,7 @@ struct CustomTextEditor: NSViewRepresentable {
     textView.isVerticallyResizable = true
     textView.autoresizingMask = [.width]
     textView.isHorizontallyResizable = false
+    textView.isAutomaticLinkDetectionEnabled = true
 
     textView.typingAttributes = [
       .paragraphStyle: paragraphStyle,

@@ -5,19 +5,22 @@ import SwiftUI
 
 struct MessagesList: NSViewControllerRepresentable {
   @EnvironmentObject private var messageStore: FullChatViewModel
+  var width: CGFloat
   
   func makeCoordinator() -> Coordinator {
     Coordinator(self)
   }
   
   func makeNSViewController(context: Context) -> MessagesTableView {
-    let controller = MessagesTableView()
-    controller.update(with: messageStore.fullMessages)
+    print("MessageList init width \(width)")
+    let controller = MessagesTableView(width: width)
+    controller.update(with: messageStore.fullMessages, width: width)
     return controller
   }
   
   func updateNSViewController(_ nsViewController: MessagesTableView, context: Context) {
-    nsViewController.update(with: messageStore.fullMessages)
+    print("update called")
+    nsViewController.update(with: messageStore.fullMessages, width: width)
     context.coordinator.parent = self
   }
   
