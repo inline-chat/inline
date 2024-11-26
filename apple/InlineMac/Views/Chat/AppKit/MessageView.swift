@@ -171,7 +171,6 @@ class MessageViewAppKit: NSView {
   // MARK: - Setup
 
   private func setupView() {
-    
     if showsAvatar {
       addSubview(avatarView)
       avatarView.user = from
@@ -213,15 +212,21 @@ class MessageViewAppKit: NSView {
     }
     
     // Message text view constraints
-    NSLayoutConstraint.activate([
-      messageTextView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading),
-      messageTextView.topAnchor.constraint(
-        equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
-        constant: showsName ? Theme.messageVerticalStackSpacing : Theme.messageVerticalPadding
-      ),
-      messageTextView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Theme.messageVerticalPadding),
-      messageTextView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.messageSidePadding)
-    ])
+    NSLayoutConstraint.activate(
+      [
+        messageTextView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading),
+        messageTextView.topAnchor.constraint(
+          equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
+          constant: showsName ? Theme.messageVerticalStackSpacing : Theme.messageVerticalPadding
+        ),
+        messageTextView.bottomAnchor
+          .constraint(
+            equalTo: bottomAnchor,
+            constant: props.isLastMessage == true ? -1 * Theme.messageVerticalPadding - Theme.messageListBottomInset : -Theme.messageVerticalPadding
+          ),
+        messageTextView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.messageSidePadding)
+      ]
+    )
     
 //    if let width = props.width {
 //      let textViewWidth = MessageSizeCalculator.getTextViewWidth(for: width)
@@ -258,6 +263,7 @@ class MessageViewAppKit: NSView {
       for match in matches {
         if let url = match.url {
           attributedString.addAttributes([
+            .cursor: NSCursor.pointingHand,
             .link: url,
             .foregroundColor: NSColor.linkColor,
             .underlineStyle: NSUnderlineStyle.single.rawValue
@@ -298,66 +304,66 @@ class MessageViewAppKit: NSView {
 extension MessageViewAppKit: NSMenuDelegate {}
 
 extension MessageViewAppKit: NSTextViewDelegate {
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    
-    // Remove existing tracking areas
-    trackingAreas.forEach { removeTrackingArea($0) }
-    
-    let options: NSTrackingArea.Options = [
-      .mouseEnteredAndExited,
-      .mouseMoved,
-      .activeInKeyWindow
-    ]
-    
-    let trackingArea = NSTrackingArea(
-      rect: bounds,
-      options: options,
-      owner: self,
-      userInfo: nil
-    )
-    addTrackingArea(trackingArea)
-  }
+//  override func updateTrackingAreas() {
+//    super.updateTrackingAreas()
+//
+//    // Remove existing tracking areas
+//    trackingAreas.forEach { removeTrackingArea($0) }
+//
+//    let options: NSTrackingArea.Options = [
+//      .mouseEnteredAndExited,
+//      .mouseMoved,
+//      .activeInKeyWindow
+//    ]
+//
+//    let trackingArea = NSTrackingArea(
+//      rect: bounds,
+//      options: options,
+//      owner: self,
+//      userInfo: nil
+//    )
+//    addTrackingArea(trackingArea)
+//  }
   
-  override func mouseMoved(with event: NSEvent) {
-    guard let textView = messageTextView as? NSTextView,
-          let textStorage = textView.textStorage,
-          textStorage.length > 0
-    else {
-      NSCursor.iBeam.set()
-      return
-    }
-    
-    let point = convert(event.locationInWindow, from: nil)
-    let localPoint = textView.convert(point, from: self)
-    
-    let index = textView.characterIndex(for: localPoint)
-    
-    // Ensure index is within bounds
-    guard index >= 0 && index < textStorage.length else {
-      NSCursor.iBeam.set()
-      return
-    }
-    
-    var effectiveRange = NSRange()
-    let attributes = textStorage.attributes(at: index, effectiveRange: &effectiveRange)
-    
-    if attributes[.link] != nil {
-      NSCursor.pointingHand.set()
-    } else {
-      NSCursor.iBeam.set()
-    }
-  }
+//  override func mouseMoved(with event: NSEvent) {
+//    guard let textView = messageTextView as? NSTextView,
+//          let textStorage = textView.textStorage,
+//          textStorage.length > 0
+//    else {
+//      NSCursor.iBeam.set()
+//      return
+//    }
+//
+//    let point = convert(event.locationInWindow, from: nil)
+//    let localPoint = textView.convert(point, from: self)
+//
+//    let index = textView.characterIndex(for: localPoint)
+//
+//    // Ensure index is within bounds
+//    guard index >= 0 && index < textStorage.length else {
+//      NSCursor.iBeam.set()
+//      return
+//    }
+//
+//    var effectiveRange = NSRange()
+//    let attributes = textStorage.attributes(at: index, effectiveRange: &effectiveRange)
+//
+//    if attributes[.link] != nil {
+//      NSCursor.pointingHand.set()
+//    } else {
+//      NSCursor.iBeam.set()
+//    }
+//  }
+//
+//  override func mouseExited(with event: NSEvent) {
+//    NSCursor.arrow.set()
+//  }
   
-  override func mouseExited(with event: NSEvent) {
-    NSCursor.arrow.set()
-  }
-  
-  func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
-    if let url = link as? URL {
-      NSWorkspace.shared.open(url)
-      return true
-    }
-    return false
-  }
+//  func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+//    if let url = link as? URL {
+//      NSWorkspace.shared.open(url)
+//      return true
+//    }
+//    return false
+//  }
 }

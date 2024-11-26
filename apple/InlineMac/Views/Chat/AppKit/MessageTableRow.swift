@@ -54,7 +54,15 @@ class MessageTableCell: NSTableCellView {
     // Force layout update
     layoutSubtreeIfNeeded()
   }
+  private func updateContent(message: FullMessage, props: MessageViewProps) {
+    // Your existing view update logic
+  }
   
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    currentContent = nil
+    // Clear any other state
+  }
 //  // Add prepareForReuse to reset state if needed
 //  override func prepareForReuse() {
 //    // Reset any temporary state

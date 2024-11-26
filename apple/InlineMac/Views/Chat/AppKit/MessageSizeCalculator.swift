@@ -83,6 +83,9 @@ class MessageSizeCalculator {
       totalHeight += Theme.messageNameLabelHeight
       totalHeight += Theme.messageVerticalStackSpacing
     }
+    if props.isLastMessage == true {
+      totalHeight += Theme.messageListBottomInset
+    }
     totalHeight += Theme.messageVerticalPadding * 2
     let size = NSSize(width: width, height: totalHeight)
     
