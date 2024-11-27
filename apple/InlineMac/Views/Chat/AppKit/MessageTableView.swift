@@ -442,6 +442,10 @@ extension MessagesTableView: NSTableViewDelegate {
     guard row >= 0, row < messages.count else { return true }
     return row == messages.count - 1
   }
+  
+  func isFirstMessage(at row: Int) -> Bool {
+    return row == 0
+  }
 
   func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     guard row >= 0, row < messages.count else { return nil }
@@ -456,7 +460,8 @@ extension MessagesTableView: NSTableViewDelegate {
     // get height
     var props = MessageViewProps(
       firstInGroup: isFirstInGroup(at: row),
-      isLastMessage: isLastMessage(at: row)
+      isLastMessage: isLastMessage(at: row),
+      isFirstMessage: isFirstMessage(at: row)
     )
 //    var props = MessageViewProps(firstInGroup: true)
     let tableWidth = width
@@ -478,7 +483,8 @@ extension MessagesTableView: NSTableViewDelegate {
 
     let props = MessageViewProps(
       firstInGroup: isFirstInGroup(at: row),
-      isLastMessage: isLastMessage(at: row)
+      isLastMessage: isLastMessage(at: row),
+      isFirstMessage: isFirstMessage(at: row)
     )
     
     let tableWidth = width

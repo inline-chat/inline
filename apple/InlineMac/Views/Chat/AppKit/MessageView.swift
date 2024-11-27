@@ -7,12 +7,14 @@ import SwiftUI
 struct MessageViewProps: Equatable, Codable, Hashable {
   /// Used to show sender and photo
   var firstInGroup: Bool
-  var isLastMessage: Bool?
+  var isLastMessage: Bool
+  var isFirstMessage: Bool
   var width: CGFloat?
   var height: CGFloat?
+  
   /// Used in cache key
   func toString() -> String {
-    "\(firstInGroup)\(isLastMessage == true ? "ILM" : "NILM")"
+    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")"
   }
 }
 
@@ -191,10 +193,13 @@ class MessageViewAppKit: NSView {
     let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing
     
+    let topPadding = props.isFirstMessage ? Theme.messageListTopInset + Theme.messageVerticalPadding : Theme.messageVerticalPadding
+    let bottomPadding = props.isLastMessage ? Theme.messageListBottomInset + Theme.messageVerticalPadding : Theme.messageVerticalPadding
+    
     if showsAvatar {
       NSLayoutConstraint.activate([
         avatarView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: avatarLeading),
-        avatarView.topAnchor.constraint(equalTo: topAnchor, constant: Theme.messageVerticalPadding),
+        avatarView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
         avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize),
         avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize)
       ])
@@ -203,7 +208,7 @@ class MessageViewAppKit: NSView {
     if showsName {
       NSLayoutConstraint.activate([
         nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading),
-        nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: Theme.messageVerticalPadding),
+        nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
         nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.messageSidePadding)
       ])
       
@@ -217,7 +222,7 @@ class MessageViewAppKit: NSView {
         messageTextView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading),
         messageTextView.topAnchor.constraint(
           equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
-          constant: showsName ? Theme.messageVerticalStackSpacing : Theme.messageVerticalPadding
+          constant: showsName ? Theme.messageVerticalStackSpacing : topPadding
         ),
         messageTextView.bottomAnchor
           .constraint(
@@ -227,14 +232,6 @@ class MessageViewAppKit: NSView {
         messageTextView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.messageSidePadding)
       ]
     )
-    
-//    if let width = props.width {
-//      let textViewWidth = MessageSizeCalculator.getTextViewWidth(for: width)
-//      NSLayoutConstraint.activate([
-//        messageTextView.widthAnchor
-//          .constraint(equalToConstant: textViewWidth)
-//      ])
-//    }
   }
 
   private func setupMessageText() {
