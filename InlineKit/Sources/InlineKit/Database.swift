@@ -175,17 +175,17 @@ public extension AppDatabase {
     // Optionally, delete the database file
     // Uncomment the next line if you want to delete the file
     // try deleteDatabaseFile()
-
-    // Reset the database passphrase to a default value
-    try AppDatabase.shared.dbWriter.write { db in
-      try db.changePassphrase("123")
-    }
-
+    
     log.info("Database successfully deleted.")
   }
 
   static func loggedOut() throws {
     try clearDB()
+    
+    // Reset the database passphrase to a default value
+    try AppDatabase.shared.dbWriter.write { db in
+      try db.changePassphrase("123")
+    }
   }
 }
 

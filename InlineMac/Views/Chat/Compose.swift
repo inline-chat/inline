@@ -15,6 +15,7 @@ struct Compose: View {
   @Environment(\.colorScheme) var colorScheme
   
   @State private var text: String = ""
+  @State private var event: ComposeTextEditorEvent = .none
   @State private var editorHeight: CGFloat = 42
   
   var minHeight: CGFloat = 42
@@ -31,14 +32,20 @@ struct Compose: View {
 
       CustomTextEditor(
         text: $text,
+        event: $event,
         minHeight: minHeight,
         height: $editorHeight,
-        onEvent: handleEditorEvent,
+        
         horizontalPadding: horizontalPadding,
         verticalPadding: 4,
         font: .systemFont(ofSize: 13)
       )
       .frame(height: editorHeight)
+      .onChange(of: event) { newEvent in
+        if newEvent == .none { return }
+        handleEditorEvent(newEvent)
+        event = .none
+      }
       
       .background(alignment: .leading) {
         if text.isEmpty {
@@ -146,6 +153,8 @@ struct Compose: View {
       
     case .dismiss:
       focus.focusedField = nil
+    default:
+      break;
     }
   }
   
@@ -189,7 +198,10 @@ struct Compose: View {
     Task {
       do {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        guard let chatId = chatId else { return }
+        guard let chatId = chatId else {
+          Log.shared.warning("Chat ID is nil, cannot send message")
+          return
+        }
         
         let messageText = text
         text = ""
@@ -236,6 +248,7 @@ struct Compose: View {
 }
 
 enum ComposeTextEditorEvent {
+  case none
   case focus
   case blur
   case send
@@ -243,17 +256,40 @@ enum ComposeTextEditorEvent {
   case dismiss
 }
 
+
 struct CustomTextEditor: NSViewRepresentable {
   @Binding var text: String
+  @Binding var event: ComposeTextEditorEvent
   var minHeight: CGFloat
   @Binding var height: CGFloat
-  var onEvent: (ComposeTextEditorEvent) -> Void
+//  var onEvent: (ComposeTextEditorEvent) -> Void
 //  @Binding var isFocused: Bool
-
   var horizontalPadding: CGFloat = 8
   var verticalPadding: CGFloat = 6
   var font: NSFont = .preferredFont(forTextStyle: .body)
   
+  
+//  init(
+//    text: Binding<String>,
+//    minHeight: CGFloat,
+//    height: Binding<CGFloat>,
+//    onEvent: @escaping (ComposeTextEditorEvent) -> Void,
+////    isFocused: Binding<Bool>,
+//    horizontalPadding: CGFloat = 8,
+//    verticalPadding: CGFloat = 6,
+//    font: NSFont = .preferredFont(forTextStyle: .body)
+//  ) {
+//    self._text = text
+//    self.minHeight = minHeight
+//    self._height = height
+//    self.onEvent = onEvent
+////    self._isFocused = isFocused
+//    self.horizontalPadding = horizontalPadding
+//    self.verticalPadding = verticalPadding
+//    self.font = font
+//  }
+
+
   func makeCoordinator() -> Coordinator {
     Coordinator(self)
   }
@@ -315,6 +351,10 @@ struct CustomTextEditor: NSViewRepresentable {
     )
     
     return textView
+  }
+  
+  func onEvent(_ event: ComposeTextEditorEvent) {
+    self.event = event
   }
   
   func makeNSView(context: Context) -> NSScrollView {
@@ -398,7 +438,12 @@ struct CustomTextEditor: NSViewRepresentable {
     var parent: CustomTextEditor
     var lastHeight: CGFloat = 0
     var currentMaxHeight: CGFloat = 300 // Default value
-
+    
+    // Use computed property to always get fresh reference
+    var onEvent: (ComposeTextEditorEvent) -> Void {
+      return parent.onEvent
+    }
+    
     init(_ parent: CustomTextEditor) {
       self.parent = parent
       super.init()
@@ -478,20 +523,20 @@ struct CustomTextEditor: NSViewRepresentable {
         let hasShiftModifier = NSEvent.modifierFlags.contains(.shift)
         
         if hasShiftModifier {
-          parent.onEvent(.insertNewline)
+          onEvent(.insertNewline)
           updateHeightIfNeeded(for: textView)
           return false
         } else {
           // Only send if there's actual content
           if !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            parent.onEvent(.send)
+            onEvent(.send)
             return true
           }
           return false
         }
         
       case #selector(NSResponder.cancelOperation(_:)):
-        parent.onEvent(.dismiss)
+        onEvent(.dismiss)
         return true
         
       default:
@@ -500,11 +545,11 @@ struct CustomTextEditor: NSViewRepresentable {
     }
 
     func textViewDidBecomeFirstResponder(_ notification: Notification) {
-      parent.onEvent(.focus)
+      onEvent(.focus)
     }
     
     func textViewDidResignFirstResponder(_ notification: Notification) {
-      parent.onEvent(.blur)
+      onEvent(.blur)
     }
   }
 }
