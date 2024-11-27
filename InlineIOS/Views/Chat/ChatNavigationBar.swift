@@ -31,6 +31,15 @@ final class ChatHeaderView: UIView {
     return label
   }()
 
+  private let statusLabel: UILabel = {
+    let label = UILabel()
+    label.font = .systemFont(ofSize: 13, weight: .regular)
+    label.textColor = .secondaryLabel
+    label.textAlignment = .center
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
+
   private var hostingController: UIHostingController<UserAvatar>?
   private weak var parentViewController: UIViewController?
   private var onBack: (() -> Void)?
@@ -54,7 +63,7 @@ final class ChatHeaderView: UIView {
     addSubview(backButton)
     addSubview(avatarView)
     addSubview(nameLabel)
-
+    addSubview(statusLabel)
     NSLayoutConstraint.activate([
       // Back button constraints
       backButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
@@ -65,6 +74,10 @@ final class ChatHeaderView: UIView {
       // Name label constraints - centered in view
       nameLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
       nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+      // Status label constraints - centered in view
+      statusLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+      statusLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
 
       // Avatar view constraints - to the right of the name label
       avatarView.leadingAnchor.constraint(equalTo: trailingAnchor, constant: -38),
@@ -85,7 +98,7 @@ final class ChatHeaderView: UIView {
     parentViewController = parentVC
     self.onBack = onBack
     nameLabel.text = user.firstName
-
+    statusLabel.text = "Online"
     // Create and set up new hosting controller
     let avatar = UserAvatar(user: user, size: 26)
     let hostingController = UIHostingController(rootView: avatar)
