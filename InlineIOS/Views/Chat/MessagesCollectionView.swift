@@ -202,7 +202,7 @@ struct MessagesCollectionView: UIViewRepresentable {
             collectionView.scrollToItem(
               at: IndexPath(item: 0, section: 0),
               at: .bottom,
-              animated: false
+              animated: true
             )
 
             // Get the latest message cell and prepare it for animation
