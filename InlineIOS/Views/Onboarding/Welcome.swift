@@ -9,75 +9,103 @@ import CoreHaptics
 import SwiftUI
 
 struct Welcome: View {
-  @EnvironmentObject var nav: OnboardingNavigation
+
+  let fullText = "Welcome to Inline"
+  let typingSpeed: TimeInterval = 0.08
+
   @State private var engine: CHHapticEngine?
   @State private var displayedText = ""
   @State private var showCaret = false
   @State private var animationCompleted = false
 
-  let fullText = "Hey There."
-  let typingSpeed: TimeInterval = 0.08
+  @EnvironmentObject var nav: OnboardingNavigation
 
   var body: some View {
     VStack(alignment: .leading) {
-      ZStack(alignment: .leading) {
-        // Placeholder to maintain layout
-        Text(fullText)
-          .font(.largeTitle)
-          .fontWeight(.bold)
-          .opacity(0)
-
-        // Animated text with caret
-        HStack(alignment: .center, spacing: 2) {
-          Text(animationCompleted ? fullText : displayedText)
-            .font(.largeTitle)
-            .fontWeight(.bold)
-
-          Rectangle()
-            .frame(width: 4, height: 28)
-            .background(.secondary)
-            .opacity(showCaret ? 1 : 0)
-        }
-      }
-
-      Text("Ready for a new way to chat at work?")
-        .foregroundColor(.secondary)
-        .font(.title3)
-        .multilineTextAlignment(.leading)
+      heading
+      subheading
     }
     .onAppear {
       prepareHaptics()
-
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
         animateText()
       }
     }
-
     .padding(.horizontal, OnboardingUtils.shared.hPadding)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     .safeAreaInset(edge: .bottom) {
-      Button("Continue") {
-        displayedText = ""
-        nav.push(.email())
-      }
-      .buttonStyle(SimpleButtonStyle())
-      .frame(maxWidth: .infinity)
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-      .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+      bottomArea
     }
     .safeAreaInset(edge: .top) {
-      HStack {
-        Image("OnboardingLogoType")
-          .renderingMode(.template)
-          .foregroundColor(.primary)
-          .padding(.horizontal, OnboardingUtils.shared.hPadding)
-          .padding(.top, 28)
-        Spacer()
-      }
+      topArea
     }
     .navigationBarBackButtonHidden()
   }
 
+}
+
+// MARK: - Views
+extension Welcome {
+  @ViewBuilder
+  var heading: some View {
+    ZStack(alignment: .leading) {
+      // Placeholder to maintain layout
+      Text(fullText)
+        .font(.largeTitle)
+        .fontWeight(.bold)
+        .opacity(0)
+
+      // Animated text with caret
+      HStack(alignment: .center, spacing: 2) {
+        Text(animationCompleted ? fullText : displayedText)
+          .font(.largeTitle)
+          .fontWeight(.bold)
+
+        Rectangle()
+          .frame(width: 4, height: 28)
+          .background(.secondary)
+          .opacity(showCaret ? 1 : 0)
+      }
+    }
+  }
+
+  @ViewBuilder
+  var subheading: some View {
+    Text("It's an all new way to chat with your team.")
+      .foregroundColor(.secondary)
+      .font(.title3)
+      .multilineTextAlignment(.leading)
+  }
+
+  @ViewBuilder
+  var bottomArea: some View {
+    Button("Continue") {
+      submit()
+    }
+    .buttonStyle(SimpleButtonStyle())
+    .frame(maxWidth: .infinity)
+    .padding(.horizontal, OnboardingUtils.shared.hPadding)
+    .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+  }
+
+  @ViewBuilder
+  var topArea: some View {
+    HStack {
+      Image("OnboardingLogoType")
+        .renderingMode(.template)
+        .foregroundColor(.primary)
+        .padding(.horizontal, OnboardingUtils.shared.hPadding)
+        .padding(.top, 28)
+      Spacer()
+    }
+  }
+}
+// MARK: - Helper Methods
+extension Welcome {
+  private func submit() {
+    displayedText = ""
+    nav.push(.email())
+  }
   private func animateText() {
     guard !animationCompleted else { return }
 
@@ -105,6 +133,10 @@ struct Welcome: View {
     }
   }
 
+}
+
+// MARK: - Haptic setup
+extension Welcome {
   private func prepareHaptics() {
     guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
     do {
@@ -138,28 +170,4 @@ struct Welcome: View {
 #Preview {
   Welcome()
     .environmentObject(Navigation())
-}
-
-struct TypingText: View {
-  let fullText: String
-  @State private var displayedText = ""
-  let typingInterval: TimeInterval
-
-  init(_ text: String, typingInterval: TimeInterval = 0.2) {
-    fullText = text
-    self.typingInterval = typingInterval
-  }
-
-  var body: some View {
-    Text(displayedText)
-      .onAppear { animateText() }
-  }
-
-  private func animateText() {
-    for (index, character) in fullText.enumerated() {
-      DispatchQueue.main.asyncAfter(deadline: .now() + typingInterval * Double(index)) {
-        displayedText += String(character)
-      }
-    }
-  }
 }
