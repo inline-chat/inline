@@ -27,7 +27,6 @@ struct ChatView: View {
   var body: some View {
     VStack(spacing: 0) {
       chatMessages
-
     }
     .safeAreaInset(edge: .bottom) {
       inputArea
@@ -151,7 +150,6 @@ extension ChatView {
 
 // MARK: - Views
 extension ChatView {
-
   @ViewBuilder
   private var chatMessages: some View {
     MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
