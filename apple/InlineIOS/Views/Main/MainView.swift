@@ -50,13 +50,11 @@ struct MainView: View {
     VStack {
       contentView
     }
-
     .toolbar {
       toolbarContent
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
-
     .task {
       notificationHandler.setAuthenticated(value: true)
       do {
@@ -68,7 +66,6 @@ struct MainView: View {
 
       do {
         try await dataManager.getSpaces()
-
       } catch {
         Log.shared.error("Failed to getSpaces", error: error)
       }
