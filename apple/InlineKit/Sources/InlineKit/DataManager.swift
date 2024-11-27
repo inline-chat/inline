@@ -122,10 +122,11 @@ public class DataManager: ObservableObject {
 
     // Optimistic
     try await database.dbWriter.write { db in
-      let dialog = Dialog(optimisticForUserId: user.id)
-      try dialog.save(db, onConflict: .ignore)
+
       let user = User(from: user)
       try user.save(db, onConflict: .ignore)
+      let dialog = Dialog(optimisticForUserId: user.id)
+      try dialog.save(db, onConflict: .ignore)
     }
     log.debug("saved optimistic")
 
@@ -358,7 +359,6 @@ public class DataManager: ObservableObject {
       randomId: randomId
     )
 
-    
     Task { @MainActor in
       // Don't apply local changes if randomId is set which means optimistic update was handled
       if randomId == nil {
