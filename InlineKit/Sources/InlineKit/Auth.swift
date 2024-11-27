@@ -3,13 +3,13 @@ import Foundation
 import KeychainSwift
 import SwiftUI
 
+// Store userId and token and check is logged in
 // TODO: Remove @unchecked
 public final class Auth: ObservableObject, @unchecked Sendable {
   let log = Log.scoped("Auth")
   public static let shared = Auth()
   private var cachedToken: String?
   var cachedUserId: Int64?
-  private var profileCompleted: Bool?
   private let keychain: KeychainSwift
   private var accessGroup: String
   private var keyChainPrefix: String
@@ -23,15 +23,9 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     evaluateIsLoggedIn()
   }
 
-  public func saveProfileCompleted(_ profileCompleted: Bool) {
-    self.profileCompleted = profileCompleted
-    evaluateIsLoggedIn()
-  }
-
   private func evaluateIsLoggedIn() {
     isLoggedIn =
-      cachedToken != nil && cachedUserId != nil && profileCompleted != nil
-      && profileCompleted == true
+      cachedToken != nil && cachedUserId != nil
   }
 
   public func getToken() -> String? {
