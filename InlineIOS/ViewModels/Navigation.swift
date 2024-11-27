@@ -72,6 +72,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   func popToRoot() {
     navigationPath = NavigationPath()
+    activeSheet = nil
   }
 
   func pop() {
