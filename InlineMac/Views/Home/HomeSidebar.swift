@@ -158,6 +158,7 @@ struct HomeSidebar: View {
 
         nav.navigate(to: .chat(peer: .user(id: user.id)))
       } catch {
+        Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
         overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
       }
     }
