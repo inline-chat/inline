@@ -1,20 +1,15 @@
-//
-//  ContentView.swift
-//  InlineIOS
-//
-//  Created by Dena Sohrabi on 9/26/24.
-//
-
 import InlineKit
 import SwiftUI
 
 struct ContentView: View {
+  @Environment(\.auth) private var auth
+
   @EnvironmentObject private var nav: Navigation
+  @EnvironmentStateObject private var dataManager: DataManager
+
   @StateObject private var onboardingNav = OnboardingNavigation()
   @StateObject var api = ApiClient()
   @StateObject var userData = UserData()
-  @Environment(\.auth) private var auth
-  @EnvironmentStateObject private var dataManager: DataManager
 
   init() {
     _dataManager = EnvironmentStateObject { env in

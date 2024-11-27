@@ -133,6 +133,7 @@ struct Code: View {
         if result.user.firstName == nil {
           nav.push(.profile)
         } else {
+          auth.saveProfileCompleted(true)
           nav.push(.main)
         }
 
