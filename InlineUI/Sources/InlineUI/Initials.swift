@@ -7,7 +7,6 @@ public struct InitialsCircle: View {
   @Environment(\.colorScheme) private var colorScheme
 
   private enum ColorPalette {
-    // Carefully selected colors that are visually distinct and work well in both light and dark modes
     static let colors: [Color] = [
       // Vibrant Base Colors
       .init(hex: "3B82F6"),  // Bright Blue
@@ -42,9 +41,10 @@ public struct InitialsCircle: View {
 
   private var backgroundColor: Color {
     let fullName = [firstName, lastName].compactMap { $0 }.joined()
+    let baseColor = ColorPalette.color(for: fullName)
     return colorScheme == .dark
-      ? ColorPalette.color(for: fullName).opacity(0.8)
-      : ColorPalette.color(for: fullName)
+      ? baseColor.adjustBrightness(by: 0.25)  // Make colors brighter in dark mode
+      : baseColor
   }
 
   private var foregroundColor: Color {
@@ -54,8 +54,8 @@ public struct InitialsCircle: View {
   private var backgroundGradient: LinearGradient {
     LinearGradient(
       colors: [
-        backgroundColor.opacity(0.1),
-        backgroundColor.opacity(0.3),
+        backgroundColor.opacity(colorScheme == .dark ? 0.8 : 0.1),
+        backgroundColor.opacity(colorScheme == .dark ? 1.0 : 0.3),
       ],
       startPoint: .topLeading,
       endPoint: .bottomTrailing
