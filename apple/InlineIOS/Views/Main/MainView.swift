@@ -78,9 +78,9 @@ struct MainView: View {
 
 // MARK: - View Components
 
-private extension MainView {
+extension MainView {
   @ViewBuilder
-  var contentView: some View {
+  fileprivate var contentView: some View {
     if spaceList.spaces.isEmpty && home.chats.isEmpty {
       // EmptyStateView()
       //   .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -89,7 +89,7 @@ private extension MainView {
     }
   }
 
-  var contentList: some View {
+  fileprivate var contentList: some View {
     List {
       // HStack {
       //   Spacer()
@@ -109,7 +109,7 @@ private extension MainView {
     .padding(.vertical, 8)
   }
 
-  var spacesSection: some View {
+  fileprivate var spacesSection: some View {
     Section(header: Text("Spaces")) {
       ForEach(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
         SpaceRowView(space: space)
@@ -120,7 +120,7 @@ private extension MainView {
     }
   }
 
-  var chatsSection: some View {
+  fileprivate var chatsSection: some View {
     Section {
       ForEach(
         home.chats, id: \.user.id
@@ -133,7 +133,7 @@ private extension MainView {
     }
   }
 
-  var toolbarContent: some ToolbarContent {
+  fileprivate var toolbarContent: some ToolbarContent {
     Group {
       ToolbarItem(id: "UserAvatar", placement: .topBarLeading) {
         HStack {
@@ -145,23 +145,29 @@ private extension MainView {
             Text(user?.firstName ?? user?.lastName ?? user?.email ?? "User")
               .font(.title3)
               .fontWeight(.semibold)
-            if ws.connectionState != .normal {
+            if ws.connectionState == .connecting {
               Text(connection)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .opacity(connection.isEmpty ? 0 : 1)
                 .frame(alignment: .leading)
                 .onChange(of: ws.connectionState) { _, _ in
-                  if ws.connectionState == .normal {
-                    connection = ""
-                  } else if ws.connectionState == .connecting {
+                  if ws.connectionState == .connecting {
                     connection = "Connecting..."
-                  } else if ws.connectionState == .updating {
-                    connection = "Updating..."
+                  } else {
+                    connection = ""
                   }
                 }
+                .transition(
+                  .asymmetric(
+                    insertion: .offset(y: 40),
+                    removal: .offset(y: 40)
+                  )
+                  .combined(with: .opacity)
+                )
             }
           }
+          .animation(.smoothSnappy, value: ws.connectionState)
         }
       }
 
@@ -223,8 +229,8 @@ private extension MainView {
 
 // MARK: - Helper Methods
 
-private extension MainView {
-  func handleLogout() {
+extension MainView {
+  fileprivate func handleLogout() {
     auth.logOut()
     do {
       try AppDatabase.clearDB()
