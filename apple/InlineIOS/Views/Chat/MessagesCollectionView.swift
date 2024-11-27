@@ -13,7 +13,8 @@ struct MessagesCollectionView: UIViewRepresentable {
     collectionView.delegate = context.coordinator
     collectionView.register(
       MessageCollectionViewCell.self,
-      forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier)
+      forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
+    )
 
     // Base transform for bottom-up scrolling
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
@@ -310,13 +311,14 @@ struct MessagesCollectionView: UIViewRepresentable {
       guard indexPath.item < fullMessages.count else { return .zero }
 
       let fullMessage = fullMessages[indexPath.item]
-      let width = collectionView.bounds.width - 16
+      let width = collectionView.bounds.width - 28
 
       let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 2.0
 
       let messageView = UIMessageView(fullMessage: fullMessage)
       messageView.frame = CGRect(
-        x: 0, y: 0, width: width, height: UIView.layoutFittingCompressedSize.height)
+        x: 0, y: 0, width: width, height: UIView.layoutFittingCompressedSize.height
+      )
       let size = messageView.systemLayoutSizeFitting(
         CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
         withHorizontalFittingPriority: .required,
