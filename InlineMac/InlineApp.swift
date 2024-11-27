@@ -13,6 +13,8 @@ struct InlineApp: App {
   @StateObject var auth = Auth.shared
   @StateObject var overlay = OverlayManager()
   
+  @Environment(\.openWindow) var openWindow
+  
   var body: some Scene {
     WindowGroup(id: "main") {
       MainWindow()
@@ -30,24 +32,11 @@ struct InlineApp: App {
     )
     .windowToolbarStyle(.unified(showsTitle: false))
     .commands {
-      MainWindowCommands()
-      
-      TextEditingCommands()
-      
-      // Create Space
-      if auth.isLoggedIn {
-        CommandGroup(after: .newItem) {
-          Button(action: createSpace) {
-            Text("Create Space")
-          }
-        }
-      }
-      
-      CommandGroup(after: .appSettings) {
-        Button(action: clearCache) {
-          Text("Clear Cache")
-        }
-      }
+      MainWindowCommands(
+        isLoggedIn: auth.isLoggedIn,
+        navigation: navigation,
+        logOut: logOut
+      )
     }
     
     // Chat single window
@@ -80,11 +69,6 @@ struct InlineApp: App {
     }
   }
   
-  func clearCache() {
-    // Clear database
-    try? AppDatabase.clearDB()
-  }
-  
   // Resets all state and data
   func logOut() {
     // Clear creds
@@ -109,9 +93,6 @@ struct InlineApp: App {
   }
   
   // -----
-  private func createSpace() {
-    navigation.createSpaceSheetPresented = true
-  }
 }
 
 public extension EnvironmentValues {

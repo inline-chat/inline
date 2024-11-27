@@ -1,10 +1,52 @@
+import InlineKit
 import SwiftUI
 
 struct MainWindowCommands: Commands {
+  @Environment(\.openWindow) var openWindow
+
+  var isLoggedIn: Bool
+  var navigation: NavigationModel
+  var logOut: () -> Void
+
+  @ObservedObject var auth = Auth.shared
+
   var body: some Commands {
+    CommandGroup(before: .appTermination) {
+      if auth.isLoggedIn {
+        Button(action: logOutWithConfirmation) {
+          Text("Log Out")
+        }
+      }
+
+      Button(action: clearCache) {
+        Text("Clear Cache...")
+      }
+
+      Divider()
+    }
+
+    TextEditingCommands()
+
+    // Create Space
+    if auth.isLoggedIn {
+      CommandGroup(after: .newItem) {
+        Button(action: createSpace) {
+          Text("Create Space")
+        }
+      }
+    }
+
     CommandGroup(replacing: .help) {
       Button(action: openHelpWebsite) {
         Text("Help")
+      }
+
+      Button(action: openWebsite) {
+        Text("Website")
+      }
+
+      Button(action: openStatus) {
+        Text("Service Status")
       }
 
       Divider()
@@ -12,9 +54,17 @@ struct MainWindowCommands: Commands {
       Button(action: openX) {
         Text("Updates on X")
       }
+
+      Button(action: openGitHub) {
+        Text("GitHub")
+      }
     }
 
     SidebarCommands()
+  }
+
+  private func createSpace() {
+    navigation.createSpaceSheetPresented = true
   }
 
   private func openHelpWebsite() {
@@ -23,5 +73,50 @@ struct MainWindowCommands: Commands {
 
   private func openX() {
     NSWorkspace.shared.open(URL(string: "https://x.com/inline_chat")!)
+  }
+
+  private func openWebsite() {
+    NSWorkspace.shared.open(URL(string: "https://inline.chat")!)
+  }
+
+  private func openStatus() {
+    NSWorkspace.shared.open(URL(string: "https://status.inline.chat")!)
+  }
+
+  private func openGitHub() {
+    NSWorkspace.shared.open(URL(string: "https://github.com/inlinehq")!)
+  }
+  private func sendFeedback() {
+    NSWorkspace.shared.open(URL(string: "mailto")!)
+  }
+
+  func logOutWithConfirmation() {
+    let alert = NSAlert()
+    alert.messageText = "Log Out"
+    alert.informativeText = "Are you sure you want to log out?"
+
+    let cancel = alert.addButton(withTitle: "Cancel")
+    alert.alertStyle = .warning
+
+    let button = alert.addButton(withTitle: "Log Out")
+    button.hasDestructiveAction = true
+
+    if alert.runModal() == .alertSecondButtonReturn {
+      logOut()
+    }
+  }
+
+  func clearCache() {
+    // Clear database
+    try? AppDatabase.clearDB()
+
+    // Close main window
+    if let window = NSApplication.shared.mainWindow {
+      window.close()
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+      openWindow(id: "main")
+    }
   }
 }
