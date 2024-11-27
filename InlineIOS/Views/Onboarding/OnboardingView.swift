@@ -13,7 +13,7 @@ struct OnboardingView: View {
           case .code(let email):
             Code(email: email)
           case .profile:
-            AddAccount()
+            Profile()
           case .welcome:
             Welcome()
           case .main:

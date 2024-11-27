@@ -7,7 +7,7 @@ enum UsernameStatus {
   case taken
 }
 
-struct AddAccount: View {
+struct Profile: View {
   // MARK: - State
 
   @State private var fullName = ""
@@ -30,6 +30,7 @@ struct AddAccount: View {
 
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var api: ApiClient
+  @Environment(\.auth) private var auth
   @Environment(\.appDatabase) private var database
   @FormState private var formState
 
@@ -186,7 +187,7 @@ struct AddAccount: View {
         try await database.dbWriter.write { db in
           try User(from: result.user).save(db)
         }
-
+        auth.saveProfileCompleted(true)
         formState.reset()
         nav.push(.main)
       } catch {
@@ -212,5 +213,5 @@ struct AddAccount: View {
 }
 
 #Preview {
-  AddAccount()
+  Profile()
 }
