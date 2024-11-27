@@ -58,9 +58,6 @@ extension Code {
         formState.startLoading()
         let result = try await api.verifyCode(code: code, email: email)
         print("TOKEN \(result.token)")
-        if result.user.firstName != nil {
-          // mainViewRouter.setRoute(route: .main)
-        }
         auth.saveToken(result.token)
         auth.saveCurrentUserId(userId: result.userId)
 
@@ -81,7 +78,7 @@ extension Code {
         }
 
         formState.reset()
-        if result.user.firstName == nil {
+        if result.user.firstName == nil || result.user.firstName?.isEmpty == true {
           nav.push(.profile)
         } else {
           // mainViewRouter.setRoute(route: .main)
