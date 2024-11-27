@@ -10,6 +10,7 @@ struct ContentView: View {
   @StateObject private var onboardingNav = OnboardingNavigation()
   @StateObject var api = ApiClient()
   @StateObject var userData = UserData()
+  @StateObject var mainViewRouter = MainViewRouter()
 
   init() {
     _dataManager = EnvironmentStateObject { env in
@@ -19,7 +20,8 @@ struct ContentView: View {
 
   var body: some View {
     Group {
-      if auth.isLoggedIn {
+      switch mainViewRouter.route {
+      case .main:
         NavigationStack(path: nav.currentStackBinding) {
           MainView()
             .navigationDestination(for: Navigation.Destination.self) { destination in
@@ -29,7 +31,7 @@ struct ContentView: View {
         .sheet(item: $nav.activeSheet) { destination in
           sheetContent(for: destination)
         }
-      } else {
+      case .onboarding:
         OnboardingView()
       }
     }
@@ -38,6 +40,7 @@ struct ContentView: View {
     .environmentObject(api)
     .environmentObject(userData)
     .environmentObject(dataManager)
+    .environmentObject(mainViewRouter)
   }
 
 }

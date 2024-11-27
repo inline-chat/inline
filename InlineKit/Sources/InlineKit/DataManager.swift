@@ -245,6 +245,7 @@ public class DataManager: ObservableObject {
         // Then save chats with lastMsgId set to nil
         let chats = result.chats.map { chat in
           var chat = Chat(from: chat)
+//          chat.lastMsgId = nil
           // do not set lastMsgId to nil to avoid foreign key constraint
           return chat
         }
@@ -287,7 +288,7 @@ public class DataManager: ObservableObject {
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil  // TODO: fix
+          chat.lastMsgId = nil // TODO: fix
 
           return chat
         }
@@ -329,7 +330,7 @@ public class DataManager: ObservableObject {
 
   public func sendMessage(
     chatId: Int64, peerUserId: Int64?, peerThreadId: Int64?, text: String, peerId: Peer?,
-    randomId: Int64?  // for now nilable
+    randomId: Int64? // for now nilable
   )
     async throws
   {
