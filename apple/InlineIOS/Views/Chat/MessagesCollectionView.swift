@@ -183,8 +183,6 @@ struct MessagesCollectionView: UIViewRepresentable {
       let oldMessages = fullMessages
       fullMessages = messages
 
-      updateSnapshot(with: messages, animated: false)
-
       // Only scroll to bottom if the new message is from us
       if messages.count > oldCount {
         let newMessages = messages.filter { message in
@@ -195,53 +193,48 @@ struct MessagesCollectionView: UIViewRepresentable {
         let hasOurNewMessage = newMessages.contains { $0.message.out == true }
 
         if hasOurNewMessage {
-          DispatchQueue.main.async { [weak self] in
+          // First update the data without animation
+          updateSnapshot(with: messages, animated: false)
+
+          // Then perform the animation
+          UIView.performWithoutAnimation {
+            // Scroll to bottom without animation
             collectionView.scrollToItem(
               at: IndexPath(item: 0, section: 0),
               at: .bottom,
-              animated: true
+              animated: false
             )
-            // Add animation for new messages
-            self?.animateNewMessages(newMessages, in: collectionView)
+
+            // Get the latest message cell and prepare it for animation
+            if let latestCell = collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) {
+              latestCell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
+              latestCell.transform = CGAffineTransform(scaleX: 0.95, y: 0.95).translatedBy(
+                x: 0, y: 10)
+
+              // Animate to final state
+              UIView.animate(
+                withDuration: 0.4,
+                delay: 0,
+                usingSpringWithDamping: 0.8,
+                initialSpringVelocity: 0.2,
+                options: [.curveEaseOut]
+              ) {
+                latestCell.transform = .identity
+              }
+            }
           }
         } else {
           // Restore previous scroll position for messages from others
+          updateSnapshot(with: messages, animated: false)
           DispatchQueue.main.async { [weak self] in
             self?.restoreScrollPosition(collectionView)
           }
         }
+      } else {
+        updateSnapshot(with: messages, animated: false)
       }
 
       previousMessageCount = messages.count
-    }
-
-    private func animateNewMessages(
-      _ newMessages: [FullMessage], in collectionView: UICollectionView
-    ) {
-      guard !newMessages.isEmpty else { return }
-
-      let indexPaths = newMessages.enumerated().map { IndexPath(item: $0.offset, section: 0) }
-      let cells = indexPaths.compactMap { collectionView.cellForItem(at: $0) }
-
-      cells.enumerated().forEach { index, cell in
-        // Ensure content view has correct transform
-        cell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
-
-        // Initial animation state
-        let scale = CGAffineTransform(scaleX: 0.98, y: 0.98)
-        let translation = CGAffineTransform(translationX: 0, y: -24)
-        cell.transform = scale.concatenating(translation)
-
-        UIView.animate(
-          withDuration: 0.22,
-          delay: Double(index) * 0.04,
-          usingSpringWithDamping: 0.82,
-          initialSpringVelocity: 0.4,
-          options: [.curveEaseOut, .allowUserInteraction]
-        ) {
-          cell.transform = .identity
-        }
-      }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {

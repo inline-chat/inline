@@ -4,7 +4,6 @@ import InlineUI
 import SwiftUI
 
 struct ChatView: View {
-
   var peer: Peer
 
   @State var text: String = ""
@@ -53,7 +52,6 @@ struct ChatView: View {
       }
     }
   }
-
 }
 
 // MARK: - Helper Extensions
@@ -66,8 +64,8 @@ extension View {
 }
 
 // MARK: - Helper Methods
-extension ChatView {
 
+extension ChatView {
   private func fetchMessages() {
     Task {
       try await dataManager.getChatHistory(
@@ -138,6 +136,7 @@ extension ChatView {
 }
 
 // MARK: - Helper Properties
+
 extension ChatView {
   var title: String {
     if case .user = peer {
@@ -149,6 +148,7 @@ extension ChatView {
 }
 
 // MARK: - Views
+
 extension ChatView {
   @ViewBuilder
   private var chatMessages: some View {
@@ -159,11 +159,8 @@ extension ChatView {
   private var inputArea: some View {
     HStack {
       ComposeView(messageText: $text)
-      ZStack {
-        sendButton
-          .transition(.scale(scale: 0.8).combined(with: .opacity))
-      }
-      .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
+
+      sendButton
 
     }
     .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
@@ -184,8 +181,16 @@ extension ChatView {
           .foregroundStyle(.blue)
           .font(.system(size: 20, weight: .semibold))
           .frame(width: 30, height: 30)
-
       }
+      .buttonStyle(SendButtonStyle())
     }
+  }
+}
+
+struct SendButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .scaleEffect(configuration.isPressed ? 0.94 : 1)
+      .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
   }
 }
