@@ -4,8 +4,8 @@ import InlineUI
 import SwiftUI
 
 struct Settings: View {
-  @Query(CurrentUser())
-  var currentUser: User?
+  @Query(CurrentUser()) var currentUser: User?
+
   @Environment(\.auth) var auth
   @EnvironmentObject private var ws: WebSocketManager
   @EnvironmentObject private var nav: Navigation
@@ -13,46 +13,58 @@ struct Settings: View {
 
   var body: some View {
     List {
-      Section(header: Text("Account")) {
+      accountSection
+      actionsSection
+    }
+    .listStyle(.plain)
+  }
+}
+
+extension Settings {
+  @ViewBuilder
+  fileprivate var accountSection: some View {
+    Section(header: Text("Account")) {
+      if let currentUser = currentUser {
         HStack {
-          InitialsCircle(
-            firstName: currentUser?.firstName ?? "User", lastName: currentUser?.lastName, size: 26
-          )
-          .padding(.trailing, 6)
-          Text(currentUser?.firstName ?? "Not loaded" + " " + (currentUser?.lastName ?? ""))
-            .font(.body)
-            .fontWeight(.medium)
+          UserAvatar(user: currentUser, size: 42)
+            .padding(.trailing, 6)
+          VStack(alignment: .leading) {
+            Text((currentUser.firstName ?? "") + " " + (currentUser.lastName ?? ""))
+              .font(.body)
+              .fontWeight(.medium)
+            Text(currentUser.email ?? "")
+              .font(.callout)
+              .foregroundColor(.secondary)
+          }
+        }
+
+      } else {
+        Button("Set up profile") {
+          // TODO: Add profile setup
         }
       }
 
-      Section(header: Text("Actions")) {
-        Button("Logout", role: .destructive) {
-          // Clear creds
-          Auth.shared.logOut()
-          
-          // Stop WebSocket
-          ws.loggedOut()
-          
-          // Clear database
-          try? AppDatabase.loggedOut()
-          
-          try? AppDatabase.loggedOut()
-          
-          onboardingNav.push(.welcome)
-          
-          nav.popToRoot()
-        }
+    }
+  }
+
+  @ViewBuilder
+  fileprivate var actionsSection: some View {
+    Section(header: Text("Actions")) {
+      Button("Logout", role: .destructive) {
+        // Clear creds
+        Auth.shared.logOut()
+
+        // Stop WebSocket
+        ws.loggedOut()
+
+        // Clear database
+        try? AppDatabase.loggedOut()
+
+        nav.popToRoot()
+
+        onboardingNav.push(.welcome)
       }
     }
-    //        .alert("Logout", isPresented: $showLogoutAlert) {
-    //            Text("Are you sure you want to logout?")
-    //            Button("Cancel", role: .cancel) {
-    //                showLogoutAlert = false
-    //            }
-    //            Button("Logout", role: .destructive) {
-    //                auth.logout()
-    //            }
-    //        }
   }
 }
 
