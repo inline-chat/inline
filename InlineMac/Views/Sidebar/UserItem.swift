@@ -9,6 +9,7 @@ struct UserItem: View {
 
   var user: User
   var action: (() -> Void)?
+  var selected: Bool = false
 
   var body: some View {
     let view = Button {
@@ -17,19 +18,12 @@ struct UserItem: View {
       }
     } label: {
       HStack(spacing: 0) {
-        UserAvatar(user: user)
+        UserAvatar(user: user, size: Theme.sidebarIconSize)
           .padding(.trailing, Theme.sidebarIconSpacing)
 
         VStack(alignment: .leading, spacing: 0) {
           Text(user.firstName ?? user.username ?? "")
             .lineLimit(1)
-
-          if let username = user.username {
-            Text("@\(username)")
-              .lineLimit(1)
-              .foregroundStyle(.secondary)
-              .font(.caption)
-          }
         }
         Spacer()
       }
