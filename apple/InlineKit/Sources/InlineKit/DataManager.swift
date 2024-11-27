@@ -145,6 +145,7 @@ public class DataManager: ObservableObject {
           let user = User(from: result.user)
           try user.save(db, onConflict: .replace)
         }
+        Log.shared.info("Created private chat with \(user.anyName) with chatID: \(result.chat.id)")
       } catch {
         Log.shared.error("Failed to create private chat", error: error)
         throw error

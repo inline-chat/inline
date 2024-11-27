@@ -42,6 +42,12 @@ struct InlineApp: App {
           }
         }
       }
+      
+      CommandGroup(after: .appSettings) {
+        Button(action: clearCache) {
+          Text("Clear Cache")
+        }
+      }
     }
     
     // Chat single window
@@ -72,6 +78,11 @@ struct InlineApp: App {
         .appDatabase(AppDatabase.shared)
         .environmentObject(overlay)
     }
+  }
+  
+  func clearCache() {
+    // Clear database
+    try? AppDatabase.clearDB()
   }
   
   // Resets all state and data
