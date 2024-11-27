@@ -40,6 +40,10 @@ struct ContentView: View {
     .environmentObject(dataManager)
   }
 
+}
+
+// MARK: - Navigation destinations
+extension ContentView {
   @ViewBuilder
   func destinationView(for destination: Navigation.Destination) -> some View {
     switch destination {
@@ -83,7 +87,6 @@ struct ContentView: View {
     }
   }
 }
-
 #Preview {
   ContentView()
     .environment(\.locale, .init(identifier: "en"))
