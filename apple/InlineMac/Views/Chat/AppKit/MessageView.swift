@@ -73,7 +73,7 @@ class MessageViewAppKit: NSView {
   }()
   
   private lazy var messageTextView: NSTextView = {
-    let textView = NSTextView()
+    let textView = CustomTextView2()
     textView.translatesAutoresizingMaskIntoConstraints = false
     textView.isEditable = false
     textView.isSelectable = true
@@ -89,6 +89,7 @@ class MessageViewAppKit: NSView {
     textView.textContainer?.lineFragmentPadding = MessageTextConfiguration.lineFragmentPadding
     textView.textContainerInset = MessageTextConfiguration.containerInset
     textView.font = MessageTextConfiguration.font
+    // Disable first mouse
     
     // -------------
     // SIZE FROM OUTSIDE
@@ -272,7 +273,7 @@ class MessageViewAppKit: NSView {
     messageTextView.textStorage?.setAttributedString(attributedString)
     Self.cacheAttrs.set(key: key, value: attributedString)
     
-    messageTextView.delegate = self
+//    messageTextView.delegate = self
     layoutSubtreeIfNeeded()
   }
 
@@ -286,7 +287,7 @@ class MessageViewAppKit: NSView {
     let copyItem = NSMenuItem(title: "Copy", action: #selector(copyMessage), keyEquivalent: "c")
     menu.addItem(copyItem)
     
-    menu.delegate = self
+//    menu.delegate = self
     self.menu = menu
   }
   
@@ -298,69 +299,34 @@ class MessageViewAppKit: NSView {
   }
 }
 
-extension MessageViewAppKit: NSMenuDelegate {}
-
-extension MessageViewAppKit: NSTextViewDelegate {
-//  override func updateTrackingAreas() {
-//    super.updateTrackingAreas()
-//
-//    // Remove existing tracking areas
-//    trackingAreas.forEach { removeTrackingArea($0) }
-//
-//    let options: NSTrackingArea.Options = [
-//      .mouseEnteredAndExited,
-//      .mouseMoved,
-//      .activeInKeyWindow
-//    ]
-//
-//    let trackingArea = NSTrackingArea(
-//      rect: bounds,
-//      options: options,
-//      owner: self,
-//      userInfo: nil
-//    )
-//    addTrackingArea(trackingArea)
-//  }
+// Custom NSTextView subclass to handle hit testing
+class CustomTextView2: NSTextView {
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    return false
+  }
   
-//  override func mouseMoved(with event: NSEvent) {
-//    guard let textView = messageTextView as? NSTextView,
-//          let textStorage = textView.textStorage,
-//          textStorage.length > 0
-//    else {
-//      NSCursor.iBeam.set()
-//      return
-//    }
-//
-//    let point = convert(event.locationInWindow, from: nil)
-//    let localPoint = textView.convert(point, from: self)
-//
-//    let index = textView.characterIndex(for: localPoint)
-//
-//    // Ensure index is within bounds
-//    guard index >= 0 && index < textStorage.length else {
-//      NSCursor.iBeam.set()
-//      return
-//    }
-//
-//    var effectiveRange = NSRange()
-//    let attributes = textStorage.attributes(at: index, effectiveRange: &effectiveRange)
-//
-//    if attributes[.link] != nil {
-//      NSCursor.pointingHand.set()
-//    } else {
-//      NSCursor.iBeam.set()
-//    }
-//  }
-//
-//  override func mouseExited(with event: NSEvent) {
-//    NSCursor.arrow.set()
-//  }
   
-//  func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
-//    if let url = link as? URL {
-//      NSWorkspace.shared.open(url)
-//      return true
-//    }
-//    return false
-//  }
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    // Prevent hit testing when window is inactive
+    guard let window = window, window.isKeyWindow else {
+      return nil
+    }
+    return super.hitTest(point)
+  }
+  
+  override func mouseDown(with event: NSEvent) {
+    // Ensure window is key before handling mouse events
+    guard let window = window else {
+      super.mouseDown(with: event)
+      return
+    }
+    
+    if !window.isKeyWindow {
+      window.makeKeyAndOrderFront(nil)
+      // Optionally, you can choose to not forward the event
+      return
+    }
+    
+    super.mouseDown(with: event)
+  }
 }
