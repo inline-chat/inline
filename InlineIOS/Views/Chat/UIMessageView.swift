@@ -84,6 +84,13 @@ class UIMessageView: UIView {
   private func configureForMessage() {
     messageLabel.text = fullMessage.message.text
 
+    // Set text alignment based on content
+    if let text = fullMessage.message.text, text.isRTL {
+      messageLabel.textAlignment = .right
+    } else {
+      messageLabel.textAlignment = .left
+    }
+
     if fullMessage.message.out == true {
       messageLabel.textColor = .white
       bubbleView.backgroundColor = .systemBlue
@@ -108,7 +115,7 @@ class UIMessageView: UIView {
   // MARK: - Size Calculation
 
   override var intrinsicContentSize: CGSize {
-    let maxWidth = bounds.width - 60 // Account for side margins
+    let maxWidth = bounds.width - 60  // Account for side margins
     let constraintRect = CGSize(width: maxWidth, height: .greatestFiniteMagnitude)
     let boundingBox =
       messageLabel.text?.boundingRect(
@@ -120,7 +127,7 @@ class UIMessageView: UIView {
 
     return CGSize(
       width: bounds.width,
-      height: boundingBox.height + 16 // Account for vertical padding
+      height: boundingBox.height + 16  // Account for vertical padding
     )
   }
 
@@ -143,5 +150,24 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       }
       return UIMenu(children: [copyAction])
     }
+  }
+}
+
+extension String {
+  var isRTL: Bool {
+    guard let firstChar = first else { return false }
+    let earlyRTL =
+      firstChar.unicodeScalars.first?.properties.generalCategory == .otherLetter
+      && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
+      && firstChar.unicodeScalars.first!.value <= 0x08FF
+
+    if earlyRTL { return true }
+
+    let language = CFStringTokenizerCopyBestStringLanguage(
+      self as CFString, CFRange(location: 0, length: count))
+    if let language = language {
+      return NSLocale.characterDirection(forLanguage: language as String) == .rightToLeft
+    }
+    return false
   }
 }
