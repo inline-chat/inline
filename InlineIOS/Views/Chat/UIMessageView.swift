@@ -3,6 +3,7 @@ import UIKit
 
 class UIMessageView: UIView {
   // MARK: - Properties
+
   private let messageLabel: UILabel = {
     let label = UILabel()
     label.numberOfLines = 0
@@ -27,6 +28,7 @@ class UIMessageView: UIView {
   private var fullMessage: FullMessage
 
   // MARK: - Initialization
+
   init(fullMessage: FullMessage) {
     self.fullMessage = fullMessage
     super.init(frame: .zero)
@@ -34,11 +36,13 @@ class UIMessageView: UIView {
     configureForMessage()
   }
 
+  @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
 
   // MARK: - Setup
+
   private func setupViews() {
     addSubview(containerView)
     containerView.addSubview(bubbleView)
@@ -61,11 +65,14 @@ class UIMessageView: UIView {
       messageLabel.centerYAnchor.constraint(equalTo: bubbleView.centerYAnchor),
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
       messageLabel.bottomAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor, constant: -8),
+        equalTo: bubbleView.bottomAnchor, constant: -8
+      ),
       messageLabel.leadingAnchor.constraint(
-        equalTo: bubbleView.leadingAnchor, constant: 10),
+        equalTo: bubbleView.leadingAnchor, constant: 10
+      ),
       messageLabel.trailingAnchor.constraint(
-        equalTo: bubbleView.trailingAnchor, constant: -10),
+        equalTo: bubbleView.trailingAnchor, constant: -10
+      ),
 
     ])
 
@@ -99,6 +106,7 @@ class UIMessageView: UIView {
   }
 
   // MARK: - Size Calculation
+
   override var intrinsicContentSize: CGSize {
     let maxWidth = bounds.width - 60  // Account for side margins
     let constraintRect = CGSize(width: maxWidth, height: .greatestFiniteMagnitude)
@@ -123,6 +131,7 @@ class UIMessageView: UIView {
 }
 
 // MARK: - Context Menu
+
 extension UIMessageView: UIContextMenuInteractionDelegate {
   func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction,
