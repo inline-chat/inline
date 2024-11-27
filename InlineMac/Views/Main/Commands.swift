@@ -37,16 +37,16 @@ struct MainWindowCommands: Commands {
     }
 
     CommandGroup(replacing: .help) {
+      Button(action: sendFeedback) {
+        Text("Send Feedback")
+      }
+
       Button(action: openHelpWebsite) {
         Text("Help")
       }
 
       Button(action: openWebsite) {
         Text("Website")
-      }
-
-      Button(action: openStatus) {
-        Text("Service Status")
       }
 
       Divider()
@@ -58,6 +58,12 @@ struct MainWindowCommands: Commands {
       Button(action: openGitHub) {
         Text("GitHub")
       }
+      
+      Divider()
+      
+      Button(action: openStatus) {
+        Text("Service Status")
+      }
     }
 
     SidebarCommands()
@@ -68,7 +74,7 @@ struct MainWindowCommands: Commands {
   }
 
   private func openHelpWebsite() {
-    NSWorkspace.shared.open(URL(string: "https://inline.chat/")!)
+    NSWorkspace.shared.open(URL(string: "https://inline.chat/docs")!)
   }
 
   private func openX() {
@@ -86,8 +92,9 @@ struct MainWindowCommands: Commands {
   private func openGitHub() {
     NSWorkspace.shared.open(URL(string: "https://github.com/inlinehq")!)
   }
+  
   private func sendFeedback() {
-    NSWorkspace.shared.open(URL(string: "mailto")!)
+    NSWorkspace.shared.open(URL(string: "https://inline.chat/feedback")!)
   }
 
   func logOutWithConfirmation() {
