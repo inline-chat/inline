@@ -37,9 +37,11 @@ struct ChatRowView: View {
             .foregroundColor(.secondary)
 
         }
-        Text(item.message?.text ?? "")
+        Text((item.message?.text ?? "").replacingOccurrences(of: "\n", with: " "))
           .font(.callout)
           .foregroundColor(.secondary)
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
     .frame(height: 48)
