@@ -54,85 +54,10 @@ struct Profile: View {
     .onAppear { focusedField = .fullName }
   }
 
-  // MARK: - View Components
+}
 
-  private var nameSection: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      AnimatedLabel(animate: $animate, text: "Setup your profile")
-      TextField(placeHolder, text: $fullName)
-        .focused($focusedField, equals: .fullName)
-        .textContentType(.name)
-        .textInputAutocapitalization(.words)
-        .font(.title2)
-        .fontWeight(.semibold)
-        .padding(.vertical, 8)
-        .onChange(of: focusedField) { _, newValue in
-          withAnimation(.smooth(duration: 0.15)) {
-            animate = newValue == .fullName
-          }
-        }
-        .onSubmit { focusedField = .username }
-    }
-  }
-
-  private var usernameSection: some View {
-    TextField("Username", text: $username)
-      .focused($focusedField, equals: .username)
-      .textContentType(.username)
-      .textInputAutocapitalization(.never)
-      .autocorrectionDisabled(true)
-      .font(.title2)
-      .fontWeight(.semibold)
-      .padding(.vertical, 8)
-      .onChange(of: username) { _, newValue in
-        handleUsernameChange(newValue)
-      }
-      .overlay(alignment: .trailing) {
-        usernameStatusIndicator
-      }
-      .onSubmit { submitAccount() }
-  }
-
-  @ViewBuilder
-  private var usernameStatusIndicator: some View {
-    if username.count >= 2 {
-      switch usernameStatus {
-      case .checking:
-        Image(systemName: "hourglass")
-          .font(.callout)
-          .foregroundColor(.secondary)
-      case .available:
-        Image(systemName: "checkmark.circle")
-          .font(.callout)
-          .foregroundColor(.green)
-      case .taken:
-        Image(systemName: "xmark.circle")
-          .font(.callout)
-          .foregroundColor(.red)
-      }
-    }
-  }
-
-  private var errorSection: some View {
-    Text(errorMsg)
-      .font(.callout)
-      .foregroundColor(.red)
-      .padding(.top, 8)
-  }
-
-  private var bottomButton: some View {
-    Button(formState.isLoading ? "Creating Account..." : "Continue") {
-      submitAccount()
-    }
-    .buttonStyle(SimpleButtonStyle())
-    .frame(maxWidth: .infinity)
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
-    .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-    .disabled(formState.isLoading)
-    .opacity(formState.isLoading ? 0.5 : 1)
-  }
-
-  // MARK: - Helper Methods
+// MARK: - Helper Methods
+extension Profile {
 
   private func handleUsernameChange(_ newValue: String) {
     errorMsg = ""
@@ -209,6 +134,86 @@ struct Profile: View {
       return (components.givenName ?? fullName, components.familyName)
     }
     return (fullName, nil)
+  }
+}
+
+// MARK: - Views
+extension Profile {
+  @ViewBuilder
+  private var nameSection: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      AnimatedLabel(animate: $animate, text: "Setup your profile")
+      TextField(placeHolder, text: $fullName)
+        .focused($focusedField, equals: .fullName)
+        .textContentType(.name)
+        .textInputAutocapitalization(.words)
+        .font(.title2)
+        .fontWeight(.semibold)
+        .padding(.vertical, 8)
+        .onChange(of: focusedField) { _, newValue in
+          withAnimation(.smooth(duration: 0.15)) {
+            animate = newValue == .fullName
+          }
+        }
+        .onSubmit { focusedField = .username }
+    }
+  }
+  @ViewBuilder
+  private var usernameSection: some View {
+    TextField("Username", text: $username)
+      .focused($focusedField, equals: .username)
+      .textContentType(.username)
+      .textInputAutocapitalization(.never)
+      .autocorrectionDisabled(true)
+      .font(.title2)
+      .fontWeight(.semibold)
+      .padding(.vertical, 8)
+      .onChange(of: username) { _, newValue in
+        handleUsernameChange(newValue)
+      }
+      .overlay(alignment: .trailing) {
+        usernameStatusIndicator
+      }
+      .onSubmit { submitAccount() }
+  }
+
+  @ViewBuilder
+  private var usernameStatusIndicator: some View {
+    if username.count >= 2 {
+      switch usernameStatus {
+      case .checking:
+        Image(systemName: "hourglass")
+          .font(.callout)
+          .foregroundColor(.secondary)
+      case .available:
+        Image(systemName: "checkmark.circle")
+          .font(.callout)
+          .foregroundColor(.green)
+      case .taken:
+        Image(systemName: "xmark.circle")
+          .font(.callout)
+          .foregroundColor(.red)
+      }
+    }
+  }
+
+  private var errorSection: some View {
+    Text(errorMsg)
+      .font(.callout)
+      .foregroundColor(.red)
+      .padding(.top, 8)
+  }
+  @ViewBuilder
+  private var bottomButton: some View {
+    Button(formState.isLoading ? "Creating Account..." : "Continue") {
+      submitAccount()
+    }
+    .buttonStyle(SimpleButtonStyle())
+    .frame(maxWidth: .infinity)
+    .padding(.horizontal, OnboardingUtils.shared.hPadding)
+    .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+    .disabled(formState.isLoading)
+    .opacity(formState.isLoading ? 0.5 : 1)
   }
 }
 
