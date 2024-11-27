@@ -4,31 +4,21 @@ import InlineUI
 import SwiftUI
 
 struct ChatView: View {
-  // MARK: - Properties
+
+  var peer: Peer
+
+  @State var text: String = ""
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var dataManager: DataManager
   @Environment(\.appDatabase) var database
-
-  var peer: Peer
-
-  @State private var text: String = ""
-
-  // MARK: - Initialization
+  @Environment(\.scenePhase) var scenePhase
 
   init(peer: Peer) {
     self.peer = peer
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer)
-    }
-  }
-
-  var title: String {
-    if case .user = peer {
-      return fullChatViewModel.peerUser?.firstName ?? ""
-    } else {
-      return fullChatViewModel.chat?.title ?? ""
     }
   }
 
@@ -58,49 +48,26 @@ struct ChatView: View {
     .onAppear {
       fetchMessages()
     }
-  }
-
-  // MARK: - View Components
-  @ViewBuilder
-  private var chatMessages: some View {
-    MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
-  }
-
-  @ViewBuilder
-  private var inputArea: some View {
-    HStack {
-      ComposeView(messageText: $text)
-      ZStack {
-        sendButton
-          .transition(.scale(scale: 0.8).combined(with: .opacity))
-      }
-      .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
-
-    }
-    .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
-    .padding(.vertical, 6)
-    .padding(.horizontal)
-    .overlay(alignment: .top) {
-      Divider()
-        .padding(.top, -8)
-    }
-    .background(Color(.systemBackground))
-  }
-
-  @ViewBuilder
-  var sendButton: some View {
-    if !text.isEmpty {
-      Button(action: sendMessage) {
-        Image(systemName: "paperplane.fill")
-          .foregroundStyle(.blue)
-          .font(.system(size: 20, weight: .semibold))
-          .frame(width: 30, height: 30)
-
+    .onChange(of: scenePhase) { _, newPhase in
+      if newPhase == .active {
+        fetchMessages()
       }
     }
   }
 
-  // MARK: - Methods
+}
+
+// MARK: - Helper Extensions
+
+extension View {
+  func flipped() -> some View {
+    rotationEffect(.init(radians: .pi))
+      .scaleEffect(x: -1, y: 1, anchor: .center)
+  }
+}
+
+// MARK: - Helper Methods
+extension ChatView {
 
   private func fetchMessages() {
     Task {
@@ -149,10 +116,12 @@ struct ChatView: View {
           out: true
         )
 
+        // Save message to database
         try await database.dbWriter.write { db in
           try message.save(db)
         }
 
+        // Send message to server
         try await dataManager.sendMessage(
           chatId: chatId,
           peerUserId: peerUserId,
@@ -169,11 +138,56 @@ struct ChatView: View {
   }
 }
 
-// MARK: - Helper Extensions
+// MARK: - Helper Properties
+extension ChatView {
+  var title: String {
+    if case .user = peer {
+      return fullChatViewModel.peerUser?.firstName ?? ""
+    } else {
+      return fullChatViewModel.chat?.title ?? ""
+    }
+  }
+}
 
-extension View {
-  func flipped() -> some View {
-    rotationEffect(.init(radians: .pi))
-      .scaleEffect(x: -1, y: 1, anchor: .center)
+// MARK: - Views
+extension ChatView {
+
+  @ViewBuilder
+  private var chatMessages: some View {
+    MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
+  }
+
+  @ViewBuilder
+  private var inputArea: some View {
+    HStack {
+      ComposeView(messageText: $text)
+      ZStack {
+        sendButton
+          .transition(.scale(scale: 0.8).combined(with: .opacity))
+      }
+      .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
+
+    }
+    .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
+    .padding(.vertical, 6)
+    .padding(.horizontal)
+    .overlay(alignment: .top) {
+      Divider()
+        .padding(.top, -8)
+    }
+    .background(Color(.systemBackground))
+  }
+
+  @ViewBuilder
+  var sendButton: some View {
+    if !text.isEmpty {
+      Button(action: sendMessage) {
+        Image(systemName: "paperplane.fill")
+          .foregroundStyle(.blue)
+          .font(.system(size: 20, weight: .semibold))
+          .frame(width: 30, height: 30)
+
+      }
+    }
   }
 }
