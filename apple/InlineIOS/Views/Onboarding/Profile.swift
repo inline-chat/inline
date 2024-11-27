@@ -30,6 +30,7 @@ struct Profile: View {
 
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var api: ApiClient
+  @EnvironmentObject private var mainViewRouter: MainViewRouter
   @Environment(\.auth) private var auth
   @Environment(\.appDatabase) private var database
   @FormState private var formState
@@ -53,17 +54,16 @@ struct Profile: View {
     .onChange(of: username) { validateInput() }
     .onAppear { focusedField = .fullName }
   }
-
 }
 
 // MARK: - Helper Methods
-extension Profile {
 
+extension Profile {
   private func handleUsernameChange(_ newValue: String) {
     errorMsg = ""
     let trimmedUsername = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
-    if !trimmedUsername.isEmpty && trimmedUsername.count >= 2 {
+    if !trimmedUsername.isEmpty, trimmedUsername.count >= 2 {
       checkUsername(trimmedUsername)
     } else {
       usernameStatus = .checking
@@ -112,7 +112,7 @@ extension Profile {
         try await database.dbWriter.write { db in
           try User(from: result.user).save(db)
         }
-        auth.saveProfileCompleted(true)
+        mainViewRouter.setRoute(route: .main)
         formState.reset()
         nav.push(.main)
       } catch {
@@ -138,6 +138,7 @@ extension Profile {
 }
 
 // MARK: - Views
+
 extension Profile {
   @ViewBuilder
   private var nameSection: some View {
@@ -158,6 +159,7 @@ extension Profile {
         .onSubmit { focusedField = .username }
     }
   }
+
   @ViewBuilder
   private var usernameSection: some View {
     TextField("Username", text: $username)
@@ -203,6 +205,7 @@ extension Profile {
       .foregroundColor(.red)
       .padding(.top, 8)
   }
+
   @ViewBuilder
   private var bottomButton: some View {
     Button(formState.isLoading ? "Creating Account..." : "Continue") {

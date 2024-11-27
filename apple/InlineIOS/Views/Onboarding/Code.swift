@@ -18,6 +18,7 @@ struct Code: View {
   @EnvironmentObject var nav: OnboardingNavigation
   @EnvironmentObject var api: ApiClient
   @EnvironmentObject var userData: UserData
+  @EnvironmentObject var mainViewRouter: MainViewRouter
 
   @Environment(\.appDatabase) var database
   @Environment(\.auth) private var auth
@@ -41,10 +42,10 @@ struct Code: View {
       isFocused = true
     }
   }
-
 }
 
 // MARK: - Helper Methods
+
 extension Code {
   private func validateInput() {
     errorMsg = ""
@@ -58,7 +59,7 @@ extension Code {
         let result = try await api.verifyCode(code: code, email: email)
         print("TOKEN \(result.token)")
         if result.user.firstName != nil {
-          auth.saveProfileCompleted(true)
+          // mainViewRouter.setRoute(route: .main)
         }
         auth.saveToken(result.token)
         auth.saveCurrentUserId(userId: result.userId)
@@ -83,7 +84,7 @@ extension Code {
         if result.user.firstName == nil {
           nav.push(.profile)
         } else {
-          auth.saveProfileCompleted(true)
+          // mainViewRouter.setRoute(route: .main)
           nav.push(.main)
         }
 
@@ -102,6 +103,7 @@ extension Code {
 }
 
 // MARK: - Views
+
 extension Code {
   @ViewBuilder
   var codeInput: some View {

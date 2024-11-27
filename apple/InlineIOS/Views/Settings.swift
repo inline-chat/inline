@@ -10,6 +10,7 @@ struct Settings: View {
   @EnvironmentObject private var ws: WebSocketManager
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var onboardingNav: OnboardingNavigation
+  @EnvironmentObject private var mainViewRouter: MainViewRouter
 
   var body: some View {
     List {
@@ -20,9 +21,9 @@ struct Settings: View {
   }
 }
 
-extension Settings {
+private extension Settings {
   @ViewBuilder
-  fileprivate var accountSection: some View {
+  var accountSection: some View {
     Section(header: Text("Account")) {
       if let currentUser = currentUser {
         HStack {
@@ -43,12 +44,11 @@ extension Settings {
           // TODO: Add profile setup
         }
       }
-
     }
   }
 
   @ViewBuilder
-  fileprivate var actionsSection: some View {
+  var actionsSection: some View {
     Section(header: Text("Actions")) {
       Button("Logout", role: .destructive) {
         // Clear creds
@@ -59,7 +59,7 @@ extension Settings {
 
         // Clear database
         try? AppDatabase.loggedOut()
-
+        mainViewRouter.setRoute(route: .onboarding)
         nav.popToRoot()
 
         onboardingNav.push(.welcome)

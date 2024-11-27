@@ -104,6 +104,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       userId: Number(input.peerUserId) ?? 0,
       title: title,
       message: input.text,
+      currentUserId: context.currentUserId,
     })
 
     return { message: encodedMessage }
@@ -216,7 +217,17 @@ const sendMessageUpdate = async ({
   }
 }
 
-const sendPushNotification = async ({ userId, title, message }: { userId: number; title: string; message: string }) => {
+const sendPushNotification = async ({
+  userId,
+  title,
+  message,
+  currentUserId,
+}: {
+  userId: number
+  title: string
+  message: string
+  currentUserId: number
+}) => {
   try {
     // Get all sessions for the user
     const userSessions = await db.select().from(sessions).where(eq(sessions.userId, userId))
@@ -236,7 +247,7 @@ const sendPushNotification = async ({ userId, title, message }: { userId: number
       pushType: "alert",
       sound: "default",
       payload: {
-        userId: userId,
+        userId: currentUserId,
       },
     })
 
