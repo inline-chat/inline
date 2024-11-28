@@ -95,12 +95,12 @@ extension ChatView {
         text = ""
 
         // Add haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .medium)
+        let generator = UIImpactFeedbackGenerator(style: .soft)
         generator.impactOccurred()
         let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
         let peerThreadId: Int64? = if case .thread(let id) = peer { id } else { nil }
 
-        let randomId = Int64.random(in: Int64.min...Int64.max)
+        let randomId = Int64.random(in: Int64.min ... Int64.max)
         let message = Message(
           messageId: -randomId,
           randomId: randomId,
@@ -159,9 +159,7 @@ extension ChatView {
   private var inputArea: some View {
     HStack {
       ComposeView(messageText: $text)
-
       sendButton
-
     }
     .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
     .padding(.vertical, 6)
