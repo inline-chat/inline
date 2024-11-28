@@ -37,9 +37,11 @@ public final class Log: @unchecked Sendable {
   public static let shared = Log(scope: "shared")
 
   private let scope: String
+  private let level: LogLevel
 
-  private init(scope: String) {
+  private init(scope: String, level: LogLevel = .debug) {
     self.scope = scope
+    self.level = level
   }
 
   public static func scoped(_ scope: String) -> Log {
@@ -53,7 +55,7 @@ public final class Log: @unchecked Sendable {
     let timestamp = Self.dateFormatter.string(from: Date())
     let fileName = (file as NSString).lastPathComponent
     #if DEBUG
-    // Don't log time when in debug mode cleaner logs
+      // Don't log time when in debug mode cleaner logs
       let logMessage =
         "\(level.rawValue) | \(scope) | [\(fileName):\(line) \(function)]: \(message) \(error?.localizedDescription ?? "")"
     #else
@@ -106,6 +108,15 @@ extension Log: Logging {
   ) {
     #if DEBUG
       log(message, level: .debug, file: file, function: function, line: line)
+    #endif
+  }
+
+  public func trace(
+    _ message: String, file: String = #file, function: String = #function, line: Int = #line
+  ) {
+    guard level == .trace else { return }
+    #if DEBUG
+      log(message, level: .trace, file: file, function: function, line: line)
     #endif
   }
 }
