@@ -9,8 +9,6 @@ struct Compose: View {
   var topMsgId: Int64?
   
   @EnvironmentObject var data: DataManager
-  @EnvironmentObject var scroller: ChatScroller
-  @EnvironmentObject var focus: ChatFocus
   @Environment(\.appDatabase) var db
   @Environment(\.colorScheme) var colorScheme
   
@@ -20,11 +18,7 @@ struct Compose: View {
   
   var minHeight: CGFloat = 42
   var horizontalPadding: CGFloat = 12
-  
-  var isFocused: Bool {
-    focus.focusedField == .compose
-  }
-  
+
   var body: some View {
     HStack(alignment: .bottom, spacing: 0) {
       attachmentButton
@@ -139,10 +133,10 @@ struct Compose: View {
   private func handleEditorEvent(_ event: ComposeTextEditorEvent) {
     switch event {
     case .focus:
-      focus.focusedField = .compose
+      break
       
     case .blur:
-      focus.focusedField = nil
+      break
       
     case .send:
       send()
@@ -152,9 +146,10 @@ struct Compose: View {
       break
       
     case .dismiss:
-      focus.focusedField = nil
+      break
+      
     default:
-      break;
+      break
     }
   }
   
@@ -228,7 +223,7 @@ struct Compose: View {
           try message.save(db)
         }
         
-        scroller.scrollToBottom(animate: true)
+        // TODO: Scroll to bottom
         
         try await data.sendMessage(
           chatId: chatId,
@@ -256,7 +251,6 @@ enum ComposeTextEditorEvent {
   case dismiss
 }
 
-
 struct CustomTextEditor: NSViewRepresentable {
   @Binding var text: String
   @Binding var event: ComposeTextEditorEvent
@@ -268,13 +262,12 @@ struct CustomTextEditor: NSViewRepresentable {
   var verticalPadding: CGFloat = 6
   var font: NSFont = .preferredFont(forTextStyle: .body)
   
-  
 //  init(
 //    text: Binding<String>,
 //    minHeight: CGFloat,
 //    height: Binding<CGFloat>,
 //    onEvent: @escaping (ComposeTextEditorEvent) -> Void,
-////    isFocused: Binding<Bool>,
+  ////    isFocused: Binding<Bool>,
 //    horizontalPadding: CGFloat = 8,
 //    verticalPadding: CGFloat = 6,
 //    font: NSFont = .preferredFont(forTextStyle: .body)
@@ -283,12 +276,11 @@ struct CustomTextEditor: NSViewRepresentable {
 //    self.minHeight = minHeight
 //    self._height = height
 //    self.onEvent = onEvent
-////    self._isFocused = isFocused
+  ////    self._isFocused = isFocused
 //    self.horizontalPadding = horizontalPadding
 //    self.verticalPadding = verticalPadding
 //    self.font = font
 //  }
-
 
   func makeCoordinator() -> Coordinator {
     Coordinator(self)
