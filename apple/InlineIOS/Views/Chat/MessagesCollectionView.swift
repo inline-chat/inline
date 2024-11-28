@@ -111,21 +111,21 @@ struct MessagesCollectionView: UIViewRepresentable {
       isPerformingBatchUpdate = true
 
       // Pre-calculate sizes in background
-      Task.detached { @MainActor [weak self] in
-        guard let self = self else { return }
+      //      Task.detached { @MainActor [weak self] in
+      //      guard let self = self else { return }
 
-        // Create snapshot without animation first
-        var snapshot = NSDiffableDataSourceSnapshot<Int, FullMessage>()
-        snapshot.appendSections([0])
-        snapshot.appendItems(messages)
+      // Create snapshot without animation first
+      var snapshot = NSDiffableDataSourceSnapshot<Int, FullMessage>()
+      snapshot.appendSections([0])
+      snapshot.appendItems(messages)
 
-        // Apply immediately without animation
-        await self.dataSource.apply(snapshot, animatingDifferences: false)
-        self.isPerformingBatchUpdate = false
+      // Apply immediately without animation
+      dataSource.apply(snapshot, animatingDifferences: animated)
+      isPerformingBatchUpdate = false
 
-        // Ensure transforms are correct after update
-        self.ensureCorrectTransforms(in: self.currentCollectionView)
-      }
+      // Ensure transforms are correct after update
+      ensureCorrectTransforms(in: currentCollectionView)
+      //      }
     }
 
     private func ensureCorrectTransforms(in collectionView: UICollectionView?) {
@@ -194,7 +194,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
         if hasOurNewMessage {
           // First update the data without animation
-          updateSnapshot(with: messages, animated: false)
+          updateSnapshot(with: messages, animated: true)
 
           // Then perform the animation
           UIView.performWithoutAnimation {
@@ -208,16 +208,17 @@ struct MessagesCollectionView: UIViewRepresentable {
             // Get the latest message cell and prepare it for animation
             if let latestCell = collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) {
               latestCell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
-              latestCell.transform = CGAffineTransform(scaleX: 0.95, y: 0.95).translatedBy(
-                x: 0, y: 10)
+              // latestCell.transform = CGAffineTransform(scaleX: 0.95, y: 0.95).translatedBy(
+              //   x: 0, y: 10
+              // )
 
               // Animate to final state
               UIView.animate(
-                withDuration: 0.4,
+                withDuration: 0.2,
                 delay: 0,
                 usingSpringWithDamping: 0.8,
                 initialSpringVelocity: 0.2,
-                options: [.curveEaseOut]
+                options: [.curveEaseIn]
               ) {
                 latestCell.transform = .identity
               }
@@ -225,7 +226,7 @@ struct MessagesCollectionView: UIViewRepresentable {
           }
         } else {
           // Restore previous scroll position for messages from others
-          updateSnapshot(with: messages, animated: false)
+          updateSnapshot(with: messages, animated: true)
           DispatchQueue.main.async { [weak self] in
             self?.restoreScrollPosition(collectionView)
           }
