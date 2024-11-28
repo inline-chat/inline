@@ -38,7 +38,8 @@ struct MessagesCollectionView: UIViewRepresentable {
   }
 
   private func createLayout() -> UICollectionViewLayout {
-    let layout = UICollectionViewFlowLayout()
+//    let layout = UICollectionViewFlowLayout()
+    let layout = AnimatedCollectionViewLayout()
     layout.minimumInteritemSpacing = 0
     layout.minimumLineSpacing = 0
     layout.scrollDirection = .vertical
@@ -106,34 +107,22 @@ struct MessagesCollectionView: UIViewRepresentable {
     }
 
     private func updateSnapshot(with messages: [FullMessage], animated: Bool) {
-      // Skip if already updating
       guard !isPerformingBatchUpdate else { return }
-      isPerformingBatchUpdate = true
+//      isPerformingBatchUpdate = true
 
-      // Pre-calculate sizes in background
-      //      Task.detached { @MainActor [weak self] in
-      //      guard let self = self else { return }
+      print("updateSnapshot \(messages.count) animated=\(animated)")
 
-      // Create snapshot without animation first
       var snapshot = NSDiffableDataSourceSnapshot<Int, FullMessage>()
       snapshot.appendSections([0])
       snapshot.appendItems(messages)
 
-      // Apply immediately without animation
-      dataSource.apply(snapshot, animatingDifferences: animated)
-      isPerformingBatchUpdate = false
-
-      // Ensure transforms are correct after update
-      ensureCorrectTransforms(in: currentCollectionView)
-      //      }
-    }
-
-    private func ensureCorrectTransforms(in collectionView: UICollectionView?) {
-      guard let collectionView = collectionView else { return }
-
-      UIView.performWithoutAnimation {
-        collectionView.visibleCells.forEach { cell in
-          cell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
+      // Use UIView.animate for custom animations
+      if animated {
+        dataSource.apply(snapshot, animatingDifferences: true)
+      } else {
+        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+          guard let self else { return }
+          isPerformingBatchUpdate = false
         }
       }
     }
@@ -141,8 +130,8 @@ struct MessagesCollectionView: UIViewRepresentable {
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
-        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-        visibleIndexPaths.item < fullMessages.count
+            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+            visibleIndexPaths.item < fullMessages.count
       else {
         scrollAnchor = nil
         return
@@ -161,7 +150,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
-        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
       else {
         return
       }
@@ -188,45 +177,23 @@ struct MessagesCollectionView: UIViewRepresentable {
 
         if hasOurNewMessage {
           // Calculate the height of the new message before adding it
-          let newMessage = messages[0]  // First item due to inverted layout
-          let newMessageHeight = calculateMessageHeight(for: newMessage, in: collectionView)
 
           // Update data with animation
           UIView.animate(
-            withDuration: 0.2,  // Shorter duration
+            withDuration: 0.2, // Shorter duration
             delay: 0,
-            options: [.curveEaseOut]  // Removed spring animation
+            options: [.curveEaseOut] // Removed spring animation
           ) {
-            // Shift existing content down by the height of the new message
-            let contentOffset = collectionView.contentOffset
-            collectionView.contentOffset = CGPoint(
-              x: contentOffset.x,
-              y: contentOffset.y - newMessageHeight + 22.0
-            )
-
             // Then update the data source
             self.fullMessages = messages
-            self.updateSnapshot(with: messages, animated: false)
+            self.updateSnapshot(with: messages, animated: true)
 
             // Configure the new cell's initial state
             if let newCell = collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) {
-              newCell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
-              newCell.transform = CGAffineTransform(translationX: 0, y: -newMessageHeight)
-              newCell.alpha = 0
-
-              // Animate the new cell into position
-              UIView.animate(
-                withDuration: 0.2,
-                delay: 0,
-                options: [.curveEaseOut]
-              ) {
-                newCell.transform = .identity
-                newCell.alpha = 1
-              }
+//              newCell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
             }
           }
         } else {
-
           updateSnapshot(with: messages, animated: true)
           DispatchQueue.main.async { [weak self] in
             self?.restoreScrollPosition(collectionView)
@@ -234,34 +201,10 @@ struct MessagesCollectionView: UIViewRepresentable {
         }
       } else {
         fullMessages = messages
-        updateSnapshot(with: messages, animated: false)
+        updateSnapshot(with: messages, animated: true)
       }
 
       previousMessageCount = messages.count
-    }
-
-    private func calculateMessageHeight(
-      for message: FullMessage, in collectionView: UICollectionView
-    ) -> CGFloat {
-      let width = collectionView.bounds.width - 28
-      let messageView = UIMessageView(fullMessage: message)
-      messageView.frame = CGRect(
-        x: 0, y: 0,
-        width: width,
-        height: UIView.layoutFittingCompressedSize.height
-      )
-      let size = messageView.systemLayoutSizeFitting(
-        CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
-        withHorizontalFittingPriority: .required,
-        verticalFittingPriority: .fittingSizeLevel
-      )
-
-      let topPadding: CGFloat = 24.0
-      return size.height + topPadding
-    }
-
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-      ensureCorrectTransforms(in: currentCollectionView)
     }
 
     @objc func orientationDidChange(_ notification: Notification) {
@@ -272,7 +215,6 @@ struct MessagesCollectionView: UIViewRepresentable {
 
         UIView.performWithoutAnimation {
           collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-          self.ensureCorrectTransforms(in: collectionView)
           collectionView.collectionViewLayout.invalidateLayout()
 
           if !self.fullMessages.isEmpty {
@@ -292,7 +234,7 @@ struct MessagesCollectionView: UIViewRepresentable {
       guard indexPath.item < fullMessages.count else { return false }
 
       let currentMessage = fullMessages[indexPath.item]
-      let previousIndex = indexPath.item + 1  // Note: +1 because messages are reversed
+      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
 
       // If this is the first message in a group from the same sender,
       // check if the previous message was from a different sender
@@ -367,5 +309,19 @@ struct MessagesCollectionView: UIViewRepresentable {
     ) -> CGFloat {
       return 0
     }
+  }
+}
+
+final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
+  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
+    guard let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy() as? UICollectionViewLayoutAttributes else {
+      return nil
+    }
+
+    // Initial state: moved down and slightly scaled
+    attributes.transform = CGAffineTransform(translationX: 0, y: -50)
+    attributes.alpha = 0
+
+    return attributes
   }
 }
