@@ -1,16 +1,28 @@
 import { db } from "@in/server/db"
 import { and, eq, inArray, not, or } from "drizzle-orm"
-import { chats, dialogs, spaces, users } from "@in/server/db/schema"
+import { chats, dialogs, spaces, users, type DbChat } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
 import { Authorize } from "@in/server/utils/authorize"
-import { encodeChatInfo, encodeDialogInfo, encodeUserInfo, TChatInfo, TDialogInfo, TUserInfo } from "../models"
+import {
+  encodeChatInfo,
+  encodeDialogInfo,
+  encodeMessageInfo,
+  encodeUserInfo,
+  TChatInfo,
+  TDialogInfo,
+  TMessageInfo,
+  TPeerInfo,
+  TUserInfo,
+} from "../models"
+import invariant from "tiny-invariant"
 
 export const Input = Type.Object({})
 
 export const Response = Type.Object({
+  messages: Type.Array(TMessageInfo),
   chats: Type.Array(TChatInfo),
   dialogs: Type.Array(TDialogInfo),
   peerUsers: Type.Array(TUserInfo),
@@ -60,6 +72,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
     where: and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))),
     with: {
       dialogs: true,
+      lastMsg: true,
     },
   })
   const peerUsers = await db
@@ -81,10 +94,21 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
     [selfChatDialog ?? null, ...c.dialogs].filter((d) => d != null).map((d) => encodeDialogInfo(d)),
   )
   const peerUsersEncoded = peerUsers.map((u) => encodeUserInfo(u))
-
+  const messagesEncoded = result.flatMap((c) =>
+    [c.lastMsg ?? null]
+      .filter((m) => m != null)
+      .map((m) => encodeMessageInfo(m, { currentUserId, peerId: getPeerId(c, currentUserId) })),
+  )
   return {
     chats: chatsEncoded,
     dialogs: dialogsEncoded,
     peerUsers: peerUsersEncoded,
+    messages: messagesEncoded,
   }
+}
+
+/** Only handles private chats */
+const getPeerId = (chat: DbChat, currentUserId: number): TPeerInfo => {
+  invariant(chat.minUserId != null && chat.maxUserId != null, "Private chat must have minUserId and maxUserId")
+  return chat.minUserId === currentUserId ? { userId: chat.maxUserId } : { userId: chat.minUserId }
 }

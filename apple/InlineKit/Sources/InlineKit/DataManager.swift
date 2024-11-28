@@ -245,11 +245,23 @@ public class DataManager: ObservableObject {
         // Then save chats with lastMsgId set to nil
         let chats = result.chats.map { chat in
           var chat = Chat(from: chat)
-//          chat.lastMsgId = nil
-          // do not set lastMsgId to nil to avoid foreign key constraint
+          chat.lastMsgId = nil
           return chat
         }
         try chats.forEach { chat in
+          try chat.save(db, onConflict: .replace)
+        }
+
+        // Save messages
+        let messages = result.messages.map { message in Message(from: message) }
+        try messages.forEach { message in
+          try message.save(db, onConflict: .replace)
+        }
+
+        // TODO: Optimize
+        // Update chat's last message ids now
+        let chats_ = result.chats.map { chat in Chat(from: chat) }
+        try chats_.forEach { chat in
           try chat.save(db, onConflict: .replace)
         }
 
@@ -263,11 +275,10 @@ public class DataManager: ObservableObject {
 
         return chats
       }
-
-      print("getPrivateChats result: \(chats)")
+      log.debug("fetched private chats")
       return chats
     } catch {
-      Log.shared.error("Failed to get private chats", error: error)
+      log.error("Failed to get private chats", error: error)
       throw error
     }
   }

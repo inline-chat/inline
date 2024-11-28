@@ -208,9 +208,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   }
 
   public func getPrivateChats() async throws -> GetPrivateChats {
-    print("API CALLED")
     let result: GetPrivateChats = try await request(.getPrivateChats, includeToken: true)
-    print("getPrivateChats resultttttt \(result)")
     return result
   }
 
@@ -370,6 +368,7 @@ public struct GetMe: Codable, Sendable {
 public struct EmptyPayload: Codable, Sendable {}
 
 public struct GetPrivateChats: Codable, Sendable {
+  public let messages: [ApiMessage]
   public let chats: [ApiChat]
   public let dialogs: [ApiDialog]
   public let peerUsers: [ApiUser]

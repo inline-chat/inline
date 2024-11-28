@@ -6,6 +6,7 @@ public enum LogLevel: String {
   case warning = "⚠️ WARNING"
   case info = "ℹ️ INFO"
   case debug = "🐛 DEBUG"
+  case trace = "🚧 TRACE"
 
   var sentryLevel: SentryLevel {
     switch self {
@@ -13,6 +14,7 @@ public enum LogLevel: String {
     case .warning: return .warning
     case .info: return .info
     case .debug: return .debug
+    case .trace: return .debug
     }
   }
 }
@@ -22,6 +24,7 @@ public protocol Logging {
   func warning(_ message: String, file: String, function: String, line: Int)
   func info(_ message: String, file: String, function: String, line: Int)
   func debug(_ message: String, file: String, function: String, line: Int)
+  func trace(_ message: String, file: String, function: String, line: Int)
 }
 
 public final class Log: @unchecked Sendable {
@@ -52,7 +55,7 @@ public final class Log: @unchecked Sendable {
     #if DEBUG
     // Don't log time when in debug mode cleaner logs
       let logMessage =
-        "\(level.rawValue) [\(scope)]: \(message) \(error?.localizedDescription ?? "") - [\(fileName):\(line) \(function)]"
+        "\(level.rawValue) | \(scope) | [\(fileName):\(line) \(function)]: \(message) \(error?.localizedDescription ?? "")"
     #else
       let logMessage =
         "\(timestamp) \(level.rawValue) [\(scope)] [\(fileName):\(line) \(function)] \(message) \(error?.localizedDescription ?? "")"

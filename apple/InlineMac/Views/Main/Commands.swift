@@ -58,9 +58,9 @@ struct MainWindowCommands: Commands {
       Button(action: openGitHub) {
         Text("GitHub")
       }
-      
+
       Divider()
-      
+
       Button(action: openStatus) {
         Text("Service Status")
       }
@@ -92,7 +92,7 @@ struct MainWindowCommands: Commands {
   private func openGitHub() {
     NSWorkspace.shared.open(URL(string: "https://github.com/inlinehq")!)
   }
-  
+
   private func sendFeedback() {
     NSWorkspace.shared.open(URL(string: "https://inline.chat/feedback")!)
   }
@@ -101,10 +101,8 @@ struct MainWindowCommands: Commands {
     let alert = NSAlert()
     alert.messageText = "Log Out"
     alert.informativeText = "Are you sure you want to log out?"
-
-    let cancel = alert.addButton(withTitle: "Cancel")
+    alert.addButton(withTitle: "Cancel")
     alert.alertStyle = .warning
-
     let button = alert.addButton(withTitle: "Log Out")
     button.hasDestructiveAction = true
 
