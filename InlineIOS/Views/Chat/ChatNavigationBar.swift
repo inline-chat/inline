@@ -57,6 +57,7 @@ final class ChatHeaderView: UIView {
   }
 
   // MARK: - Setup
+
   private func setupViews() {
     backgroundColor = .clear
 
@@ -98,7 +99,7 @@ final class ChatHeaderView: UIView {
     parentViewController = parentVC
     self.onBack = onBack
     nameLabel.text = user.firstName
-    statusLabel.text = "Online"
+    statusLabel.text = "online"
     // Create and set up new hosting controller
     let avatar = UserAvatar(user: user, size: 26)
     let hostingController = UIHostingController(rootView: avatar)
