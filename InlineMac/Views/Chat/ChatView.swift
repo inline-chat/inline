@@ -97,9 +97,6 @@ struct ChatView: View {
                     .flippedUpsideDown()
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .id(fullMessage.message.globalId) // to avoid flashes
-                    .onAppear {
-                      print("fullChat.fullMessages.first?.message.globalId \(fullChat.fullMessages.first?.message.globalId)")
-                    }
                 }
               }
             }

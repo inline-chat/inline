@@ -228,7 +228,7 @@ class MessageViewAppKit: NSView {
         messageTextView.bottomAnchor
           .constraint(
             equalTo: bottomAnchor,
-            constant: props.isLastMessage == true ? -1 * Theme.messageVerticalPadding - Theme.messageListBottomInset : -Theme.messageVerticalPadding
+            constant: -bottomPadding
           ),
         messageTextView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.messageSidePadding)
       ]

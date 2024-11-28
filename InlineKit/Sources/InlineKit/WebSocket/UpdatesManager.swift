@@ -1,34 +1,33 @@
 import Foundation
 import GRDB
-import InlineKit
 
 actor UpdatesManager {
   private var database: AppDatabase = .shared
   private var log = Log.scoped("Updates")
 
   func apply(update: Update, db: Database) throws {
-    log.debug("apply update")
+    self.log.debug("apply update")
 
     if let update = update.newMessage {
-      log.debug("applying new message")
+      self.log.debug("applying new message")
       try update.apply(db: db)
     } else if let update = update.updateMessageId {
-      log.debug("applying update message id")
+      self.log.debug("applying update message id")
       try update.apply(db: db)
     }
   }
 
   func applyBatch(updates: [Update]) {
-    log.debug("applying \(updates.count) updates")
+    self.log.debug("applying \(updates.count) updates")
     do {
-      try database.dbWriter.write { db in
+      try self.database.dbWriter.write { db in
         for update in updates {
-          try apply(update: update, db: db)
+          try self.apply(update: update, db: db)
         }
       }
     } catch {
       // handle error
-      log.error("Failed to apply updates", error: error)
+      self.log.error("Failed to apply updates", error: error)
     }
   }
 }
@@ -46,7 +45,7 @@ struct UpdateNewMessage: Codable {
 
   func apply(db: Database) throws {
     let message = Message(from: message)
-    try message.save(db, onConflict: .ignore)  // NOTE: @Mo: we ignore to avoid animation issues for our own messages
+    try message.save(db, onConflict: .ignore) // NOTE: @Mo: we ignore to avoid animation issues for our own messages
     var chat = try Chat.fetchOne(db, id: message.chatId)
     chat?.lastMsgId = message.messageId
     try chat?.save(db)
@@ -69,7 +68,6 @@ struct UpdateUpdateMessageId: Codable {
         chat?.lastMsgId = message.messageId
         try chat?.save(db)
       }
-
     }
   }
 }
