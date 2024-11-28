@@ -176,66 +176,88 @@ struct MessagesCollectionView: UIViewRepresentable {
     }
 
     func updateMessages(_ messages: [FullMessage], in collectionView: UICollectionView) {
-      // Capture scroll position before update if needed
-      captureScrollPosition(collectionView)
-
       let oldCount = fullMessages.count
       let oldMessages = fullMessages
-      fullMessages = messages
 
-      // Only scroll to bottom if the new message is from us
       if messages.count > oldCount {
         let newMessages = messages.filter { message in
           !oldMessages.contains { $0.message.id == message.message.id }
         }
 
-        // Check if any of the new messages are from us
         let hasOurNewMessage = newMessages.contains { $0.message.out == true }
 
         if hasOurNewMessage {
-          // First update the data without animation
-          updateSnapshot(with: messages, animated: true)
+          // Calculate the height of the new message before adding it
+          let newMessage = messages[0]  // First item due to inverted layout
+          let newMessageHeight = calculateMessageHeight(for: newMessage, in: collectionView)
 
-          // Then perform the animation
-          UIView.performWithoutAnimation {
-            // Scroll to bottom without animation
-            collectionView.scrollToItem(
-              at: IndexPath(item: 0, section: 0),
-              at: .bottom,
-              animated: true
+          // Update data with animation
+          UIView.animate(
+            withDuration: 0.2,  // Shorter duration
+            delay: 0,
+            options: [.curveEaseOut]  // Removed spring animation
+          ) {
+            // Shift existing content down by the height of the new message
+            let contentOffset = collectionView.contentOffset
+            collectionView.contentOffset = CGPoint(
+              x: contentOffset.x,
+              y: contentOffset.y - newMessageHeight + 22.0
             )
 
-            // Get the latest message cell and prepare it for animation
-            if let latestCell = collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) {
-              latestCell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
-              // latestCell.transform = CGAffineTransform(scaleX: 0.95, y: 0.95).translatedBy(
-              //   x: 0, y: 10
-              // )
+            // Then update the data source
+            self.fullMessages = messages
+            self.updateSnapshot(with: messages, animated: false)
 
-              // Animate to final state
+            // Configure the new cell's initial state
+            if let newCell = collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) {
+              newCell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
+              newCell.transform = CGAffineTransform(translationX: 0, y: -newMessageHeight)
+              newCell.alpha = 0
+
+              // Animate the new cell into position
               UIView.animate(
                 withDuration: 0.2,
                 delay: 0,
-                usingSpringWithDamping: 0.8,
-                initialSpringVelocity: 0.2,
-                options: [.curveEaseIn]
+                options: [.curveEaseOut]
               ) {
-                latestCell.transform = .identity
+                newCell.transform = .identity
+                newCell.alpha = 1
               }
             }
           }
         } else {
-          // Restore previous scroll position for messages from others
+
           updateSnapshot(with: messages, animated: true)
           DispatchQueue.main.async { [weak self] in
             self?.restoreScrollPosition(collectionView)
           }
         }
       } else {
+        fullMessages = messages
         updateSnapshot(with: messages, animated: false)
       }
 
       previousMessageCount = messages.count
+    }
+
+    private func calculateMessageHeight(
+      for message: FullMessage, in collectionView: UICollectionView
+    ) -> CGFloat {
+      let width = collectionView.bounds.width - 28
+      let messageView = UIMessageView(fullMessage: message)
+      messageView.frame = CGRect(
+        x: 0, y: 0,
+        width: width,
+        height: UIView.layoutFittingCompressedSize.height
+      )
+      let size = messageView.systemLayoutSizeFitting(
+        CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+        withHorizontalFittingPriority: .required,
+        verticalFittingPriority: .fittingSizeLevel
+      )
+
+      let topPadding: CGFloat = 24.0
+      return size.height + topPadding
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
