@@ -92,11 +92,16 @@ extension ChatView {
         guard let chatId = fullChatViewModel.chat?.id else { return }
 
         let messageText = text
-        text = ""
 
         // Add haptic feedback
         let generator = UIImpactFeedbackGenerator(style: .soft)
         generator.impactOccurred()
+
+        // Delay clearing the text field to allow animation to complete
+        withAnimation {
+          text = ""
+        }
+
         let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
         let peerThreadId: Int64? = if case .thread(let id) = peer { id } else { nil }
 
@@ -159,7 +164,9 @@ extension ChatView {
   private var inputArea: some View {
     HStack {
       ComposeView(messageText: $text)
-      sendButton
+      ZStack {
+        sendButton
+      }
     }
     .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
     .padding(.vertical, 6)
@@ -174,21 +181,56 @@ extension ChatView {
   @ViewBuilder
   var sendButton: some View {
     if !text.isEmpty {
-      Button(action: sendMessage) {
+      Button {
+        sendMessage()
+      } label: {
         Image(systemName: "paperplane.fill")
-          .foregroundStyle(.blue)
-          .font(.system(size: 20, weight: .semibold))
-          .frame(width: 30, height: 30)
+          .resizable()
+          .scaledToFit()
+          .foregroundStyle(.white)
       }
-      .buttonStyle(SendButtonStyle())
+      .buttonStyle(
+        CircleButtonStyle(
+          size: 30,
+          backgroundColor: .accentColor
+        )
+      )
     }
   }
 }
 
-struct SendButtonStyle: ButtonStyle {
+// struct SendButtonStyle: ButtonStyle {
+//   func makeBody(configuration: Configuration) -> some View {
+//     configuration.label
+//       .scaleEffect(configuration.isPressed ? 0.80 : 1)
+//       .animation(.easeInOut, value: configuration.isPressed)
+//   }
+// }
+
+struct CircleButtonStyle: ButtonStyle {
+  let size: CGFloat
+  let backgroundColor: Color
+
+  @State private var isHovering = false
+
+  init(
+    size: CGFloat = 32,
+    backgroundColor: Color = .blue
+
+  ) {
+    self.size = size
+    self.backgroundColor = backgroundColor
+  }
+
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .scaleEffect(configuration.isPressed ? 0.94 : 1)
-      .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
+      .padding(8)
+      .frame(width: size, height: size)
+      .background(
+        Circle()
+          .fill(backgroundColor)
+      )
+      .scaleEffect(configuration.isPressed ? 0.85 : 1.0)
+      .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
   }
 }
