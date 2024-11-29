@@ -30,19 +30,15 @@ struct ChatView: View {
     .safeAreaInset(edge: .bottom) {
       inputArea
     }
-    .safeAreaInset(edge: .top) {
-      if let user = fullChatViewModel.peerUser {
-        ChatHeaderViewRepresentable(
-          user: user,
-          onBack: {
-            nav.pop()
-          }
-        )
-        .frame(height: 45)
-        .background(Color.clear.edgesIgnoringSafeArea(.all))
+    .toolbar {
+      ToolbarItem(placement: .principal) {
+        Text(title)
+          .font(.title3)
+          .fontWeight(.semibold)
       }
     }
-    .navigationBarHidden(true)
+    .navigationBarHidden(false)
+    .toolbarRole(.editor)
     .onAppear {
       fetchMessages()
     }
@@ -164,11 +160,10 @@ extension ChatView {
   private var inputArea: some View {
     HStack {
       ComposeView(messageText: $text)
-      ZStack {
-        sendButton
-      }
+
+      sendButton
     }
-    .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
+
     .padding(.vertical, 6)
     .padding(.horizontal)
     .overlay(alignment: .top) {
