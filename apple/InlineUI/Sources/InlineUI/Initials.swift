@@ -16,13 +16,13 @@ public struct InitialsCircle: View, Equatable {
 
   public enum ColorPalette {
     static let colors: [Color] = [
-      .blue,
+      .pink,
       .orange,
       .purple,
       .yellow,
       .teal,
+      .blue,
       .teal,
-      .pink,
       .green,
       .red,
       .indigo,
@@ -96,7 +96,8 @@ public struct InitialsCircle: View, Equatable {
       )
 
       .frame(width: size, height: size)
-      .drawingGroup(opaque: true)
+//      .drawingGroup(opaque: true)
+      .drawingGroup()
   }
 }
 
