@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Sentry
 
 public enum LogLevel: String {
@@ -7,7 +8,17 @@ public enum LogLevel: String {
   case info = "ℹ️ INFO"
   case debug = "🐛 DEBUG"
   case trace = "🚧 TRACE"
-
+  
+  var osLogType: OSLogType {
+    switch self {
+    case .error: return .error
+    case .warning: return .fault
+    case .info: return .info
+    case .debug: return .debug
+    case .trace: return .debug
+    }
+  }
+  
   var sentryLevel: SentryLevel {
     switch self {
     case .error: return .error
@@ -28,43 +39,42 @@ public protocol Logging {
 }
 
 public final class Log: @unchecked Sendable {
-  private static let dateFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-    return formatter
-  }()
-
   public static let shared = Log(scope: "shared")
-
+  
   private let scope: String
   private let level: LogLevel
-
+  private let logger: Logger
+  
   private init(scope: String, level: LogLevel = .debug) {
     self.scope = scope
     self.level = level
+    self.logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.app", category: scope)
   }
-
+  
   public static func scoped(_ scope: String) -> Log {
     Log(scope: scope)
   }
-
+  
   private func log(
-    _ message: String, level: LogLevel, error: Error? = nil, file: String = #file,
-    function: String = #function, line: Int = #line
+    _ message: String,
+    level: LogLevel,
+    error: Error? = nil,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
   ) {
-    let timestamp = Self.dateFormatter.string(from: Date())
     let fileName = (file as NSString).lastPathComponent
-    #if DEBUG
-      // Don't log time when in debug mode cleaner logs
-      let logMessage =
-        "\(level.rawValue) | \(scope) | [\(fileName):\(line) \(function)]: \(message) \(error?.localizedDescription ?? "")"
-    #else
-      let logMessage =
-        "\(timestamp) \(level.rawValue) [\(scope)] [\(fileName):\(line) \(function)] \(message) \(error?.localizedDescription ?? "")"
-    #endif
-
-    print(logMessage)
-
+    let errorDescription = error?.localizedDescription ?? ""
+    
+    let logMessage: String
+    if scope == "shared" || level == .error {
+      logMessage = "[\(fileName):\(line) \(function)] \(message) \(errorDescription)"
+    } else {
+      logMessage = "\(message) \(errorDescription)"
+    }
+    
+    logger.log(level: level.osLogType, "\(level.rawValue) | \(self.scope) | \(logMessage)")
+    
     if level == .error, let error = error {
       SentrySDK.capture(error: error) { sentryScope in
         sentryScope.setLevel(level.sentryLevel)
@@ -85,38 +95,53 @@ public final class Log: @unchecked Sendable {
 
 extension Log: Logging {
   public func error(
-    _ message: String, error: Error? = nil, file: String = #file, function: String = #function,
+    _ message: String,
+    error: Error? = nil,
+    file: String = #file,
+    function: String = #function,
     line: Int = #line
   ) {
     log(message, level: .error, error: error, file: file, function: function, line: line)
   }
-
+  
   public func warning(
-    _ message: String, file: String = #file, function: String = #function, line: Int = #line
+    _ message: String,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
   ) {
     log(message, level: .warning, file: file, function: function, line: line)
   }
-
+  
   public func info(
-    _ message: String, file: String = #file, function: String = #function, line: Int = #line
+    _ message: String,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
   ) {
     log(message, level: .info, file: file, function: function, line: line)
   }
-
+  
   public func debug(
-    _ message: String, file: String = #file, function: String = #function, line: Int = #line
+    _ message: String,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
   ) {
-    #if DEBUG
-      log(message, level: .debug, file: file, function: function, line: line)
-    #endif
+#if DEBUG
+    log(message, level: .debug, file: file, function: function, line: line)
+#endif
   }
-
+  
   public func trace(
-    _ message: String, file: String = #file, function: String = #function, line: Int = #line
+    _ message: String,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
   ) {
     guard level == .trace else { return }
-    #if DEBUG
-      log(message, level: .trace, file: file, function: function, line: line)
-    #endif
+#if DEBUG
+    log(message, level: .trace, file: file, function: function, line: line)
+#endif
   }
 }
