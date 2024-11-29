@@ -11,7 +11,7 @@ import Sentry
 import SwiftUI
 
 @main
-struct InlineIOSApp: App {
+struct InlineApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
   @StateObject var ws = WebSocketManager()
   init() {
