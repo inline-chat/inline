@@ -14,7 +14,7 @@ enum DataManagerError: Error {
 @MainActor
 public class DataManager: ObservableObject {
   private var database: AppDatabase
-  private var log = Log.scoped("DataManager")
+  private var log = Log.scoped("DataManager", enableTracing: true)
 
   public init(database: AppDatabase) {
     self.database = database
@@ -26,13 +26,12 @@ public class DataManager: ObservableObject {
     log.debug("fetchMe")
     do {
       let result = try await ApiClient.shared.getMe()
-      print("fetchMe result: \(result)")
+      log.trace("fetchMe result: \(result)")
       let user = User(from: result.user)
       try await database.dbWriter.write { db in
         try user.save(db)
-        print("User saved: \(user)")
       }
-      print("currentUserId: \(Auth.shared.getCurrentUserId() ?? Int64.min)")
+      log.trace("currentUserId: \(Auth.shared.getCurrentUserId() ?? Int64.min)")
       return user
     } catch {
       Log.shared.error("Error fetching user", error: error)

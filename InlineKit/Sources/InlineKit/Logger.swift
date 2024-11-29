@@ -51,6 +51,10 @@ public final class Log: @unchecked Sendable {
     self.logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.app", category: scope)
   }
   
+  public static func scoped(_ scope: String, enableTracing: Bool = false) -> Log {
+    Log(scope: scope, level: enableTracing ? .trace : .debug)
+  }
+  
   public static func scoped(_ scope: String) -> Log {
     Log(scope: scope)
   }
@@ -67,13 +71,14 @@ public final class Log: @unchecked Sendable {
     let errorDescription = error?.localizedDescription ?? ""
     
     let logMessage: String
+    let scope_ = scope
     if scope == "shared" || level == .error {
       logMessage = "[\(fileName):\(line) \(function)] \(message) \(errorDescription)"
     } else {
       logMessage = "\(message) \(errorDescription)"
     }
     
-    logger.log(level: level.osLogType, "\(level.rawValue) | \(self.scope) | \(logMessage)")
+    logger.log(level: level.osLogType, "\(level.rawValue) | \(scope_) | \(logMessage)")
     
     if level == .error, let error = error {
       SentrySDK.capture(error: error) { sentryScope in
@@ -128,9 +133,9 @@ extension Log: Logging {
     function: String = #function,
     line: Int = #line
   ) {
-#if DEBUG
-    log(message, level: .debug, file: file, function: function, line: line)
-#endif
+    #if DEBUG
+      log(message, level: .debug, file: file, function: function, line: line)
+    #endif
   }
   
   public func trace(
@@ -140,8 +145,8 @@ extension Log: Logging {
     line: Int = #line
   ) {
     guard level == .trace else { return }
-#if DEBUG
-    log(message, level: .trace, file: file, function: function, line: line)
-#endif
+    #if DEBUG
+      log(message, level: .trace, file: file, function: function, line: line)
+    #endif
   }
 }

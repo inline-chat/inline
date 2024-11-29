@@ -38,7 +38,7 @@ struct MessagesCollectionView: UIViewRepresentable {
   }
 
   private func createLayout() -> UICollectionViewLayout {
-//    let layout = UICollectionViewFlowLayout()
+    //    let layout = UICollectionViewFlowLayout()
     let layout = AnimatedCollectionViewLayout()
     layout.minimumInteritemSpacing = 0
     layout.minimumLineSpacing = 0
@@ -108,7 +108,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     private func updateSnapshot(with messages: [FullMessage], animated: Bool) {
       guard !isPerformingBatchUpdate else { return }
-//      isPerformingBatchUpdate = true
+      //      isPerformingBatchUpdate = true
 
       print("updateSnapshot \(messages.count) animated=\(animated)")
 
@@ -130,8 +130,8 @@ struct MessagesCollectionView: UIViewRepresentable {
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
-            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-            visibleIndexPaths.item < fullMessages.count
+        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+        visibleIndexPaths.item < fullMessages.count
       else {
         scrollAnchor = nil
         return
@@ -150,7 +150,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
-            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
       else {
         return
       }
@@ -180,9 +180,9 @@ struct MessagesCollectionView: UIViewRepresentable {
 
           // Update data with animation
           UIView.animate(
-            withDuration: 0.2, // Shorter duration
+            withDuration: 0.2,  // Shorter duration
             delay: 0,
-            options: [.curveEaseOut] // Removed spring animation
+            options: [.curveEaseOut]  // Removed spring animation
           ) {
             // Then update the data source
             self.fullMessages = messages
@@ -190,7 +190,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
             // Configure the new cell's initial state
             if let newCell = collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) {
-//              newCell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
+              //              newCell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
             }
           }
         } else {
@@ -234,7 +234,7 @@ struct MessagesCollectionView: UIViewRepresentable {
       guard indexPath.item < fullMessages.count else { return false }
 
       let currentMessage = fullMessages[indexPath.item]
-      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
+      let previousIndex = indexPath.item + 1  // Note: +1 because messages are reversed
 
       // If this is the first message in a group from the same sender,
       // check if the previous message was from a different sender
@@ -313,8 +313,13 @@ struct MessagesCollectionView: UIViewRepresentable {
 }
 
 final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
-  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
-    guard let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy() as? UICollectionViewLayoutAttributes else {
+  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
+    -> UICollectionViewLayoutAttributes?
+  {
+    guard
+      let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
+        as? UICollectionViewLayoutAttributes
+    else {
       return nil
     }
 
