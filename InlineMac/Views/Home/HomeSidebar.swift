@@ -102,7 +102,7 @@ struct HomeSidebar: View {
       ForEach(home.chats) { chat in
         UserItem(user: chat.user, action: {
           userPressed(user: chat.user)
-        })
+        }, selected: nav.homeSelection == .chat(peer: .user(id: chat.user.id)))
           .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
       }
     }
@@ -166,7 +166,7 @@ struct HomeSidebar: View {
   
   private func userPressed(user: User) {
     // Open chat in home
-    nav.navigate(to: .chat(peer: .user(id: user.id)))
+    nav.select(.chat(peer: .user(id: user.id)))
   }
 }
 

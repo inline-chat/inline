@@ -75,11 +75,14 @@ struct MainView: View {
     NavigationStack(path: path) {
       if let spaceId = navigation.activeSpaceId {
         renderSpaceRoute(for: navigation.spaceSelection.wrappedValue, spaceId: spaceId)
+          .id(navigation.spaceSelection.wrappedValue)
           .navigationDestination(for: NavigationRoute.self) { route in
             renderSpaceRoute(for: route, spaceId: spaceId)
           }
       } else {
-        HomeRoot()
+        renderHomeRoute(for: navigation.homeSelection)
+          // Note(@mo): without this .id, route would not update correctly
+          .id(navigation.homeSelection)
           .navigationDestination(for: NavigationRoute.self) { route in
             renderHomeRoute(for: route)
           }
@@ -95,35 +98,33 @@ struct MainView: View {
     }
   }
   
+  @ViewBuilder
   func renderSpaceRoute(for destination: NavigationRoute, spaceId: Int64) -> some View {
-    Group {
-      switch destination {
-      case .spaceRoot:
-        SpaceView(spaceId: spaceId)
+    switch destination {
+    case .spaceRoot:
+      SpaceView(spaceId: spaceId)
         
-      case .chat(let peer):
-        ChatView(peerId: peer)
+    case .chat(let peer):
+      ChatView(peerId: peer)
         
-      case .homeRoot:
-        // Not for space
-        HomeRoot()
-      }
+    case .homeRoot:
+      // Not for space
+      HomeRoot()
     }
   }
   
+  @ViewBuilder
   func renderHomeRoute(for destination: NavigationRoute) -> some View {
-    Group {
-      switch destination {
-      case .chat(let peer):
-        ChatView(peerId: peer)
+    switch destination {
+    case .chat(let peer):
+      ChatView(peerId: peer)
         
-      case .homeRoot:
-        HomeRoot()
+    case .homeRoot:
+      HomeRoot()
         
-      case .spaceRoot:
-        // Not for home
-        Text("")
-      }
+    case .spaceRoot:
+      // Not for home
+      Text("")
     }
   }
   

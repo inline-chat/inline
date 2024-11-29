@@ -73,12 +73,10 @@ public extension Dialog {
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
-    print("getDialogId peerUserId: \(peerUserId)")
     return peerUserId
   }
 
   static func getDialogId(peerThreadId: Int64) -> Int64 {
-    print("getDialogId peerThreadId: \(peerThreadId)")
     return peerThreadId
   }
 

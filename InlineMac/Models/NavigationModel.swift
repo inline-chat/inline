@@ -2,10 +2,22 @@ import Combine
 import InlineKit
 import SwiftUI
 
-enum NavigationRoute: Hashable, Codable {
+enum NavigationRoute: Hashable, Codable, Equatable {
   case homeRoot
   case spaceRoot
   case chat(peer: Peer)
+
+  static func ==(lhs: NavigationRoute, rhs: NavigationRoute) -> Bool {
+    switch (lhs, rhs) {
+    case (.homeRoot, .homeRoot),
+         (.spaceRoot, .spaceRoot):
+      return true
+    case let (.chat(lhsPeer), .chat(rhsPeer)):
+      return lhsPeer == rhsPeer
+    default:
+      return false
+    }
+  }
 }
 
 enum PrimarySheet: Codable {
@@ -17,6 +29,7 @@ class NavigationModel: ObservableObject {
   static let shared = NavigationModel()
 
   @Published var homePath: [NavigationRoute] = []
+  @Published var homeSelection: NavigationRoute = .homeRoot
   @Published var activeSpaceId: Int64?
 
   @Published private var spacePathDict: [Int64: [NavigationRoute]] = [:]
@@ -85,7 +98,8 @@ class NavigationModel: ObservableObject {
       spaceSelectionDict[activeSpaceId] = route
       windowManager?.setUpForInnerRoute(route)
     } else {
-      // todo
+      homeSelection = route
+      windowManager?.setUpForInnerRoute(route)
     }
   }
 
@@ -111,7 +125,7 @@ class NavigationModel: ObservableObject {
   func goHome() {
     activeSpaceId = nil
     // TODO: Load from persistence layer
-    let currentHomeRoute = homePath.last ?? .homeRoot
+    let currentHomeRoute = homePath.last ?? homeSelection
     windowManager?.setUpForInnerRoute(currentHomeRoute)
   }
 
@@ -121,7 +135,7 @@ class NavigationModel: ObservableObject {
       windowManager?.setUpForInnerRoute(spacePathDict[activeSpaceId]?.last ?? .spaceRoot)
     } else {
       homePath.removeLast()
-      windowManager?.setUpForInnerRoute(homePath.last ?? .homeRoot)
+      windowManager?.setUpForInnerRoute(homePath.last ?? homeSelection)
     }
   }
 
@@ -131,13 +145,14 @@ class NavigationModel: ObservableObject {
     homePath = .init()
     spacePathDict = [:]
     spaceSelectionDict = [:]
+    homeSelection = .homeRoot
   }
 
   var currentRoute: NavigationRoute {
     if let activeSpaceId {
       return spaceSelectionDict[activeSpaceId] ?? .spaceRoot
     } else {
-      return homePath.last ?? .homeRoot
+      return homePath.last ?? homeSelection
     }
   }
 

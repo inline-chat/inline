@@ -1,9 +1,20 @@
 import Foundation
 import GRDB
 
-public enum Peer: Codable, Hashable, Sendable {
+public enum Peer: Codable, Hashable, Sendable, Equatable {
   case user(id: Int64)
   case thread(id: Int64)
+
+  public static func ==(lhs: Peer, rhs: Peer) -> Bool {
+    switch (lhs, rhs) {
+    case (.user(let lhsId), .user(let rhsId)):
+      return lhsId == rhsId
+    case (.thread(let lhsId), .thread(let rhsId)):
+      return lhsId == rhsId
+    default:
+      return false
+    }
+  }
 
   private enum CodingKeys: String, CodingKey {
     case userId

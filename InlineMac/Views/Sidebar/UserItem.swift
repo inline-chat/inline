@@ -11,6 +11,22 @@ struct UserItem: View {
   var action: (() -> Void)?
   var selected: Bool = false
 
+  var textColor: Color {
+    selected ? .white : .primary
+  }
+
+  var backgroundColor: Color {
+    if selected {
+      .accentColor
+    } else if isFocused {
+      .primary.opacity(0.1)
+    } else if isHovered {
+      .primary.opacity(0.05)
+    } else {
+      .clear
+    }
+  }
+
   var body: some View {
     let view = Button {
       if let action = action {
@@ -24,6 +40,7 @@ struct UserItem: View {
         VStack(alignment: .leading, spacing: 0) {
           Text(user.firstName ?? user.username ?? "")
             .lineLimit(1)
+            .foregroundColor(textColor)
         }
         Spacer()
       }
@@ -45,16 +62,6 @@ struct UserItem: View {
       view.focusEffectDisabled()
     } else {
       view
-    }
-  }
-
-  private var backgroundColor: Color {
-    if isFocused {
-      return .primary.opacity(0.1)
-    } else if isHovered {
-      return .primary.opacity(0.05)
-    } else {
-      return .clear
     }
   }
 }

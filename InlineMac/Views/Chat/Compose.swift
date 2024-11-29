@@ -65,7 +65,11 @@ struct Compose: View {
     }
     .animation(.easeOut.speed(4), value: canSend)
     .padding(.horizontal, 8)
-    .background(.regularMaterial)
+    .overlay(alignment: .top) {
+      Divider()
+        .frame(height: 1)
+        .offset(y: -1)
+    }
   }
   
   @State var attachmentOverlayOpen = false
