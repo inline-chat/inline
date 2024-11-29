@@ -11,7 +11,7 @@ public enum ConnectionState {
 @MainActor
 public final class WebSocketManager: ObservableObject {
   private var client: WebSocketClient?
-  private var log = Log.scoped("WebsocketManager")
+  private var log = Log.scoped("WebsocketManager", enableTracing: true)
   @Published public private(set) var connectionState: ConnectionState = .connecting
 
   private var token: String?
