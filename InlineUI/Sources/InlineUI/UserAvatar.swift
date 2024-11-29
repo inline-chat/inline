@@ -32,6 +32,7 @@ public struct UserAvatar: View {
         size: size
       )
     }
+    .frame(width: size, height: size)
   }
 }
 
