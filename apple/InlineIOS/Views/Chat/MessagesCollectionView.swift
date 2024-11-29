@@ -19,7 +19,7 @@ struct MessagesCollectionView: UIViewRepresentable {
     // Base transform for bottom-up scrolling
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
     collectionView.contentInset = UIEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
-    collectionView.keyboardDismissMode = .none
+    collectionView.keyboardDismissMode = .onDrag
 
     // Performance optimizations
     collectionView.isPrefetchingEnabled = true
@@ -56,6 +56,7 @@ struct MessagesCollectionView: UIViewRepresentable {
   }
 
   class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
+    private var log = Log.scoped("MessageCollectionView", enableTracing: true)
     private var dataSource: UICollectionViewDiffableDataSource<Int, FullMessage>!
     private var fullMessages: [FullMessage]
     private weak var currentCollectionView: UICollectionView?
@@ -103,16 +104,23 @@ struct MessagesCollectionView: UIViewRepresentable {
     }
 
     private func applyInitialData() {
-      updateSnapshot(with: fullMessages, animated: false)
+      updateSnapshot(with: fullMessages)
     }
 
-    private func updateSnapshot(with messages: [FullMessage], animated: Bool) {
+    private func updateSnapshot(with messages: [FullMessage]) {
       guard !isPerformingBatchUpdate else { return }
+      var animated = false
       //      isPerformingBatchUpdate = true
 
-      print("updateSnapshot \(messages.count) animated=\(animated)")
+      log.trace("updateSnapshot \(messages.count) animated=\(animated)")
+
+      // Prevent animation when id or message changes
+      if fullMessages.count != messages.count {
+        animated = true
+      }
 
       var snapshot = NSDiffableDataSourceSnapshot<Int, FullMessage>()
+
       snapshot.appendSections([0])
       snapshot.appendItems(messages)
 
@@ -125,13 +133,14 @@ struct MessagesCollectionView: UIViewRepresentable {
           isPerformingBatchUpdate = false
         }
       }
+      fullMessages = messages
     }
 
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
-        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-        visibleIndexPaths.item < fullMessages.count
+            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+            visibleIndexPaths.item < fullMessages.count
       else {
         scrollAnchor = nil
         return
@@ -150,7 +159,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
-        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
       else {
         return
       }
@@ -178,30 +187,19 @@ struct MessagesCollectionView: UIViewRepresentable {
         if hasOurNewMessage {
           // Calculate the height of the new message before adding it
 
-          // Update data with animation
-          UIView.animate(
-            withDuration: 0.2,  // Shorter duration
-            delay: 0,
-            options: [.curveEaseOut]  // Removed spring animation
-          ) {
-            // Then update the data source
-            self.fullMessages = messages
-            self.updateSnapshot(with: messages, animated: true)
+          // Then update the data source
+          updateSnapshot(with: messages)
+//                    fullMessages = messages
 
-            // Configure the new cell's initial state
-            if let newCell = collectionView.cellForItem(at: IndexPath(item: 0, section: 0)) {
-              //              newCell.contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
-            }
-          }
         } else {
-          updateSnapshot(with: messages, animated: true)
+          updateSnapshot(with: messages)
           DispatchQueue.main.async { [weak self] in
             self?.restoreScrollPosition(collectionView)
           }
         }
       } else {
         fullMessages = messages
-        updateSnapshot(with: messages, animated: true)
+        updateSnapshot(with: messages)
       }
 
       previousMessageCount = messages.count
@@ -234,7 +232,7 @@ struct MessagesCollectionView: UIViewRepresentable {
       guard indexPath.item < fullMessages.count else { return false }
 
       let currentMessage = fullMessages[indexPath.item]
-      let previousIndex = indexPath.item + 1  // Note: +1 because messages are reversed
+      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
 
       // If this is the first message in a group from the same sender,
       // check if the previous message was from a different sender
@@ -318,13 +316,13 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
   {
     guard
       let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-        as? UICollectionViewLayoutAttributes
+      as? UICollectionViewLayoutAttributes
     else {
       return nil
     }
 
     // Initial state: moved down and slightly scaled
-    attributes.transform = CGAffineTransform(translationX: 0, y: -50)
+    attributes.transform = CGAffineTransform(translationX: 0, y: -30)
     attributes.alpha = 0
 
     return attributes
