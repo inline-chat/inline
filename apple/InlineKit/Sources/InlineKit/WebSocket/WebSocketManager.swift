@@ -96,7 +96,7 @@ public final class WebSocketManager: ObservableObject {
   private func processMessage(_ message: WebSocketMessage) {
     switch message {
     case .string(let text):
-      print("Received: \(text)")
+      log.trace("received string \(text)")
       // Decode message as update
       if let serverMessage = decodeServerMessage(data: text) {
         switch serverMessage.k {
@@ -112,7 +112,8 @@ public final class WebSocketManager: ObservableObject {
       }
 
     case .data(let data):
-      print("Received: \(data)")
+      log.trace("received data \(data)")
+      // ...
     }
   }
 
