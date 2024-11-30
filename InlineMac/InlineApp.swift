@@ -25,6 +25,10 @@ struct InlineApp: App {
         .appDatabase(AppDatabase.shared)
         .environmentObject(overlay)
         .environment(\.logOut, logOut)
+        .environment(
+          \.requestNotifications,
+          appDelegate.notifications.requestNotifications
+        )
     }
     .defaultSize(width: 900, height: 600)
     .windowStyle(
