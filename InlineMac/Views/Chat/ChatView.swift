@@ -7,6 +7,7 @@ struct ChatView: View {
   let peerId: Peer
 
   @EnvironmentObject var data: DataManager
+  @EnvironmentObject var nav: NavigationModel
   @EnvironmentStateObject var fullChat: FullChatViewModel
 
   var item: SpaceChatItem? {
@@ -90,7 +91,10 @@ struct ChatView: View {
         }
 
         ToolbarItem(placement: .primaryAction) {
-          Button {} label: {
+          Button {
+            // show info page here
+            nav.navigate(to: .chatInfo(peer: peerId))
+          } label: {
             Label("Info", systemImage: "info.circle")
               .help("Chat Info")
           }

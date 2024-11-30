@@ -8,10 +8,10 @@ struct ChatIcon: View {
     case user(User)
   }
 
-  let size: CGFloat = 34
 
   var peer: PeerType
 
+  var size: CGFloat = 34
   var body: some View {
     switch peer {
     case .chat:
