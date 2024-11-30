@@ -264,6 +264,8 @@ struct MessagesCollectionView: UIViewRepresentable {
       layout collectionViewLayout: UICollectionViewLayout,
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
+      // Prevents array out of bounds crashes by returning zero size if the index is invalid.
+
       guard indexPath.item < fullMessages.count else { return .zero }
 
       let fullMessage = fullMessages[indexPath.item]
