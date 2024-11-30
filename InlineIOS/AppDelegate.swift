@@ -2,6 +2,7 @@ import Foundation
 import InlineKit
 import Sentry
 import UIKit
+import InlineConfig
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
@@ -11,10 +12,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     SentrySDK.start { options in
-      // usenoor/inline-ios
-      options.dsn =
-        "https://1bd867ae25150dd18dad6100789649fd@o124360.ingest.us.sentry.io/4508058293633024"
+      options.dsn = InlineConfig.SentryDSN
       options.debug = false
+      options.tracesSampleRate = 0.1
+      options.attachViewHierarchy = true
+      options.enableMetricKit = true
+      options.enableTimeToFullDisplayTracing = true
+      options.swiftAsyncStacktraces = true
+      options.enableAppLaunchProfiling = true
     }
 
     NotificationCenter.default.addObserver(
