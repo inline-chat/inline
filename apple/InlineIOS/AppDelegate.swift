@@ -29,6 +29,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       object: nil
     )
 
+    // Must setup delegate here or we'll miss events
+    let notificationCenter = UNUserNotificationCenter.current()
+    notificationCenter.delegate = self
+
     return true
   }
 
@@ -38,15 +42,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
   }
 
-  public func requestPushNotifications() {
-    registerForPushNotifications()
-  }
-
-  func registerForPushNotifications() {
+  func requestPushNotifications() {
     let notificationCenter = UNUserNotificationCenter.current()
-    notificationCenter.delegate = self
     notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-
       guard granted else { return }
       self.getNotificationSettings()
     }
@@ -85,8 +83,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         pushToken: deviceToken
       )
     }
-
-    UNUserNotificationCenter.current().delegate = self
   }
 
   func application(

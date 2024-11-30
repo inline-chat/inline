@@ -10,6 +10,8 @@ struct MainView: View {
   @EnvironmentObject var navigation: NavigationModel
   @EnvironmentObject var rootData: RootData
   @EnvironmentObject var dataManager: DataManager
+  
+  @Environment(\.requestNotifications) var requestNotifications
 
   @State private var windowSizeCancellable: AnyCancellable?
   @State private var disableAutoCollapse = false
@@ -35,6 +37,9 @@ struct MainView: View {
     .onAppear {
       self.rootData.fetch()
       self.setUpSidebarAutoCollapse()
+    }
+    .task {
+      await requestNotifications();
     }
     // Disable auto collapse while user is modifying it to avoid jump
     .onChange(of: window.columnVisibility) { _ in

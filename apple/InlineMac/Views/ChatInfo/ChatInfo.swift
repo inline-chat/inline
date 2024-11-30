@@ -15,27 +15,33 @@ struct ChatInfo: View {
   }
 
   var body: some View {
-    VStack {
-      // Avatar
-      icon
-        .padding(.top, 16)
-
-      // Text
-      Text(fullChat.chatItem?.title ?? "Chat")
-        .font(.title)
-        .padding(.top, 8)
-
-      // Debug information via list view style inset
-      List {
-        Section("Debug") {
-          Text("Peer ID: \(peerId)")
-          Text("Chat ID: \(fullChat.chat?.id ?? 0)")
+    ScrollView {
+      LazyVStack {
+        // Avatar
+        icon
+          .padding(.top, 16)
+        
+        // Text
+        Text(fullChat.chatItem?.title ?? "Chat")
+          .font(.title)
+          .padding(.top, 8)
+        
+        // Debug information via list view style inset
+        Form {
+          Section("Debug") {
+            LabeledContent("Peer ID") {
+              Text("\(peerId)")
+            }
+            LabeledContent("Chat ID") {
+              Text("\(fullChat.chat?.id ?? 0)")
+            }
+            
+          }
         }
+        .formStyle(.grouped)
+        //      .clipShape(.rect(cornerRadius: 12.0))
       }
-      .listStyle(.automatic)
-      .clipShape(.rect(cornerRadius: 12.0))
     }
-    .padding()
     .frame(maxHeight: .infinity, alignment: .top) // This ensures top alignment
   }
 
