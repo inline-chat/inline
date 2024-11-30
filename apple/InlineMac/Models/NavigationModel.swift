@@ -6,6 +6,7 @@ enum NavigationRoute: Hashable, Codable, Equatable {
   case homeRoot
   case spaceRoot
   case chat(peer: Peer)
+  case chatInfo(peer: Peer)
 
   static func ==(lhs: NavigationRoute, rhs: NavigationRoute) -> Bool {
     switch (lhs, rhs) {
@@ -13,6 +14,8 @@ enum NavigationRoute: Hashable, Codable, Equatable {
          (.spaceRoot, .spaceRoot):
       return true
     case let (.chat(lhsPeer), .chat(rhsPeer)):
+      return lhsPeer == rhsPeer
+    case let (.chatInfo(lhsPeer), .chatInfo(rhsPeer)):
       return lhsPeer == rhsPeer
     default:
       return false
@@ -81,6 +84,8 @@ class NavigationModel: ObservableObject {
 
   init() {
     setupSubscriptions()
+
+  
   }
 
   private func setupSubscriptions() {
@@ -90,6 +95,11 @@ class NavigationModel: ObservableObject {
         self.windowManager?.setUpForInnerRoute(self.spaceSelectionDict[spaceId] ?? .spaceRoot)
       }
       .store(in: &cancellables)
+    
+    $homePath.sink { [weak self] newValue in
+      guard let self = self else { return }
+      self.windowManager?.setUpForInnerRoute(newValue.last ?? self.homeSelection)
+    }.store(in: &cancellables)
   }
 
   // Used from sidebars

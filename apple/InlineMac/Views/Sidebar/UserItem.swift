@@ -6,14 +6,11 @@ struct UserItem: View {
   @EnvironmentObject var nav: NavigationModel
   @State private var isHovered: Bool = false
   @FocusState private var isFocused: Bool
+  @Environment(\.appearsActive) var appearsActive
 
   var user: User
   var action: (() -> Void)?
   var selected: Bool = false
-
-  var textColor: Color {
-    selected ? .white : .primary
-  }
 
   var backgroundColor: Color {
     if selected {
@@ -28,6 +25,9 @@ struct UserItem: View {
   }
 
   var body: some View {
+    let text = Text(user.firstName ?? user.username ?? "")
+      .lineLimit(1)
+
     let view = Button {
       if let action = action {
         action()
@@ -38,9 +38,13 @@ struct UserItem: View {
           .padding(.trailing, Theme.sidebarIconSpacing)
 
         VStack(alignment: .leading, spacing: 0) {
-          Text(user.firstName ?? user.username ?? "")
-            .lineLimit(1)
-            .foregroundColor(textColor)
+          if selected {
+            text.foregroundColor(.white)
+          } else {
+            text.foregroundStyle(
+              appearsActive ? .primary : .tertiary
+            )
+          }
         }
         Spacer()
       }

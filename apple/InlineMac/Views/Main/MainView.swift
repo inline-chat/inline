@@ -10,23 +10,12 @@ struct MainView: View {
   @EnvironmentObject var navigation: NavigationModel
   @EnvironmentObject var rootData: RootData
   @EnvironmentObject var dataManager: DataManager
-  
-  // Fetch authenticated user data
-//  @EnvironmentStateObject var rootData: RootData
-//  @EnvironmentStateObject var dataManager: DataManager
-  
+
   @State private var windowSizeCancellable: AnyCancellable?
   @State private var disableAutoCollapse = false
   @State private var autoCollapsed = false
   
-  init() {
-//    _rootData = EnvironmentStateObject { env in
-//      RootData(db: env.appDatabase, auth: env.auth)
-//    }
-//    _dataManager = EnvironmentStateObject { env in
-//      DataManager(database: env.appDatabase)
-//    }
-  }
+  init() {}
   
   var body: some View {
     NavigationSplitView(columnVisibility: $window.columnVisibility) {
@@ -106,6 +95,9 @@ struct MainView: View {
         
     case .chat(let peer):
       ChatView(peerId: peer)
+    
+    case .chatInfo(let peer):
+      ChatInfo(peerId: peer)
         
     case .homeRoot:
       // Not for space
@@ -121,6 +113,9 @@ struct MainView: View {
         
     case .homeRoot:
       HomeRoot()
+      
+    case .chatInfo(let peer):
+      ChatInfo(peerId: peer)
         
     case .spaceRoot:
       // Not for home

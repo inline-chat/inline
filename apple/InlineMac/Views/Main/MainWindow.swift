@@ -138,6 +138,8 @@ class MainWindowViewModel: ObservableObject {
       setToolbarVisibility(false)
     case .chat:
       setToolbarVisibility(true)
+    case .chatInfo:
+      setToolbarVisibility(false)
 //    default:
 //      setToolbarVisibility(true)
     }
