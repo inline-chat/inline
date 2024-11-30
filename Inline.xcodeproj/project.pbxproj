@@ -20,6 +20,7 @@
 		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
 		CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CD26CEAB2CB94E7900665A89 /* Sentry */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
+		CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD2785702CFB0916008A0EEF /* InlineConfig */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CDE9601B2CB94D1C004C541C /* KeychainSwift */; };
 /* End PBXBuildFile section */
@@ -159,6 +160,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */,
 				CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
 				CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */,
@@ -326,6 +328,7 @@
 				CD26CEAB2CB94E7900665A89 /* Sentry */,
 				C3CC991A2CCE9AFF007F7F77 /* InlineUI */,
 				CD0A3CD92CD536DF0081AD69 /* GRDBQuery */,
+				CD2785702CFB0916008A0EEF /* InlineConfig */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -1371,6 +1374,10 @@
 			productName = Sentry;
 		};
 		CD27856E2CFB053C008A0EEF /* InlineConfig */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineConfig;
+		};
+		CD2785702CFB0916008A0EEF /* InlineConfig */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineConfig;
 		};

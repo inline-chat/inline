@@ -86,7 +86,7 @@ public final class Log: @unchecked Sendable {
         sentryScope.setTag(value: self.scope, key: "scope")
         sentryScope.setExtra(value: message, key: "message")
       }
-    } else {
+    } else if level == .error || level == .warning {
       SentrySDK.capture(message: message) { sentryScope in
         sentryScope.setLevel(level.sentryLevel)
         sentryScope.setTag(value: self.scope, key: "scope")
