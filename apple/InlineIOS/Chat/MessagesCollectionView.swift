@@ -208,6 +208,9 @@ struct MessagesCollectionView: UIViewRepresentable {
     @objc func orientationDidChange(_ notification: Notification) {
       guard let collectionView = currentCollectionView else { return }
 
+      // Invalidate size cache when orientation changes
+      MessageSizeCalculator.shared.invalidateCache()
+
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
         guard let self else { return }
 
@@ -259,31 +262,26 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     // MARK: - UICollectionViewDelegateFlowLayout
 
+    // In MessagesCollectionView.Coordinator
     func collectionView(
       _ collectionView: UICollectionView,
       layout collectionViewLayout: UICollectionViewLayout,
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
-      // Prevents array out of bounds crashes by returning zero size if the index is invalid.
-
       guard indexPath.item < fullMessages.count else { return .zero }
 
       let fullMessage = fullMessages[indexPath.item]
       let width = collectionView.bounds.width - 28
-
       let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 2.0
 
-      let messageView = UIMessageView(fullMessage: fullMessage)
-      messageView.frame = CGRect(
-        x: 0, y: 0, width: width, height: UIView.layoutFittingCompressedSize.height
-      )
-      let size = messageView.systemLayoutSizeFitting(
-        CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
-        withHorizontalFittingPriority: .required,
-        verticalFittingPriority: .fittingSizeLevel
+      var size = MessageSizeCalculator.shared.size(
+        for: fullMessage,
+        maxWidth: width
       )
 
-      return CGSize(width: width, height: size.height + topPadding)
+      // Add top padding to the height
+      size.height += topPadding
+      return size
     }
 
     func collectionView(

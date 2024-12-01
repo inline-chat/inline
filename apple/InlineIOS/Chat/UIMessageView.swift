@@ -115,19 +115,10 @@ class UIMessageView: UIView {
   // MARK: - Size Calculation
 
   override var intrinsicContentSize: CGSize {
-    let maxWidth = bounds.width - 60 // Account for side margins
-    let constraintRect = CGSize(width: maxWidth, height: .greatestFiniteMagnitude)
-    let boundingBox =
-      messageLabel.text?.boundingRect(
-        with: constraintRect,
-        options: [.usesLineFragmentOrigin, .usesFontLeading],
-        attributes: [.font: messageLabel.font!],
-        context: nil
-      ) ?? .zero
-
-    return CGSize(
-      width: bounds.width,
-      height: boundingBox.height + 16 // Account for vertical padding
+    let maxWidth = bounds.width - 60
+    return MessageSizeCalculator.shared.size(
+      for: fullMessage,
+      maxWidth: maxWidth
     )
   }
 
