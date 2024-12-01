@@ -1,8 +1,8 @@
 import Foundation
+import InlineConfig
 import InlineKit
 import Sentry
 import UIKit
-import InlineConfig
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
