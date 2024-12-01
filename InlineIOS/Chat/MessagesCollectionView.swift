@@ -11,6 +11,8 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     collectionView.backgroundColor = .clear
     collectionView.delegate = context.coordinator
+    collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
     collectionView.register(
       MessageCollectionViewCell.self,
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
@@ -39,11 +41,49 @@ struct MessagesCollectionView: UIViewRepresentable {
 
   private func createLayout() -> UICollectionViewLayout {
     //    let layout = UICollectionViewFlowLayout()
-    let layout = AnimatedCollectionViewLayout()
-    layout.minimumInteritemSpacing = 0
-    layout.minimumLineSpacing = 0
-    layout.scrollDirection = .vertical
-    layout.estimatedItemSize = .zero
+//    let layout = AnimatedCollectionViewLayout()
+//    let configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+//    let layout = UICollectionViewCompositionalLayout.list(using: configuration)
+
+//    layout.minimumInteritemSpacing = 0
+//    layout.minimumLineSpacing = 0
+//    layout.scrollDirection = .vertical
+//    layout.estimatedItemSize = .zero
+//    return layout
+
+    let config = UICollectionViewCompositionalLayoutConfiguration()
+    config.scrollDirection = .vertical
+
+    let layout = UICollectionViewCompositionalLayout(sectionProvider: { _, _ in
+      // Item
+      let itemSize = NSCollectionLayoutSize(
+        widthDimension: .fractionalWidth(1),
+        heightDimension: .estimated(44)
+      )
+      let item = NSCollectionLayoutItem(layoutSize: itemSize)
+
+      item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10)
+
+      let groupSize = NSCollectionLayoutSize(
+        widthDimension: .fractionalWidth(1),
+        heightDimension: .estimated(44)
+      )
+      let group = NSCollectionLayoutGroup.horizontal(
+        layoutSize: groupSize,
+        subitems: [item]
+      )
+
+      group.interItemSpacing = .fixed(0)
+
+      let section = NSCollectionLayoutSection(group: group)
+
+      section.interGroupSpacing = 0
+
+      section.contentInsets = .zero
+
+      return section
+    }, configuration: config)
+
     return layout
   }
 
@@ -262,27 +302,23 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     // MARK: - UICollectionViewDelegateFlowLayout
 
-    // In MessagesCollectionView.Coordinator
-    func collectionView(
-      _ collectionView: UICollectionView,
-      layout collectionViewLayout: UICollectionViewLayout,
-      sizeForItemAt indexPath: IndexPath
-    ) -> CGSize {
-      guard indexPath.item < fullMessages.count else { return .zero }
-
-      let fullMessage = fullMessages[indexPath.item]
-      let width = collectionView.bounds.width - 28
-      let topPadding = isTransitionFromOtherSender(at: indexPath) ? 24.0 : 2.0
-
-      var size = MessageSizeCalculator.shared.size(
-        for: fullMessage,
-        maxWidth: width
-      )
-
-      // Add top padding to the height
-      size.height += topPadding
-      return size
-    }
+//    func collectionView(
+//      _ collectionView: UICollectionView,
+//      layout collectionViewLayout: UICollectionViewLayout,
+//      sizeForItemAt indexPath: IndexPath
+//    ) -> CGSize {
+//      guard indexPath.item < fullMessages.count else { return .zero }
+//
+//      let fullMessage = fullMessages[indexPath.item]
+//      let width = collectionView.bounds.width
+//      let isTransition = isTransitionFromOtherSender(at: indexPath)
+//
+//      return MessageSizeCalculator.shared.size(
+//        for: fullMessage,
+//        maxWidth: width,
+//        isTransition: isTransition
+//      )
+//    }
 
     func collectionView(
       _ collectionView: UICollectionView,

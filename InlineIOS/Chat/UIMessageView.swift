@@ -114,14 +114,6 @@ class UIMessageView: UIView {
 
   // MARK: - Size Calculation
 
-  override var intrinsicContentSize: CGSize {
-    let maxWidth = bounds.width - 60
-    return MessageSizeCalculator.shared.size(
-      for: fullMessage,
-      maxWidth: maxWidth
-    )
-  }
-
   override func layoutSubviews() {
     super.layoutSubviews()
     invalidateIntrinsicContentSize()
