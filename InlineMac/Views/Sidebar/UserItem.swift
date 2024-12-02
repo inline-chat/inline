@@ -60,7 +60,6 @@ struct UserItem: View {
     .buttonStyle(.plain)
     .focused($isFocused)
     .padding(.horizontal, -Theme.sidebarItemPadding)
-    .padding(.vertical, 2)
 
     if #available(macOS 14.0, *) {
       view.focusEffectDisabled()
@@ -72,9 +71,9 @@ struct UserItem: View {
 
 #Preview {
   VStack(spacing: 0) {
-    RemoteUserItem(user: ApiUser.preview)
-    RemoteUserItem(
-      user: ApiUser.preview,
+    UserItem(user: User.preview)
+    UserItem(
+      user: User.preview,
       action: {
         print("Custom action")
       }

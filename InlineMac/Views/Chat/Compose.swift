@@ -17,7 +17,7 @@ struct Compose: View {
   @State private var editorHeight: CGFloat = 42
   
   var minHeight: CGFloat = 42
-  var horizontalPadding: CGFloat = 12
+  var textViewHorizontalPadding: CGFloat = Theme.messageHorizontalStackSpacing
 
   var body: some View {
     HStack(alignment: .bottom, spacing: 0) {
@@ -30,9 +30,9 @@ struct Compose: View {
         minHeight: minHeight,
         height: $editorHeight,
         
-        horizontalPadding: horizontalPadding,
+        horizontalPadding: textViewHorizontalPadding,
         verticalPadding: 4,
-        font: .systemFont(ofSize: 13)
+        font: Theme.messageTextFont
       )
       .frame(height: editorHeight)
       .onChange(of: event) { newEvent in
@@ -45,7 +45,7 @@ struct Compose: View {
         if text.isEmpty {
           Text("Write a message")
             .foregroundStyle(.tertiary)
-            .padding(.leading, horizontalPadding)
+            .padding(.leading, textViewHorizontalPadding)
             .allowsHitTesting(false)
             .frame(height: editorHeight)
             .transition(
@@ -64,7 +64,7 @@ struct Compose: View {
         .transition(.scale(scale: 0.8).combined(with: .opacity))
     }
     .animation(.easeOut.speed(4), value: canSend)
-    .padding(.horizontal, 8)
+    .padding(.horizontal, Theme.messageSidePadding)
     .overlay(alignment: .top) {
       Divider()
         .frame(height: 1)
@@ -85,11 +85,12 @@ struct Compose: View {
       Image(systemName: "plus")
         .resizable()
         .scaledToFit()
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.tertiary)
+        .fontWeight(.bold)
     }
     .buttonStyle(
       CircleButtonStyle(
-        size: 30,
+        size: Theme.messageAvatarSize,
         backgroundColor: .clear,
         hoveredBackgroundColor: .gray.opacity(0.1)
       )
@@ -118,15 +119,17 @@ struct Compose: View {
       Button {
         send()
       } label: {
-        //        Image(systemName: "arrow.up")
-        Image(systemName: "paperplane.fill")
+//        Image(systemName: "paperplane.fill")
+//        Image(systemName: "arrowtriangle.up.fill")
+        Image(systemName: "arrow.up")
           .resizable()
           .scaledToFit()
           .foregroundStyle(.white)
+          .fontWeight(.bold)
       }
       .buttonStyle(
         CircleButtonStyle(
-          size: 30,
+          size: Theme.messageAvatarSize,
           backgroundColor: .accentColor,
           hoveredBackgroundColor: .accentColor.opacity(0.8)
         )

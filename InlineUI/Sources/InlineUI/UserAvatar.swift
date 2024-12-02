@@ -1,7 +1,15 @@
 import InlineKit
 import SwiftUI
 
-public struct UserAvatar: View {
+public struct UserAvatar: View, Equatable {
+  public nonisolated static func == (lhs: UserAvatar, rhs: UserAvatar) -> Bool {
+    lhs.firstName == rhs.firstName &&
+      lhs.lastName == rhs.lastName &&
+      lhs.email == rhs.email &&
+      lhs.username == rhs.username &&
+      lhs.size == rhs.size
+  }
+
   let firstName: String?
   let lastName: String?
   let email: String?
@@ -15,8 +23,8 @@ public struct UserAvatar: View {
     self.username = user.username
     self.size = size
   }
-  
-  public init(apiUser:  ApiUser, size: CGFloat = 32) {
+
+  public init(apiUser: ApiUser, size: CGFloat = 32) {
     self.firstName = apiUser.firstName
     self.lastName = apiUser.lastName
     self.email = apiUser.email
@@ -25,14 +33,11 @@ public struct UserAvatar: View {
   }
 
   public var body: some View {
-    ZStack {
-      InitialsCircle(
-        firstName: firstName ?? email?.components(separatedBy: "@").first ?? "User",
-        lastName: lastName,
-        size: size
-      )
-    }
+    InitialsCircle(
+      firstName: firstName ?? email?.components(separatedBy: "@").first ?? "User",
+      lastName: lastName,
+      size: size
+    )
     .frame(width: size, height: size)
   }
 }
-

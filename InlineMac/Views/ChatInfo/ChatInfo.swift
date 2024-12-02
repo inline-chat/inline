@@ -41,7 +41,7 @@ struct ChatInfo: View {
         .formStyle(.grouped)
       }
     }
-    .frame(maxHeight: .infinity, alignment: .top) // This ensures top alignment
+    .frame( alignment: .top) // This ensures top alignment
   }
 
   @ViewBuilder

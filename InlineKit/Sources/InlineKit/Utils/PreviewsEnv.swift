@@ -7,8 +7,8 @@ public enum PreviewsEnvironemntPreset {
   case unauthenticated
 }
 
-extension View {
-  public func previewsEnvironment(_ preset: PreviewsEnvironemntPreset) -> some View {
+public extension View {
+  func previewsEnvironment(_ preset: PreviewsEnvironemntPreset) -> some View {
     let appDatabase: AppDatabase =
       if preset == .populated {
         .populated()
@@ -20,11 +20,11 @@ extension View {
 
     return
       self
-      .environment(\.appDatabase, appDatabase)
-      .databaseContext(.readWrite { appDatabase.dbWriter })
-      .environmentObject(WebSocketManager(token: nil, userId: nil))
-      .environmentObject(RootData(db: appDatabase, auth: auth))
-      //            .environmentObject(MainWindowViewModel())
-      .environment(\.auth, auth)
+        .environment(\.appDatabase, appDatabase)
+        .databaseContext(.readWrite { appDatabase.dbWriter })
+        .environmentObject(WebSocketManager(token: nil, userId: nil))
+        .environmentObject(RootData(db: appDatabase, auth: auth))
+        .environmentObject(DataManager(database: appDatabase))
+        .environment(\.auth, auth)
   }
 }

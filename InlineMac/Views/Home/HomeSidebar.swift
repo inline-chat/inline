@@ -44,8 +44,10 @@ struct HomeSidebar: View {
     .safeAreaInset(
       edge: .top,
       content: {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 0) {
           SelfUser()
+            .padding(.top, -8)
+            .padding(.bottom, 6)
           searchBar
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -61,6 +63,10 @@ struct HomeSidebar: View {
     .task {
       do {
         let _ = try await data.getSpaces()
+      } catch {
+        // TODO: handle error? keep on loading? retry? (@mo)
+      }
+      do {
         let _ = try await data.getPrivateChats()
       } catch {
         // TODO: handle error? keep on loading? retry? (@mo)
@@ -98,7 +104,7 @@ struct HomeSidebar: View {
       }
     }
 
-    Section("Private Messages") {
+    Section("Private") {
       ForEach(home.chats) { chat in
         UserItem(
           user: chat.user,
@@ -232,8 +238,7 @@ struct ConnectionStateOverlay: View {
 #Preview {
   NavigationSplitView {
     HomeSidebar()
-      .previewsEnvironment(.populated)
-      .environmentObject(NavigationModel())
+      .previewsEnvironmentForMac(.populated)
   } detail: {
     Text("Welcome.")
   }
