@@ -874,7 +874,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.5;
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac.debug;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac;
 				PRODUCT_NAME = Inline;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;

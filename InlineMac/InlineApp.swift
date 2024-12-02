@@ -90,6 +90,7 @@ struct InlineApp: App {
     // Reset internal navigation
     navigation.reset()
     
+    
     // Close Settings
     if let window = NSApplication.shared.keyWindow {
       window.close()

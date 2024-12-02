@@ -71,7 +71,7 @@ extension Code {
           let user = User(
             id: result.userId,
             email: email,
-            firstName: "",
+            firstName: result.user.firstName,
             lastName: nil
           )
           try user.save(db)
@@ -81,7 +81,7 @@ extension Code {
         if result.user.firstName == nil || result.user.firstName?.isEmpty == true {
           nav.push(.profile)
         } else {
-          // mainViewRouter.setRoute(route: .main)
+          mainViewRouter.setRoute(route: .main)
           nav.push(.main)
         }
 

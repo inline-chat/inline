@@ -40,16 +40,18 @@ struct MessagesCollectionView: UIViewRepresentable {
   }
 
   private func createLayout() -> UICollectionViewLayout {
-    //    let layout = UICollectionViewFlowLayout()
-//    let layout = AnimatedCollectionViewLayout()
-//    let configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-//    let layout = UICollectionViewCompositionalLayout.list(using: configuration)
+    /// List layout
+    //    let configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+    //    let layout = UICollectionViewCompositionalLayout.list(using: configuration)
 
-//    layout.minimumInteritemSpacing = 0
-//    layout.minimumLineSpacing = 0
-//    layout.scrollDirection = .vertical
-//    layout.estimatedItemSize = .zero
-//    return layout
+    /// Custom layout based on flow layout
+    //    let layout = UICollectionViewFlowLayout()
+    //    let layout = AnimatedCollectionViewLayout()
+    //    layout.minimumInteritemSpacing = 0
+    //    layout.minimumLineSpacing = 0
+    //    layout.scrollDirection = .vertical
+    //    layout.estimatedItemSize = .zero
+    //    return layout
 
     let config = UICollectionViewCompositionalLayoutConfiguration()
     config.scrollDirection = .vertical
