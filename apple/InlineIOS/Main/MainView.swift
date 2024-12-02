@@ -58,6 +58,12 @@ struct MainView: View {
     .task {
       notificationHandler.setAuthenticated(value: true)
       do {
+        _ = try await dataManager.fetchMe()
+      } catch {
+        Log.shared.error("Failed to getMe", error: error)
+      }
+
+      do {
         try await dataManager.getPrivateChats()
 
       } catch {
@@ -75,9 +81,9 @@ struct MainView: View {
 
 // MARK: - View Components
 
-extension MainView {
+private extension MainView {
   @ViewBuilder
-  fileprivate var contentView: some View {
+  var contentView: some View {
     if spaceList.spaces.isEmpty && home.chats.isEmpty {
       // EmptyStateView()
       //   .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -86,7 +92,7 @@ extension MainView {
     }
   }
 
-  fileprivate var contentList: some View {
+  var contentList: some View {
     List {
       // HStack {
       //   Spacer()
@@ -106,7 +112,7 @@ extension MainView {
     .padding(.vertical, 8)
   }
 
-  fileprivate var spacesSection: some View {
+  var spacesSection: some View {
     Section(header: Text("Spaces")) {
       ForEach(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
         SpaceRowView(space: space)
@@ -117,7 +123,7 @@ extension MainView {
     }
   }
 
-  fileprivate var chatsSection: some View {
+  var chatsSection: some View {
     Section {
       ForEach(
         home.chats, id: \.user.id
@@ -130,7 +136,7 @@ extension MainView {
     }
   }
 
-  fileprivate var toolbarContent: some ToolbarContent {
+  var toolbarContent: some ToolbarContent {
     Group {
       ToolbarItem(id: "UserAvatar", placement: .topBarLeading) {
         HStack {
@@ -226,8 +232,8 @@ extension MainView {
 
 // MARK: - Helper Methods
 
-extension MainView {
-  fileprivate func handleLogout() {
+private extension MainView {
+  func handleLogout() {
     auth.logOut()
     do {
       try AppDatabase.clearDB()

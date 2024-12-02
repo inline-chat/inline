@@ -97,11 +97,11 @@ public extension AppDatabase {
         t.column("pinned", .boolean)
       }
     }
-    
+
     migrator.registerMigration("v2") { db in
       // Message table
       try db.alter(table: "message") { t in
-        t.add(column: "randomId", .integer)//.unique()
+        t.add(column: "randomId", .integer) // .unique()
       }
     }
 
@@ -174,14 +174,14 @@ public extension AppDatabase {
 
     // Optionally, delete the database file
     // Uncomment the next line if you want to delete the file
-    // try deleteDatabaseFile()
-    
+    try deleteDatabaseFile()
+
     log.info("Database successfully deleted.")
   }
 
   static func loggedOut() throws {
     try clearDB()
-    
+
     // Reset the database passphrase to a default value
     try AppDatabase.shared.dbWriter.write { db in
       try db.changePassphrase("123")

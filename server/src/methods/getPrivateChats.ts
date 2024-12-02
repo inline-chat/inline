@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { and, eq, inArray, not, or } from "drizzle-orm"
-import { chats, dialogs, spaces, users, type DbChat } from "@in/server/db/schema"
+import { chats, dialogs, messages, spaces, users, type DbChat } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -68,40 +68,50 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
 
   // -------------------------------------------------------------------------------------------------------------------
   // Get all private chats
-  const result = await db.query.chats.findMany({
-    where: and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))),
-    with: {
-      dialogs: { where: eq(dialogs.userId, currentUserId) },
-      lastMsg: true,
-    },
-  })
+  // const result = await db.query.chats.findMany({
+  //   where: and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))),
+  //   with: {
+  //     dialogs: { where: eq(dialogs.userId, currentUserId) },
+  //     lastMsg: true,
+  //   },
+  // })
+
+  const result = await db
+    .select()
+    .from(chats)
+    .where(and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))))
+    .leftJoin(dialogs, and(eq(chats.id, dialogs.chatId), eq(dialogs.userId, currentUserId)))
+    .leftJoin(messages, and(eq(chats.lastMsgId, messages.messageId), eq(messages.chatId, chats.id)))
+
   const peerUsers = await db
     .select()
     .from(users)
     .where(
       inArray(
         users.id,
-        [...new Set([...result.map((c) => c.minUserId), ...result.map((c) => c.maxUserId)])].filter(
+        [...new Set([...result.map((c) => c.chats.minUserId), ...result.map((c) => c.chats.maxUserId)])].filter(
           (id): id is number => id != null,
         ),
       ),
     )
 
-  const chatsEncoded = [...result].filter((c) => c != null).map((c) => encodeChatInfo(c, { currentUserId }))
+  const chatsEncoded = result
+    .map((c) => c.chats)
+    .filter((c): c is DbChat => c != null)
+    .map((c) => encodeChatInfo(c, { currentUserId }))
 
-  const dialogsEncoded = result.flatMap((c) =>
-    [...c.dialogs]
-      .filter((d) => d != null)
-      .map((d) => {
-        return encodeDialogInfo(d)
-      }),
-  )
+  const dialogsEncoded = result
+    .map((c) => c.dialogs)
+    .filter((d) => d != null)
+    .map((d) => {
+      return encodeDialogInfo(d)
+    })
   const peerUsersEncoded = peerUsers.map((u) => encodeUserInfo(u))
-  const messagesEncoded = result.flatMap((c) =>
-    [c.lastMsg ?? null]
-      .filter((m) => m != null)
-      .map((m) => encodeMessageInfo(m, { currentUserId, peerId: getPeerId(c, currentUserId) })),
-  )
+  const messagesEncoded = result
+    .map((c) =>
+      c.messages ? encodeMessageInfo(c.messages, { currentUserId, peerId: getPeerId(c.chats, currentUserId) }) : null,
+    )
+    .filter((m): m is TMessageInfo => m != null)
   return {
     chats: chatsEncoded,
     dialogs: dialogsEncoded,
