@@ -59,6 +59,14 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     lastName: nil,
     username: nil
   )
+  
+  public static let preview = Self(
+    id: -1,
+    email: "john@acme.com",
+    firstName: "John",
+    lastName: "Doe",
+    username: "jdoe"
+  )
 
   public init(
     id: Int64 = Int64.random(in: 1 ... 5000), email: String?, firstName: String?,

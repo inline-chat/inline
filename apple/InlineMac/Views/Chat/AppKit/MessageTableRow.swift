@@ -54,6 +54,7 @@ class MessageTableCell: NSTableCellView {
     // Force layout update
     layoutSubtreeIfNeeded()
   }
+
   private func updateContent(message: FullMessage, props: MessageViewProps) {
     // Your existing view update logic
   }

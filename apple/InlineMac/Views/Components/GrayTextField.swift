@@ -33,7 +33,7 @@ struct GrayTextField: View {
   var font: Font {
     switch size {
     case .small:
-      return Font.system(size: 14, weight: .regular)
+      return Font.body
     case .medium:
       return Font.system(size: 16, weight: .regular)
     case .large:
@@ -44,7 +44,7 @@ struct GrayTextField: View {
   var height: CGFloat {
     switch size {
     case .small:
-      return 28
+      return 26
     case .medium:
       return 32
     case .large:

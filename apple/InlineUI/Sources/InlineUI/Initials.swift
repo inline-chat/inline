@@ -97,7 +97,7 @@ public struct InitialsCircle: View, Equatable {
 
       .frame(width: size, height: size)
 //      .drawingGroup(opaque: true)
-      .drawingGroup()
+//      .drawingGroup()
   }
 }
 

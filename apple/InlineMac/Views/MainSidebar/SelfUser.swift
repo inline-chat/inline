@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SelfUser: View {
   @EnvironmentObject var rootData: RootData
+  @Environment(\.appearsActive) var appearsActive
 
   var currentUser: User {
     rootData.currentUser ?? defaultUser()
@@ -16,7 +17,9 @@ struct SelfUser: View {
 
       Text(currentUser.firstName ?? "You")
         .font(Theme.sidebarTopItemFont)
-        .foregroundStyle(.primary)
+        .foregroundStyle(
+          appearsActive ? .primary : .tertiary
+        )
     }
     .frame(height: Theme.sidebarTopItemHeight)
   }
@@ -29,5 +32,5 @@ struct SelfUser: View {
 #Preview {
   SelfUser()
     .frame(width: 200)
-    .previewsEnvironment(.populated)
+    .previewsEnvironmentForMac(.populated)
 }

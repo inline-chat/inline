@@ -43,6 +43,40 @@ extension View {
 }
 
 extension View {
+  func debugBackground() -> some View {
+    #if DEBUG
+      background(Color.red.opacity(0.3))
+    #else
+      self
+    #endif
+  }
+
+  func debugBackground2() -> some View {
+    #if DEBUG
+      background(Color.blue.opacity(0.3))
+    #else
+      self
+    #endif
+  }
+
+  func debugBackground3() -> some View {
+    #if DEBUG
+      background(Color.black.opacity(0.3))
+    #else
+      self
+    #endif
+  }
+
+  func debugBorder() -> some View {
+    #if DEBUG
+      overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.red, lineWidth: 1))
+    #else
+      self
+    #endif
+  }
+}
+
+extension View {
   func flippedUpsideDown() -> some View {
     scaleEffect(CGSize(width: 1.0, height: -1.0))
   }

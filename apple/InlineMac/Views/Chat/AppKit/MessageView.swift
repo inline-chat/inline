@@ -58,12 +58,6 @@ class MessageViewAppKit: NSView {
 
   // MARK: - UI Components
 
-  private lazy var avatarView: UserAvatarView = {
-    let view = UserAvatarView(frame: .zero)
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
-  
   private lazy var nameLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -173,12 +167,16 @@ class MessageViewAppKit: NSView {
 
   // MARK: - Setup
 
+  override var wantsDefaultClipping: Bool {
+    return false
+  }
+  
   private func setupView() {
-    if showsAvatar {
-      addSubview(avatarView)
-      avatarView.user = from
-    }
-    
+    // Disable clipping for this view
+    clipsToBounds = false
+    wantsLayer = true
+    layer?.masksToBounds = false
+
     if showsName {
       addSubview(nameLabel)
       nameLabel.stringValue = from.firstName ?? from.username ?? ""
@@ -196,15 +194,6 @@ class MessageViewAppKit: NSView {
     
     let topPadding = props.isFirstMessage ? Theme.messageListTopInset + Theme.messageVerticalPadding : Theme.messageVerticalPadding
     let bottomPadding = props.isLastMessage ? Theme.messageListBottomInset + Theme.messageVerticalPadding : Theme.messageVerticalPadding
-    
-    if showsAvatar {
-      NSLayoutConstraint.activate([
-        avatarView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: avatarLeading),
-        avatarView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
-        avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize),
-        avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize)
-      ])
-    }
     
     if showsName {
       NSLayoutConstraint.activate([
@@ -304,7 +293,6 @@ class CustomTextView2: NSTextView {
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
     return false
   }
-  
   
   override func hitTest(_ point: NSPoint) -> NSView? {
     // Prevent hit testing when window is inactive
