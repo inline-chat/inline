@@ -67,7 +67,7 @@ export const webSocket = new Elysia()
           let { token, userId } = message.p
           let userIdFromToken = await getUserIdFromToken(token)
           if (userIdFromToken.userId !== userId) {
-            log.warn(`userId mismatch userIdFromToken: ${userIdFromToken}, userId: ${userId}`)
+            log.warn(`userId mismatch userIdFromToken: ${userIdFromToken.userId}, userId: ${userId}`)
             throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
           }
 

@@ -5,7 +5,7 @@ import { chats } from "./chats"
 import { bigserial } from "drizzle-orm/pg-core"
 import { integer } from "drizzle-orm/pg-core"
 import { index } from "drizzle-orm/pg-core"
-import { creationDate } from "@in/server/db/schema/common"
+import { bytea, creationDate } from "@in/server/db/schema/common"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm"
 
@@ -21,7 +21,10 @@ export const messages = pgTable(
     randomId: bigint("random_id", { mode: "bigint" }),
 
     /** message raw text, optional */
-    text: text(),
+    text: text(), // @deprecated
+    textEncrypted: bytea("text_encrypted"),
+    textIv: bytea("text_iv"),
+    textTag: bytea("text_tag"),
 
     /** required, chat it belongs to */
     chatId: integer("chat_id")

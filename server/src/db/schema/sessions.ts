@@ -1,3 +1,4 @@
+import { bytea } from "@in/server/db/schema/common"
 import { users } from "@in/server/db/schema/users"
 import { integer, pgEnum, pgTable, serial, varchar, timestamp, text } from "drizzle-orm/pg-core"
 
@@ -12,14 +13,16 @@ export const sessions = pgTable("sessions", {
   revoked: timestamp({ mode: "date", precision: 3 }),
   lastActive: timestamp("last_active", { mode: "date", precision: 3 }),
 
-  // personal info
-  country: text(),
-  region: text(),
-  city: text(),
-  timezone: text(),
-  ip: text(),
-  deviceName: text(),
-  applePushToken: text(),
+  // JSON serialized object of personal data for this user such as city, country, region, timezone
+  personalDataEncrypted: bytea("personal_data_encrypted"),
+  personalDataIv: bytea("personal_data_iv"),
+  personalDataTag: bytea("personal_data_tag"),
+
+  // push notifications
+  applePushToken: text(), // @deprecated
+  applePushTokenEncrypted: bytea("apple_push_token_encrypted"),
+  applePushTokenIv: bytea("apple_push_token_iv"),
+  applePushTokenTag: bytea("apple_push_token_tag"),
 
   // client and device info
   clientType: clientTypeEnum("client_type"),

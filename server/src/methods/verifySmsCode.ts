@@ -1,4 +1,4 @@
-import { isValidPhoneNumber, validateUpToFourSegementSemver } from "@in/server/utils/validate"
+import { isValidPhoneNumber, validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
@@ -8,9 +8,10 @@ import { twilio } from "@in/server/libs/twilio"
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
-import { createSession } from "@in/server/methods/verifyEmailCode"
 import { encodeUserInfo, TUserInfo } from "@in/server/models"
 import { ipinfo } from "@in/server/libs/ipinfo"
+import { generateToken } from "@in/server/utils/auth"
+import { SessionsModel } from "@in/server/db/models/sessions"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -53,15 +54,19 @@ export const handler = async (
 
     // make session
     let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
-    let ip = requestIp ?? null
-    let country = ipInfo?.country ?? null
-    let region = ipInfo?.region ?? null
-    let city = ipInfo?.city ?? null
-    let timezone = input.timezone ?? ipInfo?.timezone ?? null
-    let clientType = input.clientType ?? null
-    let clientVersion = validateUpToFourSegementSemver(input.clientVersion ?? "") ? input.clientVersion ?? null : null
-    let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? null : null
-    let deviceName = input.deviceName ?? null
+    let ip = requestIp ?? undefined
+    let country = ipInfo?.country ?? undefined
+    let region = ipInfo?.region ?? undefined
+    let city = ipInfo?.city ?? undefined
+    let timezone = validateIanaTimezone(input.timezone ?? "")
+      ? input.timezone ?? undefined
+      : ipInfo?.timezone ?? undefined
+    let clientType = input.clientType ?? undefined
+    let clientVersion = validateUpToFourSegementSemver(input.clientVersion ?? "")
+      ? input.clientVersion ?? undefined
+      : undefined
+    let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? undefined : undefined
+
     // create or fetch user by email
     let user = await getUserByPhoneNumber(phoneNumber)
 
@@ -73,17 +78,22 @@ export const handler = async (
     let userId = user.id
 
     // save session
-    let { token } = await createSession({
+    let { token, tokenHash } = await generateToken(userId)
+
+    let _ = await SessionsModel.create({
       userId,
-      country,
-      region,
-      city,
-      timezone,
-      ip,
-      clientType,
-      clientVersion,
-      osVersion,
-      deviceName,
+      tokenHash,
+      personalData: {
+        country,
+        region,
+        city,
+        timezone,
+        deviceName: input.deviceName ?? undefined,
+        ip,
+      },
+      clientType: clientType ?? "web",
+      clientVersion: clientVersion ?? undefined,
+      osVersion: osVersion ?? undefined,
     })
 
     return { userId: userId, token: token, user: encodeUserInfo(user) }

@@ -6,6 +6,8 @@ import {
   type DbMessage,
   type DbDialog,
 } from "@in/server/db/schema"
+import { decryptMessage } from "@in/server/utils/encryption/encryptMessage"
+import { Log } from "@in/server/utils/log"
 import { Type, type TSchema, type StaticEncode } from "@sinclair/typebox"
 import { Value } from "@sinclair/typebox/value"
 
@@ -172,24 +174,37 @@ export const encodeMessageInfo = (
   message: DbMessage,
   context: { currentUserId: number; peerId: StaticEncode<typeof TPeerInfo> },
 ): TMessageInfo => {
-  const errors = Value.Errors(TMessageInfo, {
-    ...message,
-    id: message.messageId,
-    out: message.fromId === context.currentUserId,
-    date: encodeDate(message.date),
-    editDate: message.editDate ? encodeDate(message.editDate) : null,
-    peerId: context.peerId,
-    chatId: message.chatId,
-    mentioned: false,
-    pinned: false,
-  })
-  for (const error of errors) {
-    console.log("Errors", error)
+  // const errors = Value.Errors(TMessageInfo, {
+  //   ...message,
+  //   id: message.messageId,
+  //   out: message.fromId === context.currentUserId,
+  //   date: encodeDate(message.date),
+  //   editDate: message.editDate ? encodeDate(message.editDate) : null,
+  //   peerId: context.peerId,
+  //   chatId: message.chatId,
+  //   mentioned: false,
+  //   pinned: false,
+  // })
+  // for (const error of errors) {
+  //   Log.shared.error("Errors", error)
+  // }
+
+  // Decrypt text if it exists
+  let text = message.text ? message.text : null
+  if (message.textEncrypted && message.textIv && message.textTag) {
+    const decryptedText = decryptMessage({
+      encrypted: message.textEncrypted,
+      iv: message.textIv,
+      authTag: message.textTag,
+    })
+    text = decryptedText
   }
+
   return Value.Encode(
     TMessageInfo,
     Value.Clean(TMessageInfo, {
       ...message,
+      text,
       id: message.messageId,
       out: message.fromId === context.currentUserId,
       date: encodeDate(message.date),

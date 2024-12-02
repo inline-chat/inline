@@ -11,6 +11,7 @@ import { type Static, Type } from "@sinclair/typebox"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/v1/helpers"
 import { encodeUserInfo, TUserInfo } from "@in/server/models"
 import { ipinfo } from "@in/server/libs/ipinfo"
+import { SessionsModel } from "@in/server/db/models/sessions"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -57,14 +58,18 @@ export const handler = async (
 
     // make session
     let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
-    let ip = requestIp ?? null
-    let country = ipInfo?.country ?? null
-    let region = ipInfo?.region ?? null
-    let city = ipInfo?.city ?? null
-    let timezone = validateIanaTimezone(input.timezone ?? "") ? input.timezone ?? null : ipInfo?.timezone ?? null
-    let clientType = input.clientType ?? null
-    let clientVersion = validateUpToFourSegementSemver(input.clientVersion ?? "") ? input.clientVersion ?? null : null
-    let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? null : null
+    let ip = requestIp ?? undefined
+    let country = ipInfo?.country ?? undefined
+    let region = ipInfo?.region ?? undefined
+    let city = ipInfo?.city ?? undefined
+    let timezone = validateIanaTimezone(input.timezone ?? "")
+      ? input.timezone ?? undefined
+      : ipInfo?.timezone ?? undefined
+    let clientType = input.clientType ?? undefined
+    let clientVersion = validateUpToFourSegementSemver(input.clientVersion ?? "")
+      ? input.clientVersion ?? undefined
+      : undefined
+    let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? undefined : undefined
 
     // create or fetch user by email
     let user = await getUserByEmail(email)
@@ -76,17 +81,23 @@ export const handler = async (
     let userId = user.id
 
     // save session
-    let { token } = await createSession({
+    // store sha256 of token in db
+    let { token, tokenHash } = await generateToken(userId)
+
+    let _ = await SessionsModel.create({
       userId,
-      ip,
-      country,
-      region,
-      city,
-      timezone,
-      clientType,
-      clientVersion: clientVersion ?? null,
-      osVersion: osVersion ?? null,
-      deviceName: input.deviceName ?? null,
+      tokenHash,
+      personalData: {
+        country,
+        region,
+        city,
+        timezone,
+        deviceName: input.deviceName ?? undefined,
+        ip,
+      },
+      clientType: clientType ?? "web",
+      clientVersion: clientVersion ?? undefined,
+      osVersion: osVersion ?? undefined,
     })
 
     return { userId: userId, token: token, user: encodeUserInfo(user) }
@@ -155,24 +166,4 @@ const getUserByEmail = async (email: string) => {
   }
 
   return user
-}
-
-export const createSession = async ({
-  userId,
-  ...session
-}: {
-  userId: number
-} & Omit<DbNewSession, "tokenHash">): Promise<{ token: string }> => {
-  // store sha256 of token in db
-  let { token, tokenHash } = await generateToken(userId)
-
-  // store session
-  await db.insert(sessions).values({
-    userId,
-    ...session,
-    tokenHash,
-    date: new Date(),
-  })
-
-  return { token }
 }

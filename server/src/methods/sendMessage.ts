@@ -11,23 +11,21 @@ import { getUpdateGroup } from "@in/server/utils/updates"
 import * as APN from "apn"
 import type { HandlerContext } from "../controllers/v1/helpers"
 import { apnProvider } from "../libs/apn"
+import { SessionsModel } from "@in/server/db/models/sessions"
+import { encryptMessage } from "@in/server/utils/encryption/encryptMessage"
+import { TInputId } from "@in/server/types/methods"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
   text: Type.String(),
 
-  peerUserId: Optional(Type.String()),
-  peerThreadId: Optional(Type.String()),
+  peerUserId: Optional(TInputId),
+  peerThreadId: Optional(TInputId),
 
   randomId: Optional(Type.String()), // string but it's int64
 })
 
 type Input = Static<typeof Input>
-
-// type Context = {
-//   currentUserId: number
-//   currentSessionId: number
-// }
 
 export const Response = Type.Object({
   message: TMessageInfo,
@@ -51,21 +49,29 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   // Get or validate chat ID from peer info
   const chatId = await getChatIdFromPeer(peerId, context)
 
-  // Get the last message ID for this chat to maintain sequence
-  const prevMessageId = await db
-    .select({ messageId: sql<number>`MAX(${messages.messageId})` })
-    .from(messages)
-    .where(eq(messages.chatId, chatId))
-    .then(([result]) => result?.messageId ?? 0)
+  // Encrypt
+  const encryptedText = await encryptMessage(input.text)
 
-  // Insert the new message
+  // Insert new message with nested select for messageId sequence
   const [newMessage] = await db
     .insert(messages)
     .values({
       chatId: chatId,
-      text: input.text,
       fromId: context.currentUserId,
-      messageId: prevMessageId + 1,
+
+      // Encrypted text
+      text: null,
+      textEncrypted: encryptedText.encrypted,
+      textIv: encryptedText.iv,
+      textTag: encryptedText.authTag,
+
+      // Calculate messageId
+      messageId: sql<number>`COALESCE((
+        SELECT MAX(${messages.messageId}) 
+        FROM ${messages}
+        WHERE ${messages.chatId} = ${chatId}
+      ), 0) + 1`,
+
       randomId: randomId ?? null,
       date: new Date(),
     })
@@ -76,11 +82,9 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 
-  // Update the chat's last message ID
-  await db
-    .update(chats)
-    .set({ lastMsgId: prevMessageId + 1 })
-    .where(eq(chats.id, chatId))
+  let newMessageId = newMessage.messageId
+
+  await updateLastMessageId(chatId, newMessageId)
 
   try {
     const encodedMessage = encodeMessageInfo(newMessage, {
@@ -100,12 +104,14 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       .where(eq(users.id, context.currentUserId))
       .then(([user]) => user?.firstName ?? user?.username ?? "New Message")
 
-    sendPushNotification({
-      userId: Number(input.peerUserId) ?? 0,
-      title: title,
-      message: input.text,
-      currentUserId: context.currentUserId,
-    })
+    if (input.peerUserId) {
+      sendPushNotificationToUser({
+        userId: Number(input.peerUserId),
+        title,
+        message: input.text,
+        currentUserId: context.currentUserId,
+      })
+    }
 
     return { message: encodedMessage }
   } catch (encodeError) {
@@ -217,7 +223,7 @@ const sendMessageUpdate = async ({
   }
 }
 
-const sendPushNotification = async ({
+const sendPushNotificationToUser = async ({
   userId,
   title,
   message,
@@ -230,7 +236,7 @@ const sendPushNotification = async ({
 }) => {
   try {
     // Get all sessions for the user
-    const userSessions = await db.select().from(sessions).where(eq(sessions.userId, userId))
+    const userSessions = await SessionsModel.getActiveSessionsByUserId(userId)
 
     if (!userSessions.length) {
       Log.shared.debug("No active sessions found for user", { userId })
@@ -253,6 +259,7 @@ const sendPushNotification = async ({
 
     for (const session of userSessions) {
       if (!session.applePushToken) continue
+
       try {
         const result = await apnProvider.send(notification, session.applePushToken)
         if (result.failed.length > 0) {
@@ -278,4 +285,9 @@ const sendPushNotification = async ({
       userId,
     })
   }
+}
+
+// Update the chat's last message ID
+async function updateLastMessageId(chatId: number, messageId: number) {
+  await db.update(chats).set({ lastMsgId: messageId }).where(eq(chats.id, chatId))
 }

@@ -69,6 +69,24 @@ export class InlineError extends Error {
   }
 
   public static ApiError = ApiError
+
+  public asApiResponse() {
+    let error = ApiError[this.type]
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: error[0],
+        errorCode: error[1],
+        description: this.description,
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+        status: error[1],
+      },
+    )
+  }
 }
 
 /** @deprecated */
