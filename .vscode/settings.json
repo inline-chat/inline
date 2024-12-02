@@ -18,5 +18,6 @@
     "stylex",
     "stylexjs",
     "typebox"
-  ]
+  ],
+  "typescript.tsdk": "node_modules/typescript/lib"
 }
