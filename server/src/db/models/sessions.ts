@@ -213,6 +213,7 @@ export class SessionsModel {
   private static decryptApplePushToken(session: DbSession): string | null {
     try {
       if (!session.applePushTokenEncrypted || !session.applePushTokenIv || !session.applePushTokenTag) {
+        if (session.applePushToken) return session.applePushToken
         return null
       }
 
