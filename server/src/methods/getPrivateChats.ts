@@ -71,7 +71,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
   const result = await db.query.chats.findMany({
     where: and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))),
     with: {
-      dialogs: true,
+      dialogs: { where: eq(dialogs.userId, currentUserId) },
       lastMsg: true,
     },
   })
@@ -87,11 +87,14 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
       ),
     )
 
-  const chatsEncoded = [selfChat ?? null, ...result]
-    .filter((c) => c != null)
-    .map((c) => encodeChatInfo(c, { currentUserId }))
+  const chatsEncoded = [...result].filter((c) => c != null).map((c) => encodeChatInfo(c, { currentUserId }))
+
   const dialogsEncoded = result.flatMap((c) =>
-    [selfChatDialog ?? null, ...c.dialogs].filter((d) => d != null).map((d) => encodeDialogInfo(d)),
+    [...c.dialogs]
+      .filter((d) => d != null)
+      .map((d) => {
+        return encodeDialogInfo(d)
+      }),
   )
   const peerUsersEncoded = peerUsers.map((u) => encodeUserInfo(u))
   const messagesEncoded = result.flatMap((c) =>
