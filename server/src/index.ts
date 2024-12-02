@@ -22,7 +22,11 @@ const port = process.env["PORT"] || 8000
 
 // Ensure to call this before importing any other modules!
 
-console.log(`🚧 Starting server... (${process.env.NODE_ENV}, ${version}, ${gitCommitHash})`)
+if (process.env.NODE_ENV === "development") {
+  console.log(`🚧 Starting server in development mode...`)
+} else {
+  console.log(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
+}
 
 const app = new Elysia()
   .use(root)
@@ -56,11 +60,6 @@ const app = new Elysia()
       },
     }),
   )
-// .onError({ as: "local" }, ({ code, error }) => {
-//   if (code === "NOT_FOUND") return "404"
-//   console.error("error:", error)
-//   Log.shared.error("Top level error " + code, error)
-// })
 
 // Run
 app.listen(port, (server) => {
