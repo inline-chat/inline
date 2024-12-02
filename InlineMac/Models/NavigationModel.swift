@@ -35,6 +35,10 @@ class NavigationModel: ObservableObject {
   @Published var homeSelection: NavigationRoute = .homeRoot
   @Published var activeSpaceId: Int64?
 
+  var currentHomeRoute: NavigationRoute {
+    homePath.last ?? homeSelection
+  }
+
   @Published private var spacePathDict: [Int64: [NavigationRoute]] = [:]
   @Published private var spaceSelectionDict: [Int64: NavigationRoute] = [:]
 
@@ -84,20 +88,20 @@ class NavigationModel: ObservableObject {
 
   init() {
     setupSubscriptions()
-
-  
   }
 
   private func setupSubscriptions() {
     $activeSpaceId
       .sink { [weak self] newValue in
         guard let self, let spaceId = newValue else { return }
+        guard let w = self.windowManager, w.topLevelRoute == .main else { return }
         self.windowManager?.setUpForInnerRoute(self.spaceSelectionDict[spaceId] ?? .spaceRoot)
       }
       .store(in: &cancellables)
-    
+
     $homePath.sink { [weak self] newValue in
       guard let self = self else { return }
+      guard let w = self.windowManager, w.topLevelRoute == .main else { return }
       self.windowManager?.setUpForInnerRoute(newValue.last ?? self.homeSelection)
     }.store(in: &cancellables)
   }
@@ -109,6 +113,7 @@ class NavigationModel: ObservableObject {
       windowManager?.setUpForInnerRoute(route)
     } else {
       homeSelection = route
+      homePath.removeAll()
       windowManager?.setUpForInnerRoute(route)
     }
   }

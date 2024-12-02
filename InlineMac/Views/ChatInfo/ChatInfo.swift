@@ -39,7 +39,6 @@ struct ChatInfo: View {
           }
         }
         .formStyle(.grouped)
-        //      .clipShape(.rect(cornerRadius: 12.0))
       }
     }
     .frame(maxHeight: .infinity, alignment: .top) // This ensures top alignment
