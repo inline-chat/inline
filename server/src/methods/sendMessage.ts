@@ -50,7 +50,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   const chatId = await getChatIdFromPeer(peerId, context)
 
   // Encrypt
-  const encryptedText = await encryptMessage(input.text)
+  const encryptedText = encryptMessage(input.text)
 
   // Insert new message with nested select for messageId sequence
   const [newMessage] = await db
@@ -215,9 +215,11 @@ const sendMessageUpdate = async ({
         },
       }
 
+      const updates = userId === currentUserId ? [updateMessageId, update] : [update]
+
       connectionManager.sendToUser(
         userId,
-        createMessage({ kind: ServerMessageKind.Message, payload: { updates: [update] } }),
+        createMessage({ kind: ServerMessageKind.Message, payload: { updates: updates } }),
       )
     })
   }
