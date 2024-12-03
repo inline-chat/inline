@@ -64,9 +64,5 @@ class MessageTableCell: NSTableCellView {
     currentContent = nil
     // Clear any other state
   }
-//  // Add prepareForReuse to reset state if needed
-//  override func prepareForReuse() {
-//    // Reset any temporary state
-//    super.prepareForReuse()
-//  }
+
 }

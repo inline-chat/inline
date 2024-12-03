@@ -2,6 +2,9 @@ import AppKit
 import Foundation
 import InlineKit
 
+// Known issues:
+// 1. trailing and leading new lines are not calculated properly
+
 class MessageSizeCalculator {
   private let textStorage: NSTextStorage
   private let layoutManager: NSLayoutManager
@@ -69,7 +72,7 @@ class MessageSizeCalculator {
     MessageTextConfiguration.configureTextContainer(textContainer)
     
     let attributedString = NSAttributedString(
-      string: text,
+      string: text.trimmingCharacters(in: .whitespacesAndNewlines),
       attributes: [.font: MessageTextConfiguration.font]
     )
     textStorage.setAttributedString(attributedString)

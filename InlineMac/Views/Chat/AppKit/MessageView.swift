@@ -167,15 +167,8 @@ class MessageViewAppKit: NSView {
 
   // MARK: - Setup
 
-  override var wantsDefaultClipping: Bool {
-    return false
-  }
-  
   private func setupView() {
-    // Disable clipping for this view
-    clipsToBounds = false
     wantsLayer = true
-    layer?.masksToBounds = false
 
     if showsName {
       addSubview(nameLabel)
@@ -235,7 +228,8 @@ class MessageViewAppKit: NSView {
     
     // Create mutable attributed string
     let attributedString = NSMutableAttributedString(
-      string: text,
+      // Trim to avoid known issue with size calculator
+      string: text.trimmingCharacters(in: .whitespacesAndNewlines),
       attributes: [
         .font: MessageTextConfiguration.font,
         .foregroundColor: NSColor.labelColor
