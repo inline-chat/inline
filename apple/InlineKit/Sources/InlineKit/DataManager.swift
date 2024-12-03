@@ -419,7 +419,6 @@ public class DataManager: ObservableObject {
       peerThreadId: finalPeerThreadId
     )
 
-    print("getChatHistory result: \(result)")
     let messages: [Message] = try await database.dbWriter.write { db in
       let messages = result.messages.map { Message(from: $0) }
       try messages.forEach { message in
