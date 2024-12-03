@@ -34,17 +34,27 @@ class AvatarOverlayView: NSView {
   }
   
   private func createAvatarView(for user: User) -> UserAvatarView {
+    NSAnimationContext.beginGrouping()
+    NSAnimationContext.current.duration = 0
+    
     let avatarView = UserAvatarView(frame: .zero)
     avatarView.wantsLayer = true
     avatarView.layer?.zPosition = 100
     avatarView.user = user
     addSubview(avatarView)
+    
+    NSAnimationContext.endGrouping()
     return avatarView
   }
   
   func removeAvatar(for row: Int) {
+    NSAnimationContext.beginGrouping()
+    NSAnimationContext.current.duration = 0
+    
     avatarViews[row]?.removeFromSuperview()
     avatarViews.removeValue(forKey: row)
+    
+    NSAnimationContext.endGrouping()
   }
   
   func clearAvatars() {
