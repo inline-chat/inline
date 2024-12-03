@@ -182,8 +182,8 @@ struct MessagesCollectionView: UIViewRepresentable {
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
-            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-            visibleIndexPaths.item < fullMessages.count
+        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+        visibleIndexPaths.item < fullMessages.count
       else {
         scrollAnchor = nil
         return
@@ -202,7 +202,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
-            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
       else {
         return
       }
@@ -278,7 +278,7 @@ struct MessagesCollectionView: UIViewRepresentable {
       guard indexPath.item < fullMessages.count else { return false }
 
       let currentMessage = fullMessages[indexPath.item]
-      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
+      let previousIndex = indexPath.item + 1  // Note: +1 because messages are reversed
 
       // If this is the first message in a group from the same sender,
       // check if the previous message was from a different sender
@@ -355,7 +355,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
   {
     guard
       let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-      as? UICollectionViewLayoutAttributes
+        as? UICollectionViewLayoutAttributes
     else {
       return nil
     }

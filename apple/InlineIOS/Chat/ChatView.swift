@@ -175,22 +175,22 @@ extension ChatView {
 
   @ViewBuilder
   var sendButton: some View {
-    if !text.isEmpty {
-      Button {
-        sendMessage()
-      } label: {
-        Image(systemName: "paperplane.fill")
-          .resizable()
-          .scaledToFit()
-          .foregroundStyle(.white)
-      }
-      .buttonStyle(
-        CircleButtonStyle(
-          size: 30,
-          backgroundColor: .accentColor
-        )
-      )
+    //    if !text.isEmpty {
+    Button {
+      sendMessage()
+    } label: {
+      Image(systemName: "paperplane.fill")
+        .resizable()
+        .scaledToFit()
+        .foregroundStyle(.white)
     }
+    .buttonStyle(
+      CircleButtonStyle(
+        size: 30,
+        backgroundColor: text.isEmpty ? .clear : .accentColor
+      )
+    )
+    //    }
   }
 }
 
@@ -225,7 +225,18 @@ struct CircleButtonStyle: ButtonStyle {
         Circle()
           .fill(backgroundColor)
       )
-      .scaleEffect(configuration.isPressed ? 0.85 : 1.0)
-      .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+      .scaleEffect(configuration.isPressed ? 0.8 : 1.0)
+      .animation(
+        .spring(
+          response: 0.3,
+          dampingFraction: 0.6,
+          blendDuration: 0
+        ),
+        value: configuration.isPressed
+      )
+      .animation(
+        .easeOut(duration: 0.15),
+        value: backgroundColor
+      )
   }
 }
