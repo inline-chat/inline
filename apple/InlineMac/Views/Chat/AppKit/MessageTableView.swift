@@ -13,7 +13,6 @@ class MessagesTableView: NSViewController {
 
   private var pendingMessages: [FullMessage] = []
   private let sizeCalculator = MessageSizeCalculator()
-//  private var sizeCache = NSCache<NSString, NSValue>()
 
   private let defaultRowHeight = 44.0
   
@@ -35,9 +34,7 @@ class MessagesTableView: NSViewController {
     table.rowSizeStyle = .custom
     table.selectionHighlightStyle = .none
     table.intercellSpacing = NSSize(width: 0, height: 0)
-    // Add content insets
   
-//    table.usesAutomaticRowHeights = true
     table.usesAutomaticRowHeights = false
     table.rowHeight = defaultRowHeight
     table.layer?.backgroundColor = .clear
@@ -48,19 +45,14 @@ class MessagesTableView: NSViewController {
 
     table.addTableColumn(column)
     
-    // Important: Enable automatic resizing
+    // Enable automatic resizing
     table.autoresizingMask = [.height]
-//    table.autoresizingMask = [.width, .height]
     table.delegate = self
     table.dataSource = self
-    
-//    table.backgroundColor = .init(red: 0, green: 0, blue: 0, alpha: 0.3)
-
-    // too expenstive on inital render
-//    table.style = .fullWidth
+  
     table.wantsLayer = true
     table.layer?.backgroundColor = .clear
-    // Use layer-backing for better performance
+    // This helps with running listeners on every frame
     table.layerContentsRedrawPolicy = .onSetNeedsDisplay
     return table
   }()
@@ -82,22 +74,6 @@ class MessagesTableView: NSViewController {
     scroll.layerContentsRedrawPolicy = .onSetNeedsDisplay
     scroll.translatesAutoresizingMaskIntoConstraints = false
     scroll.documentView = tableView
-
-    // Add bottom spacing
-//    scroll.automaticallyAdjustsContentInsets = false
-//    scroll.contentInsets = NSEdgeInsets(
-//      top: 0,
-//      left: 0,
-//      bottom: Theme.messageListBottomInset,
-//      right: 0
-//    )
-//    scroll.scrollerInsets = NSEdgeInsets(
-//      top: 0,
-//      left: 0,
-//      bottom: -Theme.messageListBottomInset,
-//      right: 0
-//    )
-    
     scroll.hasVerticalScroller = true
     scroll.scrollerStyle = .overlay
     scroll.verticalScrollElasticity = .allowed
@@ -138,7 +114,6 @@ class MessagesTableView: NSViewController {
 
   private func scrollToBottom(animated: Bool) {
     guard messages.count > 0 else { return }
-    print("scroll to bottom")
     
     let lastRow = messages.count - 1
     
@@ -205,28 +180,15 @@ class MessagesTableView: NSViewController {
     let contentSize = scrollView.documentView?.frame.size ?? .zero
     let maxScrollableHeight = contentSize.height + Theme.messageListBottomInset - viewportSize.height
     let currentScrollOffset = scrollOffset.y
-    print("🔍 Scroll offset: \(currentScrollOffset), max: \(maxScrollableHeight)")
+    
+    // Update scroll position
     isAtBottom = abs(currentScrollOffset - maxScrollableHeight) <= 10.0
     
-//    if let nearset = getNearestAvatarItemIndex() {
-//      let offsetFromTop = getOffsetFromTopEdge(ofRow: nearset, currentOffset: currentScrollOffset)
-//      let message = messages[nearset]
-//
-//      if let view = tableView.view(atColumn: 0, row: nearset, makeIfNecessary: false) {
-//        avatarOverlayView.updateAvatar(
-//          for: nearset,
-//          user: message.user ?? User.deletedInstance,
-//          yOffset: max(0, -offsetFromTop)
-//        )
-//      }
-//      print("🔍 Nearest avatar item: \(offsetFromTop) \(nearset) \(messages[nearset].message.text)")
-//    }
+    // Update avatars as user scrolls
     updateAvatars()
   }
   
-  var avatarOverlay: AvatarOverlayView {
-    avatarOverlayView
-  }
+  var avatarOverlay: AvatarOverlayView { avatarOverlayView }
   
   private func updateAvatars() {
     let visibleRect = tableView.visibleRect
@@ -236,14 +198,25 @@ class MessagesTableView: NSViewController {
     let scrollView = tableView.enclosingScrollView!
     let currentOffset = scrollView.contentView.bounds.origin.y
     let viewportHeight = scrollView.contentView.bounds.height
-    let topInset = Theme.messageListTopInset
     let stickyPadding: CGFloat = 8.0
  
     var processedRows = Set<Int>()
     
+    // utils
+    func avatarPadding(at row: Int) -> CGFloat {
+      return row == 0 ?
+        Theme.messageListTopInset + Theme.messageVerticalPadding :
+        Theme.messageVerticalPadding
+    }
+    
+    func avatarNaturalPosition(at row: Int) -> CGFloat {
+      return viewportHeight - (tableView.rect(ofRow: row).minY - currentOffset) - AvatarOverlayView.size - avatarPadding(at: row)
+    }
+    
     // Find sticky avatars
     var stickyRow: Int? = nil
     var upcomingSticky: Int? = nil
+    
     // sticky out of bound
     for row in (0...Int(visibleRange.location)).reversed() {
       if isFirstInGroup(at: row) {
@@ -251,8 +224,8 @@ class MessagesTableView: NSViewController {
         break
       }
     }
-    print("visibleRange \(visibleRange)")
-    // top most avatar
+   
+    // top most avatar below sticky
     for row in Int(visibleRange.location) ..< Int(visibleRange.location + visibleRange.length) {
       // skip current sticky
       if isFirstInGroup(at: row) && row != stickyRow {
@@ -260,8 +233,6 @@ class MessagesTableView: NSViewController {
         break
       }
     }
-    
-    print("🔍 Sticky: \(stickyRow) \(upcomingSticky)")
     
     // Get visible avatar rows
     let visibleAvatarRows = (Int(visibleRange.location)...Int(visibleRange.location + visibleRange.length))
@@ -272,62 +243,60 @@ class MessagesTableView: NSViewController {
     // Handle sticky avatar
     if let primaryStickyRow = stickyRow {
       let message = messages[primaryStickyRow]
-      let rowRect = tableView.rect(ofRow: primaryStickyRow)
-      let stickyAvatarPadding = primaryStickyRow == 0 ?
-        Theme.messageListTopInset + Theme.messageVerticalPadding :
-        Theme.messageVerticalPadding
       
       // Calculate the natural position where avatar would be without any constraints
-      let naturalPosition = viewportHeight - (rowRect.minY - currentOffset) - AvatarOverlayView.size - stickyAvatarPadding
-      let stickyPosition = min(naturalPosition, viewportHeight - AvatarOverlayView.size - stickyAvatarPadding)
-      // Find the first visible avatar below the sticky one
+      let naturalPosition = avatarNaturalPosition(at: primaryStickyRow)
+      
+      // Min it with the viewport height - avatar size - padding so it doesn't go out of bounds of screen
+      let stickyPosition = min(naturalPosition, viewportHeight - AvatarOverlayView.size - stickyPadding)
+      
+      // Find the first visible avatar below the sticky one, we need it so it pushes the sticky avatar up as it's about to overlap
       if let nextVisibleRow = upcomingSticky,
          // when fully overlap, ignore
          nextVisibleRow != primaryStickyRow
       {
-        let nextRowRect = tableView.rect(ofRow: nextVisibleRow)
-        let nextAvatarPadding = nextVisibleRow == 0 ?
-          Theme.messageListTopInset + Theme.messageVerticalPadding :
-          Theme.messageVerticalPadding
-        let nextAvatarPosition = viewportHeight - (nextRowRect.minY - currentOffset) - nextAvatarPadding
+        let nextAvatarPosition = avatarNaturalPosition(at: nextVisibleRow)
+        // so it doesn't go above sticky padding immediately before becoming sticky and causing jump
+        let nextAvatarPositionWithPadding = min(nextAvatarPosition, viewportHeight - AvatarOverlayView.size - stickyPadding)
         
         // Calculate the maximum allowed position (just above the next avatar)
-        let maxAllowedPosition = nextAvatarPosition + stickyAvatarPadding
+        let maxAllowedPosition = nextAvatarPosition + AvatarOverlayView.size + stickyPadding
         
-        print("🔍 Sticky avatar: position = \(stickyPosition)")
-        print("🔍 Upcoming avatar: position = \(nextAvatarPosition)")
-        print("🔍 maxAllowedPosition = \(maxAllowedPosition)")
         // Use the higher position (more towards top of screen) between natural and pushed
-        let finalPosition = max(stickyPosition, maxAllowedPosition)
+        let stickyPositionWhenPushed = max(stickyPosition, maxAllowedPosition)
         
         avatarOverlay.updateAvatar(
           for: primaryStickyRow,
           user: message.user ?? User.deletedInstance,
-          yOffset: finalPosition
+          yOffset: stickyPositionWhenPushed
         )
+        
+        avatarOverlay.updateAvatar(
+          for: nextVisibleRow,
+          user: messages[nextVisibleRow].user ?? User.deletedInstance,
+          yOffset: nextAvatarPositionWithPadding
+        )
+        
+        processedRows.insert(nextVisibleRow)
+        processedRows.insert(primaryStickyRow)
       } else {
         // No avatar below to push against, use natural position
         avatarOverlay.updateAvatar(
           for: primaryStickyRow,
           user: message.user ?? User.deletedInstance,
-          yOffset: min(naturalPosition, viewportHeight - AvatarOverlayView.size - stickyAvatarPadding)
+          yOffset: stickyPosition
         )
+        
+        processedRows.insert(primaryStickyRow)
       }
-      
-      processedRows.insert(primaryStickyRow)
     }
     
     // Update remaining visible avatars
     for row in visibleAvatarRows {
       if processedRows.contains(row) { continue }
       
-      let avatarPadding = row == 0 ?
-        Theme.messageListTopInset + Theme.messageVerticalPadding :
-        Theme.messageVerticalPadding
-      
       let message = messages[row]
-      let rowRect = tableView.rect(ofRow: row)
-      let yPosition = viewportHeight - (rowRect.minY - currentOffset) - AvatarOverlayView.size - avatarPadding
+      let yPosition = avatarNaturalPosition(at: row)
       
       avatarOverlay.updateAvatar(
         for: row,
