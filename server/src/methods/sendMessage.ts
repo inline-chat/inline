@@ -281,8 +281,9 @@ const sendPushNotificationToUser = async ({
         session.clientType === "macos"
           ? isProd
             ? "chat.inline.InlineMac"
-            : "chat.inline.InlineMac.debug"
-          : "chat.inline.InlineIOS"
+            : "chat.inline.InlineMac"
+          : // : "chat.inline.InlineMac.debug"
+            "chat.inline.InlineIOS"
 
       // Configure notification
       const notification = new APN.Notification()
@@ -295,6 +296,7 @@ const sendPushNotificationToUser = async ({
           email: currentUser.email,
         },
       }
+      notification.contentAvailable = true
       notification.mutableContent = true
       notification.threadId = `chat_${chatId}`
       notification.topic = topic
@@ -303,6 +305,7 @@ const sendPushNotificationToUser = async ({
         body: message,
       }
       notification.sound = "default"
+      console.log("notification.rawPayload", notification)
 
       try {
         const result = await apnProvider.send(notification, session.applePushToken)
