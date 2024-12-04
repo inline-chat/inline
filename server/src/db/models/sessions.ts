@@ -1,7 +1,7 @@
 // Note:Mostly AI generated
 
-import { eq } from "drizzle-orm"
-import { sessions, type DbSession, type DbNewSession } from "@in/server/db/schema/sessions"
+import { and, eq, isNull } from "drizzle-orm"
+import { sessions, type DbSession, type DbNewSession, sessions, sessions } from "@in/server/db/schema/sessions"
 import { encrypt, decrypt, type EncryptedData } from "@in/server/utils/encryption/encryption"
 import { db } from "@in/server/db"
 
@@ -235,12 +235,13 @@ export class SessionsModel {
     }
 
     try {
-      const sessions = await db.query.sessions.findMany({
-        where: (sessions, { eq, isNull, and }) => and(eq(sessions.userId, userId), isNull(sessions.revoked)),
-      })
+      const sessions_ = await db
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.userId, userId), isNull(sessions.revoked)))
 
       // Validate sessions
-      const validSessions = sessions.filter((session) => session.revoked === null && session.userId === userId)
+      const validSessions = sessions_.filter((session) => session.revoked === null && session.userId === userId)
 
       return validSessions.map((session) => this.decryptSessionData(session))
     } catch (error) {
