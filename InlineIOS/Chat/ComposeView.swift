@@ -21,6 +21,7 @@ struct ComposeView: View {
         Text("Write a message")
           .foregroundStyle(.tertiary)
           .padding(.leading, 6)
+          .padding(.vertical, 6)
           .allowsHitTesting(false)
           .transition(
             .asymmetric(

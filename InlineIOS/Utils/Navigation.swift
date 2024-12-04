@@ -34,11 +34,13 @@ class Navigation: ObservableObject, @unchecked Sendable {
   }
 
   // MARK: - Published Properties
+
   @Published private var navigationPath = NavigationPath()
   @Published var activeSheet: Destination?
   @Published var activeDestination: Destination?
 
   // MARK: - Computed Properties
+
   var currentStack: NavigationPath {
     navigationPath
   }
@@ -51,6 +53,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
   }
 
   // MARK: - Navigation Actions
+
   func push(_ destination: Destination) {
     switch destination {
     case .chat:
