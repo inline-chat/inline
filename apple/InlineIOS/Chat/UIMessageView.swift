@@ -93,7 +93,7 @@ class UIMessageView: UIView {
 
     if fullMessage.message.out == true {
       messageLabel.textColor = .white
-      bubbleView.backgroundColor = .systemBlue
+      bubbleView.backgroundColor = .tintColor
 
       // Right aligned
       bubbleView.leadingAnchor.constraint(

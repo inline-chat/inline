@@ -24,21 +24,25 @@ struct ChatView: View {
   // MARK: - Body
 
   var body: some View {
-    VStack(spacing: 0) {
+    ZStack(alignment: .bottom) {
       chatMessages
-    }
-    .safeAreaInset(edge: .bottom) {
       inputArea
+        .overlay(alignment: .top) {
+          Divider()
+        }
     }
+
     .toolbar {
       ToolbarItem(placement: .principal) {
         Text(title)
-          .font(.title3)
+          .font(.body)
           .fontWeight(.semibold)
       }
     }
     .navigationBarHidden(false)
     .toolbarRole(.editor)
+    .toolbarBackground(.visible, for: .navigationBar)
+    .toolbarTitleDisplayMode(.inline)
     .onAppear {
       fetchMessages()
     }
@@ -160,62 +164,62 @@ extension ChatView {
   private var inputArea: some View {
     HStack {
       ComposeView(messageText: $text)
-
       sendButton
     }
-
     .padding(.vertical, 6)
     .padding(.horizontal)
-    .overlay(alignment: .top) {
-      Divider()
-        .padding(.top, -8)
-    }
-    .background(Color(.systemBackground))
+    .background(
+      Color(.systemBackground)
+        .opacity(0.55)
+        .background(.thinMaterial)
+        .edgesIgnoringSafeArea(.bottom)
+    )
   }
 
   @ViewBuilder
   var sendButton: some View {
-    //    if !text.isEmpty {
-    Button {
-      sendMessage()
-    } label: {
-      Image(systemName: "paperplane.fill")
-        .resizable()
-        .scaledToFit()
-        .foregroundStyle(.white)
-    }
-    .buttonStyle(
-      CircleButtonStyle(
-        size: 30,
-        backgroundColor: text.isEmpty ? .clear : .accentColor
+    if !text.isEmpty {
+      Button {
+        sendMessage()
+      } label: {
+        Image(systemName: "paperplane.fill")
+          .resizable()
+          .scaledToFit()
+          .foregroundStyle(.white)
+      }
+      .buttonStyle(
+        CircleButtonStyle(
+          size: 30,
+          backgroundColor: .accentColor
+        )
       )
-    )
-    //    }
+      .transition(
+        .asymmetric(
+          insertion: .scale.combined(with: .opacity)
+            .animation(
+              .spring(
+                response: 0.35,
+                dampingFraction: 0.5,
+                blendDuration: 0
+              )
+            ),
+          removal: .scale.combined(with: .opacity)
+            .animation(
+              .spring(
+                response: 0.25,
+                dampingFraction: 0.5,
+                blendDuration: 0
+              )
+            )
+        )
+      )
+    }
   }
 }
-
-// struct SendButtonStyle: ButtonStyle {
-//   func makeBody(configuration: Configuration) -> some View {
-//     configuration.label
-//       .scaleEffect(configuration.isPressed ? 0.80 : 1)
-//       .animation(.easeInOut, value: configuration.isPressed)
-//   }
-// }
 
 struct CircleButtonStyle: ButtonStyle {
   let size: CGFloat
   let backgroundColor: Color
-
-  @State private var isHovering = false
-
-  init(
-    size: CGFloat = 32,
-    backgroundColor: Color = .blue
-
-  ) {
-    self.size = size
-    self.backgroundColor = backgroundColor
-  }
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
@@ -225,18 +229,14 @@ struct CircleButtonStyle: ButtonStyle {
         Circle()
           .fill(backgroundColor)
       )
-      .scaleEffect(configuration.isPressed ? 0.8 : 1.0)
+      .scaleEffect(configuration.isPressed ? 0.85 : 1.0)
       .animation(
         .spring(
-          response: 0.3,
-          dampingFraction: 0.6,
+          response: 0.2,
+          dampingFraction: 0.5,
           blendDuration: 0
         ),
         value: configuration.isPressed
-      )
-      .animation(
-        .easeOut(duration: 0.15),
-        value: backgroundColor
       )
   }
 }
