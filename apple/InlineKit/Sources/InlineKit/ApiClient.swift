@@ -1,6 +1,11 @@
 import Combine
 import Foundation
-import UIKit
+
+#if canImport(UIKit)
+  import UIKit
+#else
+  import AppKit
+#endif
 
 public enum APIError: Error {
   case invalidURL
