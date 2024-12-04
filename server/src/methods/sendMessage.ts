@@ -284,31 +284,22 @@ const sendPushNotificationToUser = async ({
             : "chat.inline.InlineMac.debug"
           : "chat.inline.InlineIOS"
 
-      console.log("sending notification:", {
-        topic,
-        sessionId: session.id,
-        applePushToken: session.applePushToken,
-        userId,
-        personalData: session.personalData,
-      })
-
       // Configure notification
       const notification = new APN.Notification()
       notification.payload = {
         userId: currentUserId,
 
-        // from: {
-        //   firstName: currentUser.firstName,
-        //   lastName: currentUser.lastName,
-        //   email: currentUser.email,
-        // },
+        from: {
+          firstName: currentUser.firstName,
+          lastName: currentUser.lastName,
+          email: currentUser.email,
+        },
       }
       notification.mutableContent = true
-      // notification.threadId = `chat_${chatId}`
+      notification.threadId = `chat_${chatId}`
       notification.topic = topic
       notification.alert = {
         title,
-        subtitle: "subtitle",
         body: message,
       }
       notification.sound = "default"
