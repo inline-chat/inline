@@ -297,17 +297,18 @@ const sendPushNotificationToUser = async ({
       notification.payload = {
         userId: currentUserId,
 
-        from: {
-          firstName: currentUser.firstName,
-          lastName: currentUser.lastName,
-          email: currentUser.email,
-        },
+        // from: {
+        //   firstName: currentUser.firstName,
+        //   lastName: currentUser.lastName,
+        //   email: currentUser.email,
+        // },
       }
       notification.mutableContent = true
-      notification.threadId = `chat_${chatId}`
+      // notification.threadId = `chat_${chatId}`
       notification.topic = topic
       notification.alert = {
         title,
+        subtitle: "subtitle",
         body: message,
       }
       notification.sound = "default"
