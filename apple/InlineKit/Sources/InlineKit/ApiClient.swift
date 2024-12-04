@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 
 public enum APIError: Error {
   case invalidURL
@@ -119,7 +120,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
     ]
 
-    if let sessionInfo = SessionInfo.get() {
+    if let sessionInfo = await SessionInfo.get() {
       queryItems.append(URLQueryItem(name: "clientType", value: sessionInfo.clientType))
       queryItems.append(URLQueryItem(name: "clientVersion", value: sessionInfo.clientVersion))
       queryItems.append(URLQueryItem(name: "osVersion", value: sessionInfo.osVersion))
@@ -428,7 +429,7 @@ struct SessionInfo: Codable, Sendable {
   let deviceName: String?
   let timezone: String?
 
-  static func get() -> SessionInfo? {
+  @MainActor static func get() -> SessionInfo? {
     let timezone = TimeZone.current.identifier
     let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     // let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
