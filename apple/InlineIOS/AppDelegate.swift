@@ -99,20 +99,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     if let userId = userInfo["userId"] as? Int {
       // Add a small delay to ensure app is ready
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-        print("Pushing to chat \(userId)")
 
-        // Check if chat is already open
-        let peerId = Peer.user(id: Int64(userId))
-        let chatDestination = Navigation.Destination.chat(peer: peerId)
+      // Check if chat is already open
+      let peerId = Peer.user(id: Int64(userId))
+      let chatDestination = Navigation.Destination.chat(peer: peerId)
 
-        // Only push if it's not the current destination
-        if self.nav.activeDestination != chatDestination {
-          self.nav.push(chatDestination)
-        }
-
-        completionHandler()
+      // Only push if it's not the current destination
+      if nav.activeDestination != chatDestination {
+        nav.push(chatDestination)
       }
+
+      completionHandler()
     }
   }
 }
