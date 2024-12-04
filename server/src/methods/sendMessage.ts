@@ -299,13 +299,12 @@ const sendPushNotificationToUser = async ({
       notification.contentAvailable = true
       notification.mutableContent = true
       notification.topic = topic
-      // notification.threadId = `chat_${chatId}`
-      // notification.sound = "default"
+      notification.threadId = `chat_${chatId}`
+      notification.sound = "default"
       notification.alert = {
         title,
         body: message,
       }
-      console.log("notification.rawPayload", notification)
 
       try {
         const result = await apnProvider.send(notification, session.applePushToken)
