@@ -1,6 +1,15 @@
 import { db } from "@in/server/db"
 import { desc, eq, sql, and } from "drizzle-orm"
-import { chats, dialogs, messages, sessions, users, type DbChat, type DbMessage } from "@in/server/db/schema"
+import {
+  chats,
+  dialogs,
+  messages,
+  sessions,
+  users,
+  type DbChat,
+  type DbMessage,
+  type DbUser,
+} from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Optional, type Static, Type } from "@sinclair/typebox"
@@ -14,6 +23,7 @@ import { apnProvider } from "../libs/apn"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { encryptMessage } from "@in/server/utils/encryption/encryptMessage"
 import { TInputId } from "@in/server/types/methods"
+import { isProd } from "@in/server/env"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -48,6 +58,19 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
 
   // Get or validate chat ID from peer info
   const chatId = await getChatIdFromPeer(peerId, context)
+
+  const currentUser = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, context.currentUserId))
+    .then(([user]) => user)
+
+  if (!currentUser) {
+    Log.shared.error("Current user not found", {
+      currentUserId: context.currentUserId,
+    })
+    throw new InlineError(InlineError.ApiError.INTERNAL)
+  }
 
   // Encrypt
   const encryptedText = encryptMessage(input.text)
@@ -108,8 +131,10 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       sendPushNotificationToUser({
         userId: Number(input.peerUserId),
         title,
+        chatId,
         message: input.text,
         currentUserId: context.currentUserId,
+        currentUser,
       })
     }
 
@@ -230,11 +255,15 @@ const sendPushNotificationToUser = async ({
   title,
   message,
   currentUserId,
+  chatId,
+  currentUser,
 }: {
   userId: number
   title: string
   message: string
+  chatId: number
   currentUserId: number
+  currentUser: DbUser
 }) => {
   try {
     // Get all sessions for the user
@@ -245,22 +274,40 @@ const sendPushNotificationToUser = async ({
       return
     }
 
-    // Configure notification
-    const notification = new APN.Notification({
-      alert: {
-        title,
-        body: message,
-      },
-      topic: "chat.inline.InlineIOS",
-      pushType: "alert",
-      sound: "default",
-      payload: {
-        userId: currentUserId,
-      },
-    })
-
     for (const session of userSessions) {
       if (!session.applePushToken) continue
+
+      let topic =
+        session.clientType === "macos"
+          ? isProd
+            ? "chat.inline.InlineMac"
+            : "chat.inline.InlineMac.debug"
+          : "chat.inline.InlineIOS"
+
+      // Configure notification
+      const notification = new APN.Notification({
+        alert: {
+          title,
+          body: message,
+        },
+        topic: topic,
+        pushType: "alert",
+        sound: "default",
+        mutableContent: true,
+        threadId: `chat_${chatId}`,
+        payload: {
+          userId: currentUserId,
+
+          from: {
+            firstName: currentUser.firstName,
+            lastName: currentUser.lastName,
+            email: currentUser.email,
+          },
+        },
+      })
+      notification.mutableContent = true
+      notification.threadId = `chat_${chatId}`
+      notification.aps["mutable-content"] = 1
 
       try {
         const result = await apnProvider.send(notification, session.applePushToken)
