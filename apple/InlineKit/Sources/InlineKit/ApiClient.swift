@@ -115,11 +115,21 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   }
 
   public func verifyCode(code: String, email: String) async throws -> VerifyCode {
-    try await request(
+    var queryItems: [URLQueryItem] = [
+      URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
+    ]
+
+    if let sessionInfo = SessionInfo.get() {
+      queryItems.append(URLQueryItem(name: "clientType", value: sessionInfo.clientType))
+      queryItems.append(URLQueryItem(name: "clientVersion", value: sessionInfo.clientVersion))
+      queryItems.append(URLQueryItem(name: "osVersion", value: sessionInfo.osVersion))
+      queryItems.append(URLQueryItem(name: "deviceName", value: sessionInfo.deviceName))
+      queryItems.append(URLQueryItem(name: "timezone", value: sessionInfo.timezone))
+    }
+
+    return try await request(
       .verifyCode,
-      queryItems: [
-        URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
-      ]
+      queryItems: queryItems
     )
   }
 
@@ -227,7 +237,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   //        )
   //    }
 
-  public func sendMessage(peerUserId: Int64?, peerThreadId: Int64?, text: String, randomId: Int64?) async throws
+  public func sendMessage(peerUserId: Int64?, peerThreadId: Int64?, text: String, randomId: Int64?)
+    async throws
     -> SendMessage
   {
     var queryItems: [URLQueryItem] = [
@@ -241,7 +252,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     if let peerThreadId = peerThreadId {
       queryItems.append(URLQueryItem(name: "peerThreadId", value: "\(peerThreadId)"))
     }
-    
+
     if let randomId = randomId {
       queryItems.append(URLQueryItem(name: "randomId", value: "\(randomId)"))
     }
@@ -408,4 +419,44 @@ public struct GetChatHistory: Codable, Sendable {
   // Sorted by date asc
   // Limited by 70 by default
   public let messages: [ApiMessage]
+}
+
+struct SessionInfo: Codable, Sendable {
+  let clientType: String?
+  let clientVersion: String?
+  let osVersion: String?
+  let deviceName: String?
+  let timezone: String?
+
+  static func get() -> SessionInfo? {
+    let timezone = TimeZone.current.identifier
+    let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+    // let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+
+    #if os(iOS)
+      let clientType = "ios"
+      let osVersion = UIDevice.current.systemVersion
+      let deviceName = UIDevice.current.name
+      return SessionInfo(
+        clientType: clientType,
+        clientVersion: clientVersion,
+        osVersion: osVersion,
+        deviceName: deviceName,
+        timezone: timezone
+      )
+    #elseif os(macOS)
+      let clientType = "macos"
+      let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+      let deviceName = Host.current().name
+      return SessionInfo(
+        clientType: clientType,
+        clientVersion: clientVersion,
+        osVersion: osVersion,
+        deviceName: deviceName,
+        timezone: timezone
+      )
+    #else
+      return nil
+    #endif
+  }
 }

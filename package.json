@@ -6,6 +6,7 @@
     "server"
   ],
   "scripts": {
+    "dev": "bun run dev:website & bun run dev:server",
     "dev:website": "cd website && bun run dev",
     "dev:server": "cd server && bun run dev",
     "build:website": "cd website && bun run build",
