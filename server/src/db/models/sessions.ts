@@ -143,6 +143,7 @@ export class SessionsModel {
     await db
       .update(sessions)
       .set({
+        applePushToken: null,
         applePushTokenEncrypted: encryptedApplePushToken.encrypted,
         applePushTokenIv: encryptedApplePushToken.iv,
         applePushTokenTag: encryptedApplePushToken.authTag,
