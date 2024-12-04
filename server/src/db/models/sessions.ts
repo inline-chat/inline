@@ -236,10 +236,13 @@ export class SessionsModel {
 
     try {
       const sessions = await db.query.sessions.findMany({
-        where: (sessions, { eq, isNull }) => eq(sessions.userId, userId) && isNull(sessions.revoked),
+        where: (sessions, { eq, isNull, and }) => and(eq(sessions.userId, userId), isNull(sessions.revoked)),
       })
 
-      return sessions.map((session) => this.decryptSessionData(session))
+      // Validate sessions
+      const validSessions = sessions.filter((session) => session.revoked === null && session.userId === userId)
+
+      return validSessions.map((session) => this.decryptSessionData(session))
     } catch (error) {
       throw new Error(`Failed to get active sessions: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
