@@ -293,29 +293,24 @@ const sendPushNotificationToUser = async ({
       })
 
       // Configure notification
-      const notification = new APN.Notification({
-        alert: {
-          title,
-          body: message,
-        },
-        topic: topic,
-        pushType: "alert",
-        sound: "default",
-        mutableContent: true,
-        threadId: `chat_${chatId}`,
-        payload: {
-          userId: currentUserId,
+      const notification = new APN.Notification()
+      notification.payload = {
+        userId: currentUserId,
 
-          from: {
-            firstName: currentUser.firstName,
-            lastName: currentUser.lastName,
-            email: currentUser.email,
-          },
+        from: {
+          firstName: currentUser.firstName,
+          lastName: currentUser.lastName,
+          email: currentUser.email,
         },
-      })
+      }
       notification.mutableContent = true
       notification.threadId = `chat_${chatId}`
-      notification.aps["mutable-content"] = 1
+      notification.topic = topic
+      notification.alert = {
+        title,
+        body: message,
+      }
+      notification.sound = "default"
 
       try {
         const result = await apnProvider.send(notification, session.applePushToken)
