@@ -12,9 +12,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case space(id: Int64)
     case chat(peer: Peer)
     case settings
-    case contacts
     case createSpace
-    case createDM
     case createThread(spaceId: Int64)
 
     // MARK: - Identifiable Conformance
@@ -25,9 +23,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
       case .space(let id): return "space-\(id)"
       case .chat(let peer): return "chat-\(peer.hashValue)"
       case .settings: return "settings"
-      case .contacts: return "contacts"
       case .createSpace: return "createSpace"
-      case .createDM: return "createDM"
       case .createThread(let spaceId): return "createThread-\(spaceId)"
       }
     }
@@ -59,7 +55,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case .chat:
       activeDestination = destination
       navigationPath.append(destination)
-    case .createSpace, .createDM, .createThread, .settings:
+    case .createSpace, .createThread, .settings:
       activeSheet = destination
     default:
       activeDestination = destination

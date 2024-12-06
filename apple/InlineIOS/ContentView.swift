@@ -42,10 +42,10 @@ struct ContentView: View {
     .environmentObject(dataManager)
     .environmentObject(mainViewRouter)
   }
-
 }
 
 // MARK: - Navigation destinations
+
 extension ContentView {
   @ViewBuilder
   func destinationView(for destination: Navigation.Destination) -> some View {
@@ -56,10 +56,8 @@ extension ContentView {
       SpaceView(spaceId: id)
     case .settings:
       Settings()
-    case .contacts:
-      Contacts()
-    case .createSpace, .createDM, .createThread:
-      EmptyView()  // These are handled by sheets
+    case .createSpace, .createThread:
+      EmptyView() // These are handled by sheets
     case .main:
       MainView()
     }
@@ -72,11 +70,7 @@ extension ContentView {
       CreateSpace(showSheet: .constant(true))
         .presentationBackground(.ultraThickMaterial)
         .presentationCornerRadius(18)
-    case .createDM:
-      CreateDm(showSheet: .constant(true))
-        .presentationBackground(.ultraThickMaterial)
-        .presentationCornerRadius(18)
-        .presentationDetents([.medium, .large])
+
     case .createThread(let spaceId):
       CreateThread(showSheet: .constant(true), spaceId: spaceId)
         .presentationBackground(.ultraThickMaterial)
@@ -90,6 +84,7 @@ extension ContentView {
     }
   }
 }
+
 #Preview {
   ContentView()
     .environment(\.locale, .init(identifier: "en"))

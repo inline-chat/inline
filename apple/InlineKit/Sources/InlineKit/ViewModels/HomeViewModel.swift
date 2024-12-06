@@ -10,6 +10,13 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   public var message: Message?
 
   public var id: Int64 { user.id }
+
+  public init(dialog: Dialog, user: User, chat: Chat?, message: Message?) {
+    self.dialog = dialog
+    self.user = user
+    self.chat = chat
+    self.message = message
+  }
 }
 
 public final class HomeViewModel: ObservableObject {
