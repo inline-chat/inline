@@ -87,6 +87,7 @@ export const handler = async (
       .values({
         userId: context.currentUserId,
         chatId: mainChat.id,
+        spaceId: space.id,
       })
       .returning()
 
