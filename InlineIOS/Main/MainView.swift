@@ -25,6 +25,10 @@ struct MainView: View {
   // MARK: - State
 
   @State private var connection: String = ""
+  @State private var text = ""
+  @State private var searchResults: [User] = []
+  @State private var isSearching = false
+  @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
 
   var user: User? {
     root.currentUser
@@ -49,6 +53,14 @@ struct MainView: View {
   var body: some View {
     VStack {
       contentView
+    }
+    .searchable(text: $text, prompt: "Search in users and spaces")
+    .onChange(of: text) { _, newValue in
+      searchDebouncer.input = newValue
+    }
+    .onReceive(searchDebouncer.$debouncedInput) { debouncedValue in
+      guard let value = debouncedValue else { return }
+      searchUsers(query: value)
     }
     .toolbar {
       toolbarContent
@@ -94,17 +106,55 @@ private extension MainView {
 
   var contentList: some View {
     List {
-      // HStack {
-      //   Spacer()
-      //   Text("Spaces Coming Soon...")
-      //     .foregroundColor(.secondary)
-      //     .font(.subheadline)
-      //     .padding(.vertical, 6)
-      //   Spacer()
+      if !text.isEmpty {
+        Section {
+          if isSearching {
+            HStack {
+              ProgressView()
+              Text("Searching...")
+                .foregroundColor(.secondary)
+            }
+          } else if searchResults.isEmpty {
+            Text("No users found")
+              .foregroundColor(.secondary)
+          } else {
+            ForEach(searchResults) { user in
+              Button {
+                Task {
+                  do {
+                    let peer = try await dataManager.createPrivateChat(userId: user.id)
+                    nav.push(.chat(peer: peer))
+                  } catch {
+                    Log.shared.error("Failed to create chat", error: error)
+                  }
+                }
+              } label: {
+                HStack(alignment: .top) {
+                  UserAvatar(user: user, size: 36)
+                    .padding(.trailing, 6)
+                    .overlay(alignment: .bottomTrailing) {
+                      Circle()
+                        .fill(.green)
+                        .frame(width: 12, height: 12)
+                        .padding(.leading, -14)
+                    }
 
-      // }
-      // .listRowSeparator(.hidden)
-      if !home.chats.isEmpty {
+                  VStack(alignment: .leading) {
+                    Text(user.firstName ?? "User")
+                      .fontWeight(.medium)
+                    if let username = user.username {
+                      Text("@\(username)")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                    }
+                  }
+                  .padding(.top, -4)
+                }
+              }
+            }
+          }
+        }
+      } else if !home.chats.isEmpty {
         chatsSection
       }
     }
@@ -128,10 +178,16 @@ private extension MainView {
       ForEach(
         home.chats, id: \.user.id
       ) { chat in
-        ChatRowView(item: chat)
-          .onTapGesture {
-            nav.push(.chat(peer: .user(id: chat.user.id)))
+        Button(role: .destructive) {
+          nav.push(.chat(peer: .user(id: chat.user.id)))
+        } label: {
+          ChatRowView(item: chat)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+          Button {} label: {
+            Image(systemName: "archivebox.fill")
           }
+        }
       }
     }
   }
@@ -185,16 +241,6 @@ private extension MainView {
               .contentShape(Rectangle())
           }
 
-          Button {
-            nav.push(.createDM)
-          } label: {
-            Image(systemName: "square.and.pencil")
-              .tint(Color.secondary)
-              .frame(width: 38, height: 38)
-              .contentShape(Rectangle())
-          }
-          .padding(.top, -6)
-
           // Menu {
           //   Button("New DM") { nav.push(.createDM) }
           //   Button("Create Space") { nav.push(.createSpace) }
@@ -232,8 +278,8 @@ private extension MainView {
 
 // MARK: - Helper Methods
 
-private extension MainView {
-  func handleLogout() {
+extension MainView {
+  fileprivate func handleLogout() {
     auth.logOut()
     do {
       try AppDatabase.clearDB()
@@ -241,5 +287,50 @@ private extension MainView {
       Log.shared.error("Failed to delete DB and logout", error: error)
     }
     nav.popToRoot()
+  }
+
+  private func searchUsers(query: String) {
+    guard !query.isEmpty else {
+      searchResults = []
+      isSearching = false
+      return
+    }
+
+    isSearching = true
+    Task {
+      do {
+        let result = try await api.searchContacts(query: query)
+
+        try await database.dbWriter.write { db in
+          for apiUser in result.users {
+            let user = User(
+              id: apiUser.id,
+              email: apiUser.email,
+              firstName: apiUser.firstName,
+              lastName: apiUser.lastName,
+              username: apiUser.username
+            )
+            try user.save(db)
+          }
+        }
+
+        try await database.reader.read { db in
+          searchResults =
+            try User
+              .filter(Column("username").like("%\(query.lowercased())%"))
+              .fetchAll(db)
+        }
+
+        await MainActor.run {
+          isSearching = false
+        }
+      } catch {
+        Log.shared.error("Error searching users", error: error)
+        await MainActor.run {
+          searchResults = []
+          isSearching = false
+        }
+      }
+    }
   }
 }
