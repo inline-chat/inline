@@ -16,10 +16,10 @@ import {
 } from "@in/server/models"
 import type { HandlerContext } from "@in/server/controllers/v1/helpers"
 import * as schema from "@in/server/db/schema"
-import { TInputId } from "@in/server/types/methods"
+import { normalizeId, TInputId } from "@in/server/types/methods"
 
 export const Input = Type.Object({
-  spaceId: Type.Optional(TInputId),
+  spaceId: TInputId,
 })
 
 export const Response = Type.Object({
@@ -43,12 +43,11 @@ export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
-  const spaceId = input?.spaceId ? Number(input.spaceId) : null
+  const spaceId = normalizeId(input.spaceId)
   if (spaceId && isNaN(spaceId)) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
 
-  console.log("spaceId", spaceId)
   const currentUserId = context.currentUserId
 
   // Buckets for results
@@ -58,7 +57,7 @@ export const handler = async (
   let messages: TMessageInfo[] = []
 
   const existingThreadDialogs = await db.query.dialogs.findMany({
-    where: and(eq(schema.dialogs.userId, currentUserId), eq(schema.dialogs.spaceId, spaceId ?? sql`null`)),
+    where: and(eq(schema.dialogs.userId, currentUserId), eq(schema.dialogs.spaceId, spaceId)),
     with: { chat: { with: { lastMsg: { with: { from: true } } } } },
     limit: MAX_LIMIT,
   })
@@ -100,6 +99,8 @@ export const handler = async (
       },
     })
 
+    console.log("publicChats", publicChats)
+
     // Make dialogs for each public chat that doesn't have one yet
     let result = await db.transaction(async (tx) => {
       const newDialogs: schema.DbDialog[] = []
@@ -121,6 +122,8 @@ export const handler = async (
       return newDialogs
     })
 
+    console.log("newDialogs", result)
+
     // Push newly created dialogs to the arrays
     result.forEach((d) => {
       dialogs.push(d)
@@ -128,6 +131,9 @@ export const handler = async (
 
     // Push last messages and chats of public chats
     publicChats.forEach((c) => {
+      if (c.dialogs[0]) {
+        dialogs.push(c.dialogs[0])
+      }
       if (c.lastMsg) {
         messages.push(encodeMessageInfo(c.lastMsg, { currentUserId, peerId: peerIdFromChat(c, { currentUserId }) }))
         if (c.lastMsg.from) {
@@ -202,8 +208,6 @@ export const handler = async (
     messages: messages,
     users: users.map(encodeUserInfo),
   }
-
-  console.log("get dialogs result", result)
 
   return result
 }
