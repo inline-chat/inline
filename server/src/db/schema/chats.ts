@@ -67,8 +67,8 @@ export const chatsRelations = relations(chats, ({ one, many }) => ({
   }),
 
   lastMsg: one(messages, {
-    fields: [chats.lastMsgId],
-    references: [messages.messageId],
+    fields: [chats.id, chats.lastMsgId],
+    references: [messages.chatId, messages.messageId],
   }),
 
   dialogs: many(dialogs),
