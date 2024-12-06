@@ -8,7 +8,9 @@ class UIMessageView: UIView {
     let label = UILabel()
     label.numberOfLines = 0
     label.font = .systemFont(ofSize: 16)
+    label.textAlignment = .natural
     label.translatesAutoresizingMaskIntoConstraints = false
+
     return label
   }()
 
@@ -43,7 +45,50 @@ class UIMessageView: UIView {
 
   // MARK: - Setup
 
+//  private func setupViews() {
+//    addSubview(containerView)
+//    containerView.addSubview(bubbleView)
+//    bubbleView.addSubview(messageLabel)
+//
+//    NSLayoutConstraint.activate([
+//      // Container constraints
+//      containerView.topAnchor.constraint(equalTo: topAnchor),
+//      containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+//      containerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+//      containerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+//
+//      // Bubble constraints
+//      bubbleView.topAnchor.constraint(equalTo: containerView.topAnchor),
+//      bubbleView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+  ////      bubbleView.widthAnchor.constraint(greaterThanOrEqualToConstant: 40),
+//
+//      // Message label constraints - centered
+//      messageLabel.centerXAnchor.constraint(equalTo: bubbleView.centerXAnchor),
+//      messageLabel.centerYAnchor.constraint(equalTo: bubbleView.centerYAnchor),
+//      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+//      messageLabel.bottomAnchor.constraint(
+//        equalTo: bubbleView.bottomAnchor, constant: -8
+//      ),
+//      messageLabel.leadingAnchor.constraint(
+//        equalTo: bubbleView.leadingAnchor, constant: 10
+//      ),
+//      messageLabel.trailingAnchor.constraint(
+//        equalTo: bubbleView.trailingAnchor, constant: -10
+//      ),
+//
+//    ])
+//
+//    // Add gesture recognizer for context menu
+//    let interaction = UIContextMenuInteraction(delegate: self)
+//    bubbleView.addInteraction(interaction)
+//  }
   private func setupViews() {
+    // Set content hugging and compression resistance priorities
+    messageLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+    messageLabel.setContentHuggingPriority(.required, for: .horizontal)
+    bubbleView.setContentCompressionResistancePriority(.required, for: .horizontal)
+    bubbleView.setContentHuggingPriority(.required, for: .horizontal)
+
     addSubview(containerView)
     containerView.addSubview(bubbleView)
     bubbleView.addSubview(messageLabel)
@@ -55,62 +100,74 @@ class UIMessageView: UIView {
       containerView.leadingAnchor.constraint(equalTo: leadingAnchor),
       containerView.trailingAnchor.constraint(equalTo: trailingAnchor),
 
+      // Message label constraints with proper margins
+      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+      messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -8),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
+      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
+
       // Bubble constraints
       bubbleView.topAnchor.constraint(equalTo: containerView.topAnchor),
-      bubbleView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-      bubbleView.widthAnchor.constraint(greaterThanOrEqualToConstant: 40),
-
-      // Message label constraints - centered
-      messageLabel.centerXAnchor.constraint(equalTo: bubbleView.centerXAnchor),
-      messageLabel.centerYAnchor.constraint(equalTo: bubbleView.centerYAnchor),
-      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
-      messageLabel.bottomAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor, constant: -8
-      ),
-      messageLabel.leadingAnchor.constraint(
-        equalTo: bubbleView.leadingAnchor, constant: 10
-      ),
-      messageLabel.trailingAnchor.constraint(
-        equalTo: bubbleView.trailingAnchor, constant: -10
-      ),
-
+      bubbleView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
     ])
-
-    // Add gesture recognizer for context menu
-    let interaction = UIContextMenuInteraction(delegate: self)
-    bubbleView.addInteraction(interaction)
   }
 
   private func configureForMessage() {
     messageLabel.text = fullMessage.message.text
 
-    // Set text alignment based on content
-    if let text = fullMessage.message.text, text.isRTL {
-      messageLabel.textAlignment = .right
-    } else {
-      messageLabel.textAlignment = .left
-    }
-
     if fullMessage.message.out == true {
       messageLabel.textColor = .white
       bubbleView.backgroundColor = .tintColor
 
-      // Right aligned
-      bubbleView.leadingAnchor.constraint(
-        greaterThanOrEqualTo: containerView.leadingAnchor, constant: 60
-      ).isActive = true
-      bubbleView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor).isActive = true
+      // Right aligned with max width constraint
+      NSLayoutConstraint.activate([
+        bubbleView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+        bubbleView.leadingAnchor.constraint(greaterThanOrEqualTo: containerView.leadingAnchor, constant: 0),
+        bubbleView.widthAnchor.constraint(lessThanOrEqualTo: containerView.widthAnchor, multiplier: 1)
+      ])
     } else {
       messageLabel.textColor = .label
       bubbleView.backgroundColor = UIColor.systemGray6.withAlphaComponent(0.7)
 
-      // Left aligned
-      bubbleView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor).isActive = true
-      bubbleView.trailingAnchor.constraint(
-        lessThanOrEqualTo: containerView.trailingAnchor, constant: -60
-      ).isActive = true
+      // Left aligned with max width constraint
+      NSLayoutConstraint.activate([
+        bubbleView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+        bubbleView.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: 0),
+        bubbleView.widthAnchor.constraint(lessThanOrEqualTo: containerView.widthAnchor, multiplier: 1)
+      ])
     }
   }
+
+//  private func configureForMessage() {
+//    messageLabel.text = fullMessage.message.text
+//
+//    // Set text alignment based on content
+  ////    if let text = fullMessage.message.text, text.isRTL {
+  ////      messageLabel.textAlignment = .right
+  ////    } else {
+  ////      messageLabel.textAlignment = .left
+  ////    }
+//
+//    if fullMessage.message.out == true {
+//      messageLabel.textColor = .white
+//      bubbleView.backgroundColor = .tintColor
+//
+//      // Right aligned
+//      bubbleView.leadingAnchor.constraint(
+//        greaterThanOrEqualTo: containerView.leadingAnchor, constant: 60
+//      ).isActive = true
+//      bubbleView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor).isActive = true
+//    } else {
+//      messageLabel.textColor = .label
+//      bubbleView.backgroundColor = UIColor.systemGray6.withAlphaComponent(0.7)
+//
+//      // Left aligned
+//      bubbleView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor).isActive = true
+//      bubbleView.trailingAnchor.constraint(
+//        lessThanOrEqualTo: containerView.trailingAnchor, constant: -60
+//      ).isActive = true
+//    }
+//  }
 
   // MARK: - Size Calculation
 

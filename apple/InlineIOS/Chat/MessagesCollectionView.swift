@@ -7,11 +7,15 @@ struct MessagesCollectionView: UIViewRepresentable {
 
   func makeUIView(context: Context) -> UICollectionView {
     let layout = createLayout()
+
     let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
 
+    collectionView.collectionViewLayout = layout
+    collectionView.contentInsetAdjustmentBehavior = .always
     collectionView.backgroundColor = .clear
     collectionView.delegate = context.coordinator
-    collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    collectionView.autoresizingMask = [.flexibleHeight]
+//    collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
     collectionView.register(
       MessageCollectionViewCell.self,
@@ -26,6 +30,8 @@ struct MessagesCollectionView: UIViewRepresentable {
     // Performance optimizations
     collectionView.isPrefetchingEnabled = true
     collectionView.decelerationRate = .normal
+    // Added for width
+    collectionView.contentInsetAdjustmentBehavior = .always
 
     context.coordinator.setupDataSource(collectionView)
 
@@ -40,54 +46,12 @@ struct MessagesCollectionView: UIViewRepresentable {
   }
 
   private func createLayout() -> UICollectionViewLayout {
-    /// List layout
-    //    let configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-    //    let layout = UICollectionViewCompositionalLayout.list(using: configuration)
-
-    /// Custom layout based on flow layout
-    //    let layout = UICollectionViewFlowLayout()
     let layout = AnimatedCollectionViewLayout()
     layout.minimumInteritemSpacing = 0
     layout.minimumLineSpacing = 0
     layout.scrollDirection = .vertical
-    layout.itemSize = UICollectionViewFlowLayout.automaticSize
-    layout.estimatedItemSize = CGSize(width: UIScreen.main.bounds.width - 22, height: 44)
+    layout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
     return layout
-
-    //    let config = UICollectionViewCompositionalLayoutConfiguration()
-    //    config.scrollDirection = .vertical
-    //
-    //    let layout = UICollectionViewCompositionalLayout(sectionProvider: { _, _ in
-    //      // Item
-    //      let itemSize = NSCollectionLayoutSize(
-    //        widthDimension: .fractionalWidth(1),
-    //        heightDimension: .estimated(44)
-    //      )
-    //      let item = NSCollectionLayoutItem(layoutSize: itemSize)
-    //
-    //      item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10)
-    //
-    //      let groupSize = NSCollectionLayoutSize(
-    //        widthDimension: .fractionalWidth(1),
-    //        heightDimension: .estimated(44)
-    //      )
-    //      let group = NSCollectionLayoutGroup.horizontal(
-    //        layoutSize: groupSize,
-    //        subitems: [item]
-    //      )
-    //
-    //      group.interItemSpacing = .fixed(0)
-    //
-    //      let section = NSCollectionLayoutSection(group: group)
-    //
-    //      section.interGroupSpacing = 0
-    //
-    //      section.contentInsets = .zero
-    //
-    //      return section
-    //    }, configuration: config)
-    //
-    //    return layout
   }
 
   func updateUIView(_ collectionView: UICollectionView, context: Context) {
@@ -200,6 +164,18 @@ struct MessagesCollectionView: UIViewRepresentable {
       )
     }
 
+    func collectionView(
+      _ collectionView: UICollectionView,
+      layout collectionViewLayout: UICollectionViewLayout,
+      sizeForItemAt indexPath: IndexPath
+    ) -> CGSize {
+      let availableWidth = collectionView.bounds.width - 25
+
+      // Return full width with estimated height
+      // Actual height will be adjusted by the cell's preferredLayoutAttributesFitting
+      return CGSize(width: availableWidth, height: 1)
+    }
+
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
             let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
@@ -250,9 +226,6 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     @objc func orientationDidChange(_ notification: Notification) {
       guard let collectionView = currentCollectionView else { return }
-
-      // Invalidate size cache when orientation changes
-      MessageSizeCalculator.shared.invalidateCache()
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
         guard let self else { return }
@@ -350,6 +323,18 @@ struct MessagesCollectionView: UIViewRepresentable {
 }
 
 final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
+  override func prepare() {
+    super.prepare()
+
+    guard let collectionView = collectionView else { return }
+
+    // Calculate the available width
+    let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
+
+    // Set the width that cells should use
+    itemSize = CGSize(width: availableWidth, height: 1) // Height will be determined automatically
+  }
+
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
     -> UICollectionViewLayoutAttributes?
   {
