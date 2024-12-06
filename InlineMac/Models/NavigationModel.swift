@@ -27,6 +27,15 @@ enum PrimarySheet: Codable {
   case createSpace
 }
 
+// Persistent data
+private struct NavigationState: Codable {
+  var homePath: [NavigationRoute]
+  var homeSelection: NavigationRoute
+  var activeSpaceId: Int64?
+  var spacePathDict: [Int64: [NavigationRoute]]
+  var spaceSelectionDict: [Int64: NavigationRoute]
+}
+
 @MainActor
 class NavigationModel: ObservableObject {
   static let shared = NavigationModel()
@@ -87,7 +96,9 @@ class NavigationModel: ObservableObject {
   private var cancellables = Set<AnyCancellable>()
 
   init() {
+    loadState()
     setupSubscriptions()
+    setupStatePersistence()
   }
 
   private func setupSubscriptions() {
@@ -154,6 +165,62 @@ class NavigationModel: ObservableObject {
     }
   }
 
+  private func setupStatePersistence() {
+    // Combine publishers to watch for state changes
+    Publishers.CombineLatest4($homePath, $homeSelection, $activeSpaceId, $spacePathDict)
+      .combineLatest($spaceSelectionDict)
+      .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.saveState()
+      }
+      .store(in: &cancellables)
+  }
+
+  // File URL for persistence
+  private var stateFileURL: URL {
+    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("navigation_state.json")
+  }
+
+  private func saveState() {
+    let state = NavigationState(
+      homePath: homePath,
+      homeSelection: homeSelection,
+      activeSpaceId: activeSpaceId,
+      spacePathDict: spacePathDict,
+      spaceSelectionDict: spaceSelectionDict
+    )
+
+    do {
+      let encoder = JSONEncoder()
+      let data = try encoder.encode(state)
+      try data.write(to: stateFileURL)
+    } catch {
+      print("Failed to save navigation state: \(error.localizedDescription)")
+    }
+  }
+
+  private func loadState() {
+    guard FileManager.default.fileExists(atPath: stateFileURL.path) else { return }
+
+    do {
+      let data = try Data(contentsOf: stateFileURL)
+      let decoder = JSONDecoder()
+      let state = try decoder.decode(NavigationState.self, from: data)
+
+      // Update state
+      homePath = state.homePath
+      homeSelection = state.homeSelection
+      activeSpaceId = state.activeSpaceId
+      spacePathDict = state.spacePathDict
+      spaceSelectionDict = state.spaceSelectionDict
+    } catch {
+      print("Failed to load navigation state: \(error.localizedDescription)")
+      // If loading fails, reset to default state
+      reset()
+    }
+  }
+
   // Called on logout
   func reset() {
     activeSpaceId = nil
@@ -161,6 +228,9 @@ class NavigationModel: ObservableObject {
     spacePathDict = [:]
     spaceSelectionDict = [:]
     homeSelection = .homeRoot
+
+    // Delete persisted state file
+    try? FileManager.default.removeItem(at: stateFileURL)
   }
 
   var currentRoute: NavigationRoute {
