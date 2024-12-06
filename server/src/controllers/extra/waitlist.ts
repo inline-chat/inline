@@ -4,6 +4,9 @@ import { insertIntoWaitlist } from "@in/server/db/models/waitlist"
 import { db } from "@in/server/db"
 import { type NewWaitlistSubscriber, waitlist as wdb } from "@in/server/db/schema"
 import { sql, count } from "drizzle-orm"
+import { ipinfo } from "@in/server/libs/ipinfo"
+import { getIp } from "@in/server/utils/ip"
+import { Log } from "@in/server/utils/log"
 
 export const waitlist = new Elysia({ prefix: "/waitlist" })
   .use(setup)
@@ -13,17 +16,26 @@ export const waitlist = new Elysia({ prefix: "/waitlist" })
   })
   .post(
     "/subscribe",
-    async ({ body }) => {
+    async ({ body, request, server }) => {
       await insertIntoWaitlist(body)
 
       try {
         // Send user data to Telegram API
         const telegramToken = process.env["TELEGRAM_TOKEN"]
         const chatId = "-1002262866594"
-        const emailParts = body.email?.split("@")
-        const nameFromEmail = emailParts?.[0]?.replace(/[^a-zA-Z0-9]/g, " ")
-        const message = `New Subscriber: \n\nEmail: ${body.email} \nName: ${nameFromEmail} \nTime Zone: ${body.timeZone} \n\n\n☕️ SHIP FASTER DENA & MO!!!`
-        let result = await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+
+        let location: string | undefined
+        try {
+          let ip = await getIp(request, server)
+          let ipInfo = ip ? await ipinfo(ip) : undefined
+          location = `${ipInfo?.country}, ${ipInfo?.city}`
+        } catch (error) {
+          Log.shared.error("Error getting IP info", { error })
+        }
+
+        const message = `New Waitlist Subscriber: \n${body.email} \n(${location}, ${body.timeZone})`
+
+        await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -33,9 +45,8 @@ export const waitlist = new Elysia({ prefix: "/waitlist" })
             text: message,
           }),
         })
-        console.log("Message sent to Telegram:", await result.json())
       } catch (error) {
-        console.error("Error sending message to Telegram:", error)
+        Log.shared.error("Error sending message to Telegram:", { error })
       }
 
       return {
