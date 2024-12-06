@@ -196,16 +196,15 @@ struct Compose: View {
   }
  
   private func send() {
-    print("send \(text)")
     Task {
+      let messageText = text.trimmingCharacters(in: .whitespacesAndNewlines)
       do {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !messageText.isEmpty else { return }
         guard let chatId = chatId else {
           Log.shared.warning("Chat ID is nil, cannot send message")
           return
         }
         
-        let messageText = text
         text = ""
         
         // Reset editor height after clearing text
