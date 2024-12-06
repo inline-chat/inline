@@ -40,7 +40,6 @@ public enum ProjectConfig {
   // Helper function to get named arguments
   public static func getArgumentValue(for key: KnownArgumentKeys) -> String? {
     let args = CommandLine.arguments
-    print(args)
     let keyPrefix = "--\(key.rawValue)"
     if let index = args.firstIndex(where: { $0.starts(with: keyPrefix) }),
        index + 1 < args.count

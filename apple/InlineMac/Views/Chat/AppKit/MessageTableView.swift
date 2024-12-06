@@ -165,7 +165,6 @@ class MessagesTableView: NSViewController {
   private func handleContentSizeChange(_ newHeight: CGFloat) {
     lastContentHeight = newHeight
     
-    print("📏 Content size changed: \(newHeight), isAtBottom: \(isAtBottom)")
     if isAtBottom && (!isPerformingUpdate || needsInitialScroll) {
       scrollToBottom(animated: false)
     }
@@ -374,8 +373,6 @@ class MessagesTableView: NSViewController {
   }
   
   private func performUpdate(with newMessages: [FullMessage], isInitialUpdate: Bool = false) {
-    print("📝 Updating table - Current: \(messages.count), New: \(newMessages.count)")
-    
     isPerformingUpdate = true
     let oldMessages = messages
     
@@ -396,12 +393,9 @@ class MessagesTableView: NSViewController {
   
     let wasAtBottom = isAtBottom
     
-//    print("wasAtBottom \(isAtBottom)")
-    
     // Update data source first
     messages = newMessages
-//
-    
+
     if removals.isEmpty && insertions.isEmpty {
       // Find messages that have been updated by comparing old and new messages at same indexes
       let updatedIndexes: [Int] = messages.enumerated().compactMap { index, newMessage -> Int? in
@@ -415,8 +409,6 @@ class MessagesTableView: NSViewController {
         }
         return nil
       }
-      
-      print("🔍 Found \(updatedIndexes.count) updated messages at: \(updatedIndexes)")
       
       // Reload only the rows that actually changed
       if !updatedIndexes.isEmpty {
@@ -468,14 +460,9 @@ class MessagesTableView: NSViewController {
       let expectedRows = self.messages.count
           
       if actualRows != expectedRows {
-        print("⚠️ Row count mismatch - forcing reload")
+        Log.shared.debug("⚠️ Row count mismatch - forcing reload")
         self.tableView.reloadData()
       }
-      
-      // Force layout update
-      // Probably unneccessary
-//      self.tableView.layout()
-//      self.tableView.needsDisplay = true
     }
   }
   
@@ -585,8 +572,6 @@ class MessagesTableView: NSViewController {
     // First, immediately update visible rows
     let visibleIndexesToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
     
-    print("📏 Updating heights for visible rows: \(visibleStartIndex) to \(visibleEndIndex)")
-
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
       self.tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)

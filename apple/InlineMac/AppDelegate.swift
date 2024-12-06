@@ -35,7 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     _ application: NSApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
-    print("Registered for remote notifications: \(deviceToken)")
+    Log.shared.error("Registered for remote notifications: \(deviceToken)")
 
     notifications.didRegisterForRemoteNotifications(deviceToken: deviceToken)
   }
@@ -44,6 +44,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     _ application: NSApplication,
     didFailToRegisterForRemoteNotificationsWithError error: Error
   ) {
-    print("Failed to register for remote notifications \(error)")
+    Log.shared.error("Failed to register for remote notifications \(error)")
   }
 }

@@ -61,7 +61,6 @@ struct ChatSideItem: View {
       isHovered = hovering
     }
     .onLongPressGesture(perform: {
-      print("Long pressed")
       pressed()
     })
   }
@@ -88,7 +87,6 @@ struct ChatSideItem: View {
   }
 
   private func pressed() {
-    print("Pressed")
     selectedRoute = currentRoute
   }
 }

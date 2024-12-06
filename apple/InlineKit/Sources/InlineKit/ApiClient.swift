@@ -94,8 +94,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         case let .success(data):
           return data
         case let .error(errorCode, description):
-          // temp log
-          print("API ERROR \(errorCode) \(description ?? "")")
           throw
             APIError
             .error(errorCode: errorCode, description: description)

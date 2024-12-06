@@ -49,25 +49,19 @@ class MessageSizeCalculator {
 //  }
   
   func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> NSSize {
-    print("table width \(width)")
     let text = message.message.text ?? " "
-    
     
     let cacheKey = "\(message.id):\(text):\(props.toString()):\(width)" as NSString
     if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue {
-      print("using cached size \(cachedSize)")
       return cachedSize
     }
     
     let availableWidth = width - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - Theme.messageSidePadding * 2 - Self.textSafeArea
     
     if availableWidth < 0 {
-      print("availableWidth \(availableWidth)")
       return NSSize(width: width, height: 36)
     }
-//    - Theme.messageSidePadding * 2
-    
-    print("availableWidth \(availableWidth)")
+
     textContainer.size = NSSize(width: availableWidth, height: .greatestFiniteMagnitude)
     MessageTextConfiguration.configureTextContainer(textContainer)
     
@@ -79,7 +73,7 @@ class MessageSizeCalculator {
     
     layoutManager.ensureLayout(for: textContainer)
     let textHeight = layoutManager.usedRect(for: textContainer).height
-    print("text \(text) textHeight \(textHeight)")
+
     var totalHeight = ceil(textHeight)
     
     if props.firstInGroup {
@@ -104,7 +98,7 @@ class MessageSizeCalculator {
   }
   
   static func getTextViewWidth(for tableWidth: CGFloat) -> CGFloat {
-    tableWidth - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - Self.textSafeArea
+    tableWidth - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - textSafeArea
   }
 }
 

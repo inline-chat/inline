@@ -137,7 +137,6 @@ public extension AppDatabase {
         try db.changePassphrase(token)
         // Needed for stupid swift. actually smart. ew.
         if let db = AppDatabase.shared.dbWriter as? DatabasePool {
-          print("invalidateReadOnlyConnections")
           db.invalidateReadOnlyConnections()
         }
       }

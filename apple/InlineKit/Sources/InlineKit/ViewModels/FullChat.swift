@@ -92,7 +92,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
-        receiveCompletion: { print("Failed to get full chat \($0)") },
+        receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
         receiveValue: { [weak self] chats in
           self?.chatItem = chats.first
 
@@ -132,7 +132,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
         receiveCompletion: { error in
-          print("Failed to get messages \(error)")
+          Log.shared.error("Failed to get messages \(error)")
         },
         receiveValue: { [weak self] messages in
 
