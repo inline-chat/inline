@@ -43,7 +43,6 @@ public class DataManager: ObservableObject {
     log.debug("createSpace")
     do {
       let result = try await ApiClient.shared.createSpace(name: name)
-      print("Create space result: \(result)")
       let space = Space(from: result.space)
       try await database.dbWriter.write { db in
         try space.save(db)
@@ -98,7 +97,7 @@ public class DataManager: ObservableObject {
     log.debug("createPrivateChat")
     do {
       let result = try await ApiClient.shared.createPrivateChat(userId: userId)
-      print("Result \(result)")
+
       try await database.dbWriter.write { db in
         let chat = Chat(from: result.chat)
         try chat.save(db)
@@ -106,7 +105,6 @@ public class DataManager: ObservableObject {
         try dialog.save(db)
         let user = User(from: result.user)
         try user.save(db)
-        print("Saved!!!!")
       }
 
       return Peer.user(id: result.user.id)

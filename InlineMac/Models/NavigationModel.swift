@@ -196,7 +196,7 @@ class NavigationModel: ObservableObject {
       let data = try encoder.encode(state)
       try data.write(to: stateFileURL)
     } catch {
-      print("Failed to save navigation state: \(error.localizedDescription)")
+      Log.shared.error("Failed to save navigation state: \(error.localizedDescription)")
     }
   }
 
@@ -215,7 +215,7 @@ class NavigationModel: ObservableObject {
       spacePathDict = state.spacePathDict
       spaceSelectionDict = state.spaceSelectionDict
     } catch {
-      print("Failed to load navigation state: \(error.localizedDescription)")
+      Log.shared.error("Failed to load navigation state: \(error.localizedDescription)")
       // If loading fails, reset to default state
       reset()
     }

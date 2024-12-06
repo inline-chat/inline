@@ -109,10 +109,9 @@ public final class FullSpaceViewModel: ObservableObject {
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
           receiveCompletion: { error in
-            print("error: \(error)")
+            Log.shared.error("error: \(error)")
           },
           receiveValue: { [weak self] chats in
-            print("\(chats)")
             self?.chats = chats
           })
   }

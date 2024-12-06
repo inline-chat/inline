@@ -70,9 +70,7 @@ struct RemoteUserItem: View {
     RemoteUserItem(user: ApiUser.preview)
     RemoteUserItem(
       user: ApiUser.preview,
-      action: {
-        print("Custom action")
-      }
+      action: {}
     )
   }
   .frame(width: 200)
