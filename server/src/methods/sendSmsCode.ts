@@ -43,7 +43,7 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    console.log("sending sms code to", lookup.phone_number)
+    Log.shared.debug("sending sms code to", { phoneNumber: lookup.phone_number })
 
     let existingUser = await db.query.users.findFirst({
       where: eq(users.phoneNumber, lookup.phone_number),

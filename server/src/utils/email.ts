@@ -3,7 +3,7 @@ import { EMAIL_PROVIDER } from "@in/server/config"
 import { sendEmail as sendEmailViaSES } from "@in/server/libs/ses"
 import { sendEmail as sendEmailViaResend } from "@in/server/libs/resend"
 import { isProd } from "@in/server/env"
-
+import { styleText } from "node:util"
 type SendEmailInput = {
   to: string
   content: SendEmailContent
@@ -22,15 +22,17 @@ export const sendEmail = async (input: SendEmailInput) => {
 
   if (!isProd && !process.env["SEND_EMAIL"]) {
     // let's log the email beautifully with formatting, subject, email, from and text so it's easy to read and matches the email
-    console.log(
+
+    console.info(
       `
-Subject: ${template.subject}
-To: ${input.to}
-From: team@inline.chat
+-- email preview -------------------------------
+${styleText("blueBright", "Subject:")} ${template.subject}
+${styleText("blueBright", "To:")} ${input.to}
 
 ${template.text}
 
-// This is a preview email. To force sending the email, set SEND_EMAIL=1.
+${styleText("cyan", "[Preview email. Force sending via SEND_EMAIL=1]")}
+------------------------------------------------
     `.trim(),
     )
     return
@@ -86,7 +88,6 @@ interface CodeTemplateInput extends TemplateInput {
   variables: { code: string; firstName: string | undefined }
 }
 function CodeTemplate({ code, firstName }: CodeTemplateInput["variables"]): TextTemplate {
-  console.log({ code, firstName })
   const subject = `Your Inline code: ${code}`
   const text = `
 Hey ${firstName ? `${firstName},` : "–"}

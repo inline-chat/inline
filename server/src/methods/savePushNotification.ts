@@ -12,7 +12,6 @@ export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
-  console.log("savePushNotification", input, context.currentSessionId)
   await SessionsModel.updateApplePushToken(context.currentSessionId, input.applePushToken)
   return undefined
 }

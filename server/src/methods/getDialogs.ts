@@ -99,8 +99,6 @@ export const handler = async (
       },
     })
 
-    console.log("publicChats", publicChats)
-
     // Make dialogs for each public chat that doesn't have one yet
     let result = await db.transaction(async (tx) => {
       const newDialogs: schema.DbDialog[] = []
@@ -121,8 +119,6 @@ export const handler = async (
       }
       return newDialogs
     })
-
-    console.log("newDialogs", result)
 
     // Push newly created dialogs to the arrays
     result.forEach((d) => {

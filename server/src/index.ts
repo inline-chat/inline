@@ -23,9 +23,9 @@ const port = process.env["PORT"] || 8000
 // Ensure to call this before importing any other modules!
 
 if (process.env.NODE_ENV === "development") {
-  console.log(`🚧 Starting server in development mode...`)
+  console.info(`🚧 Starting server in development mode...`)
 } else {
-  console.log(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
+  console.info(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
 }
 
 const app = new Elysia()

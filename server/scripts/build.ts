@@ -8,7 +8,7 @@ const commitHash =
 
 // Migrate if run in production
 if (process.env.NODE_ENV === "production") {
-  console.log(`🚧 Migrating...`)
+  console.info(`🚧 Migrating...`)
   try {
     await $`bun scripts/migrate.ts`.quiet()
   } catch (error) {
@@ -17,7 +17,7 @@ if (process.env.NODE_ENV === "production") {
   }
 }
 
-console.log(`🚧 Building...`)
+console.info(`🚧 Building...`)
 
 await Bun.build({
   entrypoints: [resolve(__dirname, "../src/index.ts")],
@@ -31,4 +31,4 @@ await Bun.build({
   },
 })
 
-console.log(`✅ Build complete`)
+console.info(`✅ Build complete`)
