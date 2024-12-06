@@ -1,0 +1,19 @@
+{
+  "references": [
+    {
+      "path": "./server"
+    },
+    {
+      "path": "./website"
+    }
+  ],
+  "files": [],
+  "compilerOptions": {
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true
+  }
+}

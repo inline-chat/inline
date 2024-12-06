@@ -17,7 +17,9 @@
     "typecheck": "cd server && bun run typecheck",
     "proto:generate-ts": "npx protoc --ts_out ./server/protocol/ --proto_path protos protos/messages.proto",
     "proto:generate-swift": "protoc --swift_out=./apple/InlineKit/Sources/InlineKit/Protocol --proto_path protos messages.proto",
-    "format:swift": "swift format apple/ --recursive --in-place"
+    "format:swift": "swift format apple/ --recursive --in-place",
+    "lint": "eslint . --cache",
+    "lint:fix": "eslint . --fix"
   },
   "overrides": {
     "elysia": "=1.1.22",
@@ -32,6 +34,11 @@
   },
   "devDependencies": {
     "@protobuf-ts/plugin": "^2.9.4",
-    "@types/bun": "^1.1.14"
+    "@types/bun": "^1.1.14",
+    "@typescript-eslint/eslint-plugin": "^8.17.0",
+    "@typescript-eslint/parser": "^8.17.0",
+    "eslint": "^9.16.0",
+    "eslint-plugin-react": "^7.37.2",
+    "typescript-eslint": "^8.17.0"
   }
 }
