@@ -50,10 +50,10 @@ struct OnboardingEnterCode: View {
         .onChange(of: self.code) { newCode in
           self.code = newCode.filter { $0.isNumber }
 
-          //                    if newCode.count == codeLimit, !formState.isLoading {
-          //                        self.submit()
-          //                    } else {
-          //                    }
+          // Auto-submit
+          if self.code.count == codeLimit, !formState.isLoading {
+            self.submit()
+          }
         }
         .onAppear {
           focusedField = .codeField
@@ -77,8 +77,8 @@ struct OnboardingEnterCode: View {
 
   @ViewBuilder var emailField: some View {
     let view =
-      GrayTextField("Code", text: $code, prompt: Text("123-456"))
-      .frame(width: 260)
+      GrayTextField("Code", text: $code, prompt: Text("123654"))
+        .frame(width: 260)
 
     if #available(macOS 14.0, *) {
       view
@@ -109,13 +109,14 @@ struct OnboardingEnterCode: View {
         // Establish WebSocket connection
         ws.authenticated()
 
-        // Navigate
-        if result.user.firstName == nil {
-          self.onboardingViewModel.navigate(to: .profile)
-        } else {
-          self.onboardingViewModel.navigateAfterLogin()
+        DispatchQueue.main.async {
+          // Navigate
+          if result.user.firstName == nil {
+            self.onboardingViewModel.navigate(to: .profile)
+          } else {
+            self.onboardingViewModel.navigateAfterLogin()
+          }
         }
-
       } catch {
         self.formState.failed(error: "Failed: \(error.localizedDescription)")
         Log.shared.error("Failed to send code", error: error)
