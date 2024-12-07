@@ -16,7 +16,7 @@ struct InlineApp: App {
   @Environment(\.openWindow) var openWindow
   
   var body: some Scene {
-    WindowGroup(id: "main") {
+    Window("Inline", id: "main") {
       MainWindow()
         .environmentObject(self.ws)
         .environmentObject(self.viewModel)
