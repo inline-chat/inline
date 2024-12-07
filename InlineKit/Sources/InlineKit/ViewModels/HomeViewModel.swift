@@ -47,7 +47,9 @@ public final class HomeViewModel: ObservableObject {
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
-        receiveCompletion: { _ in /* ignore error */ },
+        receiveCompletion: { _ in
+          Log.shared.error("Failed to get home chats")
+        },
         receiveValue: { [weak self] chats in
           self?.chats = chats
         }

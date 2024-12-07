@@ -35,6 +35,7 @@ struct MainView: View {
     .environmentObject(rootData)
     .environmentObject(dataManager)
     .onAppear {
+      Log.shared.info("MainView appeared • fetching root data")
       self.rootData.fetch()
       self.setUpSidebarAutoCollapse()
     }
