@@ -116,30 +116,23 @@ public extension AppDatabase {
   static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
     var config = base
 
-    if let token = Auth.shared.getToken() {
-      #if DEBUG
-        log.debug("Database passphrase: \(token)")
-      #endif
-      config.prepareDatabase { db in
+    config.prepareDatabase { db in
+      if let token = Auth.shared.getToken() {
+        #if DEBUG
+          log.debug("Database passphrase: \(token)")
+        #endif
         try db.usePassphrase(token)
-      }
-    } else {
-      config.prepareDatabase { db in
+      } else {
         try db.usePassphrase("123")
       }
     }
+
     return config
   }
 
   static func authenticated() async throws {
     if let token = Auth.shared.getToken() {
-      try await AppDatabase.shared.dbWriter.barrierWriteWithoutTransaction { db in
-        try db.changePassphrase(token)
-        // Needed for stupid swift. actually smart. ew.
-        if let db = AppDatabase.shared.dbWriter as? DatabasePool {
-          db.invalidateReadOnlyConnections()
-        }
-      }
+      try AppDatabase.changePassphrase(token)
     } else {
       log.warning("AppDatabase.authenticated called without token")
     }
@@ -171,19 +164,35 @@ public extension AppDatabase {
       try db.execute(sql: "PRAGMA foreign_keys = ON")
     }
 
-    // Optionally, delete the database file
-    // Uncomment the next line if you want to delete the file
-    try deleteDatabaseFile()
+    // Note(@mo): Commented because database file won't be availble for the next user!!!!! If you need this
+    // find a way to re-create the database file
+    // try deleteDatabaseFile()
 
-    log.info("Database successfully deleted.")
+    log.info("Database successfully cleared.")
   }
 
   static func loggedOut() throws {
     try clearDB()
 
     // Reset the database passphrase to a default value
-    try AppDatabase.shared.dbWriter.write { db in
-      try db.changePassphrase("123")
+    try AppDatabase.changePassphrase("123")
+  }
+
+  static func changePassphrase(_ passphrase: String) throws {
+    do {
+      if let dbPool = AppDatabase.shared.dbWriter as? DatabasePool {
+        try dbPool.barrierWriteWithoutTransaction { db in
+          try db.changePassphrase(passphrase)
+          dbPool.invalidateReadOnlyConnections()
+        }
+      } else if let dbQueue = AppDatabase.shared.dbWriter as? DatabaseQueue {
+        try dbQueue.write { db in
+          try db.changePassphrase(passphrase)
+        }
+      }
+    } catch {
+      log.error("Failed to change passphrase", error: error)
+      throw error
     }
   }
 }
@@ -253,10 +262,8 @@ public extension AppDatabase {
       let databaseUrl = getDatabaseUrl()
       let databasePath = databaseUrl.path
       let config = AppDatabase.makeConfiguration()
-      let dbPool = try DatabaseQueue(path: databasePath, configuration: config)
-      // Crashed iOS, not sure why
-      // TODO: investigate
-      // let dbPool = try DatabasePool(path: databaseURL.path, configuration: config)
+//      let dbPool = try DatabaseQueue(path: databasePath, configuration: config)
+      let dbPool = try DatabasePool(path: databasePath, configuration: config)
 
       var path = databasePath
       path.replace(" ", with: "\\ ")
