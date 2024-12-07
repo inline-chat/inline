@@ -9,29 +9,44 @@ struct MainWindow: View {
 
   var body: some View {
     ZStack {
-      switch viewModel.topLevelRoute {
-      case .main:
-        AuthenticatedWindowWrapper {
-          MainView()
-            .transition(
-              .opacity
-            )
-        }
-
-      case .onboarding:
+      // Background layer - no animation
+      if viewModel.topLevelRoute == .onboarding {
         VisualEffectView(
           material: .sidebar,
           blendingMode: .behindWindow
         )
         .ignoresSafeArea(.all)
-
-        Onboarding()
-          .transition(
-            .opacity
-          )
+        .transaction { transaction in
+          transaction.animation = nil
+        }
       }
+
+      // Content layer - with animation
+      Group {
+        switch viewModel.topLevelRoute {
+        case .main:
+          AuthenticatedWindowWrapper {
+            MainView()
+              .transition(
+                .opacity
+              )
+          }
+
+        case .onboarding:
+          VisualEffectView(
+            material: .sidebar,
+            blendingMode: .behindWindow
+          )
+          .ignoresSafeArea(.all)
+
+          Onboarding()
+            .transition(
+              .opacity
+            )
+        }
+      }
+      .animation(.snappy, value: viewModel.topLevelRoute)
     }
-    .animation(.snappy, value: viewModel.topLevelRoute)
     .introspect(.window, on: .macOS(.v13, .v14, .v15)) {
       viewModel.windowInititized($0)
       navigation.windowManager = viewModel
@@ -98,8 +113,9 @@ class MainWindowViewModel: ObservableObject {
   }
 
   func navigate(_ route: TopLevelRoute) {
-    columnVisibility = route == .main ? .automatic : .detailOnly
+    //    columnVisibility = route == .main ? .automatic : .detailOnly
     topLevelRoute = route
+    columnVisibility = route == .main ? .all : .detailOnly
     setupWindow(for: topLevelRoute)
   }
 
