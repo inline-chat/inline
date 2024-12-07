@@ -24,8 +24,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     // Base transform for bottom-up scrolling
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-    collectionView.contentInset = UIEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
-    collectionView.keyboardDismissMode = .onDrag
+    collectionView.contentInset = UIEdgeInsets(top: 62, left: 0, bottom: 16, right: 0)
 
     // Performance optimizations
     collectionView.isPrefetchingEnabled = true
