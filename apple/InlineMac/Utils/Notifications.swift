@@ -25,12 +25,17 @@ class NotificationsManager: NSObject {
 
 // Delegate
 extension NotificationsManager: UNUserNotificationCenterDelegate {
-//  func userNotificationCenter(
-//    _: UNUserNotificationCenter,
-//    willPresent: UNNotificationResponse,
-//    withCompletionHandler _: () -> Void
-//  ) {
-//  }
+  func userNotificationCenter(
+    _: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler:
+    @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    log.debug("willPresent called for \(notification)")
+
+    // Don't alert the user for other types.
+    completionHandler([])
+  }
 
   func userNotificationCenter(
     _: UNUserNotificationCenter,
