@@ -11,7 +11,7 @@ const log = new Log("encryption")
 const ENCRYPTION_KEY = process.env["ENCRYPTION_KEY"] as string
 
 if (!ENCRYPTION_KEY) {
-  throw new Error("Missing MESSAGE_ENCRYPTION_KEY in environment variables")
+  Log.shared.error("Missing MESSAGE_ENCRYPTION_KEY in environment variables")
 }
 
 const getEncryptionKey = (): string => {

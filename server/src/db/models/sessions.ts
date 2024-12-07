@@ -1,7 +1,7 @@
 // Note:Mostly AI generated
 
 import { and, eq, isNull } from "drizzle-orm"
-import { sessions, type DbSession, type DbNewSession, sessions, sessions } from "@in/server/db/schema/sessions"
+import { sessions, type DbSession, type DbNewSession } from "@in/server/db/schema/sessions"
 import { encrypt, decrypt, type EncryptedData } from "@in/server/utils/encryption/encryption"
 import { db } from "@in/server/db"
 
