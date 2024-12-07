@@ -110,6 +110,10 @@ class UIMessageView: UIView {
       bubbleView.topAnchor.constraint(equalTo: containerView.topAnchor),
       bubbleView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
     ])
+    
+    // Add gesture recognizer for context menu
+    let interaction = UIContextMenuInteraction(delegate: self)
+    bubbleView.addInteraction(interaction)
   }
 
   private func configureForMessage() {
