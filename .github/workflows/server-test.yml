@@ -39,6 +39,7 @@ jobs:
           path: |
             ~/.bun/install/cache
             node_modules
+            .eslintcache
           key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
           restore-keys: |
             ${{ runner.os }}-bun-
