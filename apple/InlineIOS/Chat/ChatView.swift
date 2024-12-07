@@ -29,6 +29,7 @@ struct ChatView: View {
       inputArea
         .overlay(alignment: .top) {
           Divider()
+            .edgesIgnoringSafeArea(.horizontal)
         }
     }
 
@@ -173,6 +174,7 @@ extension ChatView {
         .opacity(0.55)
         .background(.thinMaterial)
         .edgesIgnoringSafeArea(.bottom)
+        .edgesIgnoringSafeArea(.horizontal)
     )
   }
 

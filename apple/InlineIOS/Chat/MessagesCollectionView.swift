@@ -15,7 +15,6 @@ struct MessagesCollectionView: UIViewRepresentable {
     collectionView.backgroundColor = .clear
     collectionView.delegate = context.coordinator
     collectionView.autoresizingMask = [.flexibleHeight]
-//    collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
     collectionView.register(
       MessageCollectionViewCell.self,
