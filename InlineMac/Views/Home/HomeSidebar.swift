@@ -7,10 +7,10 @@ struct HomeSidebar: View {
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager
   @Environment(\.appDatabase) var db
+  @Environment(\.openWindow) var openWindow
 
   @EnvironmentStateObject var model: SpaceListViewModel
   @EnvironmentStateObject var home: HomeViewModel
-
   @StateObject var search = GlobalSearch()
   @FocusState private var isSearching: Bool
 
@@ -107,6 +107,9 @@ struct HomeSidebar: View {
           user: chat.user,
           action: {
             userPressed(user: chat.user)
+          },
+          commandPress: {
+            openWindow(value: Peer.user(id: chat.user.id))
           },
           selected: nav.currentHomeRoute == .chat(
             peer: .user(id: chat.user.id)
