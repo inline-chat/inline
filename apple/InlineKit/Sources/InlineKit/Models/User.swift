@@ -59,7 +59,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     lastName: nil,
     username: nil
   )
-  
+
   public static let preview = Self(
     id: -1,
     email: "john@acme.com",
@@ -105,27 +105,5 @@ public extension User {
 
   static func fromTimestamp(from: Int) -> Date {
     return Date(timeIntervalSince1970: Double(from) / 1000)
-  }
-}
-
-public extension User {
-  enum CodingKeys: String, CodingKey {
-    case id
-    case email
-    case firstName
-    case lastName
-    case date
-    case username
-  }
-
-  init(from decoder: Decoder) throws {
-    let container = try decoder.container(keyedBy: CodingKeys.self)
-
-    self.id = try container.decode(Int64.self, forKey: .id)
-    self.email = try container.decode(String.self, forKey: .email)
-    self.firstName = try container.decode(String.self, forKey: .firstName)
-    self.lastName = try container.decodeIfPresent(String.self, forKey: .lastName)
-    self.username = try container.decodeIfPresent(String.self, forKey: .username)
-    self.date = try container.decodeIfPresent(Date.self, forKey: .date) ?? .now
   }
 }
