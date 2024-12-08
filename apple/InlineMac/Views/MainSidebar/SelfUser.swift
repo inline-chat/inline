@@ -15,11 +15,27 @@ struct SelfUser: View {
       UserAvatar(user: currentUser, size: Theme.sidebarIconSize)
         .padding(.trailing, Theme.sidebarIconSpacing)
 
-      Text(currentUser.firstName ?? "You")
-        .font(Theme.sidebarTopItemFont)
-        .foregroundStyle(
-          appearsActive ? .primary : .tertiary
-        )
+      ConnectionStateProvider { connection in
+        VStack(alignment: .leading, spacing: 0) {
+          Text(currentUser.firstName ?? "You")
+            .font(Theme.sidebarTopItemFont)
+            .foregroundStyle(
+              appearsActive ? .primary : .tertiary
+            ).padding(.bottom, 0)
+
+          if connection.shouldShow {
+            Text(connection.humanReadable)
+              .lineLimit(1)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .contentTransition(.identity)
+              .padding(.top, -2)
+          }
+        }
+        
+        .animation(.smoothSnappy, value: connection.state)
+        .animation(.smoothSnappy, value: connection.shouldShow)
+      }
     }
     .frame(height: Theme.sidebarTopItemHeight)
   }

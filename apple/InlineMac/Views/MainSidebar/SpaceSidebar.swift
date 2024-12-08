@@ -61,13 +61,6 @@ struct SpaceSidebar: View {
         .padding(.horizontal)
       }
     )
-    // Extract ???
-    .overlay(
-      alignment: .bottom,
-      content: {
-        ConnectionStateOverlay()
-      }
-    )
     .task {
       do {
         try await data.getDialogs(spaceId: spaceId)
