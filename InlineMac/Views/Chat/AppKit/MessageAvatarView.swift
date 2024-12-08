@@ -30,11 +30,11 @@ class UserAvatarView: NSView {
     guard let user = user else { return }
     if let hostingController = hostingController {
       if user != prevUser {
-        let swiftUIView = UserAvatar(user: user, size: Theme.messageAvatarSize)
+        let swiftUIView = UserAvatar(user: user, size: Theme.messageAvatarSize, ignoresSafeArea: true)
         hostingController.rootView = swiftUIView
       }
     } else {
-      let swiftUIView = UserAvatar(user: user, size: Theme.messageAvatarSize)
+      let swiftUIView = UserAvatar(user: user, size: Theme.messageAvatarSize, ignoresSafeArea: true)
       hostingController = NSHostingController(rootView: swiftUIView)
       
       if let hostView = hostingController?.view {

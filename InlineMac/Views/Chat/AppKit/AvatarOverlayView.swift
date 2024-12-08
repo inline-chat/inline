@@ -12,6 +12,7 @@ class AvatarOverlayView: NSView {
     super.init(frame: frame)
     wantsLayer = true
     clipsToBounds = true
+    translatesAutoresizingMaskIntoConstraints = false
   }
   
   @available(*, unavailable)
@@ -69,9 +70,6 @@ class MessageAvatarView: NSView {
   private lazy var avatarView: UserAvatarView = {
     let view = UserAvatarView(frame: .zero)
     view.translatesAutoresizingMaskIntoConstraints = false
-//    view.clipsToBounds = false
-    view.wantsLayer = true
-//    view.layer?.zPosition = 100
     return view
   }()
   
@@ -89,6 +87,7 @@ class MessageAvatarView: NSView {
   
   private func setupView() {
     wantsLayer = true
+    translatesAutoresizingMaskIntoConstraints = false
     
     addSubview(avatarView)
     
@@ -98,8 +97,8 @@ class MessageAvatarView: NSView {
       avatarView.heightAnchor.constraint(equalToConstant: Self.size)
     ])
     
-    topConstraint = avatarView.topAnchor.constraint(equalTo: topAnchor)
-    topConstraint?.isActive = true
+//    topConstraint = avatarView.topAnchor.constraint(equalTo: topAnchor)
+//    topConstraint?.isActive = true
   }
   
   func configure(with user: User) {
