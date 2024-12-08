@@ -32,12 +32,13 @@ struct ChatView: View {
   @ViewBuilder
   var content: some View {
     GeometryReader { geo in
-      //    messageList
       VStack(spacing: 0) {
         MessagesList(width: geo.size.width)
 
         compose
       }
+      // So the scroll bar goes under the toolbar
+      .ignoresSafeArea(.container, edges: .top)
     }
     .task {
       await fetch()
@@ -60,7 +61,6 @@ struct ChatView: View {
     content
       // Hide default title. No way to achieve this without this for now
       .navigationTitle("")
-      //      .navigationSubtitle(subtitle)
       .toolbar {
         ToolbarItem(placement: .navigation) {
           HStack {
@@ -72,7 +72,7 @@ struct ChatView: View {
               // TODO: Handle
             }
 
-            VStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 0) {
               Text(title)
                 .font(.headline)
                 .padding(.bottom, 0)

@@ -16,6 +16,8 @@ class MessagesTableView: NSViewController {
 
   private let defaultRowHeight = 44.0
   
+  private let log = Log.scoped("MessagesTableView", enableTracing: true)
+  
   init(width: CGFloat) {
     self.width = width
     super.init(nibName: nil, bundle: nil)
@@ -49,11 +51,10 @@ class MessagesTableView: NSViewController {
     table.delegate = self
     table.dataSource = self
   
-    table.wantsLayer = true
-//    table.layer?.drawsAsynchronously = true
-    table.layer?.backgroundColor = .clear
+//    table.wantsLayer = true
+    //    table.layer?.backgroundColor = .clear
     // This helps with running listeners on every frame
-    table.layerContentsRedrawPolicy = .onSetNeedsDisplay
+//    table.layerContentsRedrawPolicy = .onSetNeedsDisplay
     return table
   }()
   
@@ -69,16 +70,20 @@ class MessagesTableView: NSViewController {
     scroll.borderType = .noBorder
     scroll.drawsBackground = false // Add this line
     scroll.backgroundColor = .clear
-    scroll.wantsLayer = true
+//    scroll.wantsLayer = true
     // Used for quick scroll on resize
-    scroll.layerContentsRedrawPolicy = .onSetNeedsDisplay
+//    scroll.layerContentsRedrawPolicy = .onSetNeedsDisplay
     scroll.translatesAutoresizingMaskIntoConstraints = false
     scroll.documentView = tableView
     scroll.hasVerticalScroller = true
     scroll.scrollerStyle = .overlay
+    
     scroll.verticalScrollElasticity = .allowed
     scroll.autohidesScrollers = true
+    scroll.verticalScroller?.controlSize = .small // This makes it ultra-minimal
 
+    scroll.postsBoundsChangedNotifications = true
+    
     return scroll
   }()
   
@@ -120,12 +125,15 @@ class MessagesTableView: NSViewController {
     if animated {
       // Causes clipping at the top
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.15
+        context.duration = 0.2
         context.allowsImplicitAnimation = true
         tableView.scrollRowToVisible(lastRow)
       }
     } else {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
       tableView.scrollRowToVisible(lastRow)
+      CATransaction.commit()
     }
   }
 
@@ -171,6 +179,8 @@ class MessagesTableView: NSViewController {
   }
   
   @objc func scrollViewBoundsChanged(notification: Notification) {
+    log.trace("scroll view bounds changed")
+    
     if needsInitialScroll {
       // reports inaccurate heights at this point
       return
@@ -183,29 +193,40 @@ class MessagesTableView: NSViewController {
     let currentScrollOffset = scrollOffset.y
     
     // Update scroll position
-    isAtBottom = abs(currentScrollOffset - maxScrollableHeight) <= 10.0
+    let prevAtBottom = isAtBottom
+    // Note(@mo): 38 is initial diff which will instantly make atBottom false and break scroll to bottom
+    // when initial route is the chat and app is launched. This is a hack to prevent that.
+    // but we need to find a way to keep this under 10.0 and instead fix the initial scroll to bottom.
+    isAtBottom = abs(currentScrollOffset - maxScrollableHeight) <= 40.0
+    
+    if isAtBottom != prevAtBottom {
+      log.trace("isAtBottom changed. isAtBottom = \(isAtBottom) currentScrollOffset = \(currentScrollOffset) maxScrollableHeight = \(maxScrollableHeight)")
+    }
+    
+    // Update avatars as user scrolls
+    updateAvatars()
     
     // Update heights that might have been changed if a width change happened in a different position
     // because we just update visible portion of the table
     recalculateHeightsOnWidthChange()
-
-    // Update avatars as user scrolls
-    updateAvatars()
   }
   
   var avatarOverlay: AvatarOverlayView { avatarOverlayView }
   
   private func updateAvatars() {
+    log.trace("update avatars")
+    let stickyPadding: CGFloat = 8.0
+    let scrollTopInset = scrollView.contentInsets.top
+    let viewportHeight = scrollView.contentView.bounds.height
+    let currentOffset = scrollView.contentView.bounds.origin.y
     let visibleRect = tableView.visibleRect
-    let visibleRange = tableView.rows(in: visibleRect)
+    let visibleRectMinusTopInset = visibleRect.offsetBy(dx: 0, dy: scrollTopInset)
+    log.trace("Visible rect: \(visibleRect)")
+    log.trace("Visible rect minus top inset: \(visibleRectMinusTopInset)")
+    let visibleRange = tableView.rows(in: visibleRectMinusTopInset)
     guard visibleRange.location != NSNotFound else { return }
     guard visibleRange.length > 0 else { return }
-    
-    let scrollView = tableView.enclosingScrollView!
-    let currentOffset = scrollView.contentView.bounds.origin.y
-    let viewportHeight = scrollView.contentView.bounds.height
-    let stickyPadding: CGFloat = 8.0
- 
+
     var processedRows = Set<Int>()
     
     // utils
@@ -213,6 +234,10 @@ class MessagesTableView: NSViewController {
       return row == 0 ?
         Theme.messageListTopInset + Theme.messageVerticalPadding :
         Theme.messageVerticalPadding
+    }
+    
+    func availableViewportHeight() -> CGFloat {
+      return scrollView.contentView.bounds.height - scrollTopInset
     }
     
     func avatarNaturalPosition(at row: Int) -> CGFloat {
@@ -254,7 +279,10 @@ class MessagesTableView: NSViewController {
       let naturalPosition = avatarNaturalPosition(at: primaryStickyRow)
       
       // Min it with the viewport height - avatar size - padding so it doesn't go out of bounds of screen
-      let stickyPosition = min(naturalPosition, viewportHeight - AvatarOverlayView.size - stickyPadding)
+      let stickyPosition = min(
+        naturalPosition,
+        availableViewportHeight() - AvatarOverlayView.size - stickyPadding
+      )
       
       // Find the first visible avatar below the sticky one, we need it so it pushes the sticky avatar up as it's about to overlap
       if let nextVisibleRow = upcomingSticky,
@@ -263,13 +291,18 @@ class MessagesTableView: NSViewController {
       {
         let nextAvatarPosition = avatarNaturalPosition(at: nextVisibleRow)
         // so it doesn't go above sticky padding immediately before becoming sticky and causing jump
-        let nextAvatarPositionWithPadding = min(nextAvatarPosition, viewportHeight - AvatarOverlayView.size - stickyPadding)
+        let nextAvatarPositionWithPadding = min(
+          nextAvatarPosition,
+          availableViewportHeight() - AvatarOverlayView.size - stickyPadding
+        )
         
         // Calculate the maximum allowed position (just above the next avatar)
         let maxAllowedPosition = nextAvatarPosition + AvatarOverlayView.size + stickyPadding
         
         // Use the higher position (more towards top of screen) between natural and pushed
         let stickyPositionWhenPushed = max(stickyPosition, maxAllowedPosition)
+        
+        log.trace("Sticky position: \(stickyPosition), pushed: \(stickyPositionWhenPushed), next: \(nextAvatarPosition), nextWithPadding: \(nextAvatarPositionWithPadding) max: \(maxAllowedPosition)")
         
         avatarOverlay.updateAvatar(
           for: primaryStickyRow,
@@ -334,23 +367,26 @@ class MessagesTableView: NSViewController {
     let newWidth = tableView.bounds.width
 //    let newWidth = width
     
+    var notWidthRelated = false
     if lastKnownWidth == 0 {
       lastKnownWidth = newWidth
       recalculateVisibleHeightsWithCache()
-    }
-    
-    // Handle height re-calc on width change
-    if
-      abs(newWidth - lastKnownWidth) > 0.1
-    {
+    } else if abs(newWidth - lastKnownWidth) > 0.1 {
+      // Handle height re-calc on width change
       lastKnownWidth = newWidth
       recalculateHeightsOnWidthChange()
-//      recalculateAllHeights()
+    } else {
+      notWidthRelated = true
     }
-    
+
     if needsInitialScroll && !messages.isEmpty {
       scrollToBottom(animated: false)
-      needsInitialScroll = false
+      // Avatar would flash initially without this
+      updateAvatars()
+      // Don't stop initial scroll until initial width flactuation is done (hacky way to fix not going all the way to the bottom on initial render
+      if notWidthRelated {
+        needsInitialScroll = false
+      }
     }
   }
 
@@ -362,7 +398,7 @@ class MessagesTableView: NSViewController {
       // Initial update
       messages = newMessages
       tableView.reloadData()
-      // Force immediate layout
+      
       view.layoutSubtreeIfNeeded()
       updateAvatars()
       return
