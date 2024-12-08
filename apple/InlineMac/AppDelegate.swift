@@ -35,7 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     _ application: NSApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
-    Log.shared.error("Registered for remote notifications: \(deviceToken)")
+    Log.shared.debug("Registered for remote notifications: \(deviceToken)")
 
     notifications.didRegisterForRemoteNotifications(deviceToken: deviceToken)
   }
