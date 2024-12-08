@@ -63,134 +63,89 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     let peerId = peer
     chatCancellable =
       ValueObservation
-      .tracking { db in
-        switch peerId {
-        case .user:
-          // Fetch private chat
-          try Dialog
-            .filter(id: Dialog.getDialogId(peerId: peerId))
-            .including(
-              optional: Dialog.peerUser
-                .including(
-                  optional: User.chat
-                    .including(optional: Chat.lastMessage))
-            )
-            .asRequest(of: SpaceChatItem.self)
-            .fetchAll(db)
+        .tracking { db in
+          switch peerId {
+          case .user:
+            // Fetch private chat
+            try Dialog
+              .filter(id: Dialog.getDialogId(peerId: peerId))
+              .including(
+                optional: Dialog.peerUser
+                  .including(
+                    optional: User.chat
+                      .including(optional: Chat.lastMessage))
+              )
+              .asRequest(of: SpaceChatItem.self)
+              .fetchAll(db)
 
-        case .thread:
-          // Fetch thread chat
-          try Dialog
-            .filter(id: Dialog.getDialogId(peerId: peerId))
-            .including(
-              optional: Dialog.peerThread
-                .including(optional: Chat.lastMessage)
-            )
-            .asRequest(of: SpaceChatItem.self)
-            .fetchAll(db)
+          case .thread:
+            // Fetch thread chat
+            try Dialog
+              .filter(id: Dialog.getDialogId(peerId: peerId))
+              .including(
+                optional: Dialog.peerThread
+                  .including(optional: Chat.lastMessage)
+              )
+              .asRequest(of: SpaceChatItem.self)
+              .fetchAll(db)
+          }
         }
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
-        receiveValue: { [weak self] chats in
-          self?.chatItem = chats.first
-
-          // TODO: improve this
-        }
-      )
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
+          receiveValue: { [weak self] chats in
+            self?.chatItem = chats.first
+          }
+        )
   }
 
   func fetchMessages() {
     let peer = self.peer
     messagesCancellable =
       ValueObservation
-      .tracking { db in
+        .tracking { db in
 
-        if case .thread(let id) = peer {
-          return
-            try Message
-            .filter(Column("peerThreadId") == id)
-            .including(optional: Message.from)
-            .asRequest(of: FullMessage.self)
-            .fetchAll(db)
-            .sorted(by: { $0.message.date < $1.message.date })
+          if case .thread(let id) = peer {
+            return
+              try Message
+                .filter(Column("peerThreadId") == id)
+                .including(optional: Message.from)
+                .asRequest(of: FullMessage.self)
+                // .order(Column("messageId").desc)
+                .order(Column("date").asc)
+                .fetchAll(db)
 
-        } else if case .user(let id) = peer {
-          return
-            try Message
-            .filter(Column("peerUserId") == id)
-            .including(optional: Message.from)
-            .asRequest(of: FullMessage.self)
-            .fetchAll(db)
-            .sorted(by: { $0.message.date < $1.message.date })
+          } else if case .user(let id) = peer {
+            return
+              try Message
+                .filter(Column("peerUserId") == id)
+                .including(optional: Message.from)
+                .asRequest(of: FullMessage.self)
+                // .order(Column("messageId").desc)
+                .order(Column("date").asc)
+                .fetchAll(db)
 
-        } else {
-          return []
-        }
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { error in
-          Log.shared.error("Failed to get messages \(error)")
-        },
-        receiveValue: { [weak self] messages in
-
-          if self?.reversed == true {
-            self?.fullMessages = messages.reversed()
           } else {
-            self?.fullMessages = messages
+            return []
           }
-          self?.updateMessagesInSections()
         }
-      )
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { error in
+            Log.shared.error("Failed to get messages \(error)")
+          },
+          receiveValue: { [weak self] messages in
+
+            if self?.reversed == true {
+              self?.fullMessages = messages.reversed()
+            } else {
+              self?.fullMessages = messages
+            }
+          }
+        )
   }
 
   public func getGlobalId(forMessageId messageId: Int64) -> Int64? {
     messageIdToGlobalId[messageId]
-  }
-
-  func updateMessagesInSections() {
-    let groupedMessages = Dictionary(grouping: fullMessages) { fullMessage -> Date in
-      // Use the date component to group by day
-      Calendar.current.startOfDay(for: fullMessage.message.date)
-    }
-
-    fullMessages.forEach { fullMessage in
-      messageIdToGlobalId[fullMessage.message.id] = fullMessage.id
-    }
-
-    // Convert the dictionary to an array of sections
-    messagesInSections = groupedMessages.map { date, messages in
-      if self.reversed {
-        // Create a section header for each date
-        return FullChatSection(id: date, date: date, messages: messages)
-      } else {
-        return FullChatSection(id: date, date: date, messages: messages)
-      }
-    }
-    .sorted(by: { if self.reversed { return $0.date > $1.date } else { return $0.date < $1.date } })
-  }
-
-  // Utils
-
-  public func getNextSectionDate(section: FullChatSection) -> Date? {
-    let index = messagesInSections.firstIndex(where: { $0.id == section.id }) ?? 0
-    let nextIndex = index + 1
-    if nextIndex < messagesInSections.count {
-      return messagesInSections[nextIndex].date
-    } else {
-      return nil
-    }
-  }
-
-  public func getPrevSectionDate(section: FullChatSection) -> Date? {
-    let index = messagesInSections.firstIndex(where: { $0.id == section.id }) ?? 0
-    let prevIndex = index - 1
-    if prevIndex >= 0 {
-      return messagesInSections[prevIndex].date
-    } else {
-      return nil
-    }
   }
 }
