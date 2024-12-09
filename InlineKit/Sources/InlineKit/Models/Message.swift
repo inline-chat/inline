@@ -13,9 +13,17 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var out: Bool?
   public var editDate: Int?
   public var date: Int
+  public var status: String?
 }
 
-public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable, Equatable
+public enum MessageSendingStatus: String, Codable, Hashable, Sendable {
+  case sending
+  case sent
+  case failed
+}
+
+public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
+  Sendable, Equatable
 {
   // Locally autoincremented id
   public var globalId: Int64?
@@ -23,10 +31,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var id: Int64 {
     messageId
   }
-  
+
   // Only set for outgoing messages
   public var randomId: Int64?
-  
+
   // From API, unique per chat
   public var messageId: Int64
 
@@ -54,6 +62,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   // If message was edited
   public var editDate: Date?
+  public var status: MessageSendingStatus?
 
   public static let chat = belongsTo(Chat.self)
   public var chat: QueryInterfaceRequest<Chat> {
@@ -77,7 +86,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     out: Bool? = nil,
     mentioned: Bool? = nil,
     pinned: Bool? = nil,
-    editDate: Date? = nil
+    editDate: Date? = nil,
+    status: MessageSendingStatus? = nil
   ) {
     self.messageId = messageId
     self.randomId = randomId
@@ -91,7 +101,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.out = out
     self.mentioned = mentioned
     self.pinned = pinned
-
+    self.status = status
     if peerUserId == nil && peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
@@ -109,7 +119,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       out: from.out,
       mentioned: from.mentioned,
       pinned: from.pinned,
-      editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+      editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) },
+      status: .sent
     )
   }
 
