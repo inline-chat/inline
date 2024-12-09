@@ -16,7 +16,7 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var status: String?
 }
 
-public enum MessageSendingStatus: String, Codable, Hashable, Sendable {
+public enum MessageSendingStatus: String, Codable, Hashable, Sendable, DatabaseValueConvertible {
   case sending
   case sent
   case failed
