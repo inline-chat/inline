@@ -22,9 +22,9 @@ struct Settings: View {
   }
 }
 
-private extension Settings {
+extension Settings {
   @ViewBuilder
-  var accountSection: some View {
+  fileprivate var accountSection: some View {
     Section(header: Text("Account")) {
       if let currentUser = currentUser {
         HStack {
@@ -49,7 +49,7 @@ private extension Settings {
   }
 
   @ViewBuilder
-  var actionsSection: some View {
+  fileprivate var actionsSection: some View {
     Section(header: Text("Actions")) {
       Button("Logout", role: .destructive) {
         // Clear creds
@@ -69,7 +69,7 @@ private extension Settings {
   }
 
   @ViewBuilder
-  var apearenceSection: some View {
+  fileprivate var apearenceSection: some View {
     Section(header: Text("Appearance")) {
       BubbleColorSettings()
     }
@@ -78,6 +78,8 @@ private extension Settings {
 
 struct BubbleColorSettings: View {
   @State private var selectedColor: UIColor = BubbleColorManager.shared.selectedColor
+  @State private var selectedSecondaryColor: UIColor = BubbleColorManager.shared
+    .selectedSecondaryColor
   private let columns = [
     GridItem(.adaptive(minimum: 40), spacing: 12)
   ]
@@ -99,6 +101,25 @@ struct BubbleColorSettings: View {
             .onTapGesture {
               selectedColor = color
               BubbleColorManager.shared.saveColor(color)
+            }
+        }
+      }
+
+      Text("Secondary Color")
+        .font(.headline)
+
+      LazyVGrid(columns: columns, spacing: 12) {
+        ForEach(BubbleColorManager.shared.secondaryColors, id: \.self) { color in
+          Circle()
+            .fill(Color(uiColor: color))
+            .frame(width: 40, height: 40)
+            .overlay(
+              Circle()
+                .stroke(Color.primary, lineWidth: selectedSecondaryColor == color ? 2 : 0)
+            )
+            .onTapGesture {
+              selectedSecondaryColor = color
+              BubbleColorManager.shared.saveSecondaryColor(color)
             }
         }
       }
