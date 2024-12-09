@@ -296,7 +296,7 @@ public class DataManager: ObservableObject {
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil  // TODO: fix
+          chat.lastMsgId = nil // TODO: fix
 
           return chat
         }
@@ -338,7 +338,7 @@ public class DataManager: ObservableObject {
 
   public func sendMessage(
     chatId: Int64, peerUserId: Int64?, peerThreadId: Int64?, text: String, peerId: Peer?,
-    randomId: Int64?  // for now nilable
+    randomId: Int64? // for now nilable
   )
     async throws
   {
@@ -419,14 +419,27 @@ public class DataManager: ObservableObject {
     try await database.dbWriter.write { db in
       let pendingMessages =
         try Message
-        .filter(Column("out") == true)
-        .filter(Column("status") == MessageSendingStatus.sending.rawValue)
-        .filter(Column("peerUserId") == finalPeerUserId)
-        .filter(Column("peerThreadId") == finalPeerThreadId)
-        .fetchAll(db)
+          .filter(Column("out") == true)
+          .filter(Column("status") == MessageSendingStatus.sending.rawValue)
+          .filter(Column("peerUserId") == finalPeerUserId)
+          .filter(Column("peerThreadId") == finalPeerThreadId)
+          .fetchAll(db)
 
       for var message in pendingMessages {
         message.status = .failed
+        try message.save(db, onConflict: .replace)
+      }
+
+      let unsentMessages =
+        try Message
+          .filter(Column("out") == true)
+          .filter(Column("status") == nil)
+          .filter(Column("peerUserId") == finalPeerUserId)
+          .filter(Column("peerThreadId") == finalPeerThreadId)
+          .fetchAll(db)
+
+      for var message in unsentMessages {
+        message.status = .sent
         try message.save(db, onConflict: .replace)
       }
     }
