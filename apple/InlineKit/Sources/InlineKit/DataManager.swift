@@ -296,7 +296,7 @@ public class DataManager: ObservableObject {
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil // TODO: fix
+          chat.lastMsgId = nil  // TODO: fix
 
           return chat
         }
@@ -338,7 +338,7 @@ public class DataManager: ObservableObject {
 
   public func sendMessage(
     chatId: Int64, peerUserId: Int64?, peerThreadId: Int64?, text: String, peerId: Peer?,
-    randomId: Int64? // for now nilable
+    randomId: Int64?  // for now nilable
   )
     async throws
   {
@@ -369,12 +369,12 @@ public class DataManager: ObservableObject {
       text: text,
       randomId: randomId
     )
-
+    print("Send message result \(result)")
     Task { @MainActor in
       // Don't apply local changes if randomId is set which means optimistic update was handled
       if randomId == nil {
         try await database.dbWriter.write { db in
-          let message = Message(from: result.message)
+          var message = Message(from: result.message)
           do {
             try message.save(db)
           } catch {
@@ -416,12 +416,27 @@ public class DataManager: ObservableObject {
       peerUserId: finalPeerUserId,
       peerThreadId: finalPeerThreadId
     )
+    try await database.dbWriter.write { db in
+      let pendingMessages =
+        try Message
+        .filter(Column("out") == true)
+        .filter(Column("status") == MessageSendingStatus.sending.rawValue)
+        .filter(Column("peerUserId") == finalPeerUserId)
+        .filter(Column("peerThreadId") == finalPeerThreadId)
+        .fetchAll(db)
+
+      for var message in pendingMessages {
+        message.status = .failed
+        try message.save(db, onConflict: .replace)
+      }
+    }
 
     let messages: [Message] = try await database.dbWriter.write { db in
       let messages = result.messages.map { Message(from: $0) }
-      try messages.forEach { message in
-        try message.save(db, onConflict: .ignore)
+      for message in messages {
+        try message.save(db, onConflict: .replace)
       }
+
       return messages
     }
 

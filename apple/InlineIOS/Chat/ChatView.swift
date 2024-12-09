@@ -45,6 +45,7 @@ struct ChatView: View {
     .toolbarBackground(.visible, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
     .onAppear {
+      print("Called")
       fetchMessages()
     }
     .onChange(of: scenePhase) { _, newPhase in
@@ -116,7 +117,8 @@ extension ChatView {
           peerUserId: peerUserId,
           peerThreadId: peerThreadId,
           chatId: chatId,
-          out: true
+          out: true,
+          status: .sending
         )
 
         // Save message to database

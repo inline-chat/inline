@@ -62,6 +62,7 @@ struct UpdateUpdateMessageId: Codable {
         db
       )
       if var message = message {
+        message.status = .sent
         message.messageId = self.messageId
         try message.save(db)
         var chat = try Chat.fetchOne(db, id: message.chatId)

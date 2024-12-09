@@ -45,43 +45,6 @@ class UIMessageView: UIView {
 
   // MARK: - Setup
 
-//  private func setupViews() {
-//    addSubview(containerView)
-//    containerView.addSubview(bubbleView)
-//    bubbleView.addSubview(messageLabel)
-//
-//    NSLayoutConstraint.activate([
-//      // Container constraints
-//      containerView.topAnchor.constraint(equalTo: topAnchor),
-//      containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
-//      containerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-//      containerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-//
-//      // Bubble constraints
-//      bubbleView.topAnchor.constraint(equalTo: containerView.topAnchor),
-//      bubbleView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-  ////      bubbleView.widthAnchor.constraint(greaterThanOrEqualToConstant: 40),
-//
-//      // Message label constraints - centered
-//      messageLabel.centerXAnchor.constraint(equalTo: bubbleView.centerXAnchor),
-//      messageLabel.centerYAnchor.constraint(equalTo: bubbleView.centerYAnchor),
-//      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
-//      messageLabel.bottomAnchor.constraint(
-//        equalTo: bubbleView.bottomAnchor, constant: -8
-//      ),
-//      messageLabel.leadingAnchor.constraint(
-//        equalTo: bubbleView.leadingAnchor, constant: 10
-//      ),
-//      messageLabel.trailingAnchor.constraint(
-//        equalTo: bubbleView.trailingAnchor, constant: -10
-//      ),
-//
-//    ])
-//
-//    // Add gesture recognizer for context menu
-//    let interaction = UIContextMenuInteraction(delegate: self)
-//    bubbleView.addInteraction(interaction)
-//  }
   private func setupViews() {
     // Set content hugging and compression resistance priorities
     messageLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -110,7 +73,7 @@ class UIMessageView: UIView {
       bubbleView.topAnchor.constraint(equalTo: containerView.topAnchor),
       bubbleView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
     ])
-    
+
     // Add gesture recognizer for context menu
     let interaction = UIContextMenuInteraction(delegate: self)
     bubbleView.addInteraction(interaction)
