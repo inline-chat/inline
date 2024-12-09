@@ -211,7 +211,7 @@ class UIMessageView: UIView {
     case .singleLine:
       messageLabel.textColor = fullMessage.message.out == true ? .white : .label
       let widthConstraint = messageLabel.widthAnchor.constraint(
-        equalToConstant: messageLabel.intrinsicContentSize.width + 65.0
+        equalToConstant: messageLabel.intrinsicContentSize.width + 62.0
       )
       widthConstraint.isActive = true
     case .multiline:
