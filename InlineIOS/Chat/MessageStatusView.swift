@@ -23,7 +23,7 @@ struct MessageStatusView: View {
         EmptyView()
       }
     }
-    
+
     .frame(width: 10, height: 10)
   }
 }
