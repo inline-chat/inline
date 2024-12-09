@@ -51,7 +51,7 @@ class UIMessageView: UIView {
 
     // Calculate available width considering bubble constraints and padding
     let maxWidth = bounds.width * 0.85 - 24
-    guard maxWidth > 0 else { return .singleLine } // Guard against invalid width
+    guard maxWidth > 0 else { return .singleLine }  // Guard against invalid width
 
     // Use sizeThatFits for more accurate measurement
     let size = messageLabel.sizeThatFits(CGSize(width: maxWidth, height: .greatestFiniteMagnitude))
@@ -194,7 +194,7 @@ class UIMessageView: UIView {
 
     // Configure bubble alignment first
     if fullMessage.message.out == true {
-      bubbleView.backgroundColor = .systemPurple
+      bubbleView.backgroundColor = BubbleColorManager.shared.selectedColor
       leadingConstraint?.isActive = false
       trailingConstraint?.isActive = true
     } else {
@@ -254,8 +254,8 @@ extension String {
     guard let firstChar = first else { return false }
     let earlyRTL =
       firstChar.unicodeScalars.first?.properties.generalCategory == .otherLetter
-        && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
-        && firstChar.unicodeScalars.first!.value <= 0x08FF
+      && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
+      && firstChar.unicodeScalars.first!.value <= 0x08FF
 
     if earlyRTL { return true }
 

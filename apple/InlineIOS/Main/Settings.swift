@@ -16,6 +16,7 @@ struct Settings: View {
     List {
       accountSection
       actionsSection
+      apearenceSection
     }
     .listStyle(.plain)
   }
@@ -63,6 +64,43 @@ private extension Settings {
         nav.popToRoot()
 
         onboardingNav.push(.welcome)
+      }
+    }
+  }
+
+  @ViewBuilder
+  var apearenceSection: some View {
+    Section(header: Text("Appearance")) {
+      BubbleColorSettings()
+    }
+  }
+}
+
+struct BubbleColorSettings: View {
+  @State private var selectedColor: UIColor = BubbleColorManager.shared.selectedColor
+  private let columns = [
+    GridItem(.adaptive(minimum: 40), spacing: 12)
+  ]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Bubble Color")
+        .font(.headline)
+
+      LazyVGrid(columns: columns, spacing: 12) {
+        ForEach(BubbleColorManager.shared.availableColors, id: \.self) { color in
+          Circle()
+            .fill(Color(uiColor: color))
+            .frame(width: 40, height: 40)
+            .overlay(
+              Circle()
+                .stroke(Color.primary, lineWidth: selectedColor == color ? 2 : 0)
+            )
+            .onTapGesture {
+              selectedColor = color
+              BubbleColorManager.shared.saveColor(color)
+            }
+        }
       }
     }
   }
