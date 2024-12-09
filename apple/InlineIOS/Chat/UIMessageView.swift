@@ -39,6 +39,14 @@ class UIMessageView: UIView {
     case multiline(lineCount: Int)
   }
 
+  private var metadataWidth: CGFloat {
+    if fullMessage.message.out == true {
+      return 65
+    } else {
+      return 50
+    }
+  }
+
   // MARK: - Layout Detection
 
   private var messageLayout: MessageLayout {
@@ -50,8 +58,8 @@ class UIMessageView: UIView {
     guard let text = messageLabel.text, !text.isEmpty else { return .empty }
 
     // Calculate available width considering bubble constraints and padding
-    let maxWidth = bounds.width * 0.85 - 24
-    guard maxWidth > 0 else { return .singleLine }  // Guard against invalid width
+    let maxWidth = bounds.width * 0.85 - 24 - metadataWidth
+    guard maxWidth > 0 else { return .singleLine } // Guard against invalid width
 
     // Use sizeThatFits for more accurate measurement
     let size = messageLabel.sizeThatFits(CGSize(width: maxWidth, height: .greatestFiniteMagnitude))
@@ -211,11 +219,16 @@ class UIMessageView: UIView {
     case .singleLine:
       messageLabel.textColor = fullMessage.message.out == true ? .white : .label
       let widthConstraint = messageLabel.widthAnchor.constraint(
-        equalToConstant: messageLabel.intrinsicContentSize.width + 65.0
+        equalToConstant: messageLabel.intrinsicContentSize.width + metadataWidth
       )
       widthConstraint.isActive = true
     case .multiline:
       messageLabel.textColor = fullMessage.message.out == true ? .white : .label
+      let heightConstraint = messageLabel.heightAnchor.constraint(
+        equalToConstant: messageLabel.intrinsicContentSize.height + 16
+      )
+      heightConstraint.isActive = true
+      bubbleView.layer.cornerRadius = 20
     }
   }
 
@@ -254,8 +267,8 @@ extension String {
     guard let firstChar = first else { return false }
     let earlyRTL =
       firstChar.unicodeScalars.first?.properties.generalCategory == .otherLetter
-      && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
-      && firstChar.unicodeScalars.first!.value <= 0x08FF
+        && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
+        && firstChar.unicodeScalars.first!.value <= 0x08FF
 
     if earlyRTL { return true }
 
