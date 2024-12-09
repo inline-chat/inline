@@ -1,4 +1,5 @@
 import InlineKit
+import SwiftUI
 import UIKit
 
 class UIMessageView: UIView {
@@ -20,7 +21,9 @@ class UIMessageView: UIView {
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
-  
+
+  private let metadataHostingController: UIHostingController<MessageMetadataView>
+
   private var leadingConstraint: NSLayoutConstraint?
   private var trailingConstraint: NSLayoutConstraint?
   private var fullMessage: FullMessage
@@ -73,13 +76,27 @@ class UIMessageView: UIView {
     cachedMessageLayout = nil
     // Reconfigure message after layout
     configureForMessage()
+    updateMetadataConstraints()
   }
   
   // MARK: - Initialization
   
   init(fullMessage: FullMessage) {
     self.fullMessage = fullMessage
+      
+    self.metadataHostingController = UIHostingController(
+      rootView: MessageMetadataView(
+        date: fullMessage.message.date,
+        status: fullMessage.message.status,
+        isOutgoing: fullMessage.message.out ?? false
+      )
+    )
+      
     super.init(frame: .zero)
+      
+    metadataHostingController.view.backgroundColor = .clear
+    metadataHostingController.view.translatesAutoresizingMaskIntoConstraints = false
+      
     setupViews()
     configureForMessage()
   }
@@ -94,7 +111,8 @@ class UIMessageView: UIView {
   private func setupViews() {
     addSubview(bubbleView)
     bubbleView.addSubview(messageLabel)
-    
+    bubbleView.addSubview(metadataHostingController.view)
+
     let leading = bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor)
     let trailing = bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor)
     
@@ -109,13 +127,66 @@ class UIMessageView: UIView {
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
       messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -8),
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
-      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
+      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12)
     ])
+    
+    updateMetadataConstraints()
     
     let interaction = UIContextMenuInteraction(delegate: self)
     bubbleView.addInteraction(interaction)
   }
   
+  private func updateMetadataConstraints() {
+    // Remove existing constraints
+    metadataHostingController.view.removeFromSuperview()
+    bubbleView.addSubview(metadataHostingController.view)
+        
+    switch messageLayout {
+    case .empty, .singleLine:
+      // Inline alignment for single line
+      NSLayoutConstraint.activate([
+        messageLabel.trailingAnchor.constraint(
+          equalTo: metadataHostingController.view.leadingAnchor,
+          constant: -4
+        ),
+        messageLabel.bottomAnchor.constraint(
+          equalTo: bubbleView.bottomAnchor,
+          constant: -8
+        ),
+                
+        metadataHostingController.view.centerYAnchor.constraint(
+          equalTo: messageLabel.centerYAnchor
+        ),
+        metadataHostingController.view.trailingAnchor.constraint(
+          equalTo: bubbleView.trailingAnchor,
+          constant: -12
+        )
+      ])
+            
+    case .multiline:
+      // Bottom alignment for multiline
+      NSLayoutConstraint.activate([
+        messageLabel.trailingAnchor.constraint(
+          equalTo: bubbleView.trailingAnchor,
+          constant: -12
+        ),
+        messageLabel.bottomAnchor.constraint(
+          equalTo: metadataHostingController.view.topAnchor,
+          constant: -2
+        ),
+                
+        metadataHostingController.view.trailingAnchor.constraint(
+          equalTo: bubbleView.trailingAnchor,
+          constant: -12
+        ),
+        metadataHostingController.view.bottomAnchor.constraint(
+          equalTo: bubbleView.bottomAnchor,
+          constant: -8
+        )
+      ])
+    }
+  }
+    
   private func configureForMessage() {
     messageLabel.text = fullMessage.message.text
     
@@ -146,6 +217,14 @@ class UIMessageView: UIView {
   func updateLayout() {
     setNeedsLayout()
     layoutIfNeeded()
+  }
+
+  func updateMetadata() {
+    metadataHostingController.rootView = MessageMetadataView(
+      date: fullMessage.message.date,
+      status: fullMessage.message.status,
+      isOutgoing: fullMessage.message.out ?? false
+    )
   }
 }
 
