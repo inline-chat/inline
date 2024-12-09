@@ -1,29 +1,40 @@
 import InlineKit
 import SwiftUI
 
-struct MessageStatusView: View {
+struct MessageMetadataView: View {
+  let date: Date
   let status: MessageSendingStatus?
-
+  let isOutgoing: Bool
+    
   var body: some View {
-    Group {
-      switch status {
-      case .sending:
-        ProgressView()
-          .scaleEffect(0.7)
-          .tint(.white)
-      case .sent:
-        Image(systemName: "checkmark")
-          .foregroundColor(.white)
-          .font(.system(size: 10))
-      case .failed:
-        Image(systemName: "exclamationmark")
-          .foregroundColor(.white)
-          .font(.system(size: 10))
-      case .none:
-        EmptyView()
+    HStack(spacing: 4) {
+      Text(date.formatted(.dateTime.hour().minute()))
+        .font(.system(size: 11))
+            
+      if isOutgoing && status != nil {
+        switch status {
+        case .sent:
+          Image(systemName: "checkmark")
+            .font(.system(size: 11))
+        case .sending:
+          Image(systemName: "checkmark.circle")
+            .font(.system(size: 11))
+        case .failed:
+          Image(systemName: "checkmark.circle.fill")
+            .font(.system(size: 11))
+            .foregroundColor(.red)
+        case .none:
+          EmptyView()
+        }
       }
     }
-
-    .frame(width: 10, height: 10)
+    .foregroundColor(statusColor)
+  }
+    
+  private var statusColor: Color {
+    if status == .failed {
+      return .red
+    }
+    return isOutgoing ? .white.opacity(0.7) : .gray
   }
 }
