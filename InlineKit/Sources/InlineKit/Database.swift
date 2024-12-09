@@ -81,7 +81,6 @@ extension AppDatabase {
         t.column("mentioned", .boolean)
         t.column("out", .boolean)
         t.column("pinned", .boolean)
-        t.column("status", .text)
         t.uniqueKey(["messageId", "chatId"])
       }
 
@@ -102,6 +101,10 @@ extension AppDatabase {
       // Message table
       try db.alter(table: "message") { t in
         t.add(column: "randomId", .integer)  // .unique()
+      }
+
+      try db.alter(table: "message") { t in
+        t.add(column: "status", .text)
       }
     }
 
@@ -265,7 +268,7 @@ extension AppDatabase {
       let databaseUrl = getDatabaseUrl()
       let databasePath = databaseUrl.path
       let config = AppDatabase.makeConfiguration()
-//      let dbPool = try DatabaseQueue(path: databasePath, configuration: config)
+      //      let dbPool = try DatabaseQueue(path: databasePath, configuration: config)
       let dbPool = try DatabasePool(path: databasePath, configuration: config)
 
       var path = databasePath
