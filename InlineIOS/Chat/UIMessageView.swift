@@ -198,7 +198,7 @@ class UIMessageView: UIView {
       leadingConstraint?.isActive = false
       trailingConstraint?.isActive = true
     } else {
-      bubbleView.backgroundColor = UIColor.systemGray6.withAlphaComponent(0.7)
+      bubbleView.backgroundColor = BubbleColorManager.shared.selectedSecondaryColor
       leadingConstraint?.isActive = true
       trailingConstraint?.isActive = false
     }
