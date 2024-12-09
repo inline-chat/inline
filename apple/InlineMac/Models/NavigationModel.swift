@@ -39,6 +39,8 @@ private struct NavigationState: Codable {
 @MainActor
 class NavigationModel: ObservableObject {
   static let shared = NavigationModel()
+  
+  private let log = Log.scoped("Navigation", enableTracing: true)
 
   @Published var homePath: [NavigationRoute] = []
   @Published var homeSelection: NavigationRoute = .homeRoot
@@ -51,7 +53,13 @@ class NavigationModel: ObservableObject {
   @Published private var spacePathDict: [Int64: [NavigationRoute]] = [:]
   @Published private var spaceSelectionDict: [Int64: NavigationRoute] = [:]
 
-  public var windowManager: MainWindowViewModel?
+  public var windowManager: MainWindowViewModel? {
+    didSet {
+      log.trace("windowManager set")
+      // upon window creation
+      prepareForCurrentRoute()
+    }
+  }
 
   var spacePath: Binding<[NavigationRoute]> {
     Binding(
@@ -96,8 +104,8 @@ class NavigationModel: ObservableObject {
   private var cancellables = Set<AnyCancellable>()
 
   init() {
-    loadState()
     setupSubscriptions()
+    loadState()
     setupStatePersistence()
   }
 
@@ -115,6 +123,14 @@ class NavigationModel: ObservableObject {
       guard let w = self.windowManager, w.topLevelRoute == .main else { return }
       self.windowManager?.setUpForInnerRoute(newValue.last ?? self.homeSelection)
     }.store(in: &cancellables)
+  }
+
+  private func prepareForCurrentRoute() {
+    if let activeSpaceId {
+      windowManager?.setUpForInnerRoute(spaceSelectionDict[activeSpaceId] ?? .spaceRoot)
+    } else {
+      windowManager?.setUpForInnerRoute(homePath.last ?? homeSelection)
+    }
   }
 
   // Used from sidebars

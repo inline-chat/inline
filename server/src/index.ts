@@ -5,6 +5,7 @@ import { gitCommitHash, version } from "@in/server/buildEnv"
 Sentry.init({
   dsn: SENTRY_DSN,
   tracesSampleRate: 1.0,
+  enabled: process.env.NODE_ENV !== "development",
 })
 
 // Main app
@@ -22,9 +23,7 @@ const port = process.env["PORT"] || 8000
 
 // Ensure to call this before importing any other modules!
 
-if (process.env.NODE_ENV === "development") {
-  console.info(`🚧 Starting server in development mode...`)
-} else {
+if (process.env.NODE_ENV !== "development") {
   console.info(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
 }
 

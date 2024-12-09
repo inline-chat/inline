@@ -85,12 +85,17 @@ class MainWindowViewModel: ObservableObject {
   private var windowInitilized = false
 
   func windowInititized(_ window: NSWindow) {
+    let previousWindow = self.window
     self.window = window
 
-    if windowInitilized {
-      return
-    }
-    windowInitilized = true
+//    if previousWindow == window {
+//      return
+//    }
+//    if windowInitilized {
+//      return
+//    }
+//    windowInitilized = true
+    Log.shared.debug("Window initialized")
 
     setUpWindowSizeMonitor()
     setupWindow(for: topLevelRoute)

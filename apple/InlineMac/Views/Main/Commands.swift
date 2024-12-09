@@ -24,6 +24,9 @@ struct MainWindowCommands: Commands {
 
       Divider()
     }
+    
+    // This removes the "New Window" command from the File menu
+    CommandGroup(replacing: .newItem) { }
 
     TextEditingCommands()
 

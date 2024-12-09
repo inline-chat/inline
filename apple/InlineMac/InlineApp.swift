@@ -16,7 +16,8 @@ struct InlineApp: App {
   @Environment(\.openWindow) var openWindow
   
   var body: some Scene {
-    Window("Inline", id: "main") {
+    // Note(@mo): Using Window here messes up with our title bar handling upon window re-open after close
+    WindowGroup("main") {
       MainWindow()
         .environmentObject(self.ws)
         .environmentObject(self.viewModel)
