@@ -64,6 +64,10 @@ struct MainView: View {
     }
     .toolbar {
       toolbarContent
+      ToolbarItem(placement: .bottomBar) {
+        ConnectionStateIndicator(state: ws.connectionState)
+          .animation(.smoothSnappy, value: ws.connectionState)
+      }
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
