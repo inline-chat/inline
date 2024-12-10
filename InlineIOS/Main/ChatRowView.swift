@@ -30,17 +30,22 @@ struct ChatRowView: View {
 
   var body: some View {
     HStack(alignment: .top) {
-      UserAvatar(user: item.user, size: 36)
-        .padding(.trailing, 6)
-        .overlay(alignment: .bottomTrailing) {
-          Circle()
-            .fill(.green)
-            .frame(width: 12, height: 12)
-            .padding(.leading, -14)
-        }
+      if item.user.id == Auth.shared.getCurrentUserId() {
+        savedMessageSymbol
+      } else {
+        UserAvatar(user: item.user, size: 36)
+          .padding(.trailing, 6)
+          .overlay(alignment: .bottomTrailing) {
+            Circle()
+              .fill(.green)
+              .frame(width: 12, height: 12)
+              .padding(.leading, -14)
+          }
+      }
+
       VStack(alignment: .leading) {
         HStack {
-          Text(type == .privateChat ? item.user.firstName ?? "" : item.chat?.title ?? "")
+          Text(type == .privateChat ? item.user.id == Auth.shared.getCurrentUserId() ? "Saved Message" : item.user.firstName ?? "" : item.chat?.title ?? "")
             .fontWeight(.medium)
             .foregroundColor(.primary)
           Spacer()
@@ -67,6 +72,19 @@ struct ChatRowView: View {
     .frame(height: 48)
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
+  }
+
+  @ViewBuilder
+  var savedMessageSymbol: some View {
+    Circle()
+      .fill(LinearGradient(colors: [ColorManager.shared.swiftUIColor.adjustLuminosity(by: 0.3), ColorManager.shared.swiftUIColor.adjustLuminosity(by: -0.1)], startPoint: .topLeading, endPoint: .bottomTrailing))
+      .frame(width: 36, height: 36)
+      .overlay(alignment: .center) {
+        Image(systemName: "bookmark.fill")
+          .foregroundColor(.white)
+          .font(.callout)
+      }
+      .padding(.trailing, 6)
   }
 }
 
