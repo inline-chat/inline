@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-class BubbleColorManager {
-  static let shared = BubbleColorManager()
+class ColorManager {
+  static let shared = ColorManager()
 
   private let defaults = UserDefaults.standard
   private let colorKey = "selected_bubble_color"
@@ -23,11 +23,11 @@ class BubbleColorManager {
   var selectedColor: UIColor {
     get {
       if let colorData = defaults.data(forKey: colorKey),
-        let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData)
+         let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData)
       {
         return color
       }
-      return .systemBlue  // Default color
+      return .systemBlue // Default color
     }
     set {
       if let colorData = try? NSKeyedArchiver.archivedData(
@@ -53,5 +53,4 @@ class BubbleColorManager {
   var swiftUIColor: Color {
     Color(uiColor: selectedColor)
   }
-
 }
