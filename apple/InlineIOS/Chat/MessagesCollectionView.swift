@@ -227,13 +227,13 @@ struct MessagesCollectionView: UIViewRepresentable {
           collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
           collectionView.collectionViewLayout.invalidateLayout()
 
-          if !self.fullMessages.isEmpty {
-            collectionView.scrollToItem(
-              at: IndexPath(item: 0, section: 0),
-              at: .bottom,
-              animated: false
-            )
-          }
+//          if !self.fullMessages.isEmpty {
+//            collectionView.scrollToItem(
+//              at: IndexPath(item: 0, section: 0),
+//              at: .bottom,
+//              animated: false
+//            )
+//          }
         }
       }
     }
