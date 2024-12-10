@@ -23,6 +23,8 @@ await Bun.build({
   entrypoints: [resolve(__dirname, "../src/index.ts")],
   outdir: resolve(__dirname, "../dist"),
   target: "bun",
+  external: ["@aws-sdk/*"],
+  sourcemap: "external",
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
     "process.env.BUILD_DATE": JSON.stringify(new Date().toISOString()),
