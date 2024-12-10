@@ -15,10 +15,9 @@ struct Settings: View {
   var body: some View {
     List {
       accountSection
-      actionsSection
       apearenceSection
+      actionsSection
     }
-    .listStyle(.plain)
   }
 }
 
@@ -76,32 +75,86 @@ private extension Settings {
   }
 }
 
+struct BubbleColorPreview: View {
+  let color: UIColor
+
+  var body: some View {
+    VStack(spacing: 12) {
+      // Outgoing message bubble
+      HStack {
+        Spacer()
+        Text("Hey there! This is how your messages will look")
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(Color(uiColor: color))
+          .foregroundColor(.white)
+          .cornerRadius(16)
+          .padding(.trailing, 8)
+          .fontWeight(.medium)
+      }
+
+      // Incoming message bubble
+      HStack {
+        Text("This is a reply message")
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(Color(.systemGray6))
+          .cornerRadius(16)
+          .padding(.leading, 8)
+          .fontWeight(.medium)
+        Spacer()
+      }
+    }
+    .padding()
+  }
+}
+
 struct BubbleColorSettings: View {
   @State private var selectedColor: UIColor = BubbleColorManager.shared.selectedColor
 
   private let columns = [
-    GridItem(.adaptive(minimum: 40), spacing: 12)
+    GridItem(.adaptive(minimum: 40), spacing: 10)
   ]
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Bubble Color")
+      Text("Accent Color")
         .font(.headline)
 
-      LazyVGrid(columns: columns, spacing: 12) {
-        ForEach(BubbleColorManager.shared.availableColors, id: \.self) { color in
-          ZStack {
-            Circle()
-              .fill(Color(uiColor: color))
-              .frame(width: 40, height: 40)
-              .overlay(
-                Circle()
-                  .stroke(Color.primary, lineWidth: selectedColor == color ? 2 : 0)
-              )
-              .onTapGesture {
-                selectedColor = color
-                BubbleColorManager.shared.saveColor(color)
-              }
+      // Preview section
+      VStack(alignment: .leading, spacing: 8) {
+        BubbleColorPreview(color: selectedColor)
+          .background(Color(.systemGray6).opacity(0.5))
+          .cornerRadius(12)
+      }
+    }
+    .animation(.spring(response: 0.35, dampingFraction: 0.5), value: selectedColor)
+    .listRowSeparator(.hidden)
+
+    // Color grid
+    LazyVGrid(columns: columns, spacing: 12) {
+      ForEach(BubbleColorManager.shared.availableColors, id: \.self) { color in
+        ZStack {
+          Circle()
+            .fill(Color(uiColor: color))
+            .frame(width: 36, height: 36)
+            .scaleEffect(selectedColor == color ? 1.1 : 1)
+            .animation(.spring(response: 0.35, dampingFraction: 0.5), value: selectedColor)
+
+          Circle()
+            .stroke(Color(uiColor: selectedColor), lineWidth: selectedColor == color ? 2 : 0)
+            .frame(width: 46, height: 46)
+            .opacity(selectedColor == color ? 1 : 0)
+            .animation(.spring(response: 0.35, dampingFraction: 0.5), value: selectedColor)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onTapGesture {
+          withAnimation {
+            selectedColor = color
+            BubbleColorManager.shared.saveColor(color)
+
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
           }
         }
       }
@@ -112,4 +165,9 @@ struct BubbleColorSettings: View {
 #Preview("Settings") {
   Settings()
     .environmentObject(RootData(db: AppDatabase.empty(), auth: Auth.shared))
+}
+
+#Preview {
+  BubbleColorSettings()
+    .padding()
 }
