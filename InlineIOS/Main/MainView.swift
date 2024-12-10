@@ -204,27 +204,6 @@ private extension MainView {
             Text(user?.firstName ?? user?.lastName ?? user?.email ?? "User")
               .font(.title3)
               .fontWeight(.semibold)
-            if ws.connectionState == .connecting {
-              Text(connection)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .opacity(connection.isEmpty ? 0 : 1)
-                .frame(alignment: .leading)
-                .onChange(of: ws.connectionState) { _, _ in
-                  if ws.connectionState == .connecting {
-                    connection = "Connecting..."
-                  } else {
-                    connection = ""
-                  }
-                }
-                .transition(
-                  .asymmetric(
-                    insertion: .offset(y: 40),
-                    removal: .offset(y: 40)
-                  )
-                  .combined(with: .opacity)
-                )
-            }
           }
           .animation(.smoothSnappy, value: ws.connectionState)
         }
@@ -240,38 +219,8 @@ private extension MainView {
               .frame(width: 38, height: 38)
               .contentShape(Rectangle())
           }
-
-          // Menu {
-          //   Button("New DM") { nav.push(.createDM) }
-          //   Button("Create Space") { nav.push(.createSpace) }
-          // } label: {
-          //   Image(systemName: "plus")
-          //     .tint(Color.secondary)
-          //     .frame(width: 38, height: 38)
-          //     .contentShape(Rectangle())
-          // }
         }
       }
-
-      // ToolbarItem(id: "MainToolbarContacts", placement: .bottomBar) {
-      //   ControlGroup {
-      //     Button(action: {
-      //       nav.push(.contacts)
-      //     }) {
-      //       Image(systemName: "person.3")
-      //     }
-      //     .buttonStyle(.plain)
-      //     .contentShape(Rectangle())
-      //     Button(action: {
-      //       nav.push(.settings)
-      //     }) {
-      //       Image(systemName: "gearshape")
-      //     }
-      //     .buttonStyle(.plain)
-      //     .contentShape(Rectangle())
-      //   }
-
-      // }
     }
   }
 }

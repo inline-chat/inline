@@ -110,7 +110,7 @@ struct BubbleColorPreview: View {
 }
 
 struct BubbleColorSettings: View {
-  @State private var selectedColor: UIColor = BubbleColorManager.shared.selectedColor
+  @State private var selectedColor: UIColor = ColorManager.shared.selectedColor
 
   private let columns = [
     GridItem(.adaptive(minimum: 40), spacing: 10)
@@ -133,7 +133,7 @@ struct BubbleColorSettings: View {
 
     // Color grid
     LazyVGrid(columns: columns, spacing: 12) {
-      ForEach(BubbleColorManager.shared.availableColors, id: \.self) { color in
+      ForEach(ColorManager.shared.availableColors, id: \.self) { color in
         ZStack {
           Circle()
             .fill(Color(uiColor: color))
@@ -151,7 +151,7 @@ struct BubbleColorSettings: View {
         .onTapGesture {
           withAnimation {
             selectedColor = color
-            BubbleColorManager.shared.saveColor(color)
+            ColorManager.shared.saveColor(color)
 
             let generator = UIImpactFeedbackGenerator(style: .light)
             generator.impactOccurred()
