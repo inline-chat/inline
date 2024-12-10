@@ -16,9 +16,10 @@ export const TMakeApiResponse = <T extends TSchema>(type: T) => {
   return t.Union([success, failure])
 }
 
-export const handleError = new Elysia()
+export const handleError = new Elysia({ name: "api-error-handler" })
   .error("INLINE_ERROR", InlineError)
   .onError({ as: "scoped" }, ({ code, error }) => {
+    console.log("Error in handleError", code, error, typeof error, error.name)
     if (code === "NOT_FOUND")
       return {
         ok: false,
@@ -27,6 +28,7 @@ export const handleError = new Elysia()
         description: "Method not found",
       }
     if (error instanceof InlineError) {
+      console.log("Error in handleError instance of InlineError", error.type, error.code)
       return {
         ok: false,
         error: error.type,
@@ -78,6 +80,7 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
         request.headers.get("x-real-ip") ??
         server?.requestIP(request)?.address
       const context = { currentUserId: store.currentUserId, currentSessionId: store.currentSessionId, ip }
+
       let result = await method(input, context)
       return { ok: true, result } as any
     },

@@ -22,7 +22,7 @@
     "lint:fix": "eslint . --fix"
   },
   "overrides": {
-    "elysia": "=1.1.22",
+    "elysia": "=1.1.26",
     "@sinclair/typebox": "0.32.34"
   },
   "dependencies": {
@@ -30,7 +30,7 @@
     "apn": "^2.2.0",
     "drizzle-kit": "^0.28.1",
     "drizzle-orm": "^0.36.4",
-    "elysia": "=1.1.22"
+    "elysia": "=1.1.26"
   },
   "devDependencies": {
     "@protobuf-ts/plugin": "^2.9.4",

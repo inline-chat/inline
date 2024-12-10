@@ -3,8 +3,10 @@ import { setup } from "@in/server/setup"
 import { gitCommitHash, relativeBuildDate, version } from "@in/server/buildEnv"
 import { html } from "@elysiajs/html"
 
-export const root = new Elysia()
+export const root = new Elysia({ scoped: true })
   .use(setup)
+  // NOTE(@mo): This plugin breaks the error handling ref: https://github.com/elysiajs/elysia/issues/747
+  // I used scoped: true to fix it for now
   .use(html())
   // DO NOT MODIFY THIS INITIAL PART OF MESSAGE
   // THIS IS MATCHED IN UPTIME MONITOR

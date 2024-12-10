@@ -151,5 +151,4 @@ export const apiV1 = new Elysia({ name: "v1" })
         return { ok: false, errorCode: 404, description: "Method not found" }
       })
   })
-
   .use(handleError)

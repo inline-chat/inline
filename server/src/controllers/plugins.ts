@@ -5,7 +5,7 @@ import { and, eq, isNull } from "drizzle-orm"
 import { sessions } from "@in/server/db/schema"
 import { hashToken } from "@in/server/utils/auth"
 
-export const authenticate = new Elysia({ name: "authenticate" })
+export const authenticate = new Elysia({ name: "authenticate-post" })
   .state("currentUserId", 0)
   .state("currentSessionId", 0)
   .guard({
@@ -28,7 +28,7 @@ export const authenticate = new Elysia({ name: "authenticate" })
     },
   })
 
-export const authenticateGet = new Elysia({ name: "authenticate" })
+export const authenticateGet = new Elysia({ name: "authenticate-get" })
   .state("currentUserId", 0)
   .state("currentSessionId", 0)
   .guard({
