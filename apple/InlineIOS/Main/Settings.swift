@@ -21,9 +21,9 @@ struct Settings: View {
   }
 }
 
-private extension Settings {
+extension Settings {
   @ViewBuilder
-  var accountSection: some View {
+  fileprivate var accountSection: some View {
     Section(header: Text("Account")) {
       if let currentUser = currentUser {
         HStack {
@@ -48,7 +48,7 @@ private extension Settings {
   }
 
   @ViewBuilder
-  var actionsSection: some View {
+  fileprivate var actionsSection: some View {
     Section(header: Text("Actions")) {
       Button("Logout", role: .destructive) {
         // Clear creds
@@ -68,7 +68,7 @@ private extension Settings {
   }
 
   @ViewBuilder
-  var apearenceSection: some View {
+  fileprivate var apearenceSection: some View {
     Section(header: Text("Appearance")) {
       BubbleColorSettings()
     }
