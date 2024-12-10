@@ -196,7 +196,7 @@ private extension Color {
     return cache
   }()
 
-  @MainActor func adjustLuminosity(by amount: Double) -> Color {
+  @MainActor public func adjustLuminosity(by amount: Double) -> Color {
     let key = ColorAdjustmentKey(color: self, amount: amount)
     let cacheKey = NSString(string: "\(key.colorHash):\(key.amount)")
     // Try to get from cache
