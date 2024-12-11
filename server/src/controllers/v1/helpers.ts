@@ -19,16 +19,16 @@ export const TMakeApiResponse = <T extends TSchema>(type: T) => {
 export const handleError = new Elysia({ name: "api-error-handler" })
   .error("INLINE_ERROR", InlineError)
   .onError({ as: "scoped" }, ({ code, error }) => {
-    console.log("Error in handleError", code, error, typeof error, error.name)
-    if (code === "NOT_FOUND")
+    if (code === "NOT_FOUND") {
+      Log.shared.error("API ERROR NOT FOUND", error)
       return {
         ok: false,
         error: "NOT_FOUND",
         errorCode: 404,
         description: "Method not found",
       }
-    if (error instanceof InlineError) {
-      console.log("Error in handleError instance of InlineError", error.type, error.code)
+    } else if (error instanceof InlineError) {
+      Log.shared.error("API ERROR", error)
       return {
         ok: false,
         error: error.type,
@@ -36,7 +36,7 @@ export const handleError = new Elysia({ name: "api-error-handler" })
         description: error.description,
       }
     } else if (code === "VALIDATION") {
-      console.error("VALIDATION ERROR", error)
+      Log.shared.error("VALIDATION ERROR", error)
       return {
         ok: false,
         error: "INVALID_ARGS",
