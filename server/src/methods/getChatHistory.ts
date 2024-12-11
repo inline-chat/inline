@@ -6,11 +6,12 @@ import { Log } from "@in/server/utils/log"
 import { Optional, type Static, Type } from "@sinclair/typebox"
 import { encodeMessageInfo, TInputPeerInfo, TMessageInfo } from "@in/server/models"
 import { getChatIdFromPeer } from "./sendMessage"
+import { normalizeId, TInputId } from "@in/server/types/methods"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
-  peerUserId: Optional(Type.String()),
-  peerThreadId: Optional(Type.String()),
+  peerUserId: Optional(TInputId),
+  peerThreadId: Optional(TInputId),
 
   limit: Type.Optional(Type.Integer({ default: 70 })),
 })
@@ -29,9 +30,9 @@ type Response = Static<typeof Response>
 
 export const handler = async (input: Input, context: Context): Promise<Response> => {
   const peerId = input.peerUserId
-    ? { userId: Number(input.peerUserId) }
+    ? { userId: normalizeId(input.peerUserId) }
     : input.peerThreadId
-    ? { threadId: Number(input.peerThreadId) }
+    ? { threadId: normalizeId(input.peerThreadId) }
     : input.peerId
 
   if (!peerId) {

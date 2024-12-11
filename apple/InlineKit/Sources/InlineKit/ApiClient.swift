@@ -14,7 +14,7 @@ public enum APIError: Error {
   case decodingError(Error)
   case networkError
   case rateLimited
-  case error(errorCode: Int, description: String?)
+  case error(error: String, errorCode: Int?, description: String?)
 }
 
 public enum Path: String {
@@ -43,6 +43,8 @@ public enum Path: String {
 public final class ApiClient: ObservableObject, @unchecked Sendable {
   public static let shared = ApiClient()
   public init() {}
+
+  private let log = Log.scoped("ApiClient")
 
   private var baseURL: String {
     #if targetEnvironment(simulator)
@@ -93,10 +95,11 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         switch apiResponse {
         case let .success(data):
           return data
-        case let .error(errorCode, description):
+        case let .error(error, errorCode, description):
+          log.error("Error \(error): \(description ?? "")")
           throw
             APIError
-            .error(errorCode: errorCode, description: description)
+            .error(error: error, errorCode: errorCode, description: description)
         }
       case 429:
         throw APIError.rateLimited
@@ -306,13 +309,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 /// }
 public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
   case success(T)
-  case error(errorCode: Int, description: String?)
+  case error(error: String, errorCode: Int?, description: String?)
 
   private enum CodingKeys: String, CodingKey {
     case ok
+    case result
+    case error
     case errorCode
     case description
-    case result
   }
 
   public init(from decoder: Decoder) throws {
@@ -325,7 +329,8 @@ public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
       }
     } else {
       self = try .error(
-        errorCode: values.decode(Int.self, forKey: .errorCode),
+        error: values.decode(String.self, forKey: .error),
+        errorCode: values.decodeIfPresent(Int.self, forKey: .errorCode),
         description: values.decodeIfPresent(String.self, forKey: .description)
       )
     }

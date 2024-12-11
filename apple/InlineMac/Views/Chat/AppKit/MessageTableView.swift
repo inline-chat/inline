@@ -16,7 +16,7 @@ class MessagesTableView: NSViewController {
 
   private let defaultRowHeight = 44.0
   
-  private let log = Log.scoped("MessagesTableView", enableTracing: true)
+  private let log = Log.scoped("MessagesTableView", enableTracing: false)
   
   init(width: CGFloat) {
     self.width = width

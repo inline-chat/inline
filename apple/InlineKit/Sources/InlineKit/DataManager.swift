@@ -369,12 +369,12 @@ public class DataManager: ObservableObject {
       text: text,
       randomId: randomId
     )
-    print("Send message result \(result)")
+
     Task { @MainActor in
       // Don't apply local changes if randomId is set which means optimistic update was handled
       if randomId == nil {
         try await database.dbWriter.write { db in
-          var message = Message(from: result.message)
+          let message = Message(from: result.message)
           do {
             try message.save(db)
           } catch {
@@ -390,7 +390,7 @@ public class DataManager: ObservableObject {
     peerUserId: Int64?,
     peerThreadId: Int64?,
     peerId: Peer?
-  ) async throws -> [Message] {
+  ) async throws {
     let finalPeerUserId: Int64?
     let finalPeerThreadId: Int64?
 
@@ -409,7 +409,7 @@ public class DataManager: ObservableObject {
     }
 
     log.debug(
-      "sendMessage with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
+      "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
     )
 
     let result = try await ApiClient.shared.getChatHistory(
@@ -444,15 +444,17 @@ public class DataManager: ObservableObject {
 //      }
 //    }
 
-    let messages: [Message] = try await database.dbWriter.write { db in
-      let messages = result.messages.map { Message(from: $0) }
-      for message in messages {
-        try message.save(db, onConflict: .replace)
+    try await database.dbWriter.write { db in
+      for apiMessage in result.messages {
+        do {
+          var message = Message(from: apiMessage)
+          try message.saveMessage(db, onConflict: .replace)
+        } catch {
+          Task {
+            await self.log.error("failed to save message  from: \(apiMessage)", error: error)
+          }
+        }
       }
-
-      return messages
     }
-
-    return messages
   }
 }

@@ -5,7 +5,9 @@ import GRDB
 
 public final class AppDatabase: Sendable {
   public let dbWriter: any DatabaseWriter
-  static let log = Log.scoped("AppDatabase")
+  static let log = Log.scoped("AppDatabase",
+                              // Enable tracing for seeing all SQL statements
+                              enableTracing: false)
 
   public init(_ dbWriter: any GRDB.DatabaseWriter) throws {
     self.dbWriter = dbWriter
@@ -81,7 +83,7 @@ public extension AppDatabase {
         t.column("mentioned", .boolean)
         t.column("out", .boolean)
         t.column("pinned", .boolean)
-        t.uniqueKey(["messageId", "chatId"])
+        t.uniqueKey(["messageId", "chatId"], onConflict: .replace)
       }
 
       // Dialog table
@@ -104,9 +106,9 @@ public extension AppDatabase {
       }
     }
 
-    migrator.registerMigration("Add status on message") { db in
+    migrator.registerMigration("message status") { db in
       try db.alter(table: "message") { t in
-        t.add(column: "status", .text)
+        t.add(column: "status", .integer)
       }
     }
 
@@ -122,6 +124,8 @@ public extension AppDatabase {
     var config = base
 
     config.prepareDatabase { db in
+      db.trace(options: .statement) { log.trace($0.expandedDescription) }
+
       if let token = Auth.shared.getToken() {
         #if DEBUG
           log.debug("Database passphrase: \(token)")
@@ -242,12 +246,11 @@ public extension AppDatabase {
         appropriateFor: nil, create: false)
 
       let directory =
-        if let userProfile = ProjectConfig.userProfile
-      {
-        "Database_\(userProfile)"
-      } else {
-        "Database"
-      }
+        if let userProfile = ProjectConfig.userProfile {
+          "Database_\(userProfile)"
+        } else {
+          "Database"
+        }
 
       let directoryURL = appSupportURL.appendingPathComponent(directory, isDirectory: true)
       try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
