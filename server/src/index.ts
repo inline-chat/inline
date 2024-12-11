@@ -27,7 +27,7 @@ if (process.env.NODE_ENV !== "development") {
   console.info(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
 }
 
-const app = new Elysia()
+export const app = new Elysia()
   .use(root)
   .use(apiV1)
   .use(webSocket)

@@ -19,7 +19,7 @@ import { connectionManager } from "@in/server/ws/connections"
 import { getUpdateGroup } from "@in/server/utils/updates"
 import * as APN from "apn"
 import type { HandlerContext } from "../controllers/v1/helpers"
-import { apnProvider } from "../libs/apn"
+import { apnProvider, getApnProvider } from "../libs/apn"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { encryptMessage } from "@in/server/utils/encryption/encryptMessage"
 import { TInputId } from "@in/server/types/methods"
@@ -296,6 +296,12 @@ const sendPushNotificationToUser = async ({
       notification.alert = {
         title,
         body: message,
+      }
+
+      let apnProvider = getApnProvider()
+      if (!apnProvider) {
+        Log.shared.error("APN provider not found", { userId })
+        return
       }
 
       try {

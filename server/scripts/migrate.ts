@@ -15,7 +15,8 @@ try {
   })
 
   console.info("🚧 Migrations applied successfully")
-  migrationClient.end({ timeout: 5_000 })
+  await migrationClient.end({ timeout: 5_000 })
+  process.exit(0)
 } catch (error) {
   console.error("🔥 Error applying migrations", error)
   process.exit(1)

@@ -20,7 +20,23 @@ jobs:
   test:
     name: Server Typecheck, Lint, and Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +45,13 @@ jobs:
 
       - name: Install dependencies
         run: bun install
+
+      - name: Setup environment
+        run: |
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
+
+      - name: Run database migrations
+        run: bun db:migrate
 
       - name: Run tests
         run: bun test
