@@ -109,43 +109,35 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
 
   await updateLastMessageId(chatId, newMessageId)
 
-  try {
-    const encodedMessage = encodeMessageInfo(newMessage, {
+  const encodedMessage = encodeMessageInfo(newMessage, {
+    currentUserId: context.currentUserId,
+    peerId: peerId,
+  })
+
+  sendMessageUpdate({
+    message: newMessage,
+    peerId,
+    currentUserId: context.currentUserId,
+  })
+
+  const title: string = await db
+    .select({ firstName: users.firstName, username: users.username })
+    .from(users)
+    .where(eq(users.id, context.currentUserId))
+    .then(([user]) => user?.firstName ?? user?.username ?? "New Message")
+
+  if (input.peerUserId) {
+    sendPushNotificationToUser({
+      userId: Number(input.peerUserId),
+      title,
+      chatId,
+      message: input.text,
       currentUserId: context.currentUserId,
-      peerId: peerId,
+      currentUser,
     })
-
-    sendMessageUpdate({
-      message: newMessage,
-      peerId,
-      currentUserId: context.currentUserId,
-    })
-
-    const title: string = await db
-      .select({ firstName: users.firstName, username: users.username })
-      .from(users)
-      .where(eq(users.id, context.currentUserId))
-      .then(([user]) => user?.firstName ?? user?.username ?? "New Message")
-
-    if (input.peerUserId) {
-      sendPushNotificationToUser({
-        userId: Number(input.peerUserId),
-        title,
-        chatId,
-        message: input.text,
-        currentUserId: context.currentUserId,
-        currentUser,
-      })
-    }
-
-    return { message: encodedMessage }
-  } catch (encodeError) {
-    Log.shared.error("Failed to encode message", {
-      error: encodeError,
-      message: newMessage,
-    })
-    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
+
+  return { message: encodedMessage }
 }
 
 export const getChatIdFromPeer = async (
