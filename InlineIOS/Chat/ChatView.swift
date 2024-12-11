@@ -45,7 +45,6 @@ struct ChatView: View {
     .toolbarBackground(.visible, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
     .onAppear {
-      print("Called")
       fetchMessages()
     }
     .onChange(of: scenePhase) { _, newPhase in
@@ -70,11 +69,15 @@ extension View {
 extension ChatView {
   private func fetchMessages() {
     Task {
-      try await dataManager.getChatHistory(
-        peerUserId: nil,
-        peerThreadId: nil,
-        peerId: peer
-      )
+      do {
+        try await dataManager.getChatHistory(
+          peerUserId: nil,
+          peerThreadId: nil,
+          peerId: peer
+        )
+      } catch {
+        Log.shared.error("Failed to fetch messages", error: error)
+      }
     }
   }
 

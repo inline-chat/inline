@@ -13,23 +13,22 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var out: Bool?
   public var editDate: Int?
   public var date: Int
-  public var status: String?
 }
 
-public enum MessageSendingStatus: String, Codable, Hashable, Sendable, DatabaseValueConvertible {
+public enum MessageSendingStatus: Int64, Codable, DatabaseValueConvertible, Sendable {
   case sending
   case sent
   case failed
 }
 
-public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
+public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, TableRecord,
   Sendable, Equatable
 {
   // Locally autoincremented id
   public var globalId: Int64?
 
   public var id: Int64 {
-    messageId
+    self.messageId
   }
 
   // Only set for outgoing messages
@@ -62,6 +61,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   // If message was edited
   public var editDate: Date?
+
   public var status: MessageSendingStatus?
 
   public static let chat = belongsTo(Chat.self)
@@ -120,7 +120,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       mentioned: from.mentioned,
       pinned: from.pinned,
       editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) },
-      status: .sent
+      status: from.out == true ? MessageSendingStatus.sent : nil
     )
   }
 
@@ -133,4 +133,31 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     peerThreadId: nil,
     chatId: 1
   )
+}
+
+// MARK: Helpers
+
+public extension Message {
+  mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort) throws {
+    if self.globalId == nil {
+      // Alternative:
+      //          if let existing = try Message
+      //            .filter(Column("messageId") == apiMessage.id)
+      //            .filter(Column("chatId") == apiMessage.chatId)
+      //            .fetchOne(db)
+      //          {
+      //            print("found existing message \(existing)")
+      //            message.globalId = existing.globalId
+      //          }
+
+      if let existing = try? Message
+        .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
+      {
+        print("found existing message \(existing)")
+        self.globalId = existing.globalId
+      }
+    }
+
+    try self.save(db, onConflict: .replace)
+  }
 }

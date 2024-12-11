@@ -8,12 +8,16 @@ actor UpdatesManager {
   func apply(update: Update, db: Database) throws {
     self.log.debug("apply update")
 
-    if let update = update.newMessage {
-      self.log.debug("applying new message")
-      try update.apply(db: db)
-    } else if let update = update.updateMessageId {
-      self.log.debug("applying update message id")
-      try update.apply(db: db)
+    do {
+      if let update = update.newMessage {
+        self.log.debug("applying new message")
+        try update.apply(db: db)
+      } else if let update = update.updateMessageId {
+        self.log.debug("applying update message id")
+        try update.apply(db: db)
+      }
+    } catch {
+      self.log.error("Failed to apply update", error: error)
     }
   }
 

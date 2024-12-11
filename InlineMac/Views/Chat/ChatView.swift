@@ -105,7 +105,7 @@ struct ChatView: View {
   /// Fetch chat history
   private func fetch() async {
     do {
-      let _ = try await data.getChatHistory(peerUserId: nil, peerThreadId: nil, peerId: peerId)
+      try await data.getChatHistory(peerUserId: nil, peerThreadId: nil, peerId: peerId)
     } catch {
       Log.shared.error("Failed to get chat history", error: error)
     }
