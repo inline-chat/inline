@@ -35,9 +35,9 @@ public class OnboardingUtils: @unchecked Sendable {
     case .rateLimited:
       errorMsg.wrappedValue = "Too many tries. Please try again after a few minutes."
       Log.shared.error("Failed rateLimited", error: error)
-    case let .error(errorCode, description):
+    case let .error(error_, errorCode, description):
       errorMsg.wrappedValue = description ?? "Unknown error"
-      Log.shared.error("Failed error \(errorCode)", error: error)
+      Log.shared.error("Failed error \(error_)", error: error)
     }
   }
 
