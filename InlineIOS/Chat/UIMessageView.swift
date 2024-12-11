@@ -31,42 +31,47 @@ class UIMessageView: UIView {
   // Cache for layout calculations
   private var cachedMessageLayout: MessageLayout?
 
+  private let horizontalPadding: CGFloat = 12
+  private let verticalPadding: CGFloat = 8
+  private let metadataSpacing: CGFloat = 4
+
   // MARK: - Message Layout Enum
 
   private enum MessageLayout {
     case empty
     case singleLine
-    case multiline(lineCount: Int)
+    case multiline
+  }
+
+  private var maxBubbleWidth: CGFloat {
+    return bounds.width * 0.75
+  }
+
+  private var metadataSize: CGSize {
+    metadataHostingController.view.sizeThatFits(
+      CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+    )
   }
 
   // MARK: - Layout Detection
 
   private var messageLayout: MessageLayout {
-    // Return cached layout if bounds are valid and cache exists
     if bounds.width > 0, let cached = cachedMessageLayout {
       return cached
     }
 
     guard let text = messageLabel.text, !text.isEmpty else { return .empty }
 
-    // Calculate available width considering bubble constraints and padding
-    let maxWidth = bounds.width * 0.85 - 24
-    guard maxWidth > 0 else { return .singleLine } // Guard against invalid width
-
-    // Use sizeThatFits for more accurate measurement
-    let size = messageLabel.sizeThatFits(CGSize(width: maxWidth, height: .greatestFiniteMagnitude))
-    let singleLineSize = messageLabel.sizeThatFits(
-      CGSize(width: .greatestFiniteMagnitude, height: messageLabel.font.lineHeight))
-
     let layout: MessageLayout
-    if size.height > (singleLineSize.height + 1) {
-      let lineCount = Int(ceil(size.height / messageLabel.font.lineHeight))
-      layout = .multiline(lineCount: lineCount)
-    } else {
+
+    if text.contains("\n") {
+      layout = .multiline
+    } else if text.count <= 22 {
       layout = .singleLine
+    } else {
+      layout = .multiline
     }
 
-    // Cache the result
     cachedMessageLayout = layout
     return layout
   }
@@ -129,6 +134,7 @@ class UIMessageView: UIView {
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
       messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
       messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -8),
+
     ])
 
     updateMetadataConstraints()
@@ -167,6 +173,26 @@ class UIMessageView: UIView {
 
     case .multiline:
       // Bottom alignment for multiline
+      //      NSLayoutConstraint.activate([
+      //        messageLabel.trailingAnchor.constraint(
+      //          equalTo: bubbleView.trailingAnchor,
+      //          constant: -horizontalPadding
+      //        ),
+      //        messageLabel.bottomAnchor.constraint(
+      //          equalTo: metadataHostingController.view.topAnchor,
+      //          constant: -metadataSpacing
+      //        ),
+      //
+      //        metadataHostingController.view.trailingAnchor.constraint(
+      //          equalTo: bubbleView.trailingAnchor,
+      //          constant: -horizontalPadding
+      //        ),
+      //        metadataHostingController.view.bottomAnchor.constraint(
+      //          equalTo: bubbleView.bottomAnchor,
+      //          constant: -verticalPadding
+      //        ),
+      //
+      //      ])
       NSLayoutConstraint.activate([
         messageLabel.trailingAnchor.constraint(
           equalTo: bubbleView.trailingAnchor,
@@ -192,22 +218,22 @@ class UIMessageView: UIView {
   private func configureForMessage() {
     messageLabel.text = fullMessage.message.text
 
-    // Configure bubble alignment first
     if fullMessage.message.out == true {
       bubbleView.backgroundColor = ColorManager.shared.selectedColor
       leadingConstraint?.isActive = false
       trailingConstraint?.isActive = true
+      messageLabel.textColor = .white
     } else {
       bubbleView.backgroundColor = UIColor.systemGray6.withAlphaComponent(0.7)
       leadingConstraint?.isActive = true
       trailingConstraint?.isActive = false
+      messageLabel.textColor = .label
     }
 
-    // Configure text color based on layout
+    // Configure text color and width based on layout
     switch messageLayout {
     case .empty:
       messageLabel.textColor = fullMessage.message.out == true ? .white : .label
-
     case .singleLine:
       messageLabel.textColor = fullMessage.message.out == true ? .white : .label
       let widthConstraint = messageLabel.widthAnchor.constraint(
@@ -215,7 +241,7 @@ class UIMessageView: UIView {
       )
       widthConstraint.isActive = true
     case .multiline:
-      messageLabel.textColor = fullMessage.message.out == true ? .white : .label
+      messageLabel.textColor = .red
     }
   }
 
