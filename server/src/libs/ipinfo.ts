@@ -1,6 +1,7 @@
 // ipinfo.io/45.77.137.171?token=935ffb6dc94053
 
 import { IPINFO_TOKEN } from "@in/server/env"
+import { Log } from "@in/server/utils/log"
 
 // response
 // {
@@ -37,7 +38,7 @@ interface IPInfoResponse {
 /** Check IP info if IPINFO_TOKEN is defined. */
 export const ipinfo = async (ip: string): Promise<IPInfoResponse | undefined> => {
   if (!IPINFO_TOKEN) {
-    console.warn("Cannot check IP. IPINFO_TOKEN is not defined.")
+    Log.shared.warn("Cannot check IP. IPINFO_TOKEN is not defined.")
     return
   }
 
@@ -49,7 +50,7 @@ export const ipinfo = async (ip: string): Promise<IPInfoResponse | undefined> =>
   })
 
   if (!result.ok) {
-    console.warn(`Failed to get IP info for ${ip}.`)
+    Log.shared.warn(`Failed to get IP info for ${ip}.`)
     return
   }
 

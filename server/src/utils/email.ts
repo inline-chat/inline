@@ -4,6 +4,7 @@ import { sendEmail as sendEmailViaSES } from "@in/server/libs/ses"
 import { sendEmail as sendEmailViaResend } from "@in/server/libs/resend"
 import { isProd } from "@in/server/env"
 import { styleText } from "node:util"
+import { Log } from "@in/server/utils/log"
 type SendEmailInput = {
   to: string
   content: SendEmailContent
@@ -23,7 +24,7 @@ export const sendEmail = async (input: SendEmailInput) => {
   if (!isProd && !process.env["SEND_EMAIL"]) {
     // let's log the email beautifully with formatting, subject, email, from and text so it's easy to read and matches the email
 
-    console.info(
+    Log.shared.info(
       `
 -- email preview -------------------------------
 ${styleText("blueBright", "Subject:")} ${template.subject}

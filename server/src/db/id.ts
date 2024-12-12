@@ -1,3 +1,5 @@
+import { Log } from "@in/server/utils/log"
+
 const EPOCH = 1726416420000
 
 // snowflake
@@ -76,7 +78,7 @@ export class InlineID {
     if (timestamp < this.lastTimestamp) {
       // TODO: Use logger
       // Sentry.captureMessage("Clock moved backwards. Waiting until we catch up.")
-      console.warn("Clock moved backwards. Waiting until we catch up.")
+      Log.shared.warn("Clock moved backwards. Waiting until we catch up.")
       timestamp = await this.waitNextMillis(this.lastTimestamp)
     }
 
@@ -84,8 +86,7 @@ export class InlineID {
 
     // ID structure: [41 bits timestamp][6 bits node id][14 bits sequence]
     const id =
-      ((timestamp - InlineID.EPOCH) <<
-        (InlineID.NODE_ID_BITS + InlineID.SEQUENCE_BITS)) |
+      ((timestamp - InlineID.EPOCH) << (InlineID.NODE_ID_BITS + InlineID.SEQUENCE_BITS)) |
       (this.nodeId << InlineID.SEQUENCE_BITS) |
       this.sequence
 
@@ -102,9 +103,7 @@ export class InlineID {
     nodeId: number
     sequence: number
   } {
-    const timestamp = Number(
-      (id >> (InlineID.NODE_ID_BITS + InlineID.SEQUENCE_BITS)) + InlineID.EPOCH,
-    )
+    const timestamp = Number((id >> (InlineID.NODE_ID_BITS + InlineID.SEQUENCE_BITS)) + InlineID.EPOCH)
     const nodeId = Number((id >> InlineID.SEQUENCE_BITS) & InlineID.MAX_NODE_ID)
     const sequence = Number(id & InlineID.MAX_SEQUENCE)
 

@@ -19,7 +19,8 @@
     "proto:generate-swift": "protoc --swift_out=./apple/InlineKit/Sources/InlineKit/Protocol --proto_path protos messages.proto",
     "format:swift": "swift format apple/ --recursive --in-place",
     "lint": "eslint . --cache",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "test": "cd server && bun run test"
   },
   "overrides": {
     "elysia": "=1.1.26",

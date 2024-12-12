@@ -18,13 +18,14 @@ import swagger from "@elysiajs/swagger"
 import { apiV1 } from "@in/server/controllers/v1"
 import { webSocket } from "@in/server/ws"
 import { connectionManager } from "@in/server/ws/connections"
+import { Log } from "@in/server/utils/log"
 
 const port = process.env["PORT"] || 8000
 
 // Ensure to call this before importing any other modules!
 
 if (process.env.NODE_ENV !== "development") {
-  console.info(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
+  Log.shared.info(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
 }
 
 export const app = new Elysia()
@@ -63,5 +64,5 @@ export const app = new Elysia()
 // Run
 app.listen(port, (server) => {
   connectionManager.setServer(server)
-  console.info(`✅ Server is running on http://${server.hostname}:${server.port}`)
+  Log.shared.info(`✅ Server is running on http://${server.hostname}:${server.port}`)
 })
