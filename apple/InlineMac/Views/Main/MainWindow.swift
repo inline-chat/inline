@@ -59,7 +59,6 @@ enum TopLevelRoute {
   case main
 }
 
-@MainActor
 class MainWindowViewModel: ObservableObject {
   @Published var topLevelRoute: TopLevelRoute
   @Published var columnVisibility: NavigationSplitViewVisibility
@@ -88,9 +87,9 @@ class MainWindowViewModel: ObservableObject {
     let previousWindow = self.window
     self.window = window
 
-//    if previousWindow == window {
-//      return
-//    }
+    if previousWindow == window {
+      return
+    }
 //    if windowInitilized {
 //      return
 //    }

@@ -36,10 +36,9 @@ private struct NavigationState: Codable {
   var spaceSelectionDict: [Int64: NavigationRoute]
 }
 
-@MainActor
 class NavigationModel: ObservableObject {
   static let shared = NavigationModel()
-  
+
   private let log = Log.scoped("Navigation", enableTracing: true)
 
   @Published var homePath: [NavigationRoute] = []
@@ -53,13 +52,7 @@ class NavigationModel: ObservableObject {
   @Published private var spacePathDict: [Int64: [NavigationRoute]] = [:]
   @Published private var spaceSelectionDict: [Int64: NavigationRoute] = [:]
 
-  public var windowManager: MainWindowViewModel? {
-    didSet {
-      log.trace("windowManager set")
-      // upon window creation
-      prepareForCurrentRoute()
-    }
-  }
+  public var windowManager: MainWindowViewModel?
 
   var spacePath: Binding<[NavigationRoute]> {
     Binding(
@@ -73,10 +66,9 @@ class NavigationModel: ObservableObject {
         guard let self,
               let activeSpaceId
         else { return }
-        Task { @MainActor in
-          self.spacePathDict[activeSpaceId] = newValue
-          self.windowManager?.setUpForInnerRoute(newValue.last ?? .spaceRoot)
-        }
+
+        self.spacePathDict[activeSpaceId] = newValue
+        self.setUpForRoute(newValue.last ?? .spaceRoot)
       }
     )
   }
@@ -93,10 +85,9 @@ class NavigationModel: ObservableObject {
         guard let self,
               let activeSpaceId
         else { return }
-        Task { @MainActor in
-          self.spaceSelectionDict[activeSpaceId] = newValue
-          self.windowManager?.setUpForInnerRoute(newValue)
-        }
+
+        self.spaceSelectionDict[activeSpaceId] = newValue
+        self.setUpForRoute(newValue)
       }
     )
   }
@@ -114,44 +105,52 @@ class NavigationModel: ObservableObject {
       .sink { [weak self] newValue in
         guard let self, let spaceId = newValue else { return }
         guard let w = self.windowManager, w.topLevelRoute == .main else { return }
-        self.windowManager?.setUpForInnerRoute(self.spaceSelectionDict[spaceId] ?? .spaceRoot)
+        self.setUpForRoute(self.spaceSelectionDict[spaceId] ?? .spaceRoot)
       }
       .store(in: &cancellables)
 
     $homePath.sink { [weak self] newValue in
       guard let self = self else { return }
       guard let w = self.windowManager, w.topLevelRoute == .main else { return }
-      self.windowManager?.setUpForInnerRoute(newValue.last ?? self.homeSelection)
+      self.setUpForRoute(newValue.last ?? self.homeSelection)
     }.store(in: &cancellables)
   }
 
   private func prepareForCurrentRoute() {
     if let activeSpaceId {
-      windowManager?.setUpForInnerRoute(spaceSelectionDict[activeSpaceId] ?? .spaceRoot)
+      setUpForRoute(spaceSelectionDict[activeSpaceId] ?? .spaceRoot)
     } else {
-      windowManager?.setUpForInnerRoute(homePath.last ?? homeSelection)
+      setUpForRoute(homePath.last ?? homeSelection)
     }
+  }
+
+  private func setUpForRoute(_ route: NavigationRoute) {
+    guard let windowManager = windowManager else {
+      log.error("Window manager not set up")
+      return
+    }
+    windowManager.setUpForInnerRoute(route)
   }
 
   // Used from sidebars
   func select(_ route: NavigationRoute) {
     if let activeSpaceId {
       spaceSelectionDict[activeSpaceId] = route
-      windowManager?.setUpForInnerRoute(route)
+      setUpForRoute(route)
     } else {
       homeSelection = route
       homePath.removeAll()
-      windowManager?.setUpForInnerRoute(route)
+      setUpForRoute(route)
     }
   }
 
   func navigate(to route: NavigationRoute) {
     if let activeSpaceId {
       spacePathDict[activeSpaceId, default: []].append(route)
-      windowManager?.setUpForInnerRoute(route)
+      setUpForRoute(route)
     } else {
       homePath.append(route)
-      windowManager?.setUpForInnerRoute(route)
+      setUpForRoute(route)
     }
   }
 
@@ -160,7 +159,7 @@ class NavigationModel: ObservableObject {
     // TODO: Load from persistence layer
     if spacePathDict[id] == nil {
       spacePathDict[id] = []
-      windowManager?.setUpForInnerRoute(.spaceRoot)
+      setUpForRoute(.spaceRoot)
     }
   }
 
@@ -168,16 +167,16 @@ class NavigationModel: ObservableObject {
     activeSpaceId = nil
     // TODO: Load from persistence layer
     let currentHomeRoute = homePath.last ?? homeSelection
-    windowManager?.setUpForInnerRoute(currentHomeRoute)
+    setUpForRoute(currentHomeRoute)
   }
 
   func navigateBack() {
     if let activeSpaceId {
       spacePathDict[activeSpaceId]?.removeLast()
-      windowManager?.setUpForInnerRoute(spacePathDict[activeSpaceId]?.last ?? .spaceRoot)
+      setUpForRoute(spacePathDict[activeSpaceId]?.last ?? .spaceRoot)
     } else {
       homePath.removeLast()
-      windowManager?.setUpForInnerRoute(homePath.last ?? homeSelection)
+      setUpForRoute(homePath.last ?? homeSelection)
     }
   }
 

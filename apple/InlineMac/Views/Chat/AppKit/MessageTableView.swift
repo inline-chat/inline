@@ -83,6 +83,7 @@ class MessagesTableView: NSViewController {
     scroll.verticalScroller?.controlSize = .small // This makes it ultra-minimal
 
     scroll.postsBoundsChangedNotifications = true
+    scroll.automaticallyAdjustsContentInsets = false
     
     return scroll
   }()
@@ -95,6 +96,23 @@ class MessagesTableView: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupScrollObserver()
+  }
+
+
+  // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did layout and it fixes the issue.
+  private func updateScrollViewInsets() {
+    guard let window = view.window else { return }
+    
+    let windowFrame = window.frame
+    let contentFrame = window.contentLayoutRect
+    let toolbarHeight = windowFrame.height - contentFrame.height
+    
+    scrollView.contentInsets = NSEdgeInsets(
+      top: toolbarHeight,
+      left: 0,
+      bottom: 0,
+      right: 0
+    )
   }
   
   private func setupViews() {
@@ -119,6 +137,8 @@ class MessagesTableView: NSViewController {
 
   private func scrollToBottom(animated: Bool) {
     guard messages.count > 0 else { return }
+    
+    print("scrollTopInset \(scrollView.contentInsets.top)")
     
     let lastRow = messages.count - 1
     
@@ -363,6 +383,7 @@ class MessagesTableView: NSViewController {
   
   override func viewDidLayout() {
     super.viewDidLayout()
+    updateScrollViewInsets()
     
     let newWidth = tableView.bounds.width
 //    let newWidth = width

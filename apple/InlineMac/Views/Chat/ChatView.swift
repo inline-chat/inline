@@ -38,6 +38,7 @@ struct ChatView: View {
         compose
       }
       // So the scroll bar goes under the toolbar
+      // Note(@mo: this adds a bug on first frame toolbar doesn't have background and insets are messed up? so scroll fails initially)
       .ignoresSafeArea(.container, edges: .top)
     }
     .task {
@@ -60,7 +61,7 @@ struct ChatView: View {
   var body: some View {
     content
       // Hide default title. No way to achieve this without this for now
-      .navigationTitle("")
+      .navigationTitle(" ")
       .toolbar {
         ToolbarItem(placement: .navigation) {
           HStack {
@@ -100,6 +101,7 @@ struct ChatView: View {
           }
         }
       }
+      .toolbarBackground(.visible, for: .windowToolbar)
   }
 
   /// Fetch chat history
