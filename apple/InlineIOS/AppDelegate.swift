@@ -7,6 +7,18 @@ import UIKit
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
   let nav = Navigation()
+
+  func application(
+    _ application: UIApplication,
+    willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    // Set up notification delegate here to not miss anything
+    let notificationCenter = UNUserNotificationCenter.current()
+    notificationCenter.delegate = self
+
+    return true
+  }
+
   func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -28,10 +40,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       name: .authenticationChanged,
       object: nil
     )
-
-    // Must setup delegate here or we'll miss events
-    let notificationCenter = UNUserNotificationCenter.current()
-    notificationCenter.delegate = self
 
     return true
   }
