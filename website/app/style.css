@@ -1,29 +1,11 @@
 @import "./preflight.css";
 
 @layer priority1 {
-  /* Load fonts */
-  @font-face {
-    font-family: "RM Neue";
-    src: url("/fonts/RMNeue-Regular.woff2") format("woff2");
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-  }
-
-  @font-face {
-    font-family: "RM Neue";
-    src: url("/fonts/RMNeue-Bold.woff2") format("woff2");
-    font-weight: 700;
-    font-style: normal;
-    font-display: swap;
-  }
-
   /* Anti-aliasing */
-  /* RM Neue looks better like this */
-  html {
+  /* html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-  }
+  } */
 
   html {
     background: #f2f2f2;

@@ -511,7 +511,7 @@ const styles = stylex.create({
     minHeight: "100%",
 
     fontWeight: "400",
-    fontFamily: '"RM Neue", sans-serif',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
