@@ -153,7 +153,6 @@ public extension Message {
       if let existing = try? Message
         .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
       {
-        print("found existing message \(existing)")
         self.globalId = existing.globalId
       }
     }

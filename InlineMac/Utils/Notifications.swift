@@ -21,6 +21,16 @@ class NotificationsManager: NSObject {
     center.delegate = self
     log.debug("Notifications manager setup completed.")
   }
+
+  var onNotificationReceivedAction: ((_ response: UNNotificationResponse) -> Void)?
+
+  func onNotificationReceived(action: @escaping (_ response: UNNotificationResponse) -> Void) {
+    if onNotificationReceivedAction != nil {
+      log.error("onNotificationReceived action already attached. It must only be called once.")
+    }
+    log.trace("Attached onNotificationReceived action")
+    onNotificationReceivedAction = action
+  }
 }
 
 // Delegate
@@ -40,12 +50,11 @@ extension NotificationsManager: UNUserNotificationCenterDelegate {
   func userNotificationCenter(
     _: UNUserNotificationCenter,
     didReceive response: UNNotificationResponse,
-    withCompletionHandler _: @escaping () -> Void
+    withCompletionHandler completionHandler: @escaping () -> Void
   ) {
     log.debug("Received notification: \(response.notification.request.content.userInfo)")
-    let userInfo = response.notification.request.content.userInfo
-
-    // Handle the notification here.
+    self.onNotificationReceivedAction.map { $0(response) }
+    completionHandler() // Is this correct?
   }
 }
 

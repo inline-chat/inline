@@ -138,8 +138,6 @@ class MessagesTableView: NSViewController {
   private func scrollToBottom(animated: Bool) {
     guard messages.count > 0 else { return }
     
-    print("scrollTopInset \(scrollView.contentInsets.top)")
-    
     let lastRow = messages.count - 1
     
     if animated {
