@@ -24,14 +24,23 @@ struct ChatView: View {
   // MARK: - Body
 
   var body: some View {
-    ZStack(alignment: .bottom) {
+    VStack(spacing: 0) {
       chatMessages
-      inputArea
-        .overlay(alignment: .top) {
-          Divider()
-            .edgesIgnoringSafeArea(.horizontal)
+        .ignoresSafeArea(.all, edges: .bottom)
+        .ignoresSafeArea(.all, edges: .top)
+        .safeAreaInset(edge: .bottom) {
+          inputArea
+            .overlay(alignment: .top) {
+              Divider()
+                .edgesIgnoringSafeArea(.horizontal)
+            }
         }
+      // so it goes under the navigationbar
+
+      // This fixes the bottom part of list insets
+//        .ignoresSafeArea(.container, edges: .bottom)
     }
+    .ignoresSafeArea(.all, edges: .top)
 
     .toolbar {
       ToolbarItem(placement: .principal) {
