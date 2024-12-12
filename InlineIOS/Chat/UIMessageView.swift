@@ -5,19 +5,6 @@ import UIKit
 class UIMessageView: UIView {
   // MARK: - Properties
 
-  private var isMultiLine: Bool = false
-  private var cachedSize: CGSize = .zero
-  private var cachedText: String = ""
-  private var cachedWidth: CGFloat = 0
-
-  private enum LayoutCache {
-    static var textSizes: NSCache<NSString, NSValue> = {
-      let cache = NSCache<NSString, NSValue>()
-      cache.countLimit = 1000
-      return cache
-    }()
-  }
-
   private let messageLabel: UILabel = {
     let label = UILabel()
     label.numberOfLines = 0
@@ -46,13 +33,6 @@ class UIMessageView: UIView {
 
   private let horizontalPadding: CGFloat = 12
   private let verticalPadding: CGFloat = 8
-
-  private var maximumTextWidth: CGFloat {
-    let totalWidth = bounds.width * 0.9 // 90% of parent width
-    let horizontalInsets = horizontalPadding * 2
-    let metadataWidth = metadataView.intrinsicContentSize.width
-    return totalWidth - horizontalInsets - (metadataWidth > 0 ? metadataWidth + 8 : 0)
-  }
 
   // MARK: - Initialization
 
@@ -93,13 +73,18 @@ class UIMessageView: UIView {
       messageLabel.bottomAnchor.constraint(
         equalTo: bubbleView.bottomAnchor, constant: -verticalPadding
       ),
+      metadataView.bottomAnchor.constraint(
+        equalTo: bubbleView.bottomAnchor
+      ),
+      metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
+      metadataView.trailingAnchor.constraint(
+        equalTo: bubbleView.trailingAnchor, constant: -horizontalPadding
+      ),
+      metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
     ]
-
-    fuckingConstraints.append(contentsOf: metadataConstrains())
 
     NSLayoutConstraint.activate(fuckingConstraints)
 
-    // Set proper content hugging and compression resistance
     messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     messageLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
@@ -110,103 +95,8 @@ class UIMessageView: UIView {
     bubbleView.addInteraction(interaction)
   }
 
-  private func calculateIsMultiLine() {
-    guard messageLabel.text != nil, bounds.width > 0 else { return }
-
-    // Check for explicit line breaks first
-    if messageLabel.text?.contains("\n") == true {
-      isMultiLine = true
-      return
-    }
-
-    let currentWidth = bounds.width
-    let text = messageLabel.text ?? ""
-
-    // Return cached result if nothing changed
-    if cachedText == text && abs(cachedWidth - currentWidth) < 0.001 {
-      return
-    }
-
-    // Create cache key
-    let cacheKey = "\(text):\(currentWidth)" as NSString
-
-    // Try to get cached size
-    if let cachedValue = LayoutCache.textSizes.object(forKey: cacheKey) {
-      let size = cachedValue.cgSizeValue
-      isMultiLine = size.height > messageLabel.font.lineHeight * 1.5
-      cachedSize = size
-      cachedText = text
-      cachedWidth = currentWidth
-      return
-    }
-
-    // Calculate size if not cached
-    let maxWidth = maximumTextWidth
-    let size = calculateTextSize(text: text, maxWidth: maxWidth)
-
-    // Cache the result
-    LayoutCache.textSizes.setObject(NSValue(cgSize: size), forKey: cacheKey)
-
-    // Update state
-    isMultiLine = size.height > messageLabel.font.lineHeight * 1.5
-    cachedSize = size
-    cachedText = text
-    cachedWidth = currentWidth
-  }
-
-  private func calculateTextSize(text: String, maxWidth: CGFloat) -> CGSize {
-    let attributes: [NSAttributedString.Key: Any] = [
-      .font: messageLabel.font as Any,
-    ]
-
-    let constraintRect = CGSize(width: maxWidth, height: .greatestFiniteMagnitude)
-    let boundingBox = text.boundingRect(
-      with: constraintRect,
-      options: [.usesLineFragmentOrigin, .usesFontLeading],
-      attributes: attributes,
-      context: nil
-    )
-
-    return CGSize(
-      width: ceil(boundingBox.width),
-      height: ceil(boundingBox.height)
-    )
-  }
-
-  func metadataConstrains() -> [NSLayoutConstraint] {
-    let fuckingSingleLineConstraints = [
-      metadataView.bottomAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor, constant: -verticalPadding
-      ),
-      metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
-      metadataView.trailingAnchor.constraint(
-        equalTo: bubbleView.trailingAnchor, constant: -horizontalPadding
-      ),
-      metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
-    ]
-
-    let fuckingMultilineConstraints = [
-      metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -16),
-      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
-    ]
-
-    if isMultiLine {
-      return fuckingMultilineConstraints
-    } else {
-      return fuckingSingleLineConstraints
-    }
-  }
-
   private func configureForMessage() {
     messageLabel.text = fullMessage.message.text
-    calculateIsMultiLine()
-
-    if isMultiLine {
-      bubbleView.layer.cornerRadius = 18
-    } else {
-      bubbleView.layer.cornerRadius = 18
-//      bubbleView.layer.cornerRadius = bubbleView.bounds.height / 2
-    }
 
     if fullMessage.message.out == true {
       bubbleView.backgroundColor = ColorManager.shared.selectedColor
@@ -240,11 +130,6 @@ class UIMessageView: UIView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    calculateIsMultiLine()
-  }
-
-  static func clearCache() {
-    LayoutCache.textSizes.removeAllObjects()
   }
 
   override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -253,18 +138,7 @@ class UIMessageView: UIView {
     if previousTraitCollection?.preferredContentSizeCategory
       != traitCollection.preferredContentSizeCategory
     {
-      UIMessageView.clearCache()
       setNeedsLayout()
-    }
-  }
-
-  override func didMoveToWindow() {
-    super.didMoveToWindow()
-    if window == nil {
-      if let text = messageLabel.text {
-        let cacheKey = "\(text):\(bounds.width)" as NSString
-        LayoutCache.textSizes.removeObject(forKey: cacheKey)
-      }
     }
   }
 }
