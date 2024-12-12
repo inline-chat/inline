@@ -11,11 +11,11 @@ struct MessagesCollectionView: UIViewRepresentable {
     let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
 
     collectionView.collectionViewLayout = layout
-    collectionView.contentInsetAdjustmentBehavior = .always
+//    collectionView.contentInsetAdjustmentBehavior = .always // added for width
     collectionView.backgroundColor = .clear
     collectionView.delegate = context.coordinator
     collectionView.autoresizingMask = [.flexibleHeight]
-
+//    collectionView.automaticallyAdjustsScrollIndicatorInsets = false
     collectionView.register(
       MessageCollectionViewCell.self,
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
@@ -23,13 +23,29 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     // Base transform for bottom-up scrolling
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-    collectionView.contentInset = UIEdgeInsets(top: 62, left: 0, bottom: 16, right: 0)
+    context.coordinator.adjustContentInset(for: collectionView)
 
+    // Get navigation bar height
+//    let navBarHeight = getNavigationBarHeight()
+//
+//    // Set scroll indicator insets instead of content inset
+//    collectionView.scrollIndicatorInsets = UIEdgeInsets(
+//      top: 0,
+//      left: 0,
+//      bottom: navBarHeight,
+//      right: 0
+//    )
+//
+//    // Content inset can be different if needed
+//    collectionView.contentInset = UIEdgeInsets(
+//      top: 0, // Adjust this value based on your needs
+//      left: 0,
+//      bottom: navBarHeight,
+//      right: 0
+//    )
     // Performance optimizations
     collectionView.isPrefetchingEnabled = true
     collectionView.decelerationRate = .normal
-    // Added for width
-    collectionView.contentInsetAdjustmentBehavior = .always
 
     context.coordinator.setupDataSource(collectionView)
 
@@ -82,6 +98,52 @@ struct MessagesCollectionView: UIViewRepresentable {
       super.init()
     }
 
+    func getNavigationBarHeight() -> CGFloat {
+      let fallback: CGFloat = 44.0
+      let minimumNavHeight: CGFloat = 32.0
+
+      guard let windowScene = UIApplication.shared
+        .connectedScenes
+        .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+        let window = windowScene.windows.first(where: { $0.isKeyWindow })
+      else {
+        return fallback
+      }
+
+      let orientation = windowScene.interfaceOrientation
+      let safeAreaTop = window.safeAreaInsets.top
+
+      switch orientation {
+      case .portrait, .portraitUpsideDown:
+        return safeAreaTop + 10.0
+      case .landscapeLeft, .landscapeRight:
+        return max(safeAreaTop + 32.0, minimumNavHeight)
+      case .unknown:
+        return fallback
+      @unknown default:
+        return fallback
+      }
+    }
+
+    func adjustContentInset(for collectionView: UICollectionView) {
+      let navH = getNavigationBarHeight()
+
+      collectionView.scrollIndicatorInsets = UIEdgeInsets(
+        top: 0,
+        left: 0,
+        bottom: navH,
+        right: 0
+      )
+
+      // Content inset can be different if needed
+      collectionView.contentInset = UIEdgeInsets(
+        top: 0, // Adjust this value based on your needs
+        left: 0,
+        bottom: navH,
+        right: 0
+      )
+    }
+
     func setupDataSource(_ collectionView: UICollectionView) {
       currentCollectionView = collectionView
 
@@ -110,6 +172,26 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     private func applyInitialData() {
       updateSnapshot(with: fullMessages)
+    }
+
+    func adjustContentInset(for collectionView: UICollectionView, navBarHeight: CGFloat) {
+      // Get navigation bar height
+
+      // Set scroll indicator insets instead of content inset
+      collectionView.scrollIndicatorInsets = UIEdgeInsets(
+        top: 0,
+        left: 0,
+        bottom: navBarHeight,
+        right: 0
+      )
+
+      // Content inset can be different if needed
+      collectionView.contentInset = UIEdgeInsets(
+        top: 0, // Adjust this value based on your needs
+        left: 0,
+        bottom: navBarHeight,
+        right: 0
+      )
     }
 
     private func updateSnapshot(with messages: [FullMessage]) {
@@ -219,12 +301,13 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     @objc func orientationDidChange(_ notification: Notification) {
       guard let collectionView = currentCollectionView else { return }
-
+      print("orientationDidChange \(orientationDidChange)")
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
         guard let self else { return }
 
         UIView.performWithoutAnimation {
           collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
+          self.adjustContentInset(for: collectionView)
           collectionView.collectionViewLayout.invalidateLayout()
 
 //          if !self.fullMessages.isEmpty {
