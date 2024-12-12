@@ -1,42 +1,142 @@
 import InlineKit
-import SwiftUI
+import UIKit
 
-struct MessageMetadataView: View {
-  let date: Date
-  let status: MessageSendingStatus?
-  let isOutgoing: Bool
+class MessageMetadata: UIView {
+  private let dateLabel: UILabel = {
+    let label = UILabel()
+    label.font = .systemFont(ofSize: 11)
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
 
-  var body: some View {
-    HStack(spacing: 4) {
-      Text(date.formatted(.dateTime.hour().minute()))
-        .font(.system(size: 11))
-        .foregroundColor(isOutgoing ? .white.opacity(0.7) : .gray)
+  private let statusImageView: UIImageView = {
+    let imageView = UIImageView()
+    imageView.contentMode = .scaleAspectFit
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    return imageView
+  }()
 
-      if isOutgoing && status != nil {
-        Group {
-          switch status {
-          case .sent:
-            Image(systemName: "checkmark")
-              .font(.system(size: 11))
-          case .sending:
-            Image(systemName: "checkmark.circle")
-              .font(.system(size: 11))
-          case .failed:
-            Image(systemName: "exclamationmark")
-              .font(.system(size: 11))
-          case .none:
-            EmptyView()
-          }
-        }
-        .foregroundColor(statusColor)
-      }
-    }
+  private let stackView: UIStackView = {
+    let stack = UIStackView()
+    stack.axis = .horizontal
+    stack.spacing = 4
+    stack.alignment = .center
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }()
+
+  init(date: Date, status: MessageSendingStatus?, isOutgoing: Bool) {
+    super.init(frame: .zero)
+    setupViews()
+    configure(date: date, status: status, isOutgoing: isOutgoing)
   }
 
-  private var statusColor: Color {
-    if status == .failed {
-      return isOutgoing ? .white.opacity(0.7) : .red
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func setupViews() {
+    addSubview(stackView)
+    stackView.addArrangedSubview(dateLabel)
+    stackView.addArrangedSubview(statusImageView)
+
+    NSLayoutConstraint.activate([
+      stackView.topAnchor.constraint(equalTo: topAnchor),
+      stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ])
+  }
+
+  func configure(date: Date, status: MessageSendingStatus?, isOutgoing: Bool) {
+    let dateFormatter = DateFormatter()
+    dateFormatter.dateFormat = "HH:mm"
+    dateLabel.text = dateFormatter.string(from: date)
+    dateLabel.textColor = isOutgoing ? UIColor.white.withAlphaComponent(0.7) : .gray
+
+    if isOutgoing && status != nil {
+      statusImageView.isHidden = false
+
+      let imageName: String
+      switch status {
+      case .sent:
+        imageName = "checkmark"
+      case .sending:
+        imageName = "checkmark.circle"
+      case .failed:
+        imageName = "exclamationmark"
+      case .none:
+        imageName = ""
+      }
+
+      statusImageView.image = UIImage(systemName: imageName)?
+        .withConfiguration(UIImage.SymbolConfiguration(pointSize: 11))
+
+      statusImageView.tintColor =
+        status == .failed
+          ? (isOutgoing ? UIColor.white.withAlphaComponent(0.7) : .red)
+          : (isOutgoing ? UIColor.white.withAlphaComponent(0.7) : .gray)
+    } else {
+      statusImageView.isHidden = true
     }
-    return isOutgoing ? .white.opacity(0.7) : .gray
   }
 }
+
+#if DEBUG
+import SwiftUI
+
+struct MessageMetadataPreview: PreviewProvider {
+  static var previews: some View {
+    VStack(spacing: 20) {
+      // Outgoing message status previews
+      HStack {
+        Spacer()
+        UIViewPreview {
+          MessageMetadata(date: Date(), status: .sending, isOutgoing: true)
+        }
+      }
+      HStack {
+        Spacer()
+        UIViewPreview {
+          MessageMetadata(date: Date(), status: .sent, isOutgoing: true)
+        }
+      }
+      HStack {
+        Spacer()
+        UIViewPreview {
+          MessageMetadata(date: Date(), status: .failed, isOutgoing: true)
+        }
+      }
+
+      // Incoming message status preview
+      HStack {
+        UIViewPreview {
+          MessageMetadata(date: Date(), status: nil, isOutgoing: false)
+        }
+        Spacer()
+      }
+    }
+    .padding()
+    .background(Color(.systemBackground))
+    .previewLayout(.sizeThatFits)
+  }
+}
+
+// Helper struct to wrap UIView for SwiftUI previews
+struct UIViewPreview<View: UIView>: UIViewRepresentable {
+  let view: View
+
+  init(_ builder: @escaping () -> View) {
+    view = builder()
+  }
+
+  func makeUIView(context: Context) -> some UIView {
+    return view
+  }
+
+  func updateUIView(_ uiView: UIViewType, context: Context) {
+    // No updates needed
+  }
+}
+#endif
