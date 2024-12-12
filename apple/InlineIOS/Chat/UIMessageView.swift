@@ -5,11 +5,7 @@ import UIKit
 class UIMessageView: UIView {
   // MARK: - Properties
 
-  enum MessageLayout {
-    case singleLine
-    case multiline
-  }
-
+  private var isMultiLine: Bool = false
   private var cachedSize: CGSize = .zero
   private var cachedText: String = ""
   private var cachedWidth: CGFloat = 0
@@ -51,8 +47,6 @@ class UIMessageView: UIView {
   private let horizontalPadding: CGFloat = 12
   private let verticalPadding: CGFloat = 8
 
-  private var messageLayout: MessageLayout = .singleLine
-
   private var maximumTextWidth: CGFloat {
     let totalWidth = bounds.width * 0.9 // 90% of parent width
     let horizontalInsets = horizontalPadding * 2
@@ -87,7 +81,7 @@ class UIMessageView: UIView {
     leadingConstraint = leading
     trailingConstraint = trailing
 
-    var constraints = [
+    var fuckingConstraints = [
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
       bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
@@ -101,9 +95,9 @@ class UIMessageView: UIView {
       ),
     ]
 
-    constraints.append(contentsOf: metadataConstrains())
+    fuckingConstraints.append(contentsOf: metadataConstrains())
 
-    NSLayoutConstraint.activate(constraints)
+    NSLayoutConstraint.activate(fuckingConstraints)
 
     // Set proper content hugging and compression resistance
     messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -116,12 +110,12 @@ class UIMessageView: UIView {
     bubbleView.addInteraction(interaction)
   }
 
-  private func calculateMessageLayout() {
+  private func calculateIsMultiLine() {
     guard messageLabel.text != nil, bounds.width > 0 else { return }
 
     // Check for explicit line breaks first
     if messageLabel.text?.contains("\n") == true {
-      messageLayout = .multiline
+      isMultiLine = true
       return
     }
 
@@ -139,7 +133,7 @@ class UIMessageView: UIView {
     // Try to get cached size
     if let cachedValue = LayoutCache.textSizes.object(forKey: cacheKey) {
       let size = cachedValue.cgSizeValue
-      messageLayout = size.height > messageLabel.font.lineHeight * 1.5 ? .multiline : .singleLine
+      isMultiLine = size.height > messageLabel.font.lineHeight * 1.5
       cachedSize = size
       cachedText = text
       cachedWidth = currentWidth
@@ -154,7 +148,7 @@ class UIMessageView: UIView {
     LayoutCache.textSizes.setObject(NSValue(cgSize: size), forKey: cacheKey)
 
     // Update state
-    messageLayout = size.height > messageLabel.font.lineHeight * 1.5 ? .multiline : .singleLine
+    isMultiLine = size.height > messageLabel.font.lineHeight * 1.5
     cachedSize = size
     cachedText = text
     cachedWidth = currentWidth
@@ -180,35 +174,39 @@ class UIMessageView: UIView {
   }
 
   func metadataConstrains() -> [NSLayoutConstraint] {
-    switch messageLayout {
-    case .singleLine:
-      return [
-        metadataView.bottomAnchor.constraint(
-          equalTo: bubbleView.bottomAnchor, constant: -verticalPadding
-        ),
-        metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
-        metadataView.trailingAnchor.constraint(
-          equalTo: bubbleView.trailingAnchor, constant: -horizontalPadding
-        ),
-        metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
-      ]
+    let fuckingSingleLineConstraints = [
+      metadataView.bottomAnchor.constraint(
+        equalTo: bubbleView.bottomAnchor, constant: -verticalPadding
+      ),
+      metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
+      metadataView.trailingAnchor.constraint(
+        equalTo: bubbleView.trailingAnchor, constant: -horizontalPadding
+      ),
+      metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
+    ]
 
-    case .multiline:
-      return [
-        metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -16),
-        metadataView.leadingAnchor.constraint(
-          equalTo: bubbleView.leadingAnchor, constant: horizontalPadding
-        ),
-      ]
+    let fuckingMultilineConstraints = [
+      metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -16),
+      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
+    ]
+
+    if isMultiLine {
+      return fuckingMultilineConstraints
+    } else {
+      return fuckingSingleLineConstraints
     }
   }
 
   private func configureForMessage() {
     messageLabel.text = fullMessage.message.text
-    calculateMessageLayout()
-    print("Configuring message layout: \(messageLayout) \(messageLabel.text)")
+    calculateIsMultiLine()
 
-    bubbleView.layer.cornerRadius = 18
+    if isMultiLine {
+      bubbleView.layer.cornerRadius = 18
+    } else {
+      bubbleView.layer.cornerRadius = 18
+//      bubbleView.layer.cornerRadius = bubbleView.bounds.height / 2
+    }
 
     if fullMessage.message.out == true {
       bubbleView.backgroundColor = ColorManager.shared.selectedColor
@@ -231,7 +229,6 @@ class UIMessageView: UIView {
         isOutgoing: false
       )
     }
-    updateLayout()
   }
 
   func updateLayout() {
@@ -243,8 +240,7 @@ class UIMessageView: UIView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    calculateMessageLayout()
-    print("Layout subviews with message layout: \(messageLayout) \(fullMessage.message.text)")
+    calculateIsMultiLine()
   }
 
   static func clearCache() {
