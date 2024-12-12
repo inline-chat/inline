@@ -2,6 +2,9 @@
 **/.cache
 **/build
 .env
+.env.test
+.env.prod
+.env.staging
 
 # Node.js
 node_modules/
