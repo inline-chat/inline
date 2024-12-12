@@ -273,9 +273,8 @@ const sendPushNotificationToUser = async ({
         session.clientType === "macos"
           ? isProd
             ? "chat.inline.InlineMac"
-            : "chat.inline.InlineMac"
-          : // : "chat.inline.InlineMac.debug"
-            "chat.inline.InlineIOS"
+            : "chat.inline.InlineMac.debug"
+          : "chat.inline.InlineIOS"
 
       // Configure notification
       const notification = new APN.Notification()
