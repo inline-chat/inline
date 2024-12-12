@@ -9,12 +9,12 @@ struct InlineApp: App {
   @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
   @StateObject var viewModel = MainWindowViewModel()
   @StateObject var ws = WebSocketManager()
-  @StateObject var navigation = NavigationModel()
+  @StateObject var navigation: NavigationModel = .shared
   @StateObject var auth = Auth.shared
   @StateObject var overlay = OverlayManager()
   
   @Environment(\.openWindow) var openWindow
-  
+
   var body: some Scene {
     // Note(@mo): Using Window here messes up with our title bar handling upon window re-open after close
     WindowGroup("main") {
@@ -90,7 +90,6 @@ struct InlineApp: App {
     
     // Reset internal navigation
     navigation.reset()
-    
     
     // Close Settings
     if let window = NSApplication.shared.keyWindow {

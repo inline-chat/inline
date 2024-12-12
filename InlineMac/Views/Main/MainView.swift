@@ -40,7 +40,7 @@ struct MainView: View {
       self.setUpSidebarAutoCollapse()
     }
     .task {
-      await requestNotifications();
+      await requestNotifications()
     }
     // Disable auto collapse while user is modifying it to avoid jump
     .onChange(of: window.columnVisibility) { _ in
@@ -74,6 +74,7 @@ struct MainView: View {
           .navigationDestination(for: NavigationRoute.self) { route in
             renderSpaceRoute(for: route, spaceId: spaceId)
           }
+        
       } else {
         renderHomeRoute(for: navigation.homeSelection)
           // Note(@mo): without this .id, route would not update correctly
@@ -116,7 +117,7 @@ struct MainView: View {
     switch destination {
     case .chat(let peer):
       ChatView(peerId: peer)
-        
+      
     case .homeRoot:
       HomeRoot()
       

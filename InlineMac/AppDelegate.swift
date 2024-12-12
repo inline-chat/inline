@@ -7,6 +7,7 @@ import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate {
   let notifications = NotificationsManager()
+  let navigation: NavigationModel = .shared
 
   func applicationWillFinishLaunching(_ notification: Notification) {
     // Disable native tabbing
@@ -23,7 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       options.debug = false
       options.tracesSampleRate = 0.1
     }
-    
+
     notifications.setup()
   }
 
