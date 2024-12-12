@@ -8,7 +8,7 @@ if (!process.env.RESEND_API_KEY) {
 }
 
 if (!process.env["ENCRYPTION_KEY"]) {
-  process.env["ENCRYPTION_KEY"] = "test-key"
+  process.env["ENCRYPTION_KEY"] = "1234567890123456789012345678901212345678901234567890123456789012"
 }
 // If some services are not needed during testing, you can use dummy values
 if (!process.env.AMAZON_ACCESS_KEY) {
