@@ -13,22 +13,28 @@ class ChatContainerView: UIView {
   private let messagesView: MessagesCollectionView
   private let composeView = ComposeView()
   private let text: Binding<String>
-    
+  var onSendMessage: (() -> Void)?
+
   // MARK: - Initialization
     
   init(frame: CGRect, fullMessages: [FullMessage], text: Binding<String>) {
     self.text = text
     self.messagesView = MessagesCollectionView(messages: fullMessages)
-        
+      
     super.init(frame: frame)
-        
+      
     setupViews()
-        
+      
     composeView.onTextChange = { [weak self] newText in
+      
       self?.text.wrappedValue = newText
     }
+    composeView.onSend = { [weak self] in
+      self?.onSendMessage?()
+    }
+
     composeView.text = text.wrappedValue
-        
+      
     contentView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     contentView.setContentHuggingPriority(.defaultLow, for: .horizontal)
   }
@@ -99,17 +105,21 @@ class ChatContainerView: UIView {
 struct ChatContainerViewRepresentable: UIViewRepresentable {
   var fullMessages: [FullMessage]
   var text: Binding<String>
+  var onSendMessage: () -> Void
     
   func makeUIView(context: Context) -> ChatContainerView {
-    ChatContainerView(
+    let view = ChatContainerView(
       frame: .zero,
       fullMessages: fullMessages,
       text: text
     )
+    view.onSendMessage = onSendMessage
+    return view
   }
     
   func updateUIView(_ uiView: ChatContainerView, context: Context) {
     uiView.updateMessages(fullMessages)
+    uiView.onSendMessage = onSendMessage
   }
 }
 
@@ -136,7 +146,8 @@ struct ChatView: View {
   var body: some View {
     ChatContainerViewRepresentable(
       fullMessages: fullChatViewModel.fullMessages,
-      text: $text
+      text: $text,
+      onSendMessage: sendMessage
     )
     .toolbar {
       ToolbarItem(placement: .principal) {
@@ -197,7 +208,6 @@ struct ChatView: View {
         let generator = UIImpactFeedbackGenerator(style: .soft)
         generator.impactOccurred()
                 
-        // Delay clearing the text field to allow animation to complete
         withAnimation {
           text = ""
         }

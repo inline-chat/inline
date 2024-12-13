@@ -3,7 +3,17 @@ import UIKit
 
 final class ComposeView: UIView {
   // MARK: - Properties
-    
+
+  private let sendButton: UIButton = {
+    let button = UIButton()
+    let config = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
+    let image = UIImage(systemName: "arrow.up.circle.fill", withConfiguration: config)
+    button.setImage(image, for: .normal)
+    button.tintColor = .systemBlue
+    button.isHidden = true // Initially hidden
+    return button
+  }()
+
   private let textView: UITextView = {
     let storage = OptimizedTextStorage()
     let layoutManager = OptimizedLayoutManager()
@@ -43,7 +53,8 @@ final class ComposeView: UIView {
     
   private var heightConstraint: NSLayoutConstraint?
   var onTextChange: ((String) -> Void)?
-    
+  var onSend: (() -> Void)?
+
   // MARK: - Initialization
     
   override init(frame: CGRect) {
@@ -63,27 +74,40 @@ final class ComposeView: UIView {
   private func setupViews() {
     addSubview(textView)
     addSubview(placeholderLabel)
-        
+    addSubview(sendButton)
+         
     textView.translatesAutoresizingMaskIntoConstraints = false
     placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+    sendButton.translatesAutoresizingMaskIntoConstraints = false
+         
+    sendButton.addTarget(self, action: #selector(handleSend), for: .touchUpInside)
   }
-    
+     
   private func setupConstraints() {
     let heightConstraint = textView.heightAnchor.constraint(equalToConstant: 40)
     self.heightConstraint = heightConstraint
-        
+          
     NSLayoutConstraint.activate([
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      textView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -8),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
       heightConstraint,
-            
+              
       placeholderLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-      placeholderLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+      placeholderLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+              
+      sendButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+      sendButton.widthAnchor.constraint(equalToConstant: 32),
+      sendButton.heightAnchor.constraint(equalToConstant: 32)
     ])
   }
-    
+
+  @objc private func handleSend() {
+    onSend?()
+  }
+
   private func setupTextView() {
     textView.delegate = self
   }
@@ -95,6 +119,7 @@ final class ComposeView: UIView {
     set {
       textView.text = newValue
       updatePlaceholderVisibility()
+      updateSendButtonVisibility()
       updateHeight()
     }
   }
@@ -106,7 +131,15 @@ final class ComposeView: UIView {
       self.placeholderLabel.alpha = self.textView.text.isEmpty ? 1 : 0
     }
   }
-    
+  
+  private func updateSendButtonVisibility() {
+    let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    UIView.animate(withDuration: 0.2) {
+      self.sendButton.isHidden = !hasText
+      self.sendButton.alpha = hasText ? 1 : 0
+    }
+  }
+   
   private func updateHeight() {
     let size = textView.sizeThatFits(CGSize(width: textView.bounds.width, height: CGFloat.greatestFiniteMagnitude))
     let newHeight = min(size.height, 300)
@@ -127,6 +160,7 @@ extension ComposeView: UITextViewDelegate {
   func textViewDidChange(_ textView: UITextView) {
     onTextChange?(textView.text)
     updatePlaceholderVisibility()
+    updateSendButtonVisibility()
     updateHeight()
   }
 }
