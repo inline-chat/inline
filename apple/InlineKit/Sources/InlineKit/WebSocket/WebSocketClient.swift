@@ -138,7 +138,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     connectionState = .disconnected
     notifyStateChange()
 
-    if isActive && closeCode != .normalClosure {
+    if isActive {
       Task {
         await attemptReconnection()
       }
