@@ -38,6 +38,7 @@ public enum Path: String {
   case getDialogs
   case getChatHistory
   case savePushNotification
+  case updateStatus
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -293,6 +294,16 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       queryItems: [
         URLQueryItem(name: "applePushToken", value: pushToken),
 
+      ],
+      includeToken: true
+    )
+  }
+
+  public func updateStatus(online: Bool) async throws -> EmptyPayload {
+    try await request(
+      .updateStatus,
+      queryItems: [
+        URLQueryItem(name: "online", value: online ? "true" : "false"),
       ],
       includeToken: true
     )

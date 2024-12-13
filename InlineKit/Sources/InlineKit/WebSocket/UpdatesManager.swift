@@ -15,6 +15,9 @@ actor UpdatesManager {
       } else if let update = update.updateMessageId {
         self.log.debug("applying update message id")
         try update.apply(db: db)
+      } else if let update = update.updateUserStatus {
+        self.log.debug("applying update user status")
+        try update.apply(db: db)
       }
     } catch {
       self.log.error("Failed to apply update", error: error)
@@ -41,7 +44,8 @@ actor UpdatesManager {
 struct Update: Codable {
   /// New message received
   var newMessage: UpdateNewMessage?
-  var updateMessageId: UpdateUpdateMessageId?
+  var updateMessageId: UpdateMessageId?
+  var updateUserStatus: UpdateUserStatus?
 }
 
 struct UpdateNewMessage: Codable {
@@ -56,7 +60,7 @@ struct UpdateNewMessage: Codable {
   }
 }
 
-struct UpdateUpdateMessageId: Codable {
+struct UpdateMessageId: Codable {
   var messageId: Int64
   var randomId: String
 
@@ -74,5 +78,21 @@ struct UpdateUpdateMessageId: Codable {
         try chat?.save(db)
       }
     }
+  }
+}
+
+struct UpdateUserStatus: Codable {
+  var userId: Int64
+  var online: Bool
+  var lastOnline: Int64?
+
+  func apply(db: Database) throws {
+    let user = try User.filter(id: self.userId).updateAll(
+      db,
+      [
+        Column("online").set(to: self.online),
+        Column("lastOnline").set(to: self.lastOnline)
+      ]
+    )
   }
 }

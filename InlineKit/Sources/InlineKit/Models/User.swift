@@ -6,6 +6,8 @@ public struct ApiUser: Codable, Hashable, Sendable {
   public var email: String?
   public var firstName: String?
   public var lastName: String?
+  public var online: Bool?
+  public var lastOnline: Int?
   public var date: Int
   public var username: String?
 
@@ -30,6 +32,8 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var lastName: String?
   public var date: Date?
   public var username: String?
+  public var online: Bool?
+  public var lastOnline: Date?
 
   public static let members = hasMany(Member.self)
   public static let spaces = hasMany(Space.self, through: members, using: Member.space)
@@ -101,9 +105,11 @@ public extension User {
     self.lastName = apiUser.lastName
     self.username = apiUser.username
     self.date = Self.fromTimestamp(from: apiUser.date)
+    self.online = apiUser.online
+    self.lastOnline = apiUser.lastOnline.map(Self.fromTimestamp(from:))
   }
 
   static func fromTimestamp(from: Int) -> Date {
-    return Date(timeIntervalSince1970: Double(from) / 1000)
+    return Date(timeIntervalSince1970: Double(from))
   }
 }

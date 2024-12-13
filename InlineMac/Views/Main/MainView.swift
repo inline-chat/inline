@@ -41,6 +41,9 @@ struct MainView: View {
     }
     .task {
       await requestNotifications()
+      
+      // Set online
+      try? await dataManager.updateStatus(online: true)
     }
     // Disable auto collapse while user is modifying it to avoid jump
     .onChange(of: window.columnVisibility) { _ in
