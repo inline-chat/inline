@@ -112,4 +112,9 @@ public extension User {
   static func fromTimestamp(from: Int) -> Date {
     return Date(timeIntervalSince1970: Double(from))
   }
+  
+  func isCurrentUser() -> Bool {
+    return self.id == Auth.shared.getCurrentUserId()
+  }
 }
+

@@ -24,7 +24,7 @@ struct UserItem: View {
         UserAvatar(user: user, size: Theme.sidebarIconSize)
           .padding(.trailing, Theme.sidebarIconSpacing)
 
-        VStack(alignment: .leading, spacing: 0) {
+        HStack(spacing: 3) {
           if selected {
             text.foregroundColor(.white)
           } else {
@@ -32,7 +32,22 @@ struct UserItem: View {
               appearsActive ? .primary : .tertiary
             )
           }
-        }.animation(.easeInOut(duration: 0.1), value: selected)
+
+          // Should we show this in home? probably not, but in space we need it
+          if user.isCurrentUser() {
+            if selected {
+              Text("(You)").foregroundColor(.white.opacity(0.6))
+            } else {
+              Text("(You)").foregroundStyle(
+                appearsActive ? .tertiary : .quaternary
+              )
+            }
+          }
+        }
+        .transaction { transaction in
+          transaction.disablesAnimations = true
+        }
+
         Spacer()
       }
       .onHover { isHovered = $0 }
@@ -74,13 +89,20 @@ struct UserItemButtonStyle: ButtonStyle {
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
       .padding(.horizontal, Theme.sidebarItemPadding)
       .background {
-        RoundedRectangle(cornerRadius: Theme.sidebarItemRadius)
-          .fill(backgroundColor(configuration))
+        Group {
+          RoundedRectangle(cornerRadius: Theme.sidebarItemRadius)
+            .fill(backgroundColor(configuration))
+        }.transaction { transaction in
+          if selected {
+            transaction.disablesAnimations = true
+            transaction.animation = .none
+          }
+        }
       }
       // Optional: Add subtle scale effect when pressed
       .scaleEffect(!selected && configuration.isPressed ? 0.98 : 1.0)
       // Optional: Add smooth animation for press state
-      .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+      .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
   }
 
   private func backgroundColor(_ configuration: Configuration) -> Color {
