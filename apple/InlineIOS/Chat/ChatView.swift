@@ -2,142 +2,46 @@ import Combine
 import InlineKit
 import InlineUI
 import SwiftUI
-import UIKit
-
-// MARK: - ChatContainerView (UIKit)
-
-class ChatContainerView: UIView {
-  // MARK: - Properties
-    
-  private let contentView = UIView()
-  private let messagesView: MessagesCollectionView
-  private let composeView = ComposeView()
-  private let text: Binding<String>
-    
-  // MARK: - Initialization
-    
-  init(frame: CGRect, fullMessages: [FullMessage], text: Binding<String>) {
-    self.text = text
-    self.messagesView = MessagesCollectionView(messages: fullMessages)
-        
-    super.init(frame: frame)
-        
-    setupViews()
-        
-    composeView.onTextChange = { [weak self] newText in
-      self?.text.wrappedValue = newText
-    }
-    composeView.text = text.wrappedValue
-        
-    contentView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    contentView.setContentHuggingPriority(.defaultLow, for: .horizontal)
-  }
-    
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-    
-  private var didSetupConstraints = false
-    
-  override func didMoveToWindow() {
-    super.didMoveToWindow()
-        
-    // Only setup once when we have a valid window/hierarchy
-    guard !didSetupConstraints else { return }
-    didSetupConstraints = true
-        
-    setupViews()
-  }
-    
-  private func setupViews() {
-    // Add contentView to main view
-    addSubview(contentView)
-    contentView.translatesAutoresizingMaskIntoConstraints = false
-        
-    // Add views to contentView
-    contentView.addSubview(messagesView)
-    contentView.addSubview(composeView)
-        
-    messagesView.translatesAutoresizingMaskIntoConstraints = false
-    composeView.translatesAutoresizingMaskIntoConstraints = false
-        
-    // Setup constraints
-    NSLayoutConstraint.activate([
-      // ContentView constraints
-      contentView.topAnchor.constraint(equalTo: topAnchor),
-      contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            
-      // MessagesView constraints
-      messagesView.topAnchor.constraint(equalTo: contentView.topAnchor),
-      messagesView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-      messagesView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-      messagesView.bottomAnchor.constraint(equalTo: composeView.topAnchor),
-            
-      // ComposeView constraints
-      composeView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-      composeView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-      composeView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
-    ])
-  }
-    
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    print("ContentView frame: \(contentView.frame)")
-    print("Compose frame: \(composeView.frame)")
-  }
-    
-  func updateMessages(_ messages: [FullMessage]) {
-    messagesView.updateMessages(messages)
-  }
-}
-
-// MARK: - ChatContainerViewRepresentable (SwiftUI Bridge)
-
-struct ChatContainerViewRepresentable: UIViewRepresentable {
-  var fullMessages: [FullMessage]
-  var text: Binding<String>
-    
-  func makeUIView(context: Context) -> ChatContainerView {
-    ChatContainerView(
-      frame: .zero,
-      fullMessages: fullMessages,
-      text: text
-    )
-  }
-    
-  func updateUIView(_ uiView: ChatContainerView, context: Context) {
-    uiView.updateMessages(fullMessages)
-  }
-}
-
-// MARK: - ChatView (SwiftUI)
 
 struct ChatView: View {
   var peer: Peer
-    
+
   @State var text: String = ""
-    
+
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var dataManager: DataManager
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
-    
+
   init(peer: Peer) {
     self.peer = peer
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer)
     }
   }
-    
+
+  // MARK: - Body
+
   var body: some View {
-    ChatContainerViewRepresentable(
-      fullMessages: fullChatViewModel.fullMessages,
-      text: $text
-    )
+    VStack(spacing: 0) {
+      chatMessages
+        .ignoresSafeArea(.all, edges: .bottom)
+        .ignoresSafeArea(.all, edges: .top)
+        .safeAreaInset(edge: .bottom) {
+          inputArea
+            .overlay(alignment: .top) {
+              Divider()
+                .edgesIgnoringSafeArea(.horizontal)
+            }
+        }
+      // so it goes under the navigationbar
+
+      // This fixes the bottom part of list insets
+//        .ignoresSafeArea(.container, edges: .bottom)
+    }
+    .ignoresSafeArea(.all, edges: .top)
+
     .toolbar {
       ToolbarItem(placement: .principal) {
         Text(title)
@@ -158,19 +62,20 @@ struct ChatView: View {
       }
     }
   }
-    
-  // MARK: - Helper Properties
-    
-  var title: String {
-    if case .user = peer {
-      return fullChatViewModel.peerUser?.firstName ?? ""
-    } else {
-      return fullChatViewModel.chat?.title ?? ""
-    }
+}
+
+// MARK: - Helper Extensions
+
+extension View {
+  func flipped() -> some View {
+    rotationEffect(.init(radians: .pi))
+      .scaleEffect(x: -1, y: 1, anchor: .center)
   }
-    
-  // MARK: - Helper Methods
-    
+}
+
+// MARK: - Helper Methods
+
+extension ChatView {
   private func fetchMessages() {
     Task {
       do {
@@ -184,27 +89,36 @@ struct ChatView: View {
       }
     }
   }
-    
+
+  private func dismissKeyboard() {
+    UIApplication.shared.sendAction(
+      #selector(UIResponder.resignFirstResponder),
+      to: nil,
+      from: nil,
+      for: nil
+    )
+  }
+
   func sendMessage() {
     Task {
       do {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard let chatId = fullChatViewModel.chat?.id else { return }
-                
+
         let messageText = text
-                
+
         // Add haptic feedback
         let generator = UIImpactFeedbackGenerator(style: .soft)
         generator.impactOccurred()
-                
+
         // Delay clearing the text field to allow animation to complete
         withAnimation {
           text = ""
         }
-                
+
         let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
         let peerThreadId: Int64? = if case .thread(let id) = peer { id } else { nil }
-                
+
         let randomId = Int64.random(in: Int64.min ... Int64.max)
         let message = Message(
           messageId: -randomId,
@@ -218,12 +132,12 @@ struct ChatView: View {
           out: true,
           status: .sending
         )
-                
+
         // Save message to database
         try await database.dbWriter.write { db in
           try message.save(db)
         }
-                
+
         // Send message to server
         try await dataManager.sendMessage(
           chatId: chatId,
@@ -235,22 +149,110 @@ struct ChatView: View {
         )
       } catch {
         Log.shared.error("Failed to send message", error: error)
+        // Optionally show error to user
       }
     }
   }
 }
 
-// MARK: - Helper Extensions
+// MARK: - Helper Properties
 
-extension UIView {
-  var parentViewController: UIViewController? {
-    var parentResponder: UIResponder? = self
-    while parentResponder != nil {
-      parentResponder = parentResponder?.next
-      if let viewController = parentResponder as? UIViewController {
-        return viewController
-      }
+extension ChatView {
+  var title: String {
+    if case .user = peer {
+      return fullChatViewModel.peerUser?.firstName ?? ""
+    } else {
+      return fullChatViewModel.chat?.title ?? ""
     }
-    return nil
+  }
+}
+
+// MARK: - Views
+
+extension ChatView {
+  @ViewBuilder
+  private var chatMessages: some View {
+    MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
+  }
+
+  @ViewBuilder
+  private var inputArea: some View {
+    HStack {
+      ComposeView(messageText: $text)
+      sendButton
+    }
+    .padding(.vertical, 6)
+    .padding(.horizontal)
+    .background(
+      Color(.systemBackground)
+        .opacity(0.55)
+        .background(.thinMaterial)
+        .edgesIgnoringSafeArea(.bottom)
+        .edgesIgnoringSafeArea(.horizontal)
+    )
+  }
+
+  @ViewBuilder
+  var sendButton: some View {
+    if !text.isEmpty {
+      Button {
+        sendMessage()
+      } label: {
+        Image(systemName: "paperplane.fill")
+          .resizable()
+          .scaledToFit()
+          .foregroundStyle(.white)
+      }
+      .buttonStyle(
+        CircleButtonStyle(
+          size: 30,
+          backgroundColor: .accentColor
+        )
+      )
+      .transition(
+        .asymmetric(
+          insertion: .scale.combined(with: .opacity)
+            .animation(
+              .spring(
+                response: 0.35,
+                dampingFraction: 0.5,
+                blendDuration: 0
+              )
+            ),
+          removal: .scale.combined(with: .opacity)
+            .animation(
+              .spring(
+                response: 0.25,
+                dampingFraction: 0.5,
+                blendDuration: 0
+              )
+            )
+        )
+      )
+    }
+  }
+}
+
+struct CircleButtonStyle: ButtonStyle {
+  let size: CGFloat
+  let backgroundColor: Color
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .padding(8)
+      .frame(width: size, height: size)
+      .background(
+        Circle()
+          .fill(backgroundColor)
+      )
+      .scaleEffect(configuration.isPressed ? 0.85 : 1.0)
+      .animation(
+        .spring(
+          response: 0.2,
+          dampingFraction: 0.5,
+          blendDuration: 0
+        ),
+        value: configuration.isPressed
+      )
   }
 }
