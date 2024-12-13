@@ -61,7 +61,7 @@ class UIMessageView: UIView {
     leadingConstraint = leading
     trailingConstraint = trailing
 
-    var fuckingConstraints = [
+    var constraints = [
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
       bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
@@ -73,9 +73,7 @@ class UIMessageView: UIView {
       messageLabel.bottomAnchor.constraint(
         equalTo: bubbleView.bottomAnchor, constant: -verticalPadding
       ),
-      metadataView.bottomAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor
-      ),
+
       metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
       metadataView.trailingAnchor.constraint(
         equalTo: bubbleView.trailingAnchor, constant: -horizontalPadding
@@ -83,7 +81,13 @@ class UIMessageView: UIView {
       metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
     ]
 
-    NSLayoutConstraint.activate(fuckingConstraints)
+    if fullMessage.message.out == true {
+      trailingConstraint?.isActive = true
+    } else {
+      leadingConstraint?.isActive = true
+    }
+
+    NSLayoutConstraint.activate(constraints)
 
     messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     messageLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -154,7 +158,13 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       let copyAction = UIAction(title: "Copy") { [weak self] _ in
         UIPasteboard.general.string = self?.fullMessage.message.text
       }
-      return UIMenu(children: [copyAction])
+
+      let replyAction = UIAction(title: "Reply") { [weak self] _ in
+        print("Wanna reply")
+        ChatState.shared.setReplyingMessageId(id: self?.fullMessage.message.id ?? 0)
+      }
+
+      return UIMenu(children: [copyAction, replyAction])
     }
   }
 }
@@ -164,8 +174,8 @@ extension String {
     guard let firstChar = first else { return false }
     let earlyRTL =
       firstChar.unicodeScalars.first?.properties.generalCategory == .otherLetter
-        && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
-        && firstChar.unicodeScalars.first!.value <= 0x08FF
+      && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
+      && firstChar.unicodeScalars.first!.value <= 0x08FF
 
     if earlyRTL { return true }
 

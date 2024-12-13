@@ -36,7 +36,12 @@ final class MessagesCollectionView: UIView {
 
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
     coordinator.adjustContentInset(for: collectionView)
-
+    collectionView.contentInset = UIEdgeInsets(
+      top: 18,
+      left: 0,
+      bottom: 18,
+      right: 0
+    )
     collectionView.isPrefetchingEnabled = true
     collectionView.decelerationRate = .normal
 
@@ -55,7 +60,7 @@ final class MessagesCollectionView: UIView {
       collectionView.topAnchor.constraint(equalTo: topAnchor),
       collectionView.leadingAnchor.constraint(equalTo: leadingAnchor),
       collectionView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      collectionView.bottomAnchor.constraint(equalTo: bottomAnchor)
+      collectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
   }
 
@@ -64,7 +69,9 @@ final class MessagesCollectionView: UIView {
     layout.minimumInteritemSpacing = 0
     layout.minimumLineSpacing = 0
     layout.scrollDirection = .vertical
-    layout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
+
+    // Remove automatic sizing which can cause conflicts
+    layout.estimatedItemSize = .zero
     return layout
   }
 
@@ -102,9 +109,10 @@ final class MessagesCollectionView: UIView {
       let fallback: CGFloat = 44.0
       let minimumNavHeight: CGFloat = 32.0
 
-      guard let windowScene = UIApplication.shared
-        .connectedScenes
-        .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+      guard
+        let windowScene = UIApplication.shared
+          .connectedScenes
+          .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
         let window = windowScene.windows.first(where: { $0.isKeyWindow })
       else {
         return fallback
@@ -137,7 +145,7 @@ final class MessagesCollectionView: UIView {
 
       // Content inset can be different if needed
       collectionView.contentInset = UIEdgeInsets(
-        top: 0, // Adjust this value based on your needs
+        top: 0,  // Adjust this value based on your needs
         left: 0,
         bottom: navH,
         right: 0
@@ -187,7 +195,7 @@ final class MessagesCollectionView: UIView {
 
       // Content inset can be different if needed
       collectionView.contentInset = UIEdgeInsets(
-        top: 0, // Adjust this value based on your needs
+        top: 0,  // Adjust this value based on your needs
         left: 0,
         bottom: navBarHeight,
         right: 0
@@ -226,8 +234,8 @@ final class MessagesCollectionView: UIView {
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
-            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-            visibleIndexPaths.item < fullMessages.count
+        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+        visibleIndexPaths.item < fullMessages.count
       else {
         scrollAnchor = nil
         return
@@ -244,21 +252,90 @@ final class MessagesCollectionView: UIView {
       )
     }
 
+    // THIS FIXED WARNINGS
+    //     Unable to simultaneously satisfy constraints.
+    // 	Probably at least one of the constraints in the following list is one you don't want.
+    // 	Try this:
+    // 		(1) look at each constraint and try to figure out which you don't expect;
+    // 		(2) find the code that added the unwanted constraint or constraints and fix it.
+    // (
+    //     "<NSLayoutConstraint:0x6000021c0d20 V:|-(0)-[UIView:0x103e56100]   (active, names: '|':InlineIOS.UIMessageView:0x103e55b30 )>",
+    //     "<NSLayoutConstraint:0x6000021c0d70 UIView:0x103e56100.bottom == InlineIOS.UIMessageView:0x103e55b30.bottom   (active)>",
+    //     "<NSLayoutConstraint:0x6000021c1360 V:|-(2)-[InlineIOS.UIMessageView:0x103e55b30]   (active, names: '|':UIView:0x103e557b0 )>",
+    //     "<NSLayoutConstraint:0x6000021c13b0 InlineIOS.UIMessageView:0x103e55b30.bottom == UIView:0x103e557b0.bottom   (active)>",
+    //     "<NSLayoutConstraint:0x6000021bcff0 'UIView-Encapsulated-Layout-Height' UIView:0x103e557b0.height == 1   (active)>"
+    // )
+
+    // Will attempt to recover by breaking constraint
+    // <NSLayoutConstraint:0x6000021c0d70 UIView:0x103e56100.bottom == InlineIOS.UIMessageView:0x103e55b30.bottom   (active)>
+
+    // Make a symbolic breakpoint at UIViewAlertForUnsatisfiableConstraints to catch this in the debugger.
+    // The methods in the UIConstraintBasedLayoutDebugging category on UIView listed in <UIKitCore/UIView.h> may also be helpful.
+    // Unable to simultaneously satisfy constraints.
+    // 	Probably at least one of the constraints in the following list is one you don't want.
+    // 	Try this:
+    // 		(1) look at each constraint and try to figure out which you don't expect;
+    // 		(2) find the code that added the unwanted constraint or constraints and fix it.
+    // (
+    //     "<NSLayoutConstraint:0x6000021c1360 V:|-(2)-[InlineIOS.UIMessageView:0x103e55b30]   (active, names: '|':UIView:0x103e557b0 )>",
+    //     "<NSLayoutConstraint:0x6000021c13b0 InlineIOS.UIMessageView:0x103e55b30.bottom == UIView:0x103e557b0.bottom   (active)>",
+    //     "<NSLayoutConstraint:0x6000021bcff0 'UIView-Encapsulated-Layout-Height' UIView:0x103e557b0.height == 1   (active)>"
+    // )
+
+    // Will attempt to recover by breaking constraint
+    // <NSLayoutConstraint:0x6000021c13b0 InlineIOS.UIMessageView:0x103e55b30.bottom == UIView:0x103e557b0.bottom   (active)>
+
+    // Make a symbolic breakpoint at UIViewAlertForUnsatisfiableConstraints to catch this in the debugger.
+    // The methods in the UIConstraintBasedLayoutDebugging category on UIView listed in <UIKitCore/UIView.h> may also be helpful.
+    // Unable to simultaneously satisfy constraints.
+    // 	Probably at least one of the constraints in the following list is one you don't want.
+    // 	Try this:
+    // 		(1) look at each constraint and try to figure out which you don't expect;
+    // 		(2) find the code that added the unwanted constraint or constraints and fix it.
+    // (
+    //     "<NSLayoutConstraint:0x6000021c21c0 V:|-(8)-[UILabel:0x103e5ac50]   (active, names: '|':UIView:0x103e5af70 )>",
+    //     "<NSLayoutConstraint:0x6000021c2350 V:[UILabel:0x103e5ac50]-(8)-|   (active, names: '|':UIView:0x103e5af70 )>",
+    //     "<NSLayoutConstraint:0x6000021c20d0 V:|-(0)-[UIView:0x103e5af70]   (active, names: '|':InlineIOS.UIMessageView:0x103e5a9a0 )>",
+    //     "<NSLayoutConstraint:0x6000021c2120 UIView:0x103e5af70.bottom == InlineIOS.UIMessageView:0x103e5a9a0.bottom   (active)>",
+    //     "<NSLayoutConstraint:0x6000021c2710 V:|-(2)-[InlineIOS.UIMessageView:0x103e5a9a0]   (active, names: '|':UIView:0x103e5a620 )>",
+    //     "<NSLayoutConstraint:0x6000021c2760 InlineIOS.UIMessageView:0x103e5a9a0.bottom == UIView:0x103e5a620.bottom   (active)>",
+    //     "<NSLayoutConstraint:0x6000021aa7b0 'UIView-Encapsulated-Layout-Height' UIView:0x103e5a620.height == 1   (active)>"
+    // )
+
+    // Will attempt to recover by breaking constraint
+    // <NSLayoutConstraint:0x6000021c2350 V:[UILabel:0x103e5ac50]-(8)-|   (active, names: '|':UIView:0x103e5af70 )>
+
+    // Make a symbolic breakpoint at UIViewAlertForUnsatisfiableConstraints to catch this in the debugger.
+    // The methods in the UIConstraintBasedLayoutDebugging category on UIView listed in <UIKitCore/UIView.h> may also be helpful.
     func collectionView(
       _ collectionView: UICollectionView,
       layout collectionViewLayout: UICollectionViewLayout,
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
+      // Bounds checking
+      guard indexPath.item < fullMessages.count else {
+        return .zero
+      }
+
       let availableWidth = collectionView.bounds.width - 25
 
-      // Return full width with estimated height
-      // Actual height will be adjusted by the cell's preferredLayoutAttributesFitting
-      return CGSize(width: availableWidth, height: 1)
+      // Create a temporary cell to calculate the proper height
+      let cell = MessageCollectionViewCell(frame: .zero)
+      let message = fullMessages[indexPath.item]
+      cell.configure(with: message, topPadding: 2, bottomPadding: 0)
+
+      let size = cell.contentView.systemLayoutSizeFitting(
+        CGSize(width: availableWidth, height: 0),
+        withHorizontalFittingPriority: .required,
+        verticalFittingPriority: .fittingSizeLevel
+      )
+
+      return size
     }
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
-            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
       else {
         return
       }
@@ -310,13 +387,13 @@ final class MessagesCollectionView: UIView {
           self.adjustContentInset(for: collectionView)
           collectionView.collectionViewLayout.invalidateLayout()
 
-//          if !self.fullMessages.isEmpty {
-//            collectionView.scrollToItem(
-//              at: IndexPath(item: 0, section: 0),
-//              at: .bottom,
-//              animated: false
-//            )
-//          }
+          //          if !self.fullMessages.isEmpty {
+          //            collectionView.scrollToItem(
+          //              at: IndexPath(item: 0, section: 0),
+          //              at: .bottom,
+          //              animated: false
+          //            )
+          //          }
         }
       }
     }
@@ -327,7 +404,7 @@ final class MessagesCollectionView: UIView {
       guard indexPath.item < fullMessages.count else { return false }
 
       let currentMessage = fullMessages[indexPath.item]
-      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
+      let previousIndex = indexPath.item + 1  // Note: +1 because messages are reversed
 
       // If this is the first message in a group from the same sender,
       // check if the previous message was from a different sender
@@ -408,7 +485,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
 
     // Set the width that cells should use
-    itemSize = CGSize(width: availableWidth, height: 1) // Height will be determined automatically
+    itemSize = CGSize(width: availableWidth, height: 1)  // Height will be determined automatically
   }
 
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
@@ -416,7 +493,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
   {
     guard
       let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-      as? UICollectionViewLayoutAttributes
+        as? UICollectionViewLayoutAttributes
     else {
       return nil
     }
