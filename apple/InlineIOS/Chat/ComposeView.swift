@@ -48,6 +48,7 @@ final class ComposeView: UIView {
     label.text = "Write a message"
     label.font = .preferredFont(forTextStyle: .body)
     label.textColor = .tertiaryLabel
+
     return label
   }()
 
@@ -89,16 +90,16 @@ final class ComposeView: UIView {
 
     NSLayoutConstraint.activate([
       textView.topAnchor.constraint(equalTo: topAnchor),
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
       textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -8),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
       heightConstraint,
 
-      placeholderLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      placeholderLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
       placeholderLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
       sendButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
       sendButton.widthAnchor.constraint(equalToConstant: 32),
       sendButton.heightAnchor.constraint(equalToConstant: 32),
     ])
