@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import InlineKit
 import SwiftUI
 
@@ -40,7 +41,15 @@ struct Compose: View {
         handleEditorEvent(newEvent)
         event = .none
       }
-      
+      .onChange(of: text) { newText in
+        // Send compose action for typing
+        if newText.isEmpty {
+          Task { await ComposeActions.shared.stoppedTyping(for: peerId) }
+        } else {
+          Task { await ComposeActions.shared.startedTyping(for: peerId) }
+        }
+      }
+        
       .background(alignment: .leading) {
         if text.isEmpty {
           Text("Write a message")

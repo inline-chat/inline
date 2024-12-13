@@ -113,6 +113,11 @@ import {
   Input as UpdateStatusInput,
   Response as UpdateStatusResponse,
 } from "@in/server/methods/updateStatus"
+import {
+  handler as sendComposeActionHandler,
+  Input as SendComposeActionInput,
+  Response as SendComposeActionResponse,
+} from "@in/server/methods/sendComposeAction"
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
@@ -144,6 +149,9 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(makeApiRoute("/getSpaceMembers", GetSpaceMembersInput, GetSpaceMembersResponse, getSpaceMembersHandler))
       .use(makeApiRoute("/getDialogs", GetDialogsInput, GetDialogsResponse, getDialogsHandler))
       .use(makeApiRoute("/updateStatus", UpdateStatusInput, UpdateStatusResponse, updateStatusHandler))
+      .use(
+        makeApiRoute("/sendComposeAction", SendComposeActionInput, SendComposeActionResponse, sendComposeActionHandler),
+      )
       .use(
         makeApiRoute(
           "/savePushNotification",

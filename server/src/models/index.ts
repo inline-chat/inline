@@ -15,6 +15,10 @@ import { Value } from "@sinclair/typebox/value"
 //   .Decode((value) => String(value))
 //   .Encode((value) => BigInt(value))
 
+export const TimestampMs = Type.Transform(Type.Integer())
+  .Decode((value: number) => new Date(value * 1000))
+  .Encode((date: Date) => Math.floor(date.getTime() / 1000))
+
 const Optional = <T extends TSchema>(schema: T) => Type.Union([Type.Null(), Type.Undefined(), schema])
 export const TOptional = Optional
 
@@ -32,7 +36,7 @@ export const TSpaceInfo = Type.Object({
   id: Type.Integer(),
   name: Type.String(),
   handle: Optional(Type.String()),
-  date: Type.Integer(),
+  date: TimestampMs,
 
   /** Is the current user the creator of the space */
   creator: Type.Boolean(),
@@ -41,7 +45,6 @@ export type TSpaceInfo = StaticEncode<typeof TSpaceInfo>
 export const encodeSpaceInfo = (space: DbSpace, context: UserContext): TSpaceInfo => {
   return Value.Encode(TSpaceInfo, {
     ...space,
-    date: encodeDate(space.date),
     creator: space.creatorId === context.currentUserId,
   })
 }
@@ -54,14 +57,14 @@ export const TUserInfo = Type.Object({
   username: Optional(Type.String()),
   email: Optional(Type.String()),
   online: Optional(Type.Boolean()),
-  lastOnline: Optional(Type.Integer()),
-  date: Type.Integer(),
+  lastOnline: Optional(TimestampMs),
+  date: TimestampMs,
 })
 export type TUserInfo = StaticEncode<typeof TUserInfo>
 export const encodeUserInfo = (user: DbUser | TUserInfo): TUserInfo => {
   return Value.Encode(TUserInfo, {
     ...user,
-    date: user.date ? encodeDate(user.date) : 0,
+    online: user.online,
   })
 }
 
@@ -71,14 +74,13 @@ export const TMemberInfo = Type.Object({
   userId: Type.Integer(),
   spaceId: Type.Integer(),
   role: Type.Union([Type.Literal("owner"), Type.Literal("admin"), Type.Literal("member")]),
-  date: Type.Integer(),
+  date: TimestampMs,
 })
 export type TMemberInfo = StaticEncode<typeof TMemberInfo>
 
 export const encodeMemberInfo = (member: DbMember | TMemberInfo): TMemberInfo => {
   return Value.Encode(TMemberInfo, {
     ...member,
-    date: encodeDate(member.date),
   })
 }
 
@@ -98,8 +100,8 @@ export const TChatInfo = Type.Object({
   id: Type.Integer(),
   type: Type.Union([Type.Literal("private"), Type.Literal("thread")]),
   peer: TPeerInfo,
-  date: Type.Integer(),
   lastMsgId: Optional(Type.Integer()),
+  date: TimestampMs,
 
   // For space threads
   title: Optional(Type.String()),
@@ -119,7 +121,6 @@ export const encodeChatInfo = (chat: DbChat, { currentUserId }: { currentUserId:
     peer: chat.spaceId
       ? { threadId: chat.id }
       : { userId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId },
-    date: encodeDate(chat.date),
   })
 }
 
@@ -164,8 +165,8 @@ export const TMessageInfo = Type.Object({
   chatId: Type.Integer(),
   fromId: Type.Integer(),
   text: Optional(Type.String()),
-  date: Type.Integer(),
-  editDate: Optional(Type.Integer()),
+  date: TimestampMs,
+  editDate: Optional(TimestampMs),
   // https://core.telegram.org/api/mentions
   mentioned: Optional(Type.Boolean()),
   out: Optional(Type.Boolean()),
@@ -210,14 +211,15 @@ export const encodeMessageInfo = (
       text,
       id: message.messageId,
       out: message.fromId === context.currentUserId,
-      date: encodeDate(message.date),
-      editDate: message.editDate ? encodeDate(message.editDate) : null,
       peerId: context.peerId,
       mentioned: false,
       pinned: false,
     }),
   )
 }
+
+export const TComposeAction = Type.Union([Type.Literal("typing")])
+export type TComposeAction = StaticEncode<typeof TComposeAction>
 
 // # Updates
 // To add updates, just add a new object to the union. With exactly one property: eg. "newMessage", "editedMessage", "deletedMessage" etc.
@@ -227,41 +229,51 @@ const UpdateBase = {
 } as const
 
 export const TNewMessageUpdate = Type.Object({
-  newMessage: Type.Object({
-    message: TMessageInfo,
-  }),
+  message: TMessageInfo,
 })
 
 export const TMessageEditedUpdate = Type.Object({
-  editMessage: Type.Object({
-    message: TMessageInfo,
-  }),
+  message: TMessageInfo,
 })
 
 export const TUpdateMessageIdUpdate = Type.Object({
-  updateMessageId: Type.Object({
-    messageId: Type.Integer(),
-    randomId: Type.String(),
-  }),
+  messageId: Type.Integer(),
+  randomId: Type.String(),
 })
 export type TUpdateMessageIdUpdate = StaticEncode<typeof TUpdateMessageIdUpdate>
 
 export const TUpdateUserStatus = Type.Object({
-  updateUserStatus: Type.Object({
-    userId: Type.Integer(),
-    online: Type.Boolean(),
-    lastOnline: Type.Integer(),
-  }),
+  userId: Type.Integer(),
+  online: Type.Boolean(),
+  lastOnline: TimestampMs,
 })
 export type TUpdateUserStatus = StaticEncode<typeof TUpdateUserStatus>
+
+export const TUpdateComposeAction = Type.Object({
+  userId: Type.Integer(),
+  peerId: TPeerInfo, // where user is typing
+  action: TOptional(TComposeAction),
+})
+export type TUpdateComposeAction = StaticEncode<typeof TUpdateComposeAction>
 
 //
 export const TUpdate = Type.Union([
   // Updates
-  TNewMessageUpdate,
-  TMessageEditedUpdate,
-  TUpdateMessageIdUpdate,
-  TUpdateUserStatus,
+  Type.Object({
+    newMessage: TNewMessageUpdate,
+  }),
+  Type.Object({
+    editMessage: TMessageEditedUpdate,
+  }),
+  Type.Object({
+    updateMessageId: TUpdateMessageIdUpdate,
+  }),
+  Type.Object({
+    updateUserStatus: TUpdateUserStatus,
+  }),
+  Type.Object({
+    updateComposeAction: TUpdateComposeAction,
+  }),
 ])
 
 export type TUpdateInfo = StaticEncode<typeof TUpdate>

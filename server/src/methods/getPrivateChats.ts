@@ -112,6 +112,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
       c.messages ? encodeMessageInfo(c.messages, { currentUserId, peerId: getPeerId(c.chats, currentUserId) }) : null,
     )
     .filter((m): m is TMessageInfo => m != null)
+
   return {
     chats: chatsEncoded,
     dialogs: dialogsEncoded,

@@ -4,7 +4,7 @@ import { dialogs } from "@in/server/db/schema"
 
 export class DialogsModel {
   static async getUserIdsWeHavePrivateDialogsWith({ userId }: { userId: number }): Promise<number[]> {
-    const dialogs_ = await db.select({ userId: dialogs.userId }).from(dialogs).where(eq(dialogs.userId, userId))
-    return dialogs_.map(({ userId }) => userId)
+    const dialogs_ = await db.select({ userId: dialogs.peerUserId }).from(dialogs).where(eq(dialogs.userId, userId))
+    return dialogs_.map(({ userId }) => userId).filter((userId): userId is number => userId != null)
   }
 }

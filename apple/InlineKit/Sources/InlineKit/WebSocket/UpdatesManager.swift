@@ -18,6 +18,9 @@ actor UpdatesManager {
       } else if let update = update.updateUserStatus {
         self.log.debug("applying update user status")
         try update.apply(db: db)
+      } else if let update = update.updateComposeAction {
+        self.log.debug("applying update compose action")
+        update.apply()
       }
     } catch {
       self.log.error("Failed to apply update", error: error)
@@ -46,6 +49,7 @@ struct Update: Codable {
   var newMessage: UpdateNewMessage?
   var updateMessageId: UpdateMessageId?
   var updateUserStatus: UpdateUserStatus?
+  var updateComposeAction: UpdateComposeAction?
 }
 
 struct UpdateNewMessage: Codable {
@@ -87,12 +91,29 @@ struct UpdateUserStatus: Codable {
   var lastOnline: Int64?
 
   func apply(db: Database) throws {
-    let user = try User.filter(id: self.userId).updateAll(
+    try User.filter(id: self.userId).updateAll(
       db,
       [
         Column("online").set(to: self.online),
         Column("lastOnline").set(to: self.lastOnline)
       ]
     )
+  }
+}
+
+struct UpdateComposeAction: Codable {
+  var userId: Int64
+  var peerId: Peer
+
+  // null means cancel
+  var action: ApiComposeAction?
+
+  func apply() {
+    if let action = self.action {
+      Task { await ComposeActions.shared.addComposeAction(for: self.peerId, action: action, userId: self.userId) }
+    } else {
+      // cancel
+      Task { await ComposeActions.shared.removeComposeAction(for: self.peerId) }
+    }
   }
 }

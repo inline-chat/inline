@@ -1,8 +1,10 @@
 import { authenticate, authenticateGet } from "@in/server/controllers/plugins"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { ApiError, ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import Elysia, { t, type TSchema, type Static, type InputSchema } from "elysia"
-import type { TUndefined, TObject, TDecodeType } from "@sinclair/typebox"
+import { type TUndefined, type TObject, type TDecodeType, Type } from "@sinclair/typebox"
+import { TOptional, TPeerInfo } from "@in/server/models"
+import { normalizeId, TInputId } from "@in/server/types/methods"
 
 export const TMakeApiResponse = <T extends TSchema>(type: T) => {
   const success = t.Object({ ok: t.Literal(true), result: type })
@@ -159,4 +161,36 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
   )
 
   return new Elysia().use(getRoute).use(postRoute)
+}
+
+export const TApiInputPeer = {
+  peerId: TOptional(TPeerInfo),
+  peerUserId: TOptional(TInputId),
+  peerThreadId: TOptional(TInputId),
+} as const
+
+export function peerFromInput(input: {
+  peerId?: TPeerInfo | undefined | null
+  peerUserId?: number | string | undefined | null
+  peerThreadId?: number | string | undefined | null
+}): TPeerInfo {
+  if (input.peerUserId) {
+    return { userId: normalizeId(input.peerUserId) }
+  } else if (input.peerThreadId) {
+    return { threadId: normalizeId(input.peerThreadId) }
+  } else if (input.peerId) {
+    return input.peerId
+  } else {
+    throw new InlineError(ApiError.PEER_INVALID)
+  }
+}
+
+export function reversePeerId(peerId: TPeerInfo, context: HandlerContext): TPeerInfo {
+  if ("userId" in peerId) {
+    return { userId: context.currentUserId }
+  } else if ("threadId" in peerId) {
+    return { threadId: peerId.threadId }
+  } else {
+    throw new InlineError(ApiError.PEER_INVALID)
+  }
 }
