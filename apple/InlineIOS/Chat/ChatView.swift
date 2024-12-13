@@ -119,8 +119,25 @@ struct ChatContainerViewRepresentable: UIViewRepresentable {
   }
 
   func updateUIView(_ uiView: ChatContainerView, context: Context) {
-    uiView.updateMessages(fullMessages)
+    // Only update messages if they've changed
+    if context.coordinator.previousMessages != fullMessages {
+      uiView.updateMessages(fullMessages)
+      context.coordinator.previousMessages = fullMessages
+    }
+
     uiView.onSendMessage = onSendMessage
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(fullMessages: fullMessages)
+  }
+
+  class Coordinator {
+    var previousMessages: [FullMessage]
+
+    init(fullMessages: [FullMessage]) {
+      self.previousMessages = fullMessages
+    }
   }
 }
 
