@@ -41,12 +41,12 @@ export const webSocket = new Elysia()
       const connectionId = connectionManager.addConnection(ws)
       ws.data.store.connectionId = connectionId
 
-      log.debug("new ws connection", connectionId)
+      log.trace("new ws connection", connectionId)
     },
 
     close(ws) {
       // TODO: Delete socket from our cache
-      log.debug("ws connection closed", ws.data.store.connectionId)
+      log.trace("ws connection closed", ws.data.store.connectionId)
 
       // Clean up
       const connectionId = ws.data.store.connectionId
@@ -58,21 +58,28 @@ export const webSocket = new Elysia()
     async message(ws, message) {
       switch (message.k) {
         case ClientMessageKind.ConnectionInit: {
-          log.debug("ws connection init")
+          log.trace("ws connection init")
 
           if (!ws.data.store.connectionId) {
             log.warn("no connection found when authenticating")
             return
           }
+
           let { token, userId } = message.p
           let userIdFromToken = await getUserIdFromToken(token)
+
           if (userIdFromToken.userId !== userId) {
             log.warn(`userId mismatch userIdFromToken: ${userIdFromToken.userId}, userId: ${userId}`)
             throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
           }
 
-          connectionManager.authenticateConnection(ws.data.store.connectionId, userIdFromToken.userId)
-          log.debug("authenticated connection", ws.data.store.connectionId, userIdFromToken.userId)
+          connectionManager.authenticateConnection(
+            ws.data.store.connectionId,
+            userIdFromToken.userId,
+            userIdFromToken.sessionId,
+          )
+
+          log.trace("authenticated connection", userIdFromToken.userId)
 
           ws.send(
             createMessage({
@@ -85,11 +92,11 @@ export const webSocket = new Elysia()
         }
 
         case ClientMessageKind.Message:
-          log.debug("ws message", message.p)
+          log.trace("ws message", message.p)
           break
 
         case ClientMessageKind.Ping:
-          log.debug("ws ping")
+          log.trace("ws ping")
           break
 
         default:

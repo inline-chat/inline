@@ -30,6 +30,8 @@ export const users = pgTable(
     lastName: varchar("last_name", { length: 256 }),
     username: varchar("username", { length: 256 }),
     deleted: boolean("deleted"),
+    online: boolean("online").default(false).notNull(),
+    lastOnline: timestamp("last_online", { mode: "date", precision: 3 }),
     date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
   },
   (table) => ({

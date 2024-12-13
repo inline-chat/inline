@@ -1,6 +1,6 @@
 import { bytea } from "@in/server/db/schema/common"
 import { users } from "@in/server/db/schema/users"
-import { integer, pgEnum, pgTable, serial, varchar, timestamp, text } from "drizzle-orm/pg-core"
+import { integer, pgEnum, pgTable, serial, varchar, boolean, timestamp, text } from "drizzle-orm/pg-core"
 
 export const clientTypeEnum = pgEnum("client_type", ["ios", "macos", "web"])
 
@@ -12,6 +12,7 @@ export const sessions = pgTable("sessions", {
   tokenHash: varchar("token_hash", { length: 64 }).notNull(), // hash
   revoked: timestamp({ mode: "date", precision: 3 }),
   lastActive: timestamp("last_active", { mode: "date", precision: 3 }),
+  active: boolean("active").default(false).notNull(),
 
   // JSON serialized object of personal data for this user such as city, country, region, timezone
   personalDataEncrypted: bytea("personal_data_encrypted"),

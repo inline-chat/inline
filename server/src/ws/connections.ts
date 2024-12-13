@@ -1,5 +1,12 @@
+/**
+ * Connections Manager
+ *
+ * - Registers incoming websocket connections and manages users presence via Presence Manager
+ */
+
 import { getSpaceIdsForUser } from "@in/server/db/models/spaces"
 import { Log } from "@in/server/utils/log"
+import { presenceManager } from "@in/server/ws/presence"
 import { ServerMessage, type ServerMessageType } from "@in/server/ws/protocol"
 import { WebSocketTopic } from "@in/server/ws/topics"
 import { Value } from "@sinclair/typebox/value"
@@ -11,9 +18,17 @@ const log = new Log("ws-connections")
 
 const CLOSE_UNAUTHENTICATED_TIMEOUT = 20_000
 
+interface Connection {
+  ws: ElysiaWS<ServerWebSocket<any>>
+
+  // For authenticated connections
+  userId?: number
+  sessionId?: number
+}
+
 class ConnectionManager {
   private server: Server | undefined
-  private connections: Map<string, { ws: ElysiaWS<ServerWebSocket<any>>; userId?: number }> = new Map()
+  private connections: Map<string, Connection> = new Map()
   private authenticatedUsers: Map<number, Set<string>> = new Map()
   private usersBySpaceId: Map<number, Set<number>> = new Map()
   private userSpaceIds: Map<number, number[]> = new Map()
@@ -39,11 +54,15 @@ class ConnectionManager {
     return id
   }
 
-  authenticateConnection(id: string, userId: number) {
+  authenticateConnection(id: string, userId: number, sessionId: number) {
     log.debug(`Authenticating connection ${id} for user ${userId}`)
     const connection = this.connections.get(id)
     if (connection) {
       connection.userId = userId
+      connection.sessionId = sessionId
+
+      presenceManager.handleConnectionOpen({ userId, sessionId })
+
       if (!this.authenticatedUsers.has(userId)) {
         // User is connecting for the first time, populate the cache
         this.authenticatedUsers.set(userId, new Set())
@@ -71,7 +90,9 @@ class ConnectionManager {
     const connection = this.connections.get(id)
     if (connection) {
       this.connections.delete(id)
-      if (connection.userId) {
+      if (connection.userId && connection.sessionId) {
+        presenceManager.handleConnectionClose({ userId: connection.userId, sessionId: connection.sessionId })
+
         const userConnections = this.authenticatedUsers.get(connection.userId)
         userConnections?.delete(id)
         if (userConnections && userConnections.size === 0) {

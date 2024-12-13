@@ -1,6 +1,6 @@
 // Note:Mostly AI generated
 
-import { and, eq, isNull } from "drizzle-orm"
+import { and, eq, inArray, isNull } from "drizzle-orm"
 import { sessions, type DbSession, type DbNewSession } from "@in/server/db/schema/sessions"
 import { encrypt, decrypt, type EncryptedData } from "@in/server/utils/encryption/encryption"
 import { db } from "@in/server/db"
@@ -115,7 +115,7 @@ export class SessionsModel {
   }
 
   // Update session's last active timestamp
-  static async updateLastActive(id: number): Promise<void> {
+  static async setActive(id: number, active: boolean): Promise<void> {
     if (!id || id <= 0) {
       throw new Error("Invalid session ID")
     }
@@ -123,7 +123,7 @@ export class SessionsModel {
     try {
       const result = await db
         .update(sessions)
-        .set({ lastActive: new Date() })
+        .set({ active, lastActive: new Date() })
         .where(eq(sessions.id, id))
         .returning({ id: sessions.id })
 
@@ -133,6 +133,17 @@ export class SessionsModel {
     } catch (error) {
       throw new Error(
         `Failed to update session last active: ${error instanceof Error ? error.message : "Unknown error"}`,
+      )
+    }
+  }
+
+  // Update session's last active timestamp
+  static async setActiveBulk(ids: number[], active: boolean): Promise<void> {
+    try {
+      await db.update(sessions).set({ active, lastActive: new Date() }).where(inArray(sessions.id, ids))
+    } catch (error) {
+      throw new Error(
+        `Failed to update sessions last active in bulk: ${error instanceof Error ? error.message : "Unknown error"}`,
       )
     }
   }
