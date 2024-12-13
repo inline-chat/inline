@@ -71,7 +71,7 @@ public final class WebSocketManager: ObservableObject {
 
     let client = WebSocketClient(
       url: url,
-      reconnectionConfig: .init(maxAttempts: 300, backoff: 1.5),
+      reconnectionConfig: .init(maxAttempts: 30000, backoff: 1.5),
       credentials: WebSocketCredentials(token: token, userId: userId)
     )
     self.client = client
@@ -124,7 +124,7 @@ public final class WebSocketManager: ObservableObject {
     case .disconnected:
       connectionState = .connecting
     case .connecting:
-      connectionState = .updating
+      connectionState = .connecting
     }
   }
 
