@@ -63,7 +63,7 @@ class MessageMetadata: UIView {
       case .sent:
         imageName = "checkmark"
       case .sending:
-        imageName = "checkmark.circle"
+        imageName = "clock"
       case .failed:
         imageName = "exclamationmark"
       case .none:
