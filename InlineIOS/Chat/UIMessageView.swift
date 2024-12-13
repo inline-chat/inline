@@ -164,8 +164,8 @@ extension String {
     guard let firstChar = first else { return false }
     let earlyRTL =
       firstChar.unicodeScalars.first?.properties.generalCategory == .otherLetter
-        && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
-        && firstChar.unicodeScalars.first!.value <= 0x08FF
+      && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
+      && firstChar.unicodeScalars.first!.value <= 0x08FF
 
     if earlyRTL { return true }
 
