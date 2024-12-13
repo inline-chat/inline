@@ -2,7 +2,7 @@
 
 import { and, eq, inArray, isNull } from "drizzle-orm"
 import { sessions, type DbSession, type DbNewSession } from "@in/server/db/schema/sessions"
-import { encrypt, decrypt, type EncryptedData } from "@in/server/utils/encryption/encryption"
+import { encrypt, decrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { db } from "@in/server/db"
 
 // Define interfaces for the personal data structure
@@ -241,7 +241,7 @@ export class SessionsModel {
   }
 
   // Get all active sessions for a user
-  static async getActiveSessionsByUserId(userId: number): Promise<SessionWithDecryptedData[]> {
+  static async getValidSessionsByUserId(userId: number): Promise<SessionWithDecryptedData[]> {
     if (!userId || userId <= 0) {
       throw new Error("Invalid user ID")
     }
@@ -251,6 +251,27 @@ export class SessionsModel {
         .select()
         .from(sessions)
         .where(and(eq(sessions.userId, userId), isNull(sessions.revoked)))
+
+      // Validate sessions
+      const validSessions = sessions_.filter((session) => session.revoked === null && session.userId === userId)
+
+      return validSessions.map((session) => this.decryptSessionData(session))
+    } catch (error) {
+      throw new Error(`Failed to get active sessions: ${error instanceof Error ? error.message : "Unknown error"}`)
+    }
+  }
+
+  // Get all currently active sessions for a user
+  static async getActiveSessionsByUserId(userId: number): Promise<SessionWithDecryptedData[]> {
+    if (!userId || userId <= 0) {
+      throw new Error("Invalid user ID")
+    }
+
+    try {
+      const sessions_ = await db
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.userId, userId), isNull(sessions.revoked), eq(sessions.active, true)))
 
       // Validate sessions
       const validSessions = sessions_.filter((session) => session.revoked === null && session.userId === userId)

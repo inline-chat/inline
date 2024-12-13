@@ -108,6 +108,11 @@ import {
   Input as SavePushNotificationInput,
   Response as SavePushNotificationResponse,
 } from "@in/server/methods/savePushNotification"
+import {
+  handler as updateStatusHandler,
+  Input as UpdateStatusInput,
+  Response as UpdateStatusResponse,
+} from "@in/server/methods/updateStatus"
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
@@ -138,6 +143,7 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(makeApiRoute("/getPrivateChats", GetPrivateChatsInput, GetPrivateChatsResponse, getPrivateChatsHandler))
       .use(makeApiRoute("/getSpaceMembers", GetSpaceMembersInput, GetSpaceMembersResponse, getSpaceMembersHandler))
       .use(makeApiRoute("/getDialogs", GetDialogsInput, GetDialogsResponse, getDialogsHandler))
+      .use(makeApiRoute("/updateStatus", UpdateStatusInput, UpdateStatusResponse, updateStatusHandler))
       .use(
         makeApiRoute(
           "/savePushNotification",

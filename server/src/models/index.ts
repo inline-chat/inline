@@ -6,7 +6,7 @@ import {
   type DbMessage,
   type DbDialog,
 } from "@in/server/db/schema"
-import { decryptMessage } from "@in/server/utils/encryption/encryptMessage"
+import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Log } from "@in/server/utils/log"
 import { Type, type TSchema, type StaticEncode } from "@sinclair/typebox"
 import { Value } from "@sinclair/typebox/value"
@@ -16,6 +16,7 @@ import { Value } from "@sinclair/typebox/value"
 //   .Encode((value) => BigInt(value))
 
 const Optional = <T extends TSchema>(schema: T) => Type.Union([Type.Null(), Type.Undefined(), schema])
+export const TOptional = Optional
 
 const encodeDate = (date: Date | number): number => {
   return typeof date === "number" ? date : Math.floor(date.getTime() / 1000)
@@ -52,6 +53,8 @@ export const TUserInfo = Type.Object({
   lastName: Optional(Type.String()),
   username: Optional(Type.String()),
   email: Optional(Type.String()),
+  online: Optional(Type.Boolean()),
+  lastOnline: Optional(Type.Integer()),
   date: Type.Integer(),
 })
 export type TUserInfo = StaticEncode<typeof TUserInfo>
@@ -242,5 +245,23 @@ export const TUpdateMessageIdUpdate = Type.Object({
   }),
 })
 export type TUpdateMessageIdUpdate = StaticEncode<typeof TUpdateMessageIdUpdate>
-export const TUpdate = Type.Union([TNewMessageUpdate, TMessageEditedUpdate, TUpdateMessageIdUpdate])
+
+export const TUpdateUserStatus = Type.Object({
+  updateUserStatus: Type.Object({
+    userId: Type.Integer(),
+    online: Type.Boolean(),
+    lastOnline: Type.Integer(),
+  }),
+})
+export type TUpdateUserStatus = StaticEncode<typeof TUpdateUserStatus>
+
+//
+export const TUpdate = Type.Union([
+  // Updates
+  TNewMessageUpdate,
+  TMessageEditedUpdate,
+  TUpdateMessageIdUpdate,
+  TUpdateUserStatus,
+])
+
 export type TUpdateInfo = StaticEncode<typeof TUpdate>

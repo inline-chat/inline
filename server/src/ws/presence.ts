@@ -10,6 +10,7 @@
 
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { UsersModel } from "@in/server/db/models/users"
+import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
 import { Log } from "@in/server/utils/log"
 
 interface SessionInput {
@@ -21,7 +22,7 @@ class PresenceManager {
   private readonly log = new Log("presenceManager")
 
   private readonly sessionActiveTimeout = 1000 * 60 * 15 // 15 minutes
-  private readonly sessionHeartbeatInterval = 1000 * 60 * 14 // 14 minutes
+  private readonly sessionHeartbeatInterval = this.sessionActiveTimeout - 1000 * 60 // 14 minutes
 
   /** Keep track of currently active sessions to update them periodically */
   private readonly currentlyActiveSessions = new Set<number>()
@@ -65,10 +66,24 @@ class PresenceManager {
       (session) => session.lastActive && session.lastActive >= new Date(Date.now() - this.sessionActiveTimeout),
     )
     // TODO: Mark invalid sessions as inactive
-
+    this.log.info("Evaluating user online status", { userId, recentlyActiveSessions })
     if (recentlyActiveSessions.length === 0) {
-      UsersModel.setOnline(userId, false)
+      this.updateUserOnlineStatus(userId, false)
     }
+  }
+
+  /** Best method for updating user's online status */
+  public async updateUserOnlineStatus(userId: number, online: boolean) {
+    // Update user's online status
+    let { online: newOnline, lastOnline } = await UsersModel.setOnline(userId, online)
+
+    // Send update to all users that have a private dialog with the user
+    sendTransientUpdateFor({
+      reason: {
+        userPresenceUpdate: { userId, online: newOnline, lastOnline },
+      },
+    })
+    return { online: newOnline, lastOnline }
   }
 }
 

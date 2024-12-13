@@ -16,12 +16,12 @@ import { Optional, type Static, Type } from "@sinclair/typebox"
 import { encodeMessageInfo, TInputPeerInfo, TMessageInfo, TPeerInfo, type TUpdateInfo } from "@in/server/models"
 import { createMessage, ServerMessageKind } from "@in/server/ws/protocol"
 import { connectionManager } from "@in/server/ws/connections"
-import { getUpdateGroup } from "@in/server/utils/updates"
+import { getUpdateGroup } from "@in/server/modules/updates"
 import * as APN from "apn"
 import type { HandlerContext } from "../controllers/v1/helpers"
 import { getApnProvider } from "../libs/apn"
 import { SessionsModel } from "@in/server/db/models/sessions"
-import { encryptMessage } from "@in/server/utils/encryption/encryptMessage"
+import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { TInputId } from "@in/server/types/methods"
 import { isProd } from "@in/server/env"
 
@@ -259,7 +259,7 @@ const sendPushNotificationToUser = async ({
 }) => {
   try {
     // Get all sessions for the user
-    const userSessions = await SessionsModel.getActiveSessionsByUserId(userId)
+    const userSessions = await SessionsModel.getValidSessionsByUserId(userId)
 
     if (!userSessions.length) {
       Log.shared.debug("No active sessions found for user", { userId })

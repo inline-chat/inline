@@ -112,6 +112,13 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("online") { db in
+      try db.alter(table: "user") { t in
+        t.add(column: "online", .boolean)
+        t.add(column: "lastOnline", .datetime)
+      }
+    }
+
     return migrator
   }
 }
