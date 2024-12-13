@@ -38,12 +38,14 @@ struct MainView: View {
       Log.shared.info("MainView appeared • fetching root data")
       self.rootData.fetch()
       self.setUpSidebarAutoCollapse()
+      
+      Task {
+        // Set online
+        try? await dataManager.updateStatus(online: true)
+      }
     }
     .task {
       await requestNotifications()
-      
-      // Set online
-      try? await dataManager.updateStatus(online: true)
     }
     // Disable auto collapse while user is modifying it to avoid jump
     .onChange(of: window.columnVisibility) { _ in
