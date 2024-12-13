@@ -2,61 +2,61 @@ import InlineKit
 import SwiftUI
 import UIKit
 
-struct MessagesCollectionView: UIViewRepresentable {
+final class MessagesCollectionView: UIView {
   var fullMessages: [FullMessage]
+  private var collectionView: UICollectionView!
+  private var coordinator: Coordinator!
 
-  func makeUIView(context: Context) -> UICollectionView {
+  init(fullMessages: [FullMessage], frame: CGRect = .zero) {
+    self.fullMessages = fullMessages
+
+    super.init(frame: frame)
+
+    setupCollectionView()
+  }
+
+  required init?(coder: NSCoder) {
+    fullMessages = []
+    super.init(coder: coder)
+    setupCollectionView()
+  }
+
+  private func setupCollectionView() {
     let layout = createLayout()
+    collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+    coordinator = Coordinator(fullMessages: fullMessages)
 
-    let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
-
-    collectionView.collectionViewLayout = layout
-//    collectionView.contentInsetAdjustmentBehavior = .always // added for width
     collectionView.backgroundColor = .clear
-    collectionView.delegate = context.coordinator
+    collectionView.delegate = coordinator
     collectionView.autoresizingMask = [.flexibleHeight]
-//    collectionView.automaticallyAdjustsScrollIndicatorInsets = false
     collectionView.register(
       MessageCollectionViewCell.self,
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
     )
 
-    // Base transform for bottom-up scrolling
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-    context.coordinator.adjustContentInset(for: collectionView)
+    coordinator.adjustContentInset(for: collectionView)
 
-    // Get navigation bar height
-//    let navBarHeight = getNavigationBarHeight()
-//
-//    // Set scroll indicator insets instead of content inset
-//    collectionView.scrollIndicatorInsets = UIEdgeInsets(
-//      top: 0,
-//      left: 0,
-//      bottom: navBarHeight,
-//      right: 0
-//    )
-//
-//    // Content inset can be different if needed
-//    collectionView.contentInset = UIEdgeInsets(
-//      top: 0, // Adjust this value based on your needs
-//      left: 0,
-//      bottom: navBarHeight,
-//      right: 0
-//    )
-    // Performance optimizations
     collectionView.isPrefetchingEnabled = true
     collectionView.decelerationRate = .normal
 
-    context.coordinator.setupDataSource(collectionView)
+    coordinator.setupDataSource(collectionView)
 
     NotificationCenter.default.addObserver(
-      context.coordinator,
+      coordinator,
       selector: #selector(Coordinator.orientationDidChange),
       name: UIDevice.orientationDidChangeNotification,
       object: nil
     )
 
-    return collectionView
+    addSubview(collectionView)
+    collectionView.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      collectionView.topAnchor.constraint(equalTo: topAnchor),
+      collectionView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      collectionView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      collectionView.bottomAnchor.constraint(equalTo: bottomAnchor)
+    ])
   }
 
   private func createLayout() -> UICollectionViewLayout {
@@ -68,8 +68,8 @@ struct MessagesCollectionView: UIViewRepresentable {
     return layout
   }
 
-  func updateUIView(_ collectionView: UICollectionView, context: Context) {
-    context.coordinator.updateMessages(fullMessages, in: collectionView)
+  func updateMessages(_ messages: [FullMessage]) {
+    coordinator.updateMessages(messages, in: collectionView)
   }
 
   func makeCoordinator() -> Coordinator {
@@ -94,7 +94,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     init(fullMessages: [FullMessage]) {
       self.fullMessages = fullMessages
-      self.previousMessageCount = fullMessages.count
+      previousMessageCount = fullMessages.count
       super.init()
     }
 
