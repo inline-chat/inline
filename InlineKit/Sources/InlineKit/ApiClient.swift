@@ -39,6 +39,7 @@ public enum Path: String {
   case getChatHistory
   case savePushNotification
   case updateStatus
+  case sendComposeAction
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -308,6 +309,21 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       includeToken: true
     )
   }
+
+  public func sendComposeAction(peerId: Peer, action: ApiComposeAction?) async throws -> EmptyPayload {
+    try await request(
+      .sendComposeAction,
+      queryItems: [
+        URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)),
+        URLQueryItem(
+          name: "peerThreadId",
+          value: peerId.asThreadId().map(String.init)
+        ),
+        URLQueryItem(name: "action", value: action?.rawValue),
+      ],
+      includeToken: true
+    )
+  }
 }
 
 /// Example
@@ -479,4 +495,8 @@ struct SessionInfo: Codable, Sendable {
       return nil
     #endif
   }
+}
+
+public enum ApiComposeAction: String, Codable, Sendable {
+  case typing
 }

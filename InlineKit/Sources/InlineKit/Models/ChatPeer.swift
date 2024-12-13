@@ -30,6 +30,24 @@ public enum Peer: Codable, Hashable, Sendable, Equatable {
     }
   }
 
+  public func asUserId() -> Int64? {
+    switch self {
+    case .user(let id):
+      return id
+    case .thread:
+      return nil
+    }
+  }
+  
+  public func asThreadId() -> Int64? {
+    switch self {
+    case .user:
+      return nil
+    case .thread(let id):
+      return id
+    }
+  }
+
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
 

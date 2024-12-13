@@ -10,6 +10,9 @@ struct ChatView: View {
   @EnvironmentObject var nav: NavigationModel
   @EnvironmentStateObject var fullChat: FullChatViewModel
 
+  // TODO: Optimize
+  @ObservedObject var composeActions: ComposeActions = .shared
+
   var item: SpaceChatItem? {
     fullChat.chatItem
   }
@@ -18,8 +21,26 @@ struct ChatView: View {
     item?.title ?? "Chat"
   }
 
+  private func currentComposeAction() -> ApiComposeAction? {
+    composeActions.getComposeAction(for: peerId)?.action
+  }
+
+  static let formatter = RelativeDateTimeFormatter()
+  private func getLastOnlineText(date: Date?) -> String {
+    guard let date = date else { return "" }
+    Self.formatter.dateTimeStyle = .named
+    return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
+  }
+
   var subtitle: String {
-    "online"
+    // TODO: support threads
+    if let composeAction = currentComposeAction() {
+      return composeAction.rawValue
+    } else if let online = item?.user?.online {
+      return online ? "online" : (item?.user?.lastOnline != nil ? getLastOnlineText(date: item?.user?.lastOnline) : "offline")
+    } else {
+      return "last seen recently"
+    }
   }
 
   public init(peerId: Peer) {
