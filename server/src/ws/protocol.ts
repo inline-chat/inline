@@ -4,6 +4,7 @@ import { t, type Static } from "elysia"
 import { Input as GetMeInput } from "@in/server/methods/getMe"
 import { nanoid } from "nanoid/non-secure"
 import { TUpdate } from "@in/server/models"
+import type { StaticDecode, StaticEncode } from "@sinclair/typebox"
 
 const Methods = t.Union([
   t.Object({
@@ -97,7 +98,7 @@ export const ServerMessage = t.Union([
   }),
 ])
 
-export type ServerMessageType = Static<typeof ServerMessage>
+export type ServerMessageType = StaticDecode<typeof ServerMessage>
 
 export const enum ClientMessageKind {
   ConnectionInit = 1, // used for connection initialization with auth
