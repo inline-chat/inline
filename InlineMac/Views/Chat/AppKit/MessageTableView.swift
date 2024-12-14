@@ -107,6 +107,15 @@ class MessagesTableView: NSViewController {
     let contentFrame = window.contentLayoutRect
     let toolbarHeight = windowFrame.height - contentFrame.height
     
+    if scrollView.contentInsets.top != toolbarHeight {
+      log.debug("Adjusting view's toolbar")
+      // Updated
+      // TODO: make window toolbar layout and have background to fight the swiftui defaUlt behaviour
+      // Configure window toolbar
+      window.titlebarAppearsTransparent = false
+      window.isMovableByWindowBackground = true
+    }
+    
     scrollView.contentInsets = NSEdgeInsets(
       top: toolbarHeight,
       left: 0,
@@ -378,6 +387,11 @@ class MessagesTableView: NSViewController {
 
   private var lastKnownWidth: CGFloat = 0
   private var needsInitialScroll = true
+  
+  override func viewDidAppear() {
+    super.viewDidAppear()
+    updateScrollViewInsets()
+  }
   
   override func viewDidLayout() {
     super.viewDidLayout()
