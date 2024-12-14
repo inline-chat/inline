@@ -36,6 +36,7 @@ struct Compose: View {
         font: Theme.messageTextFont
       )
       .frame(height: editorHeight)
+      .disableAnimations()
       .onChange(of: event) { newEvent in
         if newEvent == .none { return }
         handleEditorEvent(newEvent)
@@ -59,14 +60,14 @@ struct Compose: View {
             .frame(height: editorHeight)
             .transition(
               .asymmetric(
-                insertion: .offset(x: 40),
-                removal: .offset(x: 40)
+                insertion: .offset(x: 60),
+                removal: .offset(x: 60)
               )
               .combined(with: .opacity)
             )
         }
       }
-      .animation(.smoothSnappy, value: text.isEmpty)
+      .animation(.smoothSnappy.speed(1.5), value: text.isEmpty)
      
       sendButton
         .frame(height: minHeight, alignment: .center)
@@ -329,7 +330,8 @@ struct CustomTextEditor: NSViewRepresentable {
   }
   
   func makeTextView() -> NSTextView {
-    let textView = NSTextView()
+    let textView = CustomTextView()
+//    let textView = NSTextView()
 
     textView.drawsBackground = false
     textView.isRichText = false
@@ -441,7 +443,7 @@ struct CustomTextEditor: NSViewRepresentable {
     return min(max(maxHeight, 100), 500)
   }
 
-  class Coordinator: NSObject, NSTextViewDelegate {
+  class Coordinator: NSObject, NSTextViewDelegate, CustomTextViewDelegate {
     var parent: CustomTextEditor
     var lastHeight: CGFloat = 0
     var currentMaxHeight: CGFloat = 300 // Default value
@@ -525,7 +527,11 @@ struct CustomTextEditor: NSViewRepresentable {
     }
     
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+      Log.shared.debug("commandSelector \(commandSelector)")
       switch commandSelector {
+      case #selector(NSResponder.noResponder(for:)):
+        print("noResponder")
+        return false
       case #selector(NSResponder.insertNewline(_:)):
         let hasShiftModifier = NSEvent.modifierFlags.contains(.shift)
         
@@ -550,6 +556,15 @@ struct CustomTextEditor: NSViewRepresentable {
         return false
       }
     }
+    
+    func textViewDidPressReturn(_ textView: NSTextView) -> Bool {
+      return false
+    }
+    
+    func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool {
+      onEvent(.send)
+      return true
+    }
 
     func textViewDidBecomeFirstResponder(_ notification: Notification) {
       onEvent(.focus)
@@ -568,15 +583,23 @@ class CustomTextView: NSTextView {
       // Check if Shift key is held down
       if event.modifierFlags.contains(.shift) {
         // Insert a line break
-        insertNewline(self)
+//        insertNewline(self)
+//        return
+      } else if event.modifierFlags.contains(.command) {
+        if let delegate = delegate as? CustomTextViewDelegate {
+          if delegate.textViewDidPressCommandReturn(self) {
+            return
+          }
+        }
       } else {
         // Handle regular Enter key press (e.g., submit form)
         // You can customize this behavior
         if let delegate = delegate as? CustomTextViewDelegate {
-          delegate.textViewDidPressReturn(self)
+          if delegate.textViewDidPressReturn(self) {
+            return
+          }
         }
       }
-      return
     }
     
     super.keyDown(with: event)
@@ -596,7 +619,8 @@ final class ComposeScrollView: NSScrollView {
 }
 
 protocol CustomTextViewDelegate: NSTextViewDelegate {
-  func textViewDidPressReturn(_ textView: NSTextView)
+  func textViewDidPressReturn(_ textView: NSTextView) -> Bool
+  func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool
 }
 
 // Alternative method using NSString

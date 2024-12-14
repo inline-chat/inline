@@ -82,6 +82,16 @@ extension View {
   }
 }
 
+
+extension View {
+  func disableAnimations() -> some View {
+    transaction { transaction in
+      transaction.disablesAnimations = true
+      transaction.animation = nil
+    }
+  }
+}
+
 public extension Animation {
   static var smoothSnappy: Animation {
     .interpolatingSpring(
