@@ -60,7 +60,7 @@ struct ChatView: View {
       }
       // So the scroll bar goes under the toolbar
       // Note(@mo: this adds a bug on first frame toolbar doesn't have background and insets are messed up? so scroll fails initially)
-      .ignoresSafeArea(.container, edges: .top)
+      .ignoresSafeArea(.all, edges: .top)
     }
     .task {
       await fetch()
@@ -122,7 +122,6 @@ struct ChatView: View {
           }
         }
       }
-      .toolbarBackground(.visible, for: .windowToolbar)
   }
 
   /// Fetch chat history
