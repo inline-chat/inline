@@ -90,10 +90,7 @@ class MainWindowViewModel: ObservableObject {
     if previousWindow == window {
       return
     }
-//    if windowInitilized {
-//      return
-//    }
-//    windowInitilized = true
+
     Log.shared.debug("Window initialized")
 
     setUpWindowSizeMonitor()
@@ -133,11 +130,12 @@ class MainWindowViewModel: ObservableObject {
     switch route {
     case .main:
       // Main style
-      //      window.titlebarAppearsTransparent = false
-      //      window.titleVisibility = .visible
-      window.isMovableByWindowBackground = false
+      window.titleVisibility = .visible
+      // This fixes the toolbar not being movable initially
+      window.isMovableByWindowBackground = true
       window.isOpaque = true
       window.backgroundColor = NSColor.windowBackgroundColor
+
       setUpForInnerRoute(NavigationModel.shared.currentRoute)
     case .onboarding:
       // onboarding style
@@ -160,19 +158,22 @@ class MainWindowViewModel: ObservableObject {
       setToolbarVisibility(true)
     case .chatInfo:
       setToolbarVisibility(false)
-//    default:
-//      setToolbarVisibility(true)
     }
   }
 
   public func setToolbarVisibility(_ isVisible: Bool) {
     guard let window = window else { return }
 
-    // Keep the title bar (including traffic lights and sidebar toggle)
-    //    window.titleVisibility = isVisible ? .visible : .hidden
-    window.titlebarAppearsTransparent = !isVisible
-    window.titlebarSeparatorStyle = isVisible ? .automatic : .none
-//    window.toolbarStyle = .unified
+    if isVisible {
+      window.titleVisibility = .visible // ensure
+      window.titlebarAppearsTransparent = false
+      window.titlebarSeparatorStyle = .automatic
+      window.toolbarStyle = .unified
+    } else {
+      window.titlebarAppearsTransparent = true
+      window.titlebarSeparatorStyle = .none
+      window.toolbarStyle = .unified
+    }
   }
 
   public func resize(to newSize: CGSize) {
