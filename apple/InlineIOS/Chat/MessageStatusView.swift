@@ -2,6 +2,8 @@ import InlineKit
 import UIKit
 
 class MessageMetadata: UIView {
+  private let symbolSize: CGFloat = 12
+
   private let dateLabel: UILabel = {
     let label = UILabel()
     label.font = .systemFont(ofSize: 11)
@@ -13,6 +15,10 @@ class MessageMetadata: UIView {
     let imageView = UIImageView()
     imageView.contentMode = .scaleAspectFit
     imageView.translatesAutoresizingMaskIntoConstraints = false
+
+    // Set fixed width and height constraints
+    imageView.setContentHuggingPriority(.required, for: .horizontal)
+    imageView.setContentCompressionResistancePriority(.required, for: .horizontal)
     return imageView
   }()
 
@@ -46,6 +52,10 @@ class MessageMetadata: UIView {
       stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
       stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
       stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+      // Add fixed width and height constraints for statusImageView
+      statusImageView.widthAnchor.constraint(equalToConstant: symbolSize),
+      statusImageView.heightAnchor.constraint(equalToConstant: symbolSize)
     ])
   }
 
@@ -59,6 +69,8 @@ class MessageMetadata: UIView {
       statusImageView.isHidden = false
 
       let imageName: String
+      let symbolConfig = UIImage.SymbolConfiguration(pointSize: symbolSize)
+        .applying(UIImage.SymbolConfiguration(weight: .medium))
       switch status {
       case .sent:
         imageName = "checkmark"
@@ -71,7 +83,8 @@ class MessageMetadata: UIView {
       }
 
       statusImageView.image = UIImage(systemName: imageName)?
-        .withConfiguration(UIImage.SymbolConfiguration(pointSize: 11))
+        .withConfiguration(symbolConfig)
+        .withAlignmentRectInsets(.init(top: 0, left: -2, bottom: 0, right: -2)) // Fine-tune alignment if needed
 
       statusImageView.tintColor =
         status == .failed
