@@ -180,30 +180,45 @@ final class OptimizedTextStorage: NSTextStorage {
 
   override var string: String { storage.string }
 
-  override func attributes(at location: Int, effectiveRange range: NSRangePointer?)
-    -> [NSAttributedString.Key: Any]
-  {
+  override func attributes(at location: Int, effectiveRange range: NSRangePointer?) -> [NSAttributedString.Key: Any] {
     storage.attributes(at: location, effectiveRange: range)
   }
 
   override func replaceCharacters(in range: NSRange, with str: String) {
+    beginEditing()
     storage.replaceCharacters(in: range, with: str)
-    edited(.editedCharacters, range: range, changeInLength: str.count - range.length)
+    edited(.editedCharacters, range: range, changeInLength: (str as NSString).length - range.length)
+    endEditing()
   }
 
   override func setAttributes(_ attrs: [NSAttributedString.Key: Any]?, range: NSRange) {
+    beginEditing()
     storage.setAttributes(attrs, range: range)
     edited(.editedAttributes, range: range, changeInLength: 0)
+    endEditing()
   }
 }
 
 final class OptimizedLayoutManager: NSLayoutManager {
   override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
-    guard let textContainer = textContainers.first else { return }
+    guard let textContainer = textContainers.first,
+          glyphsToShow.location >= 0,
+          glyphsToShow.length <= numberOfGlyphs
+    else {
+      return
+    }
+
     let visibleRect = textContainer.size
     let glyphRange = glyphRange(
       forBoundingRect: CGRect(origin: .zero, size: visibleRect),
       in: textContainer)
+
+    guard glyphRange.location >= 0,
+          glyphRange.length <= numberOfGlyphs
+    else {
+      return
+    }
+
     super.drawGlyphs(forGlyphRange: glyphRange, at: origin)
   }
 }
