@@ -111,8 +111,8 @@ final class MessagesCollectionView: UIView {
 
       guard
         let windowScene = UIApplication.shared
-          .connectedScenes
-          .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+        .connectedScenes
+        .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
         let window = windowScene.windows.first(where: { $0.isKeyWindow })
       else {
         return fallback
@@ -145,7 +145,7 @@ final class MessagesCollectionView: UIView {
 
       // Content inset can be different if needed
       collectionView.contentInset = UIEdgeInsets(
-        top: 0,  // Adjust this value based on your needs
+        top: 0, // Adjust this value based on your needs
         left: 0,
         bottom: navH,
         right: 0
@@ -195,7 +195,7 @@ final class MessagesCollectionView: UIView {
 
       // Content inset can be different if needed
       collectionView.contentInset = UIEdgeInsets(
-        top: 0,  // Adjust this value based on your needs
+        top: 0, // Adjust this value based on your needs
         left: 0,
         bottom: navBarHeight,
         right: 0
@@ -234,8 +234,8 @@ final class MessagesCollectionView: UIView {
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
-        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-        visibleIndexPaths.item < fullMessages.count
+            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+            visibleIndexPaths.item < fullMessages.count
       else {
         scrollAnchor = nil
         return
@@ -322,7 +322,7 @@ final class MessagesCollectionView: UIView {
       // Create a temporary cell to calculate the proper height
       let cell = MessageCollectionViewCell(frame: .zero)
       let message = fullMessages[indexPath.item]
-      cell.configure(with: message, topPadding: 2, bottomPadding: 0)
+      cell.configure(with: message, topPadding: 0, bottomPadding: 0)
 
       let size = cell.contentView.systemLayoutSizeFitting(
         CGSize(width: availableWidth, height: 0),
@@ -335,7 +335,7 @@ final class MessagesCollectionView: UIView {
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
-        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
       else {
         return
       }
@@ -404,7 +404,7 @@ final class MessagesCollectionView: UIView {
       guard indexPath.item < fullMessages.count else { return false }
 
       let currentMessage = fullMessages[indexPath.item]
-      let previousIndex = indexPath.item + 1  // Note: +1 because messages are reversed
+      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
 
       // If this is the first message in a group from the same sender,
       // check if the previous message was from a different sender
@@ -485,7 +485,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
 
     // Set the width that cells should use
-    itemSize = CGSize(width: availableWidth, height: 1)  // Height will be determined automatically
+    itemSize = CGSize(width: availableWidth, height: 1) // Height will be determined automatically
   }
 
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
@@ -493,13 +493,13 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
   {
     guard
       let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-        as? UICollectionViewLayoutAttributes
+      as? UICollectionViewLayoutAttributes
     else {
       return nil
     }
 
     // Initial state: moved down and slightly scaled
-    attributes.transform = CGAffineTransform(translationX: 0, y: -50)
+    attributes.transform = CGAffineTransform(translationX: 0, y: -30)
     //    attributes.alpha = 0
 
     return attributes
