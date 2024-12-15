@@ -452,8 +452,9 @@ class MessagesTableView: NSViewController {
       // Avatar would flash initially without this
       updateAvatars()
       // Don't stop initial scroll until initial width flactuation is done (hacky way to fix not going all the way to the bottom on initial render
-      if notWidthRelated {
-        needsInitialScroll = false
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // Very hacky way 😎
+        self.needsInitialScroll = false
       }
     }
   }
