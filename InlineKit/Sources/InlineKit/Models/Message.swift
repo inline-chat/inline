@@ -13,6 +13,7 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var out: Bool?
   public var editDate: Int?
   public var date: Int
+  public var repliedToMessageId: Int64?
 }
 
 public enum MessageSendingStatus: Int64, Codable, DatabaseValueConvertible, Sendable {
@@ -21,7 +22,8 @@ public enum MessageSendingStatus: Int64, Codable, DatabaseValueConvertible, Send
   case failed
 }
 
-public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, TableRecord,
+public struct Message: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
+  TableRecord,
   Sendable, Equatable
 {
   // Locally autoincremented id
@@ -64,6 +66,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   public var status: MessageSendingStatus?
 
+  public var repliedToMessageId: Int64?
+
   public static let chat = belongsTo(Chat.self)
   public var chat: QueryInterfaceRequest<Chat> {
     request(for: Message.chat)
@@ -72,6 +76,13 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public static let from = belongsTo(User.self, using: ForeignKey(["fromId"], to: ["id"]))
   public var from: QueryInterfaceRequest<User> {
     request(for: Message.from)
+  }
+
+  public static let repliedToMessage = belongsTo(
+    Message.self, using: ForeignKey(["repliedToMessageId"], to: ["messageId"])
+  )
+  public var repliedToMessage: QueryInterfaceRequest<Message> {
+    request(for: Message.repliedToMessage)
   }
 
   public init(
@@ -87,7 +98,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     mentioned: Bool? = nil,
     pinned: Bool? = nil,
     editDate: Date? = nil,
-    status: MessageSendingStatus? = nil
+    status: MessageSendingStatus? = nil,
+    repliedToMessageId: Int64? = nil
   ) {
     self.messageId = messageId
     self.randomId = randomId
@@ -102,6 +114,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.mentioned = mentioned
     self.pinned = pinned
     self.status = status
+    self.repliedToMessageId = repliedToMessageId
     if peerUserId == nil && peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
@@ -120,7 +133,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       mentioned: from.mentioned,
       pinned: from.pinned,
       editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) },
-      status: from.out == true ? MessageSendingStatus.sent : nil
+      status: from.out == true ? MessageSendingStatus.sent : nil,
+      repliedToMessageId: from.repliedToMessageId
     )
   }
 
@@ -138,7 +152,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 // MARK: Helpers
 
 public extension Message {
-  mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort) throws {
+  mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort)
+    throws
+  {
     if self.globalId == nil {
       // Alternative:
       //          if let existing = try Message
@@ -150,8 +166,9 @@ public extension Message {
       //            message.globalId = existing.globalId
       //          }
 
-      if let existing = try? Message
-        .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
+      if let existing =
+        try? Message
+          .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
       {
         self.globalId = existing.globalId
       }

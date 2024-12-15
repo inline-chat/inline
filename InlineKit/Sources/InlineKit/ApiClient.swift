@@ -246,10 +246,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   //        )
   //    }
 
-  public func sendMessage(peerUserId: Int64?, peerThreadId: Int64?, text: String, randomId: Int64?)
-    async throws
-    -> SendMessage
-  {
+  public func sendMessage(
+    peerUserId: Int64?,
+    peerThreadId: Int64?,
+    text: String,
+    randomId: Int64?,
+    repliedToMessageId: Int64?
+  ) async throws -> SendMessage {
     var queryItems: [URLQueryItem] = [
       URLQueryItem(name: "text", value: text),
     ]
@@ -264,6 +267,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     if let randomId = randomId {
       queryItems.append(URLQueryItem(name: "randomId", value: "\(randomId)"))
+    }
+    if let repliedToMessageId = repliedToMessageId {
+      queryItems.append(URLQueryItem(name: "repliedToMessageId", value: "\(repliedToMessageId)"))
     }
 
     return try await request(
@@ -310,7 +316,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func sendComposeAction(peerId: Peer, action: ApiComposeAction?) async throws -> EmptyPayload {
+  public func sendComposeAction(peerId: Peer, action: ApiComposeAction?) async throws
+    -> EmptyPayload
+  {
     try await request(
       .sendComposeAction,
       queryItems: [

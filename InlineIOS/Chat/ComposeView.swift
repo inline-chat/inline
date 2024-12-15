@@ -180,7 +180,9 @@ final class OptimizedTextStorage: NSTextStorage {
 
   override var string: String { storage.string }
 
-  override func attributes(at location: Int, effectiveRange range: NSRangePointer?) -> [NSAttributedString.Key: Any] {
+  override func attributes(at location: Int, effectiveRange range: NSRangePointer?)
+    -> [NSAttributedString.Key: Any]
+  {
     storage.attributes(at: location, effectiveRange: range)
   }
 
