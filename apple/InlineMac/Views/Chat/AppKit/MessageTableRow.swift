@@ -6,6 +6,7 @@ import SwiftUI
 class MessageTableCell: NSTableCellView {
   private var messageView: MessageViewAppKit?
   private var currentContent: (message: FullMessage, props: MessageViewProps)?
+  private let log = Log.scoped("MessageTableCell", enableTracing: true)
   
   override init(frame: NSRect) {
     super.init(frame: frame)
@@ -18,18 +19,54 @@ class MessageTableCell: NSTableCellView {
   }
   
   private func setupView() {
-    wantsLayer = true
-    layer?.backgroundColor = .clear
+//    wantsLayer = true
+//    layer?.backgroundColor = .clear
+  }
+  
+  private func onlyContentNeedsChange(_ message: FullMessage, _ props: MessageViewProps) -> Bool {
+    guard let currentContent = currentContent else { return false }
+    let aM = currentContent.message.message
+    let bM = message.message
+    let aP = currentContent.props
+    let bP = props
+    
+    return aM.status == bM.status &&
+      aM.fromId == bM.fromId &&
+      aP.firstInGroup == bP.firstInGroup &&
+      aP.isFirstMessage == bP.isFirstMessage &&
+      aP.isLastMessage == bP.isLastMessage &&
+      // NOT EQUAL CONTENT
+      aM.text != bM.text
   }
   
   func configure(with fullMessage: FullMessage, props: MessageViewProps) {
-    // Skip update if content hasn't changed
-//    guard currentContent?.message != fullMessage ||
-//      currentContent?.props != props else { return }
-
-    currentContent = (fullMessage, props)
+    if onlyContentNeedsChange(fullMessage, props) {
+      log.trace("configuring only inner content \(fullMessage.id) \(props.toString())")
+      currentContent = (fullMessage, props)
+      updateInnerContent()
+    } else if currentContent?.message != fullMessage ||
+      currentContent?.props.equalContentTo(props) == false
+    {
+      // Update if content has changed
+      log.trace("configuring with new content \(fullMessage.id) \(props.toString())")
+      currentContent = (fullMessage, props)
+      updateContent()
+    } else if currentContent?.props.width != props.width || currentContent?.props.height != props.height {
+      log.trace("configuring with new sizes")
+      // Content equal but width / height changed
+      currentContent = (fullMessage, props)
+      updateSizes()
+    }
     
-    updateContent()
+    // Equal
+  }
+  
+  private func updateSizes() {
+    messageView?.updateSizes(props: currentContent!.1)
+  }
+  
+  private func updateInnerContent() {
+    messageView?.updateInnerContent(fullMessage: currentContent!.0, props: currentContent!.1)
   }
   
   private func updateContent() {
@@ -52,17 +89,13 @@ class MessageTableCell: NSTableCellView {
     messageView = newMessageView
     
     // Force layout update
-    layoutSubtreeIfNeeded()
+//    layoutSubtreeIfNeeded()
   }
 
-  private func updateContent(message: FullMessage, props: MessageViewProps) {
-    // Your existing view update logic
-  }
-  
-  override func prepareForReuse() {
-    super.prepareForReuse()
-    currentContent = nil
-    // Clear any other state
-  }
-
+//  override func prepareForReuse() {
+//    super.prepareForReuse()
+//    log.trace("prepareForReuse")
+//    currentContent = nil
+//    // Clear any other state
+//  }
 }

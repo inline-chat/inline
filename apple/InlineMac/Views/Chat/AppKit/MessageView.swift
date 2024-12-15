@@ -12,6 +12,13 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var width: CGFloat?
   var height: CGFloat?
   
+  // Compare everything except size
+  func equalContentTo(_ other: MessageViewProps) -> Bool {
+    firstInGroup == other.firstInGroup &&
+      isLastMessage == other.isLastMessage &&
+      isFirstMessage == other.isFirstMessage
+  }
+  
   /// Used in cache key
   func toString() -> String {
     "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")"
@@ -92,12 +99,9 @@ class MessageViewAppKit: NSView {
     textView.textContainer?.widthTracksTextView = true
     textView.textContainer?.heightTracksTextView = true
     if let width = props.width, let height = props.height {
-      let textViewWidth = MessageSizeCalculator.getTextViewWidth(for: width)
-      let size = NSSize(width: textViewWidth, height: height)
+//      let textViewWidth = MessageSizeCalculator.getTextViewWidth(for: width)
+//      let size = NSSize(width: width, height: height)
 //      textView.textContainer?.size = size
-//      textView.minSize = size // <----
-//      textView.maxSize = size // <----
-      //
 //      textView.setFrameSize(size) // This is the key addition
     }
     
@@ -168,7 +172,7 @@ class MessageViewAppKit: NSView {
   // MARK: - Setup
 
   private func setupView() {
-    wantsLayer = true
+//    wantsLayer = true
 
     if showsName {
       addSubview(nameLabel)
@@ -180,6 +184,8 @@ class MessageViewAppKit: NSView {
     setupConstraints()
     setupContextMenu()
   }
+  
+  private var textViewWidthConstraint: NSLayoutConstraint!
   
   private func setupConstraints() {
     let avatarLeading = Theme.messageSidePadding
@@ -199,6 +205,8 @@ class MessageViewAppKit: NSView {
       nameLabel.setContentCompressionResistancePriority(.required, for: .vertical)
     }
     
+    textViewWidthConstraint = messageTextView.widthAnchor.constraint(equalToConstant: props.width ?? 0.0)
+    
     // Message text view constraints
     NSLayoutConstraint.activate(
       [
@@ -212,15 +220,37 @@ class MessageViewAppKit: NSView {
             equalTo: bottomAnchor,
             constant: -bottomPadding
           ),
-        messageTextView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.messageSidePadding)
+        
+        // This is accurate but requires careful updates
+        textViewWidthConstraint
+        
+        // TODO: this results in automatic updated width on resize, but makes the text go up to the end of viewport which is undesirable.
+//        messageTextView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.messageSidePadding)
       ]
     )
+  }
+  
+  // Called when width/height changes
+  public func updateSizes(props: MessageViewProps) {
+    self.props = props
+    textViewWidthConstraint.constant = props.width ?? 0.0
+  }
+  
+  // Experimental: Called when only the text changes
+  public func updateInnerContent(fullMessage: FullMessage, props: MessageViewProps) {
+    self.fullMessage = fullMessage
+    self.props = props
+    
+    nameLabel.stringValue = from.firstName ?? from.username ?? ""
+    setupMessageText()
+    updateSizes(props: props)
+    // WIP..
   }
 
   private func setupMessageText() {
     let text = message.text ?? ""
     
-    let key = "\(message.id)\(text)"
+    let key = "\(text)"
     if let attrs = Self.cacheAttrs.get(key: key) {
       messageTextView.textStorage?.setAttributedString(attrs)
       return
@@ -257,7 +287,7 @@ class MessageViewAppKit: NSView {
     Self.cacheAttrs.set(key: key, value: attributedString)
     
 //    messageTextView.delegate = self
-    layoutSubtreeIfNeeded()
+//    layoutSubtreeIfNeeded()
   }
 
   private func setupContextMenu() {
