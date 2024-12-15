@@ -79,12 +79,15 @@ struct HomeSidebar: View {
       }
       .background {
         KeyPressHandler {
-          if isSearching {
-            if $0.keyCode == 53 { // ESC key code
+          if $0.keyCode == 53 { // ESC key code
+            if isSearching {
               search.clear()
               isSearching = false
-              return nil
+            } else {
+              // Navigate to home root and clear selection
+              nav.select(.homeRoot)
             }
+            return nil
           }
 
           return $0
