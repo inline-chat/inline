@@ -1,0 +1,1 @@
+ALTER TABLE "messages" ADD COLUMN "replied_to_message_id" integer;

@@ -171,6 +171,7 @@ export const TMessageInfo = Type.Object({
   mentioned: Optional(Type.Boolean()),
   out: Optional(Type.Boolean()),
   pinned: Optional(Type.Boolean()),
+  repliedToMessageId: Optional(Type.Integer()),
 })
 
 export type TMessageInfo = StaticEncode<typeof TMessageInfo>

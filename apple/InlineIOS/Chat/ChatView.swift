@@ -12,6 +12,15 @@ class ChatContainerView: UIView {
   private let contentView = UIView()
   private let messagesView: MessagesCollectionView
   private let composeView = ComposeView()
+  private let topComposeView: UIHostingController<TopComposeView>
+  private let composeStack: UIStackView = {
+    let stack = UIStackView()
+    stack.axis = .vertical
+    stack.spacing = 0
+    stack.alignment = .fill
+    return stack
+  }()
+
   private let text: Binding<String>
   var onSendMessage: (() -> Void)?
 
@@ -20,24 +29,15 @@ class ChatContainerView: UIView {
   init(frame: CGRect, fullMessages: [FullMessage], text: Binding<String>) {
     self.text = text
     self.messagesView = MessagesCollectionView(fullMessages: fullMessages)
+    self.topComposeView = UIHostingController(
+      rootView: TopComposeView(replyingMessageId: ChatState.shared.replyingMessageId ?? 0)
+    )
 
     super.init(frame: frame)
 
     setupViews()
-
-    composeView.onTextChange = { [weak self] newText in
-
-      self?.text.wrappedValue = newText
-    }
-    composeView.onSend = { [weak self] in
-      print("Send called")
-      self?.onSendMessage?()
-    }
-
-    composeView.text = text.wrappedValue
-
-    contentView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    contentView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    setupChatStateObserver()
+    setupComposeView()
   }
 
   @available(*, unavailable)
@@ -45,17 +45,7 @@ class ChatContainerView: UIView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private var didSetupConstraints = false
-
-  override func didMoveToWindow() {
-    super.didMoveToWindow()
-
-    // Only setup once when we have a valid window/hierarchy
-    guard !didSetupConstraints else { return }
-    didSetupConstraints = true
-
-    setupViews()
-  }
+  // MARK: - Setup Methods
 
   private func setupViews() {
     // Add contentView to main view
@@ -64,12 +54,17 @@ class ChatContainerView: UIView {
 
     // Add views to contentView
     contentView.addSubview(messagesView)
-    contentView.addSubview(composeView)
+    contentView.addSubview(composeStack)
+
+    // Setup compose stack
+    composeStack.translatesAutoresizingMaskIntoConstraints = false
+    composeStack.addArrangedSubview(topComposeView.view)
+    composeStack.addArrangedSubview(composeView)
 
     messagesView.translatesAutoresizingMaskIntoConstraints = false
+    topComposeView.view.translatesAutoresizingMaskIntoConstraints = false
     composeView.translatesAutoresizingMaskIntoConstraints = false
 
-    // Setup constraints
     NSLayoutConstraint.activate([
       // ContentView constraints
       contentView.topAnchor.constraint(equalTo: topAnchor),
@@ -81,23 +76,79 @@ class ChatContainerView: UIView {
       messagesView.topAnchor.constraint(equalTo: contentView.topAnchor),
       messagesView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
       messagesView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-      messagesView.bottomAnchor.constraint(equalTo: composeView.topAnchor),
+      messagesView.bottomAnchor.constraint(equalTo: composeStack.topAnchor),
 
-      // ComposeView constraints
-      composeView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-      composeView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-      composeView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+      // ComposeStack constraints
+      composeStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+      composeStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+      composeStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
+      // Fixed height for topComposeView
+      topComposeView.view.heightAnchor.constraint(equalToConstant: 58)
     ])
+
+    // Initial state
+    topComposeView.view.isHidden = ChatState.shared.replyingMessageId == nil
   }
 
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    print("ContentView frame: \(contentView.frame)")
-    print("Compose frame: \(composeView.frame)")
+  private func setupComposeView() {
+    composeView.onTextChange = { [weak self] newText in
+      self?.text.wrappedValue = newText
+    }
+    composeView.onSend = { [weak self] in
+      self?.onSendMessage?()
+    }
+    composeView.text = text.wrappedValue
+  }
+
+  private func setupChatStateObserver() {
+    Task { @MainActor in
+      for await _ in ChatState.shared.$replyingMessageId.values {
+        updateTopComposeView()
+      }
+    }
+  }
+
+  // MARK: - Update Methods
+
+  private func updateTopComposeView() {
+    if let replyingId = ChatState.shared.replyingMessageId {
+      print("Showing reply view for message: \(replyingId)")
+      topComposeView.rootView = TopComposeView(replyingMessageId: replyingId)
+
+      if topComposeView.view.isHidden {
+        topComposeView.view.alpha = 0
+        topComposeView.view.isHidden = false
+
+        UIView.animate(withDuration: 0.3) {
+          self.topComposeView.view.alpha = 1
+          self.layoutIfNeeded()
+        }
+      }
+    } else {
+      print("Hiding reply view")
+      guard !topComposeView.view.isHidden else { return }
+
+      UIView.animate(withDuration: 0.3) {
+        self.topComposeView.view.alpha = 0
+      } completion: { _ in
+        self.topComposeView.view.isHidden = true
+        self.layoutIfNeeded()
+      }
+    }
   }
 
   func updateMessages(_ messages: [FullMessage]) {
     messagesView.updateMessages(messages)
+  }
+
+  // MARK: - Layout
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    print("ContentView frame: \(contentView.frame)")
+    print("TopComposeView frame: \(topComposeView.view.frame)")
+    print("Compose frame: \(composeView.frame)")
   }
 }
 
@@ -107,7 +158,6 @@ struct ChatContainerViewRepresentable: UIViewRepresentable {
   var fullMessages: [FullMessage]
   var text: Binding<String>
   var onSendMessage: () -> Void
-
   func makeUIView(context: Context) -> ChatContainerView {
     let view = ChatContainerView(
       frame: .zero,
@@ -145,12 +195,12 @@ struct ChatContainerViewRepresentable: UIViewRepresentable {
 
 struct ChatView: View {
   var peer: Peer
-
   @State var text: String = ""
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var dataManager: DataManager
+
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
 
@@ -244,9 +294,11 @@ struct ChatView: View {
           peerThreadId: peerThreadId,
           chatId: chatId,
           out: true,
-          status: .sending
+          status: .sending,
+          repliedToMessageId: ChatState.shared.replyingMessageId
         )
 
+        print("Sending message with repliedToMessageId: \(message.repliedToMessageId) \(message)")
         // Save message to database
         try await database.dbWriter.write { db in
           try message.save(db)
@@ -259,8 +311,10 @@ struct ChatView: View {
           peerThreadId: peerThreadId,
           text: messageText,
           peerId: peer,
-          randomId: randomId
+          randomId: randomId,
+          repliedToMessageId: message.repliedToMessageId
         )
+        ChatState.shared.clearReplyingMessageId()
       } catch {
         Log.shared.error("Failed to send message", error: error)
       }

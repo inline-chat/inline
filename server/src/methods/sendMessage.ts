@@ -28,7 +28,7 @@ import { isProd } from "@in/server/env"
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
   text: Type.String(),
-
+  repliedToMessageId: Optional(TInputId),
   peerUserId: Optional(TInputId),
   peerThreadId: Optional(TInputId),
 
@@ -51,7 +51,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     : input.peerId
 
   const randomId = input.randomId ? BigInt(input.randomId) : undefined
-
+  const repliedToMessageIdNum = input.repliedToMessageId ? Number(input.repliedToMessageId) : undefined
   if (!peerId) {
     throw new InlineError(InlineError.ApiError.PEER_INVALID)
   }
@@ -93,8 +93,9 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         SELECT MAX(${messages.messageId}) 
         FROM ${messages}
         WHERE ${messages.chatId} = ${chatId}
-      ), 0) + 1`,
+        ), 0) + 1`,
 
+      repliedToMessageId: repliedToMessageIdNum ?? null,
       randomId: randomId ?? null,
       date: new Date(),
     })

@@ -42,6 +42,9 @@ export const messages = pgTable(
     editDate: timestamp("edit_date", { mode: "date", precision: 3 }),
 
     date: creationDate,
+
+    /** optional, message it is replying to */
+    repliedToMessageId: integer("replied_to_message_id"),
   },
   (table) => ({
     messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(table.messageId, table.chatId),
