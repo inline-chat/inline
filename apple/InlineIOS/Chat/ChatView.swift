@@ -23,14 +23,21 @@ class ChatContainerView: UIView {
 
   private let text: Binding<String>
   var onSendMessage: (() -> Void)?
+  var chatId: Int64
 
   // MARK: - Initialization
 
-  init(frame: CGRect, fullMessages: [FullMessage], text: Binding<String>) {
+  init(frame: CGRect, fullMessages: [FullMessage], text: Binding<String>, chatId: Int64) {
     self.text = text
+    self.chatId = chatId
     self.messagesView = MessagesCollectionView(fullMessages: fullMessages)
+
+    let state = ChatState.shared.getState(chatId: chatId)
     self.topComposeView = UIHostingController(
-      rootView: TopComposeView(replyingMessageId: ChatState.shared.replyingMessageId ?? 0)
+      rootView: TopComposeView(
+        replyingMessageId: state.replyingMessageId ?? 0,
+        chatId: chatId
+      )
     )
 
     super.init(frame: frame)
@@ -84,11 +91,12 @@ class ChatContainerView: UIView {
       composeStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
       // Fixed height for topComposeView
-      topComposeView.view.heightAnchor.constraint(equalToConstant: 58)
+      topComposeView.view.heightAnchor.constraint(equalToConstant: 58),
     ])
 
     // Initial state
-    topComposeView.view.isHidden = ChatState.shared.replyingMessageId == nil
+    topComposeView.view.isHidden =
+      ChatState.shared.getState(chatId: chatId).replyingMessageId == nil
   }
 
   private func setupComposeView() {
@@ -103,7 +111,7 @@ class ChatContainerView: UIView {
 
   private func setupChatStateObserver() {
     Task { @MainActor in
-      for await _ in ChatState.shared.$replyingMessageId.values {
+      for await _ in ChatState.shared.$states.values {
         updateTopComposeView()
       }
     }
@@ -112,9 +120,9 @@ class ChatContainerView: UIView {
   // MARK: - Update Methods
 
   private func updateTopComposeView() {
-    if let replyingId = ChatState.shared.replyingMessageId {
+    if let replyingId = ChatState.shared.getState(chatId: chatId).replyingMessageId {
       print("Showing reply view for message: \(replyingId)")
-      topComposeView.rootView = TopComposeView(replyingMessageId: replyingId)
+      topComposeView.rootView = TopComposeView(replyingMessageId: replyingId, chatId: chatId)
 
       if topComposeView.view.isHidden {
         topComposeView.view.alpha = 0
@@ -158,11 +166,13 @@ struct ChatContainerViewRepresentable: UIViewRepresentable {
   var fullMessages: [FullMessage]
   var text: Binding<String>
   var onSendMessage: () -> Void
+  var chatId: Int64
   func makeUIView(context: Context) -> ChatContainerView {
     let view = ChatContainerView(
       frame: .zero,
       fullMessages: fullMessages,
-      text: text
+      text: text,
+      chatId: chatId
     )
     view.onSendMessage = onSendMessage
     return view
@@ -215,7 +225,8 @@ struct ChatView: View {
     ChatContainerViewRepresentable(
       fullMessages: fullChatViewModel.fullMessages,
       text: $text,
-      onSendMessage: sendMessage
+      onSendMessage: sendMessage,
+      chatId: fullChatViewModel.chat?.id ?? 0
     )
     .toolbar {
       ToolbarItem(placement: .principal) {
@@ -271,6 +282,7 @@ struct ChatView: View {
         guard let chatId = fullChatViewModel.chat?.id else { return }
 
         let messageText = text
+        let state = ChatState.shared.getState(chatId: chatId)
 
         // Add haptic feedback
         let generator = UIImpactFeedbackGenerator(style: .soft)
@@ -295,7 +307,7 @@ struct ChatView: View {
           chatId: chatId,
           out: true,
           status: .sending,
-          repliedToMessageId: ChatState.shared.replyingMessageId
+          repliedToMessageId: state.replyingMessageId
         )
 
         print("Sending message with repliedToMessageId: \(message.repliedToMessageId) \(message)")
@@ -314,7 +326,7 @@ struct ChatView: View {
           randomId: randomId,
           repliedToMessageId: message.repliedToMessageId
         )
-        ChatState.shared.clearReplyingMessageId()
+        ChatState.shared.clearReplyingMessageId(chatId: chatId)
       } catch {
         Log.shared.error("Failed to send message", error: error)
       }

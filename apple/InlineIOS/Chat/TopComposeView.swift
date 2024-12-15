@@ -4,11 +4,13 @@ import SwiftUI
 
 struct TopComposeView: View {
   var replyingMessageId: Int64
+  var chatId: Int64
   @Environment(\.appDatabase) var db
   @State private var repliedMessage: FullMessage?
 
-  init(replyingMessageId: Int64) {
+  init(replyingMessageId: Int64, chatId: Int64) {
     self.replyingMessageId = replyingMessageId
+    self.chatId = chatId
     print("TopComposeView init with id: \(replyingMessageId)")
   }
 
@@ -25,7 +27,7 @@ struct TopComposeView: View {
             Spacer()
 
             Button {
-              ChatState.shared.clearReplyingMessageId()
+              ChatState.shared.clearReplyingMessageId(chatId: chatId)
             } label: {
               Image(systemName: "xmark")
                 .foregroundStyle(.secondary)
@@ -33,12 +35,14 @@ struct TopComposeView: View {
             .buttonStyle(.plain)
           }
 
-          Text((message.message.text ?? "")
-            .replacingOccurrences(of: "\r\n", with: " ")
-            .replacingOccurrences(of: "\n", with: " "))
-            .font(.callout)
-            .lineLimit(2)
-            .foregroundStyle(.secondary)
+          Text(
+            (message.message.text ?? "")
+              .replacingOccurrences(of: "\r\n", with: " ")
+              .replacingOccurrences(of: "\n", with: " ")
+          )
+          .font(.callout)
+          .lineLimit(2)
+          .foregroundStyle(.secondary)
         }
         .padding(.horizontal)
         .frame(maxWidth: .infinity)
