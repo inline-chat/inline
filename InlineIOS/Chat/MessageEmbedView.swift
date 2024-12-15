@@ -13,17 +13,21 @@ struct MessageEmbedView: View {
   }
 
   var body: some View {
-    VStack {
+    VStack(alignment: .leading) {
       Text(repliedToMessage?.user?.firstName ?? "")
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(repliedToMessage?.message.out == true ? .white : .secondary)
       Text(repliedToMessage?.message.text ?? "")
         .font(.callout)
         .lineLimit(2)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(repliedToMessage?.message.out == true ? .white : .secondary)
     }
+
     .frame(height: 38)
-    .background(ColorManager.shared.swiftUIColor.opacity(0.2))
+    .padding(6)
+    .background(.white.opacity(0.2))
+    .cornerRadius(12)
+
     .onAppear {
       fetchRepliedMessage()
     }
@@ -52,4 +56,15 @@ struct MessageEmbedView: View {
       }
     }
   }
+}
+
+#Preview {
+  VStack(spacing: 20) {
+    // Preview with full data
+    MessageEmbedView(repliedToMessageId: 1)
+      .previewsEnvironment(.populated)
+      .padding()
+  }
+  .frame(width: 300, height: 300)
+  .background(.red)
 }
