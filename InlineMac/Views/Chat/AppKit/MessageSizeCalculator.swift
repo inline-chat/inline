@@ -10,6 +10,13 @@ class MessageSizeCalculator {
   private let layoutManager: NSLayoutManager
   private let textContainer: NSTextContainer
   private let cache = NSCache<NSString, NSValue>()
+  private let minWidthForSingleLine = NSCache<NSString, NSValue>()
+  
+  private let log = Log.scoped("MessageSizeCalculator")
+  private var heightForSingleLine: CGFloat?
+  
+  // This let's us limit number of re-calculations
+  static let widthChangeThreshold = 20.0
   
   init() {
     textStorage = NSTextStorage()
@@ -19,62 +26,50 @@ class MessageSizeCalculator {
     textStorage.addLayoutManager(layoutManager)
     layoutManager.addTextContainer(textContainer)
     
-    cache.countLimit = 1000
+    cache.countLimit = 2000
+    minWidthForSingleLine.countLimit = 2000
   }
   
-  /// Used to allow AppKit make it work
-  static let textSafeArea: CGFloat = 0.0
-  
-//  func calculateSize(for text: String, width: CGFloat) -> NSSize {
-//    let cacheKey = "\(text):\(width)" as NSString
-//    if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue {
-//      return cachedSize
-//    }
-//
-//    textContainer.size = NSSize(width: width, height: .greatestFiniteMagnitude)
-//    textContainer.lineFragmentPadding = 0
-//
-//    let attributedString = NSAttributedString(
-//      string: text,
-//      attributes: [.font: NSFont.systemFont(ofSize: 14)]
-//    )
-//    textStorage.setAttributedString(attributedString)
-//
-//    layoutManager.ensureLayout(for: textContainer)
-//    let height = layoutManager.usedRect(for: textContainer).height
-//    let size = NSSize(width: width, height: ceil(height))
-//
-//    cache.setObject(NSValue(size: size), forKey: cacheKey)
-//    return size
-//  }
-  
   func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> NSSize {
-    let text = message.message.text ?? " "
+    let text = message.message.text ?? ""
     
-    let cacheKey = "\(message.id):\(text):\(props.toString()):\(width)" as NSString
+    // If text is empty, height is always 1 line
+    // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
+    if text.isEmpty {
+      return CGSize(width: 1, height: heightForSingleLineText())
+    }
+    
+    let availableWidth = ceil(width) - Self.widthChangeThreshold - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - Theme.messageSidePadding * 2
+
+    let cacheKey = "\(message.id):\(text):\(props.toString()):\(availableWidth)" as NSString
     if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue {
       return cachedSize
     }
     
-    let availableWidth = width - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - Theme.messageSidePadding * 2 - Self.textSafeArea
+    var textSize: CGSize?
     
-    if availableWidth < 0 {
-      return NSSize(width: width, height: 36)
+    if let minSize = minWidthForSingleLine.object(forKey: text as NSString) as? CGSize, minSize.width < width {
+      log.trace("single line minWidth \(minSize.width) is less than viewport \(width)")
+      textSize = CGSize(width: minSize.width, height: heightForSingleLineText())
     }
-
-    textContainer.size = NSSize(width: availableWidth, height: .greatestFiniteMagnitude)
-    MessageTextConfiguration.configureTextContainer(textContainer)
     
-    let attributedString = NSAttributedString(
-      string: text.trimmingCharacters(in: .whitespacesAndNewlines),
-      attributes: [.font: MessageTextConfiguration.font]
-    )
-    textStorage.setAttributedString(attributedString)
+//    if availableWidth < 0 {
+//      return NSSize(width: width, height: 36)
+//    }
+    if textSize == nil {
+      textSize = calculateSizeForText(text, width: availableWidth)
+    }
     
-    layoutManager.ensureLayout(for: textContainer)
-    let textHeight = layoutManager.usedRect(for: textContainer).height
-
-    var totalHeight = ceil(textHeight)
+    let textHeight = ceil(textSize!.height)
+    let textWidth = textSize!.width
+    
+    // Mark as single line if height is equal to single line height
+    if textHeight == heightForSingleLineText() {
+      log.debug("cached single line text \(text) width \(textWidth)")
+      minWidthForSingleLine.setObject(NSValue(size: CGSize(width: textWidth, height: textHeight)), forKey: text as NSString)
+    }
+    
+    var totalHeight = textHeight
     
     if props.firstInGroup {
       totalHeight += Theme.messageNameLabelHeight
@@ -87,9 +82,15 @@ class MessageSizeCalculator {
       totalHeight += Theme.messageListTopInset
     }
     totalHeight += Theme.messageVerticalPadding * 2
-    let size = NSSize(width: width, height: totalHeight)
+    
+    // Fitting width
+    let size = NSSize(width: textWidth, height: totalHeight)
+    
+    // Full viewport width as width
+    // let size = NSSize(width: width, height: totalHeight)
     
     cache.setObject(NSValue(size: size), forKey: cacheKey)
+  
     return size
   }
   
@@ -98,7 +99,38 @@ class MessageSizeCalculator {
   }
   
   static func getTextViewWidth(for tableWidth: CGFloat) -> CGFloat {
-    tableWidth - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - textSafeArea
+    tableWidth - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing
+  }
+  
+  private func heightForSingleLineText() -> CGFloat {
+    if let height = heightForSingleLine {
+      return height
+    } else {
+      let text = "I"
+      let size = calculateSizeForText(text, width: 1000)
+      heightForSingleLine = size.height
+      return size.height
+    }
+  }
+  
+  private func calculateSizeForText(_ text: String, width: CGFloat) -> NSSize {
+    textContainer.size = NSSize(width: width, height: .greatestFiniteMagnitude)
+    MessageTextConfiguration.configureTextContainer(textContainer)
+    
+    let attributedString = NSAttributedString(
+      string: text.trimmingCharacters(in: .whitespacesAndNewlines),
+      attributes: [.font: MessageTextConfiguration.font]
+    )
+    textStorage.setAttributedString(attributedString)
+    layoutManager.ensureLayout(for: textContainer)
+
+    let textRect = layoutManager.usedRect(for: textContainer)
+    let textHeight = ceil(textRect.height)
+    let textWidth = textRect.width
+    
+    log.trace("calculateSizeForText \(text) width \(width) resulting in rect \(textRect)")
+    
+    return CGSize(width: textWidth, height: textHeight)
   }
 }
 
