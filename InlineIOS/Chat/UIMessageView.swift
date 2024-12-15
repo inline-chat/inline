@@ -160,8 +160,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       }
 
       let replyAction = UIAction(title: "Reply") { [weak self] _ in
-        print("Wanna reply")
-        ChatState.shared.setReplyingMessageId(id: self?.fullMessage.message.id ?? 0)
+        ChatState.shared.setReplyingMessageId(chatId: self?.fullMessage.message.chatId ?? 0, id: self?.fullMessage.message.id ?? 0)
       }
 
       return UIMenu(children: [copyAction, replyAction])
