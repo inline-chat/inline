@@ -120,6 +120,8 @@ class MessageViewAppKit: NSView {
 //    //    textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 //    //     textView.alignment = .natural
     
+    textView.delegate = self
+
     return textView
   }()
 
@@ -312,8 +314,17 @@ class MessageViewAppKit: NSView {
   }
 }
 
+extension MessageViewAppKit: NSTextViewDelegate {}
+
 // Custom NSTextView subclass to handle hit testing
 class CustomTextView2: NSTextView {
+  override func resignFirstResponder() -> Bool {
+    // Clear out selection when user clicks somewhere else
+    selectedRanges = [NSValue(range: NSRange(location: 0, length: 0))]
+    
+    return super.resignFirstResponder()
+  }
+  
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
     return false
   }
