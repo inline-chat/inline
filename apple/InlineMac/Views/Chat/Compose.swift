@@ -247,7 +247,8 @@ struct Compose: View {
           peerThreadId: peerThreadId,
           text: messageText,
           peerId: peerId,
-          randomId: randomId
+          randomId: randomId,
+          repliedToMessageId: nil
         )
         
       } catch {

@@ -10,6 +10,7 @@ class AvatarOverlayView: NSView {
   
   override init(frame: NSRect) {
     super.init(frame: frame)
+    // This helped
     wantsLayer = true
     clipsToBounds = true
     translatesAutoresizingMaskIntoConstraints = false
@@ -37,14 +38,12 @@ class AvatarOverlayView: NSView {
   private func createAvatarView(for user: User) -> UserAvatarView {
     NSAnimationContext.beginGrouping()
     NSAnimationContext.current.duration = 0
-    
     let avatarView = UserAvatarView(frame: .zero)
-    avatarView.wantsLayer = true
-    avatarView.layer?.zPosition = 100
     avatarView.user = user
-    addSubview(avatarView)
     
+    addSubview(avatarView)
     NSAnimationContext.endGrouping()
+    
     return avatarView
   }
   
@@ -86,7 +85,6 @@ class MessageAvatarView: NSView {
   }
   
   private func setupView() {
-    wantsLayer = true
     translatesAutoresizingMaskIntoConstraints = false
     
     addSubview(avatarView)

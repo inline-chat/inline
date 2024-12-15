@@ -16,16 +16,16 @@ struct ChatInfo: View {
 
   var body: some View {
     ScrollView {
-      LazyVStack {
+      VStack {
         // Avatar
         icon
           .padding(.top, 16)
-        
+
         // Text
         Text(fullChat.chatItem?.title ?? "Chat")
           .font(.title)
           .padding(.top, 8)
-        
+
         // Debug information via list view style inset
         Form {
           Section("Debug") {
@@ -35,13 +35,12 @@ struct ChatInfo: View {
             LabeledContent("Chat ID") {
               Text("\(fullChat.chat?.id ?? 0)")
             }
-            
           }
         }
         .formStyle(.grouped)
       }
     }
-    .frame( alignment: .top) // This ensures top alignment
+    .frame(alignment: .top) // This ensures top alignment
   }
 
   @ViewBuilder

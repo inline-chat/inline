@@ -30,6 +30,7 @@ class CacheAttrs {
   
   init() {
     cache = NSCache<NSString, NSAttributedString>()
+    cache.countLimit = 1000 // Set appropriate limit
   }
   
   func get(key: String) -> NSAttributedString? {
@@ -98,64 +99,24 @@ class MessageViewAppKit: NSView {
     textView.isHorizontallyResizable = false
     textView.textContainer?.widthTracksTextView = true
     textView.textContainer?.heightTracksTextView = true
-    if let width = props.width, let height = props.height {
-//      let textViewWidth = MessageSizeCalculator.getTextViewWidth(for: width)
+
+    // Disable smart insertions and replacements for better performance
+    textView.smartInsertDeleteEnabled = false
+    textView.isAutomaticQuoteSubstitutionEnabled = false
+    textView.isAutomaticDashSubstitutionEnabled = false
+    textView.isAutomaticTextReplacementEnabled = false
+    textView.isAutomaticSpellingCorrectionEnabled = false
+
+    // Don't know what this does
+//    if let width = props.width, let height = props.height {
 //      let size = NSSize(width: width, height: height)
-//      textView.textContainer?.size = size
-//      textView.setFrameSize(size) // This is the key addition
-    }
-    
-    // -------------
-    // AUTO SIZE
-//    textView.isVerticallyResizable = true
-//    textView.isHorizontallyResizable = false
-    ////    let maxWidth = self.bounds.width
-//    let maxWidth = 351.0
-//    textView.textContainer?.widthTracksTextView = true
-//    textView.textContainer?.heightTracksTextView = false
-//    textView.textContainer?.size.width = maxWidth // <----
-//    textView.maxSize = NSSize(width: maxWidth, height: 10000) // <----
-//
-//    //    textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
-//    //    textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-//    //     textView.alignment = .natural
-    
+//      textView.setFrameSize(size) // This probably helps...
+//    }
+ 
     textView.delegate = self
 
     return textView
   }()
-
-//  private lazy var contentStackView: NSStackView = {
-//    let stack = NSStackView()
-//    stack.translatesAutoresizingMaskIntoConstraints = false
-//    stack.orientation = .vertical
-//    stack.spacing = Theme.messageVerticalStackSpacing
-//    stack.alignment = .leading
-//    stack.edgeInsets = NSEdgeInsets(
-//      top: 0,
-//      left: 0,
-//      bottom: 0,
-//      right: 0
-//    )
-//    return stack
-//  }()
-
-//  private lazy var horizontalStackView: NSStackView = {
-//    let stack = NSStackView()
-//    stack.translatesAutoresizingMaskIntoConstraints = false
-//    stack.orientation = .horizontal
-//    stack.spacing = Theme.messageHorizontalStackSpacing
-//    stack.edgeInsets = NSEdgeInsets(
-//      top: 0,
-//      left: Theme.messageSidePadding,
-//      bottom: 0,
-//      right: Theme.messageSidePadding
-//    )
-//
-//    stack.alignment = .top
-//    return stack
-//  }()
-//
 
   // MARK: - Initialization
 
@@ -174,8 +135,6 @@ class MessageViewAppKit: NSView {
   // MARK: - Setup
 
   private func setupView() {
-//    wantsLayer = true
-
     if showsName {
       addSubview(nameLabel)
       nameLabel.stringValue = from.firstName ?? from.username ?? ""
@@ -288,7 +247,6 @@ class MessageViewAppKit: NSView {
     messageTextView.textStorage?.setAttributedString(attributedString)
     Self.cacheAttrs.set(key: key, value: attributedString)
     
-//    messageTextView.delegate = self
 //    layoutSubtreeIfNeeded()
   }
 
