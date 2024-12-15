@@ -295,7 +295,7 @@ struct ChatView: View {
         let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
         let peerThreadId: Int64? = if case .thread(let id) = peer { id } else { nil }
 
-        let randomId = Int64.random(in: Int64.min ... Int64.max)
+        let randomId = Int64.random(in: Int64.min...Int64.max)
         let message = Message(
           messageId: -randomId,
           randomId: randomId,
