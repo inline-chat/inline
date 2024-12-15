@@ -16,7 +16,8 @@ class MessageSizeCalculator {
   private var heightForSingleLine: CGFloat?
   
   // This let's us limit number of re-calculations
-  static let widthChangeThreshold = 20.0
+  static let widthChangeThreshold = 10.0
+  static let extraSafeWidth = 8.0
   
   init() {
     textStorage = NSTextStorage()
@@ -61,6 +62,7 @@ class MessageSizeCalculator {
     }
     
     let textHeight = ceil(textSize!.height)
+//    let textWidth = textSize!.width
     let textWidth = textSize!.width
     
     // Mark as single line if height is equal to single line height
@@ -69,7 +71,8 @@ class MessageSizeCalculator {
       minWidthForSingleLine.setObject(NSValue(size: CGSize(width: textWidth, height: textHeight)), forKey: text as NSString)
     }
     
-    var totalHeight = textHeight
+    // don't let it be smaller than that
+    var totalHeight = max(textHeight, heightForSingleLineText())
     
     if props.firstInGroup {
       totalHeight += Theme.messageNameLabelHeight
@@ -123,10 +126,15 @@ class MessageSizeCalculator {
     )
     textStorage.setAttributedString(attributedString)
     layoutManager.ensureLayout(for: textContainer)
+    // Get the glyphRange to ensure we're measuring all content
+    let glyphRange = layoutManager.glyphRange(for: textContainer)
+    let textRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+    
+    // Alternative
+//    let textRect = layoutManager.usedRect(for: textContainer)
 
-    let textRect = layoutManager.usedRect(for: textContainer)
     let textHeight = ceil(textRect.height)
-    let textWidth = textRect.width
+    let textWidth = textRect.width + Self.extraSafeWidth
     
     log.trace("calculateSizeForText \(text) width \(width) resulting in rect \(textRect)")
     

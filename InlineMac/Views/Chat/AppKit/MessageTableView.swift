@@ -6,17 +6,10 @@ import SwiftUI
 class MessagesTableView: NSViewController {
   var width: CGFloat
   
-  private var messages: [FullMessage] = []
-  private var persistentViews: Set<NSTableCellView> = []
-
-  private var scrollObserver: NSObjectProtocol?
-
-  private var pendingMessages: [FullMessage] = []
-  private let sizeCalculator = MessageSizeCalculator()
-
-  private let defaultRowHeight = 44.0
-  
   private let log = Log.scoped("MessagesTableView", enableTracing: true)
+  private var messages: [FullMessage] = []
+  private let sizeCalculator = MessageSizeCalculator()
+  private let defaultRowHeight = 24.0
   
   init(width: CGFloat) {
     self.width = width
@@ -51,10 +44,6 @@ class MessagesTableView: NSViewController {
     table.delegate = self
     table.dataSource = self
   
-//    table.wantsLayer = true
-    //    table.layer?.backgroundColor = .clear
-    // This helps with running listeners on every frame
-//    table.layerContentsRedrawPolicy = .onSetNeedsDisplay
     return table
   }()
   
@@ -70,9 +59,7 @@ class MessagesTableView: NSViewController {
     scroll.borderType = .noBorder
     scroll.drawsBackground = false // Add this line
     scroll.backgroundColor = .clear
-//    scroll.wantsLayer = true
     // Used for quick scroll on resize
-//    scroll.layerContentsRedrawPolicy = .onSetNeedsDisplay
     scroll.translatesAutoresizingMaskIntoConstraints = false
     scroll.documentView = tableView
     scroll.hasVerticalScroller = true
@@ -83,6 +70,7 @@ class MessagesTableView: NSViewController {
     scroll.verticalScroller?.controlSize = .small // This makes it ultra-minimal
 
     scroll.postsBoundsChangedNotifications = true
+    scroll.postsFrameChangedNotifications = true
     scroll.automaticallyAdjustsContentInsets = false
     
     return scroll
@@ -97,6 +85,21 @@ class MessagesTableView: NSViewController {
     super.viewDidLoad()
     setupScrollObserver()
   }
+  
+  private var isScrolling = false
+  private var lastUpdateTime: CFTimeInterval = 0
+
+  private func updateAvatarsIfNeeded() {
+    // Throttle updates during rapid scrolling
+    let currentTime = CACurrentMediaTime()
+    if isScrolling && (currentTime - lastUpdateTime) < 1.0 / 120.0 {
+      return
+    }
+    lastUpdateTime = currentTime
+    
+    log.trace("updateAvatars in bounds changed")
+    updateAvatars()
+  }
 
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did layout and it fixes the issue.
   private func updateScrollViewInsets() {
@@ -106,16 +109,14 @@ class MessagesTableView: NSViewController {
     let contentFrame = window.contentLayoutRect
     let toolbarHeight = windowFrame.height - contentFrame.height
     
-    defer {
+    if scrollView.contentInsets.top != toolbarHeight {
       scrollView.contentInsets = NSEdgeInsets(
         top: toolbarHeight,
         left: 0,
         bottom: 0,
         right: 0
       )
-    }
-    
-    if scrollView.contentInsets.top != toolbarHeight {
+      
       log.debug("Adjusting view's toolbar")
       // Updated
       // TODO: make window toolbar layout and have background to fight the swiftui defaUlt behaviour
@@ -209,7 +210,7 @@ class MessagesTableView: NSViewController {
       object: scrollView
     )
   }
-  
+
   @objc private func scrollWheelBegan() {
     isUserScrolling = true
   }
@@ -236,6 +237,10 @@ class MessagesTableView: NSViewController {
   @objc func scrollViewBoundsChanged(notification: Notification) {
     log.trace("scroll view bounds changed")
     
+    // Update avatars as user scrolls
+    //    updateAvatars()
+    updateAvatarsIfNeeded()
+    
     if needsInitialScroll {
       // reports inaccurate heights at this point
       return
@@ -244,7 +249,7 @@ class MessagesTableView: NSViewController {
     let scrollOffset = scrollView.contentView.bounds.origin
     let viewportSize = scrollView.contentView.bounds.size
     let contentSize = scrollView.documentView?.frame.size ?? .zero
-    let maxScrollableHeight = contentSize.height + Theme.messageListBottomInset - viewportSize.height
+    let maxScrollableHeight = contentSize.height - viewportSize.height
     let currentScrollOffset = scrollOffset.y
     
     // Update scroll position
@@ -252,23 +257,35 @@ class MessagesTableView: NSViewController {
     // Note(@mo): 38 is initial diff which will instantly make atBottom false and break scroll to bottom
     // when initial route is the chat and app is launched. This is a hack to prevent that.
     // but we need to find a way to keep this under 10.0 and instead fix the initial scroll to bottom.
-    isAtBottom = abs(currentScrollOffset - maxScrollableHeight) <= 40.0
+    isAtBottom = abs(currentScrollOffset - maxScrollableHeight) <= 5.0
     
-    if isAtBottom != prevAtBottom {
-      log.trace("isAtBottom changed. isAtBottom = \(isAtBottom) currentScrollOffset = \(currentScrollOffset) maxScrollableHeight = \(maxScrollableHeight)")
-    }
-    
-    // Update avatars as user scrolls
-    updateAvatars()
-    
+    #if DEBUG
+      if isAtBottom != prevAtBottom {
+        log.trace("isAtBottom changed. isAtBottom = \(isAtBottom) currentScrollOffset = \(currentScrollOffset) maxScrollableHeight = \(maxScrollableHeight)")
+      }
+    #endif
+
     // Update heights that might have been changed if a width change happened in a different position
     // because we just update visible portion of the table
     recalculateHeightsOnWidthChange()
+  }
+
+  // Using CFAbsoluteTimeGetCurrent()
+  private func measureTime(_ closure: () -> Void, name: String = "Function") {
+    let start = CFAbsoluteTimeGetCurrent()
+    closure()
+    let end = CFAbsoluteTimeGetCurrent()
+    let timeElapsed = (end - start) * 1000 // Convert to milliseconds
+    log.trace("\(name) took \(String(format: "%.2f", timeElapsed))ms")
   }
   
   var avatarOverlay: AvatarOverlayView { avatarOverlayView }
   
   private func updateAvatars() {
+    _updateAvatars()
+  }
+  
+  private func _updateAvatars() {
     log.trace("update avatars")
     let stickyPadding: CGFloat = 8.0
     let scrollTopInset = scrollView.contentInsets.top
@@ -291,9 +308,7 @@ class MessagesTableView: NSViewController {
         Theme.messageVerticalPadding
     }
     
-    func availableViewportHeight() -> CGFloat {
-      return scrollView.contentView.bounds.height - scrollTopInset
-    }
+    let availableViewportHeight = scrollView.contentView.bounds.height - scrollTopInset
     
     func avatarNaturalPosition(at row: Int) -> CGFloat {
       return viewportHeight - (tableView.rect(ofRow: row).minY - currentOffset) - AvatarOverlayView.size - avatarPadding(at: row)
@@ -336,7 +351,7 @@ class MessagesTableView: NSViewController {
       // Min it with the viewport height - avatar size - padding so it doesn't go out of bounds of screen
       let stickyPosition = min(
         naturalPosition,
-        availableViewportHeight() - AvatarOverlayView.size - stickyPadding
+        availableViewportHeight - AvatarOverlayView.size - stickyPadding
       )
       
       // Find the first visible avatar below the sticky one, we need it so it pushes the sticky avatar up as it's about to overlap
@@ -348,7 +363,7 @@ class MessagesTableView: NSViewController {
         // so it doesn't go above sticky padding immediately before becoming sticky and causing jump
         let nextAvatarPositionWithPadding = min(
           nextAvatarPosition,
-          availableViewportHeight() - AvatarOverlayView.size - stickyPadding
+          availableViewportHeight - AvatarOverlayView.size - stickyPadding
         )
         
         // Calculate the maximum allowed position (just above the next avatar)
@@ -400,12 +415,12 @@ class MessagesTableView: NSViewController {
       processedRows.insert(row)
     }
     
-    // Clean up non-visible avatars
-    let currentAvatars = Set(avatarOverlay.avatarViews.keys)
-    let avatarsToRemove = currentAvatars.subtracting(processedRows)
-    avatarsToRemove.forEach { avatarOverlay.removeAvatar(for: $0) }
-    
-    avatarOverlay.layoutSubtreeIfNeeded()
+    DispatchQueue.main.async {
+      // Clean up non-visible avatars
+      let currentAvatars = Set(self.avatarOverlay.avatarViews.keys)
+      let avatarsToRemove = currentAvatars.subtracting(processedRows)
+      avatarsToRemove.forEach { self.avatarOverlay.removeAvatar(for: $0) }
+    }
   }
 
   @objc func scrollViewFrameChanged(notification: Notification) {
@@ -430,7 +445,6 @@ class MessagesTableView: NSViewController {
     let newWidth = tableView.bounds.width
 //    let newWidth = width
     
-    var notWidthRelated = false
     if lastKnownWidth == 0 {
       lastKnownWidth = newWidth
       recalculateVisibleHeightsWithCache()
@@ -441,9 +455,9 @@ class MessagesTableView: NSViewController {
       recalculateHeightsOnWidthChange()
     }
     
-    log.debug("View did layout")
-    log.debug("View at bottom \(isAtBottom)")
-    log.debug("View needsInitialScroll \(needsInitialScroll)")
+    log.trace("View did layout")
+    log.trace("View at bottom \(isAtBottom)")
+    log.trace("View needsInitialScroll \(needsInitialScroll)")
 
     // Important note:
     // If we stop doing initial scroll soon, it won't go all the way to the bottom initially
@@ -589,43 +603,6 @@ class MessagesTableView: NSViewController {
     let visibleRange = tableView.rows(in: visibleRect)
     return IndexSet(integersIn: Int(visibleRange.location) ..< Int(visibleRange.location + visibleRange.length))
   }
-  
-  private func getNearestAvatarItemIndex() -> Int? {
-    // Guard against invalid state
-    guard tableView.frame.height > 0,
-          tableView.enclosingScrollView != nil,
-          messages.count > 0
-    else {
-      return nil
-    }
-    
-    let topVisibleRect = tableView.visibleRect.divided(
-      atDistance: 20,
-      from: .minYEdge
-    ).slice
-    
-    // Guard against zero rect
-    guard !topVisibleRect.isEmpty else {
-      return nil
-    }
-    
-    let visibleRange = tableView.rows(in: topVisibleRect)
-    let topLocation = visibleRange.location
-    
-    // find the first message that is first in group
-    for i in (0...topLocation).reversed() {
-      if isFirstInGroup(at: i) {
-        return i
-      }
-    }
-    return nil
-  }
-  
-  private func getOffsetFromTopEdge(ofRow row: Int, currentOffset: CGFloat) -> CGFloat {
-    guard row >= 0, row < messages.count else { return 0 }
-    
-    return tableView.rect(ofRow: row).minY - currentOffset
-  }
 
   private func recalculateVisibleHeightsWithCache() {
     let visibleRect = tableView.visibleRect
@@ -633,7 +610,7 @@ class MessagesTableView: NSViewController {
     
     guard visibleRange.location != NSNotFound else { return }
     
-    let bufferCount = 10
+    let bufferCount = 4
     
     // Calculate buffer ranges
     let startIndex = max(0, visibleRange.location - bufferCount)
@@ -649,11 +626,11 @@ class MessagesTableView: NSViewController {
     // disable animations
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
-      tableView.noteHeightOfRows(withIndexesChanged: indexesToUpdate)
       
       // DO WE NEED THIS HERE???
-//      self.tableView
-//        .reloadData(forRowIndexes: visibleIndexesToUpdate, columnIndexes: IndexSet([0]))
+      self.tableView
+        .reloadData(forRowIndexes: indexesToUpdate, columnIndexes: IndexSet([0]))
+      tableView.noteHeightOfRows(withIndexesChanged: indexesToUpdate)
     }
   }
   
@@ -663,7 +640,7 @@ class MessagesTableView: NSViewController {
     
     guard visibleRange.location != NSNotFound else { return }
     
-    let bufferCount = 5
+    let bufferCount = 0
     
     // Calculate ranges
     let visibleStartIndex = max(0, visibleRange.location - bufferCount)
@@ -677,25 +654,15 @@ class MessagesTableView: NSViewController {
     
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
-      self.tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
       // To send new props
       self.tableView
         .reloadData(forRowIndexes: visibleIndexesToUpdate, columnIndexes: IndexSet([0]))
+      // Optimize by not calling for offscreen items
+      self.tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
     }
   }
 
-  private func recalculateAllHeights() {
-    let indexesToUpdate = IndexSet(
-      integersIn: 0 ..< tableView.numberOfRows
-    )
-      
-    // disable animations
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0
-      self.tableView.noteHeightOfRows(withIndexesChanged: indexesToUpdate)
-    }
-  }
-  
+  // TODO: Intended to use for load more
 //  private func preserveScrollPosition(during update: () -> Void) {
 //    let scrollView = tableView.enclosingScrollView!
 //    let visibleRect = tableView.visibleRect
@@ -754,7 +721,7 @@ extension MessagesTableView: NSTableViewDelegate {
   func isFirstMessage(at row: Int) -> Bool {
     return row == 0
   }
-
+  
   func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     guard row >= 0, row < messages.count else { return nil }
       
@@ -771,9 +738,10 @@ extension MessagesTableView: NSTableViewDelegate {
       isLastMessage: isLastMessage(at: row),
       isFirstMessage: isFirstMessage(at: row)
     )
-//    var props = MessageViewProps(firstInGroup: true)
+
     let tableWidth = width
-//    let tableWidth = tableView.bounds.width
+    // let tableWidth = tableView.bounds.width
+    
     let size = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
     props.width = size.width
     props.height = size.height
@@ -797,6 +765,7 @@ extension MessagesTableView: NSTableViewDelegate {
     
     let tableWidth = width
 //    let tableWidth = tableView.bounds.width
+    
     let size = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
     return size.height
   }
