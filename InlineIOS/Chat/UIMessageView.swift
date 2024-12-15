@@ -18,14 +18,15 @@ class UIMessageView: UIView {
     let view = UIView()
     view.layer.cornerRadius = 18
     view.translatesAutoresizingMaskIntoConstraints = false
+
     return view
   }()
 
-  private let metadataView: MessageMetadata = {
-    let metadata = MessageMetadata(date: Date(), status: nil, isOutgoing: false)
-    metadata.translatesAutoresizingMaskIntoConstraints = false
-    return metadata
-  }()
+//  private let metadataView: MessageMetadata = {
+//    let metadata = MessageMetadata(date: Date(), status: nil, isOutgoing: false)
+//    metadata.translatesAutoresizingMaskIntoConstraints = false
+//    return metadata
+//  }()
 
   private var leadingConstraint: NSLayoutConstraint?
   private var trailingConstraint: NSLayoutConstraint?
@@ -53,47 +54,30 @@ class UIMessageView: UIView {
   private func setupViews() {
     addSubview(bubbleView)
     bubbleView.addSubview(messageLabel)
-    bubbleView.addSubview(metadataView)
 
-    let leading = bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor)
-    let trailing = bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor)
+    // Create constraints with proper constants
+    leadingConstraint = bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8)
+    trailingConstraint = bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8)
 
-    leadingConstraint = leading
-    trailingConstraint = trailing
-
-    var constraints = [
-      bubbleView.topAnchor.constraint(equalTo: topAnchor),
-      bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
-
-      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: verticalPadding),
-      messageLabel.leadingAnchor.constraint(
-        equalTo: bubbleView.leadingAnchor, constant: horizontalPadding
-      ),
-      messageLabel.bottomAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor, constant: -verticalPadding
-      ),
-
-      metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
-      metadataView.trailingAnchor.constraint(
-        equalTo: bubbleView.trailingAnchor, constant: -horizontalPadding
-      ),
-      metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
-    ]
-
+    // Activate initial alignment based on message direction
     if fullMessage.message.out == true {
       trailingConstraint?.isActive = true
     } else {
       leadingConstraint?.isActive = true
     }
 
-    NSLayoutConstraint.activate(constraints)
+    NSLayoutConstraint.activate([
+      // Bubble view constraints
+      bubbleView.topAnchor.constraint(equalTo: topAnchor),
+      bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
 
-    messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    messageLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-    metadataView.setContentCompressionResistancePriority(.required, for: .horizontal)
-    metadataView.setContentHuggingPriority(.required, for: .horizontal)
+      // Message label constraints - Add trailing constraint
+      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: verticalPadding),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: horizontalPadding),
+      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -horizontalPadding),
+      messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -verticalPadding)
+    ])
 
     let interaction = UIContextMenuInteraction(delegate: self)
     bubbleView.addInteraction(interaction)
@@ -107,21 +91,11 @@ class UIMessageView: UIView {
       leadingConstraint?.isActive = false
       trailingConstraint?.isActive = true
       messageLabel.textColor = .white
-      metadataView.configure(
-        date: fullMessage.message.date,
-        status: fullMessage.message.status,
-        isOutgoing: true
-      )
     } else {
       bubbleView.backgroundColor = UIColor.systemGray6.withAlphaComponent(0.7)
       leadingConstraint?.isActive = true
       trailingConstraint?.isActive = false
       messageLabel.textColor = .label
-      metadataView.configure(
-        date: fullMessage.message.date,
-        status: nil,
-        isOutgoing: false
-      )
     }
   }
 
@@ -136,15 +110,15 @@ class UIMessageView: UIView {
     super.layoutSubviews()
   }
 
-  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-    super.traitCollectionDidChange(previousTraitCollection)
-
-    if previousTraitCollection?.preferredContentSizeCategory
-      != traitCollection.preferredContentSizeCategory
-    {
-      setNeedsLayout()
-    }
-  }
+//  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+//    super.traitCollectionDidChange(previousTraitCollection)
+//
+//    if previousTraitCollection?.preferredContentSizeCategory
+//      != traitCollection.preferredContentSizeCategory
+//    {
+//      setNeedsLayout()
+//    }
+//  }
 }
 
 // MARK: - Context Menu

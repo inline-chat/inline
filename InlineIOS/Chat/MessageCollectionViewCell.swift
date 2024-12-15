@@ -45,17 +45,38 @@ class MessageCollectionViewCell: UICollectionViewCell {
     contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
   }
 
+//  override func preferredLayoutAttributesFitting(
+//    _ layoutAttributes: UICollectionViewLayoutAttributes
+//  ) -> UICollectionViewLayoutAttributes {
+//    let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
+//
+//    // Force layout before measurement
+//    setNeedsLayout()
+//    layoutIfNeeded()
+//
+//    let size = contentView.systemLayoutSizeFitting(
+//      CGSize(width: 0, height: 0),
+//      withHorizontalFittingPriority: .required,
+//      verticalFittingPriority: .fittingSizeLevel
+//    )
+//
+//    attributes.frame.size = size
+//    return attributes
+//  }
+
   override func preferredLayoutAttributesFitting(
     _ layoutAttributes: UICollectionViewLayoutAttributes
   ) -> UICollectionViewLayoutAttributes {
     let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
-
-    // Force layout before measurement
-    setNeedsLayout()
     layoutIfNeeded()
 
+    let targetSize = CGSize(
+      width: layoutAttributes.frame.width,
+      height: UIView.layoutFittingCompressedSize.height
+    )
+
     let size = contentView.systemLayoutSizeFitting(
-      CGSize(width: layoutAttributes.frame.width, height: 0),
+      targetSize,
       withHorizontalFittingPriority: .required,
       verticalFittingPriority: .fittingSizeLevel
     )
