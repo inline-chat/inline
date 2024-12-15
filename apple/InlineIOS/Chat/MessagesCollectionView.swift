@@ -71,7 +71,9 @@ final class MessagesCollectionView: UIView {
     layout.scrollDirection = .vertical
 
     // Remove automatic sizing which can cause conflicts
-    layout.estimatedItemSize = .zero
+//    layout.estimatedItemSize = .zero
+    layout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
+
     return layout
   }
 
@@ -322,7 +324,7 @@ final class MessagesCollectionView: UIView {
       // Create a temporary cell to calculate the proper height
       let cell = MessageCollectionViewCell(frame: .zero)
       let message = fullMessages[indexPath.item]
-      cell.configure(with: message, topPadding: 0, bottomPadding: 0)
+      cell.configure(with: message, topPadding: 2, bottomPadding: 0)
 
       let size = cell.contentView.systemLayoutSizeFitting(
         CGSize(width: availableWidth, height: 0),
@@ -332,6 +334,18 @@ final class MessagesCollectionView: UIView {
 
       return size
     }
+
+//    func collectionView(
+//      _ collectionView: UICollectionView,
+//      layout collectionViewLayout: UICollectionViewLayout,
+//      sizeForItemAt indexPath: IndexPath
+//    ) -> CGSize {
+//      let availableWidth = collectionView.bounds.width - 24
+//
+//      // Return full width with estimated height
+//      // Actual height will be adjusted by the cell's preferredLayoutAttributesFitting
+//      return CGSize(width: availableWidth, height: 1)
+//    }
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
