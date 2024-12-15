@@ -47,6 +47,8 @@ class UIMessageView: UIView {
   private let horizontalPadding: CGFloat = 12
   private let verticalPadding: CGFloat = 8
 
+  private let embedView: UIHostingController<MessageEmbedView>? = nil
+
   // MARK: - Initialization
 
   init(fullMessage: FullMessage) {
@@ -98,6 +100,28 @@ class UIMessageView: UIView {
     // Remove existing arrangement
     contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
     shortMessageStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+    // Add embed view if message is a reply
+    if let repliedToMessageId = fullMessage.message.repliedToMessageId {
+      let embedView = UIHostingController(
+        rootView: MessageEmbedView(repliedToMessageId: repliedToMessageId)
+      )
+      embedView.view.backgroundColor = UIColor.clear
+
+      // Create container with leading alignment
+      let embedContainer = UIView()
+      embedContainer.addSubview(embedView.view)
+      embedView.view.translatesAutoresizingMaskIntoConstraints = false
+
+      NSLayoutConstraint.activate([
+        embedView.view.topAnchor.constraint(equalTo: embedContainer.topAnchor),
+        embedView.view.leadingAnchor.constraint(equalTo: embedContainer.leadingAnchor),
+        embedView.view.trailingAnchor.constraint(equalTo: embedContainer.trailingAnchor),
+        embedView.view.bottomAnchor.constraint(equalTo: embedContainer.bottomAnchor),
+      ])
+
+      contentStack.addArrangedSubview(embedContainer)
+    }
 
     let messageLength = fullMessage.message.text?.count ?? 0
     let messageText = fullMessage.message.text ?? ""
@@ -208,8 +232,8 @@ extension String {
     guard let firstChar = first else { return false }
     let earlyRTL =
       firstChar.unicodeScalars.first?.properties.generalCategory == .otherLetter
-      && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
-      && firstChar.unicodeScalars.first!.value <= 0x08FF
+        && firstChar.unicodeScalars.first != nil && firstChar.unicodeScalars.first!.value >= 0x0590
+        && firstChar.unicodeScalars.first!.value <= 0x08FF
 
     if earlyRTL { return true }
 
