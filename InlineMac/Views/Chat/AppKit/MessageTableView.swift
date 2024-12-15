@@ -16,7 +16,7 @@ class MessagesTableView: NSViewController {
 
   private let defaultRowHeight = 44.0
   
-  private let log = Log.scoped("MessagesTableView", enableTracing: false)
+  private let log = Log.scoped("MessagesTableView", enableTracing: true)
   
   init(width: CGFloat) {
     self.width = width
@@ -98,7 +98,6 @@ class MessagesTableView: NSViewController {
     setupScrollObserver()
   }
 
-
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did layout and it fixes the issue.
   private func updateScrollViewInsets() {
     guard let window = view.window else { return }
@@ -106,6 +105,15 @@ class MessagesTableView: NSViewController {
     let windowFrame = window.frame
     let contentFrame = window.contentLayoutRect
     let toolbarHeight = windowFrame.height - contentFrame.height
+    
+    defer {
+      scrollView.contentInsets = NSEdgeInsets(
+        top: toolbarHeight,
+        left: 0,
+        bottom: 0,
+        right: 0
+      )
+    }
     
     if scrollView.contentInsets.top != toolbarHeight {
       log.debug("Adjusting view's toolbar")
@@ -115,13 +123,6 @@ class MessagesTableView: NSViewController {
       window.titlebarAppearsTransparent = false
       window.isMovableByWindowBackground = true
     }
-    
-    scrollView.contentInsets = NSEdgeInsets(
-      top: toolbarHeight,
-      left: 0,
-      bottom: 0,
-      right: 0
-    )
   }
   
   private func setupViews() {
@@ -148,6 +149,8 @@ class MessagesTableView: NSViewController {
     guard messages.count > 0 else { return }
     
     let lastRow = messages.count - 1
+    isProgrammaticScroll = true
+    defer { isProgrammaticScroll = false }
     
     if animated {
       // Causes clipping at the top
@@ -190,8 +193,33 @@ class MessagesTableView: NSViewController {
                                            selector: #selector(scrollViewBoundsChanged),
                                            name: NSView.boundsDidChangeNotification,
                                            object: scrollView.contentView)
+    
+    // Add scroll wheel notification
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(scrollWheelBegan),
+      name: NSScrollView.willStartLiveScrollNotification,
+      object: scrollView
+    )
+    
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(scrollWheelEnded),
+      name: NSScrollView.didEndLiveScrollNotification,
+      object: scrollView
+    )
   }
   
+  @objc private func scrollWheelBegan() {
+    isUserScrolling = true
+  }
+  
+  @objc private func scrollWheelEnded() {
+    isUserScrolling = false
+  }
+
+  private var isProgrammaticScroll = false
+  private var isUserScrolling = false
   private var isAtBottom = true
   
   private var prevContentSize: CGSize = .zero
@@ -376,6 +404,8 @@ class MessagesTableView: NSViewController {
     let currentAvatars = Set(avatarOverlay.avatarViews.keys)
     let avatarsToRemove = currentAvatars.subtracting(processedRows)
     avatarsToRemove.forEach { avatarOverlay.removeAvatar(for: $0) }
+    
+    avatarOverlay.layoutSubtreeIfNeeded()
   }
 
   @objc func scrollViewFrameChanged(notification: Notification) {
@@ -404,14 +434,19 @@ class MessagesTableView: NSViewController {
     if lastKnownWidth == 0 {
       lastKnownWidth = newWidth
       recalculateVisibleHeightsWithCache()
-    } else if abs(newWidth - lastKnownWidth) > 0.1 {
+    } else if abs(newWidth - lastKnownWidth) > MessageSizeCalculator.widthChangeThreshold {
+//    } else if abs(newWidth - lastKnownWidth) > 0.1 {
       // Handle height re-calc on width change
       lastKnownWidth = newWidth
       recalculateHeightsOnWidthChange()
-    } else {
-      notWidthRelated = true
     }
+    
+    log.debug("View did layout")
+    log.debug("View at bottom \(isAtBottom)")
+    log.debug("View needsInitialScroll \(needsInitialScroll)")
 
+    // Important note:
+    // If we stop doing initial scroll soon, it won't go all the way to the bottom initially
     if needsInitialScroll && !messages.isEmpty {
       scrollToBottom(animated: false)
       // Avatar would flash initially without this
@@ -507,16 +542,16 @@ class MessagesTableView: NSViewController {
       tableView.endUpdates()
       
       if oldMessages.last != messages.last {
+        // TODO: See if we can optimize here
         // last message changed height
         tableView.reloadData(forRowIndexes: IndexSet([messages.count - 2, messages.count - 1]), columnIndexes: IndexSet([0]))
         recalculateVisibleHeightsWithCache()
       }
 
       // Handle scroll position
-      if (!removals.isEmpty || !insertions.isEmpty) && wasAtBottom && !isInitialUpdate {
-//        DispatchQueue.main.async {
-        self.scrollToBottom(animated: true)
-//        }
+      if (!removals.isEmpty || !insertions.isEmpty) && wasAtBottom {
+        // Only animate if it's not the initial load
+        self.scrollToBottom(animated: !isInitialUpdate)
       }
       
     } completionHandler: { [weak self] in
@@ -614,22 +649,20 @@ class MessagesTableView: NSViewController {
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
       tableView.noteHeightOfRows(withIndexesChanged: indexesToUpdate)
+      
+      // DO WE NEED THIS HERE???
+//      self.tableView
+//        .reloadData(forRowIndexes: visibleIndexesToUpdate, columnIndexes: IndexSet([0]))
     }
   }
   
-  private var heightUpdateWorkItem: DispatchWorkItem?
-  private let heightUpdateQueue = DispatchQueue(label: "com.app.heightUpdate", qos: .userInitiated)
-
   private func recalculateHeightsOnWidthChange() {
-    // Cancel any pending updates
-    heightUpdateWorkItem?.cancel()
-    
     let visibleRect = tableView.visibleRect
     let visibleRange = tableView.rows(in: visibleRect)
     
     guard visibleRange.location != NSNotFound else { return }
     
-    let bufferCount = 10
+    let bufferCount = 5
     
     // Calculate ranges
     let visibleStartIndex = max(0, visibleRange.location - bufferCount)
@@ -644,6 +677,9 @@ class MessagesTableView: NSViewController {
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
       self.tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
+      // To send new props
+      self.tableView
+        .reloadData(forRowIndexes: visibleIndexesToUpdate, columnIndexes: IndexSet([0]))
     }
   }
 
@@ -676,6 +712,11 @@ class MessagesTableView: NSViewController {
 //      scrollView.contentView.scroll(newOffset)
 //    }
 //  }
+  
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+    contentSizeObserver?.invalidate()
+  }
 }
 
 extension MessagesTableView: NSTableViewDataSource {
