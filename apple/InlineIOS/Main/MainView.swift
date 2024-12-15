@@ -163,7 +163,6 @@ private extension MainView {
       }
     }
     .listStyle(.plain)
-    .padding(.vertical, 8)
   }
 
   var spacesSection: some View {
