@@ -3,7 +3,7 @@ import { setup } from "@in/server/setup"
 import { gitCommitHash, relativeBuildDate, version } from "@in/server/buildEnv"
 import { html } from "@elysiajs/html"
 
-export const root = new Elysia({ scoped: true })
+export const root = new Elysia({ scoped: true, name: "root", prefix: "/" })
   .use(setup)
   // NOTE(@mo): This plugin breaks the error handling ref: https://github.com/elysiajs/elysia/issues/747
   // I used scoped: true to fix it for now
@@ -29,12 +29,12 @@ export const root = new Elysia({ scoped: true })
               background-image: linear-gradient(180deg, #111, #333);
             }
             body {
+             padding: 0;
+              margin: 0;
               font-family: monospace;
               font-size: 16px;
               line-height: 1.5;
-              
               color: #eee;
-              padding: 20px;
               height: 100%;
             }
             h1, h2 {
@@ -54,23 +54,39 @@ export const root = new Elysia({ scoped: true })
               margin-right: 2px;
             }
             footer {
-              border-top: 1px solid #555;
+              border-top: 1px solid #333;
               padding-top: 20px;
               font-size: 16px;
-              max-width: 500px;
+              max-width: 300px;
+              opacity: 0.8;
             }
+            footer a {
+              display: block;
+            }
+            footer ul {
+              padding: 0; 
+              margin: 0;
+              padding-left: 20px;
+            }
+            footer li {
+              margin-bottom: 10px;
+            }
+              
           </style>
         </head>
         <body>
+        <div style="padding: 40px;">
           <h1>${title}</h1>
           <p>${subtitle}</p>
           <footer style="margin-top: 20px;">
-          <a href="https://inline.chat">inline.chat</a>
-          <a><span>•</span></a>
-          <a href="https://status.inline.chat">is inline down?</a>
-          <a><span>•</span></a>
-          <a href="mailto:hi@inline.chat">hi@inline.chat</a>
+          <ul>
+          <li><a href="https://inline.chat">inline.chat</a></li>
+          <li><a href="https://status.inline.chat">is inline down?</a></li>
+          <li><a href="https://api.inline.chat/v1/docs">API docs (preview)</a></li>
+          <li><a href="mailto:hi@inline.chat">hi@inline.chat</a></li>
+          </ul>
           </footer>
+          </div>
         </body>
       </html>
     `
