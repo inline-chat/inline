@@ -15,33 +15,6 @@ struct ChatRowView: View {
     composeActions.getComposeAction(for: Peer(userId: item.user.id))?.action
   }
 
-  private func formatDate(_ date: Date) -> String {
-    let calendar = Calendar.current
-    let now = Date()
-    let components = calendar.dateComponents([.day], from: date, to: now)
-    let daysAgo = components.day ?? 0
-
-    if calendar.isDateInToday(date) {
-      // Today: Show time in 24-hour format
-      let formatter = DateFormatter()
-      formatter.dateFormat = "HH:mm"
-      return formatter.string(from: date)
-    } else if calendar.isDateInYesterday(date) {
-      // Yesterday
-      return "Yesterday"
-    } else if daysAgo < 7 {
-      // Within last week: Show day name
-      let formatter = DateFormatter()
-      formatter.dateFormat = "EEEE"
-      return formatter.string(from: date)
-    } else {
-      // Older messages: Show date
-      let formatter = DateFormatter()
-      formatter.dateFormat = "dd/MM/yy"
-      return formatter.string(from: date)
-    }
-  }
-
   var body: some View {
     HStack(alignment: .top) {
       if item.user.id == Auth.shared.getCurrentUserId() {
@@ -50,10 +23,13 @@ struct ChatRowView: View {
         UserAvatar(user: item.user, size: 36)
           .padding(.trailing, 6)
           .overlay(alignment: .bottomTrailing) {
-            Circle()
-              .fill(.green)
-              .frame(width: 12, height: 12)
-              .padding(.leading, -14)
+            if item.user.online == true {
+              Circle()
+                .fill(.green)
+                .frame(width: 11, height: 11)
+                .padding(.leading, -15)
+                .padding(.top, -14)
+            }
           }
       }
 
@@ -67,7 +43,7 @@ struct ChatRowView: View {
           .fontWeight(.medium)
           .foregroundColor(.primary)
           Spacer()
-          Text(formatDate(item.message?.date ?? Date()))
+          Text(item.message?.date.formatted() ?? "")
             .font(.callout)
             .foregroundColor(.secondary)
         }
