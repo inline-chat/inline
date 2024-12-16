@@ -26,7 +26,7 @@ struct ChatRowView: View {
             if item.user.online == true {
               Circle()
                 .fill(.green)
-                .frame(width: 11, height: 11)
+                .frame(width: 10, height: 10)
                 .padding(.leading, -15)
                 .padding(.top, -14)
             }
