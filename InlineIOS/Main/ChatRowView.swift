@@ -9,6 +9,12 @@ struct ChatRowView: View {
     item.chat?.type ?? .privateChat
   }
 
+  @ObservedObject var composeActions: ComposeActions = .shared
+
+  private func currentComposeAction() -> ApiComposeAction? {
+    composeActions.getComposeAction(for: Peer(userId: item.user.id))?.action
+  }
+
   private func formatDate(_ date: Date) -> String {
     let calendar = Calendar.current
     let now = Date()
@@ -54,13 +60,18 @@ struct ChatRowView: View {
             .foregroundColor(.secondary)
         }
 
-        if let text = item.message?.text {
+        if currentComposeAction()?.rawValue.isEmpty == false {
+          Text("\(currentComposeAction()?.rawValue ?? "")...")
+            .font(.callout)
+            .foregroundColor(.secondary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let text = item.message?.text {
           Text(text.replacingOccurrences(of: "\n", with: " "))
             .font(.callout)
             .foregroundColor(.secondary)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
-
         } else {
           Text("No messages yet")
             .font(.callout)
