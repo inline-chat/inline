@@ -10,6 +10,7 @@ struct MainView: View {
 
   @EnvironmentObject private var nav: Navigation
   @Environment(\.appDatabase) private var database
+  @Environment(\.scenePhase) private var scene
   @Environment(\.auth) private var auth
   @EnvironmentObject private var api: ApiClient
   @EnvironmentObject private var ws: WebSocketManager
@@ -71,6 +72,29 @@ struct MainView: View {
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
+    .onAppear {
+      Task {
+        try? await dataManager.updateStatus(online: true)
+      }
+    }
+    .onChange(of: scene) { _, newScene in
+      switch newScene {
+      case .active:
+        Task {
+          try? await dataManager.updateStatus(online: true)
+        }
+      case .inactive:
+        Task {
+          try? await dataManager.updateStatus(online: false)
+        }
+      case .background:
+        Task {
+          try? await dataManager.updateStatus(online: false)
+        }
+      default:
+        break
+      }
+    }
     .task {
       notificationHandler.setAuthenticated(value: true)
       do {
