@@ -214,6 +214,30 @@ struct ChatView: View {
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
 
+  @ObservedObject var composeActions: ComposeActions = .shared
+
+  private func currentComposeAction() -> ApiComposeAction? {
+    composeActions.getComposeAction(for: peer)?.action
+  }
+
+  static let formatter = RelativeDateTimeFormatter()
+  private func getLastOnlineText(date: Date?) -> String {
+    guard let date = date else { return "" }
+    Self.formatter.dateTimeStyle = .named
+    return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
+  }
+
+  var subtitle: String {
+    // TODO: support threads
+    if let composeAction = currentComposeAction() {
+      return composeAction.rawValue
+    } else if let online = fullChatViewModel.peerUser?.online {
+      return online ? "online" : (fullChatViewModel.peerUser?.lastOnline != nil ? getLastOnlineText(date: fullChatViewModel.peerUser?.lastOnline) : "offline")
+    } else {
+      return "last seen recently"
+    }
+  }
+
   init(peer: Peer) {
     self.peer = peer
     _fullChatViewModel = EnvironmentStateObject { env in
@@ -230,9 +254,14 @@ struct ChatView: View {
     )
     .toolbar {
       ToolbarItem(placement: .principal) {
-        Text(title)
-          .font(.body)
-          .fontWeight(.semibold)
+        VStack {
+          Text(title)
+            .font(.body)
+            .fontWeight(.semibold)
+          Text(subtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
     }
     .navigationBarHidden(false)
@@ -241,6 +270,14 @@ struct ChatView: View {
     .toolbarTitleDisplayMode(.inline)
     .onAppear {
       fetchMessages()
+    }
+    .onChange(of: text) { newText in
+      // Send compose action for typing
+      if newText.isEmpty {
+        Task { await ComposeActions.shared.stoppedTyping(for: peer) }
+      } else {
+        Task { await ComposeActions.shared.startedTyping(for: peer) }
+      }
     }
     .onChange(of: scenePhase) { _, newPhase in
       if newPhase == .active {
@@ -295,7 +332,7 @@ struct ChatView: View {
         let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
         let peerThreadId: Int64? = if case .thread(let id) = peer { id } else { nil }
 
-        let randomId = Int64.random(in: Int64.min...Int64.max)
+        let randomId = Int64.random(in: Int64.min ... Int64.max)
         let message = Message(
           messageId: -randomId,
           randomId: randomId,
