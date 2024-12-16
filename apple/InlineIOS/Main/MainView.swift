@@ -72,7 +72,7 @@ struct MainView: View {
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
-    
+
     .task {
       notificationHandler.setAuthenticated(value: true)
       do {
