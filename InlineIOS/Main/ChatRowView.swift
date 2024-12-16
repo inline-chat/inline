@@ -18,18 +18,26 @@ struct ChatRowView: View {
   private func formatDate(_ date: Date) -> String {
     let calendar = Calendar.current
     let now = Date()
-    let components = calendar.dateComponents([.second], from: date, to: now)
+    let components = calendar.dateComponents([.day], from: date, to: now)
+    let daysAgo = components.day ?? 0
 
-    if let seconds = components.second, seconds < 60 {
-      return "now"
-    } else if calendar.isDateInToday(date) {
+    if calendar.isDateInToday(date) {
+      // Today: Show time in 24-hour format
       let formatter = DateFormatter()
-      formatter.dateFormat = "h:mm a"
-      formatter.amSymbol = ""
-      return formatter.string(from: date).replacingOccurrences(of: " PM", with: "PM")
+      formatter.dateFormat = "HH:mm"
+      return formatter.string(from: date)
+    } else if calendar.isDateInYesterday(date) {
+      // Yesterday
+      return "Yesterday"
+    } else if daysAgo < 7 {
+      // Within last week: Show day name
+      let formatter = DateFormatter()
+      formatter.dateFormat = "EEEE"
+      return formatter.string(from: date)
     } else {
+      // Older messages: Show date
       let formatter = DateFormatter()
-      formatter.dateFormat = "MMM d, h:mm"
+      formatter.dateFormat = "dd/MM/yy"
       return formatter.string(from: date)
     }
   }
@@ -51,9 +59,13 @@ struct ChatRowView: View {
 
       VStack(alignment: .leading) {
         HStack {
-          Text(type == .privateChat ? item.user.id == Auth.shared.getCurrentUserId() ? "Saved Message" : item.user.firstName ?? "" : item.chat?.title ?? "")
-            .fontWeight(.medium)
-            .foregroundColor(.primary)
+          Text(
+            type == .privateChat
+              ? item.user.id == Auth.shared.getCurrentUserId()
+              ? "Saved Message" : item.user.firstName ?? "" : item.chat?.title ?? ""
+          )
+          .fontWeight(.medium)
+          .foregroundColor(.primary)
           Spacer()
           Text(formatDate(item.message?.date ?? Date()))
             .font(.callout)
@@ -88,7 +100,14 @@ struct ChatRowView: View {
   @ViewBuilder
   var savedMessageSymbol: some View {
     Circle()
-      .fill(LinearGradient(colors: [ColorManager.shared.swiftUIColor.adjustLuminosity(by: 0.3), ColorManager.shared.swiftUIColor.adjustLuminosity(by: -0.1)], startPoint: .topLeading, endPoint: .bottomTrailing))
+      .fill(
+        LinearGradient(
+          colors: [
+            ColorManager.shared.swiftUIColor.adjustLuminosity(by: 0.3),
+            ColorManager.shared.swiftUIColor.adjustLuminosity(by: -0.1),
+          ], startPoint: .topLeading, endPoint: .bottomTrailing
+        )
+      )
       .frame(width: 36, height: 36)
       .overlay(alignment: .center) {
         Image(systemName: "bookmark.fill")
