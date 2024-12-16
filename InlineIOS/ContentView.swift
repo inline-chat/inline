@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
   @Environment(\.auth) private var auth
+  @Environment(\.scenePhase) private var scene
 
   @EnvironmentObject private var nav: Navigation
   @EnvironmentStateObject private var dataManager: DataManager
@@ -31,6 +32,27 @@ struct ContentView: View {
         .sheet(item: $nav.activeSheet) { destination in
           sheetContent(for: destination)
         }
+        .onAppear {
+          Task {
+            try? await dataManager.updateStatus(online: true)
+          }
+        }
+
+        .onChange(of: scene) { _, newScene in
+          switch newScene {
+          case .active:
+            Task {
+              try? await dataManager.updateStatus(online: true)
+            }
+          case .inactive:
+            break
+          case .background:
+            break
+          default:
+            break
+          }
+        }
+
       case .onboarding:
         OnboardingView()
       }

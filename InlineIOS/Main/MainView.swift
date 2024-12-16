@@ -72,29 +72,7 @@ struct MainView: View {
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
-    .onAppear {
-      Task {
-        try? await dataManager.updateStatus(online: true)
-      }
-    }
-    .onChange(of: scene) { _, newScene in
-      switch newScene {
-      case .active:
-        Task {
-          try? await dataManager.updateStatus(online: true)
-        }
-      case .inactive:
-        Task {
-          try? await dataManager.updateStatus(online: false)
-        }
-      case .background:
-        Task {
-          try? await dataManager.updateStatus(online: false)
-        }
-      default:
-        break
-      }
-    }
+    
     .task {
       notificationHandler.setAuthenticated(value: true)
       do {
