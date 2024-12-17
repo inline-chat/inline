@@ -1,70 +1,126 @@
-import GRDB
 import InlineKit
-import SwiftUI
-
-struct MessageEmbedView: View {
-  var repliedToMessageId: Int64
-
-  @Environment(\.appDatabase) var db
-  @State private var repliedToMessage: FullMessage?
-
-  init(repliedToMessageId: Int64) {
-    self.repliedToMessageId = repliedToMessageId
-  }
-
-  var body: some View {
-    VStack(alignment: .leading) {
-      Text(repliedToMessage?.user?.firstName ?? "")
-        .font(.caption)
-        .foregroundStyle(repliedToMessage?.message.out == true ? .white : .secondary)
-      Text(repliedToMessage?.message.text ?? "")
-        .font(.callout)
-        .lineLimit(2)
-        .foregroundStyle(repliedToMessage?.message.out == true ? .white : .secondary)
-    }
-
-    .frame(height: 38)
-    .padding(6)
-    .background(.white.opacity(0.2))
-    .cornerRadius(12)
-
-    .onAppear {
-      fetchRepliedMessage()
-    }
-    .onChange(of: repliedToMessageId) {
-      fetchRepliedMessage()
-    }
-  }
-
-  private func fetchRepliedMessage() {
-    print("Fetching replied message: \(repliedToMessageId)")
-    Task {
-      do {
-        let message = try await db.dbWriter.read { db in
-          try Message
-            .filter(Column("messageId") == repliedToMessageId)
-            .including(optional: Message.from)
-            .asRequest(of: FullMessage.self)
-            .fetchOne(db)
-        }
-        await MainActor.run {
-          self.repliedToMessage = message
-          print("Fetched message: \(String(describing: message))")
-        }
-      } catch {
-        Log.shared.error("Failed to fetch replied message", error: error)
-      }
+import UIKit
+class MessageEmbedView: UIView {
+  // MARK: - UI Components
+    
+  private let containerView: UIView = {
+    let view = UIView()
+    view.layer.cornerRadius = 8
+    view.clipsToBounds = true
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+    
+  private let verticalBar: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+    
+  private let nameLabel: UILabel = {
+    let label = UILabel()
+    label.font = .systemFont(ofSize: 13, weight: .medium)
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
+    
+  private let messageLabel: UILabel = {
+    let label = UILabel()
+    label.font = .systemFont(ofSize: 15)
+    label.numberOfLines = 1
+    label.lineBreakMode = .byTruncatingTail
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
+    
+  private let stackView: UIStackView = {
+    let stack = UIStackView()
+    stack.axis = .vertical
+    stack.spacing = 2
+    stack.alignment = .leading
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }()
+    
+  // MARK: - Properties
+    
+  private var repliedToMessage: Message? {
+    didSet {
+      updateContent()
     }
   }
-}
-
-#Preview {
-  VStack(spacing: 20) {
-    // Preview with full data
-    MessageEmbedView(repliedToMessageId: 1)
-      .previewsEnvironment(.populated)
-      .padding()
+    
+  // MARK: - Initialization
+    
+  init(repliedToMessage: Message?) {
+    super.init(frame: .zero)
+    self.repliedToMessage = repliedToMessage
+    setupViews()
   }
-  .frame(width: 300, height: 300)
-  .background(.red)
+    
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+    
+  // MARK: - Setup
+    
+  private func setupViews() {
+    addSubview(containerView)
+    containerView.addSubview(verticalBar)
+    containerView.addSubview(stackView)
+        
+    stackView.addArrangedSubview(nameLabel)
+    stackView.addArrangedSubview(messageLabel)
+        
+    NSLayoutConstraint.activate([
+      // Container constraints
+      containerView.topAnchor.constraint(equalTo: topAnchor),
+      containerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      containerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            
+      // Vertical bar constraints
+      verticalBar.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 4),
+      verticalBar.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 4),
+      verticalBar.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -4),
+      verticalBar.widthAnchor.constraint(equalToConstant: 2),
+            
+      // Stack view constraints
+      stackView.leadingAnchor.constraint(equalTo: verticalBar.trailingAnchor, constant: 8),
+      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8),
+      stackView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+            
+      // Fixed height for better performance
+      containerView.heightAnchor.constraint(equalToConstant: 44)
+    ])
+  }
+    
+  private func updateContent() {
+    guard let message = repliedToMessage else { return }
+        
+    let isOutgoing = message.out == true
+    let backgroundColor: UIColor = isOutgoing ?
+      .systemBlue.withAlphaComponent(0.1) :
+      .systemGray6.withAlphaComponent(0.7)
+    let barColor: UIColor = isOutgoing ? .systemBlue : .systemGray3
+    let textColor: UIColor = .label
+        
+    containerView.backgroundColor = backgroundColor
+    verticalBar.backgroundColor = barColor
+    nameLabel.textColor = textColor.withAlphaComponent(0.8)
+    messageLabel.textColor = textColor
+        
+    nameLabel.text = "User"
+    messageLabel.text = message.text
+        
+    // Handle RTL if needed
+    if message.text?.isRTL == true {
+      messageLabel.textAlignment = .right
+      stackView.alignment = .trailing
+    } else {
+      messageLabel.textAlignment = .left
+      stackView.alignment = .leading
+    }
+  }
 }

@@ -18,8 +18,8 @@ public final class AppDatabase: Sendable {
 
 // MARK: - Migrations
 
-extension AppDatabase {
-  public var migrator: DatabaseMigrator {
+public extension AppDatabase {
+  var migrator: DatabaseMigrator {
     var migrator = DatabaseMigrator()
 
     #if DEBUG
@@ -103,7 +103,7 @@ extension AppDatabase {
     migrator.registerMigration("v2") { db in
       // Message table
       try db.alter(table: "message") { t in
-        t.add(column: "randomId", .integer)  // .unique()
+        t.add(column: "randomId", .integer) // .unique()
       }
     }
 
@@ -132,9 +132,9 @@ extension AppDatabase {
 
 // MARK: - Database Configuration
 
-extension AppDatabase {
+public extension AppDatabase {
   /// - parameter base: A base configuration.
-  public static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
+  static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
     var config = base
 
     config.prepareDatabase { db in
@@ -153,7 +153,7 @@ extension AppDatabase {
     return config
   }
 
-  public static func authenticated() async throws {
+  static func authenticated() async throws {
     if let token = Auth.shared.getToken() {
       try AppDatabase.changePassphrase(token)
     } else {
@@ -161,7 +161,7 @@ extension AppDatabase {
     }
   }
 
-  public static func clearDB() throws {
+  static func clearDB() throws {
     _ = try AppDatabase.shared.dbWriter.write { db in
 
       // Disable foreign key checks temporarily
@@ -171,11 +171,11 @@ extension AppDatabase {
       let tables = try String.fetchAll(
         db,
         sql: """
-          SELECT name FROM sqlite_master 
-          WHERE type = 'table' 
-          AND name NOT LIKE 'sqlite_%'
-          AND name NOT LIKE 'grdb_%'
-          """)
+        SELECT name FROM sqlite_master 
+        WHERE type = 'table' 
+        AND name NOT LIKE 'sqlite_%'
+        AND name NOT LIKE 'grdb_%'
+        """)
 
       // Delete all rows from each table
       for table in tables {
@@ -196,7 +196,7 @@ extension AppDatabase {
     log.info("Database successfully cleared.")
   }
 
-  public static func loggedOut() throws {
+  static func loggedOut() throws {
     try clearDB()
 
     // Reset the database passphrase to a default value
@@ -222,8 +222,8 @@ extension AppDatabase {
   }
 }
 
-extension AppDatabase {
-  public static func deleteDatabaseFile() throws {
+public extension AppDatabase {
+  static func deleteDatabaseFile() throws {
     let fileManager = FileManager.default
     let databaseUrl = getDatabaseUrl()
     let databasePath = databaseUrl.path
@@ -239,18 +239,18 @@ extension AppDatabase {
 
 // MARK: - Database Access: Reads
 
-extension AppDatabase {
+public extension AppDatabase {
   /// Provides a read-only access to the database.
-  public var reader: any GRDB.DatabaseReader {
+  var reader: any GRDB.DatabaseReader {
     dbWriter
   }
 }
 
 // MARK: - The database for the application
 
-extension AppDatabase {
+public extension AppDatabase {
   /// The database for the application
-  public static let shared = makeShared()
+  static let shared = makeShared()
 
   private static func getDatabaseUrl() -> URL {
     do {
@@ -260,11 +260,12 @@ extension AppDatabase {
         appropriateFor: nil, create: false)
 
       let directory =
-        if let userProfile = ProjectConfig.userProfile {
-          "Database_\(userProfile)"
-        } else {
-          "Database"
-        }
+        if let userProfile = ProjectConfig.userProfile
+      {
+        "Database_\(userProfile)"
+      } else {
+        "Database"
+      }
 
       let directoryURL = appSupportURL.appendingPathComponent(directory, isDirectory: true)
       try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
@@ -327,14 +328,14 @@ extension AppDatabase {
   }
 
   /// Creates an empty database for SwiftUI previews
-  public static func empty() -> AppDatabase {
+  static func empty() -> AppDatabase {
     // Connect to an in-memory database
     // Refrence https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/databaseconnections
     let dbQueue = try! DatabaseQueue(configuration: AppDatabase.makeConfiguration())
     return try! AppDatabase(dbQueue)
   }
 
-  public static func emptyWithSpaces() -> AppDatabase {
+  static func emptyWithSpaces() -> AppDatabase {
     let db = AppDatabase.empty()
     do {
       try db.dbWriter.write { db in
@@ -350,7 +351,7 @@ extension AppDatabase {
     return db
   }
 
-  public static func emptyWithChat() -> AppDatabase {
+  static func emptyWithChat() -> AppDatabase {
     let db = AppDatabase.empty()
     do {
       try db.dbWriter.write { db in
@@ -363,7 +364,7 @@ extension AppDatabase {
   }
 
   /// Used for previews
-  public static func populated() -> AppDatabase {
+  static func populated() -> AppDatabase {
     let db = AppDatabase.empty()
 
     // Populate with test data
@@ -434,13 +435,13 @@ extension AppDatabase {
       // Create dialogs for quick access
       let dialogs: [Dialog] = [
         // DM dialogs
-        Dialog(id: 2, peerUserId: 2, spaceId: nil),  // Dialog with Alice
-        Dialog(id: 3, peerUserId: 3, spaceId: nil),  // Dialog with Bob
+        Dialog(id: 2, peerUserId: 2, spaceId: nil), // Dialog with Alice
+        Dialog(id: 3, peerUserId: 3, spaceId: nil), // Dialog with Bob
 
         // Thread dialogs
-        Dialog(id: -3, peerThreadId: 3, spaceId: 1),  // Engineering/General
-        Dialog(id: -4, peerThreadId: 4, spaceId: 1),  // Engineering/Random
-        Dialog(id: -5, peerThreadId: 5, spaceId: 2),  // Design/Design System
+        Dialog(id: -3, peerThreadId: 3, spaceId: 1), // Engineering/General
+        Dialog(id: -4, peerThreadId: 4, spaceId: 1), // Engineering/Random
+        Dialog(id: -5, peerThreadId: 5, spaceId: 2), // Design/Design System
       ]
       try dialogs.forEach { try $0.save(db) }
     }

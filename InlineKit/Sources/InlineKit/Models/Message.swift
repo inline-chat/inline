@@ -6,7 +6,6 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var peerId: Peer
   public var fromId: Int64
   public var chatId: Int64
-  // Raw message text
   public var text: String?
   public var mentioned: Bool?
   public var pinned: Bool?
@@ -78,9 +77,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.from)
   }
 
-  public static let repliedToMessage = belongsTo(
-    Message.self, using: ForeignKey(["repliedToMessageId"], to: ["messageId"])
-  )
+  public static let repliedToMessage = belongsTo(Message.self, key: "repliedToMessage", using: ForeignKey(["messageId"]))
   public var repliedToMessage: QueryInterfaceRequest<Message> {
     request(for: Message.repliedToMessage)
   }
@@ -151,8 +148,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
 // MARK: Helpers
 
-extension Message {
-  public mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort)
+public extension Message {
+  mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort)
     throws
   {
     if self.globalId == nil {
@@ -168,7 +165,7 @@ extension Message {
 
       if let existing =
         try? Message
-        .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
+          .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
       {
         self.globalId = existing.globalId
       }
