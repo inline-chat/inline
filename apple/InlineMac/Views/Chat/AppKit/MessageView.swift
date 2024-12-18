@@ -168,7 +168,7 @@ class MessageViewAppKit: NSView {
       nameLabel.textColor = NSColor(
         InitialsCircle.ColorPalette
           .color(for: nameLabel.stringValue)
-//          .adjustLuminosity(by: -0.1) // TODO: Optimize
+          .adjustLuminosity(by: -0.08) // TODO: Optimize
       )
     }
     
@@ -195,7 +195,7 @@ class MessageViewAppKit: NSView {
     let bottomPadding = Theme.messageVerticalPadding
     let bottomSpacing = props.isLastMessage ? Theme.messageListBottomInset : 0.0
     let bgPadding = 6.0
-    let avatarLeading = Theme.messageSidePadding 
+    let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
     let sidePadding = Theme.messageSidePadding - bgPadding
     
