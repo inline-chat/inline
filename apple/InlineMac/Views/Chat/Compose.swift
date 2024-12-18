@@ -73,8 +73,10 @@ struct Compose: View {
         .frame(height: minHeight, alignment: .center)
         .transition(.scale(scale: 0.8).combined(with: .opacity))
     }
+    // Matches the chat view background
     .animation(.easeOut.speed(4), value: canSend)
     .padding(.horizontal, Theme.messageSidePadding)
+    .background(Color(.textBackgroundColor))
     .overlay(alignment: .top) {
       Divider()
         .frame(height: 1)
