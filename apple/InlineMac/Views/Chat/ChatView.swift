@@ -10,6 +10,8 @@ struct ChatView: View {
   @EnvironmentObject var nav: NavigationModel
   @EnvironmentStateObject var fullChat: FullChatViewModel
 
+  @Environment(\.scenePhase) var scenePhase
+
   // TODO: Optimize
   @ObservedObject var composeActions: ComposeActions = .shared
 
@@ -25,10 +27,25 @@ struct ChatView: View {
     composeActions.getComposeAction(for: peerId)?.action
   }
 
+  @State private var currentTime = Date()
+
+  let timer = Timer.publish(
+    every: 60, // 1 minute
+    on: .main,
+    in: .common
+  ).autoconnect()
+
   static let formatter = RelativeDateTimeFormatter()
   private func getLastOnlineText(date: Date?) -> String {
     guard let date = date else { return "" }
+
+    let diffSeconds = Date().timeIntervalSince(date)
+    if diffSeconds < 60 {
+      return "last seen just now"
+    }
+
     Self.formatter.dateTimeStyle = .named
+//    Self.formatter.unitsStyle = .spellOut
     return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
   }
 
@@ -62,9 +79,27 @@ struct ChatView: View {
       // Note(@mo: this adds a bug on first frame toolbar doesn't have background and insets are messed up? so scroll fails initially)
       .ignoresSafeArea(.all, edges: .top)
     }
-    .task {
-      await fetch()
+    .onReceive(timer) { _ in
+      currentTime = Date()
     }
+    .onAppear {
+      // On Appear - temporary
+      Task {
+        await fetch()
+      }
+    }
+    .onChange(of: scenePhase) { scenePhase_ in
+      // Refetch on open - temporary
+      switch scenePhase_ {
+      case .active:
+        Task {
+          await fetch()
+        }
+      default:
+        break
+      }
+    }
+
     .environmentObject(fullChat)
   }
 
