@@ -36,13 +36,17 @@ enum Theme {
   static let messageVerticalStackSpacing: CGFloat = 0
   static let messageNameLabelHeight: CGFloat = 18
   static let messageTextFont: NSFont = .systemFont(ofSize: NSFont.systemFontSize)
-  static let messageSenderFont: NSFont = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+  static let messageSenderFont: NSFont = .systemFont(
+    ofSize: NSFont.systemFontSize,
+    weight: .semibold
+  )
   static let messageTextLineFragmentPadding: CGFloat = 0
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
   
   // MARK: - Chat View
 
+  static let messageGroupSpacing: CGFloat = 8
   static let messageListTopInset: CGFloat = 14
   static let messageListBottomInset: CGFloat = 10
 }
