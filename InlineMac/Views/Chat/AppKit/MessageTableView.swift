@@ -6,7 +6,7 @@ import SwiftUI
 class MessagesTableView: NSViewController {
   var width: CGFloat
   
-  private let log = Log.scoped("MessagesTableView", enableTracing: true)
+  private let log = Log.scoped("MessagesTableView", enableTracing: false)
   private var messages: [FullMessage] = []
   private let sizeCalculator = MessageSizeCalculator()
   private let defaultRowHeight = 24.0
