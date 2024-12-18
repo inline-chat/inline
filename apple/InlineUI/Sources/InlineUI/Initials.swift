@@ -14,12 +14,15 @@ public struct InitialsCircle: View, Equatable {
 
   @Environment(\.colorScheme) private var colorScheme
 
+  @MainActor
   public enum ColorPalette {
+    @MainActor
+
     static let colors: [Color] = [
-      .pink,
+      .pink.adjustLuminosity(by: -0.1),
       .orange,
       .purple,
-      .yellow,
+      .yellow.adjustLuminosity(by: -0.1),
       .teal,
       .blue,
       .teal,
@@ -64,8 +67,8 @@ public struct InitialsCircle: View, Equatable {
   private var backgroundGradient: LinearGradient {
     LinearGradient(
       colors: [
-        backgroundColor.adjustLuminosity(by: 0.3),
-        backgroundColor.adjustLuminosity(by: -0.1),
+        backgroundColor.adjustLuminosity(by: 0.2),
+        backgroundColor.adjustLuminosity(by: 0),
       ],
       startPoint: .topLeading,
       endPoint: .bottomTrailing
@@ -192,7 +195,7 @@ private extension Color {
   // Use NSCache instead of Dictionary for better memory management
   @MainActor private static let adjustmentCache: NSCache<NSString, AnyObject> = {
     let cache = NSCache<NSString, AnyObject>()
-    cache.countLimit = 100 // Limit cache size
+    cache.countLimit = 200 // Limit cache size
     return cache
   }()
 
