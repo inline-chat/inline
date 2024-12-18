@@ -57,8 +57,9 @@ class MessagesTableView: NSViewController {
     let scroll = NSScrollView()
     scroll.hasVerticalScroller = true
     scroll.borderType = .noBorder
-    scroll.drawsBackground = false // Add this line
-    scroll.backgroundColor = .clear
+    scroll.drawsBackground = true // Add this line
+    scroll.backgroundColor = .textBackgroundColor
+//    scroll.backgroundColor = .windowBackgroundColor
     // Used for quick scroll on resize
     scroll.translatesAutoresizingMaskIntoConstraints = false
     scroll.documentView = tableView
@@ -118,9 +119,7 @@ class MessagesTableView: NSViewController {
       )
       
       log.debug("Adjusting view's toolbar")
-      // Updated
-      // TODO: make window toolbar layout and have background to fight the swiftui defaUlt behaviour
-      // Configure window toolbar
+      // make window toolbar layout and have background to fight the swiftui defaUlt behaviour
       window.titlebarAppearsTransparent = false
       window.isMovableByWindowBackground = true
     }
@@ -148,6 +147,7 @@ class MessagesTableView: NSViewController {
 
   private func scrollToBottom(animated: Bool) {
     guard messages.count > 0 else { return }
+    log.trace("Scrolling to bottom animated=\(animated)")
     
     let lastRow = messages.count - 1
     isProgrammaticScroll = true
@@ -182,6 +182,7 @@ class MessagesTableView: NSViewController {
     contentSizeObserver = scrollView.documentView?.observe(\.frame) { [weak self] view, _ in
       guard let self = self else { return }
       let newHeight = view.frame.height
+      log.trace("scrollView document frame change")
       updateAvatars()
       handleContentSizeChange(newHeight)
     }
@@ -229,10 +230,14 @@ class MessagesTableView: NSViewController {
   private func handleContentSizeChange(_ newHeight: CGFloat) {
     lastContentHeight = newHeight
     
+    log.trace("scrollView content size change")
+
     if isAtBottom && (!isPerformingUpdate || needsInitialScroll) {
       scrollToBottom(animated: false)
     }
   }
+  
+  private var prevOffset: CGFloat = 0
   
   @objc func scrollViewBoundsChanged(notification: Notification) {
     log.trace("scroll view bounds changed")
@@ -265,9 +270,14 @@ class MessagesTableView: NSViewController {
       }
     #endif
 
-    // Update heights that might have been changed if a width change happened in a different position
-    // because we just update visible portion of the table
-    recalculateHeightsOnWidthChange()
+    // Only update width of rows if scrolling up otherwise this messes up scroll animation on new item
+    if prevOffset != currentScrollOffset && !isProgrammaticScroll && !isAtBottom && prevOffset > currentScrollOffset {
+      // Update heights that might have been changed if a width change happened in a different position
+      // because we just update visible portion of the table
+      recalculateHeightsOnWidthChange()
+    }
+      
+    prevOffset = currentScrollOffset
   }
 
   // Using CFAbsoluteTimeGetCurrent()
@@ -303,9 +313,11 @@ class MessagesTableView: NSViewController {
     
     // utils
     func avatarPadding(at row: Int) -> CGFloat {
-      return row == 0 ?
+      let padding = row == 0 ?
         Theme.messageListTopInset + Theme.messageVerticalPadding :
         Theme.messageVerticalPadding
+      
+      return padding + Theme.messageGroupSpacing
     }
     
     let availableViewportHeight = scrollView.contentView.bounds.height - scrollTopInset
@@ -540,49 +552,54 @@ class MessagesTableView: NSViewController {
     }
 //
     // Batch all visual updates
-    NSAnimationContext.runAnimationGroup { _ in
-      tableView.beginUpdates()
+//    NSAnimationContext.runAnimationGroup { context in
+    tableView.beginUpdates()
 
-      if !removals.isEmpty {
-        tableView.removeRows(at: IndexSet(removals), withAnimation: .effectFade)
-      }
+    if !removals.isEmpty {
+      tableView.removeRows(at: IndexSet(removals), withAnimation: .effectFade)
+    }
       
-      if !insertions.isEmpty {
-        tableView
-          .insertRows(
-            at: IndexSet(insertions),
-            withAnimation: .effectFade
-          )
-      }
-      tableView.endUpdates()
+    if !insertions.isEmpty {
+      tableView
+        .insertRows(
+          at: IndexSet(insertions),
+          withAnimation: .effectFade
+        )
+    }
+    tableView.endUpdates()
       
-      if oldMessages.last != messages.last {
-        // TODO: See if we can optimize here
-        // last message changed height
-        tableView.reloadData(forRowIndexes: IndexSet([messages.count - 2, messages.count - 1]), columnIndexes: IndexSet([0]))
-        recalculateVisibleHeightsWithCache()
-      }
+    if oldMessages.last != messages.last {
+      // TODO: See if we can optimize here
+      // last message changed height
+      tableView.reloadData(forRowIndexes: IndexSet([messages.count - 2, messages.count - 1]), columnIndexes: IndexSet([0]))
+      recalculateVisibleHeightsWithCache()
+    }
 
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
       // Handle scroll position
       if (!removals.isEmpty || !insertions.isEmpty) && wasAtBottom {
         // Only animate if it's not the initial load
-        self.scrollToBottom(animated: !isInitialUpdate)
-      }
-      
-    } completionHandler: { [weak self] in
-      guard let self = self else { return }
-      
-      isPerformingUpdate = false
-      
-      // Verify the update
-      let actualRows = self.tableView.numberOfRows
-      let expectedRows = self.messages.count
-          
-      if actualRows != expectedRows {
-        Log.shared.debug("⚠️ Row count mismatch - forcing reload")
-        self.tableView.reloadData()
+        //        self.scrollToBottom(animated: !isInitialUpdate)
+        self.scrollToBottom(animated: true)
       }
     }
+    
+    isPerformingUpdate = false
+      
+//    } completionHandler: { [weak self] in
+//      guard let self = self else { return }
+//
+//      isPerformingUpdate = false
+//
+//      // Verify the update
+//      let actualRows = self.tableView.numberOfRows
+//      let expectedRows = self.messages.count
+//
+//      if actualRows != expectedRows {
+//        Log.shared.debug("⚠️ Row count mismatch - forcing reload")
+//        self.tableView.reloadData()
+//      }
+//    }
   }
   
   private func getVisibleRowIndexes() -> IndexSet {
@@ -634,19 +651,19 @@ class MessagesTableView: NSViewController {
     }
   }
   
+  // Note this function will stop any animation that is happening so must be used with caution
   private func recalculateHeightsOnWidthChange() {
+    log.trace("Recalculating heights on width change")
     let visibleRect = tableView.visibleRect
     let visibleRange = tableView.rows(in: visibleRect)
     
     guard visibleRange.location != NSNotFound else { return }
     
-    let bufferCount = 0
-    
     // Calculate ranges
-    let visibleStartIndex = max(0, visibleRange.location - bufferCount)
+    let visibleStartIndex = max(0, visibleRange.location)
     let visibleEndIndex = min(
       tableView.numberOfRows,
-      visibleRange.location + visibleRange.length + bufferCount
+      visibleRange.location + visibleRange.length
     )
     
     // First, immediately update visible rows
@@ -696,7 +713,7 @@ extension MessagesTableView: NSTableViewDataSource {
 extension MessagesTableView: NSTableViewDelegate {
   func isFirstInGroup(at row: Int) -> Bool {
     guard row >= 0, row < messages.count else { return true }
-
+    
     let prevMessage = row > 0 ? messages[row - 1] : nil
     guard prevMessage != nil else {
       return true

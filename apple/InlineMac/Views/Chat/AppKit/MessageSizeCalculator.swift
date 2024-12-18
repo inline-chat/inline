@@ -77,6 +77,7 @@ class MessageSizeCalculator {
     if props.firstInGroup {
       totalHeight += Theme.messageNameLabelHeight
       totalHeight += Theme.messageVerticalStackSpacing
+      totalHeight += Theme.messageGroupSpacing
     }
     if props.isLastMessage == true {
       totalHeight += Theme.messageListBottomInset
@@ -103,6 +104,22 @@ class MessageSizeCalculator {
   
   static func getTextViewWidth(for tableWidth: CGFloat) -> CGFloat {
     tableWidth - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing
+  }  
+  static func getTextViewHeight(for props: MessageViewProps) -> CGFloat {
+    var height = props.height ?? 60.0
+    if props.firstInGroup {
+      height -= Theme.messageNameLabelHeight
+      height -= Theme.messageVerticalStackSpacing
+      height -= Theme.messageGroupSpacing
+    }
+    if props.isLastMessage == true {
+      height -= Theme.messageListBottomInset
+    }
+    if props.isFirstMessage == true {
+      height -= Theme.messageListTopInset
+    }
+    height -= Theme.messageVerticalPadding * 2
+    return height
   }
   
   private func heightForSingleLineText() -> CGFloat {
