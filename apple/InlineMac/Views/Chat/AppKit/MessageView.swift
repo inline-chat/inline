@@ -189,14 +189,15 @@ class MessageViewAppKit: NSView {
   private var textViewTrailingConstraint: NSLayoutConstraint!
   
   private func setupConstraints() {
-    let avatarLeading = Theme.messageSidePadding
     
     var topSpacing = props.isFirstMessage ? Theme.messageListTopInset : 0.0
     let topPadding = Theme.messageVerticalPadding
     let bottomPadding = Theme.messageVerticalPadding
     let bottomSpacing = props.isLastMessage ? Theme.messageListBottomInset : 0.0
     let bgPadding = 6.0
+    let avatarLeading = Theme.messageSidePadding 
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
+    let sidePadding = Theme.messageSidePadding - bgPadding
     
     if props.firstInGroup {
       topSpacing += Theme.messageGroupSpacing
@@ -213,7 +214,7 @@ class MessageViewAppKit: NSView {
       NSLayoutConstraint.activate([
         nameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: contentLeading),
         nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: topPadding),
-        nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Theme.messageSidePadding)
+        nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -sidePadding)
       ])
       
       nameLabel.setContentHuggingPriority(.defaultHigh, for: .vertical)
@@ -226,8 +227,6 @@ class MessageViewAppKit: NSView {
         equalToConstant: MessageSizeCalculator
           .getTextViewHeight(for: props)
       )
-    textViewLeadingConstraint = messageTextView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: contentLeading)
-    textViewTrailingConstraint = messageTextView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20.0)
     
     NSLayoutConstraint.activate(
       [
@@ -246,7 +245,7 @@ class MessageViewAppKit: NSView {
         ),
         textStackView.trailingAnchor.constraint(
           equalTo: contentView.trailingAnchor,
-          constant: -20.0
+          constant: -sidePadding
         )
       ]
     )
