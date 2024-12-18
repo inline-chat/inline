@@ -33,7 +33,7 @@ public struct InitialsCircle: View, Equatable {
 //      .brown,
     ]
 
-    static func color(for name: String) -> Color {
+    public static func color(for name: String) -> Color {
 //      let hash = name.hashValue
       let hash = name.utf8.reduce(0) { $0 + Int($1) }
       return colors[abs(hash) % colors.count]
