@@ -12,6 +12,8 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var width: CGFloat?
   var height: CGFloat?
   
+//  private var rtl: Bool
+  
   // Compare everything except size
   func equalContentTo(_ other: MessageViewProps) -> Bool {
     firstInGroup == other.firstInGroup &&
@@ -66,11 +68,27 @@ class MessageViewAppKit: NSView {
 
   // MARK: - UI Components
 
+  private lazy var contentView: NSView = {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.layer?.cornerRadius = 8
+    return view
+  }()
+  
+  private lazy var textStackView: NSStackView = {
+    let stack = NSStackView()
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    stack.orientation = .vertical
+    return stack
+  }()
+  
   private lazy var nameLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
     label.translatesAutoresizingMaskIntoConstraints = false
     label.font = Theme.messageSenderFont
     label.lineBreakMode = .byTruncatingTail
+    
     return label
   }()
   
@@ -81,6 +99,10 @@ class MessageViewAppKit: NSView {
     textView.isSelectable = true
     textView.backgroundColor = .clear
     textView.drawsBackground = false
+    
+    // For international langs to not be clipped
+    textView.clipsToBounds = false
+    
     // for Debug
 //    textView.backgroundColor = .blue.withAlphaComponent(0.1)
 //    textView.drawsBackground = true
@@ -134,32 +156,64 @@ class MessageViewAppKit: NSView {
 
   // MARK: - Setup
 
+  private var rtl = false
+  
   private func setupView() {
+    addSubview(contentView)
+    contentView.addSubview(textStackView)
+    
     if showsName {
-      addSubview(nameLabel)
+      contentView.addSubview(nameLabel)
       nameLabel.stringValue = from.firstName ?? from.username ?? ""
+      nameLabel.textColor = NSColor(
+        InitialsCircle.ColorPalette
+          .color(for: nameLabel.stringValue)
+//          .adjustLuminosity(by: -0.1) // TODO: Optimize
+      )
     }
     
-    addSubview(messageTextView)
-    setupMessageText()
+//    contentView.addSubview(messageTextView)
+    textStackView.addArrangedSubview(messageTextView)
+    
+    setupMessageText() // must be before constraints so RTL is set
+    
+    textStackView.alignment = rtl ? .right : .left
+    
     setupConstraints()
     setupContextMenu()
   }
   
   private var textViewWidthConstraint: NSLayoutConstraint!
+  private var textViewHeightConstraint: NSLayoutConstraint!
+  private var textViewLeadingConstraint: NSLayoutConstraint!
+  private var textViewTrailingConstraint: NSLayoutConstraint!
   
   private func setupConstraints() {
     let avatarLeading = Theme.messageSidePadding
-    let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing
     
-    let topPadding = props.isFirstMessage ? Theme.messageListTopInset + Theme.messageVerticalPadding : Theme.messageVerticalPadding
-    let bottomPadding = props.isLastMessage ? Theme.messageListBottomInset + Theme.messageVerticalPadding : Theme.messageVerticalPadding
+    var topSpacing = props.isFirstMessage ? Theme.messageListTopInset : 0.0
+    let topPadding = Theme.messageVerticalPadding
+    let bottomPadding = Theme.messageVerticalPadding
+    let bottomSpacing = props.isLastMessage ? Theme.messageListBottomInset : 0.0
+    let bgPadding = 6.0
+    let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
+    
+    if props.firstInGroup {
+      topSpacing += Theme.messageGroupSpacing
+    }
+    
+    NSLayoutConstraint.activate([
+      contentView.topAnchor.constraint(equalTo: topAnchor, constant: topSpacing),
+      contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: bgPadding),
+      contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -bgPadding),
+      contentView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bottomSpacing)
+    ])
     
     if showsName {
       NSLayoutConstraint.activate([
-        nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading),
-        nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
-        nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.messageSidePadding)
+        nameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: contentLeading),
+        nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: topPadding),
+        nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Theme.messageSidePadding)
       ])
       
       nameLabel.setContentHuggingPriority(.defaultHigh, for: .vertical)
@@ -167,26 +221,42 @@ class MessageViewAppKit: NSView {
     }
     
     textViewWidthConstraint = messageTextView.widthAnchor.constraint(equalToConstant: props.width ?? 0.0)
+    textViewHeightConstraint = messageTextView.heightAnchor
+      .constraint(
+        equalToConstant: MessageSizeCalculator
+          .getTextViewHeight(for: props)
+      )
+    textViewLeadingConstraint = messageTextView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: contentLeading)
+    textViewTrailingConstraint = messageTextView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20.0)
+    
+    NSLayoutConstraint.activate(
+      [
+        textStackView.topAnchor.constraint(
+          equalTo: showsName ? nameLabel.bottomAnchor : contentView.topAnchor,
+          constant: showsName ? Theme.messageVerticalStackSpacing : topPadding
+        ),
+        textStackView.bottomAnchor
+          .constraint(
+            equalTo: contentView.bottomAnchor,
+            constant: -bottomPadding
+          ),
+        textStackView.leadingAnchor.constraint(
+          equalTo: contentView.leadingAnchor,
+          constant: contentLeading
+        ),
+        textStackView.trailingAnchor.constraint(
+          equalTo: contentView.trailingAnchor,
+          constant: -20.0
+        )
+      ]
+    )
     
     // Message text view constraints
     NSLayoutConstraint.activate(
       [
-        messageTextView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading),
-        messageTextView.topAnchor.constraint(
-          equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
-          constant: showsName ? Theme.messageVerticalStackSpacing : topPadding
-        ),
-        messageTextView.bottomAnchor
-          .constraint(
-            equalTo: bottomAnchor,
-            constant: -bottomPadding
-          ),
-        
         // This is accurate but requires careful updates
-        textViewWidthConstraint
-        
-        // TODO: this results in automatic updated width on resize, but makes the text go up to the end of viewport which is undesirable.
-//        messageTextView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.messageSidePadding)
+        textViewWidthConstraint,
+        textViewHeightConstraint
       ]
     )
   }
@@ -195,6 +265,8 @@ class MessageViewAppKit: NSView {
   public func updateSizes(props: MessageViewProps) {
     self.props = props
     textViewWidthConstraint.constant = props.width ?? 0.0
+    textViewHeightConstraint.constant = MessageSizeCalculator
+      .getTextViewHeight(for: props)
   }
   
   // Experimental: Called when only the text changes
@@ -205,12 +277,25 @@ class MessageViewAppKit: NSView {
     nameLabel.stringValue = from.firstName ?? from.username ?? ""
     setupMessageText()
     updateSizes(props: props)
+    
+    // update rtl
+    textStackView.alignment = rtl ? .trailing : .leading
+//    textViewTrailingConstraint.isActive = rtl
+//    textViewLeadingConstraint.isActive = !rtl
     // WIP..
   }
-
+  
   private func setupMessageText() {
     let text = message.text ?? ""
     
+    if text.isRTL {
+      rtl = true
+      messageTextView.baseWritingDirection = .rightToLeft
+    } else {
+      rtl = false
+      messageTextView.baseWritingDirection = .natural
+    }
+
     let key = "\(text)"
     if let attrs = Self.cacheAttrs.get(key: key) {
       messageTextView.textStorage?.setAttributedString(attrs)
@@ -260,19 +345,124 @@ class MessageViewAppKit: NSView {
     let copyItem = NSMenuItem(title: "Copy", action: #selector(copyMessage), keyEquivalent: "c")
     menu.addItem(copyItem)
     
-//    menu.delegate = self
+    menu.delegate = self
     self.menu = menu
   }
+
+  override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+    // Apply selection style when menu is about to open
+    contentView.layer?.backgroundColor = NSColor.darkGray
+      .withAlphaComponent(0.1).cgColor
+  }
   
+  override func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) {
+    // Remove selection style when menu closes
+    contentView.layer?.backgroundColor = nil
+  }
+
   // MARK: - Actions
 
   @objc private func copyMessage() {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(message.text ?? "", forType: .string)
   }
+  
+  // MARK: Hover
+
+  private func updateHoverState() {
+    guard window?.isKeyWindow == true else {
+      layer?.backgroundColor = nil
+      return
+    }
+    
+    // Disable implicit animations during scrolling
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.08
+      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+      context.allowsImplicitAnimation = true
+      
+      if isHovered {
+        contentView.layer?.backgroundColor = NSColor.darkGray
+          .withAlphaComponent(0.04).cgColor
+      } else {
+        contentView.layer?.backgroundColor = nil
+      }
+    }
+  }
+
+  override func viewDidHide() {
+    super.viewDidHide()
+    clearHoverState()
+  }
+  
+  override func viewDidUnhide() {
+    super.viewDidUnhide()
+    updateTrackingAreas()
+  }
+  
+  private var isHovered = false {
+    didSet {
+      if isHovered != oldValue {
+        updateHoverState()
+      }
+    }
+  }
+
+  private var trackingArea: NSTrackingArea?
+  
+  private func clearHoverState() {
+    isHovered = false
+    layer?.backgroundColor = nil
+  }
+  
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    isHovered = true
+  }
+  
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    isHovered = false
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    
+    if let trackingArea = trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+    
+    let options: NSTrackingArea.Options = [
+      .mouseEnteredAndExited,
+      .activeAlways,
+      .inVisibleRect // Add this option
+    ]
+    
+    trackingArea = NSTrackingArea(
+      rect: bounds,
+      options: options,
+      owner: self,
+      userInfo: nil
+    )
+    
+    if let trackingArea = trackingArea {
+      addTrackingArea(trackingArea)
+    }
+    
+    // Check if mouse is actually over the view
+    if let window = window {
+      let mousePoint = window.mouseLocationOutsideOfEventStream
+      let localPoint = convert(mousePoint, from: nil)
+      isHovered = bounds.contains(localPoint) && window.isKeyWindow
+    }
+  }
 }
 
-extension MessageViewAppKit: NSTextViewDelegate {}
+extension MessageViewAppKit: NSTextViewDelegate {
+  // Custom menu for text
+}
+  
+extension MessageViewAppKit: NSMenuDelegate {}
 
 // Custom NSTextView subclass to handle hit testing
 class CustomTextView2: NSTextView {
