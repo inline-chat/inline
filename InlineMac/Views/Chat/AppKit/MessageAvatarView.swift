@@ -4,28 +4,21 @@ import InlineUI
 import SwiftUI
 
 class UserAvatarView: NSView {
-  var prevUser: User?
-  var user: User? {
-    didSet {
-      updateAvatar()
-    }
-  }
+  private var prevUser: User?
+  private var user: User?
   
   private var hostingController: NSHostingController<UserAvatar>?
   
   init(user: User) {
     self.user = user
-    super.init(frame: .zero)
+    super.init(frame: NSRect(x: 0, y: 0, width: Theme.messageAvatarSize, height: Theme.messageAvatarSize))
+    updateAvatar()
   }
   
 //  override var wantsUpdateLayer: Bool { true }
   
   override init(frame: NSRect) {
     super.init(frame: frame)
-    // Setting layer seemed to make it laggier
-//     wantsLayer = true
-//    avatarView.layer?.zPosition = 100
-    // layer?.masksToBounds = true
   }
 
   required init?(coder: NSCoder) {
