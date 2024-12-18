@@ -38,8 +38,7 @@ class AvatarOverlayView: NSView {
   private func createAvatarView(for user: User) -> UserAvatarView {
     NSAnimationContext.beginGrouping()
     NSAnimationContext.current.duration = 0
-    let avatarView = UserAvatarView(frame: .zero)
-    avatarView.user = user
+    let avatarView = UserAvatarView(user: user)
     
     addSubview(avatarView)
     NSAnimationContext.endGrouping()
@@ -60,46 +59,5 @@ class AvatarOverlayView: NSView {
   func clearAvatars() {
     avatarViews.values.forEach { $0.removeFromSuperview() }
     avatarViews.removeAll()
-  }
-}
-
-class MessageAvatarView: NSView {
-  static let size: CGFloat = Theme.messageAvatarSize
-  
-  private lazy var avatarView: UserAvatarView = {
-    let view = UserAvatarView(frame: .zero)
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
-  
-  private var topConstraint: NSLayoutConstraint?
-  
-  init() {
-    super.init(frame: .zero)
-    setupView()
-  }
-  
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-  
-  private func setupView() {
-    translatesAutoresizingMaskIntoConstraints = false
-    
-    addSubview(avatarView)
-    
-    NSLayoutConstraint.activate([
-      avatarView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      avatarView.widthAnchor.constraint(equalToConstant: Self.size),
-      avatarView.heightAnchor.constraint(equalToConstant: Self.size)
-    ])
-    
-//    topConstraint = avatarView.topAnchor.constraint(equalTo: topAnchor)
-//    topConstraint?.isActive = true
-  }
-  
-  func configure(with user: User) {
-    avatarView.user = user
   }
 }
