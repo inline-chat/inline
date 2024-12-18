@@ -6,7 +6,7 @@ import SwiftUI
 class MessagesTableView: NSViewController {
   var width: CGFloat
   
-  private let log = Log.scoped("MessagesTableView", enableTracing: false)
+  private let log = Log.scoped("MessagesTableView", enableTracing: true)
   private var messages: [FullMessage] = []
   private let sizeCalculator = MessageSizeCalculator()
   private let defaultRowHeight = 24.0
@@ -271,7 +271,14 @@ class MessagesTableView: NSViewController {
     #endif
 
     // Only update width of rows if scrolling up otherwise this messes up scroll animation on new item
-    if prevOffset != currentScrollOffset && !isProgrammaticScroll && !isAtBottom && prevOffset > currentScrollOffset {
+    if prevOffset != currentScrollOffset &&
+      // this ensures bottom over scroll / elastic doesn't glitch bc of continuous update
+      maxScrollableHeight > currentScrollOffset &&
+      !isProgrammaticScroll && !isAtBottom &&
+      prevOffset > currentScrollOffset &&
+      // Debounce
+      ceil(currentScrollOffset).truncatingRemainder(dividingBy: 10) == 0
+    {
       // Update heights that might have been changed if a width change happened in a different position
       // because we just update visible portion of the table
       recalculateHeightsOnWidthChange()
@@ -659,18 +666,24 @@ class MessagesTableView: NSViewController {
     
     guard visibleRange.location != NSNotFound else { return }
     
+    let buffer = 2
+    
     // Calculate ranges
-    let visibleStartIndex = max(0, visibleRange.location)
+    let visibleStartIndex = max(0, visibleRange.location - buffer)
     let visibleEndIndex = min(
       tableView.numberOfRows,
-      visibleRange.location + visibleRange.length
+      visibleRange.location + visibleRange.length + buffer
     )
     
     // First, immediately update visible rows
     let visibleIndexesToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
     
+    // Begin updates
+    
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
+      context.allowsImplicitAnimation = false
+
       // To send new props
       self.tableView
         .reloadData(forRowIndexes: visibleIndexesToUpdate, columnIndexes: IndexSet([0]))
@@ -679,24 +692,35 @@ class MessagesTableView: NSViewController {
     }
   }
 
-  // TODO: Intended to use for load more
-//  private func preserveScrollPosition(during update: () -> Void) {
-//    let scrollView = tableView.enclosingScrollView!
-//    let visibleRect = tableView.visibleRect
-//
-//    // Store the first visible row and its offset
-//    let firstVisibleRow = tableView.row(at: visibleRect.origin)
-//    let offsetFromRow = visibleRect.origin.y - tableView.rect(ofRow: firstVisibleRow).origin.y
-//
-//    update()
-//
-//    // Restore scroll position
-//    if firstVisibleRow >= 0 {
-//      let newRowRect = tableView.rect(ofRow: firstVisibleRow)
-//      let newOffset = CGPoint(x: 0, y: newRowRect.origin.y + offsetFromRow)
-//      scrollView.contentView.scroll(newOffset)
-//    }
-//  }
+  private func preserveScrollPosition(during update: (@escaping () -> Void) -> Void) {
+    let scrollView = tableView.enclosingScrollView!
+    let visibleRect = tableView.visibleRect
+    
+    // Find the first fully or partially visible row
+    let firstVisibleRow = tableView.row(at: CGPoint(x: 0, y: visibleRect.minY))
+    guard firstVisibleRow >= 0 else { return }
+    
+    // Calculate the offset from the top of the first visible row
+    let rowRect = tableView.rect(ofRow: firstVisibleRow)
+    let offsetFromRowTop = visibleRect.minY - rowRect.minY
+    
+    // Create restoration closure
+    let restore = { [weak self] in
+      guard let self else { return }
+      
+      // Get the new rect for the same row
+      let newRowRect = self.tableView.rect(ofRow: firstVisibleRow)
+      // Calculate the new scroll position
+      let newY = newRowRect.minY + offsetFromRowTop
+      
+      // Apply the new scroll position
+      scrollView.contentView.scroll(to: CGPoint(x: 0, y: newY))
+      scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+    
+    // Perform the update with restoration callback
+    update(restore)
+  }
   
   deinit {
     NotificationCenter.default.removeObserver(self)
