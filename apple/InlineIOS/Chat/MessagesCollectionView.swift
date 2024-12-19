@@ -442,7 +442,7 @@ final class MessagesCollectionView: UIView {
 
         UIView.performWithoutAnimation {
           collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-          self.adjustContentInset(for: collectionView)
+//          self.adjustContentInset(for: collectionView)
           collectionView.collectionViewLayout.invalidateLayout()
 
           //          if !self.fullMessages.isEmpty {
