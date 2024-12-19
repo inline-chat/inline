@@ -184,6 +184,7 @@ class MessagesTableView: NSViewController {
       let newHeight = view.frame.height
       log.trace("scrollView document frame change")
       updateAvatars()
+      
       handleContentSizeChange(newHeight)
     }
     
@@ -223,6 +224,7 @@ class MessagesTableView: NSViewController {
   private var isProgrammaticScroll = false
   private var isUserScrolling = false
   private var isAtBottom = true
+  private var isAtAbsoluteBottom = true
   
   private var prevContentSize: CGSize = .zero
   private var isPerformingUpdate = false
