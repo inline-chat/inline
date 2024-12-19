@@ -26,25 +26,22 @@ struct ChatView: View {
   var body: some View {
     VStack(spacing: 0) {
       chatMessages
-
-      // so it goes under the navigationbar
-
-      // This fixes the bottom part of list insets
-      //        .ignoresSafeArea(.container, edges: .bottom)
     }
-    
+
     .safeAreaInset(edge: .bottom) {
       inputArea
-        .overlay(alignment: .top) {
-          Divider()
-            .edgesIgnoringSafeArea(.horizontal)
-        }
+
+//        .overlay(alignment: .top) {
+//          Divider()
+//            .edgesIgnoringSafeArea(.horizontal)
+//        }
     }
     .toolbar {
       ToolbarItem(placement: .principal) {
         Text(title)
           .font(.body)
           .fontWeight(.semibold)
+        // TODO: Add status
       }
     }
     .navigationBarHidden(false)
@@ -179,16 +176,11 @@ extension ChatView {
   private var inputArea: some View {
     HStack {
       ComposeView(messageText: $text)
+
+      sendButton
     }
     .padding(.vertical, 6)
     .padding(.horizontal)
-    .background(
-      Color(.systemBackground)
-        .opacity(0.55)
-        .background(.thinMaterial)
-        .edgesIgnoringSafeArea(.bottom)
-        .edgesIgnoringSafeArea(.horizontal)
-    )
   }
 
   @ViewBuilder

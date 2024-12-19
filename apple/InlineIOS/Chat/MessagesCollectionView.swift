@@ -23,6 +23,23 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     // Base transform for bottom-up scrolling
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
+
+    // Performance optimizations
+    collectionView.isPrefetchingEnabled = true
+    collectionView.decelerationRate = .normal
+    collectionView.contentInsetAdjustmentBehavior = .never
+
+    // Improve scrolling performance
+    collectionView.isDirectionalLockEnabled = true
+    collectionView.showsVerticalScrollIndicator = true
+    collectionView.indicatorStyle = .default
+
+    // Memory optimization
+    collectionView.remembersLastFocusedIndexPath = false
+
+    // Fix for scroll indicator
+    collectionView.scrollIndicatorInsets = .zero
+    collectionView.verticalScrollIndicatorInsets = .zero
 //    context.coordinator.adjustContentInset(for: collectionView)
 
     // Get navigation bar height
@@ -244,18 +261,6 @@ struct MessagesCollectionView: UIViewRepresentable {
       )
     }
 
-    func collectionView(
-      _ collectionView: UICollectionView,
-      layout collectionViewLayout: UICollectionViewLayout,
-      sizeForItemAt indexPath: IndexPath
-    ) -> CGSize {
-      let availableWidth = collectionView.bounds.width - 25
-
-      // Return full width with estimated height
-      // Actual height will be adjusted by the cell's preferredLayoutAttributesFitting
-      return CGSize(width: availableWidth, height: 1)
-    }
-
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
             let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
@@ -301,7 +306,7 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     @objc func orientationDidChange(_ notification: Notification) {
       guard let collectionView = currentCollectionView else { return }
-      print("orientationDidChange \(orientationDidChange)")
+
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
 
         UIView.performWithoutAnimation {
@@ -371,6 +376,27 @@ struct MessagesCollectionView: UIViewRepresentable {
     //      )
     //    }
 
+//    func collectionView(
+//      _ collectionView: UICollectionView,
+//      layout collectionViewLayout: UICollectionViewLayout,
+//      sizeForItemAt indexPath: IndexPath
+//    ) -> CGSize {
+//      let availableWidth = collectionView.bounds.width - collectionView.contentInset.left - collectionView.contentInset.right
+//      return CGSize(width: availableWidth, height: UICollectionViewFlowLayout.automaticSize.height)
+//    }
+
+    func collectionView(
+      _ collectionView: UICollectionView,
+      layout collectionViewLayout: UICollectionViewLayout,
+      sizeForItemAt indexPath: IndexPath
+    ) -> CGSize {
+      let availableWidth = collectionView.bounds.width - 25
+
+      // Return full width with estimated height
+      // Actual height will be adjusted by the cell's preferredLayoutAttributesFitting
+      return CGSize(width: availableWidth, height: 1)
+    }
+
     func collectionView(
       _ collectionView: UICollectionView,
       layout collectionViewLayout: UICollectionViewLayout,
@@ -408,6 +434,11 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
 
     // Set the width that cells should use
     itemSize = CGSize(width: availableWidth, height: 1) // Height will be determined automatically
+  }
+
+  override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
+    guard let collectionView = collectionView else { return false }
+    return collectionView.bounds.width != newBounds.width
   }
 
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
