@@ -25,16 +25,17 @@ struct ChatView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      chatMessages
-    }
+      MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
+        .safeAreaInset(edge: .bottom) {
+          HStack {
+            ComposeView(messageText: $text)
 
-    .safeAreaInset(edge: .bottom) {
-      inputArea
-
-//        .overlay(alignment: .top) {
-//          Divider()
-//            .edgesIgnoringSafeArea(.horizontal)
-//        }
+            sendButton
+          }
+          .padding(.vertical, 6)
+          .padding(.horizontal)
+          .background(Color(uiColor: .systemBackground))
+        }
     }
     .toolbar {
       ToolbarItem(placement: .principal) {
@@ -181,6 +182,8 @@ extension ChatView {
     }
     .padding(.vertical, 6)
     .padding(.horizontal)
+    .background(Color(uiColor: .systemBackground))
+    .animation(nil, value: text)
   }
 
   @ViewBuilder

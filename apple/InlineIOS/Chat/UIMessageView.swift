@@ -47,11 +47,11 @@ class UIMessageView: UIView {
   private let horizontalPadding: CGFloat = 12
   private let verticalPadding: CGFloat = 8
 
-  private let embedView: MessageEmbedView = {
-    let view = MessageEmbedView(repliedToMessage: nil)
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
+//  private let embedView: MessageEmbedView = {
+//    let view = MessageEmbedView(repliedToMessage: nil)
+//    view.translatesAutoresizingMaskIntoConstraints = false
+//    return view
+//  }()
 
   // MARK: - Initialization
 
