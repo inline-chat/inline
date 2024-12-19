@@ -391,65 +391,40 @@ final class MessagesCollectionView: UIView {
     // }
 
     func updateMessages(_ messages: [FullMessage], in collectionView: UICollectionView) {
-      // Batch updates
-      collectionView.performBatchUpdates {
-        var snapshot = dataSource.snapshot()
+      // Find only changed messages
+      let changedMessages = messages.enumerated().filter { index, newMessage in
+        guard index < fullMessages.count else { return true }
+        return !isMessageEqual(newMessage, fullMessages[index])
+      }.map { $0.element }
 
-        // Only update changed messages
-        let changedMessages = messages.enumerated().filter { index, newMessage in
-          guard index < fullMessages.count else { return true }
-          return !isMessageEqual(newMessage, fullMessages[index])
+      // If no changes, avoid unnecessary updates
+      guard !changedMessages.isEmpty else { return }
+
+      var snapshot = dataSource.snapshot()
+
+      // Update only changed items
+      for message in changedMessages {
+        if let existingIndex = fullMessages.firstIndex(where: {
+          $0.message.id == message.message.id
+        }) {
+          snapshot.reconfigureItems([fullMessages[existingIndex]])
+        } else {
+          // Handle new messages
+          snapshot.appendItems([message])
         }
-
-        // Update in batches
-        for (index, newMessage) in changedMessages {
-          if index < snapshot.itemIdentifiers.count {
-            snapshot.reconfigureItems([snapshot.itemIdentifiers[index]])
-          } else {
-            snapshot.appendItems([newMessage])
-          }
-        }
-
-        dataSource.apply(snapshot, animatingDifferences: false)
-        fullMessages = messages
       }
-    }
 
-//    func updateMessages(_ messages: [FullMessage], in collectionView: UICollectionView) {
-//      // Find only changed messages
-//      let changedMessages = messages.enumerated().filter { index, newMessage in
-//        guard index < fullMessages.count else { return true }
-//        return !isMessageEqual(newMessage, fullMessages[index])
-//      }.map { $0.element }
-//
-//      // If no changes, avoid unnecessary updates
-//      guard !changedMessages.isEmpty else { return }
-//
-//      var snapshot = dataSource.snapshot()
-//
-//      // Update only changed items
-//      for message in changedMessages {
-//        if let existingIndex = fullMessages.firstIndex(where: {
-//          $0.message.id == message.message.id
-//        }) {
-//          snapshot.reconfigureItems([fullMessages[existingIndex]])
-//        } else {
-//          // Handle new messages
-//          snapshot.appendItems([message])
-//        }
-//      }
-//
-//      fullMessages = messages
-//
-//      let hasOurNewMessage = changedMessages.contains { $0.message.out == true }
-//
-//      dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
-//        guard let self = self, !hasOurNewMessage else { return }
-//        self.restoreScrollPosition(collectionView)
-//      }
-//
-//      previousMessageCount = messages.count
-//    }
+      fullMessages = messages
+
+      let hasOurNewMessage = changedMessages.contains { $0.message.out == true }
+
+      dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+        guard let self = self, !hasOurNewMessage else { return }
+        self.restoreScrollPosition(collectionView)
+      }
+
+      previousMessageCount = messages.count
+    }
 
     private func isMessageEqual(_ message1: FullMessage, _ message2: FullMessage) -> Bool {
       // Compare relevant properties that affect the UI
@@ -459,47 +434,25 @@ final class MessagesCollectionView: UIView {
       // Add other relevant properties
     }
 
-//    @objc func orientationDidChange(_ notification: Notification) {
-//      guard let collectionView = currentCollectionView else { return }
-//      print("orientationDidChange \(orientationDidChange)")
-//      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-//        guard let self else { return }
-//
-//        UIView.performWithoutAnimation {
-//          collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-//          self.adjustContentInset(for: collectionView)
-//          collectionView.collectionViewLayout.invalidateLayout()
-//
-//          //          if !self.fullMessages.isEmpty {
-//          //            collectionView.scrollToItem(
-//          //              at: IndexPath(item: 0, section: 0),
-//          //              at: .bottom,
-//          //              animated: false
-//          //            )
-//          //          }
-//        }
-//      }
-//    }
-
     @objc func orientationDidChange(_ notification: Notification) {
       guard let collectionView = currentCollectionView else { return }
+      print("orientationDidChange \(orientationDidChange)")
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        guard let self else { return }
 
-      // Debounce rotation updates
-      NSObject.cancelPreviousPerformRequests(withTarget: self)
-      perform(#selector(handleRotation), with: nil, afterDelay: 0.1)
-    }
+        UIView.performWithoutAnimation {
+          collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
+          self.adjustContentInset(for: collectionView)
+          collectionView.collectionViewLayout.invalidateLayout()
 
-    @objc private func handleRotation() {
-      guard let collectionView = currentCollectionView else { return }
-
-      UIView.performWithoutAnimation {
-        collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-        adjustContentInset(for: collectionView)
-
-        // Only invalidate visible cells
-        let visibleItems = collectionView.indexPathsForVisibleItems
-        collectionView.collectionViewLayout.invalidateLayout()
-        collectionView.reloadItems(at: visibleItems)
+          //          if !self.fullMessages.isEmpty {
+          //            collectionView.scrollToItem(
+          //              at: IndexPath(item: 0, section: 0),
+          //              at: .bottom,
+          //              animated: false
+          //            )
+          //          }
+        }
       }
     }
 
