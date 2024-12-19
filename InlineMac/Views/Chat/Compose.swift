@@ -506,9 +506,13 @@ struct CustomTextEditor: NSViewRepresentable {
       // Only update if significant change
 //      if abs(newHeight - lastHeight) > 0.1 {
       lastHeight = newHeight
-      parent.height = newHeight
+      
+      DispatchQueue.main.async {
+        self.parent.height = newHeight
+      }
         
       textView.layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: 0, length: textView.string.count), actualCharacterRange: nil)
+      layoutManager.ensureLayout(for: textContainer)
       updateTextViewInsets(textView, contentHeight: contentHeight)
     }
 
