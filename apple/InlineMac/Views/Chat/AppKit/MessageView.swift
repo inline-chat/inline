@@ -161,7 +161,21 @@ class MessageViewAppKit: NSView {
 
   // MARK: - Setup
   
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+  }
+
   private func setupView() {
+    // Note(@mo):
+    // HACK to fix text view clipping during window resize. I tried with allowNonContiguousLayout but it didn't work well and it caused scroll jumps.
+    NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: nil, queue: .main) { [weak self] _ in
+      guard let self = self else { return }
+      
+      // Force complete layout update
+      self.messageTextView.needsLayout = true
+      self.messageTextView.needsDisplay = true
+    }
+    
     addSubview(contentView)
     contentView.addSubview(textStackView)
     
