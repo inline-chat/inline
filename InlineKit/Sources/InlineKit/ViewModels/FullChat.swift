@@ -6,7 +6,6 @@ public struct FullMessage: Codable, FetchableRecord, PersistableRecord, Sendable
 {
   public var user: User?
   public var message: Message
-  public var repliedToMessage: Message?
 
   // stable id
   public var id: Int64 {
@@ -111,7 +110,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
               try Message
                 .filter(Column("peerThreadId") == id)
                 .including(optional: Message.from)
-                .including(optional: Message.repliedToMessage)
+//                .including(optional: Message.repliedToMessage)
                 .asRequest(of: FullMessage.self)
                 // .order(Column("messageId").desc)
                 .order(Column("date").asc)
@@ -123,7 +122,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
                 try Message
                 .filter(Column("peerUserId") == id)
                 .including(optional: Message.from)
-                .including(optional: Message.repliedToMessage)
+//                .including(optional: Message.repliedToMessage)
                 .asRequest(of: FullMessage.self)
                 // .order(Column("messageId").desc)
                 .order(Column("date").asc)
