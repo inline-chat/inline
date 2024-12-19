@@ -113,8 +113,8 @@ final class MessagesCollectionView: UIView {
 
       guard
         let windowScene = UIApplication.shared
-          .connectedScenes
-          .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+        .connectedScenes
+        .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
         let window = windowScene.windows.first(where: { $0.isKeyWindow })
       else {
         return fallback
@@ -147,7 +147,7 @@ final class MessagesCollectionView: UIView {
 
       // Content inset can be different if needed
       collectionView.contentInset = UIEdgeInsets(
-        top: 0,  // Adjust this value based on your needs
+        top: 0, // Adjust this value based on your needs
         left: 0,
         bottom: navH,
         right: 0
@@ -197,7 +197,7 @@ final class MessagesCollectionView: UIView {
 
       // Content inset can be different if needed
       collectionView.contentInset = UIEdgeInsets(
-        top: 0,  // Adjust this value based on your needs
+        top: 0, // Adjust this value based on your needs
         left: 0,
         bottom: navBarHeight,
         right: 0
@@ -236,8 +236,8 @@ final class MessagesCollectionView: UIView {
     private func captureScrollPosition(_ collectionView: UICollectionView) {
       // Only capture if we're not at the top (y: 0 in flipped scroll view)
       guard collectionView.contentOffset.y > 0,
-        let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-        visibleIndexPaths.item < fullMessages.count
+            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
+            visibleIndexPaths.item < fullMessages.count
       else {
         scrollAnchor = nil
         return
@@ -349,7 +349,7 @@ final class MessagesCollectionView: UIView {
 
     private func restoreScrollPosition(_ collectionView: UICollectionView) {
       guard let anchor = scrollAnchor,
-        let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
+            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
       else {
         return
       }
@@ -363,52 +363,143 @@ final class MessagesCollectionView: UIView {
       }
     }
 
-    func updateMessages(_ messages: [FullMessage], in collectionView: UICollectionView) {
-      let oldCount = fullMessages.count
-      let oldMessages = fullMessages
+    // func updateMessages(_ messages: [FullMessage], in collectionView: UICollectionView) {
+    //   let oldCount = fullMessages.count
+    //   let oldMessages = fullMessages
 
-      if messages.count > oldCount {
-        let newMessages = messages.filter { message in
-          !oldMessages.contains { $0.message.id == message.message.id }
+    //   if messages.count > oldCount {
+    //     let newMessages = messages.filter { message in
+    //       !oldMessages.contains { $0.message.id == message.message.id }
+    //     }
+
+    //     let hasOurNewMessage = newMessages.contains { $0.message.out == true }
+
+    //     if hasOurNewMessage {
+    //       updateSnapshot(with: messages)
+    //     } else {
+    //       updateSnapshot(with: messages)
+    //       DispatchQueue.main.async { [weak self] in
+    //         self?.restoreScrollPosition(collectionView)
+    //       }
+    //     }
+    //   } else {
+    //     fullMessages = messages
+    //     updateSnapshot(with: messages)
+    //   }
+
+    //   previousMessageCount = messages.count
+    // }
+
+    func updateMessages(_ messages: [FullMessage], in collectionView: UICollectionView) {
+      // Batch updates
+      collectionView.performBatchUpdates {
+        var snapshot = dataSource.snapshot()
+
+        // Only update changed messages
+        let changedMessages = messages.enumerated().filter { index, newMessage in
+          guard index < fullMessages.count else { return true }
+          return !isMessageEqual(newMessage, fullMessages[index])
         }
 
-        let hasOurNewMessage = newMessages.contains { $0.message.out == true }
-
-        if hasOurNewMessage {
-          updateSnapshot(with: messages)
-        } else {
-          updateSnapshot(with: messages)
-          DispatchQueue.main.async { [weak self] in
-            self?.restoreScrollPosition(collectionView)
+        // Update in batches
+        for (index, newMessage) in changedMessages {
+          if index < snapshot.itemIdentifiers.count {
+            snapshot.reconfigureItems([snapshot.itemIdentifiers[index]])
+          } else {
+            snapshot.appendItems([newMessage])
           }
         }
-      } else {
-        fullMessages = messages
-        updateSnapshot(with: messages)
-      }
 
-      previousMessageCount = messages.count
+        dataSource.apply(snapshot, animatingDifferences: false)
+        fullMessages = messages
+      }
     }
+
+//    func updateMessages(_ messages: [FullMessage], in collectionView: UICollectionView) {
+//      // Find only changed messages
+//      let changedMessages = messages.enumerated().filter { index, newMessage in
+//        guard index < fullMessages.count else { return true }
+//        return !isMessageEqual(newMessage, fullMessages[index])
+//      }.map { $0.element }
+//
+//      // If no changes, avoid unnecessary updates
+//      guard !changedMessages.isEmpty else { return }
+//
+//      var snapshot = dataSource.snapshot()
+//
+//      // Update only changed items
+//      for message in changedMessages {
+//        if let existingIndex = fullMessages.firstIndex(where: {
+//          $0.message.id == message.message.id
+//        }) {
+//          snapshot.reconfigureItems([fullMessages[existingIndex]])
+//        } else {
+//          // Handle new messages
+//          snapshot.appendItems([message])
+//        }
+//      }
+//
+//      fullMessages = messages
+//
+//      let hasOurNewMessage = changedMessages.contains { $0.message.out == true }
+//
+//      dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+//        guard let self = self, !hasOurNewMessage else { return }
+//        self.restoreScrollPosition(collectionView)
+//      }
+//
+//      previousMessageCount = messages.count
+//    }
+
+    private func isMessageEqual(_ message1: FullMessage, _ message2: FullMessage) -> Bool {
+      // Compare relevant properties that affect the UI
+      return message1.message.id == message2.message.id
+        && message1.message.status == message2.message.status
+        && message1.message.text == message2.message.text
+      // Add other relevant properties
+    }
+
+//    @objc func orientationDidChange(_ notification: Notification) {
+//      guard let collectionView = currentCollectionView else { return }
+//      print("orientationDidChange \(orientationDidChange)")
+//      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+//        guard let self else { return }
+//
+//        UIView.performWithoutAnimation {
+//          collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
+//          self.adjustContentInset(for: collectionView)
+//          collectionView.collectionViewLayout.invalidateLayout()
+//
+//          //          if !self.fullMessages.isEmpty {
+//          //            collectionView.scrollToItem(
+//          //              at: IndexPath(item: 0, section: 0),
+//          //              at: .bottom,
+//          //              animated: false
+//          //            )
+//          //          }
+//        }
+//      }
+//    }
 
     @objc func orientationDidChange(_ notification: Notification) {
       guard let collectionView = currentCollectionView else { return }
-      print("orientationDidChange \(orientationDidChange)")
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-        guard let self else { return }
 
-        UIView.performWithoutAnimation {
-          collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-          self.adjustContentInset(for: collectionView)
-          collectionView.collectionViewLayout.invalidateLayout()
+      // Debounce rotation updates
+      NSObject.cancelPreviousPerformRequests(withTarget: self)
+      perform(#selector(handleRotation), with: nil, afterDelay: 0.1)
+    }
 
-          //          if !self.fullMessages.isEmpty {
-          //            collectionView.scrollToItem(
-          //              at: IndexPath(item: 0, section: 0),
-          //              at: .bottom,
-          //              animated: false
-          //            )
-          //          }
-        }
+    @objc private func handleRotation() {
+      guard let collectionView = currentCollectionView else { return }
+
+      UIView.performWithoutAnimation {
+        collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
+        adjustContentInset(for: collectionView)
+
+        // Only invalidate visible cells
+        let visibleItems = collectionView.indexPathsForVisibleItems
+        collectionView.collectionViewLayout.invalidateLayout()
+        collectionView.reloadItems(at: visibleItems)
       }
     }
 
@@ -418,7 +509,7 @@ final class MessagesCollectionView: UIView {
       guard indexPath.item < fullMessages.count else { return false }
 
       let currentMessage = fullMessages[indexPath.item]
-      let previousIndex = indexPath.item + 1  // Note: +1 because messages are reversed
+      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
 
       // If this is the first message in a group from the same sender,
       // check if the previous message was from a different sender
@@ -499,7 +590,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
 
     // Set the width that cells should use
-    itemSize = CGSize(width: availableWidth, height: 1)  // Height will be determined automatically
+    itemSize = CGSize(width: availableWidth, height: 1) // Height will be determined automatically
   }
 
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
@@ -507,7 +598,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
   {
     guard
       let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-        as? UICollectionViewLayoutAttributes
+      as? UICollectionViewLayoutAttributes
     else {
       return nil
     }

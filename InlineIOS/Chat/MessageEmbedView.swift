@@ -3,7 +3,7 @@ import UIKit
 class MessageEmbedView: UIView {
   // MARK: - UI Components
     
-  private let containerView: UIView = {
+  let containerView: UIView = {
     let view = UIView()
     view.layer.cornerRadius = 8
     view.clipsToBounds = true
@@ -11,20 +11,20 @@ class MessageEmbedView: UIView {
     return view
   }()
     
-  private let verticalBar: UIView = {
+  let verticalBar: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
     
-  private let nameLabel: UILabel = {
+  let nameLabel: UILabel = {
     let label = UILabel()
     label.font = .systemFont(ofSize: 13, weight: .medium)
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
     
-  private let messageLabel: UILabel = {
+  let messageLabel: UILabel = {
     let label = UILabel()
     label.font = .systemFont(ofSize: 15)
     label.numberOfLines = 1
@@ -33,7 +33,7 @@ class MessageEmbedView: UIView {
     return label
   }()
     
-  private let stackView: UIStackView = {
+  let stackView: UIStackView = {
     let stack = UIStackView()
     stack.axis = .vertical
     stack.spacing = 2
@@ -44,7 +44,7 @@ class MessageEmbedView: UIView {
     
   // MARK: - Properties
     
-  private var repliedToMessage: Message? {
+  var repliedToMessage: Message? {
     didSet {
       updateContent()
     }
@@ -65,7 +65,7 @@ class MessageEmbedView: UIView {
     
   // MARK: - Setup
     
-  private func setupViews() {
+  func setupViews() {
     addSubview(containerView)
     containerView.addSubview(verticalBar)
     containerView.addSubview(stackView)
@@ -96,7 +96,7 @@ class MessageEmbedView: UIView {
     ])
   }
     
-  private func updateContent() {
+  func updateContent() {
     guard let message = repliedToMessage else { return }
         
     let isOutgoing = message.out == true
