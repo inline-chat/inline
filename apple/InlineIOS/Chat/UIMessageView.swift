@@ -163,7 +163,7 @@ class UIMessageView: UIView {
         isOutgoing: true
       )
     } else {
-      bubbleView.backgroundColor = UIColor.systemGray6
+      bubbleView.backgroundColor = UIColor.systemGray5.withAlphaComponent(0.4)
       leadingConstraint?.isActive = true
       trailingConstraint?.isActive = false
       messageLabel.textColor = .label
