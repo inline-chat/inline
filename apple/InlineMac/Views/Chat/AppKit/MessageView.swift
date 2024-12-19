@@ -9,6 +9,8 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var firstInGroup: Bool
   var isLastMessage: Bool
   var isFirstMessage: Bool
+  var isRtl: Bool
+  
   var width: CGFloat?
   var height: CGFloat?
   
@@ -16,14 +18,15 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   
   // Compare everything except size
   func equalContentTo(_ other: MessageViewProps) -> Bool {
-    firstInGroup == other.firstInGroup &&
+    isRtl == other.isRtl &&
+      firstInGroup == other.firstInGroup &&
       isLastMessage == other.isLastMessage &&
       isFirstMessage == other.isFirstMessage
   }
   
   /// Used in cache key
   func toString() -> String {
-    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")"
+    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")"
   }
 }
 
@@ -128,13 +131,15 @@ class MessageViewAppKit: NSView {
     textView.isAutomaticDashSubstitutionEnabled = false
     textView.isAutomaticTextReplacementEnabled = false
     textView.isAutomaticSpellingCorrectionEnabled = false
+    
+    // Prevents clipping during resize
+//    textView.layoutManager?.allowsNonContiguousLayout = true
+//    textView.layoutManager?.backgroundLayoutEnabled = false
 
-    // Don't know what this does
-//    if let width = props.width, let height = props.height {
-//      let size = NSSize(width: width, height: height)
-//      textView.setFrameSize(size) // This probably helps...
-//    }
- 
+    // Force layout to respect width
+//    textView.setContentHuggingPriority(.required, for: .horizontal)
+//    textView.setContentCompressionResistancePriority(.required, for: .horizontal)
+    
     textView.delegate = self
 
     return textView
@@ -155,8 +160,6 @@ class MessageViewAppKit: NSView {
   }
 
   // MARK: - Setup
-
-  private var rtl = false
   
   private func setupView() {
     addSubview(contentView)
@@ -172,13 +175,9 @@ class MessageViewAppKit: NSView {
       )
     }
     
-//    contentView.addSubview(messageTextView)
-    textStackView.addArrangedSubview(messageTextView)
+    contentView.addSubview(messageTextView)
     
-    setupMessageText() // must be before constraints so RTL is set
-    
-    textStackView.alignment = rtl ? .right : .left
-    
+    setupMessageText()
     setupConstraints()
     setupContextMenu()
   }
@@ -189,7 +188,6 @@ class MessageViewAppKit: NSView {
   private var textViewTrailingConstraint: NSLayoutConstraint!
   
   private func setupConstraints() {
-    
     var topSpacing = props.isFirstMessage ? Theme.messageListTopInset : 0.0
     let topPadding = Theme.messageVerticalPadding
     let bottomPadding = Theme.messageVerticalPadding
@@ -228,34 +226,29 @@ class MessageViewAppKit: NSView {
           .getTextViewHeight(for: props)
       )
     
-    NSLayoutConstraint.activate(
-      [
-        textStackView.topAnchor.constraint(
-          equalTo: showsName ? nameLabel.bottomAnchor : contentView.topAnchor,
-          constant: showsName ? Theme.messageVerticalStackSpacing : topPadding
-        ),
-        textStackView.bottomAnchor
-          .constraint(
-            equalTo: contentView.bottomAnchor,
-            constant: -bottomPadding
-          ),
-        textStackView.leadingAnchor.constraint(
-          equalTo: contentView.leadingAnchor,
-          constant: contentLeading
-        ),
-        textStackView.trailingAnchor.constraint(
-          equalTo: contentView.trailingAnchor,
-          constant: -sidePadding
-        )
-      ]
-    )
-    
     // Message text view constraints
     NSLayoutConstraint.activate(
       [
+        messageTextView.topAnchor.constraint(
+          equalTo: showsName ? nameLabel.bottomAnchor : contentView.topAnchor,
+          constant: showsName ? Theme.messageVerticalStackSpacing : topPadding
+        ),
+        
+        props.isRtl ?
+          messageTextView.trailingAnchor.constraint(
+            equalTo: contentView.trailingAnchor,
+            constant: -sidePadding
+          ) :
+          messageTextView.leadingAnchor.constraint(
+            equalTo: contentView.leadingAnchor,
+            constant: contentLeading
+          ),
+        
         // This is accurate but requires careful updates
         textViewWidthConstraint,
         textViewHeightConstraint
+        
+        // TODO: padding bottom?
       ]
     )
   }
@@ -263,9 +256,16 @@ class MessageViewAppKit: NSView {
   // Called when width/height changes
   public func updateSizes(props: MessageViewProps) {
     self.props = props
-    textViewWidthConstraint.constant = props.width ?? 0.0
+    let width = props.width ?? 0.0
+    textViewWidthConstraint.constant = width
     textViewHeightConstraint.constant = MessageSizeCalculator
       .getTextViewHeight(for: props)
+    
+//    messageTextView.textContainer?.size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+    
+    // Force layout update
+//    messageTextView.needsLayout = true
+//    messageTextView.layoutSubtreeIfNeeded()
   }
   
   // Experimental: Called when only the text changes
@@ -276,24 +276,12 @@ class MessageViewAppKit: NSView {
     nameLabel.stringValue = from.firstName ?? from.username ?? ""
     setupMessageText()
     updateSizes(props: props)
-    
-    // update rtl
-    textStackView.alignment = rtl ? .trailing : .leading
-//    textViewTrailingConstraint.isActive = rtl
-//    textViewLeadingConstraint.isActive = !rtl
-    // WIP..
   }
   
   private func setupMessageText() {
     let text = message.text ?? ""
-    
-    if text.isRTL {
-      rtl = true
-      messageTextView.baseWritingDirection = .rightToLeft
-    } else {
-      rtl = false
-      messageTextView.baseWritingDirection = .natural
-    }
+  
+    messageTextView.baseWritingDirection = props.isRtl ? .rightToLeft : .natural
 
     let key = "\(text)"
     if let attrs = Self.cacheAttrs.get(key: key) {

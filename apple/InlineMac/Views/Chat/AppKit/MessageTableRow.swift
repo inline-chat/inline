@@ -35,6 +35,7 @@ class MessageTableCell: NSTableCellView {
       aP.firstInGroup == bP.firstInGroup &&
       aP.isFirstMessage == bP.isFirstMessage &&
       aP.isLastMessage == bP.isLastMessage &&
+      aP.isRtl == bP.isRtl &&
       // NOT EQUAL CONTENT
       aM.text != bM.text
   }
