@@ -16,8 +16,11 @@ class MessageSizeCalculator {
   private var heightForSingleLine: CGFloat?
   
   // This let's us limit number of re-calculations
-  static let widthChangeThreshold = 10.0
-  static let extraSafeWidth = 8.0
+//  static let widthChangeThreshold = 10.0
+//  static let extraSafeWidth = 6.0
+  
+  static let widthChangeThreshold = 40.0
+  static let extraSafeWidth = 0.0
   
   init() {
     textStorage = NSTextStorage()
@@ -40,8 +43,10 @@ class MessageSizeCalculator {
       return CGSize(width: 1, height: heightForSingleLineText())
     }
     
-    let availableWidth = ceil(width) - Self.widthChangeThreshold - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - Theme.messageSidePadding * 2
-
+    let availableWidth = ceil(width) - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - Theme.messageSidePadding * 2 - Self.widthChangeThreshold -
+      // if we don't subtract this here, it can result is wrong calculations
+      Self.extraSafeWidth
+    
     let cacheKey = "\(message.id):\(text):\(props.toString()):\(availableWidth)" as NSString
     if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue {
       return cachedSize
@@ -101,10 +106,8 @@ class MessageSizeCalculator {
   func invalidateCache() {
     cache.removeAllObjects()
   }
-  
-  static func getTextViewWidth(for tableWidth: CGFloat) -> CGFloat {
-    tableWidth - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing
-  }  
+
+
   static func getTextViewHeight(for props: MessageViewProps) -> CGFloat {
     var height = props.height ?? 60.0
     if props.firstInGroup {
