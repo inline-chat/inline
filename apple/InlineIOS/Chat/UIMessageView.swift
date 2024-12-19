@@ -8,7 +8,7 @@ class UIMessageView: UIView {
   private let messageLabel: UILabel = {
     let label = UILabel()
     label.numberOfLines = 0
-    label.font = .systemFont(ofSize: 16, weight: .medium)
+    label.font = .systemFont(ofSize: 16)
     label.textAlignment = .natural
     return label
   }()
@@ -47,6 +47,12 @@ class UIMessageView: UIView {
   private let horizontalPadding: CGFloat = 12
   private let verticalPadding: CGFloat = 8
 
+  private let embedView: MessageEmbedView = {
+    let view = MessageEmbedView(repliedToMessage: nil)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
   // MARK: - Initialization
 
   init(fullMessage: FullMessage) {
@@ -69,6 +75,12 @@ class UIMessageView: UIView {
     bubbleView.translatesAutoresizingMaskIntoConstraints = false
 
     bubbleView.addSubview(contentStack)
+
+    // Add embed view if there's a reply
+    if let replyMessage = fullMessage.repliedToMessage {
+      contentStack.addArrangedSubview(embedView)
+      embedView.repliedToMessage = replyMessage
+    }
 
     leadingConstraint = bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8)
     trailingConstraint = bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8)
@@ -99,6 +111,12 @@ class UIMessageView: UIView {
     // Remove existing arrangement
     contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
     shortMessageStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+    // Add embed view first if there's a reply
+    if let replyMessage = fullMessage.repliedToMessage {
+      contentStack.addArrangedSubview(embedView)
+      embedView.repliedToMessage = replyMessage
+    }
 
     let messageLength = fullMessage.message.text?.count ?? 0
     let messageText = fullMessage.message.text ?? ""

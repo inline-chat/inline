@@ -147,17 +147,37 @@ final class ComposeView: UIView {
     }
   }
 
+//  private func updateHeight() {
+//    let size = textView.sizeThatFits(
+//      CGSize(width: textView.bounds.width, height: CGFloat.greatestFiniteMagnitude))
+//    let newHeight = min(size.height, 300)
+//
+//    guard heightConstraint?.constant != newHeight else { return }
+//
+//    heightConstraint?.constant = newHeight
+//
+//    UIView.animate(withDuration: 0.2) {
+//      self.superview?.layoutIfNeeded()
+//    }
+//  }
+
   private func updateHeight() {
+    // Debounce height updates
+    NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(performHeightUpdate), object: nil)
+    perform(#selector(performHeightUpdate), with: nil, afterDelay: 0.1)
+  }
+
+  @objc private func performHeightUpdate() {
     let size = textView.sizeThatFits(
-      CGSize(width: textView.bounds.width, height: CGFloat.greatestFiniteMagnitude))
+      CGSize(width: textView.bounds.width, height: .greatestFiniteMagnitude)
+    )
     let newHeight = min(size.height, 300)
 
     guard heightConstraint?.constant != newHeight else { return }
 
-    heightConstraint?.constant = newHeight
-
-    UIView.animate(withDuration: 0.2) {
-      self.superview?.layoutIfNeeded()
+    UIView.performWithoutAnimation {
+      heightConstraint?.constant = newHeight
+      superview?.layoutIfNeeded()
     }
   }
 }
@@ -213,7 +233,8 @@ final class OptimizedLayoutManager: NSLayoutManager {
     let visibleRect = textContainer.size
     let glyphRange = glyphRange(
       forBoundingRect: CGRect(origin: .zero, size: visibleRect),
-      in: textContainer)
+      in: textContainer
+    )
 
     guard glyphRange.location >= 0,
           glyphRange.length <= numberOfGlyphs
