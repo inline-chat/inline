@@ -788,7 +788,8 @@ extension MessagesTableView: NSTableViewDelegate {
     var props = MessageViewProps(
       firstInGroup: isFirstInGroup(at: row),
       isLastMessage: isLastMessage(at: row),
-      isFirstMessage: isFirstMessage(at: row)
+      isFirstMessage: isFirstMessage(at: row),
+      isRtl: message.message.text?.isRTL ?? false
     )
 
     let tableWidth = width
@@ -812,7 +813,8 @@ extension MessagesTableView: NSTableViewDelegate {
     let props = MessageViewProps(
       firstInGroup: isFirstInGroup(at: row),
       isLastMessage: isLastMessage(at: row),
-      isFirstMessage: isFirstMessage(at: row)
+      isFirstMessage: isFirstMessage(at: row),
+      isRtl: message.message.text?.isRTL ?? false
     )
     
     let tableWidth = width
