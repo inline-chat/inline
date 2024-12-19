@@ -30,8 +30,8 @@ final class OptimizedTextStorage: NSTextStorage {
 final class OptimizedLayoutManager: NSLayoutManager {
   override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
     guard let textContainer = textContainers.first,
-          glyphsToShow.location >= 0,
-          glyphsToShow.length <= numberOfGlyphs
+      glyphsToShow.location >= 0,
+      glyphsToShow.length <= numberOfGlyphs
     else {
       return
     }
@@ -43,7 +43,7 @@ final class OptimizedLayoutManager: NSLayoutManager {
     )
 
     guard glyphRange.location >= 0,
-          glyphRange.length <= numberOfGlyphs
+      glyphRange.length <= numberOfGlyphs
     else {
       return
     }
@@ -57,96 +57,96 @@ struct Compose: UIViewRepresentable {
   let placeholder: String
   let maxHeight: CGFloat
   @Binding var height: CGFloat
-    
+
   private let textAttributes: [NSAttributedString.Key: Any] = [
     .font: UIFont.preferredFont(forTextStyle: .body),
-    .foregroundColor: UIColor.label
+    .foregroundColor: UIColor.label,
   ]
-    
+
   private let placeholderAttributes: [NSAttributedString.Key: Any] = [
     .font: UIFont.preferredFont(forTextStyle: .body),
-    .foregroundColor: UIColor.secondaryLabel
+    .foregroundColor: UIColor.secondaryLabel,
   ]
-    
+
   func makeCoordinator() -> Coordinator {
     Coordinator(self)
   }
-    
+
   func makeUIView(context: Context) -> UITextView {
     let storage = OptimizedTextStorage()
     let layoutManager = OptimizedLayoutManager()
     let container = NSTextContainer(size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
-        
+
     container.widthTracksTextView = true
     container.heightTracksTextView = false
     container.lineFragmentPadding = 0
-        
+
     layoutManager.addTextContainer(container)
     storage.addLayoutManager(layoutManager)
-        
+
     let textView = UITextView(frame: .zero, textContainer: container)
     textView.delegate = context.coordinator
-        
+
     layoutManager.allowsNonContiguousLayout = true
     layoutManager.usesFontLeading = false
     textView.layoutManager.allowsNonContiguousLayout = true
-        
+
     textView.backgroundColor = .clear
     textView.font = UIFont.preferredFont(forTextStyle: .body)
     textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
-        
+
     textView.isScrollEnabled = true
     textView.autocorrectionType = .no
     textView.autocapitalizationType = UITextAutocapitalizationType.sentences
     textView.smartQuotesType = UITextSmartQuotesType.no
     textView.smartDashesType = UITextSmartDashesType.no
-        
+
     textView.layer.drawsAsynchronously = true
     textView.layer.shouldRasterize = true
     textView.layer.rasterizationScale = UIScreen.main.scale
-        
+
     textView.textStorage.setAttributedString(
       NSAttributedString(string: text, attributes: textAttributes)
     )
-        
+
     return textView
   }
-    
+
   func updateUIView(_ uiView: UITextView, context: Context) {
     guard uiView.text != text else { return }
-        
+
     UIView.performWithoutAnimation {
       let selectedRange = uiView.selectedRange
       uiView.textStorage.setAttributedString(
         NSAttributedString(string: text, attributes: textAttributes)
       )
       uiView.selectedRange = selectedRange
-            
+
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
         updateHeight(uiView)
       }
     }
   }
-    
+
   private func updateHeight(_ textView: UITextView) {
     let size = textView.sizeThatFits(CGSize(width: textView.bounds.width, height: .infinity))
     let newHeight = min(size.height, maxHeight)
-        
+
     guard height != newHeight else { return }
     height = newHeight
   }
-    
+
   class Coordinator: NSObject, UITextViewDelegate {
     var parent: Compose
     private var heightUpdateWorkItem: DispatchWorkItem?
-        
+
     init(_ parent: Compose) {
       self.parent = parent
     }
-        
+
     func textViewDidChange(_ textView: UITextView) {
       parent.text = textView.text
-            
+
       heightUpdateWorkItem?.cancel()
       let workItem = DispatchWorkItem { [weak self] in
         self?.updateHeight(textView)
@@ -154,7 +154,7 @@ struct Compose: UIViewRepresentable {
       heightUpdateWorkItem = workItem
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
     }
-        
+
     private func updateHeight(_ textView: UITextView) {
       let size = textView.sizeThatFits(CGSize(width: textView.bounds.width, height: .infinity))
       parent.height = min(size.height, parent.maxHeight)

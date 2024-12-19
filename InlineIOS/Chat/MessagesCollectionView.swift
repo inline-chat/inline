@@ -358,43 +358,30 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     // MARK: - UICollectionViewDelegateFlowLayout
 
-    //    func collectionView(
-    //      _ collectionView: UICollectionView,
-    //      layout collectionViewLayout: UICollectionViewLayout,
-    //      sizeForItemAt indexPath: IndexPath
-    //    ) -> CGSize {
-    //      guard indexPath.item < fullMessages.count else { return .zero }
-    //
-    //      let fullMessage = fullMessages[indexPath.item]
-    //      let width = collectionView.bounds.width
-    //      let isTransition = isTransitionFromOtherSender(at: indexPath)
-    //
-    //      return MessageSizeCalculator.shared.size(
-    //        for: fullMessage,
-    //        maxWidth: width,
-    //        isTransition: isTransition
-    //      )
-    //    }
-
-//    func collectionView(
-//      _ collectionView: UICollectionView,
-//      layout collectionViewLayout: UICollectionViewLayout,
-//      sizeForItemAt indexPath: IndexPath
-//    ) -> CGSize {
-//      let availableWidth = collectionView.bounds.width - collectionView.contentInset.left - collectionView.contentInset.right
-//      return CGSize(width: availableWidth, height: UICollectionViewFlowLayout.automaticSize.height)
-//    }
-
     func collectionView(
       _ collectionView: UICollectionView,
       layout collectionViewLayout: UICollectionViewLayout,
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
-      let availableWidth = collectionView.bounds.width - 25
+      // Bounds checking
+      guard indexPath.item < fullMessages.count else {
+        return .zero
+      }
 
-      // Return full width with estimated height
-      // Actual height will be adjusted by the cell's preferredLayoutAttributesFitting
-      return CGSize(width: availableWidth, height: 1)
+      let availableWidth = collectionView.bounds.width - 16
+
+      // Create a temporary cell to calculate the proper height
+      let cell = MessageCollectionViewCell(frame: .zero)
+      let message = fullMessages[indexPath.item]
+      cell.configure(with: message, topPadding: 2, bottomPadding: 0)
+
+      let size = cell.contentView.systemLayoutSizeFitting(
+        CGSize(width: availableWidth, height: 0),
+        withHorizontalFittingPriority: .required,
+        verticalFittingPriority: .fittingSizeLevel
+      )
+
+      return size
     }
 
     func collectionView(
@@ -436,11 +423,6 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     itemSize = CGSize(width: availableWidth, height: 1) // Height will be determined automatically
   }
 
-  override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
-    guard let collectionView = collectionView else { return false }
-    return collectionView.bounds.width != newBounds.width
-  }
-
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
     -> UICollectionViewLayoutAttributes?
   {
@@ -451,9 +433,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
       return nil
     }
 
-    // Initial state: moved down and slightly scaled
-    attributes.transform = CGAffineTransform(translationX: 0, y: -50)
-    //    attributes.alpha = 0
+    attributes.transform = CGAffineTransform(translationX: 0, y: -30)
 
     return attributes
   }
