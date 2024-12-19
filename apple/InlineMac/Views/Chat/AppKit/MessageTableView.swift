@@ -230,9 +230,9 @@ class MessagesTableView: NSViewController {
   private func handleContentSizeChange(_ newHeight: CGFloat) {
     lastContentHeight = newHeight
     
-    log.trace("scrollView content size change")
-
+    // Moved to didlayout
     if isAtBottom && (!isPerformingUpdate || needsInitialScroll) {
+      log.trace("scrollView content size change")
       scrollToBottom(animated: false)
     }
   }
@@ -259,16 +259,19 @@ class MessagesTableView: NSViewController {
     
     // Update scroll position
     let prevAtBottom = isAtBottom
-    // Note(@mo): 38 is initial diff which will instantly make atBottom false and break scroll to bottom
-    // when initial route is the chat and app is launched. This is a hack to prevent that.
-    // but we need to find a way to keep this under 10.0 and instead fix the initial scroll to bottom.
-    isAtBottom = abs(currentScrollOffset - maxScrollableHeight) <= 5.0
     
+//    DispatchQueue.main.async {
+    // Prevent iaAtBottom false negative when elastic scrolling
+    let overScrolledToBottom = currentScrollOffset > maxScrollableHeight
+    isAtBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 5.0
+    isAtAbsoluteBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 0.1
+      
     #if DEBUG
       if isAtBottom != prevAtBottom {
         log.trace("isAtBottom changed. isAtBottom = \(isAtBottom) currentScrollOffset = \(currentScrollOffset) maxScrollableHeight = \(maxScrollableHeight)")
       }
     #endif
+//    }
 
     // Only update width of rows if scrolling up otherwise this messes up scroll animation on new item
     if prevOffset != currentScrollOffset &&
@@ -443,10 +446,11 @@ class MessagesTableView: NSViewController {
   }
 
   @objc func scrollViewFrameChanged(notification: Notification) {
-    if isAtBottom {
-      // Scroll to bottom
-      scrollToBottom(animated: false)
-    }
+    // Moved to did layout
+//    if isAtBottom {
+//      // Scroll to bottom
+//      scrollToBottom(animated: false)
+//    }
   }
 
   private var lastKnownWidth: CGFloat = 0
@@ -467,7 +471,8 @@ class MessagesTableView: NSViewController {
     if lastKnownWidth == 0 {
       lastKnownWidth = newWidth
       recalculateVisibleHeightsWithCache()
-    } else if abs(newWidth - lastKnownWidth) > MessageSizeCalculator.widthChangeThreshold {
+//    } else if abs(newWidth - lastKnownWidth) > MessageSizeCalculator.widthChangeThreshold {
+    } else if abs(newWidth - lastKnownWidth) > MessageSizeCalculator.widthChangeThreshold / 2 {
 //    } else if abs(newWidth - lastKnownWidth) > 0.1 {
       // Handle height re-calc on width change
       lastKnownWidth = newWidth
@@ -489,6 +494,12 @@ class MessagesTableView: NSViewController {
         // Very hacky way 😎
         self.needsInitialScroll = false
       }
+    }
+    
+    // Note(@mo): This is a hack to fix scroll jumping when user is resizing the window at bottom.
+
+    if isAtAbsoluteBottom {
+      scrollToBottom(animated: false)
     }
   }
 
@@ -650,7 +661,7 @@ class MessagesTableView: NSViewController {
     // disable animations
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
-      
+      context.allowsImplicitAnimation = false
       // DO WE NEED THIS HERE???
       self.tableView
         .reloadData(forRowIndexes: indexesToUpdate, columnIndexes: IndexSet([0]))
