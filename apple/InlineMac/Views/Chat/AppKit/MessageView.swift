@@ -78,14 +78,7 @@ class MessageViewAppKit: NSView {
     view.layer?.cornerRadius = 8
     return view
   }()
-  
-  private lazy var textStackView: NSStackView = {
-    let stack = NSStackView()
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = .vertical
-    return stack
-  }()
-  
+
   private lazy var nameLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -104,7 +97,7 @@ class MessageViewAppKit: NSView {
     textView.drawsBackground = false
     
     // For international langs to not be clipped
-    textView.clipsToBounds = false
+    textView.clipsToBounds = false 
     
     // for Debug
 //    textView.backgroundColor = .blue.withAlphaComponent(0.1)
@@ -172,12 +165,13 @@ class MessageViewAppKit: NSView {
       guard let self = self else { return }
       
       // Force complete layout update
+//      self.messageTextView.layoutManager?.ensureLayout(for: self.messageTextView.textContainer!)
       self.messageTextView.needsLayout = true
-      self.messageTextView.needsDisplay = true
+      // buggy
+//      self.messageTextView.needsDisplay = true
     }
     
     addSubview(contentView)
-    contentView.addSubview(textStackView)
     
     if showsName {
       contentView.addSubview(nameLabel)
@@ -271,15 +265,22 @@ class MessageViewAppKit: NSView {
   public func updateSizes(props: MessageViewProps) {
     self.props = props
     let width = props.width ?? 0.0
-    textViewWidthConstraint.constant = width
-    textViewHeightConstraint.constant = MessageSizeCalculator
-      .getTextViewHeight(for: props)
+    textViewWidthConstraint.isActive = false
+    textViewHeightConstraint.isActive = false
     
-//    messageTextView.textContainer?.size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+    textViewWidthConstraint = messageTextView.widthAnchor.constraint(equalToConstant: width)
+    textViewHeightConstraint = messageTextView.heightAnchor
+      .constraint(
+        equalToConstant: MessageSizeCalculator
+          .getTextViewHeight(for: props)
+        )
+    textViewWidthConstraint.isActive = true
+    textViewHeightConstraint.isActive = true
     
-    // Force layout update
+//    messageTextView.layoutManager?.ensureLayout(for: messageTextView.textContainer!)
 //    messageTextView.needsLayout = true
 //    messageTextView.layoutSubtreeIfNeeded()
+//    layoutSubtreeIfNeeded()
   }
   
   // Experimental: Called when only the text changes
