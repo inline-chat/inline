@@ -11,11 +11,11 @@ struct MessagesCollectionView: UIViewRepresentable {
     let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
 
     collectionView.collectionViewLayout = layout
-//    collectionView.contentInsetAdjustmentBehavior = .always // added for width
+    //    collectionView.contentInsetAdjustmentBehavior = .always // added for width
     collectionView.backgroundColor = .clear
     collectionView.delegate = context.coordinator
     collectionView.autoresizingMask = [.flexibleHeight]
-//    collectionView.automaticallyAdjustsScrollIndicatorInsets = false
+    //    collectionView.automaticallyAdjustsScrollIndicatorInsets = false
     collectionView.register(
       MessageCollectionViewCell.self,
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
@@ -40,26 +40,26 @@ struct MessagesCollectionView: UIViewRepresentable {
     // Fix for scroll indicator
     collectionView.scrollIndicatorInsets = .zero
     collectionView.verticalScrollIndicatorInsets = .zero
-//    context.coordinator.adjustContentInset(for: collectionView)
+    //    context.coordinator.adjustContentInset(for: collectionView)
 
     // Get navigation bar height
-//    let navBarHeight = getNavigationBarHeight()
-//
-//    // Set scroll indicator insets instead of content inset
-//    collectionView.scrollIndicatorInsets = UIEdgeInsets(
-//      top: 0,
-//      left: 0,
-//      bottom: navBarHeight,
-//      right: 0
-//    )
-//
-//    // Content inset can be different if needed
-//    collectionView.contentInset = UIEdgeInsets(
-//      top: 0, // Adjust this value based on your needs
-//      left: 0,
-//      bottom: navBarHeight,
-//      right: 0
-//    )
+    //    let navBarHeight = getNavigationBarHeight()
+    //
+    //    // Set scroll indicator insets instead of content inset
+    //    collectionView.scrollIndicatorInsets = UIEdgeInsets(
+    //      top: 0,
+    //      left: 0,
+    //      bottom: navBarHeight,
+    //      right: 0
+    //    )
+    //
+    //    // Content inset can be different if needed
+    //    collectionView.contentInset = UIEdgeInsets(
+    //      top: 0, // Adjust this value based on your needs
+    //      left: 0,
+    //      bottom: navBarHeight,
+    //      right: 0
+    //    )
     // Performance optimizations
     collectionView.isPrefetchingEnabled = true
     collectionView.decelerationRate = .normal
@@ -119,7 +119,8 @@ struct MessagesCollectionView: UIViewRepresentable {
       let fallback: CGFloat = 44.0
       let minimumNavHeight: CGFloat = 32.0
 
-      guard let windowScene = UIApplication.shared
+      guard
+        let windowScene = UIApplication.shared
         .connectedScenes
         .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
         let window = windowScene.windows.first(where: { $0.isKeyWindow })
@@ -142,24 +143,24 @@ struct MessagesCollectionView: UIViewRepresentable {
       }
     }
 
-//    func adjustContentInset(for collectionView: UICollectionView) {
-//      let navH = getNavigationBarHeight()
-//
-//      collectionView.scrollIndicatorInsets = UIEdgeInsets(
-//        top: 0,
-//        left: 0,
-//        bottom: navH,
-//        right: 0
-//      )
-//
-//      // Content inset can be different if needed
-//      collectionView.contentInset = UIEdgeInsets(
-//        top: 0, // Adjust this value based on your needs
-//        left: 0,
-//        bottom: navH,
-//        right: 0
-//      )
-//    }
+    //    func adjustContentInset(for collectionView: UICollectionView) {
+    //      let navH = getNavigationBarHeight()
+    //
+    //      collectionView.scrollIndicatorInsets = UIEdgeInsets(
+    //        top: 0,
+    //        left: 0,
+    //        bottom: navH,
+    //        right: 0
+    //      )
+    //
+    //      // Content inset can be different if needed
+    //      collectionView.contentInset = UIEdgeInsets(
+    //        top: 0, // Adjust this value based on your needs
+    //        left: 0,
+    //        bottom: navH,
+    //        right: 0
+    //      )
+    //    }
 
     func setupDataSource(_ collectionView: UICollectionView) {
       currentCollectionView = collectionView
@@ -311,16 +312,16 @@ struct MessagesCollectionView: UIViewRepresentable {
 
         UIView.performWithoutAnimation {
           collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-//          self.adjustContentInset(for: collectionView)
+          //          self.adjustContentInset(for: collectionView)
           collectionView.collectionViewLayout.invalidateLayout()
 
-//          if !self.fullMessages.isEmpty {
-//            collectionView.scrollToItem(
-//              at: IndexPath(item: 0, section: 0),
-//              at: .bottom,
-//              animated: false
-//            )
-//          }
+          //          if !self.fullMessages.isEmpty {
+          //            collectionView.scrollToItem(
+          //              at: IndexPath(item: 0, section: 0),
+          //              at: .bottom,
+          //              animated: false
+          //            )
+          //          }
         }
       }
     }
@@ -419,22 +420,51 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     // Calculate the available width
     let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
 
-    // Set the width that cells should use
-    itemSize = CGSize(width: availableWidth, height: 1) // Height will be determined automatically
+    // Don't set a fixed itemSize here since we're using automatic sizing
+    estimatedItemSize = CGSize(width: availableWidth, height: 44) // Use a reasonable estimated height
   }
 
-  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
-    -> UICollectionViewLayoutAttributes?
-  {
-    guard
-      let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-      as? UICollectionViewLayoutAttributes
-    else {
+//
+//  override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
+//    return true
+//  }
+
+  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
+    guard let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy() as? UICollectionViewLayoutAttributes else {
       return nil
     }
 
     attributes.transform = CGAffineTransform(translationX: 0, y: -30)
-
     return attributes
   }
 }
+
+//
+// final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
+//  override func prepare() {
+//    super.prepare()
+//
+//    guard let collectionView = collectionView else { return }
+//
+//    // Calculate the available width
+//    let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
+//
+//    // Set the width that cells should use
+//    itemSize = CGSize(width: availableWidth, height: 1) // Height will be determined automatically
+//  }
+//
+//  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
+//    -> UICollectionViewLayoutAttributes?
+//  {
+//    guard
+//      let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
+//      as? UICollectionViewLayoutAttributes
+//    else {
+//      return nil
+//    }
+//
+//    attributes.transform = CGAffineTransform(translationX: 0, y: -30)
+//
+//    return attributes
+//  }
+// }

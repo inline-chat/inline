@@ -110,10 +110,11 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
               try Message
                 .filter(Column("peerThreadId") == id)
                 .including(optional: Message.from)
-//                .including(optional: Message.repliedToMessage)
+                //                .including(optional: Message.repliedToMessage)
                 .asRequest(of: FullMessage.self)
-                // .order(Column("messageId").desc)
                 .order(Column("date").asc)
+                .reversed()
+                .limit(80)
                 .fetchAll(db)
 
           } else if case .user(let id) = peer {
@@ -122,10 +123,11 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
                 try Message
                 .filter(Column("peerUserId") == id)
                 .including(optional: Message.from)
-//                .including(optional: Message.repliedToMessage)
+                //                .including(optional: Message.repliedToMessage)
                 .asRequest(of: FullMessage.self)
-                // .order(Column("messageId").desc)
                 .order(Column("date").asc)
+                .reversed()
+                .limit(80)
                 .fetchAll(db)
 
           } else {
