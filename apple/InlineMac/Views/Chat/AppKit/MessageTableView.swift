@@ -33,6 +33,9 @@ class MessagesTableView: NSViewController {
     table.rowHeight = defaultRowHeight
     table.layer?.backgroundColor = .clear
     
+//    table.wantsLayer = true
+//    table.layerContentsRedrawPolicy = .onSetNeedsDisplay
+//    
     let column = NSTableColumn(identifier: .init("messageColumn"))
     column.isEditable = false
     column.resizingMask = .autoresizingMask
@@ -439,12 +442,13 @@ class MessagesTableView: NSViewController {
       processedRows.insert(row)
     }
     
-    DispatchQueue.main.async {
-      // Clean up non-visible avatars
-      let currentAvatars = Set(self.avatarOverlay.avatarViews.keys)
-      let avatarsToRemove = currentAvatars.subtracting(processedRows)
-      avatarsToRemove.forEach { self.avatarOverlay.removeAvatar(for: $0) }
-    }
+    // Adding this dispatch makes double avatars show up sometimes
+//    DispatchQueue.main.async {
+    // Clean up non-visible avatars
+    let currentAvatars = Set(avatarOverlay.avatarViews.keys)
+    let avatarsToRemove = currentAvatars.subtracting(processedRows)
+    avatarsToRemove.forEach { self.avatarOverlay.removeAvatar(for: $0) }
+//    }
   }
 
   @objc func scrollViewFrameChanged(notification: Notification) {
@@ -661,14 +665,14 @@ class MessagesTableView: NSViewController {
     )
     
     // disable animations
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0
-      context.allowsImplicitAnimation = false
-      // DO WE NEED THIS HERE???
-      self.tableView
-        .reloadData(forRowIndexes: indexesToUpdate, columnIndexes: IndexSet([0]))
-      tableView.noteHeightOfRows(withIndexesChanged: indexesToUpdate)
-    }
+    
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    // DO WE NEED THIS HERE???
+    tableView.noteHeightOfRows(withIndexesChanged: indexesToUpdate)
+    tableView
+      .reloadData(forRowIndexes: indexesToUpdate, columnIndexes: IndexSet([0]))
+    CATransaction.commit()
   }
   
   // Note this function will stop any animation that is happening so must be used with caution
@@ -679,8 +683,8 @@ class MessagesTableView: NSViewController {
     
     guard visibleRange.location != NSNotFound else { return }
     
-    let buffer = 2
-    
+    let buffer = 0
+  
     // Calculate ranges
     let visibleStartIndex = max(0, visibleRange.location - buffer)
     let visibleEndIndex = min(
@@ -693,16 +697,13 @@ class MessagesTableView: NSViewController {
     
     // Begin updates
     
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0
-      context.allowsImplicitAnimation = false
-
-      // To send new props
-      self.tableView
-        .reloadData(forRowIndexes: visibleIndexesToUpdate, columnIndexes: IndexSet([0]))
-      // Optimize by not calling for offscreen items
-      self.tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
-    }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    
+    tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
+    tableView.reloadData(forRowIndexes: visibleIndexesToUpdate, columnIndexes: IndexSet([0]))
+    
+    CATransaction.commit()
   }
 
   private func preserveScrollPosition(during update: (@escaping () -> Void) -> Void) {
@@ -775,6 +776,11 @@ extension MessagesTableView: NSTableViewDelegate {
   func isFirstMessage(at row: Int) -> Bool {
     return row == 0
   }
+  
+//  func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
+//    // Disable autoresizing mask constraints that might interfere with content layout
+//    rowView.translatesAutoresizingMaskIntoConstraints = false
+//  }
   
   func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     guard row >= 0, row < messages.count else { return nil }
