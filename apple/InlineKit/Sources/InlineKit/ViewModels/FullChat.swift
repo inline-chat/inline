@@ -47,14 +47,16 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   private var db: AppDatabase
   public var peer: Peer
+  public var limit: Int?
 
   // Descending order (newest first) if true
   private var reversed: Bool
 
-  public init(db: AppDatabase, peer: Peer, reversed: Bool = true) {
+  public init(db: AppDatabase, peer: Peer, reversed: Bool = true, limit: Int? = nil) {
     self.db = db
     self.peer = peer
     self.reversed = reversed
+    self.limit = limit
     fetchChat()
     fetchMessages()
   }
@@ -110,26 +112,30 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
               try Message
                 .filter(Column("peerThreadId") == id)
                 .including(optional: Message.from)
-                //                .including(optional: Message.repliedToMessage)
                 .asRequest(of: FullMessage.self)
                 .order(Column("date").asc)
-                .reversed()
-                .limit(80)
                 .fetchAll(db)
 
           } else if case .user(let id) = peer {
-            return
-
+            if let limit = self.limit {
+              return
                 try Message
-                .filter(Column("peerUserId") == id)
-                .including(optional: Message.from)
-                //                .including(optional: Message.repliedToMessage)
-                .asRequest(of: FullMessage.self)
-                .order(Column("date").asc)
-                .reversed()
-                .limit(80)
-                .fetchAll(db)
+                  .filter(Column("peerUserId") == id)
+                  .including(optional: Message.from)
+                  .asRequest(of: FullMessage.self)
+                  .order(Column("date").desc)
+                  .limit(limit)
+                  .fetchAll(db)
+            } else {
+              return
+                try Message
+                  .filter(Column("peerUserId") == id)
+                  .including(optional: Message.from)
+                  .asRequest(of: FullMessage.self)
+                  .order(Column("date").asc)
 
+                  .fetchAll(db)
+            }
           } else {
             return []
           }
