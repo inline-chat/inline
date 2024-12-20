@@ -25,7 +25,7 @@ struct ChatView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
+      MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages.reversed())
         .safeAreaInset(edge: .bottom) {
           HStack {
             ComposeView(messageText: $text)
