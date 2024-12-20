@@ -448,6 +448,7 @@ public class DataManager: ObservableObject {
     //      }
     //    }
 
+    print("Fetched count : \(result.messages.count)")
     try await database.dbWriter.write { db in
       for apiMessage in result.messages {
         do {
