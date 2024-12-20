@@ -46,11 +46,11 @@ struct ChatView: View {
       }
 
       #if DEBUG
-      ToolbarItem(placement: .topBarTrailing) {
-        Button("Debug") {
-          sendDebugMessages()
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Debug") {
+            sendDebugMessages()
+          }
         }
-      }
       #endif
     }
     .navigationBarHidden(false)
@@ -249,42 +249,23 @@ extension ChatView {
 
   @ViewBuilder
   var sendButton: some View {
-    if !text.isEmpty {
-      Button {
-        sendMessage()
-      } label: {
-        Image(systemName: "paperplane.fill")
-          .resizable()
-          .scaledToFit()
-          .foregroundStyle(.white)
-      }
-      .buttonStyle(
-        CircleButtonStyle(
-          size: 30,
-          backgroundColor: .accentColor
-        )
-      )
-      .transition(
-        .asymmetric(
-          insertion: .scale.combined(with: .opacity)
-            .animation(
-              .spring(
-                response: 0.35,
-                dampingFraction: 0.5,
-                blendDuration: 0
-              )
-            ),
-          removal: .scale.combined(with: .opacity)
-            .animation(
-              .spring(
-                response: 0.25,
-                dampingFraction: 0.5,
-                blendDuration: 0
-              )
-            )
-        )
-      )
+    Button {
+      sendMessage()
+    } label: {
+      Image(systemName: "paperplane.fill")
+        .resizable()
+        .scaledToFit()
+        .foregroundStyle(.white)
     }
+    .buttonStyle(
+      CircleButtonStyle(
+        size: 30,
+        backgroundColor: .accentColor
+      )
+    )
+    .opacity(text.isEmpty ? 0 : 1)
+    .scaleEffect(text.isEmpty ? 0.5 : 1)
+    .animation(.spring(response: 0.3), value: text.isEmpty)
   }
 }
 
@@ -296,18 +277,8 @@ struct CircleButtonStyle: ButtonStyle {
     configuration.label
       .padding(8)
       .frame(width: size, height: size)
-      .background(
-        Circle()
-          .fill(backgroundColor)
-      )
-      .scaleEffect(configuration.isPressed ? 0.85 : 1.0)
-      .animation(
-        .spring(
-          response: 0.2,
-          dampingFraction: 0.5,
-          blendDuration: 0
-        ),
-        value: configuration.isPressed
-      )
+      .background(Circle().fill(backgroundColor))
+      .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+      .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
   }
 }
