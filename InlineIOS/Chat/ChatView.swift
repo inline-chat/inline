@@ -250,12 +250,11 @@ extension ChatView {
 
   @ViewBuilder
   private var inputArea: some View {
-    HStack {
+    HStack(alignment: .bottom) {
       ComposeView(messageText: $text)
-
       sendButton
+        .padding(.bottom, 6)
     }
-
     .background(Color(uiColor: .systemBackground))
   }
 
@@ -273,9 +272,7 @@ extension ChatView {
             .foregroundStyle(text.isEmpty ? Color(.tertiaryLabel) : .white)
         }
     }
-
-    .animation(.default, value: text.isEmpty)
-
+    .animation(.easeInOut(duration: 0.2), value: text.isEmpty)
     .buttonStyle(CustomButtonStyle())
   }
 }
