@@ -14,6 +14,29 @@ struct ChatView: View {
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
 
+  @ObservedObject var composeActions: ComposeActions = .shared
+
+  private func currentComposeAction() -> ApiComposeAction? {
+    composeActions.getComposeAction(for: peer)?.action
+  }
+
+  static let formatter = RelativeDateTimeFormatter()
+  private func getLastOnlineText(date: Date?) -> String {
+    guard let date = date else { return "" }
+    Self.formatter.dateTimeStyle = .named
+    return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
+  }
+
+  var subtitle: String {
+    if let composeAction = currentComposeAction() {
+      return composeAction.rawValue
+    } else if let online = fullChatViewModel.peerUser?.online {
+      return online ? "online" : (fullChatViewModel.peerUser?.lastOnline != nil ? getLastOnlineText(date: fullChatViewModel.peerUser?.lastOnline) : "offline")
+    } else {
+      return "last seen recently"
+    }
+  }
+
   init(peer: Peer) {
     self.peer = peer
     _fullChatViewModel = EnvironmentStateObject { env in
@@ -28,9 +51,7 @@ struct ChatView: View {
       MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages.reversed())
         .safeAreaInset(edge: .bottom) {
           HStack {
-            ComposeView(messageText: $text)
-
-            sendButton
+            inputArea
           }
           .padding(.vertical, 6)
           .padding(.horizontal)
@@ -39,10 +60,12 @@ struct ChatView: View {
     }
     .toolbar {
       ToolbarItem(placement: .principal) {
-        Text(title)
-          .font(.body)
-          .fontWeight(.semibold)
-        // TODO: Add status
+        VStack {
+          Text(title)
+          Text(subtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
 
       #if DEBUG
@@ -65,15 +88,6 @@ struct ChatView: View {
         fetchMessages()
       }
     }
-  }
-}
-
-// MARK: - Helper Extensions
-
-extension View {
-  func flipped() -> some View {
-    rotationEffect(.init(radians: .pi))
-      .scaleEffect(x: -1, y: 1, anchor: .center)
   }
 }
 
@@ -241,10 +255,8 @@ extension ChatView {
 
       sendButton
     }
-    .padding(.vertical, 6)
-    .padding(.horizontal)
+
     .background(Color(uiColor: .systemBackground))
-    .animation(nil, value: text)
   }
 
   @ViewBuilder
@@ -252,33 +264,26 @@ extension ChatView {
     Button {
       sendMessage()
     } label: {
-      Image(systemName: "paperplane.fill")
-        .resizable()
-        .scaledToFit()
-        .foregroundStyle(.white)
+      Circle()
+        .fill(text.isEmpty ? Color(.systemGray5) : .blue)
+        .frame(width: 28, height: 28)
+        .overlay {
+          Image(systemName: "paperplane.fill")
+            .font(.callout)
+            .foregroundStyle(text.isEmpty ? Color(.tertiaryLabel) : .white)
+        }
     }
-    .buttonStyle(
-      CircleButtonStyle(
-        size: 30,
-        backgroundColor: .accentColor
-      )
-    )
-    .opacity(text.isEmpty ? 0 : 1)
-    .scaleEffect(text.isEmpty ? 0.5 : 1)
-    .animation(.spring(response: 0.3), value: text.isEmpty)
+
+    .animation(.default, value: text.isEmpty)
+
+    .buttonStyle(CustomButtonStyle())
   }
 }
 
-struct CircleButtonStyle: ButtonStyle {
-  let size: CGFloat
-  let backgroundColor: Color
-
+struct CustomButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .padding(8)
-      .frame(width: size, height: size)
-      .background(Circle().fill(backgroundColor))
-      .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
-      .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+      .scaleEffect(configuration.isPressed ? 0.8 : 1.0)
+      .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
   }
 }
