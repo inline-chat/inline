@@ -32,7 +32,10 @@ struct ChatView: View {
     if let composeAction = currentComposeAction() {
       return composeAction.rawValue
     } else if let online = fullChatViewModel.peerUser?.online {
-      return online ? "online" : (fullChatViewModel.peerUser?.lastOnline != nil ? getLastOnlineText(date: fullChatViewModel.peerUser?.lastOnline) : "offline")
+      return online
+        ? "online"
+        : (fullChatViewModel.peerUser?.lastOnline != nil
+          ? getLastOnlineText(date: fullChatViewModel.peerUser?.lastOnline) : "offline")
     } else {
       return "last seen recently"
     }
@@ -55,7 +58,6 @@ struct ChatView: View {
             ZStack(alignment: .leading) {
               TextView(
                 text: $text,
-                onSend: sendMessage,
                 height: $textViewHeight
               )
               .frame(height: textViewHeight)
@@ -275,16 +277,6 @@ extension ChatView {
   @ViewBuilder
   private var chatMessages: some View {
     MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
-  }
-
-  @ViewBuilder
-  private var inputArea: some View {
-    HStack(alignment: .bottom) {
-      ComposeView(messageText: $text)
-      sendButton
-        .padding(.bottom, 6)
-    }
-    .background(Color(uiColor: .systemBackground))
   }
 
   @ViewBuilder

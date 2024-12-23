@@ -4,8 +4,7 @@ import UIKit
 
 struct TextView: UIViewRepresentable {
   @Binding var text: String
-  let onSend: () -> Void
-    
+  
   // For internal height management
   @Binding var height: CGFloat
     
