@@ -163,6 +163,7 @@ extension ChatView {
         // Delay clearing the text field to allow animation to complete
         withAnimation {
           text = ""
+          textViewHeight = 36
         }
 
         let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
