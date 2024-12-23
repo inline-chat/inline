@@ -7,6 +7,7 @@ struct ChatView: View {
   var peer: Peer
 
   @State var text: String = ""
+  @State private var textViewHeight: CGFloat = 36
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
@@ -50,8 +51,36 @@ struct ChatView: View {
     VStack(spacing: 0) {
       MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages.reversed())
         .safeAreaInset(edge: .bottom) {
-          HStack {
-            inputArea
+          HStack(alignment: .bottom) {
+            ZStack(alignment: .leading) {
+              TextView(
+                text: $text,
+                onSend: sendMessage,
+                height: $textViewHeight
+              )
+              .frame(height: textViewHeight)
+              .background(.clear)
+              if text.isEmpty {
+                Text("Write a message")
+                  .foregroundStyle(.tertiary)
+                  .padding(.leading, 6)
+                  .padding(.vertical, 6)
+                  .allowsHitTesting(false)
+                  .transition(
+                    .asymmetric(
+                      insertion: .offset(x: 40).combined(with: .opacity),
+                      removal: .offset(x: 40).combined(with: .opacity)
+                    )
+                  )
+              }
+            }
+            .animation(.smoothSnappy, value: textViewHeight)
+            .animation(.smoothSnappy, value: text.isEmpty)
+
+            sendButton
+              .padding(.bottom, 6)
+
+            //  inputArea
           }
           .padding(.vertical, 6)
           .padding(.horizontal)
