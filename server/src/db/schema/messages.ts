@@ -8,6 +8,7 @@ import { index } from "drizzle-orm/pg-core"
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm"
+import { reactions } from "./reactions"
 
 export const messages = pgTable(
   "messages",
@@ -53,8 +54,9 @@ export const messages = pgTable(
   }),
 )
 
-export const messageRelations = relations(messages, ({ one }) => ({
+export const messageRelations = relations(messages, ({ one, many }) => ({
   from: one(users, { fields: [messages.fromId], references: [users.id] }),
+  reactions: many(reactions),
 }))
 
 export type DbMessage = typeof messages.$inferSelect

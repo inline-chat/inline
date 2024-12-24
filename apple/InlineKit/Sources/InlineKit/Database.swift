@@ -98,6 +98,27 @@ public extension AppDatabase {
         t.column("readOutboxMaxId", .integer)
         t.column("pinned", .boolean)
       }
+
+      try db.create(table: "reaction") { t in
+        t.primaryKey("id", .integer).notNull().unique()
+        t.column("messageId", .integer)
+          .references(
+            "message", column: "messageId", onDelete: .cascade)
+          .notNull()
+          .unique()
+        t.column("userId", .integer)
+          .references("user", column: "id", onDelete: .cascade)
+          .notNull()
+          .unique()
+        t.column("chatId", .integer)
+          .references("chat", column: "id", onDelete: .cascade)
+          .notNull()
+          .unique()
+        t.column("emoji", .text)
+          .notNull()
+
+        t.column("date", .datetime).notNull()
+      }
     }
 
     migrator.registerMigration("v2") { db in

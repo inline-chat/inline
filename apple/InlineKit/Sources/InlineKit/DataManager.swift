@@ -296,7 +296,7 @@ public class DataManager: ObservableObject {
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil // TODO: fix
+          chat.lastMsgId = nil  // TODO: fix
 
           return chat
         }
@@ -460,6 +460,17 @@ public class DataManager: ObservableObject {
           }
         }
       }
+    }
+  }
+
+  public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws {
+    let result = try await ApiClient.shared.addReaction(
+      messageId: messageId, chatId: chatId, emoji: emoji)
+
+    try await database.dbWriter.write { db in
+      let reaction = Reaction(from: result.reaction)
+      try reaction.save(db, onConflict: .replace)
+      print("saved reaction: \(reaction)")
     }
   }
 

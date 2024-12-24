@@ -119,6 +119,12 @@ import {
   Response as SendComposeActionResponse,
 } from "@in/server/methods/sendComposeAction"
 
+import {
+  handler as addReactionHandler,
+  Input as AddReactionInput,
+  Response as AddReactionResponse,
+} from "@in/server/methods/addReaction"
+
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
@@ -160,6 +166,7 @@ export const apiV1 = new Elysia({ name: "v1" })
           savePushNotificationHandler,
         ),
       )
+      .use(makeApiRoute("/addReaction", AddReactionInput, AddReactionResponse, addReactionHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }

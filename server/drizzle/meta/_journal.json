@@ -127,6 +127,13 @@
       "when": 1734198503295,
       "tag": "0017_add_replying_to_message",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1735039100997,
+      "tag": "0018_add_reaction",
+      "breakpoints": true
     }
   ]
 }

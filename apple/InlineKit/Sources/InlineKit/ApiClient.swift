@@ -40,6 +40,7 @@ public enum Path: String {
   case savePushNotification
   case updateStatus
   case sendComposeAction
+  case addReaction
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -92,7 +93,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200 ... 299:
+      case 200...299:
         let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
         switch apiResponse {
         case let .success(data):
@@ -254,7 +255,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     repliedToMessageId: Int64?
   ) async throws -> SendMessage {
     var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "text", value: text),
+      URLQueryItem(name: "text", value: text)
     ]
 
     if let peerUserId = peerUserId {
@@ -299,7 +300,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .savePushNotification,
       queryItems: [
-        URLQueryItem(name: "applePushToken", value: pushToken),
+        URLQueryItem(name: "applePushToken", value: pushToken)
 
       ],
       includeToken: true
@@ -310,7 +311,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .updateStatus,
       queryItems: [
-        URLQueryItem(name: "online", value: online ? "true" : "false"),
+        URLQueryItem(name: "online", value: online ? "true" : "false")
       ],
       includeToken: true
     )
@@ -328,6 +329,20 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
           value: peerId.asThreadId().map(String.init)
         ),
         URLQueryItem(name: "action", value: action?.rawValue),
+      ],
+      includeToken: true
+    )
+  }
+
+  public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws
+    -> AddReaction
+  {
+    try await request(
+      .addReaction,
+      queryItems: [
+        URLQueryItem(name: "messageId", value: "\(messageId)"),
+        URLQueryItem(name: "chatId", value: "\(chatId)"),
+        URLQueryItem(name: "emoji", value: emoji),
       ],
       includeToken: true
     )
@@ -446,6 +461,10 @@ public struct PinnedDialogsPayload: Codable, Sendable {
 
 public struct SendMessage: Codable, Sendable {
   public let message: ApiMessage
+}
+
+public struct AddReaction: Codable, Sendable {
+  public let reaction: ApiReaction
 }
 
 public struct GetDialogs: Codable, Sendable {

@@ -10,6 +10,7 @@ import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Log } from "@in/server/utils/log"
 import { Type, type TSchema, type StaticEncode } from "@sinclair/typebox"
 import { Value } from "@sinclair/typebox/value"
+import type { DbReaction } from "../db/schema/reactions"
 
 // const BigIntString = Type.Transform(Type.BigInt())
 //   .Decode((value) => String(value))
@@ -158,6 +159,23 @@ export const encodeDialogInfo = (dialog: DbDialog): TDialogInfo => {
   })
 }
 
+// Reaction -------------
+export const TReactionInfo = Type.Object({
+  id: Type.Integer(),
+  messageId: Type.Integer(),
+  chatId: Type.Integer(),
+  userId: Type.Integer(),
+  emoji: Type.String(),
+  date: TimestampMs,
+})
+
+export type TReactionInfo = StaticEncode<typeof TReactionInfo>
+export const encodeReactionInfo = (reaction: DbReaction): TReactionInfo => {
+  return Value.Encode(TReactionInfo, {
+    ...reaction,
+  })
+}
+
 // Message -------------
 export const TMessageInfo = Type.Object({
   id: Type.Integer(),
@@ -172,6 +190,7 @@ export const TMessageInfo = Type.Object({
   out: Optional(Type.Boolean()),
   pinned: Optional(Type.Boolean()),
   repliedToMessageId: Optional(Type.Integer()),
+  // reactionIds: Optional(Type.Array(Type.Integer())),
 })
 
 export type TMessageInfo = StaticEncode<typeof TMessageInfo>
