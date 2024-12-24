@@ -14,6 +14,10 @@ struct InlineApp: App {
   @StateObject var overlay = OverlayManager()
   
   @Environment(\.openWindow) var openWindow
+  
+  init() {
+    UserDefaults.standard.set(false, forKey: "NSTableViewCanEstimateRowHeights")
+  }
 
   var body: some Scene {
     // Note(@mo): Using Window here messes up with our title bar handling upon window re-open after close
