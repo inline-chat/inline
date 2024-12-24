@@ -77,9 +77,15 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.from)
   }
 
-  public static let repliedToMessage = belongsTo(Message.self, key: "repliedToMessage", using: ForeignKey(["messageId"]))
+  public static let repliedToMessage = belongsTo(
+    Message.self, key: "repliedToMessage", using: ForeignKey(["messageId"]))
   public var repliedToMessage: QueryInterfaceRequest<Message> {
     request(for: Message.repliedToMessage)
+  }
+
+  public static let reactions = hasMany(Reaction.self)
+  public var reactions: QueryInterfaceRequest<Reaction> {
+    request(for: Message.reactions)
   }
 
   public init(
@@ -148,8 +154,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
 // MARK: Helpers
 
-public extension Message {
-  mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort)
+extension Message {
+  public mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort)
     throws
   {
     if self.globalId == nil {
@@ -165,7 +171,7 @@ public extension Message {
 
       if let existing =
         try? Message
-          .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
+        .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
       {
         self.globalId = existing.globalId
       }
