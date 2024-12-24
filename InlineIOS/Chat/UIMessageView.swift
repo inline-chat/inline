@@ -2,12 +2,6 @@ import InlineKit
 import SwiftUI
 import UIKit
 
-struct Reaction2: Equatable {
-  let emoji: String
-  var count: Int
-  var hasReacted: Bool
-}
-
 class UIMessageView: UIView {
   // MARK: - Properties
 
@@ -46,25 +40,18 @@ class UIMessageView: UIView {
     return stack
   }()
 
-  private var reactions: [Reaction2] = []
-  private let reactionHeight: CGFloat = 24
-
-  private lazy var reactionsContainer: UIStackView = {
-    let stack = UIStackView()
-    stack.axis = .horizontal
-    stack.spacing = 4
-    stack.alignment = .center
-    stack.distribution = .fillProportionally
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
-  }()
-
   private var leadingConstraint: NSLayoutConstraint?
   private var trailingConstraint: NSLayoutConstraint?
   private var fullMessage: FullMessage
 
   private let horizontalPadding: CGFloat = 12
   private let verticalPadding: CGFloat = 8
+
+//  private let embedView: MessageEmbedView = {
+//    let view = MessageEmbedView(repliedToMessage: nil)
+//    view.translatesAutoresizingMaskIntoConstraints = false
+//    return view
+//  }()
 
   // MARK: - Initialization
 
@@ -88,6 +75,12 @@ class UIMessageView: UIView {
     bubbleView.translatesAutoresizingMaskIntoConstraints = false
 
     bubbleView.addSubview(contentStack)
+
+    // Add embed view if there's a reply
+//    if let replyMessage = fullMessage.repliedToMessage {
+//      contentStack.addArrangedSubview(embedView)
+//      embedView.repliedToMessage = replyMessage
+//    }
 
     leadingConstraint = bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8)
     trailingConstraint = bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8)
@@ -119,6 +112,12 @@ class UIMessageView: UIView {
     contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
     shortMessageStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
+    // Add embed view first if there's a reply
+//    if let replyMessage = fullMessage.repliedToMessage {
+//      contentStack.addArrangedSubview(embedView)
+//      embedView.repliedToMessage = replyMessage
+//    }
+
     let messageLength = fullMessage.message.text?.count ?? 0
     let messageText = fullMessage.message.text ?? ""
     let hasLineBreak = messageText.contains("\n")
@@ -148,16 +147,10 @@ class UIMessageView: UIView {
       shortMessageStack.addArrangedSubview(metadataView)
       contentStack.addArrangedSubview(shortMessageStack)
     }
-
-    // Add reactions container if there are reactions
-    if !reactions.isEmpty {
-      contentStack.addArrangedSubview(reactionsContainer)
-    }
   }
 
   private func configureForMessage() {
-    messageLabel.text =
-      "\(fullMessage.message.text) \(fullMessage.message.messageId) \(fullMessage.message.chatId)"
+    messageLabel.text = fullMessage.message.text
 
     if fullMessage.message.out == true {
       bubbleView.backgroundColor = ColorManager.shared.selectedColor
@@ -195,77 +188,15 @@ class UIMessageView: UIView {
     super.layoutSubviews()
   }
 
-  // MARK: - Reaction2 Handling
-
-  private func handleReaction2(_ emoji: String) {
-    if let index = reactions.firstIndex(where: { $0.emoji == emoji }) {
-      // Toggle existing reaction
-      var reaction = reactions[index]
-      reaction.hasReacted.toggle()
-      reaction.count += reaction.hasReacted ? 1 : -1
-
-      if reaction.count > 0 {
-        reactions[index] = reaction
-      } else {
-        reactions.remove(at: index)
-      }
-    } else {
-      // Add new reaction
-      reactions.append(Reaction2(emoji: emoji, count: 1, hasReacted: true))
-    }
-
-    updateReaction2Views()
-  }
-
-  private func updateReaction2Views() {
-    // Clear existing reaction views
-    reactionsContainer.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-    // Add reaction bubbles
-    for reaction in reactions {
-      let reactionView = createReaction2Bubble(for: reaction)
-      reactionsContainer.addArrangedSubview(reactionView)
-    }
-
-    updateMetadataLayout()
-  }
-
-  private func createReaction2Bubble(for reaction: Reaction2) -> UIView {
-    let container = UIView()
-    container.backgroundColor =
-      reaction.hasReacted ? ColorManager.shared.selectedColor.withAlphaComponent(0.1) : .systemGray6
-    container.layer.cornerRadius = reactionHeight / 2
-
-    let label = UILabel()
-    label.text = "\(reaction.emoji) \(reaction.count)"
-    label.font = .systemFont(ofSize: 12)
-    label.textAlignment = .center
-
-    container.addSubview(label)
-    label.translatesAutoresizingMaskIntoConstraints = false
-
-    NSLayoutConstraint.activate([
-      container.heightAnchor.constraint(equalToConstant: reactionHeight),
-      label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-      label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-      label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-    ])
-
-    // Add tap gesture
-    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(reactionTapped(_:)))
-    container.addGestureRecognizer(tapGesture)
-    container.tag = reactions.firstIndex(where: { $0.emoji == reaction.emoji }) ?? 0
-
-    return container
-  }
-
-  @objc private func reactionTapped(_ gesture: UITapGestureRecognizer) {
-    guard let view = gesture.view,
-          reactions.indices.contains(view.tag)
-    else { return }
-
-    handleReaction2(reactions[view.tag].emoji)
-  }
+  //  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+  //    super.traitCollectionDidChange(previousTraitCollection)
+  //
+  //    if previousTraitCollection?.preferredContentSizeCategory
+  //      != traitCollection.preferredContentSizeCategory
+  //    {
+  //      setNeedsLayout()
+  //    }
+  //  }
 }
 
 // MARK: - Context Menu
@@ -275,35 +206,18 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
     _ interaction: UIContextMenuInteraction,
     configurationForMenuAtLocation location: CGPoint
   ) -> UIContextMenuConfiguration? {
-    return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+    return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
       let copyAction = UIAction(title: "Copy") { [weak self] _ in
         UIPasteboard.general.string = self?.fullMessage.message.text
       }
 
       let replyAction = UIAction(title: "Reply") { [weak self] _ in
         ChatState.shared.setReplyingMessageId(
-          chatId: self?.fullMessage.message.chatId ?? 0,
-          id: self?.fullMessage.message.id ?? 0
+          chatId: self?.fullMessage.message.chatId ?? 0, id: self?.fullMessage.message.id ?? 0
         )
       }
 
-      // Create reaction submenu
-      let reactionActions = self?.createReaction2Actions() ?? []
-      let reactMenu = UIMenu(
-        title: "React", image: UIImage(systemName: "face.smiling"), children: reactionActions
-      )
-
-      return UIMenu(children: [copyAction, replyAction, reactMenu])
-    }
-  }
-
-  private func createReaction2Actions() -> [UIAction] {
-    let commonEmojis = ["👍", "❤️", "😂", "🎉", "🤔", "👀"]
-
-    return commonEmojis.map { emoji in
-      UIAction(title: emoji) { [weak self] _ in
-        self?.handleReaction2(emoji)
-      }
+      return UIMenu(children: [copyAction, replyAction])
     }
   }
 }
