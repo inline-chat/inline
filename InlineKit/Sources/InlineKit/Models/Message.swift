@@ -28,6 +28,11 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   // Locally autoincremented id
   public var globalId: Int64?
 
+  // Stable ID for fetched messages (not to be created messages)
+  public var stableId: Int64 {
+    self.globalId ?? 0
+  }
+
   public var id: Int64 {
     self.messageId
   }
