@@ -10,18 +10,15 @@ class MessageSizeCalculator {
   private let layoutManager: NSLayoutManager
   private let textContainer: NSTextContainer
   private let cache = NSCache<NSString, NSValue>()
+  private let textHeightCache = NSCache<NSString, NSValue>()
   private let minWidthForSingleLine = NSCache<NSString, NSValue>()
   
   private let log = Log.scoped("MessageSizeCalculator")
   private var heightForSingleLine: CGFloat?
   
-  // This let's us limit number of re-calculations
-//  static let widthChangeThreshold = 10.0
-//  static let extraSafeWidth = 6.0
-  
-  static let widthChangeThreshold = 40.0
-  static let extraSafeWidth = 0.0
-  
+  static let safeAreaWidth: CGFloat = 50.0
+  static let extraSafeWidth = 1.0
+
   init() {
     textStorage = NSTextStorage()
     layoutManager = NSLayoutManager()
@@ -31,25 +28,30 @@ class MessageSizeCalculator {
     layoutManager.addTextContainer(textContainer)
     
     cache.countLimit = 2000
+    textHeightCache.countLimit = 2000
     minWidthForSingleLine.countLimit = 2000
   }
   
-  func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> NSSize {
+  func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> (NSSize, NSSize) {
     let text = message.message.text ?? ""
     
     // If text is empty, height is always 1 line
     // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
     if text.isEmpty {
-      return CGSize(width: 1, height: heightForSingleLineText())
+      // TODO: fix this to include name, etc
+      return (
+        CGSize(width: 1, height: heightForSingleLineText()),
+        CGSize(width: 1, height: heightForSingleLineText())
+      )
     }
     
-    let availableWidth = ceil(width) - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - Theme.messageSidePadding * 2 - Self.widthChangeThreshold -
+    let availableWidth = ceil(width) - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - Theme.messageSidePadding * 2 - Self.safeAreaWidth -
       // if we don't subtract this here, it can result is wrong calculations
       Self.extraSafeWidth
     
     let cacheKey = "\(message.id):\(text):\(props.toString()):\(availableWidth)" as NSString
-    if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue {
-      return cachedSize
+    if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue, let cachedTextSize = textHeightCache.object(forKey: cacheKey)?.sizeValue {
+      return (cachedSize, cachedTextSize)
     }
     
     var textSize: CGSize?
@@ -59,16 +61,13 @@ class MessageSizeCalculator {
       textSize = CGSize(width: minSize.width, height: heightForSingleLineText())
     }
     
-//    if availableWidth < 0 {
-//      return NSSize(width: width, height: 36)
-//    }
     if textSize == nil {
       textSize = calculateSizeForText(text, width: availableWidth)
     }
     
     let textHeight = ceil(textSize!.height)
-//    let textWidth = textSize!.width
     let textWidth = textSize!.width
+    let textSizeCeiled = CGSize(width: ceil(textWidth), height: ceil(textHeight))
     
     // Mark as single line if height is equal to single line height
     if textHeight == heightForSingleLineText() {
@@ -90,41 +89,24 @@ class MessageSizeCalculator {
     if props.isFirstMessage == true {
       totalHeight += Theme.messageListTopInset
     }
+    if Theme.messageIsBubble {
+      totalHeight += Theme.messageBubblePadding.height * 2
+    }
     totalHeight += Theme.messageVerticalPadding * 2
     
     // Fitting width
     let size = NSSize(width: textWidth, height: totalHeight)
     
-    // Full viewport width as width
-    // let size = NSSize(width: width, height: totalHeight)
-    
     cache.setObject(NSValue(size: size), forKey: cacheKey)
+    textHeightCache.setObject(NSValue(size: textSizeCeiled), forKey: cacheKey)
   
-    return size
+    return (size, textSizeCeiled)
   }
   
   func invalidateCache() {
     cache.removeAllObjects()
   }
 
-
-  static func getTextViewHeight(for props: MessageViewProps) -> CGFloat {
-    var height = props.height ?? 60.0
-    if props.firstInGroup {
-      height -= Theme.messageNameLabelHeight
-      height -= Theme.messageVerticalStackSpacing
-      height -= Theme.messageGroupSpacing
-    }
-    if props.isLastMessage == true {
-      height -= Theme.messageListBottomInset
-    }
-    if props.isFirstMessage == true {
-      height -= Theme.messageListTopInset
-    }
-    height -= Theme.messageVerticalPadding * 2
-    return height
-  }
-  
   private func heightForSingleLineText() -> CGFloat {
     if let height = heightForSingleLine {
       return height
@@ -147,11 +129,11 @@ class MessageSizeCalculator {
     textStorage.setAttributedString(attributedString)
     layoutManager.ensureLayout(for: textContainer)
     // Get the glyphRange to ensure we're measuring all content
-    let glyphRange = layoutManager.glyphRange(for: textContainer)
-    let textRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+//    let glyphRange = layoutManager.glyphRange(for: textContainer)
+//    let textRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
     
     // Alternative
-//    let textRect = layoutManager.usedRect(for: textContainer)
+    let textRect = layoutManager.usedRect(for: textContainer)
 
     let textHeight = ceil(textRect.height)
     let textWidth = textRect.width + Self.extraSafeWidth

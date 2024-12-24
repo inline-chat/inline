@@ -69,49 +69,10 @@ struct ChatView: View {
 
   @ViewBuilder
   var content: some View {
-    GeometryReader { geo in
-      VStack(spacing: 0) {
-        MessagesList(width: geo.size.width)
-
-        compose
-      }
+    ChatViewSwiftUI(peerId: peerId)
       // So the scroll bar goes under the toolbar
-      // Note(@mo: this adds a bug on first frame toolbar doesn't have background and insets are messed up? so scroll fails initially)
-      .ignoresSafeArea(.all, edges: .top)
-    }
-    .onReceive(timer) { _ in
-      currentTime = Date()
-    }
-    .onAppear {
-      // On Appear - temporary
-      Task {
-        await fetch()
-      }
-    }
-    .onChange(of: scenePhase) { scenePhase_ in
-      // Refetch on open - temporary
-      switch scenePhase_ {
-      case .active:
-        Task {
-          await fetch()
-        }
-      default:
-        break
-      }
-    }
-
-    .environmentObject(fullChat)
-  }
-
-  @State var scrollProxy: ScrollViewProxy? = nil
-
-  @ViewBuilder
-  var compose: some View {
-    Compose(
-      chatId: fullChat.chat?.id,
-      peerId: peerId,
-      topMsgId: fullChat.topMessage?.message.messageId
-    )
+      .ignoresSafeArea(.all)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   var body: some View {
@@ -157,6 +118,27 @@ struct ChatView: View {
           }
         }
       }
+      .onReceive(timer) { _ in
+        currentTime = Date()
+      }
+      .onAppear {
+        // On Appear - temporary
+        Task {
+          await fetch()
+        }
+      }
+      .onChange(of: scenePhase) { scenePhase_ in
+        // Refetch on open - temporary
+        switch scenePhase_ {
+        case .active:
+          Task {
+            await fetch()
+          }
+        default:
+          break
+        }
+      }
+      .environmentObject(fullChat)
   }
 
   /// Fetch chat history
