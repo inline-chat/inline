@@ -127,6 +127,10 @@ class ComposeTextEditor: NSView {
     heightConstraint.constant = height
   }
   
+  func setHeightAnimated(_ height: CGFloat) {
+    heightConstraint.animator().constant = height
+  }
+  
   var initialPlaceholderPosition: CGPoint? = nil
   var isPlaceholderVisible: Bool = true
   
@@ -187,5 +191,30 @@ class ComposeTextEditor: NSView {
   
   func focus() {
     window?.makeFirstResponder(textView)
+  }
+  
+  func clear() {
+    textView.string = ""
+    showPlaceholder(true)
+  }
+  
+  func resetTextViewInsets() {
+    let lineHeight = getTypingLineHeight()
+    textView.textContainerInset = NSSize(
+      width: 0,
+      height: (minHeight - lineHeight) / 2
+    )
+  }
+  
+  func updateTextViewInsets(contentHeight: CGFloat) {
+    let lineHeight = getTypingLineHeight()
+    let newInsets = NSSize(
+      width: 0,
+      height: contentHeight <= lineHeight ?
+        (minHeight - lineHeight) / 2 :
+        verticalPadding
+    )
+    
+    textView.textContainerInset = newInsets
   }
 }

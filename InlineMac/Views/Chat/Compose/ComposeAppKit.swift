@@ -11,6 +11,9 @@ class ComposeAppKit: NSView {
   private var verticalPadding = Theme.composeVerticalPadding
   // ---
   private var prevTextHeight: CGFloat = 0.0
+  
+  // Features
+  private var feature_animateHeightChanges = false
 
   func update(viewModel: FullChatViewModel) {
     self.viewModel = viewModel
@@ -48,9 +51,9 @@ class ComposeAppKit: NSView {
   }()
     
   func setupView() {
-//    backgroundColor = .textBackgroundColor
-//    backgroundColor = NSColor.controlBackgroundColor
+    translatesAutoresizingMaskIntoConstraints = false
     layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+    
     addSubview(border)
     addSubview(textEditor)
     
@@ -62,15 +65,14 @@ class ComposeAppKit: NSView {
     heightConstraint = heightAnchor.constraint(equalToConstant: Theme.composeMinHeight)
     
     NSLayoutConstraint.activate([
+      heightConstraint,
+      
       textEditor.leadingAnchor.constraint(equalTo: leadingAnchor),
       textEditor.trailingAnchor.constraint(equalTo: trailingAnchor),
       textEditor.topAnchor.constraint(equalTo: topAnchor),
       textEditor.bottomAnchor.constraint(equalTo: bottomAnchor),
       
-//      heightAnchor.constraint(greaterThanOrEqualToConstant: Theme.composeMinHeight)
-      heightConstraint,
-      
-      // border
+      // top seperator border
       border.leadingAnchor.constraint(equalTo: leadingAnchor),
       border.trailingAnchor.constraint(equalTo: trailingAnchor),
       border.topAnchor.constraint(equalTo: topAnchor),
@@ -93,6 +95,73 @@ class ComposeAppKit: NSView {
   func focusEditor() {
     textEditor.focus()
   }
+  
+  func resetHeight() {
+    if feature_animateHeightChanges {
+      CATransaction.begin()
+      CATransaction.disableActions()
+      textEditor.setHeight(minHeight)
+      CATransaction.commit()
+      
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.22
+        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        heightConstraint.animator().constant = minHeight
+        textEditor.resetTextViewInsets()
+      }
+    } else {
+      heightConstraint.constant = minHeight
+      textEditor.setHeight(minHeight)
+      textEditor.resetTextViewInsets()
+    }
+  }
+  
+  func updateHeight(_ contentHeight: CGFloat) {
+    let maxHeight = 300.0
+    let newHeight = ceil(contentHeight) + (Theme.composeVerticalPadding * 2)
+    let height = max(Theme.composeMinHeight, min(maxHeight, newHeight))
+    
+    // First update the height of scroll view immediately so it doesn't clip from top while animating
+    CATransaction.begin()
+    CATransaction.disableActions()
+    textEditor.setHeight(height)
+    CATransaction.commit()
+    
+    if feature_animateHeightChanges {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.22
+        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        heightConstraint.animator().constant = height
+        textEditor.updateTextViewInsets(contentHeight: contentHeight) // use height without paddings
+      }
+    } else {
+      heightConstraint.constant = height
+      textEditor.updateTextViewInsets(contentHeight: contentHeight)
+    }
+  }
+  
+  private var ignoreNextHeightChange = false
+    
+  // Clear, reset height
+  func clear() {
+    resetHeight()
+    textEditor.clear()
+  }
+  
+  // Send the message
+  func send() {
+    DispatchQueue.main.async {
+      self.ignoreNextHeightChange = true
+      let text = self.textEditor.string
+    
+      // Clear immediately
+      self.clear()
+    
+      // Add message
+      self.viewModel?.sendMessage(text: text)
+      self.ignoreNextHeightChange = false
+    }
+  }
 }
   
 // MARK: Delegate
@@ -104,7 +173,9 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
   
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool {
-    return false
+    // Send
+    send()
+    return true // handled
   }
   
   func textDidChange(_ notification: Notification) {
@@ -117,7 +188,10 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       textView.baseWritingDirection = .leftToRight
     }
     
-    updateHeightIfNeeded(for: textView)
+    if !ignoreNextHeightChange {
+      print("textDidChange")
+      updateHeightIfNeeded(for: textView)
+    }
     
     if textView.string.isEmpty {
       // Handle empty text
@@ -149,36 +223,10 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
       
     prevTextHeight = contentHeight
-    let maxHeight = 300.0
-    let newHeight = ceil(contentHeight) + (Theme.composeVerticalPadding * 2)
-    let height = max(Theme.composeMinHeight, min(maxHeight, newHeight))
-    
-    // First update the height of scroll view immediately so it doesn't clip from top while animating
-    CATransaction.begin()
-    CATransaction.disableActions()
-    textEditor.setHeight(height)
-    CATransaction.commit()
-    
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.22
-      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-      heightConstraint.animator().constant = height
-      updateTextViewInsets(textView, contentHeight: contentHeight)
-    }
+   
+    updateHeight(contentHeight)
   }
     
-  private func updateTextViewInsets(_ textView: NSTextView, contentHeight: CGFloat) {
-    let lineHeight = textEditor.getTypingLineHeight()
-    let newInsets = NSSize(
-      width: 0,
-      height: contentHeight <= lineHeight ?
-        (minHeight - lineHeight) / 2 :
-        verticalPadding
-    )
-
-    textView.textContainerInset = newInsets
-  }
-
 //
   func textViewDidChangeSelection(_ notification: Notification) {
     // guard let textView = notification.object as? NSTextView else { return }
