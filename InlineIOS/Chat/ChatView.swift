@@ -60,8 +60,16 @@ struct ChatView: View {
                 text: $text,
                 height: $textViewHeight
               )
+
               .frame(height: textViewHeight)
               .background(.clear)
+              .onChange(of: text) { newText in
+                if newText.isEmpty {
+                  Task { await ComposeActions.shared.stoppedTyping(for: peer) }
+                } else {
+                  Task { await ComposeActions.shared.startedTyping(for: peer) }
+                }
+              }
               if text.isEmpty {
                 Text("Write a message")
                   .foregroundStyle(.tertiary)
