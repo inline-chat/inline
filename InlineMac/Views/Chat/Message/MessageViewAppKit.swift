@@ -93,6 +93,12 @@ class MessageViewAppKit: NSView {
 
     textView.delegate = self
 
+    textView.linkTextAttributes = [
+      .foregroundColor: linkColor,
+      .underlineStyle: NSUnderlineStyle.single.rawValue,
+      .cursor: NSCursor.pointingHand
+    ]
+    
     MessageTextConfiguration.configureTextContainer(textContainer!)
     MessageTextConfiguration.configureTextView(textView)
 
