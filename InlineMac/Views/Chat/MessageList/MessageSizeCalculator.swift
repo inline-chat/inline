@@ -83,12 +83,12 @@ class MessageSizeCalculator {
       totalHeight += Theme.messageVerticalStackSpacing
       totalHeight += Theme.messageGroupSpacing
     }
-    if props.isLastMessage == true {
-      totalHeight += Theme.messageListBottomInset
-    }
-    if props.isFirstMessage == true {
-      totalHeight += Theme.messageListTopInset
-    }
+//    if props.isLastMessage == true {
+//      totalHeight += Theme.messageListBottomInset
+//    }
+//    if props.isFirstMessage == true {
+//      totalHeight += Theme.messageListTopInset
+//    }
     if Theme.messageIsBubble {
       totalHeight += Theme.messageBubblePadding.height * 2
     }
