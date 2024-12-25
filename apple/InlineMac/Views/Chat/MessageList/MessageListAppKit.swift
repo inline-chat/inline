@@ -103,6 +103,13 @@ class MessageListAppKit: NSViewController {
         top: toolbarHeight,
         left: 0,
         bottom: 0,
+        bottom: Theme.messageListBottomInset,
+        right: 0
+      )
+      scrollView.scrollerInsets = NSEdgeInsets(
+        top: 0,
+        left: 0,
+        bottom: -Theme.messageListBottomInset, // Offset it to touch bottom
         right: 0
       )
       
@@ -147,11 +154,16 @@ class MessageListAppKit: NSViewController {
         context.duration = 0.2
         context.allowsImplicitAnimation = true
         tableView.scrollRowToVisible(lastRow)
+        
+        tableView.scrollToBottomWithInset()
+//        tableView.scrollRowToVisible(lastRow)
       }
     } else {
       CATransaction.begin()
       CATransaction.setDisableActions(true)
       tableView.scrollRowToVisible(lastRow)
+      tableView.scrollToBottomWithInset()
+//      tableView.scrollRowToVisible(lastRow)
       CATransaction.commit()
     }
   }
@@ -671,5 +683,30 @@ extension MessageListAppKit: NSTableViewDelegate {
     
     let (size, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
     return size.height
+  }
+}
+
+extension NSTableView {
+  func scrollToBottomWithInset() {
+    guard let scrollView = enclosingScrollView,
+          numberOfRows > 0 else { return }
+    
+    let lastRow = numberOfRows - 1
+    let lastRowRect = rect(ofRow: lastRow)
+    
+    // Get the bottom inset value
+    let bottomInset = scrollView.contentInsets.bottom
+    
+    // Calculate the point that includes the bottom inset
+    let maxVisibleY = scrollView.documentView?.bounds.maxY ?? 0
+    let targetPoint = NSPoint(
+      x: 0,
+      y: maxVisibleY + bottomInset - scrollView.contentView.bounds.height
+    )
+    
+    scrollView.contentView.scroll(targetPoint)
+    
+    // Ensure the last row is visible
+    scrollRowToVisible(lastRow)
   }
 }
