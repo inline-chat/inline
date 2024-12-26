@@ -131,15 +131,15 @@ public extension AppDatabase {
         t.primaryKey("id", .integer).notNull().unique()
         t.column("messageId", .integer)
           .notNull()
-          .unique()
+
         t.column("userId", .integer)
           .references("user", column: "id", onDelete: .cascade)
           .notNull()
-          .unique()
+
         t.column("chatId", .integer)
           .references("chat", column: "id", onDelete: .cascade)
           .notNull()
-          .unique()
+
         t.column("emoji", .text)
           .notNull()
 
@@ -148,6 +148,9 @@ public extension AppDatabase {
         t.foreignKey(
           ["chatId", "messageId"], references: "message", columns: ["chatId", "messageId"],
           onDelete: .cascade, onUpdate: .cascade, deferred: true)
+        t.uniqueKey([
+          "chatId", "messageId", "userId", "emoji",
+        ])
       }
     }
 

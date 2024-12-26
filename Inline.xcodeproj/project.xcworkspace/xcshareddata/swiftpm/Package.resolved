@@ -1,6 +1,33 @@
 {
-  "originHash" : "522f2e44c2c8cc72252ad6814d68806fb904e3b9dd5464b3506d3ceb85bb62e4",
+  "originHash" : "59ab21ff2530925af1d1e03a7dacb575d22d5474b0325c5b418802b10aaf5e11",
   "pins" : [
+    {
+      "identity" : "contextmenuauxiliarypreview",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/dominicstop/ContextMenuAuxiliaryPreview",
+      "state" : {
+        "revision" : "6b92806b13716f3c46f39d09f2270de18994c31f",
+        "version" : "0.5.2"
+      }
+    },
+    {
+      "identity" : "dgswiftutilities",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/dominicstop/DGSwiftUtilities",
+      "state" : {
+        "revision" : "1e37402c7ef2c16990d846cc479c74aa044b0d71",
+        "version" : "0.37.0"
+      }
+    },
+    {
+      "identity" : "emojipicker",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/htmlprogrammist/EmojiPicker",
+      "state" : {
+        "revision" : "6018bd985b01d2355a635569cc702e8a337ed0a1",
+        "version" : "3.0.9"
+      }
+    },
     {
       "identity" : "grdb.swift",
       "kind" : "remoteSourceControl",
