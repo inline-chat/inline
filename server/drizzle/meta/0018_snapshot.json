@@ -1,5 +1,5 @@
 {
-  "id": "c8f38689-0bf4-4aaf-a64f-4a929ceed36c",
+  "id": "d8d209f2-655d-49c1-9427-e33d9df1835d",
   "prevId": "aa1d865a-e96e-43c1-92d7-6536096e654f",
   "version": "7",
   "dialect": "postgresql",
@@ -1126,7 +1126,18 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "unique_reaction_per_emoji": {
+          "name": "unique_reaction_per_emoji",
+          "nullsNotDistinct": false,
+          "columns": [
+            "chat_id",
+            "message_id",
+            "user_id",
+            "emoji"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

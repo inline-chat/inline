@@ -8,23 +8,34 @@ import { messages } from "./messages"
 import { relations } from "drizzle-orm"
 import { creationDate } from "./common"
 
-export const reactions = pgTable("reactions", {
-  id: serial().primaryKey(),
+export const reactions = pgTable(
+  "reactions",
+  {
+    id: serial().primaryKey(),
 
-  messageId: integer("message_id").notNull(),
-  chatId: integer("chat_id")
-    .notNull()
-    .references((): AnyPgColumn => chats.id, {
-      onDelete: "cascade",
-    }),
-  userId: integer("user_id")
-    .notNull()
-    .references((): AnyPgColumn => users.id, {
-      onDelete: "cascade",
-    }),
-  emoji: text("emoji").notNull(),
-  date: creationDate,
-})
+    messageId: integer("message_id").notNull(),
+    chatId: integer("chat_id")
+      .notNull()
+      .references((): AnyPgColumn => chats.id, {
+        onDelete: "cascade",
+      }),
+    userId: integer("user_id")
+      .notNull()
+      .references((): AnyPgColumn => users.id, {
+        onDelete: "cascade",
+      }),
+    emoji: text("emoji").notNull(),
+    date: creationDate,
+  },
+  (table) => ({
+    uniqueReactionPerEmoji: unique("unique_reaction_per_emoji").on(
+      table.chatId,
+      table.messageId,
+      table.userId,
+      table.emoji,
+    ),
+  }),
+)
 
 export const reactionRelations = relations(reactions, ({ one }) => ({
   message: one(messages, {

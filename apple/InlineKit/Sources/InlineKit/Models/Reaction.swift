@@ -10,7 +10,10 @@ public struct ApiReaction: Codable, Sendable {
   public var date: Int
 }
 
-public struct Reaction: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
+public struct Reaction: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
+  TableRecord,
+  Sendable, Equatable
+{
   public var id: Int64
   public var messageId: Int64
   public var userId: Int64
@@ -32,8 +35,7 @@ public struct Reaction: Codable, FetchableRecord, PersistableRecord, Identifiabl
     case chatId
   }
 
-  public init(id: Int64, messageId: Int64, userId: Int64, emoji: String, date: Date, chatId: Int64)
-  {
+  public init(id: Int64, messageId: Int64, userId: Int64, emoji: String, date: Date, chatId: Int64) {
     self.id = id
     self.messageId = messageId
     self.userId = userId
@@ -43,8 +45,8 @@ public struct Reaction: Codable, FetchableRecord, PersistableRecord, Identifiabl
   }
 }
 
-extension Reaction {
-  public init(from: ApiReaction) {
+public extension Reaction {
+  init(from: ApiReaction) {
     self.id = from.id
     self.messageId = from.messageId
     self.userId = from.userId
@@ -54,8 +56,8 @@ extension Reaction {
   }
 }
 
-extension Reaction {
-  public static func fromTimestamp(from: Int) -> Date {
+public extension Reaction {
+  static func fromTimestamp(from: Int) -> Date {
     return Date(timeIntervalSince1970: Double(from) / 1000)
   }
 }

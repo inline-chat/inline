@@ -4,7 +4,8 @@ CREATE TABLE IF NOT EXISTS "reactions" (
 	"chat_id" integer NOT NULL,
 	"user_id" integer NOT NULL,
 	"emoji" text NOT NULL,
-	"date" timestamp (3) DEFAULT now() NOT NULL
+	"date" timestamp (3) DEFAULT now() NOT NULL,
+	CONSTRAINT "unique_reaction_per_emoji" UNIQUE("chat_id","message_id","user_id","emoji")
 );
 --> statement-breakpoint
 DO $$ BEGIN

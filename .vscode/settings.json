@@ -3,8 +3,6 @@
     "editor.defaultFormatter": "sweetpad.sweetpad",
     "editor.formatOnSave": true
   },
-  "lldb.library": "/Applications/Xcode-16.0.0.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/LLDB",
-  "lldb.launch.expressions": "native",
   "cSpell.words": [
     "elysia",
     "elysiajs",
