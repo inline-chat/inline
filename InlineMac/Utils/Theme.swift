@@ -64,4 +64,8 @@ enum Theme {
   
   static let composeMinHeight: CGFloat = 44
   static let composeVerticalPadding: CGFloat = 8
+  
+  
+  // MARK: - Devtools
+  static let devtoolsHeight: CGFloat = 32
 }

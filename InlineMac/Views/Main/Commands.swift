@@ -4,6 +4,8 @@ import SwiftUI
 struct MainWindowCommands: Commands {
   @Environment(\.openWindow) var openWindow
 
+  @AppStorage("isDevtoolsOpen") var isDevtoolsOpen = false
+
   var isLoggedIn: Bool
   var navigation: NavigationModel
   var logOut: () -> Void
@@ -24,9 +26,9 @@ struct MainWindowCommands: Commands {
 
       Divider()
     }
-    
+
     // This removes the "New Window" command from the File menu
-    CommandGroup(replacing: .newItem) { }
+    CommandGroup(replacing: .newItem) {}
 
     TextEditingCommands()
 
@@ -36,6 +38,19 @@ struct MainWindowCommands: Commands {
         Button(action: createSpace) {
           Text("Create Space")
         }
+      }
+    }
+
+    CommandGroup(after: .sidebar) {
+      if isDevtoolsOpen {
+        Button(action: { isDevtoolsOpen.toggle() }) {
+          Text("Close Devtools")
+        }.keyboardShortcut("D", modifiers: [.shift, .command])
+      } else {
+        Button(action: { isDevtoolsOpen.toggle() }) {
+          Text("Open Devtools")
+        }
+        .keyboardShortcut("D", modifiers: [.shift, .command])
       }
     }
 

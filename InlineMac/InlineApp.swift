@@ -13,6 +13,8 @@ struct InlineApp: App {
   @StateObject var auth = Auth.shared
   @StateObject var overlay = OverlayManager()
   
+
+  
   @Environment(\.openWindow) var openWindow
   
   init() {

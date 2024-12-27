@@ -17,14 +17,26 @@ struct MainView: View {
   @State private var disableAutoCollapse = false
   @State private var autoCollapsed = false
   
+  @AppStorage("isDevtoolsOpen") var isDevtoolsOpen = false
+
   init() {}
   
   var body: some View {
     NavigationSplitView(columnVisibility: $window.columnVisibility) {
       sidebar
     } detail: {
-      detail
-        .frame(minWidth: detailMinWidth)
+      VStack(spacing: 0) {
+        detail
+          .frame(
+            minWidth: detailMinWidth,
+            maxWidth: .infinity,
+            maxHeight: .infinity
+          )
+          
+        if isDevtoolsOpen {
+          DevtoolsBar()
+        }
+      }.animation(.smoothSnappy, value: isDevtoolsOpen)
     }
     // Required so when sidebar is uncollapsing by user command
     // it pushed the detail view to the right instead of reducing its width
@@ -38,7 +50,7 @@ struct MainView: View {
       Log.shared.info("MainView appeared • fetching root data")
       self.rootData.fetch()
       self.setUpSidebarAutoCollapse()
-      
+        
       Task {
         // Set online
         try? await dataManager.updateStatus(online: true)
