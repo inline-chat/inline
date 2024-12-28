@@ -113,6 +113,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             try Message
             .filter(Column("peerThreadId") == id)
             .including(optional: Message.from)
+            .including(all: Message.reactions)
             .asRequest(of: FullMessage.self)
             .order(Column("date").asc)
             .fetchAll(db)
@@ -133,6 +134,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
               try Message
               .filter(Column("peerUserId") == id)
               .including(optional: Message.from)
+              .including(all: Message.reactions)
               .asRequest(of: FullMessage.self)
               .order(Column("date").asc)
 
@@ -148,8 +150,6 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
           Log.shared.error("Failed to get messages \(error)")
         },
         receiveValue: { [weak self] messages in
-
-          print("messages are \(messages)")
           if self?.reversed == true {
             self?.fullMessages = messages.reversed()
           } else {
