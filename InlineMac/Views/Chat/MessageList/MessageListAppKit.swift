@@ -472,15 +472,8 @@ class MessageListAppKit: NSViewController {
     }
     
     if feature_scrollsToBottomInDidLayout {
-      // Exprimental: Make sure if this calculation is actually worth it.
-      let viewportSize = scrollView.contentView.bounds.size
-      let contentSize = scrollView.documentView?.frame.size ?? .zero
-      let maxScrollableHeight = contentSize.height - viewportSize.height
-      let currentScrollOffset = scrollView.contentView.bounds.origin.y
-      let willBeNotAtBottom = currentScrollOffset < maxScrollableHeight && abs(currentScrollOffset - maxScrollableHeight) > 0.1
-
       // Note(@mo): This is a hack to fix scroll jumping when user is resizing the window at bottom.
-      if isAtAbsoluteBottom && willBeNotAtBottom {
+      if isAtAbsoluteBottom {
         scrollToBottom(animated: false)
       }
     }
