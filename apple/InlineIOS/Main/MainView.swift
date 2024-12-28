@@ -9,6 +9,8 @@ struct MainView: View {
   // MARK: - Environment & State
 
   @EnvironmentObject private var nav: Navigation
+  @EnvironmentObject private var onboardingNav: OnboardingNavigation
+
   @Environment(\.appDatabase) private var database
   @Environment(\.scenePhase) private var scene
   @Environment(\.auth) private var auth
@@ -16,7 +18,9 @@ struct MainView: View {
   @EnvironmentObject private var ws: WebSocketManager
   @EnvironmentObject private var dataManager: DataManager
   @EnvironmentStateObject var root: RootData
+  @EnvironmentObject private var userData: UserData
   @EnvironmentObject private var notificationHandler: NotificationHandler
+  @EnvironmentObject private var mainViewRouter: MainViewRouter
 
   // MARK: - View Models
 
@@ -75,15 +79,30 @@ struct MainView: View {
 
     .task {
       notificationHandler.setAuthenticated(value: true)
+
       do {
         _ = try await dataManager.fetchMe()
+
       } catch {
         Log.shared.error("Failed to getMe", error: error)
+        // Clear creds
+        Auth.shared.logOut()
+
+        // Stop WebSocket
+        ws.loggedOut()
+
+        // Clear database
+        try? AppDatabase.loggedOut()
+        mainViewRouter.setRoute(route: .onboarding)
+        nav.popToRoot()
+
+        onboardingNav.push(.welcome)
+        return
       }
 
+      // Continue with existing tasks if user exists
       do {
         try await dataManager.getPrivateChats()
-
       } catch {
         Log.shared.error("Failed to getPrivateChats", error: error)
       }
