@@ -58,7 +58,9 @@ struct MessagesCollectionView: UIViewRepresentable {
   }
 
   private func createLayout() -> UICollectionViewLayout {
+    //    let layout = UICollectionViewFlowLayout()
     let layout = AnimatedCollectionViewLayout()
+
     layout.minimumInteritemSpacing = 0
     layout.minimumLineSpacing = 0
     layout.scrollDirection = .vertical
@@ -79,7 +81,6 @@ struct MessagesCollectionView: UIViewRepresentable {
     private var dataSource: UICollectionViewDiffableDataSource<Int, FullMessage>!
     private var fullMessages: [FullMessage]
     private weak var currentCollectionView: UICollectionView?
-    private var previousMessageCount: Int = 0
     private var isPerformingBatchUpdate = false
 
     // Scroll position tracking
@@ -92,7 +93,6 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     init(fullMessages: [FullMessage]) {
       self.fullMessages = fullMessages
-      self.previousMessageCount = fullMessages.count
       super.init()
     }
 
@@ -101,7 +101,6 @@ struct MessagesCollectionView: UIViewRepresentable {
 
       dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) {
         [weak self] collectionView, indexPath, fullMessage in
-        guard let self else { return nil }
 
         guard
           let cell = collectionView.dequeueReusableCell(
@@ -126,16 +125,24 @@ struct MessagesCollectionView: UIViewRepresentable {
       updateSnapshot(with: fullMessages)
     }
 
+    var isAnimatingUpdate: Bool = false
+    var pendingMessages: [FullMessage]? = nil
+
     private func updateSnapshot(with messages: [FullMessage]) {
-      guard !isPerformingBatchUpdate else { return }
-      var animated = false
-      //      isPerformingBatchUpdate = true
+      // Prevent intrupting animations
+      guard !isAnimatingUpdate else {
+        pendingMessages = messages
+        return
+      }
 
-      log.trace("updateSnapshot \(messages.count) animated=\(animated)")
+      var animated: Bool
 
-      // Prevent animation when id or message changes
-      if fullMessages.count != messages.count {
+      let hasNewMessages = fullMessages.first?.message.globalId != messages.first?.message.globalId
+      if hasNewMessages {
         animated = true
+        isAnimatingUpdate = true
+      } else {
+        animated = false
       }
 
       var snapshot = NSDiffableDataSourceSnapshot<Int, FullMessage>()
@@ -145,11 +152,21 @@ struct MessagesCollectionView: UIViewRepresentable {
 
       // Use UIView.animate for custom animations
       if animated {
-        dataSource.apply(snapshot, animatingDifferences: true)
+        dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+          guard let self else { return }
+          self.isAnimatingUpdate = false
+
+          // After animation apply any pending updates
+          if let pendingMessages = pendingMessages {
+            self.updateSnapshot(with: pendingMessages)
+            self.pendingMessages = nil
+          }
+          //
+        }
       } else {
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
           guard let self else { return }
-          isPerformingBatchUpdate = false
+          // TODO: ??
         }
       }
       fullMessages = messages
@@ -196,27 +213,7 @@ struct MessagesCollectionView: UIViewRepresentable {
       let oldCount = fullMessages.count
       let oldMessages = fullMessages
 
-      if messages.count > oldCount {
-        let newMessages = messages.filter { message in
-          !oldMessages.contains { $0.message.id == message.message.id }
-        }
-
-        let hasOurNewMessage = newMessages.contains { $0.message.out == true }
-
-        if hasOurNewMessage {
-          updateSnapshot(with: messages)
-        } else {
-          updateSnapshot(with: messages)
-          DispatchQueue.main.async { [weak self] in
-            self?.restoreScrollPosition(collectionView)
-          }
-        }
-      } else {
-        fullMessages = messages
-        updateSnapshot(with: messages)
-      }
-
-      previousMessageCount = messages.count
+      updateSnapshot(with: messages)
     }
 
     @objc func orientationDidChange(_ notification: Notification) {
@@ -332,16 +329,21 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
 
     // Don't set a fixed itemSize here since we're using automatic sizing
-    estimatedItemSize = CGSize(width: availableWidth, height: 44)
+    estimatedItemSize = CGSize(width: availableWidth, height: 1)
   }
 
-//
-//  override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
-//    return true
-//  }
+  //
+  //  override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
+  //    return true
+  //  }
 
-  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
-    guard let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy() as? UICollectionViewLayoutAttributes else {
+  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
+    -> UICollectionViewLayoutAttributes?
+  {
+    guard
+      let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
+      as? UICollectionViewLayoutAttributes
+    else {
       return nil
     }
 
@@ -350,18 +352,19 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
   }
 }
 
-//
 // final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
 //  override func prepare() {
 //    super.prepare()
-//
+//    print("PREPAREING")
 //    guard let collectionView = collectionView else { return }
 //
 //    // Calculate the available width
 //    let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
+//    print("availableWidth \(availableWidth)")
 //
 //    // Set the width that cells should use
-//    itemSize = CGSize(width: availableWidth, height: 1) // Height will be determined automatically
+//    itemSize = CGSize(width: availableWidth, height: 44)
+//    print("itemSize \(itemSize)")
 //  }
 //
 //  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
@@ -374,8 +377,9 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
 //      return nil
 //    }
 //
-//    attributes.transform = CGAffineTransform(translationX: 0, y: -30)
+//    attributes.transform = CGAffineTransform(translationX: 0, y: -50)
 //
+//    print("attributes \(attributes)")
 //    return attributes
 //  }
 // }

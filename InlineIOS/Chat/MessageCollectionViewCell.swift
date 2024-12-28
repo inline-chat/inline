@@ -17,17 +17,16 @@ class MessageCollectionViewCell: UICollectionViewCell {
     fatalError("init(coder:) has not been implemented")
   }
 
-  override func prepareForReuse() {
-    super.prepareForReuse()
-    messageView?.removeFromSuperview()
-    messageView = nil
-  }
+//  override func prepareForReuse() {
+//    super.prepareForReuse()
+//    print("Cell being reused - clearing message view")
+//    messageView?.removeFromSuperview()
+//    messageView = nil
+//  }
 
   func configure(with message: FullMessage, topPadding: CGFloat, bottomPadding: CGFloat) {
-    // Remove existing message view if any
     messageView?.removeFromSuperview()
 
-    // Create and add new message view
     let newMessageView = UIMessageView(fullMessage: message)
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     contentView.addSubview(newMessageView)
@@ -40,33 +39,14 @@ class MessageCollectionViewCell: UICollectionViewCell {
     ])
 
     messageView = newMessageView
-
-    // Apply transform for bottom-up scrolling
     contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
   }
-
-//  override func preferredLayoutAttributesFitting(
-//    _ layoutAttributes: UICollectionViewLayoutAttributes
-//  ) -> UICollectionViewLayoutAttributes {
-//    let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
-//
-//    // Force layout before measurement
-//    setNeedsLayout()
-//    layoutIfNeeded()
-//
-//    let size = contentView.systemLayoutSizeFitting(
-//      CGSize(width: 0, height: 0),
-//      withHorizontalFittingPriority: .required,
-//      verticalFittingPriority: .fittingSizeLevel
-//    )
-//
-//    attributes.frame.size = size
-//    return attributes
-//  }
 
   override func preferredLayoutAttributesFitting(
     _ layoutAttributes: UICollectionViewLayoutAttributes
   ) -> UICollectionViewLayoutAttributes {
+    print("animate update for \(messageView?.fullMessage.message.text)")
+
     let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
     layoutIfNeeded()
 
