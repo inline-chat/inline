@@ -4,9 +4,9 @@ class ComposeTextEditor: NSView {
   public let scrollView: ComposeScrollView
   private let textView: ComposeNSTextView
   private let font: NSFont = .preferredFont(forTextStyle: .body)
-  private let minHeight: CGFloat = 42.0
-  private let horizontalPadding: CGFloat = 8
-  private let verticalPadding: CGFloat = 6
+  private let minHeight: CGFloat = Theme.composeMinHeight
+  private let horizontalPadding: CGFloat = 10.0
+  private let verticalPadding: CGFloat = Theme.composeVerticalPadding
     
   weak var delegate: (NSTextViewDelegate & ComposeTextViewDelegate)? {
     didSet {

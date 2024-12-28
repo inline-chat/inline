@@ -27,6 +27,18 @@ class ComposeAppKit: NSView {
     return textEditor
   }()
   
+  private lazy var sendButton: ComposeSendButton = {
+    let view = ComposeSendButton(frame: .zero, onSend: { [weak self] in
+      self?.send()
+    })
+    return view
+  }()
+  
+  private lazy var menuButton: ComposeMenuButton = {
+    let view = ComposeMenuButton(frame: .zero)
+    return view
+  }()
+  
   // MARK: Initialization
     
   init(peerId: Peer) {
@@ -55,6 +67,8 @@ class ComposeAppKit: NSView {
     layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
     
     addSubview(border)
+    addSubview(sendButton)
+    addSubview(menuButton)
     addSubview(textEditor)
     
     setUpConstraints()
@@ -67,8 +81,17 @@ class ComposeAppKit: NSView {
     NSLayoutConstraint.activate([
       heightConstraint,
       
-      textEditor.leadingAnchor.constraint(equalTo: leadingAnchor),
-      textEditor.trailingAnchor.constraint(equalTo: trailingAnchor),
+      // send
+      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            
+      // send
+      menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+      
+      // text editor
+      textEditor.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor),
+      textEditor.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor),
       textEditor.topAnchor.constraint(equalTo: topAnchor),
       textEditor.bottomAnchor.constraint(equalTo: bottomAnchor),
       
@@ -76,7 +99,7 @@ class ComposeAppKit: NSView {
       border.leadingAnchor.constraint(equalTo: leadingAnchor),
       border.trailingAnchor.constraint(equalTo: trailingAnchor),
       border.topAnchor.constraint(equalTo: topAnchor),
-      border.heightAnchor.constraint(equalToConstant: 1)
+      border.heightAnchor.constraint(equalToConstant: 1),
     ])
   }
   
@@ -146,6 +169,7 @@ class ComposeAppKit: NSView {
   func clear() {
     resetHeight()
     textEditor.clear()
+    sendButton.updateCanSend(false)
   }
   
   // Send the message
@@ -189,16 +213,18 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
     
     if !ignoreNextHeightChange {
-      print("textDidChange")
       updateHeightIfNeeded(for: textView)
     }
+    print("textDidChange \(textView.string)")
     
     if textView.string.isEmpty {
       // Handle empty text
       textEditor.showPlaceholder(true)
+      sendButton.updateCanSend(false)
     } else {
       // Handle non-empty text
       textEditor.showPlaceholder(false)
+      sendButton.updateCanSend(true)
     }
   }
     
