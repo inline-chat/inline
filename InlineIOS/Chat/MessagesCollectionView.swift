@@ -332,7 +332,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
 
     // Don't set a fixed itemSize here since we're using automatic sizing
-    estimatedItemSize = CGSize(width: availableWidth, height: 44) // Use a reasonable estimated height
+    estimatedItemSize = CGSize(width: availableWidth, height: 44)
   }
 
 //

@@ -79,7 +79,7 @@ extension ContentView {
     case .settings:
       Settings()
     case .createSpace, .createThread:
-      EmptyView() // These are handled by sheets
+      EmptyView()  // These are handled by sheets
     case .main:
       MainView()
     }
