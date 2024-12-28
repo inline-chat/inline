@@ -1,4 +1,3 @@
 import AppKit
 
-class MessageListScrollView: NSScrollView {
-}
+class MessageListScrollView: NSScrollView {}

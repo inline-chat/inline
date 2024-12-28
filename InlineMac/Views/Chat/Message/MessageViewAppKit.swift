@@ -75,35 +75,95 @@ class MessageViewAppKit: NSView {
   private lazy var textView: NSTextView = {
     let textView = MessageTextView(usingTextLayoutManager: true) // Experimental text kit 2
 
+    // Not sure if this helps actually
+//     textView.wantsLayer = true
+
     textView.translatesAutoresizingMaskIntoConstraints = false
     textView.isEditable = false
     textView.isSelectable = true
-    textView.backgroundColor = .clear
-    textView.textColor = textColor
     textView.drawsBackground = false
+    textView.backgroundColor = .clear
+    // In some international languages the measurements might be off slightly, this could avoid cutting off text in that case
     textView.clipsToBounds = false
     textView.textContainerInset = MessageTextConfiguration.containerInset
     textView.font = MessageTextConfiguration.font
+    textView.textColor = textColor
 
     let textContainer = textView.textContainer
     textContainer?.widthTracksTextView = true
     textContainer?.heightTracksTextView = true
-    textView.isVerticallyResizable = true
+//    textView.isVerticallyResizable = true
+    textView.isVerticallyResizable = false
     textView.isHorizontallyResizable = false
 
     textView.delegate = self
 
+    // In NSTextView you need to customize link colors here otherwise the attributed string for links
+    // does not have any effect.
     textView.linkTextAttributes = [
       .foregroundColor: linkColor,
       .underlineStyle: NSUnderlineStyle.single.rawValue,
       .cursor: NSCursor.pointingHand
     ]
-    
+
+    // Match the sizes and spacing with the size calculator we use to calculate cell height
     MessageTextConfiguration.configureTextContainer(textContainer!)
     MessageTextConfiguration.configureTextView(textView)
 
     return textView
   }()
+
+//
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+
+    if window != nil {
+      // Register for scroll visibility notifications
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(handleBoundsChange),
+        name: NSView.boundsDidChangeNotification,
+        object: enclosingScrollView?.contentView
+      )
+    }
+  }
+
+  // Fix a bug that when messages were out of viewport and came back during a live resize
+  // text would not appear until the user ended live resize operation. Seems like in TextKit 2 calling layoutViewport solves this.
+  // The property `allowsNonContiguousLayout` also seems to fix this issue but it has two other issues:
+  // 1. that forces textkit 1
+  // 2. it adds a scroll jump everytime user resizes the window
+  // which made it unsusable.
+  // This approach still needs further testing.
+  @objc private func handleBoundsChange(_ notification: Notification) {
+    guard let scrollView = enclosingScrollView,
+          let clipView = notification.object as? NSClipView else { return }
+
+    let visibleRect = scrollView.documentVisibleRect
+    let frameInClipView = convert(bounds, to: clipView)
+
+    if visibleRect
+      // Limit the layout to the top 30 points of viewport so we minimize number of messages that are layouted
+      // TODO: we need to eventually find a more optimized version of this
+      .divided(atDistance: 30.0, from: .minYEdge).slice
+      .intersects(frameInClipView)
+    {
+      // Only do this during live resize
+      if !textView.inLiveResize {
+        return
+      }
+
+      // TextKit 2 specific configuration
+      if let textLayoutManager = textView.textLayoutManager {
+        Log.shared.debug("Layouting viewport for text view \(message.id)")
+
+        DispatchQueue.main.async {
+          // Enable continuous layout
+          textLayoutManager.textViewportLayoutController.layoutViewport()
+        }
+      }
+    }
+  }
 
   func ensureLayout(_ props: MessageViewProps) {
     self.props = props
@@ -246,6 +306,12 @@ class MessageViewAppKit: NSView {
     let key = "\(text)___\(message.stableId)" // consider a hash here. // note: need to add ID otherwise messages with same text will be overriding each other styles
     if let attrs = CacheAttrs.shared.get(key: key) {
       textView.textStorage?.setAttributedString(attrs)
+
+//      if let textLayoutManager = textView.textLayoutManager {
+//        textLayoutManager
+//          .ensureLayout(for: textLayoutManager.documentRange)
+//      }
+   
       return
     }
 
@@ -277,6 +343,11 @@ class MessageViewAppKit: NSView {
     }
 
     textView.textStorage?.setAttributedString(attributedString)
+//    if let textLayoutManager = textView.textLayoutManager {
+//      textLayoutManager
+//        .ensureLayout(for: textLayoutManager.documentRange)
+//    }
+   
     CacheAttrs.shared.set(key: key, value: attributedString)
   }
 

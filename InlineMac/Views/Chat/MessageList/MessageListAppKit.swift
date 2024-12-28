@@ -1,4 +1,3 @@
-// MessagesViewController.swift
 import AppKit
 import InlineKit
 import SwiftUI
@@ -16,6 +15,7 @@ class MessageListAppKit: NSViewController {
   private var feature_setupsInsetsManually = true
   private var feature_updatesHeightsOnWidthChange = true
   private var feature_updatesHeightsOnOffsetChange = true
+  private var feature_restoresScrollOnHeightCalc = true
   
   init() {
     super.init(nibName: nil, bundle: nil)
@@ -48,8 +48,8 @@ class MessageListAppKit: NSViewController {
     table.addTableColumn(column)
     
     // Enable automatic resizing
-    table.autoresizingMask = [.height]
-//    table.autoresizingMask = []
+//    table.autoresizingMask = [.height]
+    table.autoresizingMask = []
     table.delegate = self
     table.dataSource = self
   
@@ -66,7 +66,7 @@ class MessageListAppKit: NSViewController {
     let scroll = MessageListScrollView()
     scroll.hasVerticalScroller = true
     scroll.borderType = .noBorder
-    scroll.drawsBackground = false // Add this line
+    scroll.drawsBackground = false
     scroll.backgroundColor = .clear
     // Used for quick scroll on resize
     scroll.translatesAutoresizingMaskIntoConstraints = false
@@ -88,6 +88,7 @@ class MessageListAppKit: NSViewController {
   
   override func loadView() {
     view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
     setupViews()
   }
 
@@ -130,6 +131,9 @@ class MessageListAppKit: NSViewController {
     view.addSubview(scrollView)
 //    view.addSubview(avatarOverlayView)
     
+//    tableView.wantsLayer = true
+//    scrollView.wantsLayer = true
+    
     // Set up constraints
     NSLayoutConstraint.activate([
       scrollView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -164,11 +168,18 @@ class MessageListAppKit: NSViewController {
 //        tableView.scrollRowToVisible(lastRow)
       }
     } else {
-      CATransaction.begin()
-      CATransaction.setDisableActions(true)
+//      CATransaction.begin()
+//      CATransaction.setDisableActions(true)
       tableView.scrollToBottomWithInset()
 //      tableView.scrollRowToVisible(lastRow)
-      CATransaction.commit()
+//      CATransaction.commit()
+      
+      // Test if this gives better performance than above solution
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0
+        context.allowsImplicitAnimation = false
+        tableView.scrollToBottomWithInset()
+      }
     }
   }
 
@@ -244,7 +255,10 @@ class MessageListAppKit: NSViewController {
     isAtBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 5.0
     isAtAbsoluteBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 0.1
     
-    if feature_updatesHeightsOnOffsetChange && isUserScrolling {
+    if feature_updatesHeightsOnOffsetChange && isUserScrolling &&
+      currentScrollOffset
+      .truncatingRemainder(dividingBy: 20.0) == 0
+    {
       recalculateHeightsOnWidthChange()
     }
   }
@@ -406,6 +420,11 @@ class MessageListAppKit: NSViewController {
     // keep scroll view anchored from the bottom
     guard feature_maintainsScrollFromBottomOnResize else { return }
     
+    // Already handled in this case
+    if feature_scrollsToBottomInDidLayout && isAtAbsoluteBottom {
+      return
+    }
+    
     guard let documentView = scrollView.documentView else { return }
     
     if isPerformingUpdate {
@@ -428,7 +447,7 @@ class MessageListAppKit: NSViewController {
     documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
     CATransaction.commit()
   }
-
+  
   private var lastKnownWidth: CGFloat = 0
   private var needsInitialScroll = true
   
@@ -446,13 +465,22 @@ class MessageListAppKit: NSViewController {
     if needsInitialScroll {
       scrollToBottom(animated: false)
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // Finalize heights one last time to ensure no broken heights on initial load
+        self.recalculateHeightsOnWidthChange()
         self.needsInitialScroll = false
       }
     }
     
     if feature_scrollsToBottomInDidLayout {
+      // Exprimental: Make sure if this calculation is actually worth it.
+      let viewportSize = scrollView.contentView.bounds.size
+      let contentSize = scrollView.documentView?.frame.size ?? .zero
+      let maxScrollableHeight = contentSize.height - viewportSize.height
+      let currentScrollOffset = scrollView.contentView.bounds.origin.y
+      let willBeNotAtBottom = currentScrollOffset < maxScrollableHeight && abs(currentScrollOffset - maxScrollableHeight) > 0.1
+
       // Note(@mo): This is a hack to fix scroll jumping when user is resizing the window at bottom.
-      if isAtAbsoluteBottom {
+      if isAtAbsoluteBottom && willBeNotAtBottom {
         scrollToBottom(animated: false)
       }
     }
@@ -464,12 +492,16 @@ class MessageListAppKit: NSViewController {
     
     let newWidth = tableView.bounds.width
     
-    if abs(newWidth - lastKnownWidth) > MessageSizeCalculator.safeAreaWidth {
+    // Using this prevents an issue where cells height was stuck in a cut off way when using
+    // MessageSizeCalculator.safeAreaWidth as the diff
+    let magicWidthDiff = 30.0
+    
+    if abs(newWidth - lastKnownWidth) > magicWidthDiff {
       lastKnownWidth = newWidth
       recalculateHeightsOnWidthChange()
     }
   }
-
+  
   func update(with newMessages: [FullMessage]) {
     guard !newMessages.isEmpty else { return }
     
@@ -561,7 +593,7 @@ class MessageListAppKit: NSViewController {
     
     isPerformingUpdate = false
   }
-  
+
   // Note this function will stop any animation that is happening so must be used with caution
   private func recalculateHeightsOnWidthChange() {
     log.trace("Recalculating heights on width change")
@@ -575,7 +607,7 @@ class MessageListAppKit: NSViewController {
     
     guard visibleRange.location != NSNotFound else { return }
     
-    let buffer = 4
+    let buffer = 2
 
     // Calculate ranges
     let visibleStartIndex = max(0, visibleRange.location - buffer)
@@ -592,24 +624,23 @@ class MessageListAppKit: NSViewController {
     let visibleIndexesToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
     
     // Begin updates
-    
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
 
-    // Reload top most view
-//    tableView
-//      .reloadData(
-//        forRowIndexes: IndexSet(integer: visibleRange.location),
-//        columnIndexes: IndexSet([0])
-//      )
-    tableView
-      .reloadData(
-        forRowIndexes: visibleIndexesToUpdate,
-        columnIndexes: IndexSet([0])
-      )
-    tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
-    
-    CATransaction.commit()
+    // Use CATransaction results in cut of items at bottom
+//    CATransaction.begin()
+//    CATransaction.setDisableActions(true)
+        
+//    captureScrollAnchor()
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0
+      context.allowsImplicitAnimation = false
+
+      tableView
+        .reloadData(
+          forRowIndexes: visibleIndexesToUpdate,
+          columnIndexes: IndexSet([0])
+        )
+      tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
+    }
   }
 
   deinit {

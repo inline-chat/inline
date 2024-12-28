@@ -22,6 +22,7 @@ class MessageTableCell: NSView {
   
   func configure(with message: FullMessage, props: MessageViewProps) {
     if message == currentContent?.message && props == currentContent?.props {
+      layoutSubtreeIfNeeded() // added this to solve the clipping issue in scroll view on last message when it was multiline and initial height was calculated with a wider width during the table view setup
       return
     }
       

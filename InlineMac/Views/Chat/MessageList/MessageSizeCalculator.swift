@@ -13,11 +13,11 @@ class MessageSizeCalculator {
   private let textHeightCache = NSCache<NSString, NSValue>()
   private let minWidthForSingleLine = NSCache<NSString, NSValue>()
   
-  private let log = Log.scoped("MessageSizeCalculator")
+  private let log = Log.scoped("MessageSizeCalculator", enableTracing: false)
   private var heightForSingleLine: CGFloat?
   
   static let safeAreaWidth: CGFloat = 50.0
-  static let extraSafeWidth = 1.0
+  static let extraSafeWidth = 0.0
 
   init() {
     textStorage = NSTextStorage()
