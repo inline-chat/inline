@@ -85,18 +85,18 @@ struct MainView: View {
 
       } catch {
         Log.shared.error("Failed to getMe", error: error)
-        // Clear creds
-        Auth.shared.logOut()
-
-        // Stop WebSocket
-        ws.loggedOut()
-
-        // Clear database
-        try? AppDatabase.loggedOut()
-        mainViewRouter.setRoute(route: .onboarding)
-        nav.popToRoot()
-
-        onboardingNav.push(.welcome)
+//        // Clear creds
+//        Auth.shared.logOut()
+//
+//        // Stop WebSocket
+//        ws.loggedOut()
+//
+//        // Clear database
+//        try? AppDatabase.loggedOut()
+//        mainViewRouter.setRoute(route: .onboarding)
+//        nav.popToRoot()
+//
+//        onboardingNav.push(.welcome)
         return
       }
 
