@@ -31,7 +31,7 @@ struct MainView: View {
             minWidth: detailMinWidth,
             maxWidth: .infinity,
             maxHeight: .infinity
-          )
+          ).layoutPriority(2)
           
         if isDevtoolsOpen {
           DevtoolsBar()

@@ -13,8 +13,9 @@ struct DevtoolsBarContent: View {
       Spacer()
       
       // Metrics
-      Divider()
-      SystemMetricsView()
+      // Has memory leak
+//      Divider()
+//      SystemMetricsView()
       Divider()
       // FPS
       FPSView()

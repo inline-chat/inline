@@ -67,5 +67,5 @@ enum Theme {
   
   
   // MARK: - Devtools
-  static let devtoolsHeight: CGFloat = 32
+  static let devtoolsHeight: CGFloat = 30
 }

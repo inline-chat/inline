@@ -56,8 +56,9 @@ final class SystemMonitor: ObservableObject {
   private var timer: Timer?
     
   func startMonitoring() {
+    print("startMonitoring")
     stopMonitoring()
-    timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+    timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
       self?.updateMetrics()
     }
   }
@@ -72,7 +73,9 @@ final class SystemMonitor: ObservableObject {
   }
     
   private func updateMetrics() {
-    Task {
+    Task { [weak self] in
+      guard let self = self else { return }
+      
       let memoryUsage = formatMemoryUsage(getMemoryUsage())
       let cpuUsage = formatCPUUsage(getCPUUsage())
       

@@ -5,7 +5,7 @@ import SwiftUI
 
 struct FPSMeasurement: Identifiable, Equatable {
   let id: Int
-  let date: Date
+//  let date: Date
   let fps: Int
   
   static func == (lhs: FPSMeasurement, rhs: FPSMeasurement) -> Bool {
@@ -13,13 +13,18 @@ struct FPSMeasurement: Identifiable, Equatable {
   }
 }
 
+class FPSHistory: ObservableObject {
+  @Published var history: [FPSMeasurement] = []
+}
+
 @available(macOS 14.0, *)
 class FPSCounter: ObservableObject {
   @Published private(set) var fps = 0
-  @Published private(set) var fpsHistory: [FPSMeasurement] = []
+  private(set) var fpsHistory = FPSHistory()
   
   private var displayLink: CADisplayLink?
-  private let maxHistoryCount = 30
+  static let maxHistoryCount = 20
+  let maxHistoryCount = FPSCounter.maxHistoryCount
   private(set) var nextId = 100
   
   private var frameCount = 0
@@ -29,16 +34,11 @@ class FPSCounter: ObservableObject {
   private weak var trackedWindow: NSWindow?
   
   private func fillHistory() {
-    for index in 0...30 {
-      fpsHistory
+    for index in 0...maxHistoryCount {
+      fpsHistory.history
         .append(
           FPSMeasurement(
             id: index,
-            date: Date(
-              timeIntervalSince1970: Date().timeIntervalSince1970 - Double(
-                30 - index
-              ) * 0.2
-            ),
             fps: maxFPS
           )
         )
@@ -47,7 +47,7 @@ class FPSCounter: ObservableObject {
 
   func pause() {
     displayLink?.remove(from: .main, forMode: .common)
-    fpsHistory.removeAll()
+    fpsHistory.history.removeAll()
   }
 
   func resume() {
@@ -63,7 +63,6 @@ class FPSCounter: ObservableObject {
     
     trackedWindow = window
     
-    print("Tracking started")
     displayLink = window.displayLink(target: self, selector: #selector(displayLinkDidFire(_:)))
     displayLink?.add(to: .main, forMode: .common)
   }
@@ -72,6 +71,7 @@ class FPSCounter: ObservableObject {
     displayLink?.invalidate()
     displayLink = nil
     trackedWindow = nil
+    isTracking = false
   }
   
   deinit {
@@ -90,20 +90,24 @@ class FPSCounter: ObservableObject {
     if elapsed >= updateInterval {
       let currentFPS = Int(round(Double(frameCount) / elapsed))
       
-//      DispatchQueue.main.async { [weak self] in
-//        guard let self else { return }
-      fps = currentFPS // Remove the min(maxFPS) constraint
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        fps = currentFPS // Remove the min(maxFPS) constraint
         
-      if fpsHistory.isEmpty {
-        fillHistory()
-      }
+        withAnimation(.linear(duration: 0.195)) {
+          if self.fpsHistory.history.isEmpty {
+            self.fillHistory()
+            return
+          }
+          
+          self.fpsHistory.history.append(FPSMeasurement(id: self.nextId, fps: self.fps))
+          if self.fpsHistory.history.count > self.maxHistoryCount {
+            self.fpsHistory.history.removeFirst()
+          }
+        }
         
-      fpsHistory.append(FPSMeasurement(id: nextId, date: Date(), fps: fps))
-      nextId += 1
-      if fpsHistory.count > maxHistoryCount {
-        fpsHistory.removeFirst()
+        self.nextId += 1
       }
-//      }
       
       frameCount = 0
       lastTimestamp = link.timestamp
@@ -118,40 +122,44 @@ class FPSCounter: ObservableObject {
 }
 
 @available(macOS 14.0, *)
-struct FPSView: View {
-  @StateObject private var counter = FPSCounter()
-  @State private var isStressing = false
-  @State private var heavyWorkItems: [Int] = []
-  @State private var paused = false
+struct ChartView: View {
+  let paused: Bool
+  @ObservedObject var fps: FPSHistory
+  let maxFPS: Int
   
-  @ViewBuilder
-  var texts: some View {
-    VStack(alignment: .trailing, spacing: 0) {
-      HStack(spacing: 0) {
-        Text("\(counter.fps)")
-          .contentTransition(.numericText(value: Double(counter.fps)))
-        Text(" FPS")
+  let barWidth: CGFloat
+  let barSpacing: CGFloat
+  var chartWidth: CGFloat
+  
+  var body: some View {
+    Group {
+      if fps.history.isEmpty || paused {
+        pausedView
+      } else {
+        HStack(alignment: .bottom, spacing: barSpacing) {
+          ForEach(fps.history) { measurement in
+            FPSBar(
+              fps: measurement.fps,
+              maxFPS: maxFPS,
+              width: barWidth
+            ).equatable()
+          }
+        }
+        .frame(width: chartWidth, height: Theme.devtoolsHeight - 4)
+        .contentShape(.interaction, .rect)
+        .padding(.horizontal, 0)
+        .cornerRadius(6)
       }
-      .animation(.default.speed(2.8), value: counter.fps)
-      .font(.footnote)
-      .offset(y: 1)
-      
-      Text("\(counter.maxFPS)Hz")
-        .foregroundColor(.gray)
-        .font(.caption)
-        .offset(y: -1)
     }
-    .frame(
-      width: 36,
-      alignment: .trailing
-    ) // to not change width when changes
-    .padding(.trailing, 4)
+    .animation(.easeOut(duration: 0.2), value: fps.history.isEmpty)
+    .animation(.easeOut(duration: 0.2), value: paused)
   }
   
   @ViewBuilder
   var pausedView: some View {
     Rectangle()
-      .cornerRadius(8)
+      .cornerRadius(6)
+      .foregroundStyle(.gray.gradient.quaternary)
       .overlay(content: {
         if paused {
           Text("Paused")
@@ -159,56 +167,62 @@ struct FPSView: View {
             .foregroundColor(.gray)
         }
       })
-      .foregroundStyle(.gray.gradient.quaternary)
-      .frame(width: 90, height: Theme.devtoolsHeight - 4)
+      .frame(width: chartWidth, height: Theme.devtoolsHeight - 4)
   }
-    
-  var chart: some View {
-//    Chart(counter.fpsHistory) {
-//      BarMark(
-//        x: .value("Time", $0.date),
-//        y: .value("FPS", $0.fps),
-//        width: 2.0
-//      )
-    ////      .foregroundStyle(getFpsColor(fps: $0.fps))
-//    }
-//    .chartXAxis(.hidden)
-//    .chartYAxis(.hidden)
-//    .chartYScale(domain: 0...counter.maxFPS)
-    HStack(alignment: .bottom, spacing: 1) {
-      ForEach(counter.fpsHistory) { measurement in
-        FPSBar(
-          fps: measurement.fps,
-          maxFPS: counter.maxFPS,
-          width: 2
-        )
-      }
+}
+
+@available(macOS 14.0, *)
+struct FPSView: View {
+  @StateObject private var counter = FPSCounter()
+  @State private var isStressing = false
+  @State private var heavyWorkItems: [Int] = []
+  @State private var paused = false
+  @State private var hasChart = true
+  
+  @ViewBuilder
+  var texts: some View {
+    VStack(alignment: .trailing, spacing: 0) {
+      Text("\(counter.fps) FPS")
+        .foregroundColor(.blue)
+        .font(.system(size: 12, weight: .semibold))
+        .offset(y: 2).fixedSize()
+//        .animation(.easeOut(duration: 0.08), value: counter.fps)
+      Text("\(counter.maxFPS)Hz")
+        .foregroundColor(.gray)
+        .font(.caption)
+        .offset(y: -1)
     }
-    .frame(width: 90, height: Theme.devtoolsHeight - 4)
-    .contentShape(.interaction, .rect)
-    .padding(.horizontal, 0)
-    .cornerRadius(8)
-    .shakeEffect(isShaking: isStressing)
-    .animation(.linear(duration: 0.3), value: counter.fpsHistory)
+    .frame(
+      width: 47,
+      alignment: .trailing
+    ) // to not change width when changes
+    .padding(.trailing, 4)
   }
   
+  let barWidth: CGFloat = 2
+  let barSpacing: CGFloat = 2
+  var chartWidth: CGFloat {
+    (barWidth + barSpacing) * CGFloat(FPSCounter.maxHistoryCount)
+  }
+  
+  var chart: some View {
+    ChartView(paused: paused, fps: counter.fpsHistory, maxFPS: counter.maxFPS, barWidth: barWidth, barSpacing: barSpacing, chartWidth: chartWidth)
+      .shakeEffect(isShaking: isStressing)
+  }
+
   var body: some View {
     HStack(alignment: .center, spacing: 0) {
       texts
       
-      if counter.fpsHistory.isEmpty || paused {
-        pausedView
-      } else {
+      if hasChart {
         chart
       }
     }
     .onTapGesture {
       togglePaused()
     }
-    .animation(.easeOut(duration: 0.2), value: counter.fpsHistory.isEmpty)
-    .animation(.default, value: isStressing)
+    .animation(.easeOut(duration: 0.2), value: hasChart)
     .introspect(.window, on: .macOS(.v13, .v14, .v15)) { w in
-      
       counter.startTracking(in: w)
     }
     .onAppear {
@@ -221,10 +235,14 @@ struct FPSView: View {
     .contextMenu {
       Button(!isStressing ? "Enable Stress Test" : "Disable Stress Test") {
         toggleStressTest()
-      }.id(isStressing ? 1 : 0)
+      }
       
       Button(paused ? "Resume" : "Pause") {
         togglePaused()
+      }
+      
+      Button(!hasChart ? "Enable Chart View" : "Disable Chart View") {
+        hasChart.toggle()
       }
     }
   }
@@ -259,17 +277,6 @@ struct FPSView: View {
       }
     }
   }
-  
-  private func getFpsColor(fps: Int) -> Color {
-    switch counter.fps {
-    case _ where fps >= counter.maxFPS * 90 / 100:
-      return .green
-    case _ where fps >= counter.maxFPS * 60 / 100:
-      return .yellow
-    default:
-      return .red
-    }
-  }
 }
 
 extension View {
@@ -283,17 +290,19 @@ struct ShakeEffect: ViewModifier {
   
   func body(content: Content) -> some View {
     content
-      .offset(x: isShaking ? CGFloat(Int.random(in: -6...4)) : 0,
-              y: isShaking ? CGFloat(Int.random(in: -2...2)) : 0)
+      .offset(x: isShaking ? CGFloat(Int.random(in: -3...3)) : 0,
+              y: isShaking ? CGFloat(Int.random(in: -1...1)) : 0)
       .animation(
-        .easeInOut(duration: 0.05)
-          .repeatForever(autoreverses: true),
+        isShaking ?
+          .easeIn(duration: 0.09).repeatForever(autoreverses: true) :
+          .default,
         value: isShaking
       )
   }
 }
 
-struct FPSBar: View {
+@available(macOS 14.0, *)
+struct FPSBar: View, Equatable {
   let fps: Int
   let maxFPS: Int
   let width: CGFloat
@@ -304,24 +313,28 @@ struct FPSBar: View {
     guard maxFPS > 0 else { return 0 }
     return CGFloat(fps) / CGFloat(maxFPS)
   }
-  
-  var body: some View {
-    Rectangle()
-      .fill(fpsColor)
-      .frame(width: width, height: maxHeight * heightPercentage)
-      .frame(maxHeight: maxHeight, alignment: .bottom)
-      .cornerRadius(3)
+
+  var p: Double {
+    Double(fps) / Double(maxFPS)
   }
   
-  private var fpsColor: Color {
-    let percentage = Double(fps) / Double(maxFPS)
-    switch percentage {
-    case 0.9...:
-      return .green
-    case 0.6...:
-      return .yellow
-    default:
-      return .red
+  @ViewBuilder
+  var shape: some View {
+    if p > 0.75 {
+      RoundedRectangle(cornerRadius: 1.0)
+        .fill(.blue.gradient)
+    } else if p > 0.5 {
+      RoundedRectangle(cornerRadius: 1.0)
+        .fill(.blue.gradient.secondary)
+    } else {
+      RoundedRectangle(cornerRadius: 1.0)
+        .fill(.blue.gradient.tertiary)
     }
+  }
+
+  var body: some View {
+    shape
+      .frame(width: width, height: maxHeight * heightPercentage)
+      .frame(maxHeight: maxHeight, alignment: .bottom)
   }
 }
