@@ -82,6 +82,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.from)
   }
 
+  // needs chat id as well
   public static let repliedToMessage = belongsTo(
     Message.self, key: "repliedToMessage", using: ForeignKey(["messageId"])
   )
@@ -89,7 +90,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.repliedToMessage)
   }
 
-  public static let reactions = hasMany(Reaction.self)
+  public static let reactions = hasMany(Reaction.self,
+                                        using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"]))
   public var reactions: QueryInterfaceRequest<Reaction> {
     request(for: Message.reactions)
   }

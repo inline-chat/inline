@@ -21,7 +21,8 @@ public struct Reaction: FetchableRecord, Identifiable, Codable, Hashable, Persis
   public var emoji: String
   public var date: Date
 
-  public static let message = belongsTo(Message.self)
+  public static let message = belongsTo(Message.self,
+                                        using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"]))
   public var message: QueryInterfaceRequest<Message> {
     request(for: Reaction.message)
   }
