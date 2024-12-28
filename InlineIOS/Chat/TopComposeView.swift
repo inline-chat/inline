@@ -77,7 +77,6 @@ struct TopComposeView: View {
         }
         await MainActor.run {
           self.repliedMessage = message
-          print("Fetched message: \(String(describing: message))")
         }
       } catch {
         Log.shared.error("Failed to fetch replied message", error: error)

@@ -57,7 +57,7 @@ extension Code {
       do {
         formState.startLoading()
         let result = try await api.verifyCode(code: code, email: email)
-        print("TOKEN \(result.token)")
+        
         auth.saveToken(result.token)
         auth.saveCurrentUserId(userId: result.userId)
 

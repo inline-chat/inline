@@ -215,7 +215,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     if !ignoreNextHeightChange {
       updateHeightIfNeeded(for: textView)
     }
-    print("textDidChange \(textView.string)")
+    
     
     if textView.string.isEmpty {
       // Handle empty text

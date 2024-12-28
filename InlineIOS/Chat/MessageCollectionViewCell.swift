@@ -45,7 +45,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
   override func preferredLayoutAttributesFitting(
     _ layoutAttributes: UICollectionViewLayoutAttributes
   ) -> UICollectionViewLayoutAttributes {
-    print("animate update for \(messageView?.fullMessage.message.text)")
+
 
     let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
     layoutIfNeeded()
