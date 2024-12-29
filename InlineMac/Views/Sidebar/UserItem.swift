@@ -100,7 +100,7 @@ struct UserItemButtonStyle: ButtonStyle {
         }
       }
       // Optional: Add subtle scale effect when pressed
-      .scaleEffect(!selected && configuration.isPressed ? 0.98 : 1.0)
+//      .scaleEffect(!selected && configuration.isPressed ? 0.98 : 1.0)
       // Optional: Add smooth animation for press state
       .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
   }
