@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 // WebSocketClient implementation stays the same as before...
 
@@ -29,6 +30,8 @@ public final class WebSocketManager: ObservableObject {
     Task {
       try await self.start()
     }
+
+    setupNetworkMonitoring()
   }
 
   func disconnect() {
@@ -40,6 +43,7 @@ public final class WebSocketManager: ObservableObject {
 
   deinit {
     log.debug("deinit")
+    pathMonitor?.cancel()
     // Create a new task to call disconnect on the main actor
     Task { @MainActor [self] in
       self.disconnect()
@@ -166,5 +170,29 @@ public final class WebSocketManager: ObservableObject {
       log.error("Failed to decode server message", error: error)
       return nil
     }
+  }
+
+  // MARK: Network Connectivity
+
+  private var pathMonitor: NWPathMonitor?
+
+  private func setupNetworkMonitoring() {
+    pathMonitor = NWPathMonitor()
+    pathMonitor?.pathUpdateHandler = { [weak self] path in
+      Task { @MainActor in
+        if path.status == .satisfied {
+          // Network became available
+          if await self?.client?.state != .connected {
+            self?.log.debug("recovering connection")
+            try? await self?.start()
+          }
+        } else {
+          // Network became unavailable
+          self?.log.debug("network unavailable")
+          self?.disconnect()
+        }
+      }
+    }
+    pathMonitor?.start(queue: DispatchQueue.global())
   }
 }

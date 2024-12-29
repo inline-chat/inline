@@ -21,7 +21,7 @@ struct ReconnectionConfig: Sendable {
   let maxAttempts: Int
   let backoff: TimeInterval
 
-  static let `default` = ReconnectionConfig(maxAttempts: 5, backoff: 2)
+  static let `default` = ReconnectionConfig(maxAttempts: 5, backoff: 1.5)
   static let none = ReconnectionConfig(maxAttempts: 0, backoff: 0)
 }
 
@@ -221,7 +221,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
 
   private func setupConnectionTimeout() {
     Task {
-      try? await Task.sleep(for: .seconds(10))
+      try? await Task.sleep(for: .seconds(14))
       if connectionState == .connecting {
         handleDisconnection(error: WebSocketError.connectionTimeout)
       }
@@ -305,15 +305,15 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   }
 
   private func attemptReconnection() async {
-    guard reconnectionConfig.maxAttempts > 0,
-          reconnectAttempts < reconnectionConfig.maxAttempts,
-          isActive
+    guard
+      isActive
     else {
       return
     }
 
     reconnectAttempts += 1
-    let delay = reconnectionConfig.backoff * TimeInterval(reconnectAttempts)
+    let jitter = Double.random(in: 0 ... 0.3)
+    let delay = min(reconnectionConfig.backoff * TimeInterval(reconnectAttempts), 24) + jitter
 
     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
 
