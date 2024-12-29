@@ -16,7 +16,7 @@ public final class WebSocketManager: ObservableObject {
 
   private var token: String?
   private var userId: Int64?
-  private var updatesManager: UpdatesManager
+  private var updatesManager = UpdatesManager.shared
 
   public convenience init() {
     self.init(token: Auth.shared.getToken(), userId: Auth.shared.getCurrentUserId())
@@ -25,7 +25,7 @@ public final class WebSocketManager: ObservableObject {
   public init(token: String?, userId: Int64?) {
     self.token = token
     self.userId = userId
-    self.updatesManager = UpdatesManager()
+//    self.updatesManager = UpdatesManager()
     Task {
       try await self.start()
     }

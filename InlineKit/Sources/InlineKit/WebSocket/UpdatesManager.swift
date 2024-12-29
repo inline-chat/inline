@@ -2,6 +2,8 @@ import Foundation
 import GRDB
 
 actor UpdatesManager {
+  public static let shared = UpdatesManager()
+  
   private var database: AppDatabase = .shared
   private var log = Log.scoped("Updates")
 
@@ -44,7 +46,7 @@ actor UpdatesManager {
 
 // MARK: Types
 
-struct Update: Codable {
+public struct Update: Codable, Sendable {
   /// New message received
   var newMessage: UpdateNewMessage?
   var updateMessageId: UpdateMessageId?
