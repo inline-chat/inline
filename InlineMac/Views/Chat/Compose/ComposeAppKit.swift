@@ -39,6 +39,13 @@ class ComposeAppKit: NSView {
     return view
   }()
   
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    
+    // Focus the text editor
+    focus()
+  }
+  
   // MARK: Initialization
     
   init(peerId: Peer) {
@@ -186,6 +193,10 @@ class ComposeAppKit: NSView {
       self.ignoreNextHeightChange = false
     }
   }
+  
+  func focus() {
+    textEditor.focus()
+  }
 }
   
 // MARK: Delegate
@@ -215,7 +226,6 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     if !ignoreNextHeightChange {
       updateHeightIfNeeded(for: textView)
     }
-    
     
     if textView.string.isEmpty {
       // Handle empty text
