@@ -3,7 +3,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
-struct ChatView: View {
+struct ChatView1: View {
   var peer: Peer
 
   @State var text: String = ""
@@ -132,7 +132,7 @@ struct ChatView: View {
 
 // MARK: - Helper Methods
 
-extension ChatView {
+extension ChatView1 {
   private func fetchMessages() {
     Task {
       do {
@@ -270,7 +270,7 @@ extension ChatView {
 
 // MARK: - Helper Properties
 
-extension ChatView {
+extension ChatView1 {
   var title: String {
     if case .user = peer {
       return fullChatViewModel.peerUser?.firstName ?? ""
@@ -282,7 +282,7 @@ extension ChatView {
 
 // MARK: - Views
 
-extension ChatView {
+extension ChatView1 {
   @ViewBuilder
   private var chatMessages: some View {
     MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages)
@@ -307,10 +307,10 @@ extension ChatView {
   }
 }
 
-struct CustomButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .scaleEffect(configuration.isPressed ? 0.8 : 1.0)
-      .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
-  }
-}
+// struct CustomButtonStyle: ButtonStyle {
+//  func makeBody(configuration: Configuration) -> some View {
+//    configuration.label
+//      .scaleEffect(configuration.isPressed ? 0.8 : 1.0)
+//      .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+//  }
+// }
