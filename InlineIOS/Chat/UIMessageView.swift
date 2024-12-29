@@ -3,39 +3,10 @@ import InlineKit
 import SwiftUI
 import UIKit
 
-struct GroupedReaction {
-  let emoji: String
-  let count: Int
-  let isFromCurrentUser: Bool
-}
-
-extension String {
-  var isRTL: Bool {
-    guard let firstChar = first else { return false }
-    let earlyRTL =
-      firstChar.unicodeScalars.first?.properties.generalCategory == .otherLetter
-        && firstChar.unicodeScalars.first != nil
-        && firstChar.unicodeScalars.first!.value >= 0x0590
-        && firstChar.unicodeScalars.first!.value <= 0x08FF
-
-    if earlyRTL { return true }
-
-    let language = CFStringTokenizerCopyBestStringLanguage(
-      self as CFString,
-      CFRange(location: 0, length: count)
-    )
-    if let language = language {
-      return NSLocale.characterDirection(forLanguage: language as String) == .rightToLeft
-    }
-    return false
-  }
-}
-
 class UIMessageView: UIView {
   // MARK: - Properties
 
   private var interaction: UIContextMenuInteraction?
-  private var contextMenuManager: ContextMenuManager?
 
   private let messageLabel: UILabel = {
     let label = UILabel()
@@ -72,21 +43,6 @@ class UIMessageView: UIView {
     return stack
   }()
 
-  private let reactionsContainer: UIView = {
-    let view = UIView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
-
-  private let reactionsStackView: UIStackView = {
-    let stack = UIStackView()
-    stack.axis = .horizontal
-    stack.spacing = 4
-    stack.alignment = .center
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
-  }()
-
   private var leadingConstraint: NSLayoutConstraint?
   private var trailingConstraint: NSLayoutConstraint?
   var fullMessage: FullMessage
@@ -117,8 +73,6 @@ class UIMessageView: UIView {
 
     bubbleView.addSubview(contentStack)
 
-    setupReactionsView()
-
     leadingConstraint = bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8)
     trailingConstraint = bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8)
 
@@ -146,36 +100,6 @@ class UIMessageView: UIView {
     let interaction = UIContextMenuInteraction(delegate: self)
     self.interaction = interaction
     bubbleView.addInteraction(interaction)
-
-    let contextMenuManager = ContextMenuManager(
-      contextMenuInteraction: interaction,
-      menuTargetView: self
-    )
-
-    self.contextMenuManager = contextMenuManager
-    contextMenuManager.delegate = self
-
-    contextMenuManager.auxiliaryPreviewConfig = AuxiliaryPreviewConfig(
-      verticalAnchorPosition: .automatic,
-      horizontalAlignment: fullMessage.message.out == true ? .targetTrailing : .targetLeading,
-      preferredWidth: .constant(320),
-      preferredHeight: .constant(46),
-      marginInner: 16,
-      marginOuter: 12,
-      transitionConfigEntrance: .syncedToMenuEntranceTransition(),
-      transitionExitPreset: .fade
-    )
-  }
-
-  private func setupReactionsView() {
-    reactionsContainer.addSubview(reactionsStackView)
-
-    NSLayoutConstraint.activate([
-      reactionsStackView.topAnchor.constraint(equalTo: reactionsContainer.topAnchor),
-      reactionsStackView.leadingAnchor.constraint(equalTo: reactionsContainer.leadingAnchor),
-      reactionsStackView.trailingAnchor.constraint(equalTo: reactionsContainer.trailingAnchor),
-      reactionsStackView.bottomAnchor.constraint(equalTo: reactionsContainer.bottomAnchor),
-    ])
   }
 
   private func updateMetadataLayout() {
@@ -188,7 +112,6 @@ class UIMessageView: UIView {
 
     if messageLength > 22 || hasLineBreak {
       contentStack.addArrangedSubview(messageLabel)
-      updateReactions()
 
       let metadataContainer = UIView()
       metadataContainer.addSubview(metadataView)
@@ -205,90 +128,7 @@ class UIMessageView: UIView {
       shortMessageStack.addArrangedSubview(messageLabel)
       shortMessageStack.addArrangedSubview(metadataView)
       contentStack.addArrangedSubview(shortMessageStack)
-      updateReactions()
     }
-  }
-
-  private func updateReactions() {
-    reactionsStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-    let groupedReactions = groupReactions(fullMessage.reactions)
-
-    for reaction in groupedReactions {
-      let reactionView = createReactionView(for: reaction)
-      reactionsStackView.addArrangedSubview(reactionView)
-    }
-
-    if !groupedReactions.isEmpty {
-      contentStack.addArrangedSubview(reactionsContainer)
-    } else {
-      reactionsContainer.removeFromSuperview()
-    }
-  }
-
-  private func groupReactions(_ reactions: [Reaction]) -> [GroupedReaction] {
-    var groupedDict: [String: (count: Int, fromCurrentUser: Bool)] = [:]
-
-    for reaction in reactions {
-      let current = groupedDict[reaction.emoji] ?? (0, false)
-      let isFromCurrentUser = reaction.userId == Auth.shared.getCurrentUserId()
-      groupedDict[reaction.emoji] = (
-        current.count + 1,
-        current.fromCurrentUser || isFromCurrentUser
-      )
-    }
-
-    return groupedDict.map { emoji, info in
-      GroupedReaction(
-        emoji: emoji,
-        count: info.count,
-        isFromCurrentUser: info.fromCurrentUser
-      )
-    }.sorted { $0.count > $1.count }
-  }
-
-  private func createReactionView(for reaction: GroupedReaction) -> UIView {
-    let container = UIView()
-    container.backgroundColor =
-      reaction.isFromCurrentUser
-        ? ColorManager.shared.selectedColor.withAlphaComponent(0.1)
-        : UIColor.systemGray5.withAlphaComponent(0.5)
-    container.layer.cornerRadius = 12
-
-    let stack = UIStackView()
-    stack.axis = .horizontal
-    stack.spacing = 4
-    stack.alignment = .center
-    stack.translatesAutoresizingMaskIntoConstraints = false
-
-    let emojiLabel = UILabel()
-    emojiLabel.text = reaction.emoji
-    emojiLabel.font = .systemFont(ofSize: 14)
-
-    let countLabel = UILabel()
-    countLabel.text = "\(reaction.count)"
-    countLabel.font = .systemFont(ofSize: 12, weight: .medium)
-    countLabel.textColor =
-      reaction.isFromCurrentUser ? ColorManager.shared.selectedColor : .secondaryLabel
-
-    stack.addArrangedSubview(emojiLabel)
-    stack.addArrangedSubview(countLabel)
-
-    container.addSubview(stack)
-
-    NSLayoutConstraint.activate([
-      container.heightAnchor.constraint(equalToConstant: 24),
-      stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
-      stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
-      stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
-      stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
-    ])
-
-    container.addGestureRecognizer(
-      UITapGestureRecognizer(target: self, action: #selector(reactionTapped(_:))))
-    container.tag = reaction.emoji.hashValue
-
-    return container
   }
 
   private func configureForMessage() {
@@ -318,84 +158,15 @@ class UIMessageView: UIView {
 
     updateMetadataLayout()
   }
-
-  // MARK: - Actions
-
-  @objc private func reactionTapped(_ gesture: UITapGestureRecognizer) {
-    guard let view = gesture.view,
-          let emoji = groupReactions(fullMessage.reactions)
-          .first(where: { $0.emoji.hashValue == view.tag })?.emoji
-    else {
-      return
-    }
-
-    UIView.animate(
-      withDuration: 0.1,
-      animations: {
-        view.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
-      }
-    ) { _ in
-      UIView.animate(withDuration: 0.1) {
-        view.transform = .identity
-      }
-    }
-
-    Task {
-      do {
-        try await DataManager.shared.addReaction(
-          messageId: fullMessage.message.messageId,
-          chatId: fullMessage.message.chatId,
-          emoji: emoji
-        )
-      } catch {
-        print("Error toggling reaction: \(error)")
-      }
-    }
-  }
-
-  @objc private func buttonTouchDown(_ sender: UIButton) {
-    UIView.animate(withDuration: 0.1) {
-      sender.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
-      sender.alpha = 0.7
-    }
-  }
-
-  @objc private func buttonTouchUp(_ sender: UIButton) {
-    UIView.animate(withDuration: 0.1) {
-      sender.transform = .identity
-      sender.alpha = 1.0
-    }
-  }
-
-  @objc private func reactionButtonTapped(_ sender: UIButton) {
-    guard let emoji = sender.title(for: .normal) else { return }
-
-    Task {
-      do {
-        try await DataManager.shared.addReaction(
-          messageId: fullMessage.message.messageId,
-          chatId: fullMessage.message.chatId,
-          emoji: emoji
-        )
-      } catch {
-        print("Error adding reaction: \(error)")
-      }
-    }
-  }
 }
 
 // MARK: - Context Menu
 
-extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDelegate {
+extension UIMessageView: UIContextMenuInteractionDelegate {
   func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction,
     configurationForMenuAtLocation location: CGPoint
   ) -> UIContextMenuConfiguration? {
-    contextMenuManager?.notifyOnContextMenuInteraction(
-      interaction,
-      configurationForMenuAtLocation: location
-    )
-
     return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
       guard let self else { return nil }
 
@@ -412,100 +183,5 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
 
       return UIMenu(children: [copyAction])
     }
-  }
-
-  func contextMenuInteraction(
-    _ interaction: UIContextMenuInteraction,
-    willDisplayMenuFor configuration: UIContextMenuConfiguration,
-    animator: UIContextMenuInteractionAnimating?
-  ) {
-    contextMenuManager?.notifyOnContextMenuInteraction(
-      interaction,
-      willDisplayMenuFor: configuration,
-      animator: animator
-    )
-  }
-
-  func contextMenuInteraction(
-    _ interaction: UIContextMenuInteraction,
-    willEndFor configuration: UIContextMenuConfiguration,
-    animator: UIContextMenuInteractionAnimating?
-  ) {
-    contextMenuManager?.notifyOnContextMenuInteraction(
-      interaction,
-      willEndFor: configuration,
-      animator: animator
-    )
-  }
-
-  func onRequestMenuAuxiliaryPreview(sender: ContextMenuManager) -> UIView? {
-    let previewView = UIView()
-    previewView.backgroundColor = .clear
-    previewView.layer.cornerRadius = 25
-
-    let blurEffect = UIBlurEffect(style: .systemMaterial)
-    let blurView = UIVisualEffectView(effect: blurEffect)
-    blurView.layer.cornerRadius = 25
-    blurView.clipsToBounds = true
-    blurView.translatesAutoresizingMaskIntoConstraints = false
-    previewView.addSubview(blurView)
-
-    let contentView = blurView.contentView
-
-    let reactions = ["👍", "👎", "❤️", "🥸", "🔥", "🥹", "👋", "🤩"]
-    let stackView = UIStackView()
-    stackView.axis = .horizontal
-    stackView.distribution = .fillEqually
-    stackView.spacing = 12
-    stackView.translatesAutoresizingMaskIntoConstraints = false
-
-    for reaction in reactions {
-      let container = UIView()
-      container.translatesAutoresizingMaskIntoConstraints = false
-
-      let button = UIButton()
-      button.setTitle(reaction, for: .normal)
-      button.titleLabel?.font = .systemFont(ofSize: 24)
-      button.addTarget(self, action: #selector(reactionButtonTapped(_:)), for: .touchUpInside)
-      button.addTarget(self, action: #selector(buttonTouchDown(_:)), for: .touchDown)
-      button.addTarget(
-        self, action: #selector(buttonTouchUp(_:)),
-        for: [.touchUpInside, .touchUpOutside, .touchCancel]
-      )
-      button.translatesAutoresizingMaskIntoConstraints = false
-      container.addSubview(button)
-
-      NSLayoutConstraint.activate([
-        button.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-        button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-        button.widthAnchor.constraint(equalToConstant: 40),
-        button.heightAnchor.constraint(equalToConstant: 40),
-      ])
-
-      stackView.addArrangedSubview(container)
-    }
-
-    contentView.addSubview(stackView)
-
-    NSLayoutConstraint.activate([
-      blurView.topAnchor.constraint(equalTo: previewView.topAnchor),
-      blurView.leadingAnchor.constraint(equalTo: previewView.leadingAnchor),
-      blurView.trailingAnchor.constraint(equalTo: previewView.trailingAnchor),
-      blurView.bottomAnchor.constraint(equalTo: previewView.bottomAnchor),
-
-      stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
-      stackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
-      stackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
-      stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
-
-      previewView.heightAnchor.constraint(equalToConstant: 46),
-    ])
-
-    previewView.layer.shadowColor = UIColor.black.cgColor
-    previewView.layer.shadowOffset = CGSize(width: 0, height: 2)
-    previewView.layer.shadowRadius = 4
-    previewView.layer.shadowOpacity = 0.1
-
-    return previewView
   }
 }
