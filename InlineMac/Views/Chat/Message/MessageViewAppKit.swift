@@ -258,7 +258,7 @@ class MessageViewAppKit: NSView {
     let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
     let sidePadding = Theme.messageSidePadding - bgPadding
-    let senderNameLeadingPadding = hasBubble ? 4.0 : 0.0
+    let senderNameLeadingPadding = hasBubble ? 6.0 : 0.0
 
     if props.firstInGroup {
       topPadding += Theme.messageGroupSpacing
@@ -277,7 +277,9 @@ class MessageViewAppKit: NSView {
       NSLayoutConstraint.activate([
         nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + senderNameLeadingPadding),
         nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
-        nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sidePadding)
+        nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sidePadding),
+        nameLabel.heightAnchor
+          .constraint(equalToConstant: Theme.messageNameLabelHeight),
       ])
     }
 

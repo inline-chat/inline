@@ -34,7 +34,7 @@ enum Theme {
 //  Space between avatar and content
   static let messageHorizontalStackSpacing: CGFloat = 8
   static let messageVerticalStackSpacing: CGFloat = 2.0
-  static let messageNameLabelHeight: CGFloat = 16
+  static let messageNameLabelHeight: CGFloat = 14
   static let messageTextFont: NSFont = .systemFont(ofSize: NSFont.systemFontSize)
   static let messageTextLineFragmentPadding: CGFloat = 0
   static let messageTextContainerInset: NSSize = .zero
