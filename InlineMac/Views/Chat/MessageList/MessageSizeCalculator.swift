@@ -45,7 +45,10 @@ class MessageSizeCalculator {
       )
     }
     
-    let availableWidth = ceil(width) - Theme.messageAvatarSize - Theme.messageHorizontalStackSpacing - Theme.messageSidePadding * 2 - Self.safeAreaWidth -
+    let bubblepaddings: CGFloat = Theme.messageBubblePadding.width * 2
+    let ceiledWidth = ceil(width)
+    let paddings = Theme.messageHorizontalStackSpacing + Theme.messageSidePadding * 2 + bubblepaddings
+    let availableWidth: CGFloat = ceiledWidth - paddings - Theme.messageAvatarSize - Self.safeAreaWidth -
       // if we don't subtract this here, it can result is wrong calculations
       Self.extraSafeWidth
     
@@ -56,7 +59,7 @@ class MessageSizeCalculator {
     
     var textSize: CGSize?
     
-    if let minSize = minWidthForSingleLine.object(forKey: text as NSString) as? CGSize, minSize.width < width {
+    if let minSize = minWidthForSingleLine.object(forKey: text as NSString) as? CGSize, minSize.width < availableWidth {
       log.trace("single line minWidth \(minSize.width) is less than viewport \(width)")
       textSize = CGSize(width: minSize.width, height: heightForSingleLineText())
     }

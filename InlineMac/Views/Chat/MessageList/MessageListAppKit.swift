@@ -219,6 +219,10 @@ class MessageListAppKit: NSViewController {
   
   @objc private func scrollWheelEnded() {
     isUserScrolling = false
+    
+    // Safety check to ensure all visible messages are correctly sizes
+    // Can remove once we figure out how to do this as user scrolls
+    recalculateHeightsOnWidthChange()
   }
 
   private var isProgrammaticScroll = false
@@ -257,7 +261,7 @@ class MessageListAppKit: NSViewController {
     
     if feature_updatesHeightsOnOffsetChange && isUserScrolling &&
       currentScrollOffset
-      .truncatingRemainder(dividingBy: 20.0) == 0
+      .truncatingRemainder(dividingBy: 5.0) == 0 // Picking a too high number for this will make it not fire enough... we need a better way
     {
       recalculateHeightsOnWidthChange()
     }
@@ -483,11 +487,12 @@ class MessageListAppKit: NSViewController {
   func checkWidthChangeForHeights() {
     guard feature_updatesHeightsOnWidthChange else { return }
     
+    log.trace("Checking width change, diff = \(abs(tableView.bounds.width - lastKnownWidth))")
     let newWidth = tableView.bounds.width
     
     // Using this prevents an issue where cells height was stuck in a cut off way when using
     // MessageSizeCalculator.safeAreaWidth as the diff
-    let magicWidthDiff = 30.0
+    let magicWidthDiff = 15.0
     
     if abs(newWidth - lastKnownWidth) > magicWidthDiff {
       lastKnownWidth = newWidth
