@@ -16,6 +16,7 @@ class MessageListAppKit: NSViewController {
   private var feature_updatesHeightsOnWidthChange = true
   private var feature_updatesHeightsOnOffsetChange = true
   private var feature_restoresScrollOnHeightCalc = true
+  private var feature_recalculatesHeightsWhileInitialScroll = true
   
   init() {
     super.init(nibName: nil, bundle: nil)
@@ -467,10 +468,17 @@ class MessageListAppKit: NSViewController {
 
     // Initial scroll to bottom
     if needsInitialScroll {
+      if feature_recalculatesHeightsWhileInitialScroll {
+        // Note(@mo): I still don't know why this fixes it but as soon as I compare the widths for the change,
+        // it no longer works. this needs to be called unconditionally.
+        // this is needed to ensure the scroll is done after the initial layout and prevents cutting off last msg
+        recalculateHeightsOnWidthChange()
+      }
+      
       scrollToBottom(animated: false)
+
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
         // Finalize heights one last time to ensure no broken heights on initial load
-        self.recalculateHeightsOnWidthChange()
         self.needsInitialScroll = false
       }
     }
