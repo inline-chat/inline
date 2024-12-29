@@ -36,23 +36,30 @@ enum Theme {
   static let messageVerticalStackSpacing: CGFloat = 2.0
   static let messageNameLabelHeight: CGFloat = 16
   static let messageTextFont: NSFont = .systemFont(ofSize: NSFont.systemFontSize)
-  static let messageSenderFont: NSFont = .systemFont(
-    ofSize: NSFont.systemFontSize,
-    weight: .semibold
-  )
   static let messageTextLineFragmentPadding: CGFloat = 0
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
-  static let messageBubblePadding: CGSize = .init(width: 8.0, height: 4.0)
+  static let messageBubbleRadius: CGFloat =  15.0
+  static let messageBubblePadding: CGSize = .init(width: 11.0, height: 7.0)
   static let messageIsBubble: Bool = true
-  static let messageBubbleLightColor: NSColor = NSColor(calibratedRed: 0.9, green: 0.9, blue: 0.9, alpha: 1.0)
-  static let messageBubbleDarkColor: NSColor = NSColor(calibratedRed: 0.1, green: 0.1, blue: 0.1, alpha: 1.0)
-  static let messageBubbleColor: NSColor = NSColor(name: "messageBubbleColor") { appearance in
+  static let messageBubbleLightColor: NSColor = .init(calibratedRed: 0.92, green: 0.92, blue: 0.92, alpha: 1.0)
+  static let messageBubbleDarkColor: NSColor = .init(calibratedRed: 0.08, green: 0.08, blue: 0.08, alpha: 1.0)
+  static let messageBubbleColor: NSColor = .init(name: "messageBubbleColor") { appearance in
     appearance.name == .darkAqua ? Self.messageBubbleDarkColor : Self.messageBubbleLightColor
   }
-  static let messageBubbleOutgoingColor: NSColor = .systemBlue.highlight(
-    withLevel: 0.1
+
+  static let messageBubbleOutgoingLightColor: NSColor = .systemBlue.blended(
+    withFraction: 0.1,
+    of: .white
   ) ?? .systemBlue
+  static let messageBubbleOutgoingDarkColor: NSColor = .systemBlue
+  static let messageBubbleOutgoingColor: NSColor = .init(name: "messageBubbleOutgoingColor") { appearance in
+    appearance.name == .darkAqua ? Self.messageBubbleOutgoingDarkColor : Self.messageBubbleOutgoingLightColor
+  }
+
+//  static let messageBubbleOutgoingColor: NSColor = .systemBlue.highlight(
+//    withLevel: 0.3
+//  ) ?? .systemBlue
 
   static let messageBubbleMinWidth: CGFloat = 12.0
 
@@ -61,11 +68,11 @@ enum Theme {
   static let messageGroupSpacing: CGFloat = 8
   static let messageListTopInset: CGFloat = 14
   static let messageListBottomInset: CGFloat = 10
-  
+
   static let composeMinHeight: CGFloat = 44
   static let composeVerticalPadding: CGFloat = 8
-  
-  
+
   // MARK: - Devtools
+
   static let devtoolsHeight: CGFloat = 30
 }

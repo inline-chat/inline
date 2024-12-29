@@ -48,11 +48,25 @@ class MessageViewAppKit: NSView {
     outgoing ? NSColor.white : NSColor.linkColor
   }
 
+  private var senderFont: NSFont {
+    if hasBubble {
+      .systemFont(
+        ofSize: NSFont.smallSystemFontSize,
+        weight: .medium
+      )
+    } else {
+      .systemFont(
+        ofSize: NSFont.systemFontSize,
+        weight: .semibold
+      )
+    }
+  }
+
   private lazy var bubbleView: BasicView = {
     let view = BasicView()
     view.wantsLayer = true
     view.backgroundColor = bubbleColor
-    view.layer?.cornerRadius = 12.0
+    view.layer?.cornerRadius = Theme.messageBubbleRadius
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -66,7 +80,7 @@ class MessageViewAppKit: NSView {
   private lazy var nameLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = Theme.messageSenderFont
+    label.font = senderFont
     label.lineBreakMode = .byTruncatingTail
 
     return label
@@ -113,7 +127,10 @@ class MessageViewAppKit: NSView {
     return textView
   }()
 
-//
+  func reflectBoundsChange(fraction: CGFloat) {
+    // TODO: update color reflecting the scroll
+  }
+
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
 
@@ -207,11 +224,16 @@ class MessageViewAppKit: NSView {
       addSubview(nameLabel)
       let name = from.firstName ?? from.username ?? ""
       nameLabel.stringValue = outgoing ? "You" : name
-      nameLabel.textColor = NSColor(
-        InitialsCircle.ColorPalette
-          .color(for: name)
-          .adjustLuminosity(by: -0.08) // TODO: Optimize
-      )
+      
+      if hasBubble {
+        nameLabel.textColor = NSColor.lightGray
+      } else {
+        nameLabel.textColor = NSColor(
+          InitialsCircle.ColorPalette
+            .color(for: name)
+            .adjustLuminosity(by: -0.08) // TODO: Optimize
+        )
+      }
     }
 
     addSubview(textView)
@@ -236,6 +258,7 @@ class MessageViewAppKit: NSView {
     let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
     let sidePadding = Theme.messageSidePadding - bgPadding
+    let senderNameLeadingPadding = hasBubble ? 4.0 : 0.0
 
     if props.firstInGroup {
       topPadding += Theme.messageGroupSpacing
@@ -252,7 +275,7 @@ class MessageViewAppKit: NSView {
 
     if showsName {
       NSLayoutConstraint.activate([
-        nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading),
+        nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + senderNameLeadingPadding),
         nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
         nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sidePadding)
       ])
@@ -311,7 +334,7 @@ class MessageViewAppKit: NSView {
 //        textLayoutManager
 //          .ensureLayout(for: textLayoutManager.documentRange)
 //      }
-   
+
       return
     }
 
@@ -347,7 +370,7 @@ class MessageViewAppKit: NSView {
 //      textLayoutManager
 //        .ensureLayout(for: textLayoutManager.documentRange)
 //    }
-   
+
     CacheAttrs.shared.set(key: key, value: attributedString)
   }
 
