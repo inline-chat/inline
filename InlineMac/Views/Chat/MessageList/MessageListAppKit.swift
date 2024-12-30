@@ -589,12 +589,13 @@ class MessageListAppKit: NSViewController {
 
     // TODO: instead of this, mark next update scroll is animated
     if feature_scrollsToBottomOnNewMessage {
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+      // Disabling this made quick sending faster but not sure what it breaks
+//      DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
         // Handle scroll position
         if (!removals.isEmpty || !insertions.isEmpty) && wasAtBottom {
           self.scrollToBottom(animated: true)
         }
-      }
+//      }
     }
     
     isPerformingUpdate = false
