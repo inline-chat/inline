@@ -14,11 +14,12 @@ public class MessagesProgressiveViewModel {
   // state
   public var messages: [FullMessage] = []
 
-  public var minGlobalId: Int64 = 0
-  public var maxGlobalId: Int64 = 0
+  // note: using date is most reliable as our sorting is based on date
+  public var minDate: Date = .init()
+  public var maxDate: Date = .init()
 
   // internals
-  private let initialLimit = 20
+  private let initialLimit = 50
   private let log = Log.scoped("MessagesViewModel", enableTracing: true)
   private let db = AppDatabase.shared
   private var cancellable = Set<AnyCancellable>()
@@ -31,9 +32,6 @@ public class MessagesProgressiveViewModel {
 
     // get initial batch
     loadMessages(limit: initialLimit)
-
-    // initial range
-    updateRange()
 
     // subscribe to changes
     MessagesPublisher.shared.publisher
@@ -57,6 +55,7 @@ public class MessagesProgressiveViewModel {
   }
 
   public enum MessagesChangeSet {
+    // TODO: case prepend...
     case added([FullMessage], indexSet: [Int])
     case updated([FullMessage], indexSet: [Int])
     case deleted([Int64], indexSet: [Int])
@@ -64,9 +63,17 @@ public class MessagesProgressiveViewModel {
   }
 
   private func applyChanges(update: MessagesPublisher.UpdateType) -> MessagesChangeSet? {
+    log.trace("Applying changes: \(update)")
     switch update {
     case .add(let messageAdd):
       if messageAdd.peer == peer {
+        // Check if we have it to not add it again
+        let existingIds = Set(messages.map { $0.id })
+        if messageAdd.messages.contains(where: { existingIds.contains($0.id) }) {
+          log.warning("Message already exists in the list, but message added was triggered.")
+          return nil
+        }
+
         // TODO: detect if we should add to the bottom or top
         messages.append(contentsOf: messageAdd.messages)
         // sort again
@@ -112,6 +119,7 @@ public class MessagesProgressiveViewModel {
       if peer == self.peer {
         // 90/10 solution TODO: quick way to optimize is to check if updated messages are in the current range
         refetchCurrentRange()
+        // check if actually anything changed then post update
 
         return MessagesChangeSet.reload
       }
@@ -124,24 +132,25 @@ public class MessagesProgressiveViewModel {
     messages = messages.sorted(by: { $0.message.date < $1.message.date })
   }
 
+  // TODO: make it O(1) instead of O(n)
   private func updateRange() {
-    var lowestId = messages.first?.message.globalId ?? 0
-    var highestId = messages.last?.message.globalId ?? 0
+    var lowestDate = Date.distantFuture
+    var highestDate = Date.distantPast
 
     for message in messages {
-      guard let globalId = message.message.globalId else { continue }
-
-      if globalId < lowestId {
-        lowestId = globalId
-      } else if globalId > highestId {
-        highestId = globalId
+      let date = message.message.date
+      if date < lowestDate {
+        lowestDate = date
+      }
+      if date > highestDate {
+        highestDate = date
       }
     }
 
-    minGlobalId = lowestId
-    maxGlobalId = highestId
+    minDate = lowestDate
+    maxDate = highestDate
 
-    log.trace("Updated range: \(minGlobalId) - \(maxGlobalId)")
+    log.trace("Updated range: \(lowestDate) - \(highestDate), (count: \(messages.count))")
   }
 
   private func refetchCurrentRange() {
@@ -150,6 +159,7 @@ public class MessagesProgressiveViewModel {
 
   private func loadMessages(limit: Int? = nil, preserveRange: Bool? = nil) {
     let peer = self.peer
+    let prevCount = messages.count
 
     log
       .debug(
@@ -163,17 +173,18 @@ public class MessagesProgressiveViewModel {
           .including(optional: Message.from)
           .including(all: Message.reactions)
           .asRequest(of: FullMessage.self)
-          .order(Column("date").desc)
 
-        query = switch peer {
+        switch peer {
         case .thread(let id):
-          query
+          query = query
             .filter(Column("peerThreadId") == id)
 
         case .user(let id):
-          query
+          query = query
             .filter(Column("peerUserId") == id)
         }
+
+        query = query.order(Column("date").desc)
 
         // limit
         if let limit = limit {
@@ -182,13 +193,20 @@ public class MessagesProgressiveViewModel {
 
         // range query
         if preserveRange == true {
-          query = query.filter(Column("globalId") >= minGlobalId && Column("globalId") <= maxGlobalId)
+          query = query.filter(Column("date") >= minDate).filter(Column("date") <= maxDate).limit(prevCount)
         }
 
         return try query.fetchAll(db)
       }
 
+      log.trace("loaded messages: \(messagesBatch.count)")
+
       messages = messagesBatch.reversed()
+
+      // Uncomment if we want to sort in SQL based on anything other than date
+      // sort()
+
+      updateRange()
     } catch {
       Log.shared.error("Failed to get messages \(error)")
     }
