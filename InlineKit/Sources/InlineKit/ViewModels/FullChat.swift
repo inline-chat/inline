@@ -53,13 +53,16 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   // Descending order (newest first) if true
   private var reversed: Bool
 
-  public init(db: AppDatabase, peer: Peer, reversed: Bool = true, limit: Int? = nil) {
+  public init(db: AppDatabase, peer: Peer, reversed: Bool = true, limit: Int? = nil, fetchesMessages: Bool = true) {
     self.db = db
     self.peer = peer
     self.reversed = reversed
     self.limit = limit
     fetchChat()
-    fetchMessages()
+    
+    if fetchesMessages {
+      fetchMessages()
+    }
   }
 
   func fetchChat() {
