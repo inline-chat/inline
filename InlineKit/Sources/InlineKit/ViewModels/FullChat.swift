@@ -150,10 +150,22 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             Log.shared.error("Failed to get messages \(error)")
           },
           receiveValue: { [weak self] messages in
-            if self?.reversed == true {
-              self?.fullMessages = messages.reversed()
+            //  Merged result
+            self?.fullMessages = messages
+
+            // When limit is applied it's in reverse
+            if self?.limit != nil {
+              if self?.reversed == true {
+                self?.fullMessages = messages
+              } else {
+                self?.fullMessages = messages.reversed()
+              }
             } else {
-              self?.fullMessages = messages
+              if self?.reversed == true {
+                self?.fullMessages = messages.reversed()
+              } else {
+                self?.fullMessages = messages
+              }
             }
           }
         )
@@ -190,8 +202,12 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         out: true
       )
 
-      try db.dbWriter.write { db in
-        try message.save(db)
+      // When I remove this task, or make it a sync call, I get frame drops in very fast sending
+      Task { @MainActor in
+        let newMessage = try await db.dbWriter.write { db in
+          try message.saveAndFetch(db)
+        }
+        MessagesPublisher.shared.messageAdded(message: newMessage, peer: peer)
       }
 
       // TODO: Scroll to bottom

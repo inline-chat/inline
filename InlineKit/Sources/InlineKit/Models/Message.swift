@@ -34,7 +34,18 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   }
 
   public var id: Int64 {
+    // this is wrong
     self.messageId
+  }
+
+  public var peerId: Peer {
+    if let peerUserId = self.peerUserId {
+      return .user(id: peerUserId)
+    } else if let peerThreadId = self.peerThreadId {
+      return .thread(id: peerThreadId)
+    } else {
+      fatalError("One of peerUserId or peerThreadId must be set")
+    }
   }
 
   // Only set for outgoing messages
@@ -166,6 +177,8 @@ public extension Message {
   mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort)
     throws
   {
+    var isExisting = false
+
     if self.globalId == nil {
       // Alternative:
       //          if let existing = try Message
@@ -182,9 +195,21 @@ public extension Message {
           .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
       {
         self.globalId = existing.globalId
+
+        isExisting = true
       }
     }
 
     try self.save(db, onConflict: .replace)
+
+    // Publish changes when save is successful
+    let message = self
+    DispatchQueue.main.async {
+      if isExisting {
+        MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+      } else {
+        MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+      }
+    }
   }
 }

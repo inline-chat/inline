@@ -3,27 +3,42 @@ import InlineKit
 import SwiftUI
 
 class MessageListAppKit: NSViewController {
+  // Data
+  private var peerId: Peer
+  private var viewModel: MessagesProgressiveViewModel
+//  private var messages: [FullMessage] = []
+  var messages: [FullMessage] { viewModel.messages }
+  
   private let log = Log.scoped("MessageListAppKit", enableTracing: true)
-  private var messages: [FullMessage] = []
-  private let sizeCalculator = MessageSizeCalculator()
+  private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 24.0
   
   // Specification - mostly useful in debug
-  private var feature_maintainsScrollFromBottomOnResize = true
+  private var feature_maintainsScrollFromBottomOnResize = true // .
   private var feature_scrollsToBottomOnNewMessage = true
   private var feature_scrollsToBottomInDidLayout = true
   private var feature_setupsInsetsManually = true
   private var feature_updatesHeightsOnWidthChange = true
   private var feature_updatesHeightsOnOffsetChange = true
-  private var feature_restoresScrollOnHeightCalc = true
-  private var feature_recalculatesHeightsWhileInitialScroll = true
+  private var feature_recalculatesHeightsWhileInitialScroll = false
   
-  init() {
+  // Debugging
+  private var debug_slowAnimation = false
+  
+  init(peerId: Peer) {
+    self.peerId = peerId
+    self.viewModel = MessagesProgressiveViewModel(peer: peerId)
+    
     super.init(nibName: nil, bundle: nil)
+
+    viewModel.observe { [weak self] update in
+      self?.applyUpdate(update)
+    }
   }
   
+  @available(*, unavailable)
   required init?(coder: NSCoder) {
-    super.init(coder: coder)
+    fatalError("init(coder:) has not been implemented")
   }
     
   private lazy var tableView: NSTableView = {
@@ -49,8 +64,8 @@ class MessageListAppKit: NSViewController {
     table.addTableColumn(column)
     
     // Enable automatic resizing
-//    table.autoresizingMask = [.height]
-    table.autoresizingMask = []
+    table.autoresizingMask = [.height]
+//    table.autoresizingMask = []
     table.delegate = self
     table.dataSource = self
   
@@ -162,7 +177,7 @@ class MessageListAppKit: NSViewController {
     if animated {
       // Causes clipping at the top
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.2
+        context.duration = debug_slowAnimation ? 1.5 : 0.2
         context.allowsImplicitAnimation = true
         
         tableView.scrollToBottomWithInset()
@@ -226,13 +241,22 @@ class MessageListAppKit: NSViewController {
     recalculateHeightsOnWidthChange()
   }
 
+  // True while we're changing scroll position programmatically
   private var isProgrammaticScroll = false
+  
+  // True when user is scrolling via trackpad or mouse wheel
   private var isUserScrolling = false
+  
+  // True when user is at the bottom of the scroll view within a ~0-10px threshold
   private var isAtBottom = true
+  
+  // When exactly at the bottom
   private var isAtAbsoluteBottom = true
-  private var prevContentSize: CGSize = .zero
+  
+  // This must be true for the whole duration of animation
   private var isPerformingUpdate = false
   
+  private var prevContentSize: CGSize = .zero
   private var prevOffset: CGFloat = 0
   
   @objc func scrollViewBoundsChanged(notification: Notification) {
@@ -260,7 +284,7 @@ class MessageListAppKit: NSViewController {
     isAtBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 5.0
     isAtAbsoluteBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 0.1
     
-    if feature_updatesHeightsOnOffsetChange && isUserScrolling &&
+    if feature_updatesHeightsOnOffsetChange && isUserScrolling && !isPerformingUpdate &&
       currentScrollOffset
       .truncatingRemainder(dividingBy: 5.0) == 0 // Picking a too high number for this will make it not fire enough... we need a better way
     {
@@ -277,147 +301,6 @@ class MessageListAppKit: NSViewController {
     log.trace("\(name) took \(String(format: "%.2f", timeElapsed))ms")
   }
   
-//  private func _updateAvatars() {
-//    log.trace("update avatars")
-//    let stickyPadding: CGFloat = 8.0
-//    let scrollTopInset = scrollView.contentInsets.top
-//    let viewportHeight = scrollView.contentView.bounds.height
-//    let currentOffset = scrollView.contentView.bounds.origin.y
-//    let visibleRect = tableView.visibleRect
-//    let visibleRectMinusTopInset = visibleRect.offsetBy(dx: 0, dy: scrollTopInset)
-//    log.trace("Visible rect: \(visibleRect)")
-//    log.trace("Visible rect minus top inset: \(visibleRectMinusTopInset)")
-//    let visibleRange = tableView.rows(in: visibleRectMinusTopInset)
-//    guard visibleRange.location != NSNotFound else { return }
-//    guard visibleRange.length > 0 else { return }
-//
-//    var processedRows = Set<Int>()
-//
-//    // utils
-//    func avatarPadding(at row: Int) -> CGFloat {
-//      let padding = row == 0 ?
-//        Theme.messageListTopInset + Theme.messageVerticalPadding :
-//        Theme.messageVerticalPadding
-//
-//      return padding + Theme.messageGroupSpacing
-//    }
-//
-//    let availableViewportHeight = scrollView.contentView.bounds.height - scrollTopInset
-//
-//    func avatarNaturalPosition(at row: Int) -> CGFloat {
-//      return viewportHeight - (tableView.rect(ofRow: row).minY - currentOffset) - AvatarOverlayView.size - avatarPadding(at: row)
-//    }
-//
-//    // Find sticky avatars
-//    var stickyRow: Int? = nil
-//    var upcomingSticky: Int? = nil
-//
-//    // sticky out of bound
-//    for row in (0...Int(visibleRange.location)).reversed() {
-//      if isFirstInGroup(at: row) {
-//        stickyRow = row
-//        break
-//      }
-//    }
-//
-//    // top most avatar below sticky
-//    for row in Int(visibleRange.location) ..< Int(visibleRange.location + visibleRange.length) {
-//      // skip current sticky
-//      if isFirstInGroup(at: row) && row != stickyRow {
-//        upcomingSticky = row
-//        break
-//      }
-//    }
-//
-//    // Get visible avatar rows
-//    let visibleAvatarRows = (Int(visibleRange.location)...Int(visibleRange.location + visibleRange.length))
-//      .filter { row in
-//        row < messages.count && isFirstInGroup(at: row)
-//      }
-//
-//    // Handle sticky avatar
-//    if let primaryStickyRow = stickyRow {
-//      let message = messages[primaryStickyRow]
-//
-//      // Calculate the natural position where avatar would be without any constraints
-//      let naturalPosition = avatarNaturalPosition(at: primaryStickyRow)
-//
-//      // Min it with the viewport height - avatar size - padding so it doesn't go out of bounds of screen
-//      let stickyPosition = min(
-//        naturalPosition,
-//        availableViewportHeight - AvatarOverlayView.size - stickyPadding
-//      )
-//
-//      // Find the first visible avatar below the sticky one, we need it so it pushes the sticky avatar up as it's about to overlap
-//      if let nextVisibleRow = upcomingSticky,
-//         // when fully overlap, ignore
-//         nextVisibleRow != primaryStickyRow
-//      {
-//        let nextAvatarPosition = avatarNaturalPosition(at: nextVisibleRow)
-//        // so it doesn't go above sticky padding immediately before becoming sticky and causing jump
-//        let nextAvatarPositionWithPadding = min(
-//          nextAvatarPosition,
-//          availableViewportHeight - AvatarOverlayView.size - stickyPadding
-//        )
-//
-//        // Calculate the maximum allowed position (just above the next avatar)
-//        let maxAllowedPosition = nextAvatarPosition + AvatarOverlayView.size + stickyPadding
-//
-//        // Use the higher position (more towards top of screen) between natural and pushed
-//        let stickyPositionWhenPushed = max(stickyPosition, maxAllowedPosition)
-//
-//        log.trace("Sticky position: \(stickyPosition), pushed: \(stickyPositionWhenPushed), next: \(nextAvatarPosition), nextWithPadding: \(nextAvatarPositionWithPadding) max: \(maxAllowedPosition)")
-//
-//        avatarOverlay.updateAvatar(
-//          for: primaryStickyRow,
-//          user: message.user ?? User.deletedInstance,
-//          yOffset: stickyPositionWhenPushed
-//        )
-//
-//        avatarOverlay.updateAvatar(
-//          for: nextVisibleRow,
-//          user: messages[nextVisibleRow].user ?? User.deletedInstance,
-//          yOffset: nextAvatarPositionWithPadding
-//        )
-//
-//        processedRows.insert(nextVisibleRow)
-//        processedRows.insert(primaryStickyRow)
-//      } else {
-//        // No avatar below to push against, use natural position
-//        avatarOverlay.updateAvatar(
-//          for: primaryStickyRow,
-//          user: message.user ?? User.deletedInstance,
-//          yOffset: stickyPosition
-//        )
-//
-//        processedRows.insert(primaryStickyRow)
-//      }
-//    }
-//
-//    // Update remaining visible avatars
-//    for row in visibleAvatarRows {
-//      if processedRows.contains(row) { continue }
-//
-//      let message = messages[row]
-//      let yPosition = avatarNaturalPosition(at: row)
-//
-//      avatarOverlay.updateAvatar(
-//        for: row,
-//        user: message.user ?? User.deletedInstance,
-//        yOffset: yPosition
-//      )
-//      processedRows.insert(row)
-//    }
-//
-//    // Adding this dispatch makes double avatars show up sometimes
-  ////    DispatchQueue.main.async {
-//    // Clean up non-visible avatars
-//    let currentAvatars = Set(avatarOverlay.avatarViews.keys)
-//    let avatarsToRemove = currentAvatars.subtracting(processedRows)
-//    avatarsToRemove.forEach { self.avatarOverlay.removeAvatar(for: $0) }
-  ////    }
-//  }
-
   var oldScrollViewHeight: CGFloat = 0.0
   var oldDistanceFromBottom: CGFloat = 0.0
   
@@ -436,6 +319,8 @@ class MessageListAppKit: NSViewController {
       // Do not maintain scroll when performing update, TODO: Fix later
       return
     }
+    
+    log.trace("scroll view frame changed, maintaining scroll from bottom")
   
     let scrollOffset = scrollView.contentView.bounds.origin
     let viewportSize = scrollView.contentView.bounds.size
@@ -485,7 +370,7 @@ class MessageListAppKit: NSViewController {
     
     if feature_scrollsToBottomInDidLayout {
       // Note(@mo): This is a hack to fix scroll jumping when user is resizing the window at bottom.
-      if isAtAbsoluteBottom {
+      if isAtAbsoluteBottom && !isPerformingUpdate {
         scrollToBottom(animated: false)
       }
     }
@@ -508,109 +393,192 @@ class MessageListAppKit: NSViewController {
     }
   }
   
-  func update(with newMessages: [FullMessage]) {
-    guard !newMessages.isEmpty else { return }
-    
-    if messages.isEmpty {
-      // Initial update
-      messages = newMessages
-      tableView.reloadData()
-      return
-    }
-
-    performUpdate(with: newMessages, isInitialUpdate: messages.isEmpty || needsInitialScroll)
+  func applyInitialData() {
+    tableView.reloadData()
   }
-  
-  private func performUpdate(with newMessages: [FullMessage], isInitialUpdate: Bool = false) {
-    isPerformingUpdate = true
-    let oldMessages = messages
+
+  func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
+    log.trace("apply update called")
     
-    // Explicitly calculate insertions and removals
-    let oldIds = Set(oldMessages.map { $0.id })
-    let newIds = Set(newMessages.map { $0.id })
-    
-    let insertedIds = newIds.subtracting(oldIds)
-    let removedIds = oldIds.subtracting(newIds)
-    
-    let insertions = newMessages.enumerated()
-      .filter { insertedIds.contains($0.element.id) }
-      .map { $0.offset }
-    
-    let removals = oldMessages.enumerated()
-      .filter { removedIds.contains($0.element.id) }
-      .map { $0.offset }
-  
     let wasAtBottom = isAtBottom
+    let animationDuration = debug_slowAnimation ? 1.5 : 0.15
+    let shouldScroll = wasAtBottom && feature_scrollsToBottomOnNewMessage
     
-    // Update data source first
-    messages = newMessages
+    switch update {
+    case .added(_, let indexSet):
+      log.trace("applying add changes")
+      
+      // Note: we don't need to begin/end updates here as it's a single operation
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = animationDuration
+        self.tableView.insertRows(at: IndexSet(indexSet), withAnimation: .effectFade)
+        if shouldScroll { self.scrollToBottom(animated: true) }
+      }
 
-    NSAnimationContext.runAnimationGroup { _ in
-      
-      if removals.isEmpty && insertions.isEmpty {
-        // Find messages that have been updated by comparing old and new messages at same indexes
-        let updatedIndexes: [Int] = messages.enumerated().compactMap { index, newMessage -> Int? in
-          // Check if index is valid in old messages array
-          guard index < oldMessages.count else { return nil }
-          
-          // Compare with message at same index
-          let oldMessage = oldMessages[index]
-          if oldMessage.message != newMessage.message {
-            return index
-          }
-          return nil
-        }
-        
-        // Reload only the rows that actually changed
-        if !updatedIndexes.isEmpty {
-          let indexSet = IndexSet(updatedIndexes)
-          tableView.reloadData(
-            forRowIndexes: indexSet,
-            columnIndexes: IndexSet([0])
-          )
-        }
+    case .deleted(_, let indexSet):
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = animationDuration
+        self.tableView.removeRows(at: IndexSet(indexSet), withAnimation: .effectFade)
+        if shouldScroll { self.scrollToBottom(animated: true) }
       }
-      
-      tableView.beginUpdates()
-      
-      if !removals.isEmpty {
-        tableView.removeRows(at: IndexSet(removals), withAnimation: .effectFade)
-      }
-      
-      if !insertions.isEmpty {
-        tableView
-          .insertRows(
-            at: IndexSet(insertions),
-            withAnimation: .effectFade
-          )
-      }
-      tableView.endUpdates()
-    }
 
-    // TODO: instead of this, mark next update scroll is animated
-    if feature_scrollsToBottomOnNewMessage {
-      // Disabling this made quick sending faster but not sure what it breaks
-//      DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-        // Handle scroll position
-        if (!removals.isEmpty || !insertions.isEmpty) && wasAtBottom {
-          self.scrollToBottom(animated: true)
-        }
-//      }
+    case .updated(_, let indexSet):
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = animationDuration
+        self.tableView
+          .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
+        if shouldScroll { self.scrollToBottom(animated: true) } // ??
+      }
+      
+    case .reload:
+      log.trace("reloading data")
+      tableView.reloadData()
     }
-    
-    isPerformingUpdate = false
   }
+  
+//  private var updateWorkItem: DispatchWorkItem?
+//
+//  func update(with newMessages: [FullMessage]) {
+//    guard !newMessages.isEmpty else { return }
+//
+//    if messages.isEmpty {
+//      // Initial update
+//      messages = newMessages
+//      tableView.reloadData()
+//      return
+//    }
+//
+//    // Throttle updates using DispatchWorkItem
+//    updateWorkItem?.cancel()
+//
+//    let workItem = DispatchWorkItem { [weak self] in
+//      guard let self else { return }
+//
+//      // throttle by 8ms to prevent too many updates in quick succession
+//      performUpdate(with: newMessages, isInitialUpdate: messages.isEmpty || needsInitialScroll)
+//    }
+//
+//    updateWorkItem = workItem
+//    DispatchQueue.main.asyncAfter(deadline: .now() + 0.02, execute: workItem)
+//  }
+//
+//  private func performUpdate(with newMessages: [FullMessage], isInitialUpdate: Bool = false) {
+//    isPerformingUpdate = true
+//    let oldMessages = messages
+//
+//    // Explicitly calculate insertions and removals
+//    let oldIds = Set(oldMessages.map { $0.id })
+//    let newIds = Set(newMessages.map { $0.id })
+//
+//    let insertedIds = newIds.subtracting(oldIds)
+//    let removedIds = oldIds.subtracting(newIds)
+//
+//    let insertions = newMessages.enumerated()
+//      .filter { insertedIds.contains($0.element.id) }
+//      .map { $0.offset }
+//
+//    var removals = oldMessages.enumerated()
+//      .filter { removedIds.contains($0.element.id) }
+//      .map { $0.offset }
+//
+//    let wasAtBottom = isAtBottom
+//
+//    // Update data source first
+//    messages = newMessages
+//
+//    if removals.isEmpty && insertions.isEmpty {
+//      // Off-load heavy work to background thread
+//      Task {
+//        // Find messages that have been updated by comparing old and new messages at same indexes
+//        let updatedIndexes: [Int] = messages.enumerated().compactMap { index, newMessage -> Int? in
+//          // Check if index is valid in old messages array
+//          guard index < oldMessages.count else { return nil }
+//
+//          // Compare with message at same index
+//          let oldMessage = oldMessages[index]
+//          if oldMessage.message != newMessage.message {
+//            return index
+//          }
+//          return nil
+//        }
+//
+//        // Reload only the rows that actually changed
+//        if !updatedIndexes.isEmpty {
+//          log.trace("applying updates to rows: \(updatedIndexes)")
+//          let indexSet = IndexSet(updatedIndexes)
+//
+//          // Main thread
+//          DispatchQueue.main.async {
+//            self.tableView.reloadData(
+//              forRowIndexes: indexSet,
+//              columnIndexes: IndexSet([0])
+//            )
+//          }
+//        }
+//      }
+//    }
+//
+//    // Has any updates?
+//    if !removals.isEmpty || !insertions.isEmpty {
+//      // Hack to handle limit taking effect when we add a new message, first one also removed and it messes up animations
+//      if !insertions.isEmpty && removals.count == 1 && removals.allSatisfy({ $0 == 0 }) {
+//        tableView.removeRows(at: IndexSet([0]), withAnimation: .none)
+//
+//        // clear it to prevent weird animation for new message
+//        removals = []
+//      }
+//      DispatchQueue.main.async {
+//        NSAnimationContext.runAnimationGroup { context in
+//          context.duration = self.debug_slowAnimation ? 1.5 : 0.15
+//
+//          self.tableView.beginUpdates()
+//          self.log.trace("applying updates, removals: \(removals), insertions: \(insertions)")
+//
+//          if !removals.isEmpty {
+//            self.tableView.removeRows(at: IndexSet(removals), withAnimation: .effectFade)
+//          }
+//
+//          if !insertions.isEmpty {
+//            self.tableView
+//              .insertRows(
+//                at: IndexSet(insertions),
+//                withAnimation: .effectFade
+//              )
+//          }
+//          self.tableView.endUpdates()
+//
+//        } completionHandler: {
+//          self.isPerformingUpdate = false
+//        }
+//
+//        // TODO: instead of this, mark next update scroll is animated
+//        if self.feature_scrollsToBottomOnNewMessage {
+//          // Disabling this made quick sending faster but not sure what it breaks
+//          //          DispatchQueue.main.asyncAfter(deadline: .now() + 0.008) {
+//          DispatchQueue.main.async {
+//            // Handle scroll position
+//            if (!removals.isEmpty || !insertions.isEmpty) && wasAtBottom {
+//              self.scrollToBottom(animated: true)
+//            }
+//          }
+//        }
+//      }
+//    } else {
+//      isPerformingUpdate = false
+//    }
+//  }
 
   // Note this function will stop any animation that is happening so must be used with caution
   private func recalculateHeightsOnWidthChange() {
     log.trace("Recalculating heights on width change")
-    let visibleRect = tableView.visibleRect
-    let visibleRange = tableView.rows(in: visibleRect)
     
     if isPerformingUpdate {
       log.trace("Ignoring recalculation due to ongoing update")
       return
     }
+    
+    let visibleRect = tableView.visibleRect
+    let visibleRange = tableView.rows(in: visibleRect)
     
     guard visibleRange.location != NSNotFound else { return }
     
@@ -653,6 +621,147 @@ class MessageListAppKit: NSViewController {
   deinit {
     NotificationCenter.default.removeObserver(self)
   }
+  
+  //  private func _updateAvatars() {
+  //    log.trace("update avatars")
+  //    let stickyPadding: CGFloat = 8.0
+  //    let scrollTopInset = scrollView.contentInsets.top
+  //    let viewportHeight = scrollView.contentView.bounds.height
+  //    let currentOffset = scrollView.contentView.bounds.origin.y
+  //    let visibleRect = tableView.visibleRect
+  //    let visibleRectMinusTopInset = visibleRect.offsetBy(dx: 0, dy: scrollTopInset)
+  //    log.trace("Visible rect: \(visibleRect)")
+  //    log.trace("Visible rect minus top inset: \(visibleRectMinusTopInset)")
+  //    let visibleRange = tableView.rows(in: visibleRectMinusTopInset)
+  //    guard visibleRange.location != NSNotFound else { return }
+  //    guard visibleRange.length > 0 else { return }
+  //
+  //    var processedRows = Set<Int>()
+  //
+  //    // utils
+  //    func avatarPadding(at row: Int) -> CGFloat {
+  //      let padding = row == 0 ?
+  //        Theme.messageListTopInset + Theme.messageVerticalPadding :
+  //        Theme.messageVerticalPadding
+  //
+  //      return padding + Theme.messageGroupSpacing
+  //    }
+  //
+  //    let availableViewportHeight = scrollView.contentView.bounds.height - scrollTopInset
+  //
+  //    func avatarNaturalPosition(at row: Int) -> CGFloat {
+  //      return viewportHeight - (tableView.rect(ofRow: row).minY - currentOffset) - AvatarOverlayView.size - avatarPadding(at: row)
+  //    }
+  //
+  //    // Find sticky avatars
+  //    var stickyRow: Int? = nil
+  //    var upcomingSticky: Int? = nil
+  //
+  //    // sticky out of bound
+  //    for row in (0...Int(visibleRange.location)).reversed() {
+  //      if isFirstInGroup(at: row) {
+  //        stickyRow = row
+  //        break
+  //      }
+  //    }
+  //
+  //    // top most avatar below sticky
+  //    for row in Int(visibleRange.location) ..< Int(visibleRange.location + visibleRange.length) {
+  //      // skip current sticky
+  //      if isFirstInGroup(at: row) && row != stickyRow {
+  //        upcomingSticky = row
+  //        break
+  //      }
+  //    }
+  //
+  //    // Get visible avatar rows
+  //    let visibleAvatarRows = (Int(visibleRange.location)...Int(visibleRange.location + visibleRange.length))
+  //      .filter { row in
+  //        row < messages.count && isFirstInGroup(at: row)
+  //      }
+  //
+  //    // Handle sticky avatar
+  //    if let primaryStickyRow = stickyRow {
+  //      let message = messages[primaryStickyRow]
+  //
+  //      // Calculate the natural position where avatar would be without any constraints
+  //      let naturalPosition = avatarNaturalPosition(at: primaryStickyRow)
+  //
+  //      // Min it with the viewport height - avatar size - padding so it doesn't go out of bounds of screen
+  //      let stickyPosition = min(
+  //        naturalPosition,
+  //        availableViewportHeight - AvatarOverlayView.size - stickyPadding
+  //      )
+  //
+  //      // Find the first visible avatar below the sticky one, we need it so it pushes the sticky avatar up as it's about to overlap
+  //      if let nextVisibleRow = upcomingSticky,
+  //         // when fully overlap, ignore
+  //         nextVisibleRow != primaryStickyRow
+  //      {
+  //        let nextAvatarPosition = avatarNaturalPosition(at: nextVisibleRow)
+  //        // so it doesn't go above sticky padding immediately before becoming sticky and causing jump
+  //        let nextAvatarPositionWithPadding = min(
+  //          nextAvatarPosition,
+  //          availableViewportHeight - AvatarOverlayView.size - stickyPadding
+  //        )
+  //
+  //        // Calculate the maximum allowed position (just above the next avatar)
+  //        let maxAllowedPosition = nextAvatarPosition + AvatarOverlayView.size + stickyPadding
+  //
+  //        // Use the higher position (more towards top of screen) between natural and pushed
+  //        let stickyPositionWhenPushed = max(stickyPosition, maxAllowedPosition)
+  //
+  //        log.trace("Sticky position: \(stickyPosition), pushed: \(stickyPositionWhenPushed), next: \(nextAvatarPosition), nextWithPadding: \(nextAvatarPositionWithPadding) max: \(maxAllowedPosition)")
+  //
+  //        avatarOverlay.updateAvatar(
+  //          for: primaryStickyRow,
+  //          user: message.user ?? User.deletedInstance,
+  //          yOffset: stickyPositionWhenPushed
+  //        )
+  //
+  //        avatarOverlay.updateAvatar(
+  //          for: nextVisibleRow,
+  //          user: messages[nextVisibleRow].user ?? User.deletedInstance,
+  //          yOffset: nextAvatarPositionWithPadding
+  //        )
+  //
+  //        processedRows.insert(nextVisibleRow)
+  //        processedRows.insert(primaryStickyRow)
+  //      } else {
+  //        // No avatar below to push against, use natural position
+  //        avatarOverlay.updateAvatar(
+  //          for: primaryStickyRow,
+  //          user: message.user ?? User.deletedInstance,
+  //          yOffset: stickyPosition
+  //        )
+  //
+  //        processedRows.insert(primaryStickyRow)
+  //      }
+  //    }
+  //
+  //    // Update remaining visible avatars
+  //    for row in visibleAvatarRows {
+  //      if processedRows.contains(row) { continue }
+  //
+  //      let message = messages[row]
+  //      let yPosition = avatarNaturalPosition(at: row)
+  //
+  //      avatarOverlay.updateAvatar(
+  //        for: row,
+  //        user: message.user ?? User.deletedInstance,
+  //        yOffset: yPosition
+  //      )
+  //      processedRows.insert(row)
+  //    }
+  //
+  //    // Adding this dispatch makes double avatars show up sometimes
+  ////    DispatchQueue.main.async {
+  //    // Clean up non-visible avatars
+  //    let currentAvatars = Set(avatarOverlay.avatarViews.keys)
+  //    let avatarsToRemove = currentAvatars.subtracting(processedRows)
+  //    avatarsToRemove.forEach { self.avatarOverlay.removeAvatar(for: $0) }
+  ////    }
+  //  }
 }
 
 extension MessageListAppKit: NSTableViewDataSource {
@@ -709,7 +818,9 @@ extension MessageListAppKit: NSTableViewDelegate {
       firstInGroup: isFirstInGroup(at: row),
       isLastMessage: isLastMessage(at: row),
       isFirstMessage: isFirstMessage(at: row),
-      isRtl: message.message.text?.isRTL ?? false
+//      isRtl: message.message.text?.isRTL ?? false
+      // TODO: optimize
+      isRtl: false
     )
 
     let tableWidth = tableView.bounds.width
@@ -733,7 +844,9 @@ extension MessageListAppKit: NSTableViewDelegate {
       firstInGroup: isFirstInGroup(at: row),
       isLastMessage: isLastMessage(at: row),
       isFirstMessage: isFirstMessage(at: row),
-      isRtl: message.message.text?.isRTL ?? false
+//      isRtl: message.message.text?.isRTL ?? false
+      // TODO: optimize
+      isRtl: false
     )
     
     let tableWidth = tableView.bounds.width
@@ -749,7 +862,6 @@ extension NSTableView {
           numberOfRows > 0 else { return }
     
     let lastRow = numberOfRows - 1
-    let lastRowRect = rect(ofRow: lastRow)
     
     // Get the bottom inset value
     let bottomInset = scrollView.contentInsets.bottom

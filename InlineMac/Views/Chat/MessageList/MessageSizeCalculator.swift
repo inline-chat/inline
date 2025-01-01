@@ -6,6 +6,8 @@ import InlineKit
 // 1. trailing and leading new lines are not calculated properly
 
 class MessageSizeCalculator {
+  static let shared = MessageSizeCalculator()
+  
   private let textStorage: NSTextStorage
   private let layoutManager: NSLayoutManager
   private let textContainer: NSTextContainer

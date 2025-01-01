@@ -6,7 +6,7 @@ class ChatViewAppKit: NSView {
   var peerId: Peer
   
   private lazy var messageList: MessageListAppKit = {
-    let messageList = MessageListAppKit()
+    let messageList = MessageListAppKit(peerId: peerId)
 
     return messageList
   }()
@@ -62,12 +62,12 @@ class ChatViewAppKit: NSView {
   }
   
   func update(messages: [FullMessage]) {
-    messageList.update(with: messages)
+//    messageList.update(with: messages)
   }
   
   func update(viewModel: FullChatViewModel) {
     // Update messages
-    messageList.update(with: viewModel.fullMessages)
+//    messageList.update(with: viewModel.fullMessages)
     
     // Update compose
     compose.update(viewModel: viewModel)

@@ -3,7 +3,7 @@ import GRDB
 
 actor UpdatesManager {
   public static let shared = UpdatesManager()
-  
+
   private var database: AppDatabase = .shared
   private var log = Log.scoped("Updates")
 
@@ -58,8 +58,9 @@ struct UpdateNewMessage: Codable {
   var message: ApiMessage
 
   func apply(db: Database) throws {
-    let message = Message(from: message)
-    try message.save(db, onConflict: .ignore) // NOTE: @Mo: we ignore to avoid animation issues for our own messages
+    var message = Message(from: message)
+    try message.saveMessage(db, onConflict: .ignore) // handles update internally
+//    try message.save(db, onConflict: .ignore) // NOTE: @Mo: we ignore to avoid animation issues for our own messages
     var chat = try Chat.fetchOne(db, id: message.chatId)
     chat?.lastMsgId = message.messageId
     try chat?.save(db)
@@ -79,6 +80,12 @@ struct UpdateMessageId: Codable {
         message.status = .sent
         message.messageId = self.messageId
         try message.save(db)
+
+        DispatchQueue.main.async {
+          MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+        }
+
+        // TODO: optimize this to update in one go
         var chat = try Chat.fetchOne(db, id: message.chatId)
         chat?.lastMsgId = message.messageId
         try chat?.save(db)
