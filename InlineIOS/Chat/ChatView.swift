@@ -12,22 +12,45 @@ struct ChatView: View {
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
+  @EnvironmentObject var data: DataManager
+  @EnvironmentObject var ws: WebSocketManager
+
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
 
   @ObservedObject var composeActions: ComposeActions = .shared
 
+  func currentComposeAction() -> ApiComposeAction? {
+    composeActions.getComposeAction(for: peerId)?.action
   }
 
+  @State var currentTime = Date()
+
+  let timer = Timer.publish(
+    every: 60, // 1 minute
+    on: .main,
+    in: .common
+  ).autoconnect()
+
   static let formatter = RelativeDateTimeFormatter()
-  private func getLastOnlineText(date: Date?) -> String {
+  func getLastOnlineText(date: Date?) -> String {
     guard let date = date else { return "" }
+
+    let diffSeconds = Date().timeIntervalSince(date)
+    if diffSeconds < 60 {
+      return "last seen just now"
+    }
+
     Self.formatter.dateTimeStyle = .named
+    //    Self.formatter.unitsStyle = .spellOut
     return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
   }
 
   var subtitle: String {
-    if let composeAction = currentComposeAction() {
+    // TODO: support threads
+    if ws.connectionState == .connecting {
+      return "connecting..."
+    } else if let composeAction = currentComposeAction() {
       return composeAction.rawValue
     } else if let online = fullChatViewModel.peerUser?.online {
       return online
@@ -40,7 +63,7 @@ struct ChatView: View {
   }
 
   init(peer: Peer) {
-    self.peer = peer
+    self.peerId = peer
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer, limit: 80)
     }
@@ -50,50 +73,59 @@ struct ChatView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages.reversed())
-        .safeAreaInset(edge: .bottom) {
-          HStack(alignment: .bottom) {
-            ZStack(alignment: .leading) {
-              TextView(
-                text: $text,
-                height: $textViewHeight
-              )
+      if !appearFakeChat {
+        content
+          .safeAreaInset(edge: .bottom) {
+            HStack(alignment: .bottom) {
+              ZStack(alignment: .leading) {
+                TextView(
+                  text: $text,
+                  height: $textViewHeight
+                )
 
-              .frame(height: textViewHeight)
-              .background(.clear)
-              .onChange(of: text) { newText in
-                if newText.isEmpty {
-                  Task { await ComposeActions.shared.stoppedTyping(for: peer) }
-                } else {
-                  Task { await ComposeActions.shared.startedTyping(for: peer) }
+                .frame(height: textViewHeight)
+                .background(.clear)
+                .onChange(of: text) { newText in
+                  if newText.isEmpty {
+                    Task { await ComposeActions.shared.stoppedTyping(for: peerId) }
+                  } else {
+                    Task { await ComposeActions.shared.startedTyping(for: peerId) }
+                  }
+                }
+                if text.isEmpty {
+                  Text("Write a message")
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 6)
+                    .padding(.vertical, 6)
+                    .allowsHitTesting(false)
+                    .transition(
+                      .asymmetric(
+                        insertion: .offset(x: 40).combined(with: .opacity),
+                        removal: .offset(x: 40).combined(with: .opacity)
+                      )
+                    )
                 }
               }
-              if text.isEmpty {
-                Text("Write a message")
-                  .foregroundStyle(.tertiary)
-                  .padding(.leading, 6)
-                  .padding(.vertical, 6)
-                  .allowsHitTesting(false)
-                  .transition(
-                    .asymmetric(
-                      insertion: .offset(x: 40).combined(with: .opacity),
-                      removal: .offset(x: 40).combined(with: .opacity)
-                    )
-                  )
-              }
+              .animation(.smoothSnappy, value: textViewHeight)
+              .animation(.smoothSnappy, value: text.isEmpty)
+
+              sendButton
+                .padding(.bottom, 6)
             }
-            .animation(.smoothSnappy, value: textViewHeight)
-            .animation(.smoothSnappy, value: text.isEmpty)
-
-            sendButton
-              .padding(.bottom, 6)
-
-            //  inputArea
+            .padding(.vertical, 6)
+            .padding(.horizontal)
+            .background(Color(uiColor: .systemBackground))
           }
-          .padding(.vertical, 6)
-          .padding(.horizontal)
-          .background(Color(uiColor: .systemBackground))
-        }
+      } else {
+        FakeChatView(
+          text: $text,
+          textViewHeight: $textViewHeight,
+          peerId: peerId
+        )
+      }
+    }
+    .onReceive(timer) { _ in
+      currentTime = Date()
     }
     .toolbar {
       ToolbarItem(placement: .principal) {
