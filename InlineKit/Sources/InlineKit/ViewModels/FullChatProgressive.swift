@@ -13,6 +13,7 @@ public class MessagesProgressiveViewModel {
 
   // state
   public var messages: [FullMessage] = []
+  public var reversed: Bool = false
 
   // note: using date is most reliable as our sorting is based on date
   public var minDate: Date = .init()
@@ -27,11 +28,11 @@ public class MessagesProgressiveViewModel {
 
   // Note:
   // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
-  public init(peer: Peer) {
+  public init(peer: Peer, reversed: Bool = false) {
     self.peer = peer
-
+    self.reversed = reversed
     // get initial batch
-    loadMessages(limit: initialLimit)
+    loadMessages(.limit(initialLimit))
 
     // subscribe to changes
     MessagesPublisher.shared.publisher
@@ -64,7 +65,7 @@ public class MessagesProgressiveViewModel {
     // firs try lets use date as cursor
     let cursor = direction == .top ? minDate : maxDate
     let limit = messages.count > 300 ? 400 : messages.count > 200 ? 300 : 100
-    let prepend = direction == .top
+    let prepend = direction == (reversed ? .bottom : .top)
     log.debug("Loading next batch at \(direction) \(cursor)")
     loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend)
   }
@@ -90,7 +91,11 @@ public class MessagesProgressiveViewModel {
         }
 
         // TODO: detect if we should add to the bottom or top
-        messages.append(contentsOf: messageAdd.messages)
+        if reversed {
+          messages.insert(contentsOf: messageAdd.messages, at: 0)
+        } else {
+          messages.append(contentsOf: messageAdd.messages)
+        }
         // sort again
         sort()
         updateRange()
@@ -144,11 +149,19 @@ public class MessagesProgressiveViewModel {
   }
 
   private func sort() {
-    messages = messages.sorted(by: { $0.message.date < $1.message.date })
+    if reversed {
+      messages = messages.sorted(by: { $0.message.date > $1.message.date })
+    } else {
+      messages = messages.sorted(by: { $0.message.date < $1.message.date })
+    }
   }
 
   private func sort(batch: [FullMessage]) -> [FullMessage] {
-    batch.sorted(by: { $0.message.date < $1.message.date })
+    if reversed {
+      batch.sorted(by: { $0.message.date > $1.message.date })
+    } else {
+      batch.sorted(by: { $0.message.date < $1.message.date })
+    }
   }
 
   // TODO: make it O(1) instead of O(n)
@@ -173,16 +186,21 @@ public class MessagesProgressiveViewModel {
   }
 
   private func refetchCurrentRange() {
-    loadMessages(preserveRange: true)
+    loadMessages(.preserveRange)
   }
 
-  private func loadMessages(limit: Int? = nil, preserveRange: Bool? = nil) {
+  private enum LoadMode {
+    case limit(Int)
+    case preserveRange
+  }
+
+  private func loadMessages(_ loadMode: LoadMode) {
     let peer = self.peer
     let prevCount = messages.count
 
     log
       .debug(
-        "Loading messages for \(peer) limit: \(limit != nil ? limit.debugDescription : "No limit") preserveRange: \(preserveRange ?? false)"
+        "Loading messages for \(peer) with mode: \(loadMode)"
       )
 
     do {
@@ -191,22 +209,27 @@ public class MessagesProgressiveViewModel {
 
         query = query.order(Column("date").desc)
 
-        // limit
-        if let limit = limit {
+        switch loadMode {
+        case .limit(let limit):
           query = query.limit(limit)
-        }
 
-        // range query
-        if preserveRange == true {
-          query = query.filter(Column("date") >= minDate).filter(Column("date") <= maxDate).limit(prevCount)
+        case .preserveRange:
+          query = query
+            .filter(Column("date") >= minDate)
+            .filter(Column("date") <= maxDate)
+            .limit(prevCount)
         }
 
         return try query.fetchAll(db)
       }
 
       log.trace("loaded messages: \(messagesBatch.count)")
-
-      messages = messagesBatch.reversed()
+      if reversed {
+        // it's actually already reversed bc of our .order above
+        messages = messagesBatch
+      } else {
+        messages = messagesBatch.reversed() // reverse it back
+      }
 
       // Uncomment if we want to sort in SQL based on anything other than date
       // sort()
