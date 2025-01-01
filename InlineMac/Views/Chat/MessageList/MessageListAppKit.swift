@@ -421,9 +421,14 @@ class MessageListAppKit: NSViewController {
           tableView.beginUpdates()
           tableView.insertRows(at: newIndexes, withAnimation: .none)
           tableView.endUpdates()
+          
+          loadingBatch = false
+          return true
         }
         
+        // Don't maintain
         loadingBatch = false
+        return false
       }
     }
   }
@@ -482,7 +487,7 @@ class MessageListAppKit: NSViewController {
   }
   
   // TODO: probably can optimize this
-  private func maintainingBottomScroll(_ closure: () -> Void) {
+  private func maintainingBottomScroll(_ closure: () -> Bool?) {
     guard let scrollView = tableView.enclosingScrollView else { return }
     
     // Capture current scroll position relative to bottom
@@ -492,7 +497,9 @@ class MessageListAppKit: NSViewController {
     let distanceFromBottom = contentHeight - (currentOffset + viewportHeight)
     
     // Execute the closure that modifies the data
-    closure()
+    if let shouldMaintain = closure(), !shouldMaintain {
+      return
+    }
     
 //    scrollView.layoutSubtreeIfNeeded()
     
