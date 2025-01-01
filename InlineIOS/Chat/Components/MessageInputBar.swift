@@ -6,6 +6,7 @@ struct MessageInputBar: View {
   @Binding var text: String
   @Binding var textViewHeight: CGFloat
   var peerId: Peer
+  var onSend: () -> Void
 
   var body: some View {
     HStack(alignment: .bottom) {
@@ -42,7 +43,8 @@ struct MessageInputBar: View {
       .animation(.smoothSnappy, value: text.isEmpty)
 
       Button("Send") {
-        // Send action
+        onSend()
+        text = ""
       }
       .padding(.bottom, 6)
     }

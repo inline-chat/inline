@@ -10,43 +10,35 @@ struct MessagesCollectionView: UIViewRepresentable {
 
     let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
 
+    // Basic setup
     collectionView.backgroundColor = .clear
     collectionView.delegate = context.coordinator
     collectionView.autoresizingMask = [.flexibleHeight]
 
+    // Register cell
     collectionView.register(
       MessageCollectionViewCell.self,
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
     )
 
-    // Base transform for bottom-up scrolling
+    // Bottom-up scrolling transform
     collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
 
     // Performance optimizations
     collectionView.isPrefetchingEnabled = true
     collectionView.decelerationRate = .normal
     collectionView.contentInsetAdjustmentBehavior = .never
-
-    // Improve scrolling performance
     collectionView.isDirectionalLockEnabled = true
+
+    // Scroll indicator setup
     collectionView.showsVerticalScrollIndicator = true
     collectionView.indicatorStyle = .default
-
-    // Memory optimization
-    collectionView.remembersLastFocusedIndexPath = false
-
-    // Fix for scroll indicator
-    collectionView.scrollIndicatorInsets = .zero
-    collectionView.verticalScrollIndicatorInsets = .zero
-    //    context.coordinator.adjustContentInset(for: collectionView)
-
     collectionView.scrollIndicatorInsets = UIEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
     collectionView.contentInset = UIEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
-    collectionView.isPrefetchingEnabled = true
-    collectionView.decelerationRate = .normal
 
     context.coordinator.setupDataSource(collectionView)
 
+    // Observe orientation changes
     NotificationCenter.default.addObserver(
       context.coordinator,
       selector: #selector(Coordinator.orientationDidChange),
@@ -69,151 +61,109 @@ struct MessagesCollectionView: UIViewRepresentable {
   }
 
   func updateUIView(_ collectionView: UICollectionView, context: Context) {
-    context.coordinator.updateMessages(fullMessages, in: collectionView)
+    context.coordinator.updateMessages(fullMessages)
   }
 
   func makeCoordinator() -> Coordinator {
     Coordinator(fullMessages: fullMessages)
   }
+}
 
+// MARK: - Coordinator
+
+extension MessagesCollectionView {
   class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
-    private var log = Log.scoped("MessageCollectionView", enableTracing: true)
-    private var dataSource: UICollectionViewDiffableDataSource<Int, FullMessage>!
-    private var fullMessages: [FullMessage]
-    private weak var currentCollectionView: UICollectionView?
-    private var isPerformingBatchUpdate = false
+    private var dataSource: UICollectionViewDiffableDataSource<Section, FullMessage.ID>!
+    private var messagesById: [FullMessage.ID: FullMessage] = [:]
+    // Ordered list of messages because dictionary can't be ordered
+    private var fullMessages: [FullMessage] = []
+    private var currentCollectionView: UICollectionView?
 
-    // Scroll position tracking
-    private struct ScrollAnchor {
-      let messageId: Int64
-      let offsetFromTop: CGFloat
+    enum Section {
+      case main
     }
-
-    private var scrollAnchor: ScrollAnchor?
 
     init(fullMessages: [FullMessage]) {
       self.fullMessages = fullMessages
       super.init()
+      updateMessagesCache(fullMessages)
+    }
+
+    private func updateMessagesCache(_ messages: [FullMessage]) {
+      fullMessages = messages
+      //      messagesById = Dictionary(uniqueKeysWithValues: messages.map { ($0.message.globalId ?? $0.message.id, $0) })
+
+      messagesById = Dictionary(uniqueKeysWithValues: messages.map { ($0.message.id, $0) })
     }
 
     func setupDataSource(_ collectionView: UICollectionView) {
       currentCollectionView = collectionView
 
       dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) {
-        [weak self] collectionView, indexPath, fullMessage in
-
-        guard
-          let cell = collectionView.dequeueReusableCell(
-            withReuseIdentifier: MessageCollectionViewCell.reuseIdentifier,
-            for: indexPath
-          ) as? MessageCollectionViewCell
+        [weak self] collectionView, indexPath, id in
+        guard let self,
+              let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: MessageCollectionViewCell.reuseIdentifier,
+                for: indexPath
+              ) as? MessageCollectionViewCell,
+              let message = self.messagesById[id]
         else {
           return nil
         }
 
-        let topPadding = 2.0
-
-        cell.configure(with: fullMessage, topPadding: topPadding, bottomPadding: 0)
-
+        cell.configure(with: message, topPadding: 2, bottomPadding: 0)
         return cell
       }
 
-      applyInitialData()
-    }
-
-    private func applyInitialData() {
-      updateSnapshot(with: fullMessages)
+      // Apply initial data
+      var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
+      snapshot.appendSections([.main])
+      snapshot.appendItems(Array(messagesById.keys))
+      dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     var isAnimatingUpdate: Bool = false
     var pendingMessages: [FullMessage]? = nil
 
-    private func updateSnapshot(with messages: [FullMessage]) {
-      // Prevent intrupting animations
+    func updateMessages(_ messages: [FullMessage]) {
       guard !isAnimatingUpdate else {
         pendingMessages = messages
         return
       }
 
-      var animated: Bool
+      // Update cache before creating snapshot
+      updateMessagesCache(messages)
+
+      var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
+      snapshot.appendSections([.main])
+
+      // Use the message IDs from the updated messagesById dictionary
+      snapshot.appendItems(fullMessages.map { $0.message.id })
 
       let hasNewMessages = fullMessages.first?.message.globalId != messages.first?.message.globalId
-      if hasNewMessages {
-        animated = true
-        isAnimatingUpdate = true
-      } else {
-        animated = false
-      }
 
-      var snapshot = NSDiffableDataSourceSnapshot<Int, FullMessage>()
+      print(
+        "hasNewMessages \(hasNewMessages) - \(fullMessages.first?.message.globalId) - \(messages.first?.message.globalId)"
+      )
+      let animated = hasNewMessages
+      print("animated \(animated)")
 
-      snapshot.appendSections([0])
-      snapshot.appendItems(messages)
-
-      // Use UIView.animate for custom animations
       if animated {
+        isAnimatingUpdate = true
+        print("Here :)")
         dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
           guard let self else { return }
           self.isAnimatingUpdate = false
 
-          // After animation apply any pending updates
-          if let pendingMessages = pendingMessages {
-            self.updateSnapshot(with: pendingMessages)
+          if let pendingMessages = self.pendingMessages {
+            self.updateMessages(pendingMessages)
             self.pendingMessages = nil
           }
-          //
         }
       } else {
-        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-          guard let self else { return }
-          // TODO: ??
-        }
+        print("Here :(")
+        dataSource.apply(snapshot, animatingDifferences: false)
       }
-      fullMessages = messages
-    }
-
-    private func captureScrollPosition(_ collectionView: UICollectionView) {
-      // Only capture if we're not at the top (y: 0 in flipped scroll view)
-      guard collectionView.contentOffset.y > 0,
-            let visibleIndexPaths = collectionView.indexPathsForVisibleItems.min(),
-            visibleIndexPaths.item < fullMessages.count
-      else {
-        scrollAnchor = nil
-        return
-      }
-
-      let anchorMessage = fullMessages[visibleIndexPaths.item]
-      let cell = collectionView.cellForItem(at: visibleIndexPaths)
-      let cellFrame = cell?.frame ?? .zero
-      let offsetFromTop = collectionView.contentOffset.y - cellFrame.minY
-
-      scrollAnchor = ScrollAnchor(
-        messageId: anchorMessage.message.id,
-        offsetFromTop: offsetFromTop
-      )
-    }
-
-    private func restoreScrollPosition(_ collectionView: UICollectionView) {
-      guard let anchor = scrollAnchor,
-            let anchorIndex = fullMessages.firstIndex(where: { $0.message.id == anchor.messageId })
-      else {
-        return
-      }
-
-      let indexPath = IndexPath(item: anchorIndex, section: 0)
-
-      // Get the frame of the anchor cell
-      if let attributes = collectionView.layoutAttributesForItem(at: indexPath) {
-        let targetOffset = attributes.frame.minY + anchor.offsetFromTop
-        collectionView.setContentOffset(CGPoint(x: 0, y: targetOffset), animated: false)
-      }
-    }
-
-    func updateMessages(_ messages: [FullMessage], in collectionView: UICollectionView) {
-      let oldCount = fullMessages.count
-      let oldMessages = fullMessages
-
-      updateSnapshot(with: messages)
     }
 
     @objc func orientationDidChange(_ notification: Notification) {
@@ -242,12 +192,9 @@ struct MessagesCollectionView: UIViewRepresentable {
       let currentMessage = fullMessages[indexPath.item]
       let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
 
-      // If this is the first message in a group from the same sender,
-      // check if the previous message was from a different sender
       guard previousIndex < fullMessages.count else { return true }
       let previousMessage = fullMessages[previousIndex]
 
-      // Check if this is the first message in a sequence from the same sender
       let isFirstInGroup = currentMessage.message.out != previousMessage.message.out
 
       return isFirstInGroup
@@ -272,14 +219,12 @@ struct MessagesCollectionView: UIViewRepresentable {
       layout collectionViewLayout: UICollectionViewLayout,
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
-      // Bounds checking
       guard indexPath.item < fullMessages.count else {
         return .zero
       }
 
       let availableWidth = collectionView.bounds.width - 16
 
-      // Create a temporary cell to calculate the proper height
       let cell = MessageCollectionViewCell(frame: .zero)
       let message = fullMessages[indexPath.item]
       cell.configure(with: message, topPadding: 2, bottomPadding: 0)
