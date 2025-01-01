@@ -13,10 +13,12 @@ public class MessagesProgressiveViewModel {
 
   // state
   public var messagesByID: [Int64: FullMessage] = [:]
-  public var messages: [FullMessage] = [] { didSet {
-    messagesByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+  public var messages: [FullMessage] = [] {
+    didSet {
+      messagesByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
 
-  }}
+    }
+  }
   public var reversed: Bool = false
 
   // note: using date is most reliable as our sorting is based on date
@@ -53,7 +55,8 @@ public class MessagesProgressiveViewModel {
   // Set an observer to update the UI
   public func observe(_ callback: @escaping (MessagesChangeSet) -> Void) {
     if self.callback != nil {
-      Log.shared.warning("Callback already set, re-setting it to a new one will result in undefined behaviour")
+      Log.shared.warning(
+        "Callback already set, re-setting it to a new one will result in undefined behaviour")
     }
 
     self.callback = callback
@@ -89,23 +92,20 @@ public class MessagesProgressiveViewModel {
       if messageAdd.peer == peer {
         // Check if we have it to not add it again
         let existingIds = Set(messages.map { $0.id })
-        if messageAdd.messages.contains(where: { existingIds.contains($0.id) }) {
-          log.warning("Message already exists in the list, but message added was triggered.")
-          return nil
-        }
+        let newMessages = messageAdd.messages.filter { !existingIds.contains($0.id) }
 
         // TODO: detect if we should add to the bottom or top
         if reversed {
-          messages.insert(contentsOf: messageAdd.messages, at: 0)
+          messages.insert(contentsOf: newMessages, at: 0)
         } else {
-          messages.append(contentsOf: messageAdd.messages)
+          messages.append(contentsOf: newMessages)
         }
         // sort again
         sort()
         updateRange()
 
         // Return changeset
-        return MessagesChangeSet.added(messageAdd.messages, indexSet: [messages.count - 1])
+        return MessagesChangeSet.added(newMessages, indexSet: [messages.count - 1])
       }
 
     case .delete(let messageDelete):
@@ -135,7 +135,7 @@ public class MessagesProgressiveViewModel {
         }
 
         messages[index] = messageUpdate.message
-        updateRange() // ??
+        updateRange()  // ??
         return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index])
       }
 
@@ -218,7 +218,8 @@ public class MessagesProgressiveViewModel {
           query = query.limit(limit)
 
         case .preserveRange:
-          query = query
+          query =
+            query
             .filter(Column("date") >= minDate)
             .filter(Column("date") <= maxDate)
             .limit(prevCount)
@@ -232,7 +233,7 @@ public class MessagesProgressiveViewModel {
         // it's actually already reversed bc of our .order above
         messages = messagesBatch
       } else {
-        messages = messagesBatch.reversed() // reverse it back
+        messages = messagesBatch.reversed()  // reverse it back
       }
 
       // Uncomment if we want to sort in SQL based on anything other than date
@@ -274,7 +275,8 @@ public class MessagesProgressiveViewModel {
       messagesBatch = sort(batch: messagesBatch)
 
       // dedup those with exact date as cursor as they might be included in both
-      let existingMessagesAtCursor = Set(messages.filter { $0.message.date == cursor }.map { $0.id })
+      let existingMessagesAtCursor = Set(
+        messages.filter { $0.message.date == cursor }.map { $0.id })
       messagesBatch.removeAll { existingMessagesAtCursor.contains($0.id) }
 
       if prepend {
@@ -290,17 +292,20 @@ public class MessagesProgressiveViewModel {
   }
 
   private func baseQuery() -> QueryInterfaceRequest<FullMessage> {
-    var query = Message
+    var query =
+      Message
       .including(optional: Message.from)
       .including(all: Message.reactions)
       .asRequest(of: FullMessage.self)
 
     switch peer {
     case .thread(let id):
-      query = query
+      query =
+        query
         .filter(Column("peerThreadId") == id)
     case .user(let id):
-      query = query
+      query =
+        query
         .filter(Column("peerUserId") == id)
     }
     return query
@@ -338,20 +343,25 @@ public final class MessagesPublisher {
 
   // Static methods to publish update
   func messageAdded(message: Message, peer: Peer) {
-    Log.shared.debug("Message added: \(message.messageId)")
-    let fullMessage = try? db.reader.read { db in
-      try Message
-        .filter(Column("globalId") == message.globalId)
-        .including(optional: Message.from)
-        .including(all: Message.reactions)
-        .asRequest(of: FullMessage.self)
-        .fetchOne(db)
+    Log.shared.debug("Message added: \(message)")
+    do {
+      let fullMessage = try db.reader.read { db in
+        try Message
+          .filter(Column("messageId") == message.messageId)
+          .filter(Column("chatId") == message.chatId)
+          .including(optional: Message.from)
+          .including(all: Message.reactions)
+          .asRequest(of: FullMessage.self)
+          .fetchOne(db)
+      }
+      guard let fullMessage = fullMessage else {
+        Log.shared.error("Failed to get full message")
+        return
+      }
+      publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
+    } catch {
+      Log.shared.error("Failed to get full message", error: error)
     }
-    guard let fullMessage = fullMessage else {
-      Log.shared.error("Failed to get full message")
-      return
-    }
-    publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
   }
 
   func messagesDeleted(messageIds: [Int64], peer: Peer) {
@@ -362,7 +372,8 @@ public final class MessagesPublisher {
     Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? db.reader.read { db in
       try Message
-        .filter(Column("globalId") == message.globalId)
+        .filter(Column("messageId") == message.messageId)
+        .filter(Column("chatId") == message.chatId)
         .including(optional: Message.from)
         .including(all: Message.reactions)
         .asRequest(of: FullMessage.self)

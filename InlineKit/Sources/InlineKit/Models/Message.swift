@@ -205,10 +205,13 @@ public extension Message {
     if publishChanges {
       // Publish changes when save is successful
       let message = self
-      DispatchQueue.main.async {
-        if isExisting {
+      // TODO: find a way to remove this delay
+      if isExisting {
+        DispatchQueue.main.async { // TODO: find a way to remove this delay
           MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
-        } else {
+        }
+      } else {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { // TODO: find a way to remove this delay
           MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
         }
       }
