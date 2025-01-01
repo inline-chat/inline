@@ -16,9 +16,9 @@ public class MessagesProgressiveViewModel {
   public var messages: [FullMessage] = [] {
     didSet {
       messagesByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-
     }
   }
+
   public var reversed: Bool = false
 
   // note: using date is most reliable as our sorting is based on date
@@ -135,7 +135,7 @@ public class MessagesProgressiveViewModel {
         }
 
         messages[index] = messageUpdate.message
-        updateRange()  // ??
+        updateRange() // ??
         return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index])
       }
 
@@ -220,9 +220,9 @@ public class MessagesProgressiveViewModel {
         case .preserveRange:
           query =
             query
-            .filter(Column("date") >= minDate)
-            .filter(Column("date") <= maxDate)
-            .limit(prevCount)
+              .filter(Column("date") >= minDate)
+              .filter(Column("date") <= maxDate)
+              .limit(prevCount)
         }
 
         return try query.fetchAll(db)
@@ -233,7 +233,7 @@ public class MessagesProgressiveViewModel {
         // it's actually already reversed bc of our .order above
         messages = messagesBatch
       } else {
-        messages = messagesBatch.reversed()  // reverse it back
+        messages = messagesBatch.reversed() // reverse it back
       }
 
       // Uncomment if we want to sort in SQL based on anything other than date
@@ -294,19 +294,19 @@ public class MessagesProgressiveViewModel {
   private func baseQuery() -> QueryInterfaceRequest<FullMessage> {
     var query =
       Message
-      .including(optional: Message.from)
-      .including(all: Message.reactions)
-      .asRequest(of: FullMessage.self)
+        .including(optional: Message.from)
+        .including(all: Message.reactions)
+        .asRequest(of: FullMessage.self)
 
     switch peer {
     case .thread(let id):
       query =
         query
-        .filter(Column("peerThreadId") == id)
+          .filter(Column("peerThreadId") == id)
     case .user(let id):
       query =
         query
-        .filter(Column("peerUserId") == id)
+          .filter(Column("peerUserId") == id)
     }
     return query
   }
