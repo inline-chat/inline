@@ -14,13 +14,13 @@ extension ChatView {
 
   @ViewBuilder
   var content: some View {
-    MessagesCollectionView(fullMessages: fullChatViewModel.fullMessages.reversed())
+    MessagesCollectionView(peerId: peerId)
   }
 
   @ViewBuilder
   var sendButton: some View {
     Button {
-      sendMessage()
+      fullChatViewModel.sendMessage(text: text)
     } label: {
       Circle()
         .fill(text.isEmpty ? Color(.systemGray5) : .blue)

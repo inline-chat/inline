@@ -3,7 +3,15 @@ import SwiftUI
 import UIKit
 
 struct MessagesCollectionView: UIViewRepresentable {
-  var fullMessages: [FullMessage]
+  var peerId: Peer
+
+  init(peerId: Peer) {
+    self.peerId = peerId
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(peerId: peerId)
+  }
 
   func makeUIView(context: Context) -> UICollectionView {
     let layout = createLayout()
@@ -61,11 +69,7 @@ struct MessagesCollectionView: UIViewRepresentable {
   }
 
   func updateUIView(_ collectionView: UICollectionView, context: Context) {
-    context.coordinator.updateMessages(fullMessages)
-  }
-
-  func makeCoordinator() -> Coordinator {
-    Coordinator(fullMessages: fullMessages)
+    //    context.coordinator.updateMessages(fullMessages)
   }
 }
 
@@ -73,97 +77,65 @@ struct MessagesCollectionView: UIViewRepresentable {
 
 extension MessagesCollectionView {
   class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
-    private var dataSource: UICollectionViewDiffableDataSource<Section, FullMessage.ID>!
-    private var messagesById: [FullMessage.ID: FullMessage] = [:]
-    // Ordered list of messages because dictionary can't be ordered
-    private var fullMessages: [FullMessage] = []
     private var currentCollectionView: UICollectionView?
+    private let viewModel: MessagesProgressiveViewModel
 
     enum Section {
       case main
     }
 
-    init(fullMessages: [FullMessage]) {
-      self.fullMessages = fullMessages
+    private var dataSource: UICollectionViewDiffableDataSource<Section, FullMessage.ID>!
+    private var messages: [FullMessage] { viewModel.messages }
+
+    init(peerId: Peer) {
+      viewModel = MessagesProgressiveViewModel(peer: peerId, reversed: true)
+
       super.init()
-      updateMessagesCache(fullMessages)
-    }
 
-    private func updateMessagesCache(_ messages: [FullMessage]) {
-      fullMessages = messages
-      //      messagesById = Dictionary(uniqueKeysWithValues: messages.map { ($0.message.globalId ?? $0.message.id, $0) })
-
-      messagesById = Dictionary(uniqueKeysWithValues: messages.map { ($0.message.id, $0) })
+      viewModel.observe { [weak self] update in
+        self?.applyUpdate(update)
+      }
     }
 
     func setupDataSource(_ collectionView: UICollectionView) {
       currentCollectionView = collectionView
 
-      dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) {
-        [weak self] collectionView, indexPath, id in
-        guard let self,
-              let cell = collectionView.dequeueReusableCell(
-                withReuseIdentifier: MessageCollectionViewCell.reuseIdentifier,
-                for: indexPath
-              ) as? MessageCollectionViewCell,
-              let message = self.messagesById[id]
-        else {
-          return nil
-        }
+      let cellRegistration = UICollectionView.CellRegistration<
+        MessageCollectionViewCell,
+        FullMessage.ID
+      > { [weak self] cell, _, messageId in
+        guard let self, let message = viewModel.messagesByID[messageId] else { return }
 
+        print("ADDING CELL")
         cell.configure(with: message, topPadding: 2, bottomPadding: 0)
-        return cell
       }
 
-      // Apply initial data
-      var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
-      snapshot.appendSections([.main])
-      snapshot.appendItems(Array(messagesById.keys))
-      dataSource.apply(snapshot, animatingDifferences: false)
+      dataSource = UICollectionViewDiffableDataSource<Section, FullMessage.ID>(
+        collectionView: collectionView
+      ) { collectionView, indexPath, messageId in
+        collectionView.dequeueConfiguredReusableCell(
+          using: cellRegistration,
+          for: indexPath,
+          item: messageId
+        )
+      }
+
+      // Set initial data after configuring the data source
+      setInitialData()
     }
 
-    var isAnimatingUpdate: Bool = false
-    var pendingMessages: [FullMessage]? = nil
-
-    func updateMessages(_ messages: [FullMessage]) {
-      guard !isAnimatingUpdate else {
-        pendingMessages = messages
-        return
-      }
-
-      // Update cache before creating snapshot
-      updateMessagesCache(messages)
-
+    private func setInitialData() {
       var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
+
+      // Only one section in this collection view, identified by Section.main
       snapshot.appendSections([.main])
 
-      // Use the message IDs from the updated messagesById dictionary
-      snapshot.appendItems(fullMessages.map { $0.message.id })
+      // Get identifiers of all message in our model and add to initial snapshot
+      let itemIdentifiers = messages.map { $0.id }
 
-      let hasNewMessages = fullMessages.first?.message.globalId != messages.first?.message.globalId
+      snapshot.appendItems(itemIdentifiers, toSection: .main)
 
-      print(
-        "hasNewMessages \(hasNewMessages) - \(fullMessages.first?.message.globalId) - \(messages.first?.message.globalId)"
-      )
-      let animated = hasNewMessages
-      print("animated \(animated)")
-
-      if animated {
-        isAnimatingUpdate = true
-        print("Here :)")
-        dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
-          guard let self else { return }
-          self.isAnimatingUpdate = false
-
-          if let pendingMessages = self.pendingMessages {
-            self.updateMessages(pendingMessages)
-            self.pendingMessages = nil
-          }
-        }
-      } else {
-        print("Here :(")
-        dataSource.apply(snapshot, animatingDifferences: false)
-      }
+      dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     @objc func orientationDidChange(_ notification: Notification) {
@@ -184,59 +156,84 @@ extension MessagesCollectionView {
       }
     }
 
+    func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
+      switch update {
+      case .added(let newMessages, let indexSet):
+        // get current snapshot and append new items
+        var snapshot = dataSource.snapshot()
+        let ids = newMessages.map { $0.id }
+
+        if let first = snapshot.itemIdentifiers.first {
+          snapshot.insertItems(ids, beforeItem: first)
+        } else {
+          snapshot.appendItems(ids, toSection: .main)
+        }
+
+        dataSource.apply(snapshot, animatingDifferences: true)
+      case .deleted(_, let indexSet):
+        print("deleted")
+      case .updated(_, let indexSet):
+        print("updated")
+
+      case .reload:
+        print("reload")
+        currentCollectionView?.reloadData()
+      }
+    }
+
     // MARK: - Helper Methods
 
-    private func isTransitionFromOtherSender(at indexPath: IndexPath) -> Bool {
-      guard indexPath.item < fullMessages.count else { return false }
-
-      let currentMessage = fullMessages[indexPath.item]
-      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
-
-      guard previousIndex < fullMessages.count else { return true }
-      let previousMessage = fullMessages[previousIndex]
-
-      let isFirstInGroup = currentMessage.message.out != previousMessage.message.out
-
-      return isFirstInGroup
-    }
-
-    private func isTransitionToOtherSender(at indexPath: IndexPath) -> Bool {
-      guard indexPath.item < fullMessages.count else { return false }
-
-      let currentMessage = fullMessages[indexPath.item]
-      let nextIndex = indexPath.item + 1
-
-      guard nextIndex < fullMessages.count else { return false }
-      let nextMessage = fullMessages[nextIndex]
-
-      return currentMessage.message.out != nextMessage.message.out
-    }
-
-    // MARK: - UICollectionViewDelegateFlowLayout
-
-    func collectionView(
-      _ collectionView: UICollectionView,
-      layout collectionViewLayout: UICollectionViewLayout,
-      sizeForItemAt indexPath: IndexPath
-    ) -> CGSize {
-      guard indexPath.item < fullMessages.count else {
-        return .zero
-      }
-
-      let availableWidth = collectionView.bounds.width - 16
-
-      let cell = MessageCollectionViewCell(frame: .zero)
-      let message = fullMessages[indexPath.item]
-      cell.configure(with: message, topPadding: 2, bottomPadding: 0)
-
-      let size = cell.contentView.systemLayoutSizeFitting(
-        CGSize(width: availableWidth, height: 0),
-        withHorizontalFittingPriority: .required,
-        verticalFittingPriority: .fittingSizeLevel
-      )
-
-      return size
-    }
+    //    private func isTransitionFromOtherSender(at indexPath: IndexPath) -> Bool {
+    //      guard indexPath.item < fullMessages.count else { return false }
+    //
+    //      let currentMessage = fullMessages[indexPath.item]
+    //      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
+    //
+    //      guard previousIndex < fullMessages.count else { return true }
+    //      let previousMessage = fullMessages[previousIndex]
+    //
+    //      let isFirstInGroup = currentMessage.message.out != previousMessage.message.out
+    //
+    //      return isFirstInGroup
+    //    }
+    //
+    //    private func isTransitionToOtherSender(at indexPath: IndexPath) -> Bool {
+    //      guard indexPath.item < fullMessages.count else { return false }
+    //
+    //      let currentMessage = fullMessages[indexPath.item]
+    //      let nextIndex = indexPath.item + 1
+    //
+    //      guard nextIndex < fullMessages.count else { return false }
+    //      let nextMessage = fullMessages[nextIndex]
+    //
+    //      return currentMessage.message.out != nextMessage.message.out
+    //    }
+    //
+    //    // MARK: - UICollectionViewDelegateFlowLayout
+    //
+    //    func collectionView(
+    //      _ collectionView: UICollectionView,
+    //      layout collectionViewLayout: UICollectionViewLayout,
+    //      sizeForItemAt indexPath: IndexPath
+    //    ) -> CGSize {
+    //      guard indexPath.item < fullMessages.count else {
+    //        return .zero
+    //      }
+    //
+    //      let availableWidth = collectionView.bounds.width - 16
+    //
+    //      let cell = MessageCollectionViewCell(frame: .zero)
+    //      let message = fullMessages[indexPath.item]
+    //      cell.configure(with: message, topPadding: 2, bottomPadding: 0)
+    //
+    //      let size = cell.contentView.systemLayoutSizeFitting(
+    //        CGSize(width: availableWidth, height: 0),
+    //        withHorizontalFittingPriority: .required,
+    //        verticalFittingPriority: .fittingSizeLevel
+    //      )
+    //
+    //      return size
+    //    }
 
     func collectionView(
       _ collectionView: UICollectionView,

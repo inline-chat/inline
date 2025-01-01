@@ -45,7 +45,7 @@ struct ChatView: View {
     }
 
     Self.formatter.dateTimeStyle = .named
-//    Self.formatter.unitsStyle = .spellOut
+    //    Self.formatter.unitsStyle = .spellOut
     return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
   }
 
@@ -54,7 +54,10 @@ struct ChatView: View {
     if let composeAction = currentComposeAction() {
       return composeAction.rawValue
     } else if let online = item?.user?.online {
-      return online ? "online" : (item?.user?.lastOnline != nil ? getLastOnlineText(date: item?.user?.lastOnline) : "offline")
+      return online
+        ? "online"
+        : (item?.user?.lastOnline != nil
+          ? getLastOnlineText(date: item?.user?.lastOnline) : "offline")
     } else {
       return "last seen recently"
     }

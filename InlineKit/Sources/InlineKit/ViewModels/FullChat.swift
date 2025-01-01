@@ -20,13 +20,11 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
 public struct FullChatSection: Identifiable, Equatable, Hashable {
   public var id: Date
   public var date: Date
-  public var messages: [FullMessage]
 }
 
 public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   @Published public private(set) var chatItem: SpaceChatItem?
   @Published public private(set) var fullMessages: [FullMessage] = []
-  @Published public private(set) var messagesInSections: [FullChatSection] = []
 
   public var messageIdToGlobalId: [Int64: Int64] = [:]
 
@@ -43,7 +41,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   }
 
   private var chatCancellable: AnyCancellable?
-  private var messagesCancellable: AnyCancellable?
+
   private var peerUserCancellable: AnyCancellable?
 
   private var db: AppDatabase
@@ -59,10 +57,6 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     self.reversed = reversed
     self.limit = limit
     fetchChat()
-    
-    if fetchesMessages {
-      fetchMessages()
-    }
   }
 
   func fetchChat() {
@@ -101,75 +95,6 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
           receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
           receiveValue: { [weak self] chats in
             self?.chatItem = chats.first
-          }
-        )
-  }
-
-  func fetchMessages() {
-    let peer = self.peer
-    messagesCancellable =
-      ValueObservation
-        .tracking { db in
-
-          if case .thread(let id) = peer {
-            return
-              try Message
-                .filter(Column("peerThreadId") == id)
-                .including(optional: Message.from)
-                .including(all: Message.reactions)
-                .asRequest(of: FullMessage.self)
-                .order(Column("date").asc)
-                .fetchAll(db)
-
-          } else if case .user(let id) = peer {
-            if let limit = self.limit {
-              return
-                try Message
-                  .filter(Column("peerUserId") == id)
-                  .including(optional: Message.from)
-                  .including(all: Message.reactions)
-                  .asRequest(of: FullMessage.self)
-                  .order(Column("date").desc)
-                  .limit(limit)
-                  .fetchAll(db)
-            } else {
-              return
-                try Message
-                  .filter(Column("peerUserId") == id)
-                  .including(optional: Message.from)
-                  .including(all: Message.reactions)
-                  .asRequest(of: FullMessage.self)
-                  .order(Column("date").asc)
-
-                  .fetchAll(db)
-            }
-          } else {
-            return []
-          }
-        }
-        .publisher(in: db.dbWriter, scheduling: .immediate)
-        .sink(
-          receiveCompletion: { error in
-            Log.shared.error("Failed to get messages \(error)")
-          },
-          receiveValue: { [weak self] messages in
-            //  Merged result
-            self?.fullMessages = messages
-
-            // When limit is applied it's in reverse
-            if self?.limit != nil {
-              if self?.reversed == true {
-                self?.fullMessages = messages
-              } else {
-                self?.fullMessages = messages.reversed()
-              }
-            } else {
-              if self?.reversed == true {
-                self?.fullMessages = messages.reversed()
-              } else {
-                self?.fullMessages = messages
-              }
-            }
           }
         )
   }

@@ -12,7 +12,11 @@ public class MessagesProgressiveViewModel {
   public var peer: Peer
 
   // state
-  public var messages: [FullMessage] = []
+  public var messagesByID: [Int64: FullMessage] = [:]
+  public var messages: [FullMessage] = [] { didSet {
+    messagesByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+
+  }}
   public var reversed: Bool = false
 
   // note: using date is most reliable as our sorting is based on date
