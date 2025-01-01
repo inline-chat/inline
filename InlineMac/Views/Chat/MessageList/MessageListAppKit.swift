@@ -14,13 +14,13 @@ class MessageListAppKit: NSViewController {
   private let defaultRowHeight = 24.0
   
   // Specification - mostly useful in debug
-  private var feature_maintainsScrollFromBottomOnResize = true // .
+  private var feature_maintainsScrollFromBottomOnResize = true
   private var feature_scrollsToBottomOnNewMessage = true
   private var feature_scrollsToBottomInDidLayout = true
   private var feature_setupsInsetsManually = true
   private var feature_updatesHeightsOnWidthChange = true
   private var feature_updatesHeightsOnOffsetChange = true
-  private var feature_recalculatesHeightsWhileInitialScroll = false
+  private var feature_recalculatesHeightsWhileInitialScroll = true
   
   // Debugging
   private var debug_slowAnimation = false
@@ -400,6 +400,8 @@ class MessageListAppKit: NSViewController {
   func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
     log.trace("apply update called")
     
+    isPerformingUpdate = true
+    
     let wasAtBottom = isAtBottom
     let animationDuration = debug_slowAnimation ? 1.5 : 0.15
     let shouldScroll = wasAtBottom && feature_scrollsToBottomOnNewMessage
@@ -413,6 +415,8 @@ class MessageListAppKit: NSViewController {
         context.duration = animationDuration
         self.tableView.insertRows(at: IndexSet(indexSet), withAnimation: .effectFade)
         if shouldScroll { self.scrollToBottom(animated: true) }
+      } completionHandler: {
+        self.isPerformingUpdate = false
       }
 
     case .deleted(_, let indexSet):
@@ -420,6 +424,8 @@ class MessageListAppKit: NSViewController {
         context.duration = animationDuration
         self.tableView.removeRows(at: IndexSet(indexSet), withAnimation: .effectFade)
         if shouldScroll { self.scrollToBottom(animated: true) }
+      } completionHandler: {
+        self.isPerformingUpdate = false
       }
 
     case .updated(_, let indexSet):
@@ -428,11 +434,15 @@ class MessageListAppKit: NSViewController {
         self.tableView
           .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
         if shouldScroll { self.scrollToBottom(animated: true) } // ??
+      } completionHandler: {
+        self.isPerformingUpdate = false
       }
       
     case .reload:
       log.trace("reloading data")
       tableView.reloadData()
+      if shouldScroll { scrollToBottom(animated: false) }
+      self.isPerformingUpdate = false
     }
   }
   
