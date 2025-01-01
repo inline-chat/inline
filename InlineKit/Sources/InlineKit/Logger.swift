@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 import Sentry
 
-public enum LogLevel: String {
+public enum LogLevel: String, Sendable {
   case error = "❌ ERROR"
   case warning = "⚠️ WARNING"
   case info = "ℹ️ INFO"
@@ -80,18 +80,25 @@ public final class Log: @unchecked Sendable {
     
     logger.log(level: level.osLogType, "\(level.rawValue) | \(scope_) | \(logMessage)")
     
-    if level == .error, let error = error {
-      SentrySDK.capture(error: error) { sentryScope in
-        sentryScope.setLevel(level.sentryLevel)
-        sentryScope.setTag(value: self.scope, key: "scope")
-        sentryScope.setExtra(value: message, key: "message")
-      }
-    } else if level == .error || level == .warning {
-      SentrySDK.capture(message: message) { sentryScope in
-        sentryScope.setLevel(level.sentryLevel)
-        sentryScope.setTag(value: self.scope, key: "scope")
-        if let error = error {
-          sentryScope.setExtra(value: error.localizedDescription, key: "error")
+    let level_ = level
+    
+    // Handle Sentry reporting with proper isolation
+    if level == .error || level == .warning {
+      Task {
+        if level == .error, let error = error {
+          await SentryReporter.shared.reportError(
+            error,
+            message: message,
+            scope: scope_,
+            level: level_
+          )
+        } else {
+          await SentryReporter.shared.reportMessage(
+            message,
+            scope: scope_,
+            level: level_,
+            error: error
+          )
         }
       }
     }
@@ -148,5 +155,28 @@ extension Log: Logging {
     #if DEBUG
       log(message, level: .trace, file: file, function: function, line: line)
     #endif
+  }
+}
+
+// Create a dedicated actor for handling Sentry operations
+private actor SentryReporter {
+  static let shared = SentryReporter()
+  
+  func reportError(_ error: Error, message: String, scope: String, level: LogLevel) {
+    SentrySDK.capture(error: error) { sentryScope in
+      sentryScope.setLevel(level.sentryLevel)
+      sentryScope.setTag(value: scope, key: "scope")
+      sentryScope.setExtra(value: message, key: "message")
+    }
+  }
+  
+  func reportMessage(_ message: String, scope: String, level: LogLevel, error: Error?) {
+    SentrySDK.capture(message: message) { sentryScope in
+      sentryScope.setLevel(level.sentryLevel)
+      sentryScope.setTag(value: scope, key: "scope")
+      if let error {
+        sentryScope.setExtra(value: error.localizedDescription, key: "error")
+      }
+    }
   }
 }
