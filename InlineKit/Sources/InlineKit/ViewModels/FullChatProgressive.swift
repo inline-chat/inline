@@ -26,7 +26,7 @@ public class MessagesProgressiveViewModel {
   public var maxDate: Date = .init()
 
   // internals
-  private let initialLimit = 50
+  private let initialLimit = 80
   private let log = Log.scoped("MessagesViewModel", enableTracing: true)
   private let db = AppDatabase.shared
   private var cancellable = Set<AnyCancellable>()
