@@ -21,6 +21,7 @@ class MessageListAppKit: NSViewController {
   private var feature_updatesHeightsOnWidthChange = true
   private var feature_updatesHeightsOnOffsetChange = true
   private var feature_recalculatesHeightsWhileInitialScroll = true
+  private var feature_loadsMoreWhenApproachingTop = true
   
   // Debugging
   private var debug_slowAnimation = false
@@ -290,6 +291,11 @@ class MessageListAppKit: NSViewController {
     {
       recalculateHeightsOnWidthChange()
     }
+    
+    // Check if we're approaching the top
+    if feature_loadsMoreWhenApproachingTop && isUserScrolling && currentScrollOffset < viewportSize.height {
+      loadBatch(at: .top)
+    }
   }
 
   // Using CFAbsoluteTimeGetCurrent()
@@ -393,10 +399,39 @@ class MessageListAppKit: NSViewController {
     }
   }
   
+  private var loadingBatch = false
+  
+  // Currently only at top is supported.
+  func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) {
+    if direction != .top { return }
+    if loadingBatch { return }
+    loadingBatch = true
+    
+    Task {
+      // Preserve scroll position from bottom if we're loading at top
+      maintainingBottomScroll {
+        log.trace("Loading batch at top")
+        let prevCount = viewModel.messages.count
+        viewModel.loadBatch(at: direction)
+        let newCount = viewModel.messages.count
+        let diff = newCount - prevCount
+        
+        if diff > 0 {
+          let newIndexes = IndexSet(0 ..< diff)
+          tableView.beginUpdates()
+          tableView.insertRows(at: newIndexes, withAnimation: .none)
+          tableView.endUpdates()
+        }
+        
+        loadingBatch = false
+      }
+    }
+  }
+  
   func applyInitialData() {
     tableView.reloadData()
   }
-
+  
   func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
     log.trace("apply update called")
     
@@ -442,8 +477,33 @@ class MessageListAppKit: NSViewController {
       log.trace("reloading data")
       tableView.reloadData()
       if shouldScroll { scrollToBottom(animated: false) }
-      self.isPerformingUpdate = false
+      isPerformingUpdate = false
     }
+  }
+  
+  // TODO: probably can optimize this
+  private func maintainingBottomScroll(_ closure: () -> Void) {
+    guard let scrollView = tableView.enclosingScrollView else { return }
+    
+    // Capture current scroll position relative to bottom
+    let viewportHeight = scrollView.contentView.bounds.height
+    let contentHeight = scrollView.documentView?.frame.height ?? 0
+    let currentOffset = scrollView.contentView.bounds.origin.y
+    let distanceFromBottom = contentHeight - (currentOffset + viewportHeight)
+    
+    // Execute the closure that modifies the data
+    closure()
+    
+//    scrollView.layoutSubtreeIfNeeded()
+    
+    // Calculate and set new scroll position
+    let newContentHeight = scrollView.documentView?.frame.height ?? 0
+    let newOffset = newContentHeight - (distanceFromBottom + viewportHeight)
+      
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    scrollView.documentView?.scroll(NSPoint(x: 0, y: newOffset))
+    CATransaction.commit()
   }
   
 //  private var updateWorkItem: DispatchWorkItem?

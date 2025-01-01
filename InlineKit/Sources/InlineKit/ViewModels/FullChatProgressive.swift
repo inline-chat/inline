@@ -54,6 +54,21 @@ public class MessagesProgressiveViewModel {
     self.callback = callback
   }
 
+  public enum MessagesLoadDirection {
+    case top
+    case bottom
+  }
+
+  public func loadBatch(at direction: MessagesLoadDirection) {
+    // top id as cursor?
+    // firs try lets use date as cursor
+    let cursor = direction == .top ? minDate : maxDate
+    let limit = messages.count > 300 ? 400 : messages.count > 200 ? 300 : 100
+    let prepend = direction == .top
+    log.debug("Loading next batch at \(direction) \(cursor)")
+    loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend)
+  }
+
   public enum MessagesChangeSet {
     // TODO: case prepend...
     case added([FullMessage], indexSet: [Int])
@@ -132,6 +147,10 @@ public class MessagesProgressiveViewModel {
     messages = messages.sorted(by: { $0.message.date < $1.message.date })
   }
 
+  private func sort(batch: [FullMessage]) -> [FullMessage] {
+    batch.sorted(by: { $0.message.date < $1.message.date })
+  }
+
   // TODO: make it O(1) instead of O(n)
   private func updateRange() {
     var lowestDate = Date.distantFuture
@@ -168,21 +187,7 @@ public class MessagesProgressiveViewModel {
 
     do {
       let messagesBatch: [FullMessage] = try db.dbWriter.read { db in
-        // base query
-        var query = Message
-          .including(optional: Message.from)
-          .including(all: Message.reactions)
-          .asRequest(of: FullMessage.self)
-
-        switch peer {
-        case .thread(let id):
-          query = query
-            .filter(Column("peerThreadId") == id)
-
-        case .user(let id):
-          query = query
-            .filter(Column("peerUserId") == id)
-        }
+        var query = baseQuery()
 
         query = query.order(Column("date").desc)
 
@@ -210,6 +215,68 @@ public class MessagesProgressiveViewModel {
     } catch {
       Log.shared.error("Failed to get messages \(error)")
     }
+  }
+
+  private func loadAdditionalMessages(limit: Int, cursor: Date, prepend: Bool) {
+    let peer = self.peer
+
+    log
+      .debug(
+        "Loading additional messages for \(peer)"
+      )
+
+    do {
+      var messagesBatch: [FullMessage] = try db.dbWriter.read { db in
+        var query = baseQuery()
+
+        if prepend {
+          query = query.order(Column("date").desc)
+          query = query.filter(Column("date") <= cursor)
+        } else {
+          query = query.order(Column("date").asc)
+          query = query.filter(Column("date") >= cursor)
+        }
+
+        query = query.limit(limit)
+
+        return try query.fetchAll(db)
+      }
+
+      log.trace("loaded additional messages: \(messagesBatch.count)")
+
+      messagesBatch = sort(batch: messagesBatch)
+
+      // dedup those with exact date as cursor as they might be included in both
+      let existingMessagesAtCursor = Set(messages.filter { $0.message.date == cursor }.map { $0.id })
+      messagesBatch.removeAll { existingMessagesAtCursor.contains($0.id) }
+
+      if prepend {
+        messages.insert(contentsOf: messagesBatch, at: 0)
+      } else {
+        messages.append(contentsOf: messagesBatch)
+      }
+
+      updateRange()
+    } catch {
+      Log.shared.error("Failed to get messages \(error)")
+    }
+  }
+
+  private func baseQuery() -> QueryInterfaceRequest<FullMessage> {
+    var query = Message
+      .including(optional: Message.from)
+      .including(all: Message.reactions)
+      .asRequest(of: FullMessage.self)
+
+    switch peer {
+    case .thread(let id):
+      query = query
+        .filter(Column("peerThreadId") == id)
+    case .user(let id):
+      query = query
+        .filter(Column("peerUserId") == id)
+    }
+    return query
   }
 }
 
