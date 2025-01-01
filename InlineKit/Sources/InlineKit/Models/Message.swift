@@ -174,7 +174,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 // MARK: Helpers
 
 public extension Message {
-  mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort)
+  mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort, publishChanges: Bool = false)
     throws
   {
     var isExisting = false
@@ -202,13 +202,15 @@ public extension Message {
 
     try self.save(db, onConflict: .replace)
 
-    // Publish changes when save is successful
-    let message = self
-    DispatchQueue.main.async {
-      if isExisting {
-        MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
-      } else {
-        MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+    if publishChanges {
+      // Publish changes when save is successful
+      let message = self
+      DispatchQueue.main.async {
+        if isExisting {
+          MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+        } else {
+          MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+        }
       }
     }
   }

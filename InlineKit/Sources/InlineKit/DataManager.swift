@@ -399,6 +399,7 @@ public class DataManager: ObservableObject {
   ) async throws {
     let finalPeerUserId: Int64?
     let finalPeerThreadId: Int64?
+    var peerId_: Peer
 
     if let peerId = peerId {
       switch peerId {
@@ -409,9 +410,20 @@ public class DataManager: ObservableObject {
         finalPeerUserId = nil
         finalPeerThreadId = id
       }
+
+      peerId_ = peerId
     } else {
       finalPeerUserId = peerUserId
       finalPeerThreadId = peerThreadId
+
+      if let peerUserId = peerUserId {
+        peerId_ = .user(id: peerUserId)
+      } else if let peerThreadId = peerThreadId {
+        peerId_ = .thread(id: peerThreadId)
+      } else {
+        Log.shared.error("getChatHistory: peerId is nil")
+        return
+      }
     }
 
     log.debug(
@@ -422,45 +434,24 @@ public class DataManager: ObservableObject {
       peerUserId: finalPeerUserId,
       peerThreadId: finalPeerThreadId
     )
-    //    try await database.dbWriter.write { db in
-    //      let pendingMessages =
-    //        try Message
-    //          .filter(Column("out") == true)
-    //          .filter(Column("status") == MessageSendingStatus.sending.rawValue)
-    //          .filter(Column("peerUserId") == finalPeerUserId)
-    //          .filter(Column("peerThreadId") == finalPeerThreadId)
-    //          .fetchAll(db)
-    //
-    //      for var message in pendingMessages {
-    //        message.status = .failed
-    //        try message.save(db, onConflict: .replace)
-    //      }
-    //
-    //      let unsentMessages =
-    //        try Message
-    //          .filter(Column("out") == true)
-    //          .filter(Column("status") == nil)
-    //          .filter(Column("peerUserId") == finalPeerUserId)
-    //          .filter(Column("peerThreadId") == finalPeerThreadId)
-    //          .fetchAll(db)
-    //
-    //      for var message in unsentMessages {
-    //        message.status = .sent
-    //        try message.save(db, onConflict: .replace)
-    //      }
-    //    }
 
     try await database.dbWriter.write { db in
       for apiMessage in result.messages {
         do {
           var message = Message(from: apiMessage)
-          try message.saveMessage(db, onConflict: .replace)
+          try message.saveMessage(db, onConflict: .replace, publishChanges: false)
         } catch {
           Task {
             await self.log.error("failed to save message  from: \(apiMessage)", error: error)
           }
         }
       }
+    }
+
+    // Publish
+    // Reload messages
+    DispatchQueue.main.async {
+      MessagesPublisher.shared.messagesReload(peer: peerId_)
     }
   }
 
