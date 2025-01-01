@@ -41,11 +41,19 @@ class MessageViewAppKit: NSView {
   }
 
   private var textColor: NSColor {
-    outgoing ? NSColor.white : NSColor.labelColor
+    if hasBubble {
+      outgoing ? NSColor.white : NSColor.labelColor
+    } else {
+      NSColor.labelColor
+    }
   }
 
   private var linkColor: NSColor {
-    outgoing ? NSColor.white : NSColor.linkColor
+    if hasBubble {
+      outgoing ? NSColor.white : NSColor.linkColor
+    } else {
+      NSColor.linkColor
+    }
   }
 
   private var senderFont: NSFont {
@@ -224,7 +232,7 @@ class MessageViewAppKit: NSView {
       addSubview(nameLabel)
       let name = from.firstName ?? from.username ?? ""
       nameLabel.stringValue = outgoing ? "You" : name
-      
+
       if hasBubble {
         nameLabel.textColor = NSColor.lightGray
       } else {
@@ -259,6 +267,8 @@ class MessageViewAppKit: NSView {
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
     let sidePadding = Theme.messageSidePadding - bgPadding
     let senderNameLeadingPadding = hasBubble ? 6.0 : 0.0
+    let bubblePaddingVertical = hasBubble ? bubblePadding.height : 0.0
+    let bubblePaddingHorizontal = hasBubble ? bubblePadding.width : 0.0
 
     if props.firstInGroup {
       topPadding += Theme.messageGroupSpacing
@@ -279,7 +289,7 @@ class MessageViewAppKit: NSView {
         nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
         nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sidePadding),
         nameLabel.heightAnchor
-          .constraint(equalToConstant: Theme.messageNameLabelHeight),
+          .constraint(equalToConstant: Theme.messageNameLabelHeight)
       ])
     }
 
@@ -289,10 +299,10 @@ class MessageViewAppKit: NSView {
 
 //    let textViewSideConstraint = outgoing ?
 //      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding) :
-//      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + bubblePadding.width)
+//      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + bubblePaddingHorizontal)
 
     let textViewSideConstraint =
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + bubblePadding.width)
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + bubblePaddingHorizontal)
 
     textViewWidthConstraint = textView.widthAnchor.constraint(equalToConstant: textWidth)
     textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
@@ -302,7 +312,7 @@ class MessageViewAppKit: NSView {
         // Text view
         textView.topAnchor.constraint(
           equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
-          constant: showsName ? nameAndContentGap + bubblePadding.height : topPadding + bubblePadding.height
+          constant: showsName ? nameAndContentGap + bubblePaddingVertical : topPadding + bubblePaddingVertical
         ),
         textViewWidthConstraint,
         textViewHeightConstraint,
