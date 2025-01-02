@@ -20,7 +20,11 @@ extension ChatView {
   @ViewBuilder
   var sendButton: some View {
     Button {
-      fullChatViewModel.sendMessage(text: text)
+      let result = fullChatViewModel.sendMessage(text: text)
+      if result == true {
+        text = ""
+      }
+
     } label: {
       Circle()
         .fill(text.isEmpty ? Color(.systemGray5) : .blue)

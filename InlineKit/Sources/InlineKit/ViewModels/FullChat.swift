@@ -1,5 +1,6 @@
 import Combine
 import GRDB
+import SwiftUI
 
 public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
@@ -51,7 +52,10 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   // Descending order (newest first) if true
   private var reversed: Bool
 
-  public init(db: AppDatabase, peer: Peer, reversed: Bool = true, limit: Int? = nil, fetchesMessages: Bool = true) {
+  public init(
+    db: AppDatabase, peer: Peer, reversed: Bool = true, limit: Int? = nil,
+    fetchesMessages: Bool = true
+  ) {
     self.db = db
     self.peer = peer
     self.reversed = reversed
@@ -104,15 +108,15 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   }
 
   // Send message
-  public func sendMessage(text: String) {
+  public func sendMessage(text: String) -> Bool? {
     guard let chatId = chat?.id else {
       Log.shared.warning("Chat ID is nil, cannot send message")
-      return
+      return nil
     }
-
     let messageText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
     do {
-      guard !messageText.isEmpty else { return }
+      guard !messageText.isEmpty else { return nil }
 
       let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
       let peerThreadId: Int64? = if case .thread(let id) = peer { id } else { nil }
@@ -158,5 +162,6 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
       Log.shared.error("Failed to send message A", error: error)
       // Optionally show error to user
     }
+    return true
   }
 }
