@@ -1,6 +1,12 @@
 import InlineKit
 import UIKit
 
+private let dateFormatter: DateFormatter = {
+  let formatter = DateFormatter()
+  formatter.dateFormat = "HH:mm"
+  return formatter
+}()
+
 class MessageMetadata: UIView {
   private let symbolSize: CGFloat = 12
 
@@ -15,8 +21,6 @@ class MessageMetadata: UIView {
     let imageView = UIImageView()
     imageView.contentMode = .scaleAspectFit
     imageView.translatesAutoresizingMaskIntoConstraints = false
-
-    // Set fixed width and height constraints
     imageView.setContentHuggingPriority(.required, for: .horizontal)
     imageView.setContentCompressionResistancePriority(.required, for: .horizontal)
     return imageView
@@ -31,10 +35,12 @@ class MessageMetadata: UIView {
     return stack
   }()
 
-  init(date: Date, status: MessageSendingStatus?, isOutgoing: Bool) {
+  init(_ message: FullMessage) {
     super.init(frame: .zero)
     setupViews()
-    configure(date: date, status: status, isOutgoing: isOutgoing)
+    configure(
+      date: message.message.date, status: message.message.status,
+      isOutgoing: message.message.out ?? false)
   }
 
   @available(*, unavailable)
@@ -53,15 +59,12 @@ class MessageMetadata: UIView {
       stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
       stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-      // Add fixed width and height constraints for statusImageView
       statusImageView.widthAnchor.constraint(equalToConstant: symbolSize),
-      statusImageView.heightAnchor.constraint(equalToConstant: symbolSize)
+      statusImageView.heightAnchor.constraint(equalToConstant: symbolSize),
     ])
   }
 
   func configure(date: Date, status: MessageSendingStatus?, isOutgoing: Bool) {
-    let dateFormatter = DateFormatter()
-    dateFormatter.dateFormat = "HH:mm"
     dateLabel.text = dateFormatter.string(from: date)
     dateLabel.textColor = isOutgoing ? UIColor.white.withAlphaComponent(0.7) : .gray
 
@@ -71,20 +74,17 @@ class MessageMetadata: UIView {
       let imageName: String
       let symbolConfig = UIImage.SymbolConfiguration(pointSize: symbolSize)
         .applying(UIImage.SymbolConfiguration(weight: .medium))
+
       switch status {
-      case .sent:
-        imageName = "checkmark"
-      case .sending:
-        imageName = "clock"
-      case .failed:
-        imageName = "exclamationmark"
-      case .none:
-        imageName = ""
+      case .sent: imageName = "checkmark"
+      case .sending: imageName = "clock"
+      case .failed: imageName = "exclamationmark"
+      case .none: imageName = ""
       }
 
       statusImageView.image = UIImage(systemName: imageName)?
         .withConfiguration(symbolConfig)
-        .withAlignmentRectInsets(.init(top: 0, left: -2, bottom: 0, right: -2)) // Fine-tune alignment if needed
+        .withAlignmentRectInsets(.init(top: 0, left: -2, bottom: 0, right: -2))
 
       statusImageView.tintColor =
         status == .failed
@@ -95,61 +95,3 @@ class MessageMetadata: UIView {
     }
   }
 }
-
-#if DEBUG
-import SwiftUI
-
-struct MessageMetadataPreview: PreviewProvider {
-  static var previews: some View {
-    VStack(spacing: 20) {
-      // Outgoing message status previews
-      HStack {
-        Spacer()
-        UIViewPreview {
-          MessageMetadata(date: Date(), status: .sending, isOutgoing: true)
-        }
-      }
-      HStack {
-        Spacer()
-        UIViewPreview {
-          MessageMetadata(date: Date(), status: .sent, isOutgoing: true)
-        }
-      }
-      HStack {
-        Spacer()
-        UIViewPreview {
-          MessageMetadata(date: Date(), status: .failed, isOutgoing: true)
-        }
-      }
-
-      // Incoming message status preview
-      HStack {
-        UIViewPreview {
-          MessageMetadata(date: Date(), status: nil, isOutgoing: false)
-        }
-        Spacer()
-      }
-    }
-    .padding()
-    .background(Color(.systemBackground))
-    .previewLayout(.sizeThatFits)
-  }
-}
-
-// Helper struct to wrap UIView for SwiftUI previews
-struct UIViewPreview<View: UIView>: UIViewRepresentable {
-  let view: View
-
-  init(_ builder: @escaping () -> View) {
-    view = builder()
-  }
-
-  func makeUIView(context: Context) -> some UIView {
-    return view
-  }
-
-  func updateUIView(_ uiView: UIViewType, context: Context) {
-    // No updates needed
-  }
-}
-#endif

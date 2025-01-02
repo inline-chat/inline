@@ -13,51 +13,51 @@ class UIMessageView: UIView {
     label.numberOfLines = 0
     label.font = .systemFont(ofSize: 17)
     label.textAlignment = .natural
+    label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
 
   private let bubbleView: UIView = {
     let view = UIView()
     view.layer.cornerRadius = 18
+    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
-  private let metadataView: MessageMetadata = {
-    let metadata = MessageMetadata(date: Date(), status: nil, isOutgoing: false)
-    return metadata
-  }()
-
-  private lazy var contentStack: UIStackView = {
-    let stack = UIStackView()
-    stack.axis = .vertical
-    stack.spacing = 4
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
-  }()
-
-  private lazy var shortMessageStack: UIStackView = {
-    let stack = UIStackView()
-    stack.axis = .horizontal
-    stack.spacing = 8
-    stack.alignment = .center
-    return stack
-  }()
-
-  private var leadingConstraint: NSLayoutConstraint?
-  private var trailingConstraint: NSLayoutConstraint?
   var fullMessage: FullMessage
 
-  private let horizontalPadding: CGFloat = 12
-  private let verticalPadding: CGFloat = 8
+  var outgoing: Bool {
+    fullMessage.message.out == true
+  }
+
+  private var bubbleColor: UIColor {
+    outgoing ? ColorManager.shared.selectedColor : UIColor.systemGray5.withAlphaComponent(0.4)
+  }
+
+  private var textColor: UIColor {
+    outgoing ? .white : .label
+  }
+
+  private var message: Message {
+    fullMessage.message
+  }
+
+  private let metadataView: MessageMetadata
+
+  private var multiline: Bool {
+    guard let text = message.text else { return false }
+    return text.count > 24 || text.contains("\n")
+  }
 
   // MARK: - Initialization
 
   init(fullMessage: FullMessage) {
     self.fullMessage = fullMessage
+    self.metadataView = MessageMetadata(fullMessage)
+    metadataView.translatesAutoresizingMaskIntoConstraints = false
     super.init(frame: .zero)
 
     setupViews()
-    configureForMessage()
   }
 
   @available(*, unavailable)
@@ -69,94 +69,69 @@ class UIMessageView: UIView {
 
   private func setupViews() {
     addSubview(bubbleView)
-    bubbleView.translatesAutoresizingMaskIntoConstraints = false
+    bubbleView.addSubview(messageLabel)
+    bubbleView.addSubview(metadataView)
 
-    bubbleView.addSubview(contentStack)
-
-    leadingConstraint = bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8)
-    trailingConstraint = bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8)
-
-    NSLayoutConstraint.activate([
-      bubbleView.topAnchor.constraint(equalTo: topAnchor),
-      bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
-
-      contentStack.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: verticalPadding),
-      contentStack.leadingAnchor.constraint(
-        equalTo: bubbleView.leadingAnchor, constant: horizontalPadding
-      ),
-      contentStack.trailingAnchor.constraint(
-        equalTo: bubbleView.trailingAnchor, constant: -horizontalPadding
-      ),
-      contentStack.bottomAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor, constant: -verticalPadding
-      ),
-    ])
-
+    setupAppearance()
+    setupConstraints()
     setupContextMenu()
+  }
+
+  private func setupConstraints() {
+    let messageConstraints =
+      multiline ? setupMultilineMessageConstraints() : setupOneLineMessageConstraints()
+
+    NSLayoutConstraint.activate(
+      [
+        // Bubble view constraints
+        bubbleView.topAnchor.constraint(equalTo: topAnchor),
+        bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.95),
+      ] + messageConstraints)
+
+    if outgoing {
+      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8).isActive = true
+    } else {
+      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8).isActive = true
+    }
+  }
+
+  private func setupMultilineMessageConstraints() -> [NSLayoutConstraint] {
+    return [
+      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 14),
+      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -14),
+      messageLabel.bottomAnchor.constraint(equalTo: metadataView.topAnchor, constant: -2),
+
+      metadataView.leadingAnchor.constraint(
+        greaterThanOrEqualTo: bubbleView.leadingAnchor, constant: 14),
+      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -14),
+      metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -8),
+    ]
+  }
+
+  private func setupOneLineMessageConstraints() -> [NSLayoutConstraint] {
+    return [
+      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 14),
+      messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -8),
+
+      metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
+      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -14),
+      metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
+    ]
+  }
+
+  private func setupAppearance() {
+    messageLabel.text = message.text
+    bubbleView.backgroundColor = bubbleColor
+    messageLabel.textColor = textColor
   }
 
   private func setupContextMenu() {
     let interaction = UIContextMenuInteraction(delegate: self)
     self.interaction = interaction
     bubbleView.addInteraction(interaction)
-  }
-
-  private func updateMetadataLayout() {
-    contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-    shortMessageStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-    let messageLength = fullMessage.message.text?.count ?? 0
-    let messageText = fullMessage.message.text ?? ""
-    let hasLineBreak = messageText.contains("\n")
-
-    if messageLength > 22 || hasLineBreak {
-      contentStack.addArrangedSubview(messageLabel)
-
-      let metadataContainer = UIView()
-      metadataContainer.addSubview(metadataView)
-      metadataView.translatesAutoresizingMaskIntoConstraints = false
-
-      NSLayoutConstraint.activate([
-        metadataView.trailingAnchor.constraint(equalTo: metadataContainer.trailingAnchor),
-        metadataView.topAnchor.constraint(equalTo: metadataContainer.topAnchor),
-        metadataView.bottomAnchor.constraint(equalTo: metadataContainer.bottomAnchor),
-      ])
-
-      contentStack.addArrangedSubview(metadataContainer)
-    } else {
-      shortMessageStack.addArrangedSubview(messageLabel)
-      shortMessageStack.addArrangedSubview(metadataView)
-      contentStack.addArrangedSubview(shortMessageStack)
-    }
-  }
-
-  private func configureForMessage() {
-    messageLabel.text = fullMessage.message.text
-
-    if fullMessage.message.out == true {
-      bubbleView.backgroundColor = ColorManager.shared.selectedColor
-      leadingConstraint?.isActive = false
-      trailingConstraint?.isActive = true
-      messageLabel.textColor = .white
-      metadataView.configure(
-        date: fullMessage.message.date,
-        status: fullMessage.message.status,
-        isOutgoing: true
-      )
-    } else {
-      bubbleView.backgroundColor = UIColor.systemGray5.withAlphaComponent(0.4)
-      leadingConstraint?.isActive = true
-      trailingConstraint?.isActive = false
-      messageLabel.textColor = .label
-      metadataView.configure(
-        date: fullMessage.message.date,
-        status: nil,
-        isOutgoing: false
-      )
-    }
-
-    updateMetadataLayout()
   }
 }
 
@@ -165,20 +140,13 @@ class UIMessageView: UIView {
 extension UIMessageView: UIContextMenuInteractionDelegate {
   func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction,
-    configurationForMenuAtLocation location: CGPoint
-  ) -> UIContextMenuConfiguration? {
+    configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration?
+  {
     return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
       guard let self else { return nil }
 
       let copyAction = UIAction(title: "Copy") { _ in
-        UIPasteboard.general.string = self.fullMessage.message.text
-      }
-
-      let replyAction = UIAction(title: "Reply") { _ in
-        ChatState.shared.setReplyingMessageId(
-          chatId: self.fullMessage.message.chatId ?? 0,
-          id: self.fullMessage.message.id ?? 0
-        )
+        UIPasteboard.general.string = self.message.text
       }
 
       return UIMenu(children: [copyAction])

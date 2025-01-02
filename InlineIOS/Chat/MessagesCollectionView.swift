@@ -175,7 +175,7 @@ extension MessagesCollectionView {
         snapshot.deleteItems(ids)
 
         dataSource.apply(snapshot, animatingDifferences: true)
-      case .updated(let newMessages, _):
+      case .updated(let newMessages, let indexPaths):
 
         var snapshot = dataSource.snapshot()
         let ids = newMessages.map { $0.id }
@@ -183,6 +183,7 @@ extension MessagesCollectionView {
         snapshot.reconfigureItems(ids)
 
         dataSource.apply(snapshot, animatingDifferences: false)
+
       case .reload:
         currentCollectionView?.reloadData()
       }

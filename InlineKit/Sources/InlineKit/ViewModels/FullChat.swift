@@ -108,15 +108,16 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   }
 
   // Send message
-  public func sendMessage(text: String) -> Bool? {
+  public func sendMessage(text: String) -> Bool {
     guard let chatId = chat?.id else {
       Log.shared.warning("Chat ID is nil, cannot send message")
-      return nil
+      return false
     }
     let messageText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let canSend = !messageText.isEmpty
 
     do {
-      guard !messageText.isEmpty else { return nil }
+      guard canSend else { return false }
 
       let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
       let peerThreadId: Int64? = if case .thread(let id) = peer { id } else { nil }
