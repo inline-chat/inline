@@ -106,7 +106,6 @@ extension MessagesCollectionView {
       > { [weak self] cell, _, messageId in
         guard let self, let message = viewModel.messagesByID[messageId] else { return }
 
-        print("ADDING CELL")
         cell.configure(with: message, topPadding: 2, bottomPadding: 0)
       }
 
@@ -158,7 +157,7 @@ extension MessagesCollectionView {
 
     func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
       switch update {
-      case .added(let newMessages, let indexSet):
+      case .added(let newMessages, _):
         // get current snapshot and append new items
         var snapshot = dataSource.snapshot()
         let ids = newMessages.map { $0.id }
@@ -170,13 +169,21 @@ extension MessagesCollectionView {
         }
 
         dataSource.apply(snapshot, animatingDifferences: true)
-      case .deleted(_, let indexSet):
-        print("deleted")
-      case .updated(_, let indexSet):
-        print("updated")
+      case .deleted(let ids, _):
+        var snapshot = dataSource.snapshot()
 
+        snapshot.deleteItems(ids)
+
+        dataSource.apply(snapshot, animatingDifferences: true)
+      case .updated(let newMessages, _):
+
+        var snapshot = dataSource.snapshot()
+        let ids = newMessages.map { $0.id }
+
+        snapshot.reconfigureItems(ids)
+
+        dataSource.apply(snapshot, animatingDifferences: false)
       case .reload:
-        print("reload")
         currentCollectionView?.reloadData()
       }
     }

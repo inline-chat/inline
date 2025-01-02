@@ -379,7 +379,6 @@ public class DataManager: ObservableObject {
       if randomId == nil {
         try await database.dbWriter.write { db in
           var message = Message(from: result.message)
-          message.status = .sent
 
           do {
             try message.save(db)

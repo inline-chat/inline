@@ -84,11 +84,17 @@ struct UpdateMessageId: Codable {
       if var message = message {
         message.status = .sent
         message.messageId = self.messageId
-        try message.save(db)
+//        try message.save(db)
+        try message
+          .saveMessage(
+            db,
+            onConflict: .ignore,
+            publishChanges: true
+          )
 
-        DispatchQueue.main.async {
-          MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
-        }
+//        DispatchQueue.main.async {
+//          MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+//        }
 
         // TODO: optimize this to update in one go
         var chat = try Chat.fetchOne(db, id: message.chatId)
