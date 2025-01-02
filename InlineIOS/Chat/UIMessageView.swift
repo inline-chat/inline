@@ -101,12 +101,12 @@ class UIMessageView: UIView {
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 14),
       messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -14),
-      messageLabel.bottomAnchor.constraint(equalTo: metadataView.topAnchor, constant: -2),
+      messageLabel.bottomAnchor.constraint(equalTo: metadataView.topAnchor, constant: -8),
 
       metadataView.leadingAnchor.constraint(
         greaterThanOrEqualTo: bubbleView.leadingAnchor, constant: 14),
       metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -14),
-      metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -8),
+      metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -14),
     ]
   }
 

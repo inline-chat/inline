@@ -26,21 +26,30 @@ class MessageMetadata: UIView {
     return imageView
   }()
 
-  private let stackView: UIStackView = {
-    let stack = UIStackView()
-    stack.axis = .horizontal
-    stack.spacing = 4
-    stack.alignment = .center
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
-  }()
+  let fullMessage: FullMessage
+
+  var message: Message {
+    fullMessage.message
+  }
+
+  var outgoing: Bool {
+    message.out ?? false
+  }
+
+  var textColor: UIColor {
+    outgoing ? UIColor.white.withAlphaComponent(0.7) : .gray
+  }
+
+  var imageColor: UIColor {
+    message.status == .failed
+      ? (outgoing ? UIColor.white.withAlphaComponent(0.7) : .red)
+      : (outgoing ? UIColor.white.withAlphaComponent(0.7) : .gray)
+  }
 
   init(_ message: FullMessage) {
+    fullMessage = message
     super.init(frame: .zero)
     setupViews()
-    configure(
-      date: message.message.date, status: message.message.status,
-      isOutgoing: message.message.out ?? false)
   }
 
   @available(*, unavailable)
@@ -49,33 +58,38 @@ class MessageMetadata: UIView {
   }
 
   private func setupViews() {
-    addSubview(stackView)
-    stackView.addArrangedSubview(dateLabel)
-    stackView.addArrangedSubview(statusImageView)
+    addSubview(dateLabel)
+    addSubview(statusImageView)
 
+    setupConstraints()
+    setupAppearance()
+  }
+
+  func setupConstraints() {
     NSLayoutConstraint.activate([
-      stackView.topAnchor.constraint(equalTo: topAnchor),
-      stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      dateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+      dateLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
 
+      statusImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      statusImageView.leadingAnchor.constraint(equalTo: dateLabel.trailingAnchor, constant: 4),
+      statusImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       statusImageView.widthAnchor.constraint(equalToConstant: symbolSize),
       statusImageView.heightAnchor.constraint(equalToConstant: symbolSize),
     ])
   }
 
-  func configure(date: Date, status: MessageSendingStatus?, isOutgoing: Bool) {
-    dateLabel.text = dateFormatter.string(from: date)
-    dateLabel.textColor = isOutgoing ? UIColor.white.withAlphaComponent(0.7) : .gray
+  func setupAppearance() {
+    dateLabel.text = dateFormatter.string(from: message.date)
+    dateLabel.textColor = textColor
 
-    if isOutgoing && status != nil {
+    if message.status != nil {
       statusImageView.isHidden = false
 
       let imageName: String
       let symbolConfig = UIImage.SymbolConfiguration(pointSize: symbolSize)
         .applying(UIImage.SymbolConfiguration(weight: .medium))
 
-      switch status {
+      switch message.status {
       case .sent: imageName = "checkmark"
       case .sending: imageName = "clock"
       case .failed: imageName = "exclamationmark"
@@ -86,10 +100,7 @@ class MessageMetadata: UIView {
         .withConfiguration(symbolConfig)
         .withAlignmentRectInsets(.init(top: 0, left: -2, bottom: 0, right: -2))
 
-      statusImageView.tintColor =
-        status == .failed
-          ? (isOutgoing ? UIColor.white.withAlphaComponent(0.7) : .red)
-          : (isOutgoing ? UIColor.white.withAlphaComponent(0.7) : .gray)
+      statusImageView.tintColor = imageColor
     } else {
       statusImageView.isHidden = true
     }
