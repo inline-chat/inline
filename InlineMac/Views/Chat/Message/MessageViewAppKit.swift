@@ -255,11 +255,7 @@ class MessageViewAppKit: NSView {
   private var textViewHeightConstraint: NSLayoutConstraint!
 
   private func setupConstraints() {
-    // var topSpacing = props.isFirstMessage ? Theme.messageListTopInset : 0.0
-    // let bottomSpacing = props.isLastMessage ? Theme.messageListBottomInset : 0.0
-
     var topPadding = Theme.messageVerticalPadding
-    let bottomPadding = Theme.messageVerticalPadding
     let nameAndContentGap = Theme.messageVerticalStackSpacing
     let bgPadding = 0.0
     let bubblePadding = Theme.messageBubblePadding
@@ -292,14 +288,6 @@ class MessageViewAppKit: NSView {
           .constraint(equalToConstant: Theme.messageNameLabelHeight)
       ])
     }
-
-//    let textViewSideConstraint = props.isRtl ?
-//      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding) :
-//      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading)
-
-//    let textViewSideConstraint = outgoing ?
-//      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding) :
-//      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + bubblePaddingHorizontal)
 
     let textViewSideConstraint =
       textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + bubblePaddingHorizontal)
