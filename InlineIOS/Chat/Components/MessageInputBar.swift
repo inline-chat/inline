@@ -42,9 +42,17 @@ struct MessageInputBar: View {
       .animation(.smoothSnappy, value: textViewHeight)
       .animation(.smoothSnappy, value: text.isEmpty)
 
-      Button("Send") {
-        onSend()
+      Button { onSend()
         text = ""
+      } label: {
+        Circle()
+          .fill(text.isEmpty ? Color(.systemGray5) : .blue)
+          .frame(width: 28, height: 28)
+          .overlay {
+            Image(systemName: "arrow.up")
+              .font(.callout)
+              .foregroundStyle(text.isEmpty ? Color(.tertiaryLabel) : .white)
+          }
       }
       .padding(.bottom, 6)
     }
