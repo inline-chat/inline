@@ -9,8 +9,7 @@ import CoreHaptics
 import SwiftUI
 
 struct Welcome: View {
-
-  let fullText = "Welcome to Inline"
+  let fullText = NSLocalizedString("Key", comment: "Welcome to Inline")
   let typingSpeed: TimeInterval = 0.08
 
   @State private var engine: CHHapticEngine?
@@ -41,10 +40,10 @@ struct Welcome: View {
     }
     .navigationBarBackButtonHidden()
   }
-
 }
 
 // MARK: - Views
+
 extension Welcome {
   @ViewBuilder
   var heading: some View {
@@ -79,7 +78,7 @@ extension Welcome {
 
   @ViewBuilder
   var bottomArea: some View {
-    Button("Continue") {
+    Button("Get Started") {
       submit()
     }
     .buttonStyle(SimpleButtonStyle())
@@ -100,12 +99,15 @@ extension Welcome {
     }
   }
 }
+
 // MARK: - Helper Methods
+
 extension Welcome {
   private func submit() {
     displayedText = ""
     nav.push(.email())
   }
+
   private func animateText() {
     guard !animationCompleted else { return }
 
@@ -132,10 +134,10 @@ extension Welcome {
       }
     }
   }
-
 }
 
 // MARK: - Haptic setup
+
 extension Welcome {
   private func prepareHaptics() {
     guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
@@ -148,7 +150,7 @@ extension Welcome {
   }
 
   private func playHapticFeedback() {
-    guard CHHapticEngine.capabilitiesForHardware().supportsHaptics && !animationCompleted else {
+    guard CHHapticEngine.capabilitiesForHardware().supportsHaptics, !animationCompleted else {
       return
     }
 
