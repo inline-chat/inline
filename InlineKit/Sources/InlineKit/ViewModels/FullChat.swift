@@ -131,7 +131,8 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         peerUserId: peerUserId,
         peerThreadId: peerThreadId,
         chatId: chatId,
-        out: true
+        out: true,
+        status: .sending
       )
 
       // When I remove this task, or make it a sync call, I get frame drops in very fast sending
