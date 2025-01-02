@@ -218,29 +218,29 @@ extension MessagesCollectionView {
     //
     //    // MARK: - UICollectionViewDelegateFlowLayout
     //
-    //    func collectionView(
-    //      _ collectionView: UICollectionView,
-    //      layout collectionViewLayout: UICollectionViewLayout,
-    //      sizeForItemAt indexPath: IndexPath
-    //    ) -> CGSize {
-    //      guard indexPath.item < fullMessages.count else {
-    //        return .zero
-    //      }
-    //
-    //      let availableWidth = collectionView.bounds.width - 16
-    //
-    //      let cell = MessageCollectionViewCell(frame: .zero)
-    //      let message = fullMessages[indexPath.item]
-    //      cell.configure(with: message, topPadding: 2, bottomPadding: 0)
-    //
-    //      let size = cell.contentView.systemLayoutSizeFitting(
-    //        CGSize(width: availableWidth, height: 0),
-    //        withHorizontalFittingPriority: .required,
-    //        verticalFittingPriority: .fittingSizeLevel
-    //      )
-    //
-    //      return size
-    //    }
+    func collectionView(
+      _ collectionView: UICollectionView,
+      layout collectionViewLayout: UICollectionViewLayout,
+      sizeForItemAt indexPath: IndexPath
+    ) -> CGSize {
+      guard indexPath.item < messages.count else {
+        return .zero
+      }
+
+      let availableWidth = collectionView.bounds.width - 16
+
+      let cell = MessageCollectionViewCell(frame: .zero)
+      let message = messages[indexPath.item]
+      cell.configure(with: message, topPadding: 2, bottomPadding: 0)
+
+      let size = cell.contentView.systemLayoutSizeFitting(
+        CGSize(width: availableWidth, height: 0),
+        withHorizontalFittingPriority: .required,
+        verticalFittingPriority: .fittingSizeLevel
+      )
+
+      return size
+    }
 
     func collectionView(
       _ collectionView: UICollectionView,
