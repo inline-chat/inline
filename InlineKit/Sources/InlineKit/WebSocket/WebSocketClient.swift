@@ -331,7 +331,7 @@ extension WebSocketClient {
   }
 
   func send<T: Codable>(_ message: ClientMessage<T>) async throws {
-    log.debug("sending message \(message)")
+//    log.debug("sending message \(message)")
 
     let encoder = JSONEncoder()
     // Configure encoder for better JSON formatting

@@ -438,7 +438,7 @@ class MessageListAppKit: NSViewController {
   }
   
   func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
-    log.trace("apply update called")
+//    log.trace("apply update called")
     
     isPerformingUpdate = true
     

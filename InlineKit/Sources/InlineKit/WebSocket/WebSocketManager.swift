@@ -100,7 +100,7 @@ public final class WebSocketManager: ObservableObject {
   private func processMessage(_ message: WebSocketMessage) {
     switch message {
     case .string(let text):
-      log.trace("received string \(text)")
+//      log.trace("received string \(text)")
       // Decode message as update
       if let serverMessage = decodeServerMessage(data: text) {
         switch serverMessage.k {
@@ -133,7 +133,7 @@ public final class WebSocketManager: ObservableObject {
   }
 
   func send(_ text: String) async throws {
-    log.debug("sending message \(text)")
+//    log.debug("sending message \(text)")
     try await client?.send(text: text)
   }
 

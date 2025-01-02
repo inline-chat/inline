@@ -8,20 +8,20 @@ actor UpdatesManager {
   private var log = Log.scoped("Updates")
 
   func apply(update: Update, db: Database) throws {
-    self.log.debug("apply update")
+//    self.log.debug("apply update")
 
     do {
       if let update = update.newMessage {
-        self.log.debug("applying new message")
+//        self.log.debug("applying new message")
         try update.apply(db: db)
       } else if let update = update.updateMessageId {
-        self.log.debug("applying update message id")
+//        self.log.debug("applying update message id")
         try update.apply(db: db)
       } else if let update = update.updateUserStatus {
-        self.log.debug("applying update user status")
+//        self.log.debug("applying update user status")
         try update.apply(db: db)
       } else if let update = update.updateComposeAction {
-        self.log.debug("applying update compose action")
+//        self.log.debug("applying update compose action")
         update.apply()
       }
     } catch {

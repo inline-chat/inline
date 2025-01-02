@@ -86,7 +86,7 @@ public class MessagesProgressiveViewModel {
   }
 
   private func applyChanges(update: MessagesPublisher.UpdateType) -> MessagesChangeSet? {
-    log.trace("Applying changes: \(update)")
+//    log.trace("Applying changes: \(update)")
     switch update {
     case .add(let messageAdd):
       if messageAdd.peer == peer {

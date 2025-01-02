@@ -23,15 +23,15 @@ public class DataManager: ObservableObject {
   public static let shared = DataManager(database: AppDatabase.shared)
 
   public func fetchMe() async throws -> User {
-    log.debug("fetchMe")
+//    log.debug("fetchMe")
     do {
       let result = try await ApiClient.shared.getMe()
-      log.trace("fetchMe result: \(result)")
+//      log.trace("fetchMe result: \(result)")
       let user = User(from: result.user)
       try await database.dbWriter.write { db in
         try user.save(db)
       }
-      log.trace("currentUserId: \(Auth.shared.getCurrentUserId() ?? Int64.min)")
+//      log.trace("currentUserId: \(Auth.shared.getCurrentUserId() ?? Int64.min)")
       return user
     } catch {
       Log.shared.error("Error fetching user", error: error)
