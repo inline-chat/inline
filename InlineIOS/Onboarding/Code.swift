@@ -19,7 +19,7 @@ struct Code: View {
   @EnvironmentObject var api: ApiClient
   @EnvironmentObject var userData: UserData
   @EnvironmentObject var mainViewRouter: MainViewRouter
-
+  @EnvironmentObject var ws: WebSocketManager
   @Environment(\.appDatabase) var database
   @Environment(\.auth) private var auth
 
@@ -57,12 +57,15 @@ extension Code {
       do {
         formState.startLoading()
         let result = try await api.verifyCode(code: code, email: email)
-        
+
         auth.saveToken(result.token)
         auth.saveCurrentUserId(userId: result.userId)
 
         do {
           try await AppDatabase.authenticated()
+
+          // Establish WebSocket connection
+          ws.authenticated()
         } catch {
           Log.shared.error("Failed to setup database or save user", error: error)
         }
