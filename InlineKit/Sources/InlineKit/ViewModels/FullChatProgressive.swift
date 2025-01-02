@@ -44,7 +44,7 @@ public class MessagesProgressiveViewModel {
     MessagesPublisher.shared.publisher
       .sink { [weak self] update in
         guard let self = self else { return }
-        Log.shared.debug("Received update \(update)")
+//        Log.shared.debug("Received update \(update)")
         if let changeset = applyChanges(update: update) {
           callback?(changeset)
         }
@@ -73,7 +73,7 @@ public class MessagesProgressiveViewModel {
     let cursor = direction == .top ? minDate : maxDate
     let limit = messages.count > 300 ? 400 : messages.count > 200 ? 300 : 100
     let prepend = direction == (reversed ? .bottom : .top)
-    log.debug("Loading next batch at \(direction) \(cursor)")
+//    log.debug("Loading next batch at \(direction) \(cursor)")
     loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend)
   }
 
@@ -186,7 +186,7 @@ public class MessagesProgressiveViewModel {
     minDate = lowestDate
     maxDate = highestDate
 
-    log.trace("Updated range: \(lowestDate) - \(highestDate), (count: \(messages.count))")
+//    log.trace("Updated range: \(lowestDate) - \(highestDate), (count: \(messages.count))")
   }
 
   private func refetchCurrentRange() {
@@ -228,7 +228,7 @@ public class MessagesProgressiveViewModel {
         return try query.fetchAll(db)
       }
 
-      log.trace("loaded messages: \(messagesBatch.count)")
+//      log.trace("loaded messages: \(messagesBatch.count)")
       if reversed {
         // it's actually already reversed bc of our .order above
         messages = messagesBatch
@@ -270,7 +270,7 @@ public class MessagesProgressiveViewModel {
         return try query.fetchAll(db)
       }
 
-      log.trace("loaded additional messages: \(messagesBatch.count)")
+//      log.trace("loaded additional messages: \(messagesBatch.count)")
 
       messagesBatch = sort(batch: messagesBatch)
 
@@ -343,7 +343,7 @@ public final class MessagesPublisher {
 
   // Static methods to publish update
   func messageAdded(message: Message, peer: Peer) {
-    Log.shared.debug("Message added: \(message)")
+//    Log.shared.debug("Message added: \(message)")
     do {
       let fullMessage = try db.reader.read { db in
         try Message
@@ -369,7 +369,7 @@ public final class MessagesPublisher {
   }
 
   func messageUpdated(message: Message, peer: Peer) {
-    Log.shared.debug("Message updated: \(message.messageId)")
+//    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? db.reader.read { db in
       try Message
         .filter(Column("messageId") == message.messageId)
