@@ -12,7 +12,7 @@ class ChatViewAppKit: NSView {
   }()
   
   private lazy var compose: ComposeAppKit = {
-    let compose = ComposeAppKit(peerId: self.peerId)
+    let compose = ComposeAppKit(peerId: self.peerId, messageList: messageList)
 
     return compose
   }()
@@ -50,6 +50,7 @@ class ChatViewAppKit: NSView {
       messageListView.topAnchor.constraint(equalTo: topAnchor),
       messageListView.leadingAnchor.constraint(equalTo: leadingAnchor),
       messageListView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      messageListView.bottomAnchor.constraint(equalTo: bottomAnchor),
       
       // compose
       composeView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -57,18 +58,13 @@ class ChatViewAppKit: NSView {
       composeView.trailingAnchor.constraint(equalTo: trailingAnchor),
       
       // Vertical stack
-      composeView.topAnchor.constraint(equalTo: messageListView.bottomAnchor),
+//      composeView.topAnchor.constraint(equalTo: messageListView.bottomAnchor),
     ])
   }
   
-  func update(messages: [FullMessage]) {
-//    messageList.update(with: messages)
-  }
+  func update(messages: [FullMessage]) {}
   
   func update(viewModel: FullChatViewModel) {
-    // Update messages
-//    messageList.update(with: viewModel.fullMessages)
-    
     // Update compose
     compose.update(viewModel: viewModel)
   }

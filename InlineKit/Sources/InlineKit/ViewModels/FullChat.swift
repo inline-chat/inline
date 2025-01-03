@@ -144,7 +144,6 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         MessagesPublisher.shared.messageAdded(message: newMessage, peer: peer)
       }
 
-      // TODO: Scroll to bottom
       Task {
         do {
           try await DataManager.shared.sendMessage(

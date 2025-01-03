@@ -3,9 +3,13 @@ import InlineKit
 import SwiftUI
 
 class ComposeAppKit: NSView {
+  
   private var peerId: Peer
   private var chatId: Int64?
+  
+  private weak var messageList: MessageListAppKit?
   private var viewModel: FullChatViewModel?
+  
   private var heightConstraint: NSLayoutConstraint!
   private var minHeight = Theme.composeMinHeight
   private var verticalPadding = Theme.composeVerticalPadding
@@ -13,7 +17,7 @@ class ComposeAppKit: NSView {
   private var prevTextHeight: CGFloat = 0.0
   
   // Features
-  private var feature_animateHeightChanges = false
+  private var feature_animateHeightChanges = true
 
   func update(viewModel: FullChatViewModel) {
     self.viewModel = viewModel
@@ -48,8 +52,9 @@ class ComposeAppKit: NSView {
   
   // MARK: Initialization
     
-  init(peerId: Peer) {
+  init(peerId: Peer, messageList: MessageListAppKit) {
     self.peerId = peerId
+    self.messageList = messageList
     
     super.init(frame: .zero)
     setupView()
@@ -68,11 +73,29 @@ class ComposeAppKit: NSView {
     border.translatesAutoresizingMaskIntoConstraints = false
     return border
   }()
+  
+  lazy var background = {
+    // Add vibrancy effect
+    let material = NSVisualEffectView(frame: bounds)
+    material.material = .headerView // Similar to toolbar
+    material.blendingMode = .withinWindow
+    material.state = .active
+    material.translatesAutoresizingMaskIntoConstraints = false
+    return material
+  }()
+    
     
   func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
-    layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+    wantsLayer = true
     
+    // Blended with content
+    // layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
+    
+    // More distinct background
+    layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5).cgColor
+    
+    addSubview(background)
     addSubview(border)
     addSubview(sendButton)
     addSubview(menuButton)
@@ -88,11 +111,17 @@ class ComposeAppKit: NSView {
     NSLayoutConstraint.activate([
       heightConstraint,
       
+      // bg
+      background.leadingAnchor.constraint(equalTo: leadingAnchor),
+      background.trailingAnchor.constraint(equalTo: trailingAnchor),
+      background.topAnchor.constraint(equalTo: topAnchor),
+      background.bottomAnchor.constraint(equalTo: bottomAnchor),
+      
       // send
       sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
       sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             
-      // send
+      // menu
       menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
       
@@ -126,6 +155,7 @@ class ComposeAppKit: NSView {
     textEditor.focus()
   }
   
+  // MARK: - Height
   func resetHeight() {
     if feature_animateHeightChanges {
       CATransaction.begin()
@@ -135,14 +165,17 @@ class ComposeAppKit: NSView {
       
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.22
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+//        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        context.allowsImplicitAnimation = true
         heightConstraint.animator().constant = minHeight
         textEditor.resetTextViewInsets()
+        messageList?.updateInsetForCompose(minHeight)
       }
     } else {
       heightConstraint.constant = minHeight
       textEditor.setHeight(minHeight)
       textEditor.resetTextViewInsets()
+      messageList?.updateInsetForCompose(minHeight)
     }
   }
   
@@ -160,18 +193,23 @@ class ComposeAppKit: NSView {
     if feature_animateHeightChanges {
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.22
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+//        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        context.allowsImplicitAnimation = true
         heightConstraint.animator().constant = height
         textEditor.updateTextViewInsets(contentHeight: contentHeight) // use height without paddings
+        messageList?.updateInsetForCompose(height)
       }
     } else {
       heightConstraint.constant = height
       textEditor.updateTextViewInsets(contentHeight: contentHeight)
+      messageList?.updateInsetForCompose(height)
     }
   }
   
   private var ignoreNextHeightChange = false
     
+  // MARK: - Actions
+  
   // Clear, reset height
   func clear() {
     resetHeight()
@@ -187,9 +225,10 @@ class ComposeAppKit: NSView {
     
       // Clear immediately
       self.clear()
-    
+      
       // Add message
-      self.viewModel?.sendMessage(text: text)
+      let _ = self.viewModel?.sendMessage(text: text)
+      
       self.ignoreNextHeightChange = false
     }
   }

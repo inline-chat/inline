@@ -95,7 +95,6 @@ class MessageListAppKit: NSViewController {
     scroll.verticalScrollElasticity = .allowed
     scroll.autohidesScrollers = true
     scroll.verticalScroller?.controlSize = .small // This makes it ultra-minimal
-
     scroll.postsBoundsChangedNotifications = true
     scroll.postsFrameChangedNotifications = true
     scroll.automaticallyAdjustsContentInsets = !feature_setupsInsetsManually
@@ -113,6 +112,25 @@ class MessageListAppKit: NSViewController {
     super.viewDidLoad()
     setupScrollObserver()
   }
+  
+  // MARK: - Insets
+
+  private var insetForCompose: CGFloat = Theme.composeMinHeight
+  public func updateInsetForCompose(_ inset: CGFloat) {
+    insetForCompose = inset
+    
+    scrollView.withoutScrollerFlash {
+      scrollView.contentInsets.bottom = Theme.messageListBottomInset + insetForCompose
+      // TODO: make quick changes smoother. currently it jitters a little
+      if isAtBottom {
+        self.tableView.scrollToBottomWithInset()
+      }
+    }
+  }
+  
+  private func setInsets() {
+    // TODO: extract insets logic from bottom here.
+  }
 
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did layout and it fixes the issue.
   private func updateScrollViewInsets() {
@@ -127,7 +145,7 @@ class MessageListAppKit: NSViewController {
       scrollView.contentInsets = NSEdgeInsets(
         top: toolbarHeight,
         left: 0,
-        bottom: Theme.messageListBottomInset,
+        bottom: Theme.messageListBottomInset + insetForCompose,
         right: 0
       )
       scrollView.scrollerInsets = NSEdgeInsets(
@@ -175,27 +193,29 @@ class MessageListAppKit: NSViewController {
     isProgrammaticScroll = true
     defer { isProgrammaticScroll = false }
     
-    if animated {
-      // Causes clipping at the top
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = debug_slowAnimation ? 1.5 : 0.2
-        context.allowsImplicitAnimation = true
+    scrollView.withoutScrollerFlash {
+      if animated {
+        // Causes clipping at the top
+        NSAnimationContext.runAnimationGroup { context in
+          context.duration = debug_slowAnimation ? 1.5 : 0.2
+          context.allowsImplicitAnimation = true
+          
+          tableView.scrollToBottomWithInset()
+          //        tableView.scrollRowToVisible(lastRow)
+        }
+      } else {
+        //      CATransaction.begin()
+        //      CATransaction.setDisableActions(true)
+        tableView.scrollToBottomWithInset()
+        //      tableView.scrollRowToVisible(lastRow)
+        //      CATransaction.commit()
         
-        tableView.scrollToBottomWithInset()
-//        tableView.scrollRowToVisible(lastRow)
-      }
-    } else {
-//      CATransaction.begin()
-//      CATransaction.setDisableActions(true)
-      tableView.scrollToBottomWithInset()
-//      tableView.scrollRowToVisible(lastRow)
-//      CATransaction.commit()
-      
-      // Test if this gives better performance than above solution
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0
-        context.allowsImplicitAnimation = false
-        tableView.scrollToBottomWithInset()
+        // Test if this gives better performance than above solution
+        NSAnimationContext.runAnimationGroup { context in
+          context.duration = 0
+          context.allowsImplicitAnimation = false
+          tableView.scrollToBottomWithInset()
+        }
       }
     }
   }
@@ -446,9 +466,10 @@ class MessageListAppKit: NSViewController {
     
     isPerformingUpdate = true
     
-    let wasAtBottom = isAtBottom
+    // using "atBottom" here might add jitter if user is scrolling slightly up and then we move it down quickly
+    let wasAtBottom = isAtAbsoluteBottom
     let animationDuration = debug_slowAnimation ? 1.5 : 0.15
-    let shouldScroll = wasAtBottom && feature_scrollsToBottomOnNewMessage
+    let shouldScroll = wasAtBottom && feature_scrollsToBottomOnNewMessage && !isUserScrolling // to prevent jitter when user is scrolling
     
     switch update {
     case .added(_, let indexSet):
@@ -957,6 +978,6 @@ extension NSTableView {
     scrollView.contentView.scroll(targetPoint)
     
     // Ensure the last row is visible
-    scrollRowToVisible(lastRow)
+    // scrollRowToVisible(lastRow)
   }
 }
