@@ -185,7 +185,7 @@ extension MessagesCollectionView {
         dataSource.apply(snapshot, animatingDifferences: false)
 
       case .reload:
-        currentCollectionView?.reloadData()
+        setInitialData()
       }
     }
 
