@@ -9,6 +9,7 @@ import CoreHaptics
 import SwiftUI
 
 struct Welcome: View {
+  //
   let fullText = NSLocalizedString("Key", comment: "Welcome to Inline")
   let typingSpeed: TimeInterval = 0.08
 
