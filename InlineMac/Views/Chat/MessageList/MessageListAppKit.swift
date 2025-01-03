@@ -249,7 +249,11 @@ class MessageListAppKit: NSViewController {
   private var isUserScrolling = false
   
   // True when user is at the bottom of the scroll view within a ~0-10px threshold
-  private var isAtBottom = true
+  private var isAtBottom = true {
+    didSet {
+      viewModel.setAtBottom(isAtBottom)
+    }
+  }
   
   // When exactly at the bottom
   private var isAtAbsoluteBottom = true

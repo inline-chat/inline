@@ -10,6 +10,7 @@ import GRDB
 public class MessagesProgressiveViewModel {
   // props
   public var peer: Peer
+  public var reversed: Bool = false
 
   // state
   public var messagesByID: [Int64: FullMessage] = [:]
@@ -19,11 +20,11 @@ public class MessagesProgressiveViewModel {
     }
   }
 
-  public var reversed: Bool = false
-
+  // Used to ignore range when reloading if at bottom
+  private var atBottom: Bool = true
   // note: using date is most reliable as our sorting is based on date
-  public var minDate: Date = .init()
-  public var maxDate: Date = .init()
+  private var minDate: Date = .init()
+  private var maxDate: Date = .init()
 
   // internals
   private let initialLimit = 80
@@ -75,6 +76,10 @@ public class MessagesProgressiveViewModel {
     let prepend = direction == (reversed ? .bottom : .top)
 //    log.debug("Loading next batch at \(direction) \(cursor)")
     loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend)
+  }
+
+  public func setAtBottom(_ atBottom: Bool) {
+    self.atBottom = atBottom
   }
 
   public enum MessagesChangeSet {
@@ -141,9 +146,15 @@ public class MessagesProgressiveViewModel {
 
     case .reload(let peer):
       if peer == self.peer {
-        // 90/10 solution TODO: quick way to optimize is to check if updated messages are in the current range
-        refetchCurrentRange()
-        // check if actually anything changed then post update
+        if atBottom {
+          log.trace("Reloading messages at bottom")
+          // Since user is still at bottom and haven't moved this means we need to ignore the range and show them the latest messages
+          loadMessages(.limit(initialLimit))
+        } else {
+          // 90/10 solution TODO: quick way to optimize is to check if updated messages are in the current range
+          // check if actually anything changed then post update
+          refetchCurrentRange()
+        }
 
         return MessagesChangeSet.reload
       }
@@ -343,7 +354,7 @@ public final class MessagesPublisher {
 
   // Static methods to publish update
   func messageAdded(message: Message, peer: Peer) {
-//    Log.shared.debug("Message added: \(message)")
+    Log.shared.debug("Message added: \(message)")
     do {
       let fullMessage = try db.reader.read { db in
         try Message
