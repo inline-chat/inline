@@ -198,6 +198,8 @@ public extension Message {
 
         isExisting = true
       }
+    } else {
+      isExisting = true
     }
 
     try self.save(db, onConflict: .replace)
@@ -207,12 +209,17 @@ public extension Message {
       let message = self
       // TODO: find a way to remove this delay
       if isExisting {
-        DispatchQueue.main.async { // TODO: find a way to remove this delay
-          MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+        db.afterNextTransaction { _ in
+          DispatchQueue.main.async { // TODO: find a way to remove this delay
+            MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+          }
         }
       } else {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { // TODO: find a way to remove this delay
-          MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+        db.afterNextTransaction { _ in
+          // This code runs after the transaction successfully commits
+          DispatchQueue.main.async {
+            MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+          }
         }
       }
     }
