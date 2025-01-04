@@ -8,14 +8,15 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   public var user: User
   public var chat: Chat?
   public var message: Message?
-
+  public var from: User?
   public var id: Int64 { user.id }
 
-  public init(dialog: Dialog, user: User, chat: Chat?, message: Message?) {
+  public init(dialog: Dialog, user: User, chat: Chat?, message: Message?, from: User?) {
     self.dialog = dialog
     self.user = user
     self.chat = chat
     self.message = message
+    self.from = from
   }
 }
 
@@ -40,7 +41,12 @@ public final class HomeViewModel: ObservableObject {
             required: Dialog.peerUser
               .including(
                 optional: User.chat
-                  .including(optional: Chat.lastMessage))
+                  .including(
+                    optional: Chat.lastMessage
+                      .including(optional: Message.from.forKey("from"))
+
+                  )
+              )
           )
           .asRequest(of: HomeChatItem.self)
           .fetchAll(db)
