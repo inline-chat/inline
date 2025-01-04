@@ -15,51 +15,47 @@ struct ChatRowView: View {
     composeActions.getComposeAction(for: Peer(userId: item.user.id))?.action
   }
 
+  private var isCurrentUser: Bool {
+    item.user.id == Auth.shared.getCurrentUserId()
+  }
+
+  private var showTypingIndicator: Bool {
+    currentComposeAction()?.rawValue.isEmpty == false
+  }
+
+  private var senderName: String {
+    item.from?.firstName ?? ""
+  }
+
   var body: some View {
     HStack(alignment: .top) {
-      if item.user.id == Auth.shared.getCurrentUserId() {
+      if isCurrentUser {
         savedMessageSymbol
       } else {
-        UserAvatar(user: item.user, size: 36)
-          .padding(.trailing, 6)
-          .overlay(alignment: .bottomTrailing) {
-            if item.user.online == true {
-              Circle()
-                .fill(.green)
-                .frame(width: 10, height: 10)
-                .padding(.leading, -15)
-                .padding(.top, -14)
-            }
-          }
+        userAvatar
       }
 
       VStack(alignment: .leading) {
         HStack {
-          Text(
-            type == .privateChat
-              ? item.user.id == Auth.shared.getCurrentUserId()
-              ? "Saved Message" : item.user.firstName ?? "" : item.chat?.title ?? ""
-          )
-          .fontWeight(.medium)
-          .foregroundColor(.primary)
+          chatTitle
           Spacer()
-          Text(item.message?.date.formatted() ?? "")
-            .font(.callout)
-            .foregroundColor(.secondary)
+          messageDate
         }
 
-        if currentComposeAction()?.rawValue.isEmpty == false {
+        if showTypingIndicator {
           Text("\(currentComposeAction()?.rawValue ?? "")...")
             .font(.callout)
             .foregroundColor(.secondary)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
-        } else if let text = item.message?.text {
-          Text(text.replacingOccurrences(of: "\n", with: " "))
-            .font(.callout)
-            .foregroundColor(.secondary)
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let lastMsgText = item.message?.text {
+          Text(
+            "\(senderName): \(lastMsgText.replacingOccurrences(of: "\n", with: " "))"
+          )
+          .font(.callout)
+          .foregroundColor(.secondary)
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
         } else {
           Text("No messages yet")
             .font(.callout)
@@ -71,6 +67,39 @@ struct ChatRowView: View {
     .frame(height: 48)
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
+  }
+
+  @ViewBuilder
+  var userAvatar: some View {
+    UserAvatar(user: item.user, size: 36)
+      .padding(.trailing, 6)
+      .overlay(alignment: .bottomTrailing) {
+        if item.user.online == true {
+          Circle()
+            .fill(.green)
+            .frame(width: 10, height: 10)
+            .padding(.leading, -15)
+            .padding(.top, -14)
+        }
+      }
+  }
+
+  @ViewBuilder
+  var chatTitle: some View {
+    Text(
+      type == .privateChat
+        ? item.user.id == Auth.shared.getCurrentUserId()
+          ? "Saved Message" : item.user.firstName ?? "" : item.chat?.title ?? ""
+    )
+    .fontWeight(.medium)
+    .foregroundColor(.primary)
+  }
+
+  @ViewBuilder
+  var messageDate: some View {
+    Text(item.message?.date.formatted() ?? "")
+      .font(.callout)
+      .foregroundColor(.secondary)
   }
 
   @ViewBuilder
@@ -91,51 +120,5 @@ struct ChatRowView: View {
           .font(.callout)
       }
       .padding(.trailing, 6)
-  }
-}
-
-#Preview("ChatRowView") {
-  VStack(spacing: 12) {
-    // Private chat example
-    let privateDialog = Dialog(optimisticForUserId: 2)
-
-    let privateUser = User(
-      id: 2,
-      email: "john@example.com",
-      firstName: "Dena",
-      lastName: "Doe"
-    )
-
-    let privateChat = Chat(
-      id: 1,
-      date: Date(),
-      type: .privateChat,
-      title: "John Doe",
-      spaceId: nil,
-      peerUserId: 2,
-      lastMsgId: nil
-    )
-
-    ChatRowView(
-      item: HomeChatItem(
-        dialog: privateDialog, user: privateUser, chat: privateChat,
-        message: Message(
-          messageId: 1,
-          fromId: 2,
-          date: Date(),
-          text: "فارسی هم ساپورت میکنه به به",
-          peerUserId: 2,
-          peerThreadId: nil,
-          chatId: 1
-        )
-      )
-      // item: HomeChatItem(
-      //   dialog: privateDialog,
-      //   user: privateUser,
-      //   chat: privateChat,
-      // message:
-      // )
-    )
-    .padding()
   }
 }
