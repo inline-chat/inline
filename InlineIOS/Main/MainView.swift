@@ -6,24 +6,22 @@ import SwiftUI
 /// The main view of the application showing spaces and direct messages
 
 struct MainView: View {
-  // MARK: - Environment & State
+  // MARK: - Environment
 
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var onboardingNav: OnboardingNavigation
-
-  @Environment(\.appDatabase) private var database
-  @Environment(\.scenePhase) private var scene
-  @Environment(\.auth) private var auth
   @EnvironmentObject private var api: ApiClient
   @EnvironmentObject private var ws: WebSocketManager
   @EnvironmentObject private var dataManager: DataManager
-  @EnvironmentStateObject var root: RootData
   @EnvironmentObject private var userData: UserData
   @EnvironmentObject private var notificationHandler: NotificationHandler
   @EnvironmentObject private var mainViewRouter: MainViewRouter
 
-  // MARK: - View Models
+  @Environment(\.appDatabase) private var database
+  @Environment(\.scenePhase) private var scene
+  @Environment(\.auth) private var auth
 
+  @EnvironmentStateObject var root: RootData
   @EnvironmentStateObject private var spaceList: SpaceListViewModel
   @EnvironmentStateObject private var home: HomeViewModel
 
@@ -57,7 +55,11 @@ struct MainView: View {
 
   var body: some View {
     VStack {
-      contentView
+      if spaceList.spaces.isEmpty && home.chats.isEmpty {
+        // TODO: Add empty state view
+      } else {
+        content
+      }
     }
     .searchable(text: $text, prompt: "Search in users and spaces")
     .onChange(of: text) { _, newValue in
@@ -78,60 +80,42 @@ struct MainView: View {
     .navigationBarBackButtonHidden()
 
     .task {
-      notificationHandler.setAuthenticated(value: true)
-
-      do {
-        _ = try await dataManager.fetchMe()
-
-      } catch {
-        Log.shared.error("Failed to getMe", error: error)
-//        // Clear creds
-//        Auth.shared.logOut()
-//
-//        // Stop WebSocket
-//        ws.loggedOut()
-//
-//        // Clear database
-//        try? AppDatabase.loggedOut()
-//        mainViewRouter.setRoute(route: .onboarding)
-//        nav.popToRoot()
-//
-//        onboardingNav.push(.welcome)
-        return
-      }
-
-      // Continue with existing tasks if user exists
-      do {
-        try await dataManager.getPrivateChats()
-      } catch {
-        Log.shared.error("Failed to getPrivateChats", error: error)
-      }
-
-      do {
-        try await dataManager.getSpaces()
-      } catch {
-        Log.shared.error("Failed to getSpaces", error: error)
-      }
+      await initalFetch()
     }
   }
 }
 
-// MARK: - View Components
+extension MainView {
+  fileprivate func initalFetch() async {
+    notificationHandler.setAuthenticated(value: true)
 
-private extension MainView {
-  @ViewBuilder
-  var contentView: some View {
-    if spaceList.spaces.isEmpty && home.chats.isEmpty {
-      // EmptyStateView()
-      //   .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    } else {
-      contentList
+    do {
+      _ = try await dataManager.fetchMe()
+    } catch {
+      Log.shared.error("Failed to getMe", error: error)
+      return
+    }
+
+    // Continue with existing tasks if user exists
+    do {
+      try await dataManager.getPrivateChats()
+    } catch {
+      Log.shared.error("Failed to getPrivateChats", error: error)
+    }
+
+    do {
+      try await dataManager.getSpaces()
+    } catch {
+      Log.shared.error("Failed to getSpaces", error: error)
     }
   }
 
-  var contentList: some View {
+  @ViewBuilder
+  fileprivate var content: some View {
+    let noUsersFound = searchResults.isEmpty
+    let promptIsEmpty = text.isEmpty
     List {
-      if !text.isEmpty {
+      if !promptIsEmpty {
         Section {
           if isSearching {
             HStack {
@@ -139,20 +123,13 @@ private extension MainView {
               Text("Searching...")
                 .foregroundColor(.secondary)
             }
-          } else if searchResults.isEmpty {
+          } else if noUsersFound {
             Text("No users found")
               .foregroundColor(.secondary)
           } else {
             ForEach(searchResults) { user in
               Button {
-                Task {
-                  do {
-                    let peer = try await dataManager.createPrivateChat(userId: user.id)
-                    nav.push(.chat(peer: peer))
-                  } catch {
-                    Log.shared.error("Failed to create chat", error: error)
-                  }
-                }
+                navigateToUser(user)
               } label: {
                 HStack(alignment: .top) {
                   UserAvatar(user: user, size: 36)
@@ -186,7 +163,17 @@ private extension MainView {
     .listStyle(.plain)
   }
 
-  var spacesSection: some View {
+  fileprivate func navigateToUser(_ user: User) {
+    Task {
+      do {
+        let peer = try await dataManager.createPrivateChat(userId: user.id)
+        nav.push(.chat(peer: peer))
+      } catch {
+        Log.shared.error("Failed to create chat", error: error)
+      }
+    }
+  }
+  fileprivate var spacesSection: some View {
     Section(header: Text("Spaces")) {
       ForEach(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
         SpaceRowView(space: space)
@@ -197,7 +184,7 @@ private extension MainView {
     }
   }
 
-  var chatsSection: some View {
+  fileprivate var chatsSection: some View {
     Section {
       ForEach(
         home.chats, id: \.user.id
@@ -208,7 +195,8 @@ private extension MainView {
           ChatRowView(item: chat)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-          Button {} label: {
+          Button {
+          } label: {
             Image(systemName: "archivebox.fill")
           }
         }
@@ -216,7 +204,7 @@ private extension MainView {
     }
   }
 
-  var toolbarContent: some ToolbarContent {
+  fileprivate var toolbarContent: some ToolbarContent {
     Group {
       ToolbarItem(id: "UserAvatar", placement: .topBarLeading) {
         HStack {
@@ -290,8 +278,8 @@ extension MainView {
         try await database.reader.read { db in
           searchResults =
             try User
-              .filter(Column("username").like("%\(query.lowercased())%"))
-              .fetchAll(db)
+            .filter(Column("username").like("%\(query.lowercased())%"))
+            .fetchAll(db)
         }
 
         await MainActor.run {

@@ -23,15 +23,15 @@ public class DataManager: ObservableObject {
   public static let shared = DataManager(database: AppDatabase.shared)
 
   public func fetchMe() async throws -> User {
-//    log.debug("fetchMe")
+    //    log.debug("fetchMe")
     do {
       let result = try await ApiClient.shared.getMe()
-//      log.trace("fetchMe result: \(result)")
+      //      log.trace("fetchMe result: \(result)")
       let user = User(from: result.user)
       try await database.dbWriter.write { db in
         try user.save(db)
       }
-//      log.trace("currentUserId: \(Auth.shared.getCurrentUserId() ?? Int64.min)")
+      //      log.trace("currentUserId: \(Auth.shared.getCurrentUserId() ?? Int64.min)")
       return user
     } catch {
       Log.shared.error("Error fetching user", error: error)
@@ -180,11 +180,6 @@ public class DataManager: ObservableObject {
   public func deleteSpace(spaceId: Int64) async throws {
     log.debug("deleteSpace")
     do {
-      //            Use for user ID
-      //            guard let currentUserId = Auth.shared.getCurrentUserId() else {
-      //                throw DataManagerError.notAuthorized
-      //            }
-
       let _ = try await ApiClient.shared.deleteSpace(spaceId: spaceId)
 
       try await database.dbWriter.write { db in
@@ -296,7 +291,7 @@ public class DataManager: ObservableObject {
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil // TODO: fix
+          chat.lastMsgId = nil  // TODO: fix
 
           return chat
         }

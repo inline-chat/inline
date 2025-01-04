@@ -6,7 +6,7 @@ struct ContentView: View {
   @Environment(\.scenePhase) private var scene
 
   @EnvironmentObject private var nav: Navigation
-  @EnvironmentStateObject private var dataManager: DataManager
+  @EnvironmentStateObject private var data: DataManager
 
   @StateObject private var onboardingNav = OnboardingNavigation()
   @StateObject var api = ApiClient()
@@ -14,59 +14,23 @@ struct ContentView: View {
   @StateObject var mainViewRouter = MainViewRouter()
 
   init() {
-    _dataManager = EnvironmentStateObject { env in
+    _data = EnvironmentStateObject { env in
       DataManager(database: env.appDatabase)
     }
   }
 
   var body: some View {
     Group {
-      switch mainViewRouter.route {
-      case .main:
-        NavigationStack(path: nav.currentStackBinding) {
-          MainView()
-            .navigationDestination(for: Navigation.Destination.self) { destination in
-              destinationView(for: destination)
-            }
-        }
-        .sheet(item: $nav.activeSheet) { destination in
-          sheetContent(for: destination)
-        }
-        .onAppear {
-          Task {
-            try? await dataManager.updateStatus(online: true)
-          }
-        }
-
-        .onChange(of: scene) { _, newScene in
-          switch newScene {
-          case .active:
-            Task {
-              try? await dataManager.updateStatus(online: true)
-            }
-          case .inactive:
-            break
-          case .background:
-            break
-          default:
-            break
-          }
-        }
-
-      case .onboarding:
-        OnboardingView()
-      }
+      content
     }
     .environmentObject(onboardingNav)
     .environmentObject(nav)
     .environmentObject(api)
     .environmentObject(userData)
-    .environmentObject(dataManager)
+    .environmentObject(data)
     .environmentObject(mainViewRouter)
   }
 }
-
-// MARK: - Navigation destinations
 
 extension ContentView {
   @ViewBuilder
@@ -78,10 +42,11 @@ extension ContentView {
       SpaceView(spaceId: id)
     case .settings:
       Settings()
-    case .createSpace, .createThread:
-      EmptyView()  // These are handled by sheets
     case .main:
       MainView()
+    case .createSpace, .createThread:
+      // Handled by sheets
+      EmptyView()
     }
   }
 
@@ -103,6 +68,46 @@ extension ContentView {
         .presentationCornerRadius(18)
     default:
       EmptyView()
+    }
+  }
+
+  @ViewBuilder
+  var content: some View {
+    switch mainViewRouter.route {
+    case .main:
+      NavigationStack(path: nav.currentStackBinding) {
+        MainView()
+          .navigationDestination(for: Navigation.Destination.self) { destination in
+            destinationView(for: destination)
+          }
+      }
+      .sheet(item: $nav.activeSheet) { destination in
+        sheetContent(for: destination)
+      }
+      .onAppear {
+        updateOnlineStatus()
+      }
+      .onChange(of: scene) { _, newScene in
+        switch newScene {
+        case .active:
+          updateOnlineStatus()
+        case .inactive:
+          break
+        case .background:
+          break
+        default:
+          break
+        }
+      }
+
+    case .onboarding:
+      OnboardingView()
+    }
+  }
+
+  func updateOnlineStatus() {
+    Task {
+      try? await data.updateStatus(online: true)
     }
   }
 }
