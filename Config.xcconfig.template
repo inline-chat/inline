@@ -1,2 +1,2 @@
-# Your dev API IP/hostname eg. 192.168.1.100 or mac.local get it via hostname shell command
+// Your dev API IP/hostname eg. 192.168.1.100 or mac.local get it via hostname shell command
 DEV_HOST = $(API_BASE_URL_VALUE) 
