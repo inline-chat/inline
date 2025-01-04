@@ -187,7 +187,10 @@ extension MainView {
   fileprivate var chatsSection: some View {
     Section {
       ForEach(
-        home.chats, id: \.user.id
+        home.chats.sorted(by: {
+          $0.message?.date ?? $0.chat?.date ?? Date() > $1.message?.date ?? $1.chat?.date ?? Date()
+        }),
+        id: \.user.id
       ) { chat in
         Button(role: .destructive) {
           nav.push(.chat(peer: .user(id: chat.user.id)))
