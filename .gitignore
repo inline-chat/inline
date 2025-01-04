@@ -104,4 +104,10 @@ apple/Config.prod.xcconfig
 apple/Config.dev.xcconfig
 apple/Config.staging.xcconfig
 
+Config.xcconfig
+# Config.release.xcconfig
+Config.prod.xcconfig
+Config.dev.xcconfig
+Config.staging.xcconfig
+
 .eslintcache
