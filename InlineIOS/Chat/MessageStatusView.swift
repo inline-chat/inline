@@ -66,43 +66,45 @@ class MessageMetadata: UIView {
   }
 
   func setupConstraints() {
-    NSLayoutConstraint.activate([
-      dateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-      dateLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+    if outgoing {
+      NSLayoutConstraint.activate([
+        dateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        dateLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
 
-      statusImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-      statusImageView.leadingAnchor.constraint(equalTo: dateLabel.trailingAnchor, constant: 4),
-      statusImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      statusImageView.widthAnchor.constraint(equalToConstant: symbolSize),
-      statusImageView.heightAnchor.constraint(equalToConstant: symbolSize),
-    ])
+        statusImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+        statusImageView.leadingAnchor.constraint(equalTo: dateLabel.trailingAnchor, constant: 4),
+        statusImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+        statusImageView.widthAnchor.constraint(equalToConstant: symbolSize),
+        statusImageView.heightAnchor.constraint(equalToConstant: symbolSize),
+      ])
+    } else {
+      NSLayoutConstraint.activate([
+        dateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        dateLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+        dateLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+      ])
+    }
   }
 
   func setupAppearance() {
     dateLabel.text = dateFormatter.string(from: message.date)
     dateLabel.textColor = textColor
 
-    if message.status != nil {
-      statusImageView.isHidden = false
+    let imageName: String
+    let symbolConfig = UIImage.SymbolConfiguration(pointSize: symbolSize)
+      .applying(UIImage.SymbolConfiguration(weight: .medium))
 
-      let imageName: String
-      let symbolConfig = UIImage.SymbolConfiguration(pointSize: symbolSize)
-        .applying(UIImage.SymbolConfiguration(weight: .medium))
-
-      switch message.status {
-      case .sent: imageName = "checkmark"
-      case .sending: imageName = "clock"
-      case .failed: imageName = "exclamationmark"
-      case .none: imageName = ""
-      }
-
-      statusImageView.image = UIImage(systemName: imageName)?
-        .withConfiguration(symbolConfig)
-        .withAlignmentRectInsets(.init(top: 0, left: -2, bottom: 0, right: -2))
-
-      statusImageView.tintColor = imageColor
-    } else {
-      statusImageView.isHidden = true
+    switch message.status {
+    case .sent: imageName = "checkmark"
+    case .sending: imageName = "clock"
+    case .failed: imageName = "exclamationmark"
+    case .none: imageName = ""
     }
+
+    statusImageView.image = UIImage(systemName: imageName)?
+      .withConfiguration(symbolConfig)
+      .withAlignmentRectInsets(.init(top: 0, left: -2, bottom: 0, right: -2))
+
+    statusImageView.tintColor = imageColor
   }
 }
