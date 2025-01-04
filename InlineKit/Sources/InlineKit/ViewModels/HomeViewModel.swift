@@ -34,31 +34,30 @@ public final class HomeViewModel: ObservableObject {
   func start() {
     cancellable =
       ValueObservation
-      .tracking { db in
-        try Dialog
-          .filter(Column("peerUserId") != nil)
-          .including(
-            required: Dialog.peerUser
-              .including(
-                optional: User.chat
-                  .including(
-                    optional: Chat.lastMessage
-                      .including(optional: Message.from.forKey("from"))
-
-                  )
-              )
-          )
-          .asRequest(of: HomeChatItem.self)
-          .fetchAll(db)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { _ in
-          Log.shared.error("Failed to get home chats")
-        },
-        receiveValue: { [weak self] chats in
-          self?.chats = chats
+        .tracking { db in
+          try Dialog
+            .filter(Column("peerUserId") != nil)
+            .including(
+              required: Dialog.peerUser
+                .including(
+                  optional: User.chat
+                    .including(
+                      optional: Chat.lastMessage
+                        .including(optional: Message.from.forKey("from"))
+                    )
+                )
+            )
+            .asRequest(of: HomeChatItem.self)
+            .fetchAll(db)
         }
-      )
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { _ in
+            Log.shared.error("Failed to get home chats")
+          },
+          receiveValue: { [weak self] chats in
+            self?.chats = chats
+          }
+        )
   }
 }
