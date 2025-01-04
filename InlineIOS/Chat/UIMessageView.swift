@@ -99,13 +99,13 @@ class UIMessageView: UIView {
   private func setupMultilineMessageConstraints() -> [NSLayoutConstraint] {
     return [
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
-      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 14),
-      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -14),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
+      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
       messageLabel.bottomAnchor.constraint(equalTo: metadataView.topAnchor, constant: -8),
 
       metadataView.leadingAnchor.constraint(
         greaterThanOrEqualTo: bubbleView.leadingAnchor, constant: 14),
-      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -14),
+      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
       metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -14),
     ]
   }
@@ -113,11 +113,11 @@ class UIMessageView: UIView {
   private func setupOneLineMessageConstraints() -> [NSLayoutConstraint] {
     return [
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
-      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 14),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
       messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -8),
 
       metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
-      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -14),
+      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
       metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
     ]
   }
