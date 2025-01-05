@@ -84,8 +84,6 @@ class UIMessageView: UIView {
     bubbleView.addSubview(messageLabel)
     bubbleView.addSubview(metadataView)
 
-    messageLabel.delegate = self
-
     setupAppearance()
     setupConstraints()
     setupContextMenu()
@@ -172,17 +170,5 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
 
       return UIMenu(children: [copyAction])
     }
-  }
-}
-
-extension UIMessageView: UITextViewDelegate {
-  func textView(
-    _ textView: UITextView,
-    shouldInteractWith URL: URL,
-    in characterRange: NSRange,
-    interaction: UITextItemInteraction) -> Bool
-  {
-    UIApplication.shared.open(URL)
-    return false
   }
 }
