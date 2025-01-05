@@ -124,7 +124,6 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
       let randomId = Int64.random(in: Int64.min...Int64.max)
       let date = Date()
-      print("date", date)
 
       let message = Message(
         messageId: -randomId,
