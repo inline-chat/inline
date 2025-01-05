@@ -66,6 +66,7 @@ struct ChatRowView: View {
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
           } else {
+            // TODO: decide for this -> in some cases, chat is not empty; just messages are loading
             Text("No messages yet")
               .font(.callout)
               .foregroundColor(.secondary)

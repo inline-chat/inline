@@ -55,7 +55,7 @@ struct MainView: View {
 
   var body: some View {
     VStack {
-      if spaceList.spaces.isEmpty && home.chats.isEmpty {
+      if spaceList.spaceItems.isEmpty && home.chats.isEmpty {
         // TODO: Add empty state view
       } else {
         content
@@ -156,8 +156,53 @@ private extension MainView {
             }
           }
         }
-      } else if !home.chats.isEmpty {
-        chatsSection
+      } else {
+        Section {
+          // Combined spaces and chats with chats first, spaces last
+          let combinedItems =
+            home.chats.sorted { chat1, chat2 in
+              // Sort chats by pinned first, then date
+              let pinned1 = chat1.dialog.pinned ?? false
+              let pinned2 = chat2.dialog.pinned ?? false
+              if pinned1 != pinned2 {
+                return pinned1
+              }
+              return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date
+                ?? chat2.chat?.date ?? Date()
+            }.map { CombinedItem.chat($0) }
+            + spaceList.spaceItems.map { CombinedItem.space($0) }
+
+          ForEach(combinedItems, id: \.id) { item in
+            switch item {
+            case .space(let space):
+              SpaceRowView(spaceItem: space)
+                .onTapGesture {
+                  nav.push(.space(id: space.space.id))
+                }
+            case .chat(let chat):
+              Button(role: .destructive) {
+                nav.push(.chat(peer: .user(id: chat.user.id)))
+              } label: {
+                ChatRowView(item: chat)
+              }
+              .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button {
+                  Task {
+                    try await dataManager.updateDialog(
+                      peerId: .user(id: chat.user.id),
+                      pinned: !(chat.dialog.pinned ?? false)
+                    )
+                  }
+                } label: {
+                  Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+                }
+              }
+              .tint(.indigo)
+              .listRowBackground(
+                chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
+            }
+          }
+        }
       }
     }
     .listStyle(.plain)
@@ -175,16 +220,7 @@ private extension MainView {
     }
   }
 
-  var spacesSection: some View {
-    Section(header: Text("Spaces")) {
-      ForEach(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
-        SpaceRowView(space: space)
-          .onTapGesture {
-            nav.push(.space(id: space.id))
-          }
-      }
-    }
-  }
+
 
   var chatsSection: some View {
     Section {
@@ -248,6 +284,14 @@ private extension MainView {
 
       ToolbarItem(id: "MainToolbarTrailing", placement: .topBarTrailing) {
         HStack(spacing: 2) {
+          Button {
+            nav.push(.createSpace)
+          } label: {
+            Image(systemName: "plus")
+              .tint(Color.secondary)
+              .frame(width: 38, height: 38)
+              .contentShape(Rectangle())
+          }
           Button {
             nav.push(.settings)
           } label: {
@@ -317,6 +361,25 @@ extension MainView {
           isSearching = false
         }
       }
+    }
+  }
+}
+
+private enum CombinedItem: Identifiable {
+  case space(SpaceItem)
+  case chat(HomeChatItem)
+
+  var id: Int64 {
+    switch self {
+    case .space(let space): return space.id
+    case .chat(let chat): return chat.user.id
+    }
+  }
+
+  var date: Date {
+    switch self {
+    case .space(let space): return space.space.date
+    case .chat(let chat): return chat.message?.date ?? chat.chat?.date ?? Date()
     }
   }
 }
