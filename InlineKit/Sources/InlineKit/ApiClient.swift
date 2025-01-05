@@ -41,6 +41,7 @@ public enum Path: String {
   case updateStatus
   case sendComposeAction
   case addReaction
+  case updateDialog
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -93,7 +94,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200...299:
+      case 200 ... 299:
         let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
         switch apiResponse {
         case let .success(data):
@@ -255,7 +256,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     repliedToMessageId: Int64?
   ) async throws -> SendMessage {
     var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "text", value: text)
+      URLQueryItem(name: "text", value: text),
     ]
 
     if let peerUserId = peerUserId {
@@ -300,7 +301,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .savePushNotification,
       queryItems: [
-        URLQueryItem(name: "applePushToken", value: pushToken)
+        URLQueryItem(name: "applePushToken", value: pushToken),
 
       ],
       includeToken: true
@@ -311,7 +312,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .updateStatus,
       queryItems: [
-        URLQueryItem(name: "online", value: online ? "true" : "false")
+        URLQueryItem(name: "online", value: online ? "true" : "false"),
       ],
       includeToken: true
     )
@@ -343,6 +344,21 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         URLQueryItem(name: "messageId", value: "\(messageId)"),
         URLQueryItem(name: "chatId", value: "\(chatId)"),
         URLQueryItem(name: "emoji", value: emoji),
+      ],
+      includeToken: true
+    )
+  }
+
+  public func updateDialog(peerId: Peer, pinned: Bool?) async throws -> UpdateDialog {
+    try await request(
+      .updateDialog,
+      queryItems: [
+        URLQueryItem(name: "pinned", value: "\(pinned ?? false)"),
+        URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)),
+        URLQueryItem(
+          name: "peerThreadId",
+          value: peerId.asThreadId().map(String.init)
+        ),
       ],
       includeToken: true
     )
@@ -483,6 +499,10 @@ public struct GetChatHistory: Codable, Sendable {
   // Sorted by date asc
   // Limited by 70 by default
   public let messages: [ApiMessage]
+}
+
+public struct UpdateDialog: Codable, Sendable {
+  public let dialog: ApiDialog
 }
 
 struct SessionInfo: Codable, Sendable {

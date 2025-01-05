@@ -85,8 +85,8 @@ struct MainView: View {
   }
 }
 
-extension MainView {
-  fileprivate func initalFetch() async {
+private extension MainView {
+  func initalFetch() async {
     notificationHandler.setAuthenticated(value: true)
 
     do {
@@ -111,7 +111,7 @@ extension MainView {
   }
 
   @ViewBuilder
-  fileprivate var content: some View {
+  var content: some View {
     let noUsersFound = searchResults.isEmpty
     let promptIsEmpty = text.isEmpty
     List {
@@ -163,7 +163,7 @@ extension MainView {
     .listStyle(.plain)
   }
 
-  fileprivate func navigateToUser(_ user: User) {
+  func navigateToUser(_ user: User) {
     Task {
       do {
         let peer = try await dataManager.createPrivateChat(userId: user.id)
@@ -173,7 +173,8 @@ extension MainView {
       }
     }
   }
-  fileprivate var spacesSection: some View {
+
+  var spacesSection: some View {
     Section(header: Text("Spaces")) {
       ForEach(spaceList.spaces.sorted(by: { $0.date > $1.date })) { space in
         SpaceRowView(space: space)
@@ -184,11 +185,23 @@ extension MainView {
     }
   }
 
-  fileprivate var chatsSection: some View {
+  var chatsSection: some View {
     Section {
       ForEach(
         home.chats.sorted(by: {
-          $0.message?.date ?? $0.chat?.date ?? Date() > $1.message?.date ?? $1.chat?.date ?? Date()
+          let pinned0 = $0.dialog.pinned ?? false
+          let pinned1 = $1.dialog.pinned ?? false
+          if pinned0 != pinned1 {
+            return pinned0
+          }
+
+          // Only sort by date if both are unpinned
+          if !pinned0, !pinned1 {
+            return $0.message?.date ?? $0.chat?.date ?? Date() > $1.message?.date ?? $1.chat?.date
+              ?? Date()
+          }
+          // Keep original order for pinned items
+          return false
         }),
         id: \.user.id
       ) { chat in
@@ -199,15 +212,23 @@ extension MainView {
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
           Button {
+            Task {
+              try await dataManager.updateDialog(
+                peerId: .user(id: chat.user.id),
+                pinned: !(chat.dialog.pinned ?? false)
+              )
+            }
           } label: {
-            Image(systemName: "archivebox.fill")
+            Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
           }
         }
+        .tint(.indigo)
+        .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
       }
     }
   }
 
-  fileprivate var toolbarContent: some ToolbarContent {
+  var toolbarContent: some ToolbarContent {
     Group {
       ToolbarItem(id: "UserAvatar", placement: .topBarLeading) {
         HStack {
@@ -281,8 +302,8 @@ extension MainView {
         try await database.reader.read { db in
           searchResults =
             try User
-            .filter(Column("username").like("%\(query.lowercased())%"))
-            .fetchAll(db)
+              .filter(Column("username").like("%\(query.lowercased())%"))
+              .fetchAll(db)
         }
 
         await MainActor.run {
