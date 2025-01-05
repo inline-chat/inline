@@ -55,28 +55,33 @@ struct SpaceView: View {
     .frame(maxWidth: .infinity)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      ToolbarItem(placement: .principal) {
-        HStack(spacing: 2) {
-          if let space = fullSpaceViewModel.space {
-            InitialsCircle(firstName: space.name, lastName: nil, size: 26)
-              .padding(.trailing, 6)
-            Text(space.name)
-              .font(.title3)
-              .fontWeight(.medium)
-              .foregroundColor(.primary)
+      Group {
+        ToolbarItem(id: "Space", placement: .topBarLeading) {
+          HStack {
+            if let space = fullSpaceViewModel.space {
+              InitialsCircle(firstName: space.name, lastName: nil, size: 26)
+                .padding(.trailing, 4)
+
+              VStack(alignment: .leading) {
+                Text(space.name)
+                  .font(.title3)
+                  .fontWeight(.semibold)
+              }
+            }
           }
         }
-      }
-      ToolbarItem(placement: .navigationBarTrailing) {
-        Menu {
-          Button(action: {
-            openCreateThreadSheet = true
-          }) {
-            Text("Create Thread")
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+          Menu {
+            Button(action: {
+              openCreateThreadSheet = true
+            }) {
+              Text("Create Thread")
+            }
+          } label: {
+            Image(systemName: "ellipsis")
+              .tint(Color.secondary)
           }
-        } label: {
-          Image(systemName: "ellipsis")
-            .tint(Color.secondary)
         }
       }
     }
