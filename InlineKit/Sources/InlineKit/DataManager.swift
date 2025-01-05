@@ -338,7 +338,8 @@ public class DataManager: ObservableObject {
     text: String,
     peerId: Peer?,
     randomId: Int64?,
-    repliedToMessageId: Int64?
+    repliedToMessageId: Int64?,
+    date: Date?
   ) async throws {
     let finalPeerUserId: Int64?
     let finalPeerThreadId: Int64?
@@ -366,7 +367,8 @@ public class DataManager: ObservableObject {
       peerThreadId: finalPeerThreadId,
       text: text,
       randomId: randomId,
-      repliedToMessageId: repliedToMessageId
+      repliedToMessageId: repliedToMessageId,
+      date: date
     )
 
     Task { @MainActor in
