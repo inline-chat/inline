@@ -28,7 +28,11 @@ struct ChatRowView: View {
   }
 
   private var senderName: String {
-    item.from?.firstName ?? ""
+    if item.from?.id == Auth.shared.getCurrentUserId() {
+      return "You"
+    } else {
+      return item.from?.firstName ?? ""
+    }
   }
 
   var body: some View {
