@@ -161,6 +161,7 @@ private extension MainView {
       }
     }
     .listStyle(.plain)
+    .animation(.default, value: home.chats)
   }
 
   func navigateToUser(_ user: User) {
