@@ -1,4 +1,3 @@
-import ContextMenuAuxiliaryPreview
 import InlineKit
 import SwiftUI
 import UIKit
@@ -8,13 +7,26 @@ class UIMessageView: UIView {
 
   private var interaction: UIContextMenuInteraction?
 
-  private let messageLabel: UILabel = {
-    let label = UILabel()
-    label.numberOfLines = 0
-    label.font = .systemFont(ofSize: 17)
-    label.textAlignment = .natural
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
+  private lazy var messageLabel: UITextView = {
+    let textView = UITextView()
+    textView.translatesAutoresizingMaskIntoConstraints = false
+    textView.isEditable = false
+    textView.isScrollEnabled = false
+    textView.backgroundColor = .clear
+    textView.textContainer.lineFragmentPadding = 0
+    textView.textContainerInset = .zero
+    textView.textAlignment = .natural
+    textView.clipsToBounds = false
+    textView.font = .systemFont(ofSize: 17)
+    textView.textColor = textColor
+
+    textView.linkTextAttributes = [
+      .foregroundColor: outgoing ? UIColor.white : UIColor.link,
+      .underlineStyle: NSUnderlineStyle.single.rawValue,
+    ]
+
+    textView.dataDetectorTypes = [.link, .phoneNumber]
+    return textView
   }()
 
   private let bubbleView: UIView = {
@@ -72,6 +84,8 @@ class UIMessageView: UIView {
     bubbleView.addSubview(messageLabel)
     bubbleView.addSubview(metadataView)
 
+    messageLabel.delegate = self
+
     setupAppearance()
     setupConstraints()
     setupContextMenu()
@@ -123,9 +137,16 @@ class UIMessageView: UIView {
   }
 
   private func setupAppearance() {
-    messageLabel.text = message.text
-    bubbleView.backgroundColor = bubbleColor
+    let attributedString = NSMutableAttributedString(
+      string: message.text ?? "",
+      attributes: [
+        .font: UIFont.systemFont(ofSize: 17),
+        .foregroundColor: textColor,
+      ])
+
+    messageLabel.attributedText = attributedString
     messageLabel.textColor = textColor
+    bubbleView.backgroundColor = bubbleColor
   }
 
   private func setupContextMenu() {
@@ -151,5 +172,17 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
 
       return UIMenu(children: [copyAction])
     }
+  }
+}
+
+extension UIMessageView: UITextViewDelegate {
+  func textView(
+    _ textView: UITextView,
+    shouldInteractWith URL: URL,
+    in characterRange: NSRange,
+    interaction: UITextItemInteraction) -> Bool
+  {
+    UIApplication.shared.open(URL)
+    return false
   }
 }
