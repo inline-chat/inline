@@ -94,7 +94,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200 ... 299:
+      case 200...299:
         let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
         switch apiResponse {
         case let .success(data):
@@ -253,10 +253,11 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     peerThreadId: Int64?,
     text: String,
     randomId: Int64?,
-    repliedToMessageId: Int64?
+    repliedToMessageId: Int64?,
+    date: Date?
   ) async throws -> SendMessage {
     var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "text", value: text),
+      URLQueryItem(name: "text", value: text)
     ]
 
     if let peerUserId = peerUserId {
@@ -272,6 +273,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
     if let repliedToMessageId = repliedToMessageId {
       queryItems.append(URLQueryItem(name: "repliedToMessageId", value: "\(repliedToMessageId)"))
+    }
+
+    if let date = date {
+      queryItems.append(URLQueryItem(name: "date", value: "\(date)"))
     }
 
     return try await request(
@@ -301,7 +306,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .savePushNotification,
       queryItems: [
-        URLQueryItem(name: "applePushToken", value: pushToken),
+        URLQueryItem(name: "applePushToken", value: pushToken)
 
       ],
       includeToken: true
@@ -312,7 +317,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .updateStatus,
       queryItems: [
-        URLQueryItem(name: "online", value: online ? "true" : "false"),
+        URLQueryItem(name: "online", value: online ? "true" : "false")
       ],
       includeToken: true
     )

@@ -67,40 +67,40 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     let peerId = peer
     chatCancellable =
       ValueObservation
-        .tracking { db in
-          switch peerId {
-          case .user:
-            // Fetch private chat
-            try Dialog
-              .filter(id: Dialog.getDialogId(peerId: peerId))
-              .including(
-                optional: Dialog.peerUser
-                  .including(
-                    optional: User.chat
-                      .including(optional: Chat.lastMessage))
-              )
-              .asRequest(of: SpaceChatItem.self)
-              .fetchAll(db)
+      .tracking { db in
+        switch peerId {
+        case .user:
+          // Fetch private chat
+          try Dialog
+            .filter(id: Dialog.getDialogId(peerId: peerId))
+            .including(
+              optional: Dialog.peerUser
+                .including(
+                  optional: User.chat
+                    .including(optional: Chat.lastMessage))
+            )
+            .asRequest(of: SpaceChatItem.self)
+            .fetchAll(db)
 
-          case .thread:
-            // Fetch thread chat
-            try Dialog
-              .filter(id: Dialog.getDialogId(peerId: peerId))
-              .including(
-                optional: Dialog.peerThread
-                  .including(optional: Chat.lastMessage)
-              )
-              .asRequest(of: SpaceChatItem.self)
-              .fetchAll(db)
-          }
+        case .thread:
+          // Fetch thread chat
+          try Dialog
+            .filter(id: Dialog.getDialogId(peerId: peerId))
+            .including(
+              optional: Dialog.peerThread
+                .including(optional: Chat.lastMessage)
+            )
+            .asRequest(of: SpaceChatItem.self)
+            .fetchAll(db)
         }
-        .publisher(in: db.dbWriter, scheduling: .immediate)
-        .sink(
-          receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
-          receiveValue: { [weak self] chats in
-            self?.chatItem = chats.first
-          }
-        )
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .sink(
+        receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
+        receiveValue: { [weak self] chats in
+          self?.chatItem = chats.first
+        }
+      )
   }
 
   public func getGlobalId(forMessageId messageId: Int64) -> Int64? {
@@ -122,12 +122,15 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
       let peerUserId: Int64? = if case .user(let id) = peer { id } else { nil }
       let peerThreadId: Int64? = if case .thread(let id) = peer { id } else { nil }
 
-      let randomId = Int64.random(in: Int64.min ... Int64.max)
+      let randomId = Int64.random(in: Int64.min...Int64.max)
+      let date = Date()
+      print("date", date)
+
       let message = Message(
         messageId: -randomId,
         randomId: randomId,
         fromId: Auth.shared.getCurrentUserId()!,
-        date: Date(),
+        date: date,
         text: messageText,
         peerUserId: peerUserId,
         peerThreadId: peerThreadId,
@@ -153,7 +156,8 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             text: messageText,
             peerId: peer,
             randomId: randomId,
-            repliedToMessageId: nil
+            repliedToMessageId: nil,
+            date: date
           )
         } catch {
           Log.shared.error("Failed to send message B", error: error)
