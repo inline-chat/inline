@@ -15,6 +15,10 @@ struct ChatRowView: View {
     composeActions.getComposeAction(for: Peer(userId: item.user.id))?.action
   }
 
+  private var pinned: Bool {
+    item.dialog.pinned ?? false
+  }
+
   private var isCurrentUser: Bool {
     item.user.id == Auth.shared.getCurrentUserId()
   }
@@ -39,28 +43,35 @@ struct ChatRowView: View {
         HStack {
           chatTitle
           Spacer()
+
           messageDate
         }
-
-        if showTypingIndicator {
-          Text("\(currentComposeAction()?.rawValue ?? "")...")
+        HStack {
+          if showTypingIndicator {
+            Text("\(currentComposeAction()?.rawValue ?? "")...")
+              .font(.callout)
+              .foregroundColor(.secondary)
+              .lineLimit(1)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          } else if let lastMsgText = item.message?.text {
+            Text(
+              "\(senderName): \(lastMsgText.replacingOccurrences(of: "\n", with: " "))"
+            )
             .font(.callout)
             .foregroundColor(.secondary)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
-        } else if let lastMsgText = item.message?.text {
-          Text(
-            "\(senderName): \(lastMsgText.replacingOccurrences(of: "\n", with: " "))"
-          )
-          .font(.callout)
-          .foregroundColor(.secondary)
-          .lineLimit(1)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-          Text("No messages yet")
-            .font(.callout)
-            .foregroundColor(.secondary)
-            .lineLimit(1)
+          } else {
+            Text("No messages yet")
+              .font(.callout)
+              .foregroundColor(.secondary)
+              .lineLimit(1)
+          }
+          if pinned {
+            Image(systemName: "pin.fill")
+              .foregroundColor(.secondary)
+              .font(.caption)
+          }
         }
       }
     }
@@ -89,7 +100,7 @@ struct ChatRowView: View {
     Text(
       type == .privateChat
         ? item.user.id == Auth.shared.getCurrentUserId()
-          ? "Saved Message" : item.user.firstName ?? "" : item.chat?.title ?? ""
+        ? "Saved Message" : item.user.firstName ?? "" : item.chat?.title ?? ""
     )
     .fontWeight(.medium)
     .foregroundColor(.primary)
