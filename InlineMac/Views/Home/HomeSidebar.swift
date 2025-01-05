@@ -98,8 +98,8 @@ struct HomeSidebar: View {
   @ViewBuilder
   var spacesAndUsersView: some View {
     Section("Spaces") {
-      ForEach(model.spaces) { space in
-        SpaceItem(space: space)
+      ForEach(model.spaceItems) { space in
+        SpaceItem(space: space.space)
           .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
       }
     }
