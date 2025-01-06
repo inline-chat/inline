@@ -32,9 +32,12 @@ struct WebSocketCredentials: Sendable {
 
 actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   private var webSocketTask: URLSessionWebSocketTask?
+  private var pingPongTask: Task<Void, Never>? = nil
+  private var msgTask: Task<Void, Never>? = nil
   private var connectionState: WebSocketConnectionState = .disconnected
   private var reconnectAttempts = 0
   private var isActive = true
+  private var id = UUID()
 
   // Connection metrics
   private var lastConnectedAt: Date?
@@ -77,6 +80,10 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   deinit {
     isActive = false
     webSocketTask?.cancel()
+
+    Task { @MainActor [self] in
+      await self.handleDisconnection()
+    }
   }
 
   // MARK: - URLSessionWebSocketDelegate
@@ -117,9 +124,10 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     reconnectAttempts = 0
     notifyStateChange()
 
-    Task {
+    // TODO: handle error
+    self.msgTask = Task {
       setupPingPong()
-      try await self.send(
+      try? await self.send(
         .connectionInit(token: self.credentials.token, userId: self.credentials.userId)
       )
 
@@ -198,20 +206,24 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   private func setupPingPong() {
     guard webSocketTask != nil else { return }
 
-    Task {
-      while connectionState == .connected && isActive {
+    pingPongTask?.cancel()
+    pingPongTask = Task {
+      while connectionState == .connected && isActive && Task.isCancelled == false {
         do {
-          try await Task.sleep(for: .seconds(30))
+          try await Task.sleep(for: .seconds(10))
+          log.debug("Sending ping \(self.id)")
           // Custom ping method
           webSocketTask?.sendPing { error in
             if let error = error {
               Task { @MainActor in
+                Log.shared.debug("No pong received")
                 await self.handleDisconnection(error: error)
                 await self.log.error("Failed while pinging: \(error)")
               }
             }
           }
         } catch {
+          Log.shared.debug("Failed to send ping")
           handleDisconnection(error: error)
           break
         }
@@ -222,7 +234,8 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   private func setupConnectionTimeout() {
     Task {
       try? await Task.sleep(for: .seconds(14))
-      if connectionState == .connecting {
+      if self.connectionState == .connecting {
+        log.error("Connection timeout")
         handleDisconnection(error: WebSocketError.connectionTimeout)
       }
     }
@@ -273,7 +286,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     guard let webSocketTask else { return }
 
     do {
-      while isActive, connectionState == .connected {
+      while isActive, connectionState == .connected, !Task.isCancelled {
         let message = try await webSocketTask.receive()
 
         switch message {
@@ -294,10 +307,20 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
 
   private func handleDisconnection() async {
     // ?
-    guard connectionState == .connected else { return }
+    guard connectionState == .connected else {
+      log.debug("Already disconnected")
+      return
+    }
 
+    webSocketTask?.cancel()
     webSocketTask = nil
     connectionState = .disconnected
+
+    pingPongTask?.cancel()
+    pingPongTask = nil
+    
+    msgTask?.cancel()
+    msgTask = nil
 
     if isActive {
       await attemptReconnection()
