@@ -12,6 +12,7 @@ struct MainView: View {
   @EnvironmentObject var dataManager: DataManager
   
   @Environment(\.requestNotifications) var requestNotifications
+  @Environment(\.scenePhase) var scenePhase
 
   @State private var windowSizeCancellable: AnyCancellable?
   @State private var disableAutoCollapse = false
@@ -51,10 +52,7 @@ struct MainView: View {
       self.rootData.fetch()
       self.setUpSidebarAutoCollapse()
         
-      Task {
-        // Set online
-        try? await dataManager.updateStatus(online: true)
-      }
+      markAsOnline()
     }
     .task {
       await requestNotifications()
@@ -64,6 +62,18 @@ struct MainView: View {
       disableAutoCollapse = true
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
         disableAutoCollapse = false
+      }
+    }
+    .onChange(of: scenePhase) { phase in
+      if phase == .active {
+        markAsOnline()
+        
+        Task {
+          await ws.ensureConnected()
+        }
+        
+      } else if phase == .inactive {
+        // Evaluate offline?
       }
     }
   }
@@ -179,6 +189,12 @@ struct MainView: View {
             }
           }
         }
+    }
+  }
+  
+  private func markAsOnline() {
+    Task {
+      try? await dataManager.updateStatus(online: true)
     }
   }
 }
