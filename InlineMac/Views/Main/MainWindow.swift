@@ -33,12 +33,6 @@ struct MainWindow: View {
           }
 
         case .onboarding:
-          VisualEffectView(
-            material: .sidebar,
-            blendingMode: .behindWindow
-          )
-          .ignoresSafeArea(.all)
-
           Onboarding()
             .transition(
               .opacity
