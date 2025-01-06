@@ -108,7 +108,7 @@ struct MainWindowCommands: Commands {
   }
 
   private func openGitHub() {
-    NSWorkspace.shared.open(URL(string: "https://github.com/inlinehq")!)
+    NSWorkspace.shared.open(URL(string: "https://github.com/inline-chat")!)
   }
 
   private func sendFeedback() {
