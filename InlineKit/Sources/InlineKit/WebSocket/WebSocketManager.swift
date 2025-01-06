@@ -33,6 +33,13 @@ public final class WebSocketManager: ObservableObject {
 
     setupNetworkMonitoring()
   }
+  
+  public func ensureConnected() async {
+    // ONLY reconnect if we are disconnected, otherwise we will start two connections initially while the other one is connecting
+    if await client?.state == .disconnected {
+      try? await start()
+    }
+  }
 
   func disconnect() {
     log.debug("disconnecting (manual)")
@@ -72,6 +79,13 @@ public final class WebSocketManager: ObservableObject {
       log.error("Invalid URL: \(url)")
       return
     }
+    
+    if let client = client {
+      log.debug("disconnecting before reconnecting")
+      await client.disconnect()
+    }
+    
+    log.debug("connecting WS")
 
     let client = WebSocketClient(
       url: url,
