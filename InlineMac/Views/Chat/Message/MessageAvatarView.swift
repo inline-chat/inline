@@ -4,10 +4,9 @@ import InlineUI
 import SwiftUI
 
 class UserAvatarView: NSView {
-  private var prevUser: User?
   private var user: User?
   
-  private var hostingController: NSHostingController<UserAvatar>?
+  private var hostingView: NSHostingView<UserAvatar>?
   
   init(user: User) {
     self.user = user
@@ -30,28 +29,20 @@ class UserAvatarView: NSView {
   
   private func updateAvatar() {
     guard let user = user else { return }
-    if let hostingController = hostingController {
-      if user != prevUser {
-        let swiftUIView = UserAvatar(user: user, size: Theme.messageAvatarSize, ignoresSafeArea: true)
-        hostingController.rootView = swiftUIView
-      }
-    } else {
-      let swiftUIView = UserAvatar(user: user, size: Theme.messageAvatarSize, ignoresSafeArea: true)
-      hostingController = NSHostingController(rootView: swiftUIView)
-      
-      if let hostView = hostingController?.view {
-        hostView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(hostView)
-        
-        NSLayoutConstraint.activate([
-          hostView.leadingAnchor.constraint(equalTo: leadingAnchor),
-          hostView.trailingAnchor.constraint(equalTo: trailingAnchor),
-          hostView.topAnchor.constraint(equalTo: topAnchor),
-          hostView.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-      }
-    }
+
+    let swiftUIView = UserAvatar(user: user, size: Theme.messageAvatarSize, ignoresSafeArea: true)
+    hostingView = NSHostingView(rootView: swiftUIView)
     
-    prevUser = user
+    guard let hostingView = hostingView else { return } // happy type check?
+    
+    hostingView.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(hostingView)
+      
+    NSLayoutConstraint.activate([
+      hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      hostingView.topAnchor.constraint(equalTo: topAnchor),
+      hostingView.bottomAnchor.constraint(equalTo: bottomAnchor)
+    ])
   }
 }
