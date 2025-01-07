@@ -1,5 +1,5 @@
 {
-  "originHash" : "59ab21ff2530925af1d1e03a7dacb575d22d5474b0325c5b418802b10aaf5e11",
+  "originHash" : "fc4c3327b13f149e9019d946f514219cc0f1cdbe08a5efb4ad5f1f7d66b9cea9",
   "pins" : [
     {
       "identity" : "contextmenuauxiliarypreview",
@@ -80,6 +80,15 @@
       "state" : {
         "revision" : "807f73ce09a9b9723f12385e592b4e0aaebd3336",
         "version" : "1.3.0"
+      }
+    },
+    {
+      "identity" : "throttler",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/boraseoksoon/Throttler.git",
+      "state" : {
+        "revision" : "bd0b16eb9c02e992e2c6cefec3abea0e74b90369",
+        "version" : "2.1.3"
       }
     }
   ],
