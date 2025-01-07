@@ -8,7 +8,6 @@ struct ChatView: View {
 
   @State var text: String = ""
   @State var textViewHeight: CGFloat = 36
-  @State var appearFakeChat = false
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
@@ -73,43 +72,35 @@ struct ChatView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      if !appearFakeChat {
-        content
-          .safeAreaInset(edge: .bottom) {
-            HStack(alignment: .bottom) {
-              ZStack(alignment: .leading) {
-                ComposeView(
-                  text: $text,
-                  height: $textViewHeight
-                )
+      content
+        .safeAreaInset(edge: .bottom) {
+          HStack(alignment: .bottom) {
+            ZStack(alignment: .leading) {
+              ComposeView(
+                text: $text,
+                height: $textViewHeight
+              )
 
-                .frame(height: textViewHeight)
-                .background(.clear)
-                .onChange(of: text) { _, newText in
-                  if newText.isEmpty {
-                    Task { await ComposeActions.shared.stoppedTyping(for: peerId) }
-                  } else {
-                    Task { await ComposeActions.shared.startedTyping(for: peerId) }
-                  }
+              .frame(height: textViewHeight)
+              .background(.clear)
+              .onChange(of: text) { _, newText in
+                if newText.isEmpty {
+                  Task { await ComposeActions.shared.stoppedTyping(for: peerId) }
+                } else {
+                  Task { await ComposeActions.shared.startedTyping(for: peerId) }
                 }
               }
-              .animation(.smoothSnappy, value: textViewHeight)
-              .animation(.smoothSnappy, value: text.isEmpty)
-
-              sendButton
-                .padding(.bottom, 6)
             }
-            .padding(.vertical, 6)
-            .padding(.horizontal)
-            .background(Color(uiColor: .systemBackground))
+            .animation(.smoothSnappy, value: textViewHeight)
+            .animation(.smoothSnappy, value: text.isEmpty)
+
+            sendButton
+              .padding(.bottom, 6)
           }
-      } else {
-        FakeChatView(
-          text: $text,
-          textViewHeight: $textViewHeight,
-          peerId: peerId
-        )
-      }
+          .padding(.vertical, 6)
+          .padding(.horizontal)
+          .background(Color(uiColor: .systemBackground))
+        }
     }
     .onReceive(timer) { _ in
       currentTime = Date()
@@ -121,14 +112,6 @@ struct ChatView: View {
           Text(subtitle)
             .font(.caption)
             .foregroundStyle(.secondary)
-        }
-      }
-
-      ToolbarItem(placement: .topBarTrailing) {
-        Button("👻") {
-          withAnimation {
-            appearFakeChat.toggle()
-          }
         }
       }
     }
