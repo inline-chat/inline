@@ -120,6 +120,7 @@ class MessageViewAppKit: NSView {
     let textContainer = textView.textContainer
     textContainer?.widthTracksTextView = true
     textContainer?.heightTracksTextView = true
+
     textView.isVerticallyResizable = false
     textView.isHorizontallyResizable = false
 
@@ -186,7 +187,7 @@ class MessageViewAppKit: NSView {
       if useTextKit2 {
         // TextKit 2 specific configuration
         if let textLayoutManager = textView.textLayoutManager {
-          throttle(.milliseconds(80), identifier: "layoutMessageTextView", by: .mainActor, option: .ensureLast) { [
+          throttle(.milliseconds(100), identifier: "layoutMessageTextView", by: .mainActor, option: .default) { [
             weak self,
             weak textLayoutManager
           ] in
@@ -207,15 +208,6 @@ class MessageViewAppKit: NSView {
       }
     }
   }
-
-//  func ensureLayout(_ props: MessageViewProps) {
-//    self.props = props
-//
-//    textViewWidthConstraint.constant = props.textWidth ?? 0
-//    textViewHeightConstraint.constant = props.textHeight ?? 0
-//
-//    setupMessageText()
-//  }
 
   // MARK: - Initialization
 
@@ -344,8 +336,7 @@ class MessageViewAppKit: NSView {
 
     textView.baseWritingDirection = props.isRtl ? .rightToLeft : .natural
 
-    let key = "\(text)___\(message.stableId)" // consider a hash here. // note: need to add ID otherwise messages with same text will be overriding each other styles
-    if let attrs = CacheAttrs.shared.get(key: key) {
+    if let attrs = CacheAttrs.shared.get(message: message) {
       textView.textStorage?.setAttributedString(attrs)
 
 //      if let textLayoutManager = textView.textLayoutManager {
@@ -359,7 +350,7 @@ class MessageViewAppKit: NSView {
     // Create mutable attributed string
     let attributedString = NSMutableAttributedString(
       // Trim to avoid known issue with size calculator
-      string: text.trimmingCharacters(in: .whitespacesAndNewlines),
+      string: text, // .trimmingCharacters(in: .whitespacesAndNewlines),
       attributes: [
         .font: MessageTextConfiguration.font,
         .foregroundColor: textColor
@@ -389,7 +380,7 @@ class MessageViewAppKit: NSView {
 //        .ensureLayout(for: textLayoutManager.documentRange)
 //    }
 
-    CacheAttrs.shared.set(key: key, value: attributedString)
+    CacheAttrs.shared.set(message: message, value: attributedString)
   }
 
   private func setupContextMenu() {
@@ -424,6 +415,36 @@ class MessageViewAppKit: NSView {
       // Remove selection style when menu closes
       layer?.backgroundColor = nil
     }
+  }
+
+  // MARK: - View Updates
+
+  public func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps) {
+    // update internal props
+    self.props = props
+    self.fullMessage = fullMessage
+
+    // reflect changes
+    textViewWidthConstraint.constant = textWidth
+    textViewHeightConstraint.constant = props.textHeight ?? 0
+
+    setupMessageText()
+  }
+
+  public func updateSize(props: MessageViewProps) {
+    // check if size changed
+    // wasted too much time on || being &&
+    guard props.textWidth != self.props.textWidth || props.textHeight != self.props.textHeight else { return }
+
+    // update internal props
+    self.props = props
+
+    // reflect changes
+    textViewWidthConstraint.constant = textWidth
+    textViewHeightConstraint.constant = props.textHeight ?? 0
+
+    // This helps refresh the layout
+    textView.textContainer?.containerSize = CGSize(width: textWidth, height: props.textHeight ?? 0)
   }
 
   // MARK: - Actions
