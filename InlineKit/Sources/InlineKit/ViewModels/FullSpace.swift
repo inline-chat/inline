@@ -41,7 +41,7 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
 public final class FullSpaceViewModel: ObservableObject {
   /// The spaces to display.
   @Published public private(set) var space: Space?
-  @Published public private(set) var members: [Member] = []
+  @Published public private(set) var memberChats: [SpaceChatItem] = []
   @Published public private(set) var chats: [SpaceChatItem] = []
 
   private var spaceSancellable: AnyCancellable?
@@ -70,7 +70,8 @@ public final class FullSpaceViewModel: ObservableObject {
           receiveCompletion: { _ in /* ignore error */ },
           receiveValue: { [weak self] space in
             self?.space = space
-          })
+          }
+        )
   }
 
   func fetchMembers() {
@@ -79,14 +80,22 @@ public final class FullSpaceViewModel: ObservableObject {
       ValueObservation
         .tracking { db in
           try Member.filter(Column("spaceId") == spaceId)
+            .including(optional: Member.user
+              .including(optional: User.chat
+                .including(optional: Chat.lastMessage)
+              )
+              .including(optional: User.dialog)
+            )
+            .asRequest(of: SpaceChatItem.self)
             .fetchAll(db)
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
-          receiveCompletion: { _ in /* ignore error */ },
+          receiveCompletion: { _ in },
           receiveValue: { [weak self] members in
-            self?.members = members
-          })
+            self?.memberChats = members
+          }
+        )
   }
 
   func fetchChats() {
@@ -113,6 +122,7 @@ public final class FullSpaceViewModel: ObservableObject {
           },
           receiveValue: { [weak self] chats in
             self?.chats = chats
-          })
+          }
+        )
   }
 }
