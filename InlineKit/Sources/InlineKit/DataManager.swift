@@ -471,10 +471,12 @@ public class DataManager: ObservableObject {
   }
 
   public func updateDialog(peerId: Peer, pinned: Bool?) async throws {
-    let result = try await ApiClient.shared.updateDialog(peerId: peerId, pinned: pinned)
     try await database.dbWriter.write { db in
-      let dialog = Dialog(from: result.dialog)
-      try dialog.save(db, onConflict: .replace)
+      var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+      dialog?.pinned = pinned
+      try dialog?.save(db, onConflict: .replace)
     }
+
+    let result = try await ApiClient.shared.updateDialog(peerId: peerId, pinned: pinned)
   }
 }
