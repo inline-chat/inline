@@ -22,29 +22,25 @@ struct SpaceView: View {
   var body: some View {
     VStack {
       List {
-        if fullSpaceViewModel.members.count > 0 {
+        if fullSpaceViewModel.memberChats.count > 0 {
           Section(header: Text("Members")) {
-            ForEach(fullSpaceViewModel.members) { member in
-              MemberView(userId: member.userId)
-                .onTapGesture {
-                  nav.push(.chat(peer: .user(id: member.userId)))
-                }
+            ForEach(fullSpaceViewModel.memberChats) { item in
+              Button {
+                nav.push(.chat(peer: .user(id: item.user?.id ?? 0)))
+              } label: {
+                ChatRowView(item: .space(item))
+              }
             }
           }
         }
 
         if fullSpaceViewModel.chats.count > 0 {
           Section(header: Text("Threads")) {
-            ForEach(fullSpaceViewModel.chats, id: \.self) { _ in
-              HStack {
-                InitialsCircle(firstName: "Thread", lastName: nil, size: 25)
-                  .padding(.trailing, 4)
-                Text("Thread")
-              }
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .contentShape(Rectangle())
-              .onTapGesture {
-//                                nav.push(.chat(peer: chat.))
+            ForEach(fullSpaceViewModel.chats, id: \.self) { item in
+              Button {
+                nav.push(.chat(peer: item.peerId))
+              } label: {
+                ChatRowView(item: .space(item))
               }
             }
           }

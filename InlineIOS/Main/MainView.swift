@@ -216,7 +216,7 @@ struct MainView: View {
     Button(role: .destructive) {
       nav.push(.chat(peer: .user(id: chat.user.id)))
     } label: {
-      ChatRowView(item: chat)
+      ChatRowView(item: .home(chat))
     }
     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
       Button {
