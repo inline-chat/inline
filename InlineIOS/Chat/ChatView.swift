@@ -109,9 +109,11 @@ struct ChatView: View {
       ToolbarItem(placement: .principal) {
         VStack {
           Text(title)
-          Text(subtitle)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+          if !isCurrentUser {
+            Text(subtitle)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
       }
     }
