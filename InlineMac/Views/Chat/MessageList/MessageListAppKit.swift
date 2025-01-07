@@ -263,8 +263,10 @@ class MessageListAppKit: NSViewController {
   @objc private func scrollWheelEnded() {
     isUserScrolling = false
     
-    // TODO: maintainingBottomScroll
-    recalculateHeightsOnWidthChange()
+    maintainingBottomScroll {
+      recalculateHeightsOnWidthChange()
+      return true
+    }
   }
 
   // True while we're changing scroll position programmatically
@@ -731,12 +733,13 @@ class MessageListAppKit: NSViewController {
       context.duration = 0
       context.allowsImplicitAnimation = false
 
+      // Experimental: noteheight of rows was below reload data initially
+      tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
       tableView
         .reloadData(
           forRowIndexes: visibleIndexesToUpdate,
           columnIndexes: IndexSet([0])
         )
-      tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
     }
   }
 
