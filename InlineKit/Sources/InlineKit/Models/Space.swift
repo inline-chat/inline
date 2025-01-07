@@ -14,8 +14,7 @@ public struct ApiSpace: FetchableRecord, Identifiable, Codable, Hashable, Persis
 }
 
 public struct Space: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, @unchecked
-  Sendable
-{
+Sendable {
   public var id: Int64
 
   // Space name
@@ -45,7 +44,7 @@ public struct Space: FetchableRecord, Identifiable, Codable, Hashable, Persistab
 
   /// NOTE(@mo): `Int64.random(in: 1 ... 5000)` using this is dangerous because it can generate the same number for different spaces, and it will cause a conflict with the API.
   public init(
-    id: Int64 = Int64.random(in: 1...5000), name: String, date: Date, creator: Bool? = nil
+    id: Int64 = Int64.random(in: 1 ... 5000), name: String, date: Date, creator: Bool? = nil
   ) {
     self.id = id
     self.name = name
@@ -54,15 +53,15 @@ public struct Space: FetchableRecord, Identifiable, Codable, Hashable, Persistab
   }
 }
 
-extension Space {
-  public init(from apiSpace: ApiSpace) {
+public extension Space {
+  init(from apiSpace: ApiSpace) {
     id = apiSpace.id
     name = apiSpace.name
     creator = apiSpace.creator
     date = Self.fromTimestamp(from: apiSpace.date)
   }
 
-  public static func fromTimestamp(from: Int) -> Date {
+  static func fromTimestamp(from: Int) -> Date {
     return Date(timeIntervalSince1970: Double(from) / 1000)
   }
 }
