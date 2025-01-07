@@ -45,6 +45,10 @@ struct ChatView: View {
     return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
   }
 
+  var isPrivateChat: Bool {
+    fullChatViewModel.chat?.type == .privateChat
+  }
+
   var subtitle: String {
     // TODO: support threads
     if ws.connectionState == .connecting {
@@ -109,7 +113,7 @@ struct ChatView: View {
       ToolbarItem(placement: .principal) {
         VStack {
           Text(title)
-          if !isCurrentUser {
+          if !isCurrentUser && isPrivateChat {
             Text(subtitle)
               .font(.caption)
               .foregroundStyle(.secondary)
