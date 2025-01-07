@@ -23,6 +23,7 @@
 		CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CD26CEAB2CB94E7900665A89 /* Sentry */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
 		CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD2785702CFB0916008A0EEF /* InlineConfig */; };
+		CD4D56CD2D2D4393006072AE /* Throttler in Frameworks */ = {isa = PBXBuildFile; productRef = CD4D56CC2D2D4393006072AE /* Throttler */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CDE9601B2CB94D1C004C541C /* KeychainSwift */; };
 /* End PBXBuildFile section */
@@ -96,6 +97,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */,
+				CD4D56CD2D2D4393006072AE /* Throttler in Frameworks */,
 				CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
 				CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */,
@@ -198,6 +200,7 @@
 				C3CC991A2CCE9AFF007F7F77 /* InlineUI */,
 				CD0A3CD92CD536DF0081AD69 /* GRDBQuery */,
 				CD2785702CFB0916008A0EEF /* InlineConfig */,
+				CD4D56CC2D2D4393006072AE /* Throttler */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -252,6 +255,7 @@
 				CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */,
 				C3AE72CE2D1B0ED0009F70D8 /* XCRemoteSwiftPackageReference "ContextMenuAuxiliaryPreview" */,
 				C3AE72D12D1B1716009F70D8 /* XCRemoteSwiftPackageReference "EmojiPicker" */,
+				CD4D56CB2D2D4393006072AE /* XCRemoteSwiftPackageReference "Throttler" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -778,6 +782,14 @@
 				minimumVersion = 0.10.2;
 			};
 		};
+		CD4D56CB2D2D4393006072AE /* XCRemoteSwiftPackageReference "Throttler" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/boraseoksoon/Throttler.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.1.3;
+			};
+		};
 		CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/siteline/swiftui-introspect";
@@ -859,6 +871,11 @@
 		CD2785702CFB0916008A0EEF /* InlineConfig */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineConfig;
+		};
+		CD4D56CC2D2D4393006072AE /* Throttler */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD4D56CB2D2D4393006072AE /* XCRemoteSwiftPackageReference "Throttler" */;
+			productName = Throttler;
 		};
 		CDE960152CB94C4F004C541C /* SwiftUIIntrospect */ = {
 			isa = XCSwiftPackageProductDependency;
