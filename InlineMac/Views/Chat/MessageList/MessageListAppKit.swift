@@ -54,8 +54,8 @@ class MessageListAppKit: NSViewController {
     table.rowHeight = defaultRowHeight
     
     // Experimental
-//    table.wantsLayer = true
-//    table.layerContentsRedrawPolicy = .onSetNeedsDisplay
+    // table.wantsLayer = true
+    // table.layerContentsRedrawPolicy = .onSetNeedsDisplay
     
     let column = NSTableColumn(identifier: .init("messageColumn"))
     column.isEditable = false
@@ -220,15 +220,21 @@ class MessageListAppKit: NSViewController {
     }
   }
 
+  private var frameObserver: Any?
+
   private func setupScrollObserver() {
     // Use direct observation for immediate response
     scrollView.contentView.postsFrameChangedNotifications = true
     scrollView.contentView.postsBoundsChangedNotifications = true
     
-    NotificationCenter.default.addObserver(self,
-                                           selector: #selector(scrollViewFrameChanged),
-                                           name: NSView.frameDidChangeNotification,
-                                           object: scrollView.contentView)
+    frameObserver = NotificationCenter.default.addObserver(
+      forName: NSView.frameDidChangeNotification,
+      object: scrollView.contentView,
+      queue: .main
+    ) { [weak self] _ in
+      self?.scrollViewFrameChanged()
+    }
+    
     NotificationCenter.default.addObserver(self,
                                            selector: #selector(scrollViewBoundsChanged),
                                            name: NSView.boundsDidChangeNotification,
@@ -257,8 +263,7 @@ class MessageListAppKit: NSViewController {
   @objc private func scrollWheelEnded() {
     isUserScrolling = false
     
-    // Safety check to ensure all visible messages are correctly sizes
-    // Can remove once we figure out how to do this as user scrolls
+    // TODO: maintainingBottomScroll
     recalculateHeightsOnWidthChange()
   }
 
@@ -285,7 +290,7 @@ class MessageListAppKit: NSViewController {
   private var prevOffset: CGFloat = 0
   
   @objc func scrollViewBoundsChanged(notification: Notification) {
-    log.trace("scroll view bounds changed")
+    // log.trace("scroll view bounds changed")
     
     // Update avatars as user scrolls
     //    updateAvatars()
@@ -334,7 +339,8 @@ class MessageListAppKit: NSViewController {
   var oldScrollViewHeight: CGFloat = 0.0
   var oldDistanceFromBottom: CGFloat = 0.0
   
-  @objc func scrollViewFrameChanged(notification: Notification) {
+  // @objc func scrollViewFrameChanged(notification: Notification) {
+  func scrollViewFrameChanged() {
     // keep scroll view anchored from the bottom
     guard feature_maintainsScrollFromBottomOnResize else { return }
     
@@ -355,11 +361,17 @@ class MessageListAppKit: NSViewController {
     let scrollOffset = scrollView.contentView.bounds.origin
     let viewportSize = scrollView.contentView.bounds.size
     let contentSize = scrollView.documentView?.frame.size ?? .zero
-    let maxScrollableHeight = contentSize.height - viewportSize.height
-    let currentScrollOffset = scrollOffset.y
     
     // TODO: min max
     let nextScrollPosition = contentSize.height - (oldDistanceFromBottom + viewportSize.height)
+    
+    if nextScrollPosition == scrollOffset.y {
+      log.trace("scroll position is same, skipping maintaining")
+      return
+    }
+    
+    // Early return if no change needed
+    if abs(nextScrollPosition - scrollOffset.y) < 0.5 { return }
     
     CATransaction.begin()
     CATransaction.setDisableActions(true)
@@ -419,7 +431,12 @@ class MessageListAppKit: NSViewController {
     
     if abs(newWidth - lastKnownWidth) > magicWidthDiff {
       lastKnownWidth = newWidth
-      recalculateHeightsOnWidthChange()
+      
+      maintainingBottomScroll { // This ensures the scroll will not jump while resizing a multi-line message
+        // Update heights
+        recalculateHeightsOnWidthChange()
+        return true
+      }
     }
   }
   
@@ -519,7 +536,7 @@ class MessageListAppKit: NSViewController {
     let viewportHeight = scrollView.contentView.bounds.height
     let contentHeight = scrollView.documentView?.frame.height ?? 0
     let currentOffset = scrollView.contentView.bounds.origin.y
-    let distanceFromBottom = contentHeight - (currentOffset + viewportHeight)
+//    let distanceFromBottom = contentHeight - (currentOffset + viewportHeight)
     
     // Execute the closure that modifies the data
     if let shouldMaintain = closure(), !shouldMaintain {
@@ -530,8 +547,11 @@ class MessageListAppKit: NSViewController {
     
     // Calculate and set new scroll position
     let newContentHeight = scrollView.documentView?.frame.height ?? 0
-    let newOffset = newContentHeight - (distanceFromBottom + viewportHeight)
+//    let newOffset = newContentHeight - (distanceFromBottom + viewportHeight)
+    let newOffset = newContentHeight - (oldDistanceFromBottom + viewportHeight)
       
+    log.trace("Maintaining scroll from bottom, oldOffset=\(currentOffset), newOffset=\(newOffset)")
+    
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     scrollView.documentView?.scroll(NSPoint(x: 0, y: newOffset))
@@ -722,6 +742,7 @@ class MessageListAppKit: NSViewController {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+    NotificationCenter.default.removeObserver(frameObserver)
   }
   
   //  private func _updateAvatars() {
