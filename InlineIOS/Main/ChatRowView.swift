@@ -108,6 +108,7 @@ struct ChatRowView: View {
               .font(.callout)
               .foregroundColor(.secondary)
               .lineLimit(1)
+              .frame(maxWidth: .infinity, alignment: .leading)
           }
           if pinned {
             Image(systemName: "pin.fill")
