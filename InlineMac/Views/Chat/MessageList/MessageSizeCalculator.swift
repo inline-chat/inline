@@ -15,7 +15,7 @@ class MessageSizeCalculator {
   private let textHeightCache = NSCache<NSString, NSValue>()
   private let minWidthForSingleLine = NSCache<NSString, NSValue>()
   
-  private let log = Log.scoped("MessageSizeCalculator", enableTracing: false)
+  private let log = Log.scoped("MessageSizeCalculator", enableTracing: true)
   private var heightForSingleLine: CGFloat?
   
   static let safeAreaWidth: CGFloat = 50.0
@@ -28,7 +28,7 @@ class MessageSizeCalculator {
     
     textStorage.addLayoutManager(layoutManager)
     layoutManager.addTextContainer(textContainer)
-    
+    MessageTextConfiguration.configureTextContainer(textContainer)
     cache.countLimit = 2000
     textHeightCache.countLimit = 2000
     minWidthForSingleLine.countLimit = 2000
@@ -58,16 +58,17 @@ class MessageSizeCalculator {
     if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue, let cachedTextSize = textHeightCache.object(forKey: cacheKey)?.sizeValue {
       return (cachedSize, cachedTextSize)
     }
-    
+    log.trace("availableWidth \(availableWidth) for text \(text)")
     var textSize: CGSize?
-    
+    var cachHitForSingleLine = false
     if let minSize = minWidthForSingleLine.object(forKey: text as NSString) as? CGSize, minSize.width < availableWidth {
       log.trace("single line minWidth \(minSize.width) is less than viewport \(width)")
+      cachHitForSingleLine = true
       textSize = CGSize(width: minSize.width, height: heightForSingleLineText())
     }
     
     if textSize == nil {
-      textSize = calculateSizeForText(text, width: availableWidth)
+      textSize = calculateSizeForText(text, width: availableWidth, message: message.message)
     }
     
     let textHeight = ceil(textSize!.height)
@@ -75,8 +76,8 @@ class MessageSizeCalculator {
     let textSizeCeiled = CGSize(width: ceil(textWidth), height: ceil(textHeight))
     
     // Mark as single line if height is equal to single line height
-    if textHeight == heightForSingleLineText() {
-      log.debug("cached single line text \(text) width \(textWidth)")
+    if !cachHitForSingleLine, textHeight == heightForSingleLineText() {
+      log.trace("cached single line text \(text) width \(textWidth)")
       minWidthForSingleLine.setObject(NSValue(size: CGSize(width: textWidth, height: textHeight)), forKey: text as NSString)
     }
     
@@ -123,14 +124,23 @@ class MessageSizeCalculator {
     }
   }
   
-  private func calculateSizeForText(_ text: String, width: CGFloat) -> NSSize {
+  private func calculateSizeForText(_ text: String, width: CGFloat, message: Message? = nil) -> NSSize {
     textContainer.size = NSSize(width: width, height: .greatestFiniteMagnitude)
-    MessageTextConfiguration.configureTextContainer(textContainer)
-    
-    let attributedString = NSAttributedString(
-      string: text.trimmingCharacters(in: .whitespacesAndNewlines),
-      attributes: [.font: MessageTextConfiguration.font]
-    )
+
+    // See if this actually helps performance or not
+    let attributedString = if let message = message, let attrs = CacheAttrs.shared.get(message: message) {
+      attrs
+    } else {
+      NSAttributedString(
+        string: text, // whitespacesAndNewline
+        attributes: [.font: MessageTextConfiguration.font]
+      )
+    }
+      
+//    let attributedString = NSAttributedString(
+//      string: text, // whitespacesAndNewline
+//      attributes: [.font: MessageTextConfiguration.font]
+//    )
     textStorage.setAttributedString(attributedString)
     layoutManager.ensureLayout(for: textContainer)
     // Get the glyphRange to ensure we're measuring all content
