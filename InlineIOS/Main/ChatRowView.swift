@@ -4,23 +4,43 @@ import SwiftUI
 import UIKit
 
 struct ChatRowView: View {
-  let item: HomeChatItem
+  let item: ChatRowItem
   var type: ChatType {
-    item.chat?.type ?? .privateChat
+    switch item {
+    case .home(let homeItem):
+      return homeItem.chat?.type ?? .privateChat
+    case .space(let spaceItem):
+      return spaceItem.chat?.type ?? .privateChat
+    }
   }
 
   @ObservedObject var composeActions: ComposeActions = .shared
 
   private func currentComposeAction() -> ApiComposeAction? {
-    composeActions.getComposeAction(for: Peer(userId: item.user.id))?.action
+    switch item {
+    case .home(let homeItem):
+      return composeActions.getComposeAction(for: Peer(userId: homeItem.user.id))?.action
+    case .space(let spaceItem):
+      return nil
+    }
   }
 
   private var pinned: Bool {
-    item.dialog.pinned ?? false
+    switch item {
+    case .home(let homeItem):
+      return homeItem.dialog.pinned ?? false
+    case .space(let spaceItem):
+      return spaceItem.dialog.pinned ?? false
+    }
   }
 
   private var isCurrentUser: Bool {
-    item.user.id == Auth.shared.getCurrentUserId()
+    switch item {
+    case .home(let homeItem):
+      return homeItem.user.id == Auth.shared.getCurrentUserId()
+    case .space(let spaceItem):
+      return spaceItem.user?.id == Auth.shared.getCurrentUserId()
+    }
   }
 
   private var showTypingIndicator: Bool {
@@ -28,19 +48,37 @@ struct ChatRowView: View {
   }
 
   private var senderName: String {
-    if item.from?.id == Auth.shared.getCurrentUserId() {
-      return "You"
-    } else {
-      return item.from?.firstName ?? ""
+    switch item {
+    case .home(let homeItem):
+      if homeItem.from?.id == Auth.shared.getCurrentUserId() {
+        return "You"
+      } else {
+        return homeItem.from?.firstName ?? ""
+      }
+    case .space(let spaceItem):
+      if let user = spaceItem.user {
+        return user.fullName
+      } else {
+        return spaceItem.chat?.title ?? ""
+      }
     }
   }
 
   var body: some View {
     HStack(alignment: .top) {
-      if isCurrentUser {
-        savedMessageSymbol
-      } else {
-        userAvatar
+      switch item {
+      case .home(let homeItem):
+        if isCurrentUser {
+          savedMessageSymbol
+        } else {
+          userAvatar(homeItem.user)
+        }
+      case .space(let spaceItem):
+        if isCurrentUser {
+          savedMessageSymbol
+        } else {
+          spaceAvatar(spaceItem)
+        }
       }
 
       VStack(alignment: .leading) {
@@ -57,7 +95,7 @@ struct ChatRowView: View {
               .foregroundColor(.secondary)
               .lineLimit(1)
               .frame(maxWidth: .infinity, alignment: .leading)
-          } else if let lastMsgText = item.message?.text {
+          } else if let lastMsgText = getMessage()?.text {
             Text(
               "\(senderName): \(lastMsgText.replacingOccurrences(of: "\n", with: " "))"
             )
@@ -66,7 +104,6 @@ struct ChatRowView: View {
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
           } else {
-            // TODO: decide for this -> in some cases, chat is not empty; just messages are loading
             Text("No messages yet")
               .font(.callout)
               .foregroundColor(.secondary)
@@ -85,12 +122,27 @@ struct ChatRowView: View {
     .contentShape(Rectangle())
   }
 
+  private func getMessage() -> Message? {
+    switch item {
+    case .home(let homeItem):
+      return homeItem.message
+    case .space(let spaceItem):
+      return spaceItem.message
+    }
+  }
+
   @ViewBuilder
-  var userAvatar: some View {
-    UserAvatar(user: item.user, size: 36)
+  func spaceAvatar(_ item: SpaceChatItem) -> some View {
+    InitialsCircle(firstName: item.title ?? "", lastName: nil, size: 36)
+      .padding(.trailing, 6)
+  }
+
+  @ViewBuilder
+  func userAvatar(_ user: User) -> some View {
+    UserAvatar(user: user, size: 36)
       .padding(.trailing, 6)
       .overlay(alignment: .bottomTrailing) {
-        if item.user.online == true {
+        if user.online == true {
           Circle()
             .fill(.green)
             .frame(width: 10, height: 10)
@@ -102,18 +154,31 @@ struct ChatRowView: View {
 
   @ViewBuilder
   var chatTitle: some View {
-    Text(
-      type == .privateChat
-        ? item.user.id == Auth.shared.getCurrentUserId()
-        ? "Saved Message" : item.user.firstName ?? "" : item.chat?.title ?? ""
-    )
-    .fontWeight(.medium)
-    .foregroundColor(.primary)
+    switch item {
+    case .home(let homeItem):
+      Text(
+        type == .privateChat
+          ? homeItem.user.id == Auth.shared.getCurrentUserId()
+          ? "Saved Message" : homeItem.user.firstName ?? ""
+          : homeItem.chat?.title ?? ""
+      )
+      .fontWeight(.medium)
+      .foregroundColor(.primary)
+    case .space(let spaceItem):
+      Text(
+        type == .privateChat
+          ? spaceItem.user?.id == Auth.shared.getCurrentUserId()
+          ? "Saved Message" : spaceItem.user?.firstName ?? ""
+          : spaceItem.chat?.title ?? ""
+      )
+      .fontWeight(.medium)
+      .foregroundColor(.primary)
+    }
   }
 
   @ViewBuilder
   var messageDate: some View {
-    Text(item.message?.date.formatted() ?? "")
+    Text(getMessage()?.date.formatted() ?? "")
       .font(.callout)
       .foregroundColor(.secondary)
   }
@@ -137,4 +202,9 @@ struct ChatRowView: View {
       }
       .padding(.trailing, 6)
   }
+}
+
+enum ChatRowItem {
+  case home(HomeChatItem)
+  case space(SpaceChatItem)
 }
