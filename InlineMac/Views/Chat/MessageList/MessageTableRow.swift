@@ -28,8 +28,48 @@ class MessageTableCell: NSView {
       return
     }
     
+    // ONLY SIZE CHANGE
+    if let currentContent = currentContent,
+       // has view
+       messageView != nil,
+       // same message
+       currentContent.message == message,
+       // different width and height (ie. window resized)
+       currentContent.props.equalExceptSize(props) {
+      log.debug("updating message size")
+      self.currentContent = (message, props)
+      updateSize()
+      return
+    }
+    
+    // RE-USE
+    if let currentContent = currentContent,
+       // has view
+       messageView != nil,
+       // same sender
+       currentContent.message.message.fromId == message.message.fromId,
+       // same message layout
+       currentContent.message.message.out == message.message.out,
+       currentContent.message.message.status == message.message.status,
+       currentContent.message.message.repliedToMessageId == message.message.repliedToMessageId,
+       // same avatar
+       currentContent.props.firstInGroup == props.firstInGroup
+       // different text
+       // currentContent.message.message.text != message.message.text
+    {
+      log.debug("updating message text and size")
+      log.debug("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
+      self.currentContent = (message, props)
+      updateTextAndSize()
+      return
+    }
+    
+   
+    
     log.debug("recreating message view")
       
+    
+    // TODO: Don't recreate on width/height change
 //    if let prevProps = currentContent?.props,
 //       message == currentContent?.message &&
 //       props.equalExceptSize(prevProps)
@@ -47,6 +87,20 @@ class MessageTableCell: NSView {
 //    messageView?.ensureLayout(props)
 //    layoutSubtreeIfNeeded()
 //  }
+  
+  func updateTextAndSize() {
+    guard let content = currentContent else { return }
+    guard let messageView = messageView else { return }
+    
+    messageView.updateTextAndSize(fullMessage: content.0, props: content.1)
+  }
+  
+  func updateSize() {
+    guard let content = currentContent else { return }
+    guard let messageView = messageView else { return }
+    
+    messageView.updateSize(props: content.1)
+  }
   
   private func updateContent() {
     guard let content = currentContent else { return }
