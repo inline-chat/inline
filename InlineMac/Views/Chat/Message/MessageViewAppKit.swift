@@ -1,8 +1,10 @@
 // MessageView.swift
 import AppKit
+import Foundation
 import InlineKit
 import InlineUI
 import SwiftUI
+import Throttler
 
 class MessageViewAppKit: NSView {
   static let avatarSize: CGFloat = Theme.messageAvatarSize
@@ -94,19 +96,23 @@ class MessageViewAppKit: NSView {
     return label
   }()
 
-  private lazy var textView: NSTextView = {
-    let textView = MessageTextView(usingTextLayoutManager: true) // Experimental text kit 2
+  private var useTextKit2: Bool = true
 
-    // Not sure if this helps actually
-//     textView.wantsLayer = true
+  private lazy var textView: NSTextView = {
+    let textView = if useTextKit2 {
+      MessageTextView(usingTextLayoutManager: true) // Experimental text kit 2
+    } else {
+      MessageTextView(usingTextLayoutManager: false) // TextKit 1
+    }
 
     textView.translatesAutoresizingMaskIntoConstraints = false
     textView.isEditable = false
     textView.isSelectable = true
     textView.drawsBackground = false
     textView.backgroundColor = .clear
-    // In some international languages the measurements might be off slightly, this could avoid cutting off text in that case
-    textView.clipsToBounds = false
+    // Clips to bounds = false fucks up performance so badly. what!?
+    // textView.clipsToBounds = false
+    textView.clipsToBounds = true
     textView.textContainerInset = MessageTextConfiguration.containerInset
     textView.font = MessageTextConfiguration.font
     textView.textColor = textColor
@@ -114,7 +120,6 @@ class MessageViewAppKit: NSView {
     let textContainer = textView.textContainer
     textContainer?.widthTracksTextView = true
     textContainer?.heightTracksTextView = true
-//    textView.isVerticallyResizable = true
     textView.isVerticallyResizable = false
     textView.isHorizontallyResizable = false
 
@@ -178,26 +183,39 @@ class MessageViewAppKit: NSView {
         return
       }
 
-      // TextKit 2 specific configuration
-      if let textLayoutManager = textView.textLayoutManager {
-        Log.shared.debug("Layouting viewport for text view \(message.id)")
+      if useTextKit2 {
+        // TextKit 2 specific configuration
+        if let textLayoutManager = textView.textLayoutManager {
+          throttle(.milliseconds(80), identifier: "layoutMessageTextView", by: .mainActor, option: .ensureLast) { [
+            weak self,
+            weak textLayoutManager
+          ] in
+            guard let self = self else { return }
+            guard let textLayoutManager = textLayoutManager else { return }
 
-        DispatchQueue.main.async {
-          // Enable continuous layout
-          textLayoutManager.textViewportLayoutController.layoutViewport()
+            Log.shared.debug("Layouting viewport for text view \(self.message.id)")
+
+            // Enable continuous layout
+            textLayoutManager.textViewportLayoutController.layoutViewport()
+          }
         }
+      } else {
+//        Log.shared.debug("Layouting viewport for text view \(message.id)")
+
+        // TODO: Ensure layout for textkit 1
+        // textView.layoutManager?.ensureLayout(for: textView.textContainer!)
       }
     }
   }
 
-  func ensureLayout(_ props: MessageViewProps) {
-    self.props = props
-
-    textViewWidthConstraint.constant = props.textWidth ?? 0
-    textViewHeightConstraint.constant = props.textHeight ?? 0
-
-    setupMessageText()
-  }
+//  func ensureLayout(_ props: MessageViewProps) {
+//    self.props = props
+//
+//    textViewWidthConstraint.constant = props.textWidth ?? 0
+//    textViewHeightConstraint.constant = props.textHeight ?? 0
+//
+//    setupMessageText()
+//  }
 
   // MARK: - Initialization
 
