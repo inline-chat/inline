@@ -36,6 +36,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var lastOnline: Date?
 
   public static let members = hasMany(Member.self)
+  public static let dialog = hasOne(Dialog.self)
   public static let spaces = hasMany(Space.self, through: members, using: Member.space)
 
   public var members: QueryInterfaceRequest<Member> {
@@ -44,6 +45,10 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
   public var spaces: QueryInterfaceRequest<Space> {
     request(for: User.spaces)
+  }
+
+  public var dialog: QueryInterfaceRequest<Dialog> {
+    request(for: User.dialog)
   }
 
   public static let chat = hasOne(Chat.self)
@@ -112,9 +117,8 @@ public extension User {
   static func fromTimestamp(from: Int) -> Date {
     return Date(timeIntervalSince1970: Double(from))
   }
-  
+
   func isCurrentUser() -> Bool {
     return self.id == Auth.shared.getCurrentUserId()
   }
 }
-
