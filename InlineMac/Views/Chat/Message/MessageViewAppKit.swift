@@ -187,17 +187,26 @@ class MessageViewAppKit: NSView {
       if useTextKit2 {
         // TextKit 2 specific configuration
         if let textLayoutManager = textView.textLayoutManager {
-          throttle(.milliseconds(100), identifier: "layoutMessageTextView", by: .mainActor, option: .default) { [
-            weak self,
-            weak textLayoutManager
-          ] in
-            guard let self = self else { return }
-            guard let textLayoutManager = textLayoutManager else { return }
+          let naiveThresholdForMultiLine: CGFloat = 50
 
-            Log.shared.debug("Layouting viewport for text view \(self.message.id)")
-
-            // Enable continuous layout
+          // Choose based on multiline vs single line
+          if (props.textHeight ?? 0.0) > naiveThresholdForMultiLine {
+            // Important note:
+            // Less performant, but fixes flicker during live resize for large messages that are beyound viewport height and during width resize
+            Log.shared.debug("Layouting viewport for text view \(message.id)")
             textLayoutManager.textViewportLayoutController.layoutViewport()
+          } else {
+            // More performant
+            throttle(.milliseconds(100), identifier: "layoutMessageTextView", by: .mainActor, option: .default) { [
+              weak self,
+              weak textLayoutManager
+            ] in
+              guard let self = self else { return }
+              guard let textLayoutManager = textLayoutManager else { return }
+
+              Log.shared.debug("Layouting viewport for text view \(self.message.id)")
+              textLayoutManager.textViewportLayoutController.layoutViewport()
+            }
           }
         }
       } else {
@@ -445,6 +454,12 @@ class MessageViewAppKit: NSView {
 
     // This helps refresh the layout
     textView.textContainer?.containerSize = CGSize(width: textWidth, height: props.textHeight ?? 0)
+
+    if useTextKit2 {
+      textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
+      textView.layout()
+      textView.display()
+    }
   }
 
   // MARK: - Actions
