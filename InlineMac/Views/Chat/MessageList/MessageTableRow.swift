@@ -27,6 +27,8 @@ class MessageTableCell: NSView {
       // Update: commented when I was debugging slow message sending
       return
     }
+    
+    log.debug("recreating message view")
       
 //    if let prevProps = currentContent?.props,
 //       message == currentContent?.message &&
@@ -40,11 +42,11 @@ class MessageTableCell: NSView {
     currentContent = (message, props)
     updateContent()
   }
-  
-  func ensureLayout(_ props: MessageViewProps) {
-    messageView?.ensureLayout(props)
-    layoutSubtreeIfNeeded()
-  }
+
+//  func ensureLayout(_ props: MessageViewProps) {
+//    messageView?.ensureLayout(props)
+//    layoutSubtreeIfNeeded()
+//  }
   
   private func updateContent() {
     guard let content = currentContent else { return }
