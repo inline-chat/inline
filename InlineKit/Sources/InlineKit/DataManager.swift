@@ -39,30 +39,19 @@ public class DataManager: ObservableObject {
     }
   }
 
-  public func createSpace(name: String) async throws -> Space {
+  public func createSpace(name: String) async throws -> Int64? {
     log.debug("createSpace")
     do {
       let result = try await ApiClient.shared.createSpace(name: name)
       let space = Space(from: result.space)
       try await database.dbWriter.write { db in
         try space.save(db)
-
-        let member = Member(from: result.member)
-        try member.save(db)
-
-        // Create main thread (default)
-        for chat in result.chats {
-          let thread = Chat(from: chat)
-          try thread.save(db)
-        }
-        for dialog in result.dialogs {
-          let dialog = Dialog(from: dialog)
-          try dialog.save(db)
+        try Member(from: result.member).save(db)
+        try result.chats.forEach { chat in
+          try Chat(from: chat).save(db)
         }
       }
-
-      // Return for navigating to space using id
-      return space
+      return space.id
     } catch {
       Log.shared.error("Failed to create space", error: error)
       throw error
