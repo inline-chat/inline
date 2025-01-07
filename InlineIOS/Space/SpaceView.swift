@@ -47,6 +47,7 @@ struct SpaceView: View {
         }
       }
       .listStyle(.plain)
+      .animation(.default, value: fullSpaceViewModel.chats)
     }
     .frame(maxWidth: .infinity)
     .navigationBarTitleDisplayMode(.inline)

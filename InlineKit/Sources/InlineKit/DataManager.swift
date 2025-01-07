@@ -58,24 +58,18 @@ public class DataManager: ObservableObject {
     }
   }
 
-  public func createThread(spaceId: Int64, title: String?) async throws -> Int64? {
+  public func createThread(spaceId: Int64, title: String) async throws -> Int64? {
     log.debug("createThread")
     do {
-      return try await database.dbWriter.write { db in
-
-        // TODO: API call to create thread
-
-        // Create the chat
-        let thread = Chat(
-          date: Date.now,
-          type: .thread,
-          title: title,
-          spaceId: spaceId
-        )
-        try thread.save(db)
-
-        return thread.id
+      // TODO: API call to create thread
+      let result = try await ApiClient.shared.createThread(title: title, spaceId: spaceId)
+      // Create the chat
+      let chat = Chat(from: result.chat)
+      try await database.dbWriter.write { db in
+        try chat.save(db)
       }
+      return chat.id
+
     } catch {
       Log.shared.error("Failed to create thread", error: error)
       throw error
