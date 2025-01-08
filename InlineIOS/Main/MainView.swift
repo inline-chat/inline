@@ -72,10 +72,6 @@ struct MainView: View {
     }
     .toolbar {
       toolbarContent
-      ToolbarItem(placement: .bottomBar) {
-        ConnectionStateIndicator(state: ws.connectionState)
-          .animation(.smoothSnappy, value: ws.connectionState)
-      }
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
@@ -283,8 +279,11 @@ struct MainView: View {
               .font(.title3)
               .fontWeight(.semibold)
           }
-          .animation(.smoothSnappy, value: ws.connectionState)
         }
+      }
+      
+      ToolbarItem(id: "status", placement: .principal) {
+        ConnectionStateIndicator(state: ws.connectionState)
       }
 
       ToolbarItem(id: "MainToolbarTrailing", placement: .topBarTrailing) {
