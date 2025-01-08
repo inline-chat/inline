@@ -32,6 +32,9 @@
     "Actions" : {
 
     },
+    "Add Member" : {
+
+    },
     "Appearance" : {
 
     },
@@ -377,6 +380,9 @@
 
     },
     "No users found" : {
+
+    },
+    "Search by username" : {
 
     },
     "Search in users and spaces" : {
