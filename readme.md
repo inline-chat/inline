@@ -11,7 +11,7 @@
 
 ## About
 
-Inline is the team chat app we wished existed, so we're building it ourselves. We tried Slack, Discord, iMessage, Telegram, etc but none of them felt quite right. Those are great apps so you may not need Inline now if you're already happy with your current setup. Here's what Inline is:
+Inline is the team chat app we wished existed, so we're building it ourselves. We tried Slack, Discord, iMessage, Telegram, etc but none of them felt quite right. Those are good apps so if they work well for you, we're not saying Inline will be better for you. Here's what Inline is:
 
 - **Fast**: 120-fps, instant app startup, no spinners.
 - **Lightweight**: Sub-1% CPU usage, low RAM footprint.
