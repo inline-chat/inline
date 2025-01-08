@@ -468,10 +468,17 @@ public class DataManager: ObservableObject {
     try await database.dbWriter.write { db in
       let space = Space(from: result.space)
       try space.save(db, onConflict: .replace)
+
       for member in result.members {
         let member = Member(from: member)
-        try member.save(db, onConflict: .replace)
+        try member.save(db, onConflict: .ignore)
       }
+
+      for dialog in result.dialogs {
+        let dialog = Dialog(from: dialog)
+        try dialog.save(db, onConflict: .replace)
+      }
+
       for chat in result.chats {
         let chat = Chat(from: chat)
         try chat.save(db, onConflict: .replace)
