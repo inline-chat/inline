@@ -539,6 +539,7 @@ public struct GetSpace: Codable, Sendable {
   public let space: ApiSpace
   public let members: [ApiMember]
   public let chats: [ApiChat]
+  public let dialogs: [ApiDialog]
 }
 
 struct SessionInfo: Codable, Sendable {
