@@ -113,32 +113,18 @@ struct SpaceView: View {
     }
   }
 
+  @ViewBuilder
   private func combinedItemRow(for item: CombinedItem) -> some View {
     switch item {
     case .member(let memberChat):
-      return Button {
+      Button {
         nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
       } label: {
         ChatRowView(item: .space(memberChat))
       }
-      .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-        Button {
-          Task {
-            try await data.updateDialog(
-              peerId: .user(id: memberChat.user?.id ?? 0),
-              pinned: !(memberChat.dialog.pinned ?? false)
-            )
-          }
-        } label: {
-          Image(systemName: memberChat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-        }
-      }
-      .tint(.indigo)
-      .listRowBackground(
-        memberChat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
 
     case .chat(let chat):
-      return Button {
+      Button {
         nav.push(.chat(peer: chat.peerId))
       } label: {
         ChatRowView(item: .space(chat))
@@ -190,5 +176,5 @@ private enum CombinedItem: Identifiable {
 }
 
 #Preview {
-  SpaceView(spaceId: Int64.random(in: 1...500))
+  SpaceView(spaceId: Int64.random(in: 1 ... 500))
 }

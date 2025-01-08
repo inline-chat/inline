@@ -164,12 +164,13 @@ struct MainView: View {
     }
   }
 
+  @ViewBuilder
   private func combinedItemRow(for item: CombinedItem) -> some View {
     switch item {
     case .space(let space):
-      return spaceRow(for: space)
+      spaceRow(for: space)
     case .chat(let chat):
-      return chatRow(for: chat)
+      chatRow(for: chat)
     }
   }
 
