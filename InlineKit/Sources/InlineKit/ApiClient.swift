@@ -53,6 +53,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   private let log = Log.scoped("ApiClient")
 
   private var baseURL: String {
+    if ProjectConfig.useProductionApi {
+      return "https://api.inline.chat/v1"
+    }
+    
     #if targetEnvironment(simulator)
       return "http://localhost:8000/v1"
     #elseif DEBUG && os(iOS)
