@@ -21,50 +21,66 @@ struct AddMember: View {
   var spaceId: Int64
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      AnimatedLabel(animate: $animate, text: "Add Member")
-
-      TextField("Search by username", text: $text)
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled(true)
-        .font(.title2)
-        .fontWeight(.semibold)
-        .padding(.vertical, 8)
-
-      if !text.isEmpty {
-        searchResultsView
+    NavigationView {
+      VStack(alignment: .leading, spacing: 6) {
+        if !text.isEmpty {
+          searchSection
+        }
+        Spacer()
+      }
+      .searchable(text: $text, prompt: "Search by username")
+      .onChange(of: text) { _, newValue in
+        searchDebouncer.input = newValue
+      }
+      .onReceive(searchDebouncer.$debouncedInput) { debouncedValue in
+        guard let value = debouncedValue else { return }
+        searchUsers(query: value)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .padding(.horizontal, 14)
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .principal) {
+          HStack {
+            Text("Add Member")
+              .fontWeight(.medium)
+              .font(.body)
+            Spacer()
+          }
+          .frame(maxWidth: .infinity)
+        }
       }
     }
-    .onChange(of: text) { _, newValue in
-      searchDebouncer.input = newValue
-    }
-    .onReceive(searchDebouncer.$debouncedInput) { debouncedValue in
-      guard let value = debouncedValue else { return }
-      searchUsers(query: value)
-    }
-    .padding(.horizontal, 50)
-    .frame(maxHeight: .infinity)
   }
 
   @ViewBuilder
-  private var searchResultsView: some View {
-    VStack {
+  private var searchSection: some View {
+    VStack(alignment: .leading) {
       if isSearching {
-        HStack {
-          ProgressView()
-          Text("Searching...")
-            .foregroundColor(.secondary)
-        }
+        searchLoadingView
       } else if searchResults.isEmpty {
         Text("No users found")
           .foregroundColor(.secondary)
       } else {
-        ScrollView {
-          LazyVStack {
-            ForEach(searchResults) { user in
-              searchResultRow(for: user)
-            }
-          }
+        searchResultsList
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var searchLoadingView: some View {
+    HStack {
+      ProgressView()
+      Text("Searching...")
+        .foregroundColor(.secondary)
+    }
+  }
+
+  private var searchResultsList: some View {
+    ScrollView {
+      LazyVStack {
+        ForEach(searchResults) { user in
+          searchResultRow(for: user)
         }
       }
     }
@@ -77,10 +93,17 @@ struct AddMember: View {
       HStack(alignment: .top) {
         UserAvatar(user: user, size: 36)
           .padding(.trailing, 6)
+          .overlay(alignment: .bottomTrailing) {
+            Circle()
+              .fill(.green)
+              .frame(width: 12, height: 12)
+              .padding(.leading, -14)
+          }
 
         VStack(alignment: .leading) {
           Text(user.firstName ?? "User")
             .fontWeight(.medium)
+            .foregroundColor(.primary)
           if let username = user.username {
             Text("@\(username)")
               .font(.callout)
@@ -88,9 +111,9 @@ struct AddMember: View {
           }
         }
         .padding(.top, -4)
+        Spacer()
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity)
     }
   }
 
@@ -143,6 +166,7 @@ struct AddMember: View {
     Task {
       do {
         formState.startLoading()
+        let peer = try await dataManager.createPrivateChat(userId: user.id)
         try await dataManager.addMember(spaceId: spaceId, userId: user.id)
         formState.succeeded()
         showSheet = false
