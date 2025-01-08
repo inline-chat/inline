@@ -7,7 +7,7 @@ struct SpaceView: View {
 
   @Environment(\.appDatabase) var database
   @EnvironmentObject var nav: Navigation
-  @EnvironmentObject var dataManager: DataManager
+  @EnvironmentObject var data: DataManager
   @EnvironmentStateObject var fullSpaceViewModel: FullSpaceViewModel
 
   init(spaceId: Int64) {
@@ -18,6 +18,7 @@ struct SpaceView: View {
   }
 
   @State var openCreateThreadSheet = false
+  @State var openAddMemberSheet = false
 
   var body: some View {
     VStack {
@@ -58,6 +59,11 @@ struct SpaceView: View {
             }) {
               Text("Create Thread")
             }
+            Button(action: {
+              openAddMemberSheet = true
+            }) {
+              Text("Add Member")
+            }
           } label: {
             Image(systemName: "ellipsis")
               .tint(Color.secondary)
@@ -71,12 +77,22 @@ struct SpaceView: View {
         .presentationBackground(.thinMaterial)
         .presentationCornerRadius(28)
     }
+    .sheet(isPresented: $openAddMemberSheet) {
+      AddMember(showSheet: $openAddMemberSheet, spaceId: spaceId)
+        .presentationBackground(.thinMaterial)
+        .presentationCornerRadius(28)
+    }
     .task {
       do {
-        try await dataManager.getDialogs(spaceId: spaceId)
+        try await data.getDialogs(spaceId: spaceId)
 
       } catch {
         Log.shared.error("Failed to getPrivateChats", error: error)
+      }
+    }
+    .onAppear {
+      Task {
+        try await data.getSpace(spaceId: spaceId)
       }
     }
   }
@@ -108,7 +124,7 @@ struct SpaceView: View {
       .swipeActions(edge: .trailing, allowsFullSwipe: true) {
         Button {
           Task {
-            try await dataManager.updateDialog(
+            try await data.updateDialog(
               peerId: .user(id: memberChat.user?.id ?? 0),
               pinned: !(memberChat.dialog.pinned ?? false)
             )
@@ -118,7 +134,8 @@ struct SpaceView: View {
         }
       }
       .tint(.indigo)
-      .listRowBackground(memberChat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
+      .listRowBackground(
+        memberChat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
 
     case .chat(let chat):
       return Button {
@@ -129,7 +146,7 @@ struct SpaceView: View {
       .swipeActions(edge: .trailing, allowsFullSwipe: true) {
         Button {
           Task {
-            try await dataManager.updateDialog(
+            try await data.updateDialog(
               peerId: chat.peerId,
               pinned: !(chat.dialog.pinned ?? false)
             )
@@ -173,5 +190,5 @@ private enum CombinedItem: Identifiable {
 }
 
 #Preview {
-  SpaceView(spaceId: Int64.random(in: 1 ... 500))
+  SpaceView(spaceId: Int64.random(in: 1...500))
 }
