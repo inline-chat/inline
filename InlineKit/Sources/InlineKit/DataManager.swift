@@ -274,7 +274,7 @@ public class DataManager: ObservableObject {
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil // TODO: fix
+          chat.lastMsgId = nil  // TODO: fix
 
           return chat
         }
@@ -461,5 +461,29 @@ public class DataManager: ObservableObject {
     }
 
     let result = try await ApiClient.shared.updateDialog(peerId: peerId, pinned: pinned)
+  }
+
+  public func getSpace(spaceId: Int64) async throws {
+    let result = try await ApiClient.shared.getSpace(spaceId: spaceId)
+    try await database.dbWriter.write { db in
+      let space = Space(from: result.space)
+      try space.save(db, onConflict: .replace)
+      for member in result.members {
+        let member = Member(from: member)
+        try member.save(db, onConflict: .replace)
+      }
+      for chat in result.chats {
+        let chat = Chat(from: chat)
+        try chat.save(db, onConflict: .replace)
+      }
+    }
+  }
+
+  public func addMember(spaceId: Int64, userId: Int64) async throws {
+    let result = try await ApiClient.shared.addMember(spaceId: spaceId, userId: userId)
+    try await database.dbWriter.write { db in
+      let member = Member(from: result.member)
+      try member.save(db, onConflict: .replace)
+    }
   }
 }
