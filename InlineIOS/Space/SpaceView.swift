@@ -79,7 +79,6 @@ struct SpaceView: View {
     }
     .sheet(isPresented: $openAddMemberSheet) {
       AddMember(showSheet: $openAddMemberSheet, spaceId: spaceId)
-        .presentationBackground(.thinMaterial)
         .presentationCornerRadius(28)
     }
     .task {
