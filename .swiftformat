@@ -1,7 +1,7 @@
 --indent 2
 --indentcase true
 --trimwhitespace always
---maxwidth 100
+--maxwidth 120
 --wraparguments before-first
 --wrapcollections before-first
 --closingparen same-line
