@@ -33,7 +33,7 @@ public final class WebSocketManager: ObservableObject {
 
     setupNetworkMonitoring()
   }
-  
+
   public func ensureConnected() async {
     // ONLY reconnect if we are disconnected, otherwise we will start two connections initially while the other one is connecting
     if await client?.state == .disconnected {
@@ -58,6 +58,10 @@ public final class WebSocketManager: ObservableObject {
   }
 
   private var url: String {
+    if ProjectConfig.useProductionApi {
+      return "wss://api.inline.chat/ws"
+    }
+
     #if targetEnvironment(simulator)
       return "ws://localhost:8000/ws"
     #elseif DEBUG && os(iOS)
@@ -79,12 +83,12 @@ public final class WebSocketManager: ObservableObject {
       log.error("Invalid URL: \(url)")
       return
     }
-    
+
     if let client = client {
       log.debug("disconnecting before reconnecting")
       await client.disconnect()
     }
-    
+
     log.debug("connecting WS")
 
     let client = WebSocketClient(

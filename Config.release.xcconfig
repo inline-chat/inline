@@ -1,1 +1,2 @@
-DEV_HOST = "localhost"
+DEV_HOST = api.inline.chat
+USE_PRODUCTION_API = YES

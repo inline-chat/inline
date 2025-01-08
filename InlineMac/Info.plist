@@ -8,5 +8,7 @@
 	<string>$(DEV_HOST)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>USE_PRODUCTION_API</key>
+	<string>$(USE_PRODUCTION_API)</string>
 </dict>
 </plist>

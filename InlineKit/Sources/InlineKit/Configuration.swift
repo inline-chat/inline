@@ -3,6 +3,7 @@ import Foundation
 public enum ProjectConfig {
   enum ConfigurationKey: String {
     case devHost = "DEV_HOST"
+    case useProductionApi = "USE_PRODUCTION_API"
   }
   
   enum Error: Swift.Error {
@@ -25,14 +26,21 @@ public enum ProjectConfig {
     }
   }
   
-  public static let devHost: String = {
-    do {
-      return try value(for: .devHost)
-    } catch {
-      fatalError("Failed to load dev host")
-    }
-  }()
+  public static let devHost: String =
+    (try? value(for: .devHost)) ?? "localhost"
   
+  public static let useProductionApi: Bool = {
+    #if DEBUG
+      let fallback = false
+    #else
+      let fallback = true
+    #endif
+    let valueFromConfig: String? = try? value(
+      for: .useProductionApi
+    )
+    return valueFromConfig == nil ? fallback : (valueFromConfig == "YES")
+  }()
+
   public enum KnownArgumentKeys: String {
     case userProfile = "user-profile"
   }

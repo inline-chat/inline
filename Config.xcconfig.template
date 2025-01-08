@@ -1,2 +1,5 @@
-// Your dev API IP/hostname eg. 192.168.1.100 or mac.local get it via hostname shell command
-DEV_HOST = $(API_BASE_URL_VALUE) 
+// If you're an open source contributor to use the production API set USE_PRODUCTION_HOST = YES
+USE_PRODUCTION_HOST = YES
+
+// If you're using the dev API enter the IP/hostname eg. 192.168.1.100 or mac.local get it via hostname shell command
+DEV_HOST = api.inline.chat
