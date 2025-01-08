@@ -166,7 +166,6 @@ struct AddMember: View {
     Task {
       do {
         formState.startLoading()
-        let peer = try await dataManager.createPrivateChat(userId: user.id)
         try await dataManager.addMember(spaceId: spaceId, userId: user.id)
         formState.succeeded()
         showSheet = false
