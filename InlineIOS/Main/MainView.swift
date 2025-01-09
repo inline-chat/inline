@@ -27,6 +27,7 @@ struct MainView: View {
 
   // MARK: - State
 
+  @State private var selectedTab = 0
   @State private var text = ""
   @State private var searchResults: [User] = []
   @State private var isSearching = false
@@ -35,10 +36,6 @@ struct MainView: View {
   var user: User? {
     root.currentUser
   }
-
-  // MARK: - Computed Properties
-
-  private var hasContent: Bool { !spaceList.spaceItems.isEmpty || !home.chats.isEmpty }
 
   // MARK: - Initialization
 
@@ -58,9 +55,19 @@ struct MainView: View {
 
   var body: some View {
     VStack {
-      if hasContent {
-        content
-      } else {}
+      TabView(selection: $selectedTab) {
+        chatsTab
+          .tabItem {
+            Label("Chats", systemImage: "bubble.left.and.bubble.right")
+          }
+          .tag(0)
+
+        spacesTab
+          .tabItem {
+            Label("Spaces", systemImage: "circle.hexagongrid.fill")
+          }
+          .tag(1)
+      }
     }
     .searchable(text: $text, prompt: "Search in users and spaces")
     .onChange(of: text) { _, newValue in
@@ -84,152 +91,73 @@ struct MainView: View {
   // MARK: - Content Views
 
   @ViewBuilder
-  private var content: some View {
+  var spacesTab: some View {
     List {
-      if !text.isEmpty {
-        searchSection
-      } else {
-        combinedSection
+      ForEach(spaceList.spaceItems) { space in
+        Button {
+          nav.push(.space(id: space.space.id))
+        } label: {
+          SpaceRowView(spaceItem: space)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+          if let creator = space.space.creator, creator == true {
+            Button(role: .destructive) {
+              Task { try await dataManager.deleteSpace(spaceId: space.space.id) }
+            } label: {
+              Image(systemName: "trash")
+            }
+          } else {
+            Button(role: .destructive) {
+              Task { try await dataManager.leaveSpace(spaceId: space.space.id) }
+            } label: {
+              Image(systemName: "exit")
+            }
+          }
+        }
+        .tint(.red)
+      }
+    }
+    .listStyle(.plain)
+  }
+
+  @ViewBuilder
+  var chatsTab: some View {
+    List {
+      ForEach(
+        home.chats.sorted { chat1, chat2 in
+          let pinned1 = chat1.dialog.pinned ?? false
+          let pinned2 = chat2.dialog.pinned ?? false
+          if pinned1 != pinned2 { return pinned1 }
+          return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date ?? chat2
+            .chat?.date ?? Date()
+        }
+      ) { chat in
+        Button {
+          nav.push(.chat(peer: .user(id: chat.user.id)))
+        } label: {
+          ChatRowView(item: .home(chat))
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+          Button {
+            Task {
+              try await dataManager.updateDialog(
+                peerId: .user(id: chat.user.id),
+                pinned: !(chat.dialog.pinned ?? false)
+              )
+            }
+          } label: {
+            Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+          }
+        }
+        .tint(.indigo)
+        .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
       }
     }
     .listStyle(.plain)
     .animation(.default, value: home.chats)
   }
 
-  @ViewBuilder
-  private var searchSection: some View {
-    Section {
-      if isSearching {
-        searchLoadingView
-      } else if searchResults.isEmpty {
-        Text("No users found")
-          .foregroundColor(.secondary)
-      } else {
-        searchResultsList
-      }
-    }
-  }
-
-  private var searchLoadingView: some View {
-    HStack {
-      ProgressView()
-      Text("Searching...")
-        .foregroundColor(.secondary)
-    }
-  }
-
-  private var searchResultsList: some View {
-    ForEach(searchResults) { user in
-      searchResultRow(for: user)
-    }
-  }
-
-  private func searchResultRow(for user: User) -> some View {
-    Button {
-      navigateToUser(user)
-    } label: {
-      HStack(alignment: .top) {
-        UserAvatar(user: user, size: 36)
-          .padding(.trailing, 6)
-          .overlay(alignment: .bottomTrailing) {
-            Circle()
-              .fill(.green)
-              .frame(width: 12, height: 12)
-              .padding(.leading, -14)
-          }
-
-        VStack(alignment: .leading) {
-          Text(user.firstName ?? "User")
-            .fontWeight(.medium)
-          if let username = user.username {
-            Text("@\(username)")
-              .font(.callout)
-              .foregroundColor(.secondary)
-          }
-        }
-        .padding(.top, -4)
-      }
-    }
-  }
-
-  private var combinedSection: some View {
-    Section {
-      ForEach(getCombinedItems(), id: \.id) { item in
-        combinedItemRow(for: item)
-      }
-    }
-  }
-
-  @ViewBuilder
-  private func combinedItemRow(for item: CombinedItem) -> some View {
-    switch item {
-    case .space(let space):
-      spaceRow(for: space)
-    case .chat(let chat):
-      chatRow(for: chat)
-    }
-  }
-
   // MARK: - Helper Methods
-
-  private func getCombinedItems() -> [CombinedItem] {
-    let sortedChats = home.chats.sorted { chat1, chat2 in
-      let pinned1 = chat1.dialog.pinned ?? false
-      let pinned2 = chat2.dialog.pinned ?? false
-      if pinned1 != pinned2 { return pinned1 }
-      return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date ?? chat2.chat?.date ?? Date()
-    }.map { CombinedItem.chat($0) }
-
-    let spaceItems = spaceList.spaceItems.map { CombinedItem.space($0) }
-
-    return sortedChats + spaceItems
-  }
-
-  private func spaceRow(for space: SpaceItem) -> some View {
-    Button(role: .destructive) {
-      nav.push(.space(id: space.space.id))
-    } label: {
-      SpaceRowView(spaceItem: space)
-    }
-    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-      if let creator = space.space.creator, creator == true {
-        Button(role: .destructive) {
-          Task { try await dataManager.deleteSpace(spaceId: space.space.id) }
-        } label: {
-          Image(systemName: "trash")
-        }
-      } else {
-        Button(role: .destructive) {
-          Task { try await dataManager.leaveSpace(spaceId: space.space.id) }
-        } label: {
-          Image(systemName: "exit")
-        }
-      }
-    }
-    .tint(.red)
-  }
-
-  private func chatRow(for chat: HomeChatItem) -> some View {
-    Button(role: .destructive) {
-      nav.push(.chat(peer: .user(id: chat.user.id)))
-    } label: {
-      ChatRowView(item: .home(chat))
-    }
-    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-      Button {
-        Task {
-          try await dataManager.updateDialog(
-            peerId: .user(id: chat.user.id),
-            pinned: !(chat.dialog.pinned ?? false)
-          )
-        }
-      } label: {
-        Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-      }
-    }
-    .tint(.indigo)
-    .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
-  }
 
   private func initalFetch() async {
     notificationHandler.setAuthenticated(value: true)
@@ -281,7 +209,7 @@ struct MainView: View {
           }
         }
       }
-      
+
       ToolbarItem(id: "status", placement: .principal) {
         ConnectionStateIndicator(state: ws.connectionState)
       }
