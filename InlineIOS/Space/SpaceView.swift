@@ -19,55 +19,50 @@ struct SpaceView: View {
 
   @State var openCreateThreadSheet = false
   @State var openAddMemberSheet = false
+  @State private var selectedTab: SpaceTab = .all
 
   var body: some View {
-    VStack {
-      List {
-        Section {
-          ForEach(getCombinedItems(), id: \.id) { item in
-            combinedItemRow(for: item)
+    VStack(alignment: .leading, spacing: 0) {
+      SpaceTabBar(selectedTab: $selectedTab)
+      Divider()
+
+      TabView(selection: $selectedTab) {
+        allList
+          .tag(SpaceTab.all)
+
+        chatsList
+          .tag(SpaceTab.chats)
+
+        membersList
+          .tag(SpaceTab.members)
+      }
+      .tabViewStyle(.page(indexDisplayMode: .never))
+    }
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(id: "Space", placement: .principal) {
+        if let space = fullSpaceViewModel.space {
+          HStack {
+            InitialsCircle(firstName: space.name, lastName: nil, size: 26)
+              .padding(.trailing, 4)
+            Text(space.name)
+              .font(.title3)
+              .fontWeight(.semibold)
           }
         }
       }
-      .listStyle(.plain)
-      .animation(.default, value: fullSpaceViewModel.chats)
-      .animation(.default, value: fullSpaceViewModel.memberChats)
-    }
-    .frame(maxWidth: .infinity)
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      Group {
-        ToolbarItem(id: "Space", placement: .topBarLeading) {
-          HStack {
-            if let space = fullSpaceViewModel.space {
-              InitialsCircle(firstName: space.name, lastName: nil, size: 26)
-                .padding(.trailing, 4)
 
-              VStack(alignment: .leading) {
-                Text(space.name)
-                  .font(.title3)
-                  .fontWeight(.semibold)
-              }
-            }
+      ToolbarItem(placement: .navigationBarTrailing) {
+        Menu {
+          Button(action: { openCreateThreadSheet = true }) {
+            Text("Create Thread")
           }
-        }
-
-        ToolbarItem(placement: .navigationBarTrailing) {
-          Menu {
-            Button(action: {
-              openCreateThreadSheet = true
-            }) {
-              Text("Create Thread")
-            }
-            Button(action: {
-              openAddMemberSheet = true
-            }) {
-              Text("Add Member")
-            }
-          } label: {
-            Image(systemName: "ellipsis")
-              .tint(Color.secondary)
+          Button(action: { openAddMemberSheet = true }) {
+            Text("Add Member")
           }
+        } label: {
+          Image(systemName: "ellipsis")
+            .tint(Color.secondary)
         }
       }
     }
@@ -94,6 +89,39 @@ struct SpaceView: View {
         try await data.getSpace(spaceId: spaceId)
       }
     }
+  }
+
+  private var allList: some View {
+    List {
+      ForEach(getCombinedItems(), id: \.id) { item in
+        combinedItemRow(for: item)
+      }
+    }
+    .listStyle(.plain)
+  }
+
+  private var chatsList: some View {
+    List {
+      let chatItems = fullSpaceViewModel.chats.map { CombinedItem.chat($0) }
+      ForEach(chatItems.sorted { $0.date > $1.date }, id: \.id) { item in
+        if case .chat(let chat) = item {
+          combinedItemRow(for: .chat(chat))
+        }
+      }
+    }
+    .listStyle(.plain)
+  }
+
+  private var membersList: some View {
+    List {
+      let memberItems = fullSpaceViewModel.memberChats.map { CombinedItem.member($0) }
+      ForEach(memberItems.sorted { $0.date > $1.date }, id: \.id) { item in
+        if case .member(let member) = item {
+          combinedItemRow(for: .member(member))
+        }
+      }
+    }
+    .listStyle(.plain)
   }
 
   // MARK: - Helper Methods
