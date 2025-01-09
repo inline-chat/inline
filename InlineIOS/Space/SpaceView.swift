@@ -8,6 +8,7 @@ struct SpaceView: View {
   @Environment(\.appDatabase) var database
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var data: DataManager
+  @EnvironmentObject var ws: WebSocketManager
   @EnvironmentStateObject var fullSpaceViewModel: FullSpaceViewModel
 
   init(spaceId: Int64) {
@@ -121,6 +122,21 @@ struct SpaceView: View {
       } label: {
         ChatRowView(item: .space(memberChat))
       }
+      .contextMenu {
+        Button {
+          nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
+        } label: {
+          Label("Open Chat", systemImage: "bubble.left")
+        }
+
+      } preview: {
+        ChatView(peer: .user(id: memberChat.user?.id ?? 0), preview: true)
+          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+          .environmentObject(nav)
+          .environmentObject(data)
+          .environmentObject(ws)
+          .environment(\.appDatabase, database)
+      }
 
     case .chat(let chat):
       Button {
@@ -128,6 +144,7 @@ struct SpaceView: View {
       } label: {
         ChatRowView(item: .space(chat))
       }
+
       .swipeActions(edge: .trailing, allowsFullSwipe: true) {
         Button {
           Task {
@@ -141,6 +158,31 @@ struct SpaceView: View {
         }
       }
       .tint(.indigo)
+      .contextMenu {
+        Button {
+          Task {
+            try await data.updateDialog(
+              peerId: chat.peerId,
+              pinned: !(chat.dialog.pinned ?? false)
+            )
+          }
+        } label: {
+          Label(chat.dialog.pinned ?? false ? "Unpin" : "Pin", systemImage: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+        }
+        Button {
+          nav.push(.chat(peer: chat.peerId))
+        } label: {
+          Label("Open Chat", systemImage: "bubble.left")
+        }
+
+      } preview: {
+        ChatView(peer: chat.peerId, preview: true)
+          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+          .environmentObject(nav)
+          .environmentObject(data)
+          .environmentObject(ws)
+          .environment(\.appDatabase, database)
+      }
       .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
     }
   }

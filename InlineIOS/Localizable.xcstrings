@@ -385,6 +385,12 @@
     "No users found" : {
 
     },
+    "Open Chat" : {
+
+    },
+    "Pin" : {
+
+    },
     "Search by username" : {
 
     },
@@ -404,6 +410,9 @@
 
     },
     "This is a reply message" : {
+
+    },
+    "Unpin" : {
 
     },
     "Username" : {

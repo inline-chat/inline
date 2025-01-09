@@ -5,6 +5,7 @@ import SwiftUI
 
 struct ChatView: View {
   var peerId: Peer
+  var preview: Bool
 
   @State var text: String = ""
   @State var textViewHeight: CGFloat = 36
@@ -65,8 +66,9 @@ struct ChatView: View {
     }
   }
 
-  init(peer: Peer) {
+  init(peer: Peer, preview: Bool = false) {
     self.peerId = peer
+    self.preview = preview
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer, limit: 1, fetchesMessages: false)
     }
@@ -78,32 +80,33 @@ struct ChatView: View {
     VStack(spacing: 0) {
       content
         .safeAreaInset(edge: .bottom) {
-          HStack(alignment: .bottom) {
-            ZStack(alignment: .leading) {
-              ComposeView(
-                text: $text,
-                height: $textViewHeight
-              )
-
-              .frame(height: textViewHeight)
-              .background(.clear)
-              .onChange(of: text) { _, newText in
-                if newText.isEmpty {
-                  Task { await ComposeActions.shared.stoppedTyping(for: peerId) }
-                } else {
-                  Task { await ComposeActions.shared.startedTyping(for: peerId) }
+          if !preview {
+            HStack(alignment: .bottom) {
+              ZStack(alignment: .leading) {
+                ComposeView(
+                  text: $text,
+                  height: $textViewHeight
+                )
+                .frame(height: textViewHeight)
+                .background(.clear)
+                .onChange(of: text) { _, newText in
+                  if newText.isEmpty {
+                    Task { await ComposeActions.shared.stoppedTyping(for: peerId) }
+                  } else {
+                    Task { await ComposeActions.shared.startedTyping(for: peerId) }
+                  }
                 }
               }
-            }
-            .animation(.smoothSnappy, value: textViewHeight)
-            .animation(.smoothSnappy, value: text.isEmpty)
+              .animation(.smoothSnappy, value: textViewHeight)
+              .animation(.smoothSnappy, value: text.isEmpty)
 
-            sendButton
-              .padding(.bottom, 6)
+              sendButton
+                .padding(.bottom, 6)
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal)
+            .background(Color(uiColor: .systemBackground))
           }
-          .padding(.vertical, 6)
-          .padding(.horizontal)
-          .background(Color(uiColor: .systemBackground))
         }
     }
     .onReceive(timer) { _ in
@@ -111,14 +114,15 @@ struct ChatView: View {
     }
     .toolbar {
       ToolbarItem(placement: .principal) {
-        VStack {
-          Text(title)
-          if !isCurrentUser && isPrivateChat {
-            Text(subtitle)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
+        header
+      }
+    }
+    .overlay(alignment: .top) {
+      if preview {
+        header
+          .frame(height: 45)
+          .frame(maxWidth: .infinity)
+          .background(.ultraThickMaterial)
       }
     }
     .navigationBarHidden(false)
@@ -138,6 +142,18 @@ struct ChatView: View {
         }
       default:
         break
+      }
+    }
+  }
+
+  @ViewBuilder
+  var header: some View {
+    VStack {
+      Text(title)
+      if !isCurrentUser && isPrivateChat {
+        Text(subtitle)
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
     }
   }
