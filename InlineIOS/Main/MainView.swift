@@ -27,7 +27,13 @@ struct MainView: View {
 
   // MARK: - State
 
-  @State private var selectedTab = 0
+  enum Tab: Int {
+    case chats
+    case spaces
+  }
+
+  @AppStorage("mainViewSelectedTab") private var selectedTab = Tab.chats
+
   @State private var text = ""
   @State private var searchResults: [User] = []
   @State private var isSearching = false
@@ -55,20 +61,14 @@ struct MainView: View {
 
   var body: some View {
     VStack {
-      TabView(selection: $selectedTab) {
+      switch selectedTab {
+      case .chats:
         chatsTab
-          .tabItem {
-            Label("Chats", systemImage: "bubble.left.and.bubble.right")
-          }
-          .tag(0)
-
+      case .spaces:
         spacesTab
-          .tabItem {
-            Label("Spaces", systemImage: "circle.hexagongrid.fill")
-          }
-          .tag(1)
       }
     }
+    .background(Color(.systemBackground))
     .searchable(text: $text, prompt: "Search in users and spaces")
     .onChange(of: text) { _, newValue in
       searchDebouncer.input = newValue
@@ -92,68 +92,58 @@ struct MainView: View {
 
   @ViewBuilder
   var spacesTab: some View {
-    List {
-      ForEach(spaceList.spaceItems) { space in
-        Button {
-          nav.push(.space(id: space.space.id))
-        } label: {
-          SpaceRowView(spaceItem: space)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-          if let creator = space.space.creator, creator == true {
-            Button(role: .destructive) {
-              Task { try await dataManager.deleteSpace(spaceId: space.space.id) }
-            } label: {
-              Image(systemName: "trash")
-            }
-          } else {
-            Button(role: .destructive) {
-              Task { try await dataManager.leaveSpace(spaceId: space.space.id) }
-            } label: {
-              Image(systemName: "exit")
-            }
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 26) {
+        tabbar
+        ForEach(spaceList.spaceItems) { space in
+          Button {
+            nav.push(.space(id: space.space.id))
+          } label: {
+            SpaceRowView(spaceItem: space)
           }
         }
-        .tint(.red)
       }
+      .padding(.horizontal, 16)
     }
-    .listStyle(.plain)
   }
 
   @ViewBuilder
   var chatsTab: some View {
-    List {
-      ForEach(
-        home.chats.sorted { chat1, chat2 in
-          let pinned1 = chat1.dialog.pinned ?? false
-          let pinned2 = chat2.dialog.pinned ?? false
-          if pinned1 != pinned2 { return pinned1 }
-          return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date ?? chat2
-            .chat?.date ?? Date()
-        }
-      ) { chat in
-        Button {
-          nav.push(.chat(peer: .user(id: chat.user.id)))
-        } label: {
-          ChatRowView(item: .home(chat))
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-          Button {
-            Task {
-              try await dataManager.updateDialog(
-                peerId: .user(id: chat.user.id),
-                pinned: !(chat.dialog.pinned ?? false)
-              )
-            }
-          } label: {
-            Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 26) {
+        tabbar
+        ForEach(
+          home.chats.sorted { chat1, chat2 in
+            let pinned1 = chat1.dialog.pinned ?? false
+            let pinned2 = chat2.dialog.pinned ?? false
+            if pinned1 != pinned2 { return pinned1 }
+            return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date ?? chat2
+              .chat?.date ?? Date()
           }
+        ) { chat in
+          Button {
+            nav.push(.chat(peer: .user(id: chat.user.id)))
+          } label: {
+            ChatRowView(item: .home(chat))
+          }
+          .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+              Task {
+                try await dataManager.updateDialog(
+                  peerId: .user(id: chat.user.id),
+                  pinned: !(chat.dialog.pinned ?? false)
+                )
+              }
+            } label: {
+              Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+            }
+          }
+          .tint(.indigo)
+          .background(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
         }
-        .tint(.indigo)
-        .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
       }
+      .padding(.horizontal, 16)
     }
-    .listStyle(.plain)
     .animation(.default, value: home.chats)
   }
 
@@ -174,6 +164,8 @@ struct MainView: View {
       try await dataManager.getPrivateChats()
     } catch {
       Log.shared.error("Failed to getPrivateChats", error: error)
+      Log.shared.error("Failed to getPrivateChats", error: error)
+      Log.shared.error("Failed to getPrivateChats", error: error)
     }
 
     do {
@@ -192,6 +184,44 @@ struct MainView: View {
         Log.shared.error("Failed to create chat", error: error)
       }
     }
+  }
+
+  @ViewBuilder
+  var tabbar: some View {
+    HStack {
+      Button {
+        withAnimation {
+          selectedTab = .chats
+        }
+      } label: {
+        ZStack {
+          Capsule()
+            .fill(selectedTab == .chats ? ColorManager.shared.swiftUIColor.opacity(0.1) : Color.gray.opacity(0.1))
+            .frame(height: 36)
+          Text("Chats")
+            .font(.callout)
+            .foregroundColor(selectedTab == .chats ? ColorManager.shared.swiftUIColor : .secondary)
+            .padding(.horizontal, 12)
+        }
+      }
+
+      Button {
+        withAnimation {
+          selectedTab = .spaces
+        }
+      } label: {
+        ZStack {
+          Capsule()
+            .fill(selectedTab == .spaces ? ColorManager.shared.swiftUIColor.opacity(0.1) : Color.gray.opacity(0.1))
+            .frame(height: 36)
+          Text("Spaces")
+            .font(.callout)
+            .foregroundColor(selectedTab == .spaces ? ColorManager.shared.swiftUIColor : .secondary)
+            .padding(.horizontal, 12)
+        }
+      }
+    }
+    .fixedSize()
   }
 
   var toolbarContent: some ToolbarContent {
