@@ -116,6 +116,9 @@ struct ChatRowView: View {
               .font(.caption)
           }
         }
+        if case .home = item {
+          Divider()
+        }
       }
     }
     .frame(height: 48)
