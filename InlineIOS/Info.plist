@@ -4,6 +4,8 @@
 <dict>
 	<key>DEV_HOST</key>
 	<string>$(DEV_HOST)</string>
+	<key>USE_PRODUCTION_API</key>
+	<string>$(USE_PRODUCTION_API)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UIAppFonts</key>
