@@ -6,10 +6,10 @@ struct SpaceRowView: View {
   let spaceItem: SpaceItem
 
   var body: some View {
-    HStack {
+    HStack(alignment: .top) {
       InitialsCircle(firstName: spaceItem.space.name, lastName: nil, size: 36)
         .padding(.trailing, 6)
-        .padding(.top, -6)
+
       VStack(alignment: .leading) {
         Text(spaceItem.space.name)
           .fontWeight(.medium)
@@ -20,6 +20,7 @@ struct SpaceRowView: View {
           .foregroundColor(.secondary)
           .lineLimit(1)
           .frame(maxWidth: .infinity, alignment: .leading)
+        Divider()
       }
     }
     .frame(height: 48)
