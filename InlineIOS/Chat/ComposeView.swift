@@ -2,130 +2,207 @@ import InlineKit
 import SwiftUI
 import UIKit
 
-struct TextView: UIViewRepresentable {
-  @Binding var text: String
+class ComposeTextView: UITextView {
+  private var placeholderLabel: UILabel?
 
-  @Binding var height: CGFloat
-
-  private let maxLines: Int = 10
-  private let minHeight: CGFloat = 36
-
-  // Cache font metrics
-  private let font: UIFont = .systemFont(ofSize: 17)
-  private let textContainerInsets = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
-
-  func makeCoordinator() -> Coordinator {
-    Coordinator(self)
+  override init(frame: CGRect, textContainer: NSTextContainer?) {
+    super.init(frame: frame, textContainer: textContainer)
+    setupPlaceholder()
   }
 
-  func makeUIView(context: Context) -> UITextView {
-    // Create TextKit 2 stack to avoid this warning :
-    // UITextView 0x10813c600 is switching to TextKit 1 compatibility mode because its layoutManager was accessed. Break on void _UITextViewEnablingCompatibilityMode(UITextView *__strong, BOOL) to debug.
-
-    let storage = NSTextStorage()
-    let layoutManager = NSLayoutManager()
-    layoutManager.allowsNonContiguousLayout = true
-    storage.addLayoutManager(layoutManager)
-
-    let container = NSTextContainer(size: .zero)
-    container.widthTracksTextView = true
-    container.heightTracksTextView = false
-    container.lineFragmentPadding = 0
-    layoutManager.addTextContainer(container)
-
-    // Initialize textView with TextKit 2 components
-    let textView = UITextView(frame: .zero, textContainer: container)
-    textView.delegate = context.coordinator
-    textView.font = font
-    textView.backgroundColor = .clear
-    textView.isScrollEnabled = true
-    textView.textContainerInset = textContainerInsets
-    textView.isSelectable = true
-    textView.isUserInteractionEnabled = true
-    textView.autocorrectionType = .no
-    textView.text = text
-
-    return textView
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
   }
 
-  func updateUIView(_ uiView: UITextView, context: Context) {
-    // Only update text if it actually changed
-    guard uiView.text != text else { return }
-    uiView.text = text
-    recalculateHeight(uiView)
+  private func setupPlaceholder() {
+    let label = UILabel()
+    label.text = "Write a message"
+    label.font = .systemFont(ofSize: 17)
+    label.textColor = .placeholderText
+    label.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(label)
+
+    NSLayoutConstraint.activate([
+      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+      label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+    ])
+
+    placeholderLabel = label
   }
 
-  private func recalculateHeight(_ uiView: UITextView) {
-    // Perform all UIView operations on main thread
-    DispatchQueue.main.async {
-      let size = uiView.sizeThatFits(CGSize(width: uiView.bounds.width, height: .infinity))
-      let maxHeight = font.lineHeight * CGFloat(maxLines) + textContainerInsets.top + textContainerInsets.bottom
-      let newHeight = min(max(size.height, minHeight), maxHeight)
-
-      if self.height != newHeight {
-        self.height = newHeight
-      }
-    }
-  }
-
-  class Coordinator: NSObject, UITextViewDelegate {
-    var parent: TextView
-    // Add debouncer for text changes
-    private var textChangeWorkItem: DispatchWorkItem?
-
-    init(_ parent: TextView) {
-      self.parent = parent
-    }
-
-    func textViewDidChange(_ textView: UITextView) {
-      // Cancel previous work item
-      textChangeWorkItem?.cancel()
-
-      // Create new work item with debounced update
-      let workItem = DispatchWorkItem { [weak self] in
-        guard let self = self else { return }
-        DispatchQueue.main.async {
-          self.parent.text = textView.text
-          self.parent.recalculateHeight(textView)
-        }
-      }
-
-      textChangeWorkItem = workItem
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
-    }
-
-    func textView(
-      _ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String
-    ) -> Bool {
-      return true
+  func showPlaceholder(_ show: Bool) {
+    UIView.animate(withDuration: 0.2) {
+      self.placeholderLabel?.alpha = show ? 1 : 0
+      self.placeholderLabel?.transform = show ? .identity : CGAffineTransform(translationX: 40, y: 0)
     }
   }
 }
 
-struct ComposeView: View {
+class ComposeView: UIView {
+  private let minHeight: CGFloat = 36
+  private let maxHeight: CGFloat = 300
+  private var heightConstraint: NSLayoutConstraint!
+  private var prevTextHeight: CGFloat = 0.0
+
+  private lazy var textView: ComposeTextView = {
+    let textView = ComposeTextView()
+    textView.font = .systemFont(ofSize: 17)
+    textView.isScrollEnabled = true
+    textView.backgroundColor = .clear
+    textView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+    textView.delegate = self
+    textView.translatesAutoresizingMaskIntoConstraints = false
+    return textView
+  }()
+
+  private lazy var sendButton: UIButton = {
+    let button = UIButton()
+    button.translatesAutoresizingMaskIntoConstraints = false
+
+    var config = UIButton.Configuration.plain()
+    config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: 14)
+    )
+    config.baseForegroundColor = .white
+    config.background.backgroundColor = .systemBlue
+    config.cornerStyle = .capsule
+
+    button.configuration = config
+    button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
+    button.isHidden = true
+    return button
+  }()
+
+  var onSend: ((String) -> Void)?
+  var onHeightChange: ((CGFloat) -> Void)?
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    setupViews()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func setupViews() {
+    backgroundColor = .systemBackground
+
+    addSubview(textView)
+    addSubview(sendButton)
+
+    heightConstraint = heightAnchor.constraint(equalToConstant: minHeight)
+
+    NSLayoutConstraint.activate([
+      heightConstraint,
+
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+      textView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+      textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 0),
+
+      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+      sendButton.widthAnchor.constraint(equalToConstant: 28),
+      sendButton.heightAnchor.constraint(equalToConstant: 28),
+
+      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -10),
+    ])
+  }
+
+  @objc private func sendTapped() {
+    guard let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !text.isEmpty
+    else { return }
+
+    // Capture text before clearing
+    let messageText = text
+
+    UIView.animate(withDuration: 0.2) {
+      self.textView.text = ""
+      self.resetHeight()
+      self.textView.showPlaceholder(true)
+      self.sendButton.isHidden = true
+
+    } completion: { _ in
+      // Only call onSend after animation completes to prevent any potential lag
+      self.onSend?(messageText)
+    }
+  }
+
+  private func updateHeight() {
+    let layoutManager = textView.layoutManager
+    let textContainer = textView.textContainer
+
+    layoutManager.ensureLayout(for: textContainer)
+    let contentHeight = layoutManager.usedRect(for: textContainer).height
+
+    // Ignore small height changes
+    if abs(prevTextHeight - contentHeight) < 8.0 {
+      return
+    }
+
+    prevTextHeight = contentHeight
+
+    let newHeight = min(maxHeight, max(minHeight, contentHeight + 16))
+
+    guard abs(heightConstraint.constant - newHeight) > 1 else { return }
+
+    // First update height immediately to prevent clipping
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    textView.frame = CGRect(
+      x: textView.frame.minX,
+      y: textView.frame.minY,
+      width: textView.frame.width,
+      height: newHeight
+    )
+    CATransaction.commit()
+
+    heightConstraint.constant = newHeight
+    onHeightChange?(newHeight)
+  }
+
+  private func resetHeight() {
+    UIView.animate(withDuration: 0.2) {
+      self.heightConstraint.constant = self.minHeight
+      self.textView.frame = CGRect(
+        x: self.textView.frame.minX,
+        y: self.textView.frame.minY,
+        width: self.textView.frame.width,
+        height: self.minHeight
+      )
+      self.superview?.layoutIfNeeded()
+    }
+    onHeightChange?(minHeight)
+  }
+}
+
+extension ComposeView: UITextViewDelegate {
+  func textViewDidChange(_ textView: UITextView) {
+    updateHeight()
+
+    let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    self.textView.showPlaceholder(isEmpty)
+    sendButton.isHidden = isEmpty
+  }
+}
+
+// SwiftUI wrapper
+struct ComposeViewRepresentable: UIViewRepresentable {
   @Binding var text: String
   @Binding var height: CGFloat
+  var onSend: (String) -> Void
 
-  var body: some View {
-    ZStack(alignment: .leading) {
-      TextView(text: $text, height: $height)
-        .frame(height: height)
-        .background(.clear)
-
-      if text.isEmpty {
-        Text("Write a message")
-          .foregroundStyle(.tertiary)
-          .padding(.leading, 6)
-          .padding(.vertical, 6)
-          .allowsHitTesting(false)
-          .transition(
-            .asymmetric(
-              insertion: .offset(x: 40).combined(with: .opacity),
-              removal: .offset(x: 40).combined(with: .opacity)
-            )
-          )
-      }
+  func makeUIView(context: Context) -> ComposeView {
+    let view = ComposeView()
+    view.onSend = onSend
+    view.onHeightChange = { newHeight in
+      height = newHeight
     }
-    .animation(.smoothSnappy, value: text.isEmpty)
+    return view
   }
+
+  func updateUIView(_ uiView: ComposeView, context: Context) {}
 }

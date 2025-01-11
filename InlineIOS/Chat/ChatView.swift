@@ -81,31 +81,20 @@ struct ChatView: View {
       content
         .safeAreaInset(edge: .bottom) {
           if !preview {
-            HStack(alignment: .bottom) {
-              ZStack(alignment: .leading) {
-                ComposeView(
-                  text: $text,
-                  height: $textViewHeight
-                )
-                .frame(height: textViewHeight)
-                .background(.clear)
-                .onChange(of: text) { _, newText in
-                  if newText.isEmpty {
-                    Task { await ComposeActions.shared.stoppedTyping(for: peerId) }
-                  } else {
-                    Task { await ComposeActions.shared.startedTyping(for: peerId) }
-                  }
-                }
-              }
-              .animation(.smoothSnappy, value: textViewHeight)
-              .animation(.smoothSnappy, value: text.isEmpty)
-
-              sendButton
-                .padding(.bottom, 6)
+            ComposeViewRepresentable(text: $text, height: $textViewHeight) { message in
+              fullChatViewModel.sendMessage(text: message)
             }
-            .padding(.vertical, 6)
-            .padding(.horizontal)
+            .frame(maxHeight: textViewHeight)
+            .padding(.vertical, 8)
             .background(Color(uiColor: .systemBackground))
+            .onChange(of: text) { _, newText in
+              if newText.isEmpty {
+                Task { await ComposeActions.shared.stoppedTyping(for: peerId) }
+              } else {
+                Task { await ComposeActions.shared.startedTyping(for: peerId) }
+              }
+            }
+            .animation(.smoothSnappy, value: textViewHeight)
           }
         }
     }
