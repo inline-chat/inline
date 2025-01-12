@@ -438,6 +438,9 @@ class MessageViewAppKit: NSView {
     textViewHeightConstraint.constant = props.textHeight ?? 0
 
     setupMessageText()
+
+    // As the message changes here, we need to update everything related to that. Otherwise we get wrong context menu.
+    setupContextMenu()
   }
 
   public func updateSize(props: MessageViewProps) {
