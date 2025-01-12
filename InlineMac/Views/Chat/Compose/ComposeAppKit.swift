@@ -322,10 +322,20 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       // Handle empty text
       textEditor.showPlaceholder(true)
       sendButton.updateCanSend(false)
+      
+      // Cancel typing
+      Task {
+        await ComposeActions.shared.stoppedTyping(for: self.peerId)
+      }
     } else {
       // Handle non-empty text
       textEditor.showPlaceholder(false)
       sendButton.updateCanSend(true)
+      
+      // Start typing
+      Task {
+        await ComposeActions.shared.startedTyping(for: self.peerId)
+      }
     }
   }
     
