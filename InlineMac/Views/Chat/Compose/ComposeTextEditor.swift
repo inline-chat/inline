@@ -1,12 +1,15 @@
 import AppKit
+import InlineKit
 
 class ComposeTextEditor: NSView {
   public let scrollView: ComposeScrollView
   private let textView: ComposeNSTextView
   private let font: NSFont = .preferredFont(forTextStyle: .body)
-  private let minHeight: CGFloat = Theme.composeMinHeight
+  private let log = Log.scoped("ComposeTextEditor", enableTracing: false)
+  let minHeight: CGFloat = Theme.composeMinHeight
+  let minTextHeight: CGFloat = Theme.composeMinHeight - 2 * Theme.composeVerticalPadding
   private let horizontalPadding: CGFloat = 10.0
-  private let verticalPadding: CGFloat = Theme.composeVerticalPadding
+   let verticalPadding: CGFloat = Theme.composeVerticalPadding
     
   weak var delegate: (NSTextViewDelegate & ComposeTextViewDelegate)? {
     didSet {
@@ -145,11 +148,11 @@ class ComposeTextEditor: NSView {
     
     isPlaceholderVisible = show
     
-    let offsetX = 10.0
+    let offsetX = 15.0
     let offsetY = 0.0
   
     let animationGroup = CAAnimationGroup()
-    animationGroup.duration = 0.2
+    animationGroup.duration = show ? 0.2 : 0.1
     animationGroup.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
 
     let fade = CABasicAnimation(keyPath: "opacity")
@@ -214,7 +217,16 @@ class ComposeTextEditor: NSView {
         (minHeight - lineHeight) / 2 :
         verticalPadding
     )
+    log.debug("Updating text view insets: \(newInsets)")
     
     textView.textContainerInset = newInsets
+    
+    // Hack to update caret position
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      let currentRange = self.textView.selectedRange
+      self.textView.selectedRange = NSMakeRange(currentRange.location, 0)
+      self.textView.setNeedsDisplay(textView.bounds)
+    }
   }
 }

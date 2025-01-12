@@ -52,7 +52,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   private let log = Log.scoped("ApiClient")
 
-  private var baseURL: String {
+  static let baseURL: String = {
     if ProjectConfig.useProductionApi {
       return "https://api.inline.chat/v1"
     }
@@ -66,7 +66,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     #else
       return "https://api.inline.chat/v1"
     #endif
-  }
+  }()
+  
+  private var baseURL: String { Self.baseURL }
 
   private let decoder = JSONDecoder()
 

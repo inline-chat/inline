@@ -21,7 +21,11 @@ struct KeyPressHandler: NSViewRepresentable {
 
     func setupMonitor() {
       monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-        return self?.handler?(event)
+        if event.window?.isKeyWindow == true {
+          return self?.handler?(event)
+        } else {
+          return nil
+        }
       }
     }
 
