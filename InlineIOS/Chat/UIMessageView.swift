@@ -7,26 +7,16 @@ class UIMessageView: UIView {
 
   private var interaction: UIContextMenuInteraction?
 
-  private lazy var messageLabel: UITextView = {
-    let textView = UITextView()
-    textView.translatesAutoresizingMaskIntoConstraints = false
-    textView.isEditable = false
-    textView.isScrollEnabled = false
-    textView.backgroundColor = .clear
-    textView.textContainer.lineFragmentPadding = 0
-    textView.textContainerInset = .zero
-    textView.textAlignment = .natural
-    textView.clipsToBounds = false
-    textView.font = .systemFont(ofSize: 17)
-    textView.textColor = textColor
-
-    textView.linkTextAttributes = [
-      .foregroundColor: outgoing ? UIColor.white : UIColor.link,
-      .underlineStyle: NSUnderlineStyle.single.rawValue,
-    ]
-
-    textView.dataDetectorTypes = [.link, .phoneNumber]
-    return textView
+  private lazy var messageLabel: UILabel = {
+    let label = UILabel()
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.backgroundColor = .clear
+    label.textAlignment = .natural
+    label.font = .systemFont(ofSize: 17)
+    label.textColor = textColor
+    label.numberOfLines = 0
+    label.lineBreakMode = .byWordWrapping
+    return label
   }()
 
   private let bubbleView: UIView = {
@@ -86,7 +76,7 @@ class UIMessageView: UIView {
 
     setupAppearance()
     setupConstraints()
-    setupContextMenu()
+//    setupContextMenu()
   }
 
   private func setupConstraints() {
