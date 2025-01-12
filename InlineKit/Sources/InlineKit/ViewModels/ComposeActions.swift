@@ -52,7 +52,7 @@ public class ComposeActions: ObservableObject {
   private var lastTypingSent: [Peer: Date] = [:]
 
   public func startedTyping(for peerId: Peer) async {
-    if let lastSent = lastTypingSent[peerId], lastSent.timeIntervalSinceNow > -5 {
+    if let lastSent = lastTypingSent[peerId], lastSent.timeIntervalSinceNow > -2 {
       // Previous one still valid since it hasn't been 6s
       return
     }
