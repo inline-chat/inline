@@ -3,22 +3,26 @@ import InlineKit
 import SwiftUI
 
 class ComposeAppKit: NSView {
-  
+  // Props
   private var peerId: Peer
   private var chatId: Int64?
   
+  // State
   private weak var messageList: MessageListAppKit?
   private var viewModel: FullChatViewModel?
+  private var images: Set<NSImage> = []
   
+  // Internal
   private var heightConstraint: NSLayoutConstraint!
   private var minHeight = Theme.composeMinHeight
-  private var verticalPadding = Theme.composeVerticalPadding
+  private var verticalPadding = 0.0
   // ---
-  private var prevTextHeight: CGFloat = 0.0
+  private var textViewContentHeight: CGFloat = 0.0
+  private var textViewHeight: CGFloat = 0.0
   
   // Features
-  private var feature_animateHeightChanges = true
-
+  private var feature_animateHeightChanges = false // for now until fixing how to update list view smoothly
+  
   func update(viewModel: FullChatViewModel) {
     self.viewModel = viewModel
   }
@@ -42,6 +46,15 @@ class ComposeAppKit: NSView {
     let view = ComposeMenuButton(frame: .zero)
     return view
   }()
+  
+  // Add attachments view
+  private lazy var attachments: ComposeAttachments = {
+    let view = ComposeAttachments(frame: .zero, compose: self)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+  
+  // -------
   
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
@@ -84,14 +97,10 @@ class ComposeAppKit: NSView {
     return material
   }()
     
-    
   func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
-    
-    // Blended with content
-    // layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
-    
+
     // More distinct background
     layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5).cgColor
     
@@ -100,7 +109,8 @@ class ComposeAppKit: NSView {
     addSubview(sendButton)
     addSubview(menuButton)
     addSubview(textEditor)
-    
+    addSubview(attachments)
+
     setUpConstraints()
     setupTextEditor()
   }
@@ -125,11 +135,19 @@ class ComposeAppKit: NSView {
       menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
       
+      // Add attachments constraints
+      attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor),
+      attachments.trailingAnchor.constraint(equalTo: textEditor.trailingAnchor),
+      attachments.topAnchor.constraint(equalTo: topAnchor),
+      
       // text editor
       textEditor.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor),
       textEditor.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor),
-      textEditor.topAnchor.constraint(equalTo: topAnchor),
       textEditor.bottomAnchor.constraint(equalTo: bottomAnchor),
+      
+      // Update text editor top constraint
+      // textEditor.topAnchor.constraint(equalTo: topAnchor),
+      textEditor.topAnchor.constraint(equalTo: attachments.bottomAnchor),
       
       // top seperator border
       border.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -156,52 +174,50 @@ class ComposeAppKit: NSView {
   }
   
   // MARK: - Height
-  func resetHeight() {
+  
+  private func getTextViewHeight() -> CGFloat {
+    // FIXME: move to text editor
+    textViewHeight = max(textEditor.minHeight, textViewContentHeight + textEditor.verticalPadding * 2)
+    return textViewHeight
+  }
+
+  // Get compose height
+  private func getHeight() -> CGFloat {
+    let textViewHeight = getTextViewHeight()
+    let contentHeight = max(textEditor.minHeight, textViewHeight) // FIXME:
+    let attachmentsHeight = attachments.getHeight()
+    let height = contentHeight + attachmentsHeight + verticalPadding
+    let maxHeight = 300.0
+    let capped = max(Theme.composeMinHeight, min(maxHeight, height))
+    return capped
+  }
+  
+  func updateHeight() {
+    let height = getHeight()
+    let textViewHeight = getTextViewHeight()
+
     if feature_animateHeightChanges {
+      // First update the height of scroll view immediately so it doesn't clip from top while animating
       CATransaction.begin()
       CATransaction.disableActions()
-      textEditor.setHeight(minHeight)
+      textEditor.setHeight(textViewHeight)
       CATransaction.commit()
       
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.22
-//        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        context.duration = 0.15
+        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         context.allowsImplicitAnimation = true
-        heightConstraint.animator().constant = minHeight
-        textEditor.resetTextViewInsets()
-        messageList?.updateInsetForCompose(minHeight)
-      }
-    } else {
-      heightConstraint.constant = minHeight
-      textEditor.setHeight(minHeight)
-      textEditor.resetTextViewInsets()
-      messageList?.updateInsetForCompose(minHeight)
-    }
-  }
-  
-  func updateHeight(_ contentHeight: CGFloat) {
-    let maxHeight = 300.0
-    let newHeight = ceil(contentHeight) + (Theme.composeVerticalPadding * 2)
-    let height = max(Theme.composeMinHeight, min(maxHeight, newHeight))
-    
-    // First update the height of scroll view immediately so it doesn't clip from top while animating
-    CATransaction.begin()
-    CATransaction.disableActions()
-    textEditor.setHeight(height)
-    CATransaction.commit()
-    
-    if feature_animateHeightChanges {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.22
-//        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        context.allowsImplicitAnimation = true
+        // Disable screen updates during animation setup
+        NSAnimationContext.beginGrouping()
         heightConstraint.animator().constant = height
-        textEditor.updateTextViewInsets(contentHeight: contentHeight) // use height without paddings
+        textEditor.updateTextViewInsets(contentHeight: textViewContentHeight) // use height without paddings
         messageList?.updateInsetForCompose(height)
+        NSAnimationContext.endGrouping()
       }
     } else {
+      textEditor.setHeight(textViewHeight)
       heightConstraint.constant = height
-      textEditor.updateTextViewInsets(contentHeight: contentHeight)
+      textEditor.updateTextViewInsets(contentHeight: textViewContentHeight)
       messageList?.updateInsetForCompose(height)
     }
   }
@@ -210,11 +226,40 @@ class ComposeAppKit: NSView {
     
   // MARK: - Actions
   
+  func addImage(_ image: NSImage) {
+    images.insert(image)
+    attachments.addImageView(image)
+    updateHeight()
+  }
+  
+  func removeImage(_ image: NSImage) {
+    images.remove(image)
+    attachments.removeImageView(image)
+    updateHeight()
+  }
+  
+  func clearAttachments(updateHeights: Bool = false) {
+    images.removeAll()
+    attachments.clearViews()
+    if updateHeights {
+      updateHeight()
+    }
+  }
+  
   // Clear, reset height
   func clear() {
-    resetHeight()
-    textEditor.clear()
+    // State
+    images.removeAll()
     sendButton.updateCanSend(false)
+    
+    // Views
+    attachments.clearViews()
+    textViewContentHeight = textEditor.getTypingLineHeight() // manually for now, FIXME: make it automatic in texteditor.clear
+    textEditor.clear()
+    clearAttachments(updateHeights: false)
+    
+    // must be last call
+    updateHeight()
   }
   
   // Send the message
@@ -222,6 +267,7 @@ class ComposeAppKit: NSView {
     DispatchQueue.main.async {
       self.ignoreNextHeightChange = true
       let text = self.textEditor.string
+      let images = self.images
     
       // Clear immediately
       self.clear()
@@ -252,6 +298,12 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     return true // handled
   }
   
+  func textView(_ textView: NSTextView, didReceiveImage image: NSImage) {
+    print("Image received for upload: \(image.size)")
+    
+    addImage(image)
+  }
+  
   func textDidChange(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView else { return }
     
@@ -265,7 +317,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     if !ignoreNextHeightChange {
       updateHeightIfNeeded(for: textView)
     }
-    
+
     if textView.string.isEmpty {
       // Handle empty text
       textEditor.showPlaceholder(true)
@@ -292,14 +344,14 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     layoutManager.ensureLayout(for: textContainer)
     let contentHeight = layoutManager.usedRect(for: textContainer).height
     
-    if abs(prevTextHeight - contentHeight) < 8.0 {
+    if abs(textViewContentHeight - contentHeight) < 8.0 {
       // minimal change to height ignore
       return
     }
-      
-    prevTextHeight = contentHeight
+    
+    textViewContentHeight = contentHeight
    
-    updateHeight(contentHeight)
+    updateHeight()
   }
     
 //
