@@ -36,9 +36,8 @@ public final class WebSocketManager: ObservableObject {
 
   public func ensureConnected() async {
     // ONLY reconnect if we are disconnected, otherwise we will start two connections initially while the other one is connecting
-    if await client?.state == .disconnected {
-      try? await start()
-    }
+
+    await client?.ensureConnected()
   }
 
   func disconnect() {
@@ -93,7 +92,6 @@ public final class WebSocketManager: ObservableObject {
 
     let client = WebSocketClient(
       url: url,
-      reconnectionConfig: .init(maxAttempts: 30000, backoff: 1.5),
       credentials: WebSocketCredentials(token: token, userId: userId)
     )
     self.client = client
@@ -207,7 +205,9 @@ public final class WebSocketManager: ObservableObject {
         } else {
           // Network became unavailable
           self?.log.debug("network unavailable")
-          self?.disconnect()
+
+          // don't disconnect ever for now
+          // self?.disconnect()
         }
       }
     }
