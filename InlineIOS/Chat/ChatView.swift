@@ -77,62 +77,43 @@ struct ChatView: View {
   // MARK: - Body
 
   var body: some View {
-    VStack(spacing: 0) {
-      content
-        .safeAreaInset(edge: .bottom) {
-          if !preview {
-            ComposeViewRepresentable(text: $text, height: $textViewHeight) { message in
-              fullChatViewModel.sendMessage(text: message)
-            }
-            .frame(maxHeight: textViewHeight)
-            .padding(.vertical, 8)
-            .background(Color(uiColor: .systemBackground))
-            .onChange(of: text) { _, newText in
-              if newText.isEmpty {
-                Task { await ComposeActions.shared.stoppedTyping(for: peerId) }
-              } else {
-                Task { await ComposeActions.shared.startedTyping(for: peerId) }
-              }
-            }
-            .animation(.smoothSnappy, value: textViewHeight)
-          }
+    ChatViewUIKit(peerId: peerId)
+      .edgesIgnoringSafeArea(.all)
+      .onReceive(timer) { _ in
+        currentTime = Date()
+      }
+      .toolbar {
+        ToolbarItem(placement: .principal) {
+          header
         }
-    }
-    .onReceive(timer) { _ in
-      currentTime = Date()
-    }
-    .toolbar {
-      ToolbarItem(placement: .principal) {
-        header
       }
-    }
-    .overlay(alignment: .top) {
-      if preview {
-        header
-          .frame(height: 45)
-          .frame(maxWidth: .infinity)
-          .background(.ultraThickMaterial)
+      .overlay(alignment: .top) {
+        if preview {
+          header
+            .frame(height: 45)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThickMaterial)
+        }
       }
-    }
-    .navigationBarHidden(false)
-    .toolbarRole(.editor)
-    .toolbarBackground(.visible, for: .navigationBar)
-    .toolbarTitleDisplayMode(.inline)
-    .onAppear {
-      Task {
-        await fetch()
-      }
-    }
-    .onChange(of: scenePhase) { _, scenePhase_ in
-      switch scenePhase_ {
-      case .active:
+      .navigationBarHidden(false)
+      .toolbarRole(.editor)
+      .toolbarBackground(.visible, for: .navigationBar)
+      .toolbarTitleDisplayMode(.inline)
+      .onAppear {
         Task {
           await fetch()
         }
-      default:
-        break
       }
-    }
+      .onChange(of: scenePhase) { _, scenePhase_ in
+        switch scenePhase_ {
+        case .active:
+          Task {
+            await fetch()
+          }
+        default:
+          break
+        }
+      }
   }
 
   @ViewBuilder
