@@ -64,12 +64,17 @@ struct MainView: View {
         disableAutoCollapse = false
       }
     }
+    .onForeground {
+      Task {
+        await ws.ensureConnected()
+        markAsOnline()
+      }
+    }
     .onChange(of: scenePhase) { phase in
       if phase == .active {
-        markAsOnline()
-        
         Task {
           await ws.ensureConnected()
+          markAsOnline()
         }
         
       } else if phase == .inactive {
