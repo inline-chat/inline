@@ -6,8 +6,7 @@ class MessageListAppKit: NSViewController {
   // Data
   private var peerId: Peer
   private var viewModel: MessagesProgressiveViewModel
-//  private var messages: [FullMessage] = []
-  var messages: [FullMessage] { viewModel.messages }
+  private var messages: [FullMessage] { viewModel.messages }
   
   private let log = Log.scoped("MessageListAppKit", enableTracing: true)
   private let sizeCalculator = MessageSizeCalculator.shared

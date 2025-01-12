@@ -70,7 +70,7 @@ enum Theme {
   static let messageListBottomInset: CGFloat = 10
 
   static let composeMinHeight: CGFloat = 44
-  static let composeVerticalPadding: CGFloat = 8
+  static let composeVerticalPadding: CGFloat = 4
 
   // MARK: - Devtools
 
