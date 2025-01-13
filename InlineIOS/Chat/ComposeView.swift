@@ -44,7 +44,10 @@ class ComposeView: UIView {
   private let maxHeight: CGFloat = 300
   private var heightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
-  static let textViewVerticalPadding = 12.0
+  static let textViewVerticalPadding: CGFloat = 12.0
+  private let buttonBottomPadding: CGFloat = -10.0
+  private let buttonTrailingPadding: CGFloat = -10.0
+  private let buttonSize: CGSize = .init(width: 28, height: 28)
 
   private lazy var textView: ComposeTextView = {
     let textView = ComposeTextView()
@@ -107,15 +110,15 @@ class ComposeView: UIView {
 
       heightConstraint,
 
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor),
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: 0),
+      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor),
 
-      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
-      sendButton.widthAnchor.constraint(equalToConstant: 28),
-      sendButton.heightAnchor.constraint(equalToConstant: 28),
+      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: buttonTrailingPadding),
+      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: buttonBottomPadding),
+      sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
+      sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
 
     ])
   }
@@ -125,19 +128,14 @@ class ComposeView: UIView {
           !text.isEmpty
     else { return }
 
-    // Capture text before clearing
     let messageText = text
 
-//    UIView.animate(withDuration: 0.2) {
     textView.text = ""
     resetHeight()
     textView.showPlaceholder(true)
     sendButton.isHidden = true
 
-//    } completion: { _ in
-    // Only call onSend after animation completes to prevent any potential lag
     onSend?(messageText)
-//    }
   }
 
   private func updateHeight() {
