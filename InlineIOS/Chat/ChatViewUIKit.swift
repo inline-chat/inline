@@ -18,6 +18,7 @@ class ChatContainerView: UIView {
     view.onHeightChange = { [weak self] newHeight in
       self?.handleComposeViewHeightChange(newHeight)
     }
+    view.peerId = peerId
     view.onSend = onSend
     return view
   }()
