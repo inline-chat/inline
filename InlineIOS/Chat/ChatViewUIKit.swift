@@ -48,15 +48,12 @@ class ChatContainerView: UIView {
     
     // FIXME: probably communicate current height of compose to collectionView
         
-    // Enable keyboard layout guide tracking
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
     NSLayoutConstraint.activate([
       messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
-//      messagesCollectionView.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
       messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
       messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
-//      messagesCollectionView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.bottomAnchor),
       messagesCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
       
       blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
