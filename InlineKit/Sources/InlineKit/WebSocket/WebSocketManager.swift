@@ -12,7 +12,7 @@ public enum ConnectionState {
 @MainActor
 public final class WebSocketManager: ObservableObject {
   private var client: WebSocketClient?
-  private var log = Log.scoped("WebsocketManager", enableTracing: true)
+  private var log = Log.scoped("WebsocketManager", enableTracing: false)
   @Published public private(set) var connectionState: ConnectionState = .connecting
 
   private var token: String?
@@ -26,12 +26,11 @@ public final class WebSocketManager: ObservableObject {
   public init(token: String?, userId: Int64?) {
     self.token = token
     self.userId = userId
-//    self.updatesManager = UpdatesManager()
-    Task {
-      try await self.start()
-    }
 
-    setupNetworkMonitoring()
+    log.debug("starting socket")
+    Task {
+      await self.start()
+    }
   }
 
   public func ensureConnected() {
@@ -40,19 +39,9 @@ public final class WebSocketManager: ObservableObject {
     }
   }
 
-  func disconnect() {
-    log.debug("disconnecting (manual)")
+  private func disconnect() {
     Task {
-      await client?.disconnect()
-    }
-  }
-
-  deinit {
-    log.debug("deinit")
-    pathMonitor?.cancel()
-    // Create a new task to call disconnect on the main actor
-    Task { @MainActor [self] in
-      self.disconnect()
+      await client?.stop()
     }
   }
 
@@ -72,7 +61,7 @@ public final class WebSocketManager: ObservableObject {
     #endif
   }
 
-  public func start() async throws {
+  public func start() async {
     guard let userId = userId, let token = token else {
       log.debug("not authenticated")
       return
@@ -83,22 +72,16 @@ public final class WebSocketManager: ObservableObject {
       return
     }
 
-    if let client = client {
-      log.debug("disconnecting before reconnecting")
-      await client.disconnect()
-    }
-
-    log.debug("connecting WS")
+    log.debug("starting websocket client")
 
     let client = WebSocketClient(
       url: url,
       credentials: WebSocketCredentials(token: token, userId: userId)
     )
+    self.client = nil
     self.client = client
 
-    try await client.connect()
-
-    log.debug("ws connected")
+    await client.start()
 
     await client.addMessageHandler { [weak self] message in
       Task { @MainActor in
@@ -148,9 +131,9 @@ public final class WebSocketManager: ObservableObject {
     }
   }
 
-  func send(_ text: String) async throws {
-//    log.debug("sending message \(text)")
-    try await client?.send(text: text)
+  func send<T: Codable>(_ message: ClientMessage<T>) async throws {
+    log.trace("sending message \(message)")
+    try await client?.send<T>(message)
   }
 
   // MARK: - Application Logic
@@ -166,16 +149,13 @@ public final class WebSocketManager: ObservableObject {
   }
 
   public func authenticated() {
-    log.debug("authenticated")
-    // Clear cached creds
+    log.debug("authenticated, starting socket")
+
     token = Auth.shared.getToken()
     userId = Auth.shared.getCurrentUserId()
 
-    // Disconnect
-    Task {
-      // TODO: handle saving this task
-      try await self.start()
-    }
+    // Connect
+    Task { await self.start() }
   }
 
   private func decodeServerMessage(data: String) -> ServerMessage.UpdateMessage? {
@@ -186,31 +166,5 @@ public final class WebSocketManager: ObservableObject {
       log.error("Failed to decode server message", error: error)
       return nil
     }
-  }
-
-  // MARK: Network Connectivity
-
-  private var pathMonitor: NWPathMonitor?
-
-  private func setupNetworkMonitoring() {
-    pathMonitor = NWPathMonitor()
-    pathMonitor?.pathUpdateHandler = { [weak self] path in
-      Task { @MainActor in
-        if path.status == .satisfied {
-          // Network became available
-          if await self?.client?.state != .connected {
-            self?.log.debug("recovering connection")
-            try? await self?.start()
-          }
-        } else {
-          // Network became unavailable
-          self?.log.debug("network unavailable")
-
-          // don't disconnect ever for now
-          // self?.disconnect()
-        }
-      }
-    }
-    pathMonitor?.start(queue: DispatchQueue.global())
   }
 }

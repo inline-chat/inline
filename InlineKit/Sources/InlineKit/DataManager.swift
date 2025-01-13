@@ -358,7 +358,7 @@ public class DataManager: ObservableObject {
       // Don't apply local changes if randomId is set which means optimistic update was handled
       if randomId == nil {
         try await database.dbWriter.write { db in
-          var message = Message(from: result.message)
+          let message = Message(from: result.message)
 
           do {
             try message.save(db)
