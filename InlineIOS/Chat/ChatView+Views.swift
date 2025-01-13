@@ -17,11 +17,6 @@ extension ChatView {
   }
 
   @ViewBuilder
-  var content: some View {
-    MessagesCollectionView(peerId: peerId)
-  }
-
-  @ViewBuilder
   var sendButton: some View {
     Button {
       let result = fullChatViewModel.sendMessage(text: text)

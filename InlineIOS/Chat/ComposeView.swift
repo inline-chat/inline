@@ -24,8 +24,8 @@ class ComposeTextView: UITextView {
     addSubview(label)
 
     NSLayoutConstraint.activate([
-      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
-      label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+      label.topAnchor.constraint(equalTo: topAnchor, constant: ComposeView.textViewVerticalPadding),
     ])
 
     placeholderLabel = label
@@ -34,25 +34,28 @@ class ComposeTextView: UITextView {
   func showPlaceholder(_ show: Bool) {
     UIView.animate(withDuration: 0.2) {
       self.placeholderLabel?.alpha = show ? 1 : 0
-      self.placeholderLabel?.transform = show ? .identity : CGAffineTransform(translationX: 40, y: 0)
+      self.placeholderLabel?.transform = show ? .identity : CGAffineTransform(translationX: 50, y: 0)
     }
   }
 }
 
 class ComposeView: UIView {
-  private let minHeight: CGFloat = 36
+  static let minHeight: CGFloat = 46.0
   private let maxHeight: CGFloat = 300
   private var heightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
+  static let textViewVerticalPadding = 12.0
 
   private lazy var textView: ComposeTextView = {
     let textView = ComposeTextView()
     textView.font = .systemFont(ofSize: 17)
+
     textView.isScrollEnabled = true
     textView.backgroundColor = .clear
-    textView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+    textView.textContainerInset = UIEdgeInsets(top: Self.textViewVerticalPadding, left: 6, bottom: Self.textViewVerticalPadding, right: 6)
     textView.delegate = self
     textView.translatesAutoresizingMaskIntoConstraints = false
+
     return textView
   }()
 
@@ -79,6 +82,7 @@ class ComposeView: UIView {
 
   override init(frame: CGRect) {
     super.init(frame: frame)
+
     setupViews()
   }
 
@@ -88,26 +92,31 @@ class ComposeView: UIView {
   }
 
   private func setupViews() {
-    backgroundColor = .systemBackground
+    backgroundColor = .clear
 
     addSubview(textView)
     addSubview(sendButton)
 
-    heightConstraint = heightAnchor.constraint(equalToConstant: minHeight)
+    heightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
 
     NSLayoutConstraint.activate([
+      //            blurView.topAnchor.constraint(equalTo: topAnchor),
+//      blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
+//      blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
+//      blurView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
       heightConstraint,
 
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
-      textView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-      textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 0),
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+      textView.topAnchor.constraint(equalTo: topAnchor),
+      textView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: 0),
 
       sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
       sendButton.widthAnchor.constraint(equalToConstant: 28),
       sendButton.heightAnchor.constraint(equalToConstant: 28),
 
-      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -10),
     ])
   }
 
@@ -119,23 +128,23 @@ class ComposeView: UIView {
     // Capture text before clearing
     let messageText = text
 
-    UIView.animate(withDuration: 0.2) {
-      self.textView.text = ""
-      self.resetHeight()
-      self.textView.showPlaceholder(true)
-      self.sendButton.isHidden = true
+//    UIView.animate(withDuration: 0.2) {
+    textView.text = ""
+    resetHeight()
+    textView.showPlaceholder(true)
+    sendButton.isHidden = true
 
-    } completion: { _ in
-      // Only call onSend after animation completes to prevent any potential lag
-      self.onSend?(messageText)
-    }
+//    } completion: { _ in
+    // Only call onSend after animation completes to prevent any potential lag
+    onSend?(messageText)
+//    }
   }
 
   private func updateHeight() {
     let layoutManager = textView.layoutManager
     let textContainer = textView.textContainer
 
-    layoutManager.ensureLayout(for: textContainer)
+    // layoutManager.ensureLayout(for: textContainer)
     let contentHeight = layoutManager.usedRect(for: textContainer).height
 
     // Ignore small height changes
@@ -145,64 +154,33 @@ class ComposeView: UIView {
 
     prevTextHeight = contentHeight
 
-    let newHeight = min(maxHeight, max(minHeight, contentHeight + 16))
+    let newHeight = min(maxHeight, max(Self.minHeight, contentHeight + Self.textViewVerticalPadding * 2))
 
     guard abs(heightConstraint.constant - newHeight) > 1 else { return }
 
-    // First update height immediately to prevent clipping
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    textView.frame = CGRect(
-      x: textView.frame.minX,
-      y: textView.frame.minY,
-      width: textView.frame.width,
-      height: newHeight
-    )
-    CATransaction.commit()
-
     heightConstraint.constant = newHeight
+    superview?.layoutIfNeeded()
+
     onHeightChange?(newHeight)
   }
 
   private func resetHeight() {
     UIView.animate(withDuration: 0.2) {
-      self.heightConstraint.constant = self.minHeight
-      self.textView.frame = CGRect(
-        x: self.textView.frame.minX,
-        y: self.textView.frame.minY,
-        width: self.textView.frame.width,
-        height: self.minHeight
-      )
+      self.heightConstraint.constant = Self.minHeight
       self.superview?.layoutIfNeeded()
     }
-    onHeightChange?(minHeight)
+    onHeightChange?(Self.minHeight)
   }
 }
 
 extension ComposeView: UITextViewDelegate {
   func textViewDidChange(_ textView: UITextView) {
-    updateHeight()
+    UIView.animate(withDuration: 0.2) {
+      self.updateHeight()
+    }
 
     let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     self.textView.showPlaceholder(isEmpty)
     sendButton.isHidden = isEmpty
   }
-}
-
-// SwiftUI wrapper
-struct ComposeViewRepresentable: UIViewRepresentable {
-  @Binding var text: String
-  @Binding var height: CGFloat
-  var onSend: (String) -> Void
-
-  func makeUIView(context: Context) -> ComposeView {
-    let view = ComposeView()
-    view.onSend = onSend
-    view.onHeightChange = { newHeight in
-      height = newHeight
-    }
-    return view
-  }
-
-  func updateUIView(_ uiView: ComposeView, context: Context) {}
 }

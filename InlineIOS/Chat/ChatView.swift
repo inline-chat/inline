@@ -114,6 +114,7 @@ struct ChatView: View {
           break
         }
       }
+      .environmentObject(fullChatViewModel)
   }
 
   @ViewBuilder

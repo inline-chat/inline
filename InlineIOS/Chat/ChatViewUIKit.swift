@@ -4,30 +4,29 @@ import UIKit
 
 class ChatContainerView: UIView {
   private let peerId: Peer
-    
-  private lazy var messagesCollectionView: MessagesCollectionView2 = {
-    let collectionView = MessagesCollectionView2(peerId: peerId)
+  var onSend: ((String) -> Void)?
+
+  private lazy var messagesCollectionView: MessagesCollectionView = {
+    let collectionView = MessagesCollectionView(peerId: peerId)
     collectionView.translatesAutoresizingMaskIntoConstraints = false
     return collectionView
   }()
     
-  private lazy var composeView: ComposeView2 = {
-    let view = ComposeView2()
+  private lazy var composeView: ComposeView = {
+    let view = ComposeView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.onHeightChange = { [weak self] newHeight in
       self?.handleComposeViewHeightChange(newHeight)
     }
-    view.onSend = { [weak self] _ in
-      // TODO: Handle send message
-    }
+    view.onSend = onSend
     return view
   }()
     
-  init(peerId: Peer) {
+  init(peerId: Peer, _ onSend: @escaping (String) -> Void) {
     self.peerId = peerId
+    self.onSend = onSend
     super.init(frame: .zero)
     setupViews()
-//    setupKeyboardObservers()
   }
     
   @available(*, unavailable)
@@ -38,8 +37,16 @@ class ChatContainerView: UIView {
   private func setupViews() {
     backgroundColor = .systemBackground
         
+    let blurEffect = UIBlurEffect(style: .systemMaterial)
+    let blurView = UIVisualEffectView(effect: blurEffect)
+    blurView.backgroundColor = .white.withAlphaComponent(0.2)
+    blurView.translatesAutoresizingMaskIntoConstraints = false
+    
     addSubview(messagesCollectionView)
+    addSubview(blurView)
     addSubview(composeView)
+    
+    // FIXME: probably communicate current height of compose to collectionView
         
     // Enable keyboard layout guide tracking
     keyboardLayoutGuide.followsUndockedKeyboard = true
@@ -52,55 +59,16 @@ class ChatContainerView: UIView {
 //      messagesCollectionView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.bottomAnchor),
       messagesCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
       
+      blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      blurView.topAnchor.constraint(equalTo: composeView.topAnchor),
+      blurView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
       composeView.leadingAnchor.constraint(equalTo: leadingAnchor),
       composeView.trailingAnchor.constraint(equalTo: trailingAnchor),
       composeView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor)
     ])
   }
-    
-//  private func setupKeyboardObservers() {
-//    NotificationCenter.default.addObserver(
-//      self,
-//      selector: #selector(keyboardWillShow),
-//      name: UIResponder.keyboardWillShowNotification,
-//      object: nil
-//    )
-//
-////    NotificationCenter.default.addObserver(
-////      self,
-////      selector: #selector(keyboardWillHide),
-////      name: UIResponder.keyboardWillHideNotification,
-////      object: nil
-////    )
-//  }
-
-//
-//  @objc private func keyboardWillShow(_ notification: Notification) {
-//    guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-//          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
-//    else {
-//      return
-//    }
-//
-//    let keyboardHeight = keyboardFrame.height
-//    composeViewBottomConstraint.constant = -keyboardHeight
-//
-//    UIView.animate(withDuration: duration) {
-//      self.layoutIfNeeded()
-//    }
-//  }
-//
-//  @objc private func keyboardWillHide(_ notification: Notification) {
-//    guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else {
-//      return
-//    }
-//
-//    composeViewBottomConstraint.constant = 0
-//
-//    UIView.animate(withDuration: duration) {
-//      self.layoutIfNeeded()
-//    }
-//  }
     
   private func handleComposeViewHeightChange(_ newHeight: CGFloat) {
     messagesCollectionView.updateComposeInset(composeHeight: newHeight)
@@ -111,9 +79,12 @@ class ChatContainerView: UIView {
 
 struct ChatViewUIKit: UIViewRepresentable {
   let peerId: Peer
-    
+  @EnvironmentObject var fullChatViewModel: FullChatViewModel
+
   func makeUIView(context: Context) -> ChatContainerView {
-    return ChatContainerView(peerId: peerId)
+    return ChatContainerView(peerId: peerId) { text in
+      let _ = fullChatViewModel.sendMessage(text: text)
+    }
   }
     
   func updateUIView(_ uiView: ChatContainerView, context: Context) {}
