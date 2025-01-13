@@ -30,7 +30,7 @@ struct ConnectionInitPayload: Codable {
   let userId: Int64
 }
 
-struct Method<Args: Codable>: Codable {
+struct Method<Args: Codable & Sendable>: Codable & Sendable {
   let m: String
   let a: Args
 }
@@ -44,7 +44,7 @@ struct ServerMessage<Payload: Codable>: Codable {
   let p: Payload?
 }
 
-struct ClientMessage<Payload: Codable>: Codable {
+struct ClientMessage<Payload: Codable & Sendable>: Codable, Sendable {
   let i: String
   let t: Int
   let k: ClientMessageKind
@@ -154,7 +154,7 @@ extension ClientMessage {
     )
   }
 
-  static func createMessage<T: Codable>(
+  static func createMessage<T: Codable & Sendable>(
     method: String,
     payload: T
   ) -> ClientMessage<Method<T>> {
