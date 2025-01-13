@@ -1,5 +1,6 @@
 import Atomics
 import Foundation
+import Network
 
 #if canImport(UIKit)
 import UIKit
@@ -28,27 +29,40 @@ struct WebSocketCredentials: Sendable {
 }
 
 actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
+  // As long as `isActive` is true, we retry
+  private var isActive = false
+  
+  // TBD
+  private var inBackground = false
+  
+  // Tasks
   private var webSocketTask: URLSessionWebSocketTask?
   private var pingPongTask: Task<Void, Never>? = nil
   private var msgTask: Task<Void, Never>? = nil
   private var connectionTimeoutTask: Task<Void, Never>? = nil
-  private var connectionState: WebSocketConnectionState = .disconnected
-  private var reconnectAttempts = 0
-  private var isActive = true
+  
+  // State
   private var id = UUID()
+  private var connectionState: WebSocketConnectionState = .disconnected {
+    didSet {
+      log.debug("State changed to \(connectionState) (id: \(id))")
+    }
+  }
+
+  private var networkAvailable = true
   
-  // Connection metrics
-  private var lastConnectedAt: Date?
-  private var lastDisconnectedAt: Date?
+  private var reconnectAttempts = 0
   
+  // Configuration
   private let url: URL
   private var session: URLSession?
   private let credentials: WebSocketCredentials
   
+  // Internals
   private var stateObservers: [(WebSocketConnectionState) -> Void] = []
   private var messageHandler: ((WebSocketMessage) -> Void)? = nil
-  
   private var log = Log.scoped("WebsocketClient")
+  private var pathMonitor: NWPathMonitor?
   
   init(
     url: URL,
@@ -60,8 +74,8 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     // Create session configuration
     let configuration = URLSessionConfiguration.default
     configuration.shouldUseExtendedBackgroundIdleMode = true
-    configuration.waitsForConnectivity = true
-    configuration.timeoutIntervalForResource = 300 // 5 minutes
+    // configuration.waitsForConnectivity = true
+    // configuration.timeoutIntervalForResource = 300 // 5 minutes
     
     session = nil
     
@@ -73,7 +87,9 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
       delegate: self,
       delegateQueue: nil // Using nil lets URLSession create its own queue
     )
-    
+  }
+  
+  private func startBackgroundObservers() {
 // Add background/foreground observers
 #if os(iOS)
     NotificationCenter.default.addObserver(
@@ -100,20 +116,14 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   
   // Update background handling to be more robust
   @objc private nonisolated func handleAppDidEnterBackground() {
-    Task { @MainActor in
+    Task {
       self.isInBackground = true
-      self.backgroundTask = UIApplication.shared.beginBackgroundTask { [weak self] in
-        self?.endBackgroundTask()
-      }
-      // Force a ping when entering background
-      try? await self.sendPing()
     }
   }
   
   @objc private nonisolated func handleAppWillEnterForeground() {
-    Task { @MainActor in
+    Task {
       self.isInBackground = false
-      self.endBackgroundTask()
       
       // Check connection and reconnect if needed
       if self.connectionState != .connected {
@@ -128,13 +138,6 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
       }
     }
   }
-  
-  private func endBackgroundTask() {
-    if backgroundTask != .invalid {
-      UIApplication.shared.endBackgroundTask(backgroundTask)
-      backgroundTask = .invalid
-    }
-  }
 #endif
   
   deinit {
@@ -142,35 +145,8 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     webSocketTask?.cancel()
     
     Task { @MainActor [self] in
-      await self.handleDisconnection()
+      await self.stop()
     }
-  }
-  
-  // MARK: - URLSessionWebSocketDelegate
-  
-  nonisolated func urlSession(
-    _ session: URLSession,
-    webSocketTask: URLSessionWebSocketTask,
-    didOpenWithProtocol protocol: String?
-  ) {
-    Task { await handleConnected() }
-  }
-  
-  nonisolated func urlSession(
-    _ session: URLSession,
-    webSocketTask: URLSessionWebSocketTask,
-    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
-    reason: Data?
-  ) {
-    Task { await handleDisconnection(closeCode: closeCode, reason: reason) }
-  }
-  
-  nonisolated func urlSession(
-    _ session: URLSession,
-    task: URLSessionTask,
-    didCompleteWithError error: Error?
-  ) {
-    Task { await handleDisconnection(error: error) }
   }
   
   var state: WebSocketConnectionState {
@@ -180,50 +156,59 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   // MARK: - Connection Management
   
   private func handleConnected() {
-    connectionState = .connected
+    // Reset state
     reconnectAttempts = 0
+    
+    // Update state
+    connectionState = .connected
     notifyStateChange()
     
     setupPingPong()
     
     // TODO: handle error
     Task {
-      Log.shared.debug("Sending connection init")
+      log.debug("Sending connection init")
       do {
         try await self.send(
           .connectionInit(token: self.credentials.token, userId: self.credentials.userId)
         )
       } catch {
-        Log.shared.error("Failed to send connection init", error: error)
+        log.error("Failed to send connection init", error: error)
         await handleDisconnection(error: error)
       }
     }
     
     msgTask = Task {
+      log.debug("Starting message receiving")
       await receiveMessages()
     }
   }
   
-  private var isConnecting = false
+//  private var isConnecting = false
 
-  func connect() async throws {
+  func start() async {
+    guard !isActive else {
+      log.debug("Already started")
+      return
+    }
+      
+    isActive = true
+    
+    setupNetworkMonitoring()
+    startBackgroundObservers()
+    
+    await connect()
+  }
+  
+  func connect() async {
     // Add this guard to prevent connecting if already connected
     guard connectionState == .disconnected else {
       log.debug("Already connected or connecting")
       return
     }
-    
-    guard !isConnecting else {
-      log.debug("Connection attempt already in progress")
-      return
-    }
-    
-    isConnecting = true
-    defer { isConnecting = false }
-    
-    cancelTasks()
-    
-    isActive = true
+
+    await cancelTasks()
+  
     connectionState = .connecting
     notifyStateChange()
     
@@ -232,7 +217,8 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     webSocketTask?.resume()
   }
   
-  func disconnect() async {
+  func stop() async {
+    log.debug("Disconnecting and stopping (manual)")
     isActive = false
     webSocketTask?.cancel(with: .normalClosure, reason: nil)
     webSocketTask = nil
@@ -274,27 +260,18 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     switch connectionState {
     case .disconnected:
       // Re-attempt immediately after connection is established
-      do {
-        try await connect()
-      } catch {
-        log.error("Failed to establish connection", error: error)
-      }
-        
+      await connect()
+
     case .connected:
       // Verify the connection is actually alive with a ping
       do {
         try await sendPing()
       } catch {
         log.debug("Ping failed, reconnecting...")
-        do {
-          try await connect()
-        } catch {
-          log.error("Failed to establish connection", error: error)
-        }
+        await connect()
       }
         
     case .connecting:
-      // ...
       break
     }
   }
@@ -368,38 +345,12 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     connectionTimeoutTask = Task {
       try? await Task.sleep(for: .seconds(10))
       if self.connectionState == .connecting && !Task.isCancelled && isActive {
-        log.error("Connection timeout")
- 
+        log.error("Connection timeout after 10s")
         await handleDisconnection(error: WebSocketError.connectionTimeout)
       }
     }
   }
-  
-  // Add connection quality monitoring
-  private func monitorConnectionQuality() {
-    //        Task {
-    //            var failedPings = 0
-    //            while connectionState == .connected && isActive {
-    //                do {
-    //                    let start = Date()
-    //                    try await webSocketTask?.sendPing()
-    //                    let latency = Date().timeIntervalSince(start)
-    //                    failedPings = 0
-    //                    // Log or report latency
-    //                } catch {
-    //                    failedPings += 1
-    //                    if failedPings >= 3 {
-    //                        await handleDisconnection(error: WebSocketError.poorConnection)
-    //                        break
-    //                    }
-    //                }
-    //                try await Task.sleep(for: .seconds(5))
-    //            }
-    //        }
-  }
-  
-  // Rest of the implementation..
-  
+
   func send(_ message: WebSocketMessage) async throws {
     guard connectionState == .connected, let webSocketTask else {
       throw WebSocketError.disconnected
@@ -439,14 +390,20 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     }
   }
   
-  private func cancelTasks() {
+  private func cancelTasks() async {
+    // Cancel all tasks first
+    let tasks = [pingPongTask, msgTask].compactMap { $0 }
+    tasks.forEach { $0.cancel() }
+    
+    // Wait for all tasks to complete
+//    for task in tasks {
+//      let _ = await task.value
+//    }
+    
+    // Then nullify references
     webSocketTask?.cancel(with: .normalClosure, reason: nil)
     webSocketTask = nil
-    
-    pingPongTask?.cancel()
     pingPongTask = nil
-    
-    msgTask?.cancel()
     msgTask = nil
   }
   
@@ -467,21 +424,28 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
       webSocketTask = nil
     }
     
-    cancelTasks()
+    await cancelTasks()
     
     if isActive {
       attemptReconnection()
     }
   }
   
-  private var reconnectionInProgress = false
+  private let reconnectionInProgress = ManagedAtomic<Bool>(false)
   
   private func attemptReconnection() {
     guard isActive else { return }
-    guard !reconnectionInProgress else {
+    
+    // Atomic check and set for reconnection state
+    guard reconnectionInProgress.compareExchange(
+      expected: false,
+      desired: true,
+      ordering: .acquiring
+    ).exchanged else {
+      log.debug("Reconnection already in progress")
       return
     }
-    
+
     reconnectAttempts += 1
     let backoff = 1.2
     let jitter = Double.random(in: 0 ... 0.3)
@@ -489,9 +453,12 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     
     log.debug("Attempting reconnection after \(delay) seconds, attempt \(reconnectAttempts)")
     
-    reconnectionInProgress = true
     // Task is important here
     Task {
+      defer {
+        reconnectionInProgress.store(false, ordering: .releasing)
+      }
+      
       do {
         // try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         try await Task.sleep(for: .seconds(delay))
@@ -502,24 +469,91 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
         
         // if still needed
         if connectionState == .disconnected && isActive {
-          try await connect()
+          await connect()
         }
-        reconnectionInProgress = false
-        
       } catch {
         log.error("Reconnection attempt failed", error: error)
-        reconnectionInProgress = false
         await handleDisconnection(error: error)
       }
     }
   }
 }
 
+// MARK: Network Connectivity
+
+extension WebSocketClient {
+  private func setNetworkAvailable(_ networkAvailable: Bool) async {
+    if networkAvailable {
+      log.debug("Network became available")
+      self.networkAvailable = networkAvailable
+      
+      // Side-effect
+      await ensureConnected()
+    } else {
+      log.debug("Network is unavailable")
+      self.networkAvailable = networkAvailable
+    }
+  }
+  
+  private func setupNetworkMonitoring() {
+    log.debug("Setting up network monitoring")
+    pathMonitor = NWPathMonitor()
+    pathMonitor?.pathUpdateHandler = { [weak self] path in
+      guard let self = self else { return }
+      if path.status == .satisfied {
+        // Network became available
+        Task {
+          await self.setNetworkAvailable(true)
+        }
+      } else if path.status == .unsatisfied {
+        // Network became unavailable
+        Task {
+          await self.setNetworkAvailable(false)
+        }
+      }
+    }
+    pathMonitor?.start(queue: DispatchQueue.global())
+  }
+}
+
+// MARK: - URLSessionWebSocketDelegate
+
+extension WebSocketClient {
+  nonisolated func urlSession(
+    _ session: URLSession,
+    webSocketTask: URLSessionWebSocketTask,
+    didOpenWithProtocol protocol: String?
+  ) {
+    Task { await handleConnected() }
+  }
+  
+  nonisolated func urlSession(
+    _ session: URLSession,
+    webSocketTask: URLSessionWebSocketTask,
+    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
+    reason: Data?
+  ) {
+    Task { await handleDisconnection(closeCode: closeCode, reason: reason) }
+  }
+  
+  nonisolated func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    didCompleteWithError error: Error?
+  ) {
+    Task { await handleDisconnection(error: error) }
+  }
+}
+
 // MARK: - Convenience Methods
 
 extension WebSocketClient {
-  func send(text: String) async throws {
+  private func send(text: String) async throws {
     try await send(.string(text))
+  }
+  
+  private func send(data: Data) async throws {
+    try await send(.data(data))
   }
   
   func send<T: Codable>(_ message: ClientMessage<T>) async throws {
@@ -541,9 +575,5 @@ extension WebSocketClient {
     } catch {
       throw INWebSocketError.encodingFailed
     }
-  }
-  
-  func send(data: Data) async throws {
-    try await send(.data(data))
   }
 }
