@@ -27,6 +27,10 @@ let package = Package(
     .package(url: "https://github.com/getsentry/sentry-cocoa", from: "8.36.0"),
     .package(url: "https://github.com/evgenyneu/keychain-swift.git", from: "24.0.0"),
     .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.2"),
+    .package(
+      url: "https://github.com/apple/swift-atomics.git",
+      .upToNextMajor(from: "1.2.0")
+    ),
   ],
   targets: [
     // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -38,6 +42,7 @@ let package = Package(
         .product(name: "GRDBQuery", package: "GRDBQuery"),
         .product(name: "Sentry", package: "sentry-cocoa"),
         .product(name: "KeychainSwift", package: "keychain-swift"),
+        .product(name: "Atomics", package: "swift-atomics"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

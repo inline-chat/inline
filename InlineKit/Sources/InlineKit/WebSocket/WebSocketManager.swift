@@ -34,10 +34,10 @@ public final class WebSocketManager: ObservableObject {
     setupNetworkMonitoring()
   }
 
-  public func ensureConnected() async {
-    // ONLY reconnect if we are disconnected, otherwise we will start two connections initially while the other one is connecting
-
-    await client?.ensureConnected()
+  public func ensureConnected() {
+    Task {
+      await client?.ensureConnected()
+    }
   }
 
   func disconnect() {
