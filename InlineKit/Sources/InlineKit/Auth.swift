@@ -120,14 +120,18 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   public func logOut() {
     // clear userId
     UserDefaults.standard.removeObject(forKey: userIdKey)
+    Task {
+      do {
+        _ = try await ApiClient.shared.logout()
+        keychain.delete("token")
 
-    // clear token
-    keychain.delete("token")
-
-    // clear cache
-    cachedToken = nil
-    cachedUserId = nil
-    isLoggedIn = false
+        cachedToken = nil
+        cachedUserId = nil
+        isLoggedIn = false
+      } catch {
+        print("Failed to logout: \(error)")
+      }
+    }
   }
 
   /// Used in previews
