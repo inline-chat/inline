@@ -84,6 +84,7 @@ class ComposeView: UIView {
 
   var onSend: ((String) -> Void)?
   var onHeightChange: ((CGFloat) -> Void)?
+  var peerId: Peer?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -206,7 +207,17 @@ extension ComposeView: UITextViewDelegate {
 
     if isEmpty {
       buttonDisappear()
+      if let peerId = peerId {
+        Task {
+          await ComposeActions.shared.stoppedTyping(for: peerId)
+        }
+      }
     } else {
+      if let peerId = peerId {
+        Task {
+          await ComposeActions.shared.startedTyping(for: peerId)
+        }
+      }
       buttonAppear()
     }
   }
