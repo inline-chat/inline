@@ -1,81 +1,212 @@
 import InlineKit
-import SwiftUI
 import UIKit
 
-struct MessagesCollectionView: UIViewRepresentable {
-  var peerId: Peer
+class MessagesCollectionView: UICollectionView {
+  private let peerId: Peer
+  private var coordinator: Coordinator
 
   init(peerId: Peer) {
     self.peerId = peerId
+    let layout = MessagesCollectionView.createLayout()
+    coordinator = Coordinator(peerId: peerId)
+
+    super.init(frame: .zero, collectionViewLayout: layout)
+
+    setupCollectionView()
   }
 
-  func makeCoordinator() -> Coordinator {
-    Coordinator(peerId: peerId)
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
   }
 
-  func makeUIView(context: Context) -> UICollectionView {
-    let layout = createLayout()
-
-    let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
-
+  private func setupCollectionView() {
     // Basic setup
-    collectionView.backgroundColor = .clear
-    collectionView.delegate = context.coordinator
-    collectionView.autoresizingMask = [.flexibleHeight]
+    backgroundColor = .clear
+    delegate = coordinator
+    autoresizingMask = [.flexibleHeight]
 
     // Register cell
-    collectionView.register(
+    register(
       MessageCollectionViewCell.self,
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
     )
 
     // Bottom-up scrolling transform
-    collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
+    transform = CGAffineTransform(scaleX: 1, y: -1)
 
     // Performance optimizations
-    collectionView.isPrefetchingEnabled = true
-    collectionView.decelerationRate = .normal
-    collectionView.contentInsetAdjustmentBehavior = .never
-    collectionView.isDirectionalLockEnabled = true
+    isPrefetchingEnabled = true
 
     // Scroll indicator setup
-    collectionView.showsVerticalScrollIndicator = true
-    collectionView.indicatorStyle = .default
-    collectionView.scrollIndicatorInsets = UIEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
-    collectionView.contentInset = UIEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
+    showsVerticalScrollIndicator = true
 
-    context.coordinator.setupDataSource(collectionView)
+    keyboardDismissMode = .interactive
 
-    // Observe orientation changes
+    coordinator.setupDataSource(self)
+    setupKeyboardObservers()
     NotificationCenter.default.addObserver(
-      context.coordinator,
-      selector: #selector(Coordinator.orientationDidChange),
+      self,
+      selector: #selector(orientationDidChange),
       name: UIDevice.orientationDidChangeNotification,
       object: nil
     )
-
-    return collectionView
   }
 
-  private func createLayout() -> UICollectionViewLayout {
-    //    let layout = UICollectionViewFlowLayout()
-    let layout = AnimatedCollectionViewLayout()
+  override func didMoveToWindow() {
+    updateContentInsets()
+    print("didMoveToWindow called")
+  }
 
+  private var composeHeight: CGFloat = ComposeView.minHeight
+  public func updateComposeInset(composeHeight: CGFloat) {
+    self.composeHeight = composeHeight
+    UIView.animate(withDuration: 0.2) {
+      self.updateContentInsets()
+      self.scrollToItem(
+        at: IndexPath(item: 0, section: 0),
+        at: .top,
+        animated: false
+        //      animated: false
+      )
+    }
+    print("updateComposeInset called")
+  }
+
+  func updateContentInsets() {
+    guard let window = window else { return }
+    let topContentPadding: CGFloat = 10
+    let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
+    let isLandscape = UIDevice.current.orientation.isLandscape
+    let topSafeArea = isLandscape ? window.safeAreaInsets.left : window.safeAreaInsets.top
+    let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
+    let totalTopInset = topSafeArea + navBarHeight
+    let messagesBottomPadding = 8.0
+    var bottomInset: CGFloat = 0.0
+
+    bottomInset += composeHeight
+    bottomInset += messagesBottomPadding
+
+    if isKeyboardVisible {
+      bottomInset += keyboardHeight
+    } else {
+      bottomInset += bottomSafeArea
+    }
+    print("updateContentInsets called")
+
+    contentInsetAdjustmentBehavior = .never
+    automaticallyAdjustsScrollIndicatorInsets = false
+
+    scrollIndicatorInsets = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset, right: 0)
+    contentInset = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset + topContentPadding, right: 0)
+    layoutIfNeeded()
+  }
+
+  @objc func orientationDidChange(_ notification: Notification) {
+    guard !isKeyboardVisible else { return }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+      self.scrollToItem(
+        at: IndexPath(item: 0, section: 0),
+        at: .top,
+        animated: false
+      )
+
+      self.updateContentInsets()
+      UIView.animate(withDuration: 0.3) {
+        // TODO: if at bottom already
+        self.scrollToItem(
+          at: IndexPath(item: 0, section: 0),
+          at: .top,
+          animated: true
+        )
+      }
+    }
+  }
+
+  private func findViewController() -> UIViewController? {
+    var responder: UIResponder? = self
+    while let nextResponder = responder?.next {
+      if let viewController = nextResponder as? UIViewController {
+        return viewController
+      }
+      responder = nextResponder
+    }
+    return nil
+  }
+
+  private func setupKeyboardObservers() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(keyboardWillShow),
+      name: UIResponder.keyboardWillShowNotification,
+      object: nil
+    )
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(keyboardWillHide),
+      name: UIResponder.keyboardWillHideNotification,
+      object: nil
+    )
+  }
+
+  private var isKeyboardVisible: Bool = false
+  private var keyboardHeight: CGFloat = 0
+
+  @objc private func keyboardWillShow(_ notification: Notification) {
+    isKeyboardVisible = true
+    guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
+    else {
+      return
+    }
+    print("keyboardWillShow called")
+    let keyboardFrameHeight = keyboardFrame.height
+    keyboardHeight = keyboardFrameHeight
+
+    updateContentInsets()
+    UIView.animate(withDuration: duration) {
+      self.scrollToItem(
+        at: IndexPath(item: 0, section: 0),
+        at: .top,
+//        animated: true
+        animated: false
+      )
+    }
+  }
+
+  @objc private func keyboardWillHide(_ notification: Notification) {
+    isKeyboardVisible = false
+    keyboardHeight = 0
+    guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else {
+      return
+    }
+    print("keyboardWillHide called")
+
+    updateContentInsets()
+    UIView.animate(withDuration: duration) {
+      self.scrollToItem(
+        at: IndexPath(item: 0, section: 0),
+        at: .top,
+        animated: true
+      )
+    }
+  }
+
+  private static func createLayout() -> UICollectionViewLayout {
+    let layout = AnimatedCollectionViewLayout()
     layout.minimumInteritemSpacing = 0
     layout.minimumLineSpacing = 0
     layout.scrollDirection = .vertical
     layout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
     return layout
   }
-
-  func updateUIView(_ collectionView: UICollectionView, context: Context) {
-    //    context.coordinator.updateMessages(fullMessages)
-  }
 }
 
 // MARK: - Coordinator
 
-extension MessagesCollectionView {
+private extension MessagesCollectionView {
   class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
     private var currentCollectionView: UICollectionView?
     private let viewModel: MessagesProgressiveViewModel
@@ -135,24 +266,6 @@ extension MessagesCollectionView {
       snapshot.appendItems(itemIdentifiers, toSection: .main)
 
       dataSource.apply(snapshot, animatingDifferences: false)
-    }
-
-    @objc func orientationDidChange(_ notification: Notification) {
-      guard let collectionView = currentCollectionView else { return }
-
-      UIView.performWithoutAnimation {
-        collectionView.transform = CGAffineTransform(scaleX: 1, y: -1)
-        //          self.adjustContentInset(for: collectionView)
-        collectionView.collectionViewLayout.invalidateLayout()
-
-        //          if !self.fullMessages.isEmpty {
-        //            collectionView.scrollToItem(
-        //              at: IndexPath(item: 0, section: 0),
-        //              at: .bottom,
-        //              animated: false
-        //            )
-        //          }
-      }
     }
 
     func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
@@ -282,11 +395,6 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     estimatedItemSize = CGSize(width: availableWidth, height: 1)
   }
 
-  //
-  //  override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
-  //    return true
-  //  }
-
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
     -> UICollectionViewLayoutAttributes?
   {
@@ -301,35 +409,3 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     return attributes
   }
 }
-
-// final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
-//  override func prepare() {
-//    super.prepare()
-//    print("PREPAREING")
-//    guard let collectionView = collectionView else { return }
-//
-//    // Calculate the available width
-//    let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
-//    print("availableWidth \(availableWidth)")
-//
-//    // Set the width that cells should use
-//    itemSize = CGSize(width: availableWidth, height: 44)
-//    print("itemSize \(itemSize)")
-//  }
-//
-//  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
-//    -> UICollectionViewLayoutAttributes?
-//  {
-//    guard
-//      let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-//      as? UICollectionViewLayoutAttributes
-//    else {
-//      return nil
-//    }
-//
-//    attributes.transform = CGAffineTransform(translationX: 0, y: -50)
-//
-//    print("attributes \(attributes)")
-//    return attributes
-//  }
-// }
