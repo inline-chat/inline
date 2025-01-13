@@ -302,26 +302,45 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   
   private func sendPing() async throws {
     guard let task = webSocketTask else {
+      log.debug("Ping timeout occurred")
       throw WebSocketError.disconnected
     }
     
     guard isActive else { return }
     
     try await withThrowingTaskGroup(of: Void.self) { group in
+      // Create a Task-local flag to ensure we only complete once
+      actor PingState {
+        private var hasCompleted = false
+        
+        func complete() -> Bool {
+          guard !hasCompleted else { return false }
+          hasCompleted = true
+          return true
+        }
+      }
+      
+      let pingState = PingState()
+      
       // Add timeout task
       group.addTask {
         try await Task.sleep(for: .seconds(5)) // 5 seconds timeout for ping
-        throw WebSocketError.connectionTimeout
+        if await pingState.complete() {
+          throw WebSocketError.connectionTimeout
+        }
       }
       
       // Add ping task
       group.addTask {
         try await withCheckedThrowingContinuation { continuation in
           task.sendPing { error in
-            if let error = error {
-              continuation.resume(throwing: error)
-            } else {
-              continuation.resume()
+            Task {
+              guard await pingState.complete() else { return }
+              if let error = error {
+                continuation.resume(throwing: error)
+              } else {
+                continuation.resume()
+              }
             }
           }
         }
