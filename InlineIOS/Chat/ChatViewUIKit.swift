@@ -40,7 +40,7 @@ class ChatContainerView: UIView {
         
     let blurEffect = UIBlurEffect(style: .systemMaterial)
     let blurView = UIVisualEffectView(effect: blurEffect)
-    blurView.backgroundColor = .white.withAlphaComponent(0.2)
+    blurView.backgroundColor = .clear
     blurView.translatesAutoresizingMaskIntoConstraints = false
     
     addSubview(messagesCollectionView)
