@@ -129,7 +129,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
         cachedUserId = nil
         isLoggedIn = false
       } catch {
-        print("Failed to logout: \(error)")
+        log.error("Failed to logout: \(error)")
       }
     }
   }
