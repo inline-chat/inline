@@ -139,7 +139,6 @@ struct MainView: View {
             }
           }
           .tint(.indigo)
-          .background(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
         }
       }
       .padding(.horizontal, 16)
