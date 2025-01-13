@@ -58,10 +58,18 @@ class MessagesCollectionView2: UICollectionView {
     print("didMoveToWindow called")
   }
 
-  private var composeHeight: CGFloat = 48.0
+  private var composeHeight: CGFloat = 38.0
   public func updateComposeInset(composeHeight: CGFloat) {
     self.composeHeight = composeHeight
-    updateContentInsets()
+    UIView.animate(withDuration: 0.2) {
+      self.updateContentInsets()
+      self.scrollToItem(
+        at: IndexPath(item: 0, section: 0),
+        at: .top,
+        animated: false
+        //      animated: false
+      )
+    }
     print("updateComposeInset called")
   }
 
@@ -73,10 +81,11 @@ class MessagesCollectionView2: UICollectionView {
     let topSafeArea = isLandscape ? window.safeAreaInsets.left : window.safeAreaInsets.top
     let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
     let totalTopInset = topSafeArea + navBarHeight
-
+    let messagesBottomPadding = 8.0
     var bottomInset: CGFloat = 0.0
 
     bottomInset += composeHeight
+    bottomInset += messagesBottomPadding
 
     if isKeyboardVisible {
       bottomInset += keyboardHeight
@@ -88,7 +97,6 @@ class MessagesCollectionView2: UICollectionView {
     contentInsetAdjustmentBehavior = .never
     automaticallyAdjustsScrollIndicatorInsets = false
 
-    // TODO: composeHeight
     scrollIndicatorInsets = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset, right: 0)
     contentInset = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset + topContentPadding, right: 0)
     layoutIfNeeded()
