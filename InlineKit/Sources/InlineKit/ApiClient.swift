@@ -44,6 +44,7 @@ public enum Path: String {
   case updateDialog
   case addMember
   case getSpace
+  case logout
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -56,7 +57,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     if ProjectConfig.useProductionApi {
       return "https://api.inline.chat/v1"
     }
-    
+
     #if targetEnvironment(simulator)
       return "http://localhost:8000/v1"
     #elseif DEBUG && os(iOS)
@@ -67,7 +68,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       return "https://api.inline.chat/v1"
     #endif
   }()
-  
+
   private var baseURL: String { Self.baseURL }
 
   private let decoder = JSONDecoder()
@@ -102,7 +103,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200...299:
+      case 200 ... 299:
         let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
         switch apiResponse {
         case let .success(data):
@@ -265,7 +266,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     date: Double?
   ) async throws -> SendMessage {
     var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "text", value: text)
+      URLQueryItem(name: "text", value: text),
     ]
 
     if let peerUserId = peerUserId {
@@ -314,7 +315,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .savePushNotification,
       queryItems: [
-        URLQueryItem(name: "applePushToken", value: pushToken)
+        URLQueryItem(name: "applePushToken", value: pushToken),
 
       ],
       includeToken: true
@@ -325,7 +326,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .updateStatus,
       queryItems: [
-        URLQueryItem(name: "online", value: online ? "true" : "false")
+        URLQueryItem(name: "online", value: online ? "true" : "false"),
       ],
       includeToken: true
     )
@@ -346,6 +347,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       ],
       includeToken: true
     )
+  }
+
+  public func logout() async throws -> EmptyPayload {
+    try await request(.logout, includeToken: true)
   }
 
   public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws
