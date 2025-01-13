@@ -114,28 +114,23 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
   private var isInBackground = false
   
+  private func setIsInBackground(_ isInBackground: Bool) {
+    self.isInBackground = isInBackground
+  }
+  
   // Update background handling to be more robust
   @objc private nonisolated func handleAppDidEnterBackground() {
     Task {
-      self.isInBackground = true
+      await self.setIsInBackground(true)
     }
   }
   
   @objc private nonisolated func handleAppWillEnterForeground() {
     Task {
-      self.isInBackground = false
+      await self.setIsInBackground(false)
       
       // Check connection and reconnect if needed
-      if self.connectionState != .connected {
-        do {
-          try await self.connect()
-        } catch {
-          log.error("Failed to reconnect on foreground", error: error)
-        }
-      } else {
-        // Force a ping to verify connection
-        try? await self.sendPing()
-      }
+      await ensureConnected()
     }
   }
 #endif
