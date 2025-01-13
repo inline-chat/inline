@@ -81,7 +81,7 @@ class MessagesCollectionView: UICollectionView {
     let topSafeArea = isLandscape ? window.safeAreaInsets.left : window.safeAreaInsets.top
     let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
     let totalTopInset = topSafeArea + navBarHeight
-    let messagesBottomPadding = 8.0
+    let messagesBottomPadding = 12.0
     var bottomInset: CGFloat = 0.0
 
     bottomInset += composeHeight

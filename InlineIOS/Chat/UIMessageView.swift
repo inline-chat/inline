@@ -21,7 +21,7 @@ class UIMessageView: UIView {
 
   private let bubbleView: UIView = {
     let view = UIView()
-    view.layer.cornerRadius = 18
+    view.layer.cornerRadius = 19
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -50,6 +50,9 @@ class UIMessageView: UIView {
     guard let text = message.text else { return false }
     return text.count > 24 || text.contains("\n")
   }
+
+  private var labelVerticalPadding: CGFloat = 9.0
+  private var labelHorizantalPadding: CGFloat = 12.0
 
   // MARK: - Initialization
 
@@ -88,7 +91,7 @@ class UIMessageView: UIView {
         // Bubble view constraints
         bubbleView.topAnchor.constraint(equalTo: topAnchor),
         bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
-        bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.95),
+        bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
       ] + messageConstraints)
 
     if outgoing {
@@ -100,10 +103,10 @@ class UIMessageView: UIView {
 
   private func setupMultilineMessageConstraints() -> [NSLayoutConstraint] {
     return [
-      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
-      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
-      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
-      messageLabel.bottomAnchor.constraint(equalTo: metadataView.topAnchor, constant: -8),
+      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
+      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -labelHorizantalPadding),
+      messageLabel.bottomAnchor.constraint(equalTo: metadataView.topAnchor, constant: -labelVerticalPadding),
 
       metadataView.leadingAnchor.constraint(
         greaterThanOrEqualTo: bubbleView.leadingAnchor, constant: 14),
@@ -114,9 +117,9 @@ class UIMessageView: UIView {
 
   private func setupOneLineMessageConstraints() -> [NSLayoutConstraint] {
     return [
-      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
-      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 12),
-      messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -8),
+      messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
+      messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -labelVerticalPadding),
 
       metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
       metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
