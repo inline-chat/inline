@@ -1,3 +1,4 @@
+import Atomics
 import Foundation
 
 #if canImport(UIKit)
@@ -30,6 +31,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   private var webSocketTask: URLSessionWebSocketTask?
   private var pingPongTask: Task<Void, Never>? = nil
   private var msgTask: Task<Void, Never>? = nil
+  private var connectionTimeoutTask: Task<Void, Never>? = nil
   private var connectionState: WebSocketConnectionState = .disconnected
   private var reconnectAttempts = 0
   private var isActive = true
@@ -193,6 +195,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
         )
       } catch {
         Log.shared.error("Failed to send connection init", error: error)
+        await handleDisconnection(error: error)
       }
     }
     
@@ -201,6 +204,8 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     }
   }
   
+  private var isConnecting = false
+
   func connect() async throws {
     // Add this guard to prevent connecting if already connected
     guard connectionState == .disconnected else {
@@ -208,14 +213,22 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
       return
     }
     
+    guard !isConnecting else {
+      log.debug("Connection attempt already in progress")
+      return
+    }
+    
+    isConnecting = true
+    defer { isConnecting = false }
+    
     cancelTasks()
     
     isActive = true
     connectionState = .connecting
     notifyStateChange()
     
-    webSocketTask = session!.webSocketTask(with: url)
     setupConnectionTimeout()
+    webSocketTask = session!.webSocketTask(with: url)
     webSocketTask?.resume()
   }
   
@@ -255,35 +268,34 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   
   // MARK: - Connection Monitoring
   
-  public func ensureConnected() {
+  public func ensureConnected() async {
     log.debug("Ensuring connection is alive")
-    Task {
-      switch connectionState {
-      case .disconnected:
-        // Definitely need to reconnect
+
+    switch connectionState {
+    case .disconnected:
+      // Re-attempt immediately after connection is established
+      do {
+        try await connect()
+      } catch {
+        log.error("Failed to establish connection", error: error)
+      }
+        
+    case .connected:
+      // Verify the connection is actually alive with a ping
+      do {
+        try await sendPing()
+      } catch {
+        log.debug("Ping failed, reconnecting...")
         do {
           try await connect()
         } catch {
           log.error("Failed to establish connection", error: error)
         }
-        
-      case .connected:
-        // Verify the connection is actually alive with a ping
-        do {
-          try await sendPing()
-        } catch {
-          log.debug("Ping failed, reconnecting...")
-          do {
-            try await connect()
-          } catch {
-            log.error("Failed to establish connection", error: error)
-          }
-        }
-        
-      case .connecting:
-        // Already attempting to connect, let it finish
-        break
       }
+        
+    case .connecting:
+      // ...
+      break
     }
   }
   
@@ -292,37 +304,72 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     
     pingPongTask?.cancel()
     pingPongTask = Task {
-      while connectionState == .connected && isActive && Task.isCancelled == false {
+      var consecutiveFailures = 0
+      
+      while connectionState == .connected &&
+        isActive &&
+        !Task.isCancelled
+      {
         do {
           try await Task.sleep(for: .seconds(10))
           log.debug("Sending ping \(id)")
           try await sendPing()
+          consecutiveFailures = 0
         } catch {
-          log.error("Ping failed", error: error)
-          await handleDisconnection(error: error)
-          break
+          consecutiveFailures += 1
+          log.error("Ping failed (\(consecutiveFailures)/3)", error: error)
+          
+          if consecutiveFailures >= 2 {
+            await handleDisconnection(error: error)
+            break
+          }
         }
       }
     }
   }
   
   private func sendPing() async throws {
-    return try await withCheckedThrowingContinuation { continuation in
-      webSocketTask?.sendPing { error in
-        if let error = error {
-          continuation.resume(throwing: error)
-        } else {
-          continuation.resume()
+    guard let task = webSocketTask else {
+      throw WebSocketError.disconnected
+    }
+    
+    guard isActive else { return }
+    
+    try await withThrowingTaskGroup(of: Void.self) { group in
+      // Add timeout task
+      group.addTask {
+        try await Task.sleep(for: .seconds(5)) // 5 seconds timeout for ping
+        throw WebSocketError.connectionTimeout
+      }
+      
+      // Add ping task
+      group.addTask {
+        try await withCheckedThrowingContinuation { continuation in
+          task.sendPing { error in
+            if let error = error {
+              continuation.resume(throwing: error)
+            } else {
+              continuation.resume()
+            }
+          }
         }
       }
+      
+      // Wait for first completion (success or failure)
+      try await group.next()
+      
+      // Cancel any remaining tasks
+      group.cancelAll()
     }
   }
-  
+
   private func setupConnectionTimeout() {
-    Task {
-      try? await Task.sleep(for: .seconds(14))
-      if self.connectionState == .connecting {
+    connectionTimeoutTask?.cancel()
+    connectionTimeoutTask = Task {
+      try? await Task.sleep(for: .seconds(10))
+      if self.connectionState == .connecting && !Task.isCancelled && isActive {
         log.error("Connection timeout")
+ 
         await handleDisconnection(error: WebSocketError.connectionTimeout)
       }
     }
@@ -423,13 +470,13 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     cancelTasks()
     
     if isActive {
-      await attemptReconnection()
+      attemptReconnection()
     }
   }
   
   private var reconnectionInProgress = false
   
-  private func attemptReconnection() async {
+  private func attemptReconnection() {
     guard isActive else { return }
     guard !reconnectionInProgress else {
       return
@@ -448,6 +495,10 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
       do {
         // try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         try await Task.sleep(for: .seconds(delay))
+        
+        if Task.isCancelled {
+          return
+        }
         
         // if still needed
         if connectionState == .disconnected && isActive {

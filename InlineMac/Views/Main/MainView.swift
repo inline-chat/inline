@@ -66,14 +66,14 @@ struct MainView: View {
     }
     .onForeground {
       Task {
-        await ws.ensureConnected()
+        ws.ensureConnected()
         markAsOnline()
       }
     }
     .onChange(of: scenePhase) { phase in
       if phase == .active {
         Task {
-          await ws.ensureConnected()
+          ws.ensureConnected()
           markAsOnline()
         }
         
