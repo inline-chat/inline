@@ -55,7 +55,6 @@ class MessagesCollectionView: UICollectionView {
 
   override func didMoveToWindow() {
     updateContentInsets()
-    print("didMoveToWindow called")
   }
 
   private var composeHeight: CGFloat = ComposeView.minHeight
@@ -67,10 +66,8 @@ class MessagesCollectionView: UICollectionView {
         at: IndexPath(item: 0, section: 0),
         at: .top,
         animated: false
-        //      animated: false
       )
     }
-    print("updateComposeInset called")
   }
 
   func updateContentInsets() {
@@ -92,7 +89,6 @@ class MessagesCollectionView: UICollectionView {
     } else {
       bottomInset += bottomSafeArea
     }
-    print("updateContentInsets called")
 
     contentInsetAdjustmentBehavior = .never
     automaticallyAdjustsScrollIndicatorInsets = false
@@ -161,7 +157,6 @@ class MessagesCollectionView: UICollectionView {
     else {
       return
     }
-    print("keyboardWillShow called")
     let keyboardFrameHeight = keyboardFrame.height
     keyboardHeight = keyboardFrameHeight
 
@@ -170,7 +165,6 @@ class MessagesCollectionView: UICollectionView {
       self.scrollToItem(
         at: IndexPath(item: 0, section: 0),
         at: .top,
-//        animated: true
         animated: false
       )
     }
@@ -182,7 +176,6 @@ class MessagesCollectionView: UICollectionView {
     guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else {
       return
     }
-    print("keyboardWillHide called")
 
     updateContentInsets()
     UIView.animate(withDuration: duration) {
