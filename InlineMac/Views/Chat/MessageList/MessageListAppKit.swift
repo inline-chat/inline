@@ -524,14 +524,18 @@ class MessageListAppKit: NSViewController {
       }
 
     case .updated(_, let indexSet):
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = animationDuration
-        self.tableView
-          .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
-        if shouldScroll { self.scrollToBottom(animated: true) } // ??
-      } completionHandler: {
-        self.isPerformingUpdate = false
-      }
+      tableView
+        .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
+      if shouldScroll { scrollToBottom(animated: true) }
+      self.isPerformingUpdate = false
+//      NSAnimationContext.runAnimationGroup { context in
+//        context.duration = animationDuration
+//        self.tableView
+//          .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
+//        if shouldScroll { self.scrollToBottom(animated: true) } // ??
+//      } completionHandler: {
+//        self.isPerformingUpdate = false
+//      }
       
     case .reload:
       log.trace("reloading data")
