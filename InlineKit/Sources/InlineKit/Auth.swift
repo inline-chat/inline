@@ -121,16 +121,12 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     // clear userId
     UserDefaults.standard.removeObject(forKey: userIdKey)
     Task {
-      do {
-        _ = try await ApiClient.shared.logout()
-        keychain.delete("token")
+      _ = try? await ApiClient.shared.logout()
+      keychain.delete("token")
 
-        cachedToken = nil
-        cachedUserId = nil
-        isLoggedIn = false
-      } catch {
-        log.error("Failed to logout: \(error)")
-      }
+      cachedToken = nil
+      cachedUserId = nil
+      isLoggedIn = false
     }
   }
 
