@@ -137,7 +137,7 @@ struct ChatRowView: View {
 
   @ViewBuilder
   func spaceAvatar(_ item: SpaceChatItem) -> some View {
-    InitialsCircle(firstName: item.title ?? "", lastName: nil, size: 36)
+    InitialsCircle(name: item.title ?? "", size: 36)
       .padding(.trailing, 6)
   }
 
