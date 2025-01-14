@@ -15,6 +15,9 @@ class MessageSizeCalculator {
   private let textHeightCache = NSCache<NSString, NSValue>()
   private let minWidthForSingleLine = NSCache<NSString, NSValue>()
   
+  /// Using "" empty string gives a zero height which messes up our layout when somehow an empty text-only message gets in due to a bug 
+  private let emptyFallback = " "
+  
   private let log = Log.scoped("MessageSizeCalculator", enableTracing: true)
   private var heightForSingleLine: CGFloat?
   
@@ -35,7 +38,7 @@ class MessageSizeCalculator {
   }
   
   func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> (NSSize, NSSize) {
-    let text = message.message.text ?? ""
+    let text = message.message.text ?? emptyFallback
     
     // If text is empty, height is always 1 line
     // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
