@@ -84,6 +84,7 @@ struct UpdateMessageId: Codable {
       if var message = message {
         message.status = .sent
         message.messageId = self.messageId
+        message.randomId = nil
 //        try message.save(db)
         try message
           .saveMessage(
