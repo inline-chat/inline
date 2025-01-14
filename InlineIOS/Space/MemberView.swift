@@ -17,7 +17,7 @@ struct MemberView: View {
   var body: some View {
     HStack {
       if let user = userDataViewModel.user {
-        InitialsCircle(firstName: user.firstName ?? "", lastName: user.lastName ?? nil, size: 25)
+        UserAvatar(user: user, size: 25)
           .padding(.trailing, 4)
         Text(user.firstName ?? "")
       }
@@ -26,5 +26,5 @@ struct MemberView: View {
 }
 
 #Preview {
-  MemberView(userId: Int64.random(in: 1...500))
+  MemberView(userId: Int64.random(in: 1 ... 500))
 }

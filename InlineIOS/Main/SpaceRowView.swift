@@ -7,7 +7,7 @@ struct SpaceRowView: View {
 
   var body: some View {
     HStack(alignment: .top) {
-      InitialsCircle(firstName: spaceItem.space.name, lastName: nil, size: 36)
+      SpaceAvatar(space: spaceItem.space, size: 36)
         .padding(.trailing, 6)
 
       VStack(alignment: .leading) {
