@@ -254,13 +254,25 @@ class MessageListAppKit: NSViewController {
       object: scrollView
     )
   }
+  
+  private var scrollState: MessageListScrollState = .idle {
+    didSet {
+      NotificationCenter.default.post(
+        name: .messageListScrollStateDidChange,
+        object: self,
+        userInfo: ["state": scrollState]
+      )
+    }
+  }
 
   @objc private func scrollWheelBegan() {
     isUserScrolling = true
+    scrollState = .scrolling
   }
   
   @objc private func scrollWheelEnded() {
     isUserScrolling = false
+    scrollState = .idle
     
     maintainingBottomScroll {
       recalculateHeightsOnWidthChange()
@@ -1003,4 +1015,13 @@ extension NSTableView {
     // Ensure the last row is visible
     // scrollRowToVisible(lastRow)
   }
+}
+
+extension Notification.Name {
+  static let messageListScrollStateDidChange = Notification.Name("messageListScrollStateDidChange")
+}
+
+enum MessageListScrollState {
+  case scrolling
+  case idle
 }

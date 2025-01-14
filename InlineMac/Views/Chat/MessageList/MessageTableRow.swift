@@ -50,7 +50,6 @@ class MessageTableCell: NSView {
        currentContent.message.message.fromId == message.message.fromId,
        // same message layout
        currentContent.message.message.out == message.message.out,
-       currentContent.message.message.status == message.message.status,
        currentContent.message.message.repliedToMessageId == message.message.repliedToMessageId,
        // same avatar
        currentContent.props.firstInGroup == props.firstInGroup
