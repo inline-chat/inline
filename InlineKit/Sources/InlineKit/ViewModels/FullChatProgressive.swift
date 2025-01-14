@@ -105,8 +105,11 @@ public class MessagesProgressiveViewModel {
         } else {
           messages.append(contentsOf: newMessages)
         }
+        
+        // FIXME: For now until we figured a stable sort
         // sort again
-        sort()
+        // sort()
+        
         updateRange()
 
         // Return changeset
