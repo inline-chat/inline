@@ -41,7 +41,7 @@ struct SpaceView: View {
         ToolbarItem(id: "Space", placement: .topBarLeading) {
           HStack {
             if let space = fullSpaceViewModel.space {
-              InitialsCircle(firstName: space.name, lastName: nil, size: 26)
+              SpaceAvatar(space: space, size: 26)
                 .padding(.trailing, 4)
 
               VStack(alignment: .leading) {
