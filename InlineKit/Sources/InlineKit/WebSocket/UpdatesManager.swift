@@ -7,7 +7,7 @@ actor UpdatesManager {
   private var database: AppDatabase = .shared
   private var log = Log.scoped("Updates")
 
-  func apply(update: Update, db: Database) throws {
+  func apply(update: Update, db: Database) {
 //    self.log.debug("apply update")
 
     do {
@@ -34,7 +34,7 @@ actor UpdatesManager {
     do {
       try self.database.dbWriter.write { db in
         for update in updates {
-          try self.apply(update: update, db: db)
+          self.apply(update: update, db: db)
         }
       }
     } catch {
