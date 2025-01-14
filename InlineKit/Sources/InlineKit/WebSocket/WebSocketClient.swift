@@ -309,23 +309,13 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     guard isActive else { return }
     
     try await withThrowingTaskGroup(of: Void.self) { group in
-      // Create a Task-local flag to ensure we only complete once
-      actor PingState {
-        private var hasCompleted = false
-        
-        func complete() -> Bool {
-          guard !hasCompleted else { return false }
-          hasCompleted = true
-          return true
-        }
-      }
-      
-      let pingState = PingState()
+
+      let hasCompleted = ManagedAtomic<Bool>(false)
       
       // Add timeout task
       group.addTask {
         try await Task.sleep(for: .seconds(5)) // 5 seconds timeout for ping
-        if await pingState.complete() {
+        if hasCompleted.compareExchange(expected: false, desired: true, ordering: .relaxed).exchanged {
           throw WebSocketError.connectionTimeout
         }
       }
@@ -334,8 +324,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
       group.addTask {
         try await withCheckedThrowingContinuation { continuation in
           task.sendPing { error in
-            Task {
-              guard await pingState.complete() else { return }
+            if hasCompleted.compareExchange(expected: false, desired: true, ordering: .relaxed).exchanged {
               if let error = error {
                 continuation.resume(throwing: error)
               } else {
@@ -346,11 +335,14 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
         }
       }
       
-      // Wait for first completion (success or failure)
-      try await group.next()
-      
-      // Cancel any remaining tasks
-      group.cancelAll()
+      do {
+        // Wait for first completion (success or failure)
+        try await group.next()
+        group.cancelAll()
+      } catch {
+        group.cancelAll()
+        throw error
+      }
     }
   }
 
