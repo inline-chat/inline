@@ -13,8 +13,7 @@ public struct SpaceAvatar: View {
   public var body: some View {
     ZStack {
       InitialsCircle(
-        firstName: space.name,
-        lastName: nil,
+        name: space.name,
         size: size
       )
     }

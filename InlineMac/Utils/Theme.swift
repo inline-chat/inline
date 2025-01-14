@@ -40,7 +40,7 @@ enum Theme {
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
   static let messageBubbleRadius: CGFloat =  15.0
-  static let messageBubblePadding: CGSize = .init(width: 11.0, height: 7.0)
+  static let messageBubblePadding: CGSize = .init(width: 12.0, height: 7.0)
   static let messageIsBubble: Bool = true
   static let messageBubbleLightColor: NSColor = .init(calibratedRed: 0.92, green: 0.92, blue: 0.92, alpha: 1.0)
   static let messageBubbleDarkColor: NSColor = .init(calibratedRed: 0.18, green: 0.18, blue: 0.18, alpha: 1.0)
