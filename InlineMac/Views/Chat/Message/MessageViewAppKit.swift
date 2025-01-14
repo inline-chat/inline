@@ -300,7 +300,7 @@ class MessageViewAppKit: NSView {
     let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
     let sidePadding = Theme.messageSidePadding - bgPadding
-    let senderNameLeadingPadding = hasBubble ? 6.0 : 0.0
+    let senderNameLeadingPadding = hasBubble ? 4.0 : 0.0
     let bubblePaddingVertical = hasBubble ? bubblePadding.height : 0.0
     let bubblePaddingHorizontal = hasBubble ? bubblePadding.width : 0.0
 
@@ -311,7 +311,8 @@ class MessageViewAppKit: NSView {
     if showsAvatar {
       NSLayoutConstraint.activate([
         avatarView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: avatarLeading),
-        avatarView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
+        avatarView.topAnchor.constraint(equalTo: topAnchor, constant:
+          topPadding),
         avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize),
         avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize)
       ])
@@ -356,7 +357,7 @@ class MessageViewAppKit: NSView {
           bubbleView.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: bubblePadding.height),
 
           // Time and state view
-          timeAndStateView.leadingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: 8),
+          timeAndStateView.leadingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: 12),
           timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height - Theme.messageVerticalPadding)
         ]
       )
@@ -374,7 +375,7 @@ class MessageViewAppKit: NSView {
   private func setupMessageText() {
     // Setup time and state
     // Show when failed or sending
-    setTimeAndStateVisibility(visible: message.status != .sent)
+    setTimeAndStateVisibility(visible: shouldAlwaysShowTimeAndState)
 
     // Setup text
     let text = message.text ?? ""
@@ -551,10 +552,14 @@ extension MessageViewAppKit {
     }
   }
 
+  var shouldAlwaysShowTimeAndState: Bool {
+    message.status == .sending || message.status == .failed
+  }
+
   private func updateHoverState(_ isHovered: Bool) {
     isMouseInside = isHovered
 
-    if message.status == .sent {
+    if !shouldAlwaysShowTimeAndState {
       setTimeAndStateVisibility(visible: isHovered)
     }
   }
