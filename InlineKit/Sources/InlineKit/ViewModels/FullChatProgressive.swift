@@ -380,14 +380,24 @@ public final class MessagesPublisher {
   }
 
   func messageUpdated(message: Message, peer: Peer) {
+    guard let messageGlobalId = message.globalId else {
+      Log.shared.error("Message has no global id")
+      return
+    }
+    
+    Log.shared.debug("Message updated: \(message)")
+      
 //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? db.reader.read { db in
       try Message
-        .filter(Column("messageId") == message.messageId)
-        .filter(Column("chatId") == message.chatId)
+        .filter(id: messageGlobalId)
+
+//        .filter(Column("messageId") == message.messageId)
+//        .filter(Column("chatId") == message.chatId)
         .including(optional: Message.from)
         .including(all: Message.reactions)
         .asRequest(of: FullMessage.self)
+
         .fetchOne(db)
     }
     guard let fullMessage = fullMessage else {
