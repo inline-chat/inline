@@ -36,8 +36,6 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  // MARK: Views
-
   private var bubbleColor: NSColor {
     outgoing ? Theme.messageBubbleOutgoingColor : Theme.messageBubbleColor
   }
@@ -72,6 +70,11 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  // State
+  private var isMouseInside = false
+
+  // MARK: Views
+
   private lazy var bubbleView: BasicView = {
     let view = BasicView()
     view.wantsLayer = true
@@ -94,6 +97,15 @@ class MessageViewAppKit: NSView {
     label.lineBreakMode = .byTruncatingTail
 
     return label
+  }()
+
+  private lazy var timeAndStateView: MessageTimeAndState = {
+    let view = MessageTimeAndState(fullMessage: fullMessage)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+
+    view.layer?.opacity = 0
+    return view
   }()
 
   private var useTextKit2: Bool = true
@@ -224,6 +236,8 @@ class MessageViewAppKit: NSView {
     self.fullMessage = fullMessage
     self.props = props
     super.init(frame: .zero)
+    addHoverTrackingArea()
+    setupScrollStateObserver()
     setupView()
   }
 
@@ -236,9 +250,14 @@ class MessageViewAppKit: NSView {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+    if let observer = notificationObserver {
+      NotificationCenter.default.removeObserver(observer)
+    }
   }
 
   private func setupView() {
+    addSubview(timeAndStateView)
+
     if hasBubble {
       addSubview(bubbleView)
     }
@@ -334,13 +353,30 @@ class MessageViewAppKit: NSView {
           bubbleView.topAnchor.constraint(equalTo: textView.topAnchor, constant: -bubblePadding.height),
           bubbleView.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: -bubblePadding.width),
           bubbleView.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: bubblePadding.width),
-          bubbleView.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: bubblePadding.height)
+          bubbleView.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: bubblePadding.height),
+
+          // Time and state view
+          timeAndStateView.leadingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: 8),
+          timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height - Theme.messageVerticalPadding)
+        ]
+      )
+    } else {
+      NSLayoutConstraint.activate(
+        [
+          // Time and state view
+          timeAndStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding),
+          timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height - Theme.messageVerticalPadding)
         ]
       )
     }
   }
 
   private func setupMessageText() {
+    // Setup time and state
+    // Show when failed or sending
+    setTimeAndStateVisibility(visible: message.status != .sent)
+
+    // Setup text
     let text = message.text ?? ""
 
     textView.baseWritingDirection = props.isRtl ? .rightToLeft : .natural
@@ -441,6 +477,9 @@ class MessageViewAppKit: NSView {
 
     // As the message changes here, we need to update everything related to that. Otherwise we get wrong context menu.
     setupContextMenu()
+
+    // Update time and state
+    timeAndStateView.updateMessage(fullMessage)
   }
 
   public func updateSize(props: MessageViewProps) {
@@ -465,11 +504,89 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  private func setTimeAndStateVisibility(visible: Bool) {
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.1
+      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      context.allowsImplicitAnimation = true
+      timeAndStateView.layer?.opacity = visible ? 1 : 0
+    }
+  }
+
   // MARK: - Actions
 
   @objc private func copyMessage() {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(message.text ?? "", forType: .string)
+  }
+
+  // ---
+  private var notificationObserver: NSObjectProtocol?
+  private var scrollState: MessageListScrollState = .idle
+  private var hoverTrackingArea: NSTrackingArea?
+  private func setupScrollStateObserver() {
+    notificationObserver = NotificationCenter.default.addObserver(
+      forName: .messageListScrollStateDidChange,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let state = notification.userInfo?["state"] as? MessageListScrollState else { return }
+      self?.handleScrollStateChange(state)
+    }
+  }
+}
+
+// MARK: - Tracking Area & Hover
+
+extension MessageViewAppKit {
+  private func handleScrollStateChange(_ state: MessageListScrollState) {
+    scrollState = state
+    switch state {
+    case .scrolling:
+      // Clear hover state
+      updateHoverState(false)
+    case .idle:
+      // Re-enable hover state if needed
+      break
+    }
+  }
+
+  private func updateHoverState(_ isHovered: Bool) {
+    isMouseInside = isHovered
+    // Update your hover state UI here
+    setTimeAndStateVisibility(visible: isHovered)
+  }
+
+  func removeHoverTrackingArea() {
+    if let hoverTrackingArea = hoverTrackingArea {
+      removeTrackingArea(hoverTrackingArea)
+    }
+  }
+
+  func addHoverTrackingArea() {
+    removeHoverTrackingArea()
+    hoverTrackingArea = NSTrackingArea(
+      rect: .zero,
+      options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+      owner: self,
+      userInfo: nil
+    )
+    addTrackingArea(hoverTrackingArea!)
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    guard scrollState == .idle else { return }
+    updateHoverState(true)
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    updateHoverState(false)
   }
 }
 
