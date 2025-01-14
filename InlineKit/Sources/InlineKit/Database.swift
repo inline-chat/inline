@@ -157,7 +157,6 @@ public extension AppDatabase {
     migrator.registerMigration("message date index") { db in
       try db.create(index: "message_date_idx", on: "message", columns: ["date"])
     }
-    
 
     /// TODOs:
     /// - Add indexes for performance
@@ -296,11 +295,12 @@ public extension AppDatabase {
         appropriateFor: nil, create: false)
 
       let directory =
-        if let userProfile = ProjectConfig.userProfile {
-          "Database_\(userProfile)"
-        } else {
-          "Database"
-        }
+        if let userProfile = ProjectConfig.userProfile
+      {
+        "Database_\(userProfile)"
+      } else {
+        "Database"
+      }
 
       let directoryURL = appSupportURL.appendingPathComponent(directory, isDirectory: true)
       try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
@@ -330,6 +330,18 @@ public extension AppDatabase {
       var path = databasePath
       path.replace(" ", with: "\\ ")
       log.debug("Database path: \(path)")
+
+      let iOSLink = "https://testflight.apple.com/join/FkC3f7fz"
+      let macOSLink = "https://testflight.apple.com/join/Z8zUcWZH"
+
+      print("""
+      |Test flight links|
+
+      iOS: \(iOSLink)
+      macOS: \(macOSLink)
+      😉 🍎 😉
+      """)
+
       // Create the AppDatabase
       let appDatabase = try AppDatabase(dbPool)
 
