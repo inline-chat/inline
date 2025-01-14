@@ -200,7 +200,7 @@ class ComposeAppKit: NSView {
       // First update the height of scroll view immediately so it doesn't clip from top while animating
       CATransaction.begin()
       CATransaction.disableActions()
-      textEditor.setHeight(textViewHeight)
+      textEditor.setHeight(height)
       CATransaction.commit()
       
       NSAnimationContext.runAnimationGroup { context in
@@ -215,7 +215,7 @@ class ComposeAppKit: NSView {
         NSAnimationContext.endGrouping()
       }
     } else {
-      textEditor.setHeight(textViewHeight)
+      textEditor.setHeight(height)
       heightConstraint.constant = height
       textEditor.updateTextViewInsets(contentHeight: textViewContentHeight)
       messageList?.updateInsetForCompose(height)

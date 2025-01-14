@@ -62,7 +62,7 @@ class ComposeTextEditor: NSView {
     
     // Scroll view
     scrollView.drawsBackground = false
-    scrollView.hasVerticalScroller = false
+    scrollView.hasVerticalScroller = true
     scrollView.hasHorizontalRuler = false
     scrollView.autoresizingMask = [.width]
     scrollView.translatesAutoresizingMaskIntoConstraints = false
