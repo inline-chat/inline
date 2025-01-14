@@ -138,7 +138,7 @@ class MessageTimeAndState: NSView {
     let image = switch status {
     case .sent:
       NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Sent")!.withSymbolConfiguration(
-        .init(pointSize: 10, weight: .medium).applying(.preferringMonochrome())
+        .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
       )!
     case .sending:
       NSImage(systemSymbolName: "clock", accessibilityDescription: "Sending")!.withSymbolConfiguration(
@@ -146,7 +146,7 @@ class MessageTimeAndState: NSView {
       )!
     case .failed:
       NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Failed")!.withSymbolConfiguration(
-        .init(pointSize: 10, weight: .medium).applying(.preferringMonochrome())
+        .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
       )!
     }
 

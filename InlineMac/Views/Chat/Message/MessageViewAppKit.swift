@@ -553,8 +553,10 @@ extension MessageViewAppKit {
 
   private func updateHoverState(_ isHovered: Bool) {
     isMouseInside = isHovered
-    // Update your hover state UI here
-    setTimeAndStateVisibility(visible: isHovered)
+
+    if message.status == .sent {
+      setTimeAndStateVisibility(visible: isHovered)
+    }
   }
 
   func removeHoverTrackingArea() {
