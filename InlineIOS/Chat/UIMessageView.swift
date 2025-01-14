@@ -79,7 +79,7 @@ class UIMessageView: UIView {
 
     setupAppearance()
     setupConstraints()
-//    setupContextMenu()
+    setupContextMenu()
   }
 
   private func setupConstraints() {
