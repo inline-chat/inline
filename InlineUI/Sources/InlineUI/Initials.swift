@@ -1,14 +1,13 @@
+import InlineKit
 import SwiftUI
 
 @MainActor
 public struct InitialsCircle: View, Equatable {
-  let firstName: String
-  let lastName: String?
+  let name: String
   let size: CGFloat
 
   public nonisolated static func == (lhs: InitialsCircle, rhs: InitialsCircle) -> Bool {
-    lhs.firstName == rhs.firstName &&
-      lhs.lastName == rhs.lastName &&
+    lhs.name == rhs.name &&
       lhs.size == rhs.size
   }
 
@@ -44,17 +43,11 @@ public struct InitialsCircle: View, Equatable {
   }
 
   private var initials: String {
-    [firstName]
-      .compactMap(\.first)
-      .prefix(2)
-      .map(String.init)
-      .joined()
-      .uppercased()
+    name.first.map(String.init)?.uppercased() ?? ""
   }
 
   private var backgroundColor: Color {
-    let fullName = [firstName, lastName].compactMap { $0 }.joined()
-    let baseColor = ColorPalette.color(for: fullName)
+    let baseColor = ColorPalette.color(for: name)
     return colorScheme == .dark
       ? baseColor.adjustLuminosity(by: -0.1)
       : baseColor.adjustLuminosity(by: 0)
@@ -75,9 +68,8 @@ public struct InitialsCircle: View, Equatable {
     )
   }
 
-  public init(firstName: String, lastName: String? = nil, size: CGFloat = 32) {
-    self.firstName = firstName
-    self.lastName = lastName
+  public init(name: String, size: CGFloat = 32) {
+    self.name = name
     self.size = size
   }
 
@@ -345,28 +337,47 @@ private extension Color {
     LazyVGrid(columns: Array(repeating: .init(.flexible()), count: 4), spacing: 20) {
       Group {
         // Original names
-        InitialsCircle(firstName: "John", lastName: "Doe", size: 60)
-        InitialsCircle(firstName: "Alice", lastName: "Smith", size: 60)
-        InitialsCircle(firstName: "Bob", lastName: "Johnson", size: 60)
-        InitialsCircle(firstName: "Emma", lastName: "Davis", size: 60)
-        InitialsCircle(firstName: "Michael", lastName: "Brown", size: 60)
-        InitialsCircle(firstName: "Sarah", lastName: "Wilson", size: 60)
-        InitialsCircle(firstName: "David", lastName: "Miller", size: 60)
-        InitialsCircle(firstName: "Lisa", lastName: "Anderson", size: 60)
+        InitialsCircle(name: "John Doe", size: 60)
+        InitialsCircle(name: "Alice Smith", size: 60)
+        InitialsCircle(name: "Bob Johnson", size: 60)
+        InitialsCircle(name: "Emma Davis", size: 60)
+        InitialsCircle(name: "Michael Brown", size: 60)
+        InitialsCircle(name: "Sarah Wilson", size: 60)
+        InitialsCircle(name: "David Miller", size: 60)
+        InitialsCircle(name: "Lisa Anderson", size: 60)
 
         // Tech Industry Names
-        InitialsCircle(firstName: "Sam", lastName: "Altman", size: 40)
-        InitialsCircle(firstName: "Elon", lastName: "Musk", size: 40)
-        InitialsCircle(firstName: "Tim", lastName: "Cook", size: 40)
-        InitialsCircle(firstName: "Sundar", lastName: "Pichai", size: 40)
+        InitialsCircle(name: "Sam Altman", size: 40)
+        InitialsCircle(name: "Elon Musk", size: 40)
+        InitialsCircle(name: "Tim Cook", size: 40)
+        InitialsCircle(name: "Sundar Pichai", size: 40)
 
         // International Names
-        InitialsCircle(firstName: "Yuki", lastName: "Tanaka", size: 24)
-        InitialsCircle(firstName: "Wei", lastName: "Chen", size: 24)
-        InitialsCircle(firstName: "Sofia", lastName: "Martinez", size: 24)
-        InitialsCircle(firstName: "Ahmed", lastName: "Hassan", size: 24)
-        InitialsCircle(firstName: "Dena", lastName: "Sohrabi", size: 24)
-        InitialsCircle(firstName: "Mo", lastName: "Rajabi", size: 24)
+        InitialsCircle(name: "田中 優紀", size: 24)
+        InitialsCircle(name: "陈伟", size: 24)
+        InitialsCircle(name: "Sofia Martinez", size: 24)
+
+        // Farsi Names
+        InitialsCircle(name: "دنا سهرابی", size: 24)
+        InitialsCircle(name: "محمد رجبی", size: 24)
+
+        // Arabic Names
+        InitialsCircle(name: "فاطمة السيد", size: 32)
+        InitialsCircle(name: "عمر الرشيد", size: 32)
+        InitialsCircle(name: "ليلى محمود", size: 32)
+        InitialsCircle(name: "كريم الحسن", size: 32)
+
+        // Chinese Names
+        InitialsCircle(name: "李伟", size: 32)
+        InitialsCircle(name: "张敏", size: 32)
+        InitialsCircle(name: "王小平", size: 32)
+        InitialsCircle(name: "刘亦菲", size: 32)
+
+        // Spanish Names
+        InitialsCircle(name: "Isabella García", size: 32)
+        InitialsCircle(name: "Miguel Rodríguez", size: 32)
+        InitialsCircle(name: "Carmen López", size: 32)
+        InitialsCircle(name: "José Hernández", size: 32)
       }
     }
     .frame(width: 300, height: 300)

@@ -17,6 +17,8 @@ public struct UserAvatar: View, Equatable {
   let size: CGFloat
   let ignoresSafeArea: Bool
 
+  let nameForInitials: String
+
   public init(user: User, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
     self.firstName = user.firstName
     self.lastName = user.lastName
@@ -24,6 +26,7 @@ public struct UserAvatar: View, Equatable {
     self.username = user.username
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
+    self.nameForInitials = Self.getNameForInitials(user: user)
   }
 
   public init(apiUser: ApiUser, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
@@ -33,13 +36,28 @@ public struct UserAvatar: View, Equatable {
     self.username = apiUser.username
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
+    self.nameForInitials = Self.getNameForInitials(user: apiUser)
+  }
+
+  // This must match below
+  static func getNameForInitials(user: User) -> String {
+    let firstName = user.firstName ?? user.email?.components(separatedBy: "@").first ?? "User"
+    let lastName = user.lastName
+    let name = "\(firstName) \(lastName ?? "")"
+    return name
+  }
+
+  static func getNameForInitials(user: ApiUser) -> String {
+    let firstName = user.firstName ?? user.email?.components(separatedBy: "@").first ?? "User"
+    let lastName = user.lastName
+    let name = "\(firstName) \(lastName ?? "")"
+    return name
   }
 
   @ViewBuilder
   public var avatar: some View {
     InitialsCircle(
-      firstName: firstName ?? email?.components(separatedBy: "@").first ?? "User",
-      lastName: lastName,
+      name: nameForInitials,
       size: size
     )
     .frame(width: size, height: size)
