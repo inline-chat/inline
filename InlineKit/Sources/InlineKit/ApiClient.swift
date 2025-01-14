@@ -128,6 +128,56 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
   }
 
+  private func postRequest<T: Decodable & Sendable>(
+    _ path: Path,
+    body: [String: Any],
+    includeToken: Bool = true
+  ) async throws -> T {
+    guard let url = URL(string: "\(baseURL)/\(path.rawValue)") else {
+      throw APIError.invalidURL
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    if let token = Auth.shared.getToken(), includeToken {
+      request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    do {
+      request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+      let (data, response) = try await URLSession.shared.data(for: request)
+
+      guard let httpResponse = response as? HTTPURLResponse else {
+        throw APIError.invalidResponse
+      }
+
+      switch httpResponse.statusCode {
+      case 200 ... 299:
+        let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
+        switch apiResponse {
+        case let .success(data):
+          return data
+        case let .error(error, errorCode, description):
+          log.error("Error \(error): \(description ?? "")")
+          throw APIError.error(error: error, errorCode: errorCode, description: description)
+        }
+      case 429:
+        throw APIError.rateLimited
+      default:
+        throw APIError.httpError(statusCode: httpResponse.statusCode)
+      }
+    } catch let decodingError as DecodingError {
+      throw APIError.decodingError(decodingError)
+    } catch let apiError as APIError {
+      throw apiError
+    } catch {
+      throw APIError.networkError
+    }
+  }
+
   // MARK: AUTH
 
   public func sendCode(email: String) async throws -> SendCode {
@@ -265,32 +315,29 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     repliedToMessageId: Int64?,
     date: Double?
   ) async throws -> SendMessage {
-    var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "text", value: text),
+    var body: [String: Any] = [
+      "text": text,
     ]
 
     if let peerUserId = peerUserId {
-      queryItems.append(URLQueryItem(name: "peerUserId", value: "\(peerUserId)"))
+      body["peerUserId"] = peerUserId
     }
 
     if let peerThreadId = peerThreadId {
-      queryItems.append(URLQueryItem(name: "peerThreadId", value: "\(peerThreadId)"))
+      body["peerThreadId"] = peerThreadId
     }
 
     if let randomId = randomId {
-      queryItems.append(URLQueryItem(name: "randomId", value: "\(randomId)"))
+      body["randomId"] = "\(randomId)"
     }
+
     if let repliedToMessageId = repliedToMessageId {
-      queryItems.append(URLQueryItem(name: "repliedToMessageId", value: "\(repliedToMessageId)"))
+      body["replyToMessageId"] = repliedToMessageId
     }
 
-    if let date = date {
-      queryItems.append(URLQueryItem(name: "date", value: "\(date)"))
-    }
-
-    return try await request(
+    return try await postRequest(
       .sendMessage,
-      queryItems: queryItems,
+      body: body,
       includeToken: true
     )
   }
