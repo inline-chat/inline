@@ -56,7 +56,10 @@ class ComposeView: UIView {
 
     textView.isScrollEnabled = true
     textView.backgroundColor = .clear
-    textView.textContainerInset = UIEdgeInsets(top: Self.textViewVerticalPadding, left: Self.textViewHorizantalPadding, bottom: Self.textViewVerticalPadding, right: Self.textViewHorizantalPadding)
+    textView.textContainerInset = UIEdgeInsets(
+      top: Self.textViewVerticalPadding, left: Self.textViewHorizantalPadding, bottom: Self.textViewVerticalPadding,
+      right: Self.textViewHorizantalPadding
+    )
     textView.delegate = self
     textView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -82,7 +85,7 @@ class ComposeView: UIView {
     return button
   }()
 
-  var onSend: ((String) -> Void)?
+  var onSend: ((String) -> Bool)?
   var onHeightChange: ((CGFloat) -> Void)?
   var peerId: Peer?
 
@@ -128,15 +131,14 @@ class ComposeView: UIView {
 
     let messageText = text
 
-    sendMessageHaptic()
-
-    textView.text = ""
-    resetHeight()
-    textView.showPlaceholder(true)
-
-    buttonDisappear()
-
-    onSend?(messageText)
+    // Only clear states if send message was successful
+    if let onSend = onSend, onSend(messageText) {
+      sendMessageHaptic()
+      textView.text = ""
+      resetHeight()
+      textView.showPlaceholder(true)
+      buttonDisappear()
+    }
   }
 
   func textViewHeightByContentHeight(_ contentHeight: CGFloat) -> CGFloat {

@@ -4,7 +4,7 @@ import UIKit
 
 class ChatContainerView: UIView {
   private let peerId: Peer
-  var onSend: ((String) -> Void)?
+  var onSend: ((String) -> Bool)?
 
   private lazy var messagesCollectionView: MessagesCollectionView = {
     let collectionView = MessagesCollectionView(peerId: peerId)
@@ -33,7 +33,7 @@ class ChatContainerView: UIView {
 
   private var blurViewBottomConstraint: NSLayoutConstraint?
 
-  init(peerId: Peer, _ onSend: @escaping (String) -> Void) {
+  init(peerId: Peer, _ onSend: @escaping (String) -> Bool) {
     self.peerId = peerId
     self.onSend = onSend
     super.init(frame: .zero)
@@ -93,7 +93,7 @@ class ChatContainerView: UIView {
 
   @objc private func keyboardWillShow(_ notification: Notification) {
     guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
+      let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
     else {
       return
     }
@@ -140,7 +140,7 @@ struct ChatViewUIKit: UIViewRepresentable {
 
   func makeUIView(context: Context) -> ChatContainerView {
     return ChatContainerView(peerId: peerId) { text in
-      let _ = fullChatViewModel.sendMessage(text: text)
+      fullChatViewModel.sendMessage(text: text)
     }
   }
 
