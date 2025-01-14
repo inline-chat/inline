@@ -44,7 +44,7 @@ class UIMessageView: UIView {
     fullMessage.message
   }
 
-  private let metadataView: MessageMetadata
+  private let metadataView: MessageTimeAndStatus
 
   private var multiline: Bool {
     guard let text = message.text else { return false }
@@ -58,7 +58,7 @@ class UIMessageView: UIView {
 
   init(fullMessage: FullMessage) {
     self.fullMessage = fullMessage
-    self.metadataView = MessageMetadata(fullMessage)
+    self.metadataView = MessageTimeAndStatus(fullMessage)
     metadataView.translatesAutoresizingMaskIntoConstraints = false
     super.init(frame: .zero)
 

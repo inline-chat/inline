@@ -7,7 +7,7 @@ private let dateFormatter: DateFormatter = {
   return formatter
 }()
 
-class MessageMetadata: UIView {
+class MessageTimeAndStatus: UIView {
   private let symbolSize: CGFloat = 12
 
   private let dateLabel: UILabel = {
