@@ -11,7 +11,7 @@ class ChatContainerView: UIView {
     collectionView.translatesAutoresizingMaskIntoConstraints = false
     return collectionView
   }()
-    
+
   private lazy var composeView: ComposeView = {
     let view = ComposeView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -22,33 +22,40 @@ class ChatContainerView: UIView {
     view.onSend = onSend
     return view
   }()
-    
+
+  private lazy var blurView: UIVisualEffectView = {
+    let blurEffect = UIBlurEffect(style: .systemMaterial)
+    let view = UIVisualEffectView(effect: blurEffect)
+    view.backgroundColor = .clear
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private var blurViewBottomConstraint: NSLayoutConstraint?
+
   init(peerId: Peer, _ onSend: @escaping (String) -> Void) {
     self.peerId = peerId
     self.onSend = onSend
     super.init(frame: .zero)
     setupViews()
+    setupKeyboardObservers()
   }
-    
+
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
-    
+
   private func setupViews() {
     backgroundColor = .systemBackground
-        
-    let blurEffect = UIBlurEffect(style: .systemMaterial)
-    let blurView = UIVisualEffectView(effect: blurEffect)
-    blurView.backgroundColor = .clear
-    blurView.translatesAutoresizingMaskIntoConstraints = false
-    
+
     addSubview(messagesCollectionView)
     addSubview(blurView)
     addSubview(composeView)
-    
-    // FIXME: probably communicate current height of compose to collectionView
-        
+
+    // Store the bottom constraint so we can modify it later
+    blurViewBottomConstraint = blurView.bottomAnchor.constraint(equalTo: bottomAnchor)
+
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
     NSLayoutConstraint.activate([
@@ -56,21 +63,73 @@ class ChatContainerView: UIView {
       messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
       messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
       messagesCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      
+
       blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
       blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
       blurView.topAnchor.constraint(equalTo: composeView.topAnchor),
-      blurView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      blurViewBottomConstraint!,
 
       composeView.leadingAnchor.constraint(equalTo: leadingAnchor),
       composeView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      composeView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor)
+      composeView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor),
     ])
   }
-    
+
+  private func setupKeyboardObservers() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(keyboardWillShow),
+      name: UIResponder.keyboardWillShowNotification,
+      object: nil
+    )
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(keyboardWillHide),
+      name: UIResponder.keyboardWillHideNotification,
+      object: nil
+    )
+  }
+
+  @objc private func keyboardWillShow(_ notification: Notification) {
+    guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
+    else {
+      return
+    }
+
+    UIView.animate(
+      withDuration: duration,
+      delay: 0,
+      options: .curveEaseOut
+    ) {
+      self.blurViewBottomConstraint?.isActive = false
+      self.blurViewBottomConstraint = self.blurView.bottomAnchor.constraint(equalTo: self.keyboardLayoutGuide.topAnchor)
+      self.blurViewBottomConstraint?.isActive = true
+      self.layoutIfNeeded()
+    }
+  }
+
+  @objc private func keyboardWillHide(_ notification: Notification) {
+    guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
+    else {
+      return
+    }
+    UIView.animate(
+      withDuration: duration,
+      delay: 0,
+      options: .curveEaseIn
+    ) {
+      self.blurViewBottomConstraint?.isActive = false
+      self.blurViewBottomConstraint = self.blurView.bottomAnchor.constraint(equalTo: self.bottomAnchor)
+      self.blurViewBottomConstraint?.isActive = true
+      self.layoutIfNeeded()
+    }
+  }
+
   private func handleComposeViewHeightChange(_ newHeight: CGFloat) {
     messagesCollectionView.updateComposeInset(composeHeight: newHeight)
-    
+
     layoutIfNeeded()
   }
 }
@@ -84,6 +143,6 @@ struct ChatViewUIKit: UIViewRepresentable {
       let _ = fullChatViewModel.sendMessage(text: text)
     }
   }
-    
+
   func updateUIView(_ uiView: ChatContainerView, context: Context) {}
 }
