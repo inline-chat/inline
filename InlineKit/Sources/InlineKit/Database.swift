@@ -339,7 +339,7 @@ public extension AppDatabase {
 
       iOS: \(iOSLink)
       macOS: \(macOSLink)
-      😉 🍎 😉
+      🍎🍎🍎 
       """)
 
       // Create the AppDatabase

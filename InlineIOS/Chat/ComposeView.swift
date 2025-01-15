@@ -78,7 +78,7 @@ class ComposeView: UIView {
 
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+      UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
     )
     config.baseForegroundColor = .systemBackground.withAlphaComponent(0.8)
     config.background.backgroundColor = .systemBlue
@@ -132,10 +132,10 @@ class ComposeView: UIView {
     NSLayoutConstraint.activate([
       heightConstraint,
 
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 19),
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
       textView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 8),
-      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -19),
+      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
 
       sendButton.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: buttonTrailingPadding),
       sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
@@ -294,14 +294,14 @@ class ComposeView: UIView {
   }
 
   func buttonDisappear() {
-    UIView.animate(withDuration: 0.15, delay: 0, options: .curveEaseIn) {
+    UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseIn) {
       self.sendButton.alpha = 0
       self.sendButton.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
     }
   }
 
   func buttonAppear() {
-    UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
+    UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseOut) {
       self.sendButton.alpha = 1
       self.sendButton.transform = .identity
     }
