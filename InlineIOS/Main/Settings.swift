@@ -91,7 +91,6 @@ struct BubbleColorPreview: View {
           .foregroundColor(.white)
           .cornerRadius(16)
           .padding(.trailing, 8)
-          .fontWeight(.medium)
       }
 
       // Incoming message bubble
@@ -102,7 +101,7 @@ struct BubbleColorPreview: View {
           .background(Color(.systemGray6))
           .cornerRadius(16)
           .padding(.leading, 8)
-          .fontWeight(.medium)
+
         Spacer()
       }
     }
