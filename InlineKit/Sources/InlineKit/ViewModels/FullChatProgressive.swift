@@ -64,16 +64,16 @@ public class MessagesProgressiveViewModel {
   }
 
   public enum MessagesLoadDirection {
-    case top
-    case bottom
+    case older
+    case newer
   }
 
   public func loadBatch(at direction: MessagesLoadDirection) {
     // top id as cursor?
     // firs try lets use date as cursor
-    let cursor = direction == .top ? minDate : maxDate
+    let cursor = direction == .older ? minDate : maxDate
     let limit = messages.count > 300 ? 400 : messages.count > 200 ? 300 : 100
-    let prepend = direction == (reversed ? .bottom : .top)
+    let prepend = direction == (reversed ? .newer : .older)
 //    log.debug("Loading next batch at \(direction) \(cursor)")
     loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend)
   }
@@ -105,11 +105,11 @@ public class MessagesProgressiveViewModel {
         } else {
           messages.append(contentsOf: newMessages)
         }
-        
+
         // FIXME: For now until we figured a stable sort
         // sort again
         // sort()
-        
+
         updateRange()
 
         // Return changeset
@@ -275,8 +275,8 @@ public class MessagesProgressiveViewModel {
           query = query.order(Column("date").desc)
           query = query.filter(Column("date") <= cursor)
         } else {
-          query = query.order(Column("date").asc)
-          query = query.filter(Column("date") >= cursor)
+          query = query.order(Column("date").desc)
+          query = query.filter(Column("date") <= cursor)
         }
 
         query = query.limit(limit)
@@ -284,7 +284,7 @@ public class MessagesProgressiveViewModel {
         return try query.fetchAll(db)
       }
 
-//      log.trace("loaded additional messages: \(messagesBatch.count)")
+      log.debug("loaded additional messages: \(messagesBatch.count)")
 
       messagesBatch = sort(batch: messagesBatch)
 
