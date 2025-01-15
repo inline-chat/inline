@@ -81,7 +81,7 @@ class ComposeView: UIView {
       UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
     )
     config.baseForegroundColor = .systemBackground.withAlphaComponent(0.8)
-    config.background.backgroundColor = .systemBlue
+    config.background.backgroundColor = ColorManager.shared.selectedColor
     config.cornerStyle = .capsule
 
     button.configuration = config
