@@ -8,7 +8,7 @@ private let dateFormatter: DateFormatter = {
 }()
 
 class MessageTimeAndStatus: UIView {
-  private let symbolSize: CGFloat = 9
+  private let symbolSize: CGFloat = 11
 
   private let dateLabel: UILabel = {
     let label = UILabel()
