@@ -102,11 +102,11 @@ class MessagesCollectionView: UICollectionView {
     guard !isKeyboardVisible else { return }
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-//      self.scrollToItem(
-//        at: IndexPath(item: 0, section: 0),
-//        at: .top,
-//        animated: false
-//      )
+      //      self.scrollToItem(
+      //        at: IndexPath(item: 0, section: 0),
+      //        at: .top,
+      //        animated: false
+      //      )
 
       self.updateContentInsets()
       UIView.animate(withDuration: 0.3) {
@@ -295,36 +295,6 @@ private extension MessagesCollectionView {
       }
     }
 
-    // MARK: - Helper Methods
-
-    //    private func isTransitionFromOtherSender(at indexPath: IndexPath) -> Bool {
-    //      guard indexPath.item < fullMessages.count else { return false }
-    //
-    //      let currentMessage = fullMessages[indexPath.item]
-    //      let previousIndex = indexPath.item + 1 // Note: +1 because messages are reversed
-    //
-    //      guard previousIndex < fullMessages.count else { return true }
-    //      let previousMessage = fullMessages[previousIndex]
-    //
-    //      let isFirstInGroup = currentMessage.message.out != previousMessage.message.out
-    //
-    //      return isFirstInGroup
-    //    }
-    //
-    //    private func isTransitionToOtherSender(at indexPath: IndexPath) -> Bool {
-    //      guard indexPath.item < fullMessages.count else { return false }
-    //
-    //      let currentMessage = fullMessages[indexPath.item]
-    //      let nextIndex = indexPath.item + 1
-    //
-    //      guard nextIndex < fullMessages.count else { return false }
-    //      let nextMessage = fullMessages[nextIndex]
-    //
-    //      return currentMessage.message.out != nextMessage.message.out
-    //    }
-    //
-    //    // MARK: - UICollectionViewDelegateFlowLayout
-    //
     func collectionView(
       _ collectionView: UICollectionView,
       layout collectionViewLayout: UICollectionViewLayout,
@@ -371,6 +341,48 @@ private extension MessagesCollectionView {
       minimumInteritemSpacingForSectionAt section: Int
     ) -> CGFloat {
       return 0
+    }
+
+    private var isUserDragging = false
+    private var isUserScrollInEffect = false
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+      isUserDragging = true
+      isUserScrollInEffect = true
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+      isUserDragging = false
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+      isUserScrollInEffect = false
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+      if isUserScrollInEffect {
+        let isAtBottom = scrollView.contentOffset.y >= (scrollView.contentSize.height - scrollView.bounds.size.height)
+
+        if isAtBottom {
+          viewModel.loadBatch(at: .older)
+          updateItems()
+        }
+      }
+    }
+
+    func updateItems() {
+      let currentSnapshot = dataSource.snapshot()
+      let currentIds = Set(currentSnapshot.itemIdentifiers)
+
+      let availableIds = Set(messages.map { $0.id })
+
+      let missingIds = availableIds.subtracting(currentIds)
+
+      if !missingIds.isEmpty {
+        var snapshot = currentSnapshot
+        snapshot.appendItems(Array(missingIds), toSection: .main)
+        dataSource.apply(snapshot, animatingDifferences: true)
+      }
     }
   }
 }

@@ -336,7 +336,7 @@ class MessageListAppKit: NSViewController {
     
     // Check if we're approaching the top
     if feature_loadsMoreWhenApproachingTop && isUserScrolling && currentScrollOffset < viewportSize.height {
-      loadBatch(at: .top)
+      loadBatch(at: .newer)
     }
   }
 
@@ -457,7 +457,7 @@ class MessageListAppKit: NSViewController {
   
   // Currently only at top is supported.
   func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) {
-    if direction != .top { return }
+    if direction != .newer { return }
     if loadingBatch { return }
     loadingBatch = true
     
@@ -527,7 +527,7 @@ class MessageListAppKit: NSViewController {
       tableView
         .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
       if shouldScroll { scrollToBottom(animated: true) }
-      self.isPerformingUpdate = false
+      isPerformingUpdate = false
 //      NSAnimationContext.runAnimationGroup { context in
 //        context.duration = animationDuration
 //        self.tableView
