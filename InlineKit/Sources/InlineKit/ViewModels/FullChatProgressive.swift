@@ -216,10 +216,10 @@ public class MessagesProgressiveViewModel {
     let peer = self.peer
     let prevCount = messages.count
 
-    log
-      .debug(
-        "Loading messages for \(peer) with mode: \(loadMode)"
-      )
+//    log
+//      .debug(
+//        "Loading messages for \(peer) with mode: \(loadMode)"
+//      )
 
     do {
       let messagesBatch: [FullMessage] = try db.dbWriter.read { db in
@@ -383,7 +383,7 @@ public final class MessagesPublisher {
   }
 
   func messageUpdated(message: Message, peer: Peer) {
-    Log.shared.debug("Message updated: \(message)")
+//    Log.shared.debug("Message updated: \(message)")
 
 //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? db.reader.read { db in
