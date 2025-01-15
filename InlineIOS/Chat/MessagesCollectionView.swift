@@ -102,11 +102,11 @@ class MessagesCollectionView: UICollectionView {
     guard !isKeyboardVisible else { return }
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-      self.scrollToItem(
-        at: IndexPath(item: 0, section: 0),
-        at: .top,
-        animated: false
-      )
+//      self.scrollToItem(
+//        at: IndexPath(item: 0, section: 0),
+//        at: .top,
+//        animated: false
+//      )
 
       self.updateContentInsets()
       UIView.animate(withDuration: 0.3) {

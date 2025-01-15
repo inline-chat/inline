@@ -45,19 +45,25 @@ class ComposeView: UIView {
   private var heightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
   static let textViewVerticalPadding: CGFloat = 12.0
-  static let textViewHorizantalPadding: CGFloat = 12.0
+  static let textViewHorizantalPadding: CGFloat = 32.0
   private let buttonBottomPadding: CGFloat = -10.0
   private let buttonTrailingPadding: CGFloat = -10.0
+  private let buttonLeadingPadding: CGFloat = 10.0
   private let buttonSize: CGSize = .init(width: 28, height: 28)
+  private var overlayView: UIView?
+  private var isOverlayVisible = false
 
   private lazy var textView: ComposeTextView = {
     let textView = ComposeTextView()
     textView.font = .systemFont(ofSize: 17)
 
     textView.isScrollEnabled = true
-    textView.backgroundColor = .clear
+    textView.backgroundColor = .systemBackground
+    textView.layer.cornerRadius = 22
     textView.textContainerInset = UIEdgeInsets(
-      top: Self.textViewVerticalPadding, left: Self.textViewHorizantalPadding, bottom: Self.textViewVerticalPadding,
+      top: Self.textViewVerticalPadding,
+      left: Self.textViewHorizantalPadding,
+      bottom: Self.textViewVerticalPadding,
       right: Self.textViewHorizantalPadding
     )
     textView.delegate = self
@@ -74,7 +80,7 @@ class ComposeView: UIView {
     config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
       UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
     )
-    config.baseForegroundColor = .white
+    config.baseForegroundColor = .systemBackground.withAlphaComponent(0.8)
     config.background.backgroundColor = .systemBlue
     config.cornerStyle = .capsule
 
@@ -82,6 +88,20 @@ class ComposeView: UIView {
     button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
     button.alpha = 0
     button.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+    return button
+  }()
+
+  private lazy var plusButton: UIButton = {
+    let button = UIButton()
+    button.translatesAutoresizingMaskIntoConstraints = false
+
+    var config = UIButton.Configuration.plain()
+    config.image = UIImage(systemName: "plus")?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+    )
+    config.baseForegroundColor = .systemGray2
+    button.configuration = config
+    button.addTarget(self, action: #selector(plusTapped), for: .touchUpInside)
     return button
   }()
 
@@ -105,22 +125,27 @@ class ComposeView: UIView {
 
     addSubview(textView)
     addSubview(sendButton)
+    addSubview(plusButton)
 
     heightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
 
     NSLayoutConstraint.activate([
       heightConstraint,
 
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      textView.topAnchor.constraint(equalTo: topAnchor),
-      textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor),
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 19),
+      textView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+      textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 8),
+      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -19),
 
-      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: buttonTrailingPadding),
-      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: buttonBottomPadding),
+      sendButton.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: buttonTrailingPadding),
+      sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
 
+      plusButton.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: 6),
+      plusButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
+      plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
+      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
     ])
   }
 
@@ -139,6 +164,97 @@ class ComposeView: UIView {
       textView.showPlaceholder(true)
       buttonDisappear()
     }
+  }
+
+  @objc private func plusTapped() {
+    if isOverlayVisible {
+      dismissOverlay()
+      return
+    }
+
+    let overlay = UIView()
+    overlay.backgroundColor = .clear
+    overlay.translatesAutoresizingMaskIntoConstraints = false
+    overlay.layer.cornerRadius = 12
+    overlay.clipsToBounds = true
+
+    let blurEffect = UIBlurEffect(style: .systemThickMaterial)
+    let blurView = UIVisualEffectView(effect: blurEffect)
+    blurView.translatesAutoresizingMaskIntoConstraints = false
+    overlay.addSubview(blurView)
+
+    let label = UILabel()
+    label.text = "Soon you can attach photos from here!"
+    label.numberOfLines = 0
+    label.textAlignment = .left
+    label.font = .systemFont(ofSize: 17)
+    label.textColor = .secondaryLabel
+    label.translatesAutoresizingMaskIntoConstraints = false
+    blurView.contentView.addSubview(label)
+
+    addSubview(overlay)
+
+    NSLayoutConstraint.activate([
+      overlay.widthAnchor.constraint(equalToConstant: 140),
+      overlay.heightAnchor.constraint(equalToConstant: 160),
+      overlay.bottomAnchor.constraint(equalTo: plusButton.topAnchor, constant: -20),
+      overlay.leadingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: -8),
+
+      blurView.topAnchor.constraint(equalTo: overlay.topAnchor),
+      blurView.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
+      blurView.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
+      blurView.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
+
+      label.centerXAnchor.constraint(equalTo: blurView.contentView.centerXAnchor),
+      label.centerYAnchor.constraint(equalTo: blurView.contentView.centerYAnchor),
+      label.leadingAnchor.constraint(greaterThanOrEqualTo: blurView.contentView.leadingAnchor, constant: 12),
+      label.trailingAnchor.constraint(lessThanOrEqualTo: blurView.contentView.trailingAnchor, constant: -12),
+    ])
+
+    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapOutside))
+    tapGesture.cancelsTouchesInView = false
+    addGestureRecognizer(tapGesture)
+
+    overlayView = overlay
+    isOverlayVisible = true
+
+    overlay.alpha = 0
+    overlay.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+      .concatenating(CGAffineTransform(translationX: 0, y: 10))
+
+    UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
+      overlay.alpha = 1
+      overlay.transform = .identity
+    }
+  }
+
+  @objc private func handleTapOutside(_ gesture: UITapGestureRecognizer) {
+    let location = gesture.location(in: self)
+    if let overlayView = overlayView,
+       !overlayView.frame.contains(location) && !plusButton.frame.contains(location)
+    {
+      dismissOverlay()
+    }
+  }
+
+  private func dismissOverlay() {
+    guard isOverlayVisible, let overlay = overlayView else { return }
+
+    UIView.animate(withDuration: 0.15, delay: 0, options: .curveEaseIn) {
+      overlay.alpha = 0
+      overlay.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+        .concatenating(CGAffineTransform(translationX: 0, y: 10))
+    } completion: { _ in
+      overlay.removeFromSuperview()
+      self.overlayView = nil
+      self.isOverlayVisible = false
+      self.gestureRecognizers?.removeAll()
+    }
+  }
+
+  override func resignFirstResponder() -> Bool {
+    dismissOverlay()
+    return super.resignFirstResponder()
   }
 
   func textViewHeightByContentHeight(_ contentHeight: CGFloat) -> CGFloat {
