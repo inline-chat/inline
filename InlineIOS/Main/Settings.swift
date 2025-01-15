@@ -51,18 +51,19 @@ private extension Settings {
   var actionsSection: some View {
     Section(header: Text("Actions")) {
       Button("Logout", role: .destructive) {
-        // Clear creds
-        Auth.shared.logOut()
+        Task {
+          _ = try? await ApiClient.shared.logout()
 
-        // Stop WebSocket
-        ws.loggedOut()
+          Auth.shared.logOut()
 
-        // Clear database
-        try? AppDatabase.loggedOut()
-        mainViewRouter.setRoute(route: .onboarding)
-        nav.popToRoot()
+          ws.loggedOut()
 
-        onboardingNav.push(.welcome)
+          try? AppDatabase.loggedOut()
+          mainViewRouter.setRoute(route: .onboarding)
+          nav.popToRoot()
+
+          onboardingNav.push(.welcome)
+        }
       }
     }
   }

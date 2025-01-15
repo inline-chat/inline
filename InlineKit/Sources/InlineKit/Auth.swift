@@ -120,14 +120,12 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   public func logOut() {
     // clear userId
     UserDefaults.standard.removeObject(forKey: userIdKey)
-    Task {
-      _ = try? await ApiClient.shared.logout()
-      keychain.delete("token")
 
-      cachedToken = nil
-      cachedUserId = nil
-      isLoggedIn = false
-    }
+    keychain.delete("token")
+
+    cachedToken = nil
+    cachedUserId = nil
+    isLoggedIn = false
   }
 
   /// Used in previews

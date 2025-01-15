@@ -59,7 +59,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
 
     #if targetEnvironment(simulator)
-      return "http://localhost:8000/v1"
+      return "http://\(ProjectConfig.devHost):8000/v1"
     #elseif DEBUG && os(iOS)
       return "http://\(ProjectConfig.devHost):8000/v1"
     #elseif DEBUG && os(macOS)
@@ -78,6 +78,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     queryItems: [URLQueryItem] = [],
     includeToken: Bool = false
   ) async throws -> T {
+    print("URLComponents \(baseURL)/\(path.rawValue)")
     guard var urlComponents = URLComponents(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
     }
@@ -199,7 +200,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     return try await request(
       .verifyCode,
-      queryItems: queryItems
+      queryItems: queryItems,
+      includeToken: false
     )
   }
 
