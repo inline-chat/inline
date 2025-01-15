@@ -45,7 +45,7 @@ class ComposeView: UIView {
   private var heightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
   static let textViewVerticalPadding: CGFloat = 12.0
-  static let textViewHorizantalPadding: CGFloat = 32.0
+  static let textViewHorizantalPadding: CGFloat = 34.0
   private let buttonBottomPadding: CGFloat = -10.0
   private let buttonTrailingPadding: CGFloat = -10.0
   private let buttonLeadingPadding: CGFloat = 10.0
@@ -64,7 +64,7 @@ class ComposeView: UIView {
       top: Self.textViewVerticalPadding,
       left: Self.textViewHorizantalPadding,
       bottom: Self.textViewVerticalPadding,
-      right: Self.textViewHorizantalPadding
+      right: Self.textViewHorizantalPadding + 5
     )
     textView.delegate = self
     textView.translatesAutoresizingMaskIntoConstraints = false

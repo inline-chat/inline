@@ -8,7 +8,7 @@ private let dateFormatter: DateFormatter = {
 }()
 
 class MessageTimeAndStatus: UIView {
-  private let symbolSize: CGFloat = 12
+  private let symbolSize: CGFloat = 9
 
   private let dateLabel: UILabel = {
     let label = UILabel()
@@ -95,15 +95,23 @@ class MessageTimeAndStatus: UIView {
       .applying(UIImage.SymbolConfiguration(weight: .medium))
 
     switch message.status {
-    case .sent: imageName = "checkmark"
-    case .sending: imageName = "clock"
-    case .failed: imageName = "exclamationmark"
-    case .none: imageName = ""
+    case .sent:
+      imageName = "checkmark"
+      statusImageView.preferredSymbolConfiguration = symbolConfig
+    case .sending:
+      imageName = "clock"
+      statusImageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: symbolSize - 1)
+        .applying(UIImage.SymbolConfiguration(weight: .medium))
+    case .failed:
+      imageName = "exclamationmark"
+      statusImageView.preferredSymbolConfiguration = symbolConfig
+    case .none:
+      imageName = ""
     }
 
-    statusImageView.image = UIImage(systemName: imageName)?
-      .withConfiguration(symbolConfig)
-      .withAlignmentRectInsets(.init(top: 0, left: -2, bottom: 0, right: -2))
+    if let newImage = UIImage(systemName: imageName) {
+      statusImageView.setSymbolImage(newImage, contentTransition: .replace)
+    }
 
     statusImageView.tintColor = imageColor
   }
