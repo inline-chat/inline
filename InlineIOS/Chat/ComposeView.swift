@@ -90,6 +90,7 @@ class ComposeView: UIView {
     button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
     button.alpha = 0
     button.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+
     return button
   }()
 
@@ -141,7 +142,7 @@ class ComposeView: UIView {
 
       sendButton.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: buttonTrailingPadding),
       sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
-//      sendButton.centerYAnchor.constraint(equalTo: textView.centerYAnchor),
+      //      sendButton.centerYAnchor.constraint(equalTo: textView.centerYAnchor),
 
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
