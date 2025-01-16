@@ -71,6 +71,7 @@ class MessagesCollectionView: UICollectionView {
   }
 
   func updateContentInsets() {
+    guard !UIMessageView.contextMenuOpen else { return }
     guard let window = window else { return }
     let topContentPadding: CGFloat = 10
     let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
@@ -99,14 +100,14 @@ class MessagesCollectionView: UICollectionView {
   }
 
   let threshold: CGFloat = -60
-
+  var shouldScrollToBottom: Bool { contentOffset.y < threshold }
   @objc func orientationDidChange(_ notification: Notification) {
     coordinator.clearSizeCache()
     guard !isKeyboardVisible else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
       self.updateContentInsets()
       UIView.animate(withDuration: 0.3) {
-        if self.contentOffset.y < self.threshold {
+        if self.shouldScrollToBottom {
           self.scrollToItem(
             at: IndexPath(item: 0, section: 0),
             at: .top,
@@ -159,11 +160,13 @@ class MessagesCollectionView: UICollectionView {
 
     updateContentInsets()
     UIView.animate(withDuration: duration) {
-      self.scrollToItem(
-        at: IndexPath(item: 0, section: 0),
-        at: .top,
-        animated: false
-      )
+      if self.shouldScrollToBottom {
+        self.scrollToItem(
+          at: IndexPath(item: 0, section: 0),
+          at: .top,
+          animated: false
+        )
+      }
     }
   }
 
@@ -176,11 +179,13 @@ class MessagesCollectionView: UICollectionView {
 
     updateContentInsets()
     UIView.animate(withDuration: duration) {
-      self.scrollToItem(
-        at: IndexPath(item: 0, section: 0),
-        at: .top,
-        animated: true
-      )
+      if self.shouldScrollToBottom {
+        self.scrollToItem(
+          at: IndexPath(item: 0, section: 0),
+          at: .top,
+          animated: true
+        )
+      }
     }
   }
 

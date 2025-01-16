@@ -284,4 +284,19 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
 
     return nil
   }
+
+  static var contextMenuOpen: Bool = false
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction, willDisplayMenuFor configuration: UIContextMenuConfiguration,
+    animator: UIContextMenuInteractionAnimating?)
+  {
+    Self.contextMenuOpen = true
+  }
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction, willEndFor configuration: UIContextMenuConfiguration,
+    animator: UIContextMenuInteractionAnimating?)
+  {
+    Self.contextMenuOpen = false
+  }
 }
