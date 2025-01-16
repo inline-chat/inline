@@ -44,9 +44,13 @@ public final class Auth: ObservableObject, @unchecked Sendable {
       #else
         keyChainPrefix = "inline_"
       #endif
-    #else
+    #elseif os(iOS)
       accessGroup = "2487AN8AL4.keychainGroup"
-      keyChainPrefix = ""
+      #if DEBUG
+        keyChainPrefix = "inline_dev_"
+      #else
+        keyChainPrefix = "inline_"
+      #endif
     #endif
 
     // Check if user profile is set so we need to log in to another account
