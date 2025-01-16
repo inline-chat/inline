@@ -40,16 +40,18 @@ class ComposeTextView: UITextView {
 }
 
 class ComposeView: UIView {
-  static let minHeight: CGFloat = 46.0
+  static let minHeight: CGFloat = 44.0
   private let maxHeight: CGFloat = 300
   private var heightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
   static let textViewVerticalPadding: CGFloat = 12.0
   static let textViewHorizantalPadding: CGFloat = 34.0
-  private let buttonBottomPadding: CGFloat = -10.0
+  static let textViewHorizantalMargin: CGFloat = 0.0
+  static let textViewVerticalMargin: CGFloat = 8.0
+  private let buttonBottomPadding: CGFloat = -6.0
   private let buttonTrailingPadding: CGFloat = -10.0
   private let buttonLeadingPadding: CGFloat = 10.0
-  private let buttonSize: CGSize = .init(width: 28, height: 28)
+  private let buttonSize: CGSize = .init(width: 32, height: 32)
   private var overlayView: UIView?
   private var isOverlayVisible = false
 
@@ -132,13 +134,15 @@ class ComposeView: UIView {
     NSLayoutConstraint.activate([
       heightConstraint,
 
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-      textView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-      textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 8),
-      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textViewHorizantalMargin),
+      textView.topAnchor.constraint(equalTo: topAnchor),
+      textView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.textViewHorizantalMargin),
 
       sendButton.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: buttonTrailingPadding),
       sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
+//      sendButton.centerYAnchor.constraint(equalTo: textView.centerYAnchor),
+
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
 

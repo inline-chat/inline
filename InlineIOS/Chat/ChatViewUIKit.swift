@@ -66,12 +66,12 @@ class ChatContainerView: UIView {
 
       blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
       blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      blurView.topAnchor.constraint(equalTo: composeView.topAnchor),
+      blurView.topAnchor.constraint(equalTo: composeView.topAnchor, constant: -ComposeView.textViewVerticalMargin),
       blurViewBottomConstraint!,
 
-      composeView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      composeView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      composeView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor),
+      composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+      composeView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin)
     ])
   }
 
@@ -93,7 +93,7 @@ class ChatContainerView: UIView {
 
   @objc private func keyboardWillShow(_ notification: Notification) {
     guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-      let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
+          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
     else {
       return
     }
