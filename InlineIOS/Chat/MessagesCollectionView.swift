@@ -81,7 +81,7 @@ class MessagesCollectionView: UICollectionView {
     let messagesBottomPadding = 12.0
     var bottomInset: CGFloat = 0.0
 
-    bottomInset += composeHeight
+    bottomInset += composeHeight + (ComposeView.textViewVerticalMargin * 2)
     bottomInset += messagesBottomPadding
 
     if isKeyboardVisible {
