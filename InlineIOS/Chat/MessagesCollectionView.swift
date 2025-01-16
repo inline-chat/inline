@@ -101,8 +101,8 @@ class MessagesCollectionView: UICollectionView {
   let threshold: CGFloat = -60
 
   @objc func orientationDidChange(_ notification: Notification) {
+    coordinator.clearSizeCache()
     guard !isKeyboardVisible else { return }
-
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
       self.updateContentInsets()
       UIView.animate(withDuration: 0.3) {
@@ -292,6 +292,9 @@ private extension MessagesCollectionView {
       }
     }
 
+    private var sizeCache: [FullMessage.ID: CGSize] = [:]
+    private let maxCacheSize = 1000
+
     func collectionView(
       _ collectionView: UICollectionView,
       layout collectionViewLayout: UICollectionViewLayout,
@@ -301,19 +304,37 @@ private extension MessagesCollectionView {
         return .zero
       }
 
-      let availableWidth = collectionView.bounds.width - 16
-
-      let cell = MessageCollectionViewCell(frame: .zero)
       let message = messages[indexPath.item]
-      cell.configure(with: message, topPadding: 2, bottomPadding: 0)
 
-      let size = cell.contentView.systemLayoutSizeFitting(
-        CGSize(width: availableWidth, height: 0),
-        withHorizontalFittingPriority: .required,
-        verticalFittingPriority: .fittingSizeLevel
-      )
+      if let cachedSize = sizeCache[message.id] {
+        return cachedSize
+      }
+
+      let availableWidth = collectionView.bounds.width - 16
+      let textWidth = availableWidth - 32
+
+      let font = UIFont.preferredFont(forTextStyle: .body)
+      let text = message.message.text ?? ""
+
+      let textHeight = (text as NSString).boundingRect(
+        with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+        options: [.usesLineFragmentOrigin, .usesFontLeading],
+        attributes: [.font: font],
+        context: nil
+      ).height
+
+      let size = CGSize(width: availableWidth, height: ceil(textHeight) + 24)
+
+      if sizeCache.count >= maxCacheSize {
+        sizeCache.removeAll(keepingCapacity: true)
+      }
+      sizeCache[message.id] = size
 
       return size
+    }
+
+    func clearSizeCache() {
+      sizeCache.removeAll(keepingCapacity: true)
     }
 
     func collectionView(
