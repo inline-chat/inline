@@ -98,24 +98,21 @@ class MessagesCollectionView: UICollectionView {
     layoutIfNeeded()
   }
 
+  let threshold: CGFloat = -60
+
   @objc func orientationDidChange(_ notification: Notification) {
     guard !isKeyboardVisible else { return }
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-      //      self.scrollToItem(
-      //        at: IndexPath(item: 0, section: 0),
-      //        at: .top,
-      //        animated: false
-      //      )
-
       self.updateContentInsets()
       UIView.animate(withDuration: 0.3) {
-        // TODO: if at bottom already
-        self.scrollToItem(
-          at: IndexPath(item: 0, section: 0),
-          at: .top,
-          animated: true
-        )
+        if self.contentOffset.y < self.threshold {
+          self.scrollToItem(
+            at: IndexPath(item: 0, section: 0),
+            at: .top,
+            animated: true
+          )
+        }
       }
     }
   }
