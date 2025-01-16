@@ -49,7 +49,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
       #if DEBUG
         keyChainPrefix = "inline_dev_"
       #else
-        keyChainPrefix = "inline_"
+        keyChainPrefix = ""
       #endif
     #endif
 
