@@ -275,8 +275,9 @@ private extension MessagesCollectionView {
         } else {
           snapshot.appendItems(ids, toSection: .main)
         }
-
-        dataSource.apply(snapshot, animatingDifferences: true)
+        UIView.animate(withDuration: 0.2) {
+          self.dataSource.apply(snapshot, animatingDifferences: true)
+        }
       case .deleted(let ids, _):
         var snapshot = dataSource.snapshot()
 

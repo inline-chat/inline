@@ -41,7 +41,7 @@ class ComposeTextView: UITextView {
 
 class ComposeView: UIView {
   static let minHeight: CGFloat = 46.0
-  private let maxHeight: CGFloat = 300
+  private let maxHeight: CGFloat = 600
   private var heightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
   static let textViewVerticalPadding: CGFloat = 12.0
