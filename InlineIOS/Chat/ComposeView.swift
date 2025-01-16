@@ -24,7 +24,7 @@ class ComposeTextView: UITextView {
     addSubview(label)
 
     NSLayoutConstraint.activate([
-      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalPadding + 3),
+      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalPadding + 5),
       label.topAnchor.constraint(equalTo: topAnchor, constant: ComposeView.textViewVerticalPadding),
     ])
 
@@ -40,18 +40,18 @@ class ComposeTextView: UITextView {
 }
 
 class ComposeView: UIView {
-  static let minHeight: CGFloat = 44.0
+  static let minHeight: CGFloat = 46.0
   private let maxHeight: CGFloat = 300
   private var heightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
   static let textViewVerticalPadding: CGFloat = 12.0
   static let textViewHorizantalPadding: CGFloat = 34.0
-  static let textViewHorizantalMargin: CGFloat = 0.0
-  static let textViewVerticalMargin: CGFloat = 8.0
+  static let textViewHorizantalMargin: CGFloat = 7.0
+  static let textViewVerticalMargin: CGFloat = 7.0
   private let buttonBottomPadding: CGFloat = -6.0
-  private let buttonTrailingPadding: CGFloat = -10.0
+  private let buttonTrailingPadding: CGFloat = -6.0
   private let buttonLeadingPadding: CGFloat = 10.0
-  private let buttonSize: CGSize = .init(width: 32, height: 32)
+  private let buttonSize: CGSize = .init(width: 34, height: 34)
   private var overlayView: UIView?
   private var isOverlayVisible = false
 
@@ -64,7 +64,7 @@ class ComposeView: UIView {
     textView.layer.cornerRadius = 22
     textView.textContainerInset = UIEdgeInsets(
       top: Self.textViewVerticalPadding,
-      left: Self.textViewHorizantalPadding,
+      left: Self.textViewHorizantalPadding + 2,
       bottom: Self.textViewVerticalPadding,
       right: Self.textViewHorizantalPadding + 5
     )
@@ -103,6 +103,7 @@ class ComposeView: UIView {
       UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
     )
     config.baseForegroundColor = .systemGray2
+    button.layer.cornerRadius = 18
     button.configuration = config
     button.addTarget(self, action: #selector(plusTapped), for: .touchUpInside)
     return button
@@ -135,17 +136,17 @@ class ComposeView: UIView {
     NSLayoutConstraint.activate([
       heightConstraint,
 
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textViewHorizantalMargin),
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor),
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.textViewHorizantalMargin),
+      textView.trailingAnchor.constraint(equalTo: trailingAnchor),
 
       sendButton.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: buttonTrailingPadding),
       sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
       //      sendButton.centerYAnchor.constraint(equalTo: textView.centerYAnchor),
 
-      sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
-      sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
+      sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
+      sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
 
       plusButton.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: 6),
       plusButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
@@ -195,6 +196,7 @@ class ComposeView: UIView {
     label.font = .systemFont(ofSize: 17)
     label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false
+
     blurView.contentView.addSubview(label)
 
     addSubview(overlay)
@@ -203,7 +205,7 @@ class ComposeView: UIView {
       overlay.widthAnchor.constraint(equalToConstant: 140),
       overlay.heightAnchor.constraint(equalToConstant: 160),
       overlay.bottomAnchor.constraint(equalTo: plusButton.topAnchor, constant: -20),
-      overlay.leadingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: -8),
+      overlay.leadingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: 10),
 
       blurView.topAnchor.constraint(equalTo: overlay.topAnchor),
       blurView.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
@@ -223,11 +225,13 @@ class ComposeView: UIView {
     overlayView = overlay
     isOverlayVisible = true
 
+    plusButton.backgroundColor = .clear
     overlay.alpha = 0
     overlay.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
       .concatenating(CGAffineTransform(translationX: 0, y: 10))
 
     UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
+      self.plusButton.backgroundColor = .systemGray6
       overlay.alpha = 1
       overlay.transform = .identity
     }
@@ -249,6 +253,7 @@ class ComposeView: UIView {
       overlay.alpha = 0
       overlay.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
         .concatenating(CGAffineTransform(translationX: 0, y: 10))
+      self.plusButton.backgroundColor = .clear
     } completion: { _ in
       overlay.removeFromSuperview()
       self.overlayView = nil

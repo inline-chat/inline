@@ -69,8 +69,8 @@ class ChatContainerView: UIView {
       blurView.topAnchor.constraint(equalTo: composeView.topAnchor, constant: -ComposeView.textViewVerticalMargin),
       blurViewBottomConstraint!,
 
-      composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-      composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+      composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
+      composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
       composeView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin)
     ])
   }
