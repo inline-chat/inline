@@ -5,7 +5,7 @@ import SwiftUI
 class ComposeAppKit: NSView {
   // Props
   private var peerId: Peer
-  private var chatId: Int64?
+  private var chatId: Int64? { viewModel?.chat?.id }
   
   // State
   private weak var messageList: MessageListAppKit?
@@ -223,7 +223,7 @@ class ComposeAppKit: NSView {
   }
   
   private var ignoreNextHeightChange = false
-    
+  
   // MARK: - Actions
   
   func addImage(_ image: NSImage) {
@@ -266,14 +266,24 @@ class ComposeAppKit: NSView {
   func send() {
     DispatchQueue.main.async {
       self.ignoreNextHeightChange = true
-      let text = self.textEditor.string
+      let rawText = self.textEditor.string
+      let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+      let canSend = !text.isEmpty
       let images = self.images
+      
+      if !canSend { return }
     
       // Clear immediately
       self.clear()
       
       // Add message
-      let _ = self.viewModel?.sendMessage(text: text)
+  
+      let _ = Transactions.shared.mutate(
+        transaction:
+        .sendMessage(
+          .init(text: text, peerId: self.peerId, chatId: self.chatId ?? 0) // FIXME: chatId
+        )
+      )
       
       self.ignoreNextHeightChange = false
     }
