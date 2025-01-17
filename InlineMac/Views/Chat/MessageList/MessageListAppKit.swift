@@ -463,7 +463,7 @@ class MessageListAppKit: NSViewController {
   
   // Currently only at top is supported.
   func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) {
-    if direction != .newer { return }
+    if direction != .older { return }
     if loadingBatch { return }
     loadingBatch = true
     
