@@ -68,7 +68,7 @@ class MessageListAppKit: NSViewController {
 //    table.autoresizingMask = []
     table.delegate = self
     table.dataSource = self
-  
+    
     return table
   }()
   
@@ -391,6 +391,12 @@ class MessageListAppKit: NSViewController {
     // Set new scroll position
     documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
     CATransaction.commit()
+    
+    // //    Looked a bit laggy to me
+//    NSAnimationContext.runAnimationGroup { context in
+//      context.duration = 0
+//      documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
+//    }
   }
   
   private var lastKnownWidth: CGFloat = 0
@@ -739,23 +745,88 @@ class MessageListAppKit: NSViewController {
     
     // Begin updates
 
-    // Use CATransaction results in cut of items at bottom
-//    CATransaction.begin()
-//    CATransaction.setDisableActions(true)
-        
-//    captureScrollAnchor()
+    // Find which rows have changed height and only trigger for those
+    // Calculate new heights and compare with current heights
+    var rowsToUpdate = IndexSet()
+    let availableWidth = sizeCalculator.getAvailableWidth(
+      tableWidth: tableView.bounds.width
+    )
+    
+    for row in visibleStartIndex ..< visibleEndIndex {
+//      guard let currentRowSize = getCachedSize(
+//        forRow: row
+//      ) else {
+//        rowsToUpdate.insert(row)
+//        continue
+//      }
+//
+//      // If row's width is less than availableWidth, we need to update it
+//      if availableWidth <= currentRowSize.width {
+//        rowsToUpdate.insert(row)
+//      }
+      
+      if let message = message(forRow: row), !sizeCalculator
+        .isSingleLine(messageText: message.message.text ?? "", availableWidth: availableWidth)
+      {
+        rowsToUpdate.insert(row)
+      }
+    }
+
+    log.trace("Rows to update: \(rowsToUpdate)")
+    
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
       context.allowsImplicitAnimation = false
-
+      
+//      let startTime = CFAbsoluteTimeGetCurrent()
+      
       // Experimental: noteheight of rows was below reload data initially
-      tableView.noteHeightOfRows(withIndexesChanged: visibleIndexesToUpdate)
+      tableView.noteHeightOfRows(withIndexesChanged: rowsToUpdate)
+      
       tableView
         .reloadData(
-          forRowIndexes: visibleIndexesToUpdate,
+          forRowIndexes: rowsToUpdate,
           columnIndexes: IndexSet([0])
         )
+      
+//      let timeElapsed = CFAbsoluteTimeGetCurrent() - startTime
+//      print("reloadData took \(timeElapsed * 1000) milliseconds")
     }
+  }
+
+  private func message(forRow row: Int) -> FullMessage? {
+    guard row >= 0, row < messages.count else {
+      return nil
+    }
+    
+    return messages[row]
+  }
+
+  private func getCachedSize(forRow row: Int) -> CGSize? {
+    guard row >= 0, row < messages.count else {
+      return nil
+    }
+    
+    let message = messages[row]
+    return sizeCalculator.cachedSize(messageStableId: message.id)
+  }
+
+  private func calculateNewHeight(forRow row: Int) -> CGFloat {
+    guard row >= 0, row < messages.count else {
+      return defaultRowHeight
+    }
+    
+    let message = messages[row]
+    let props = MessageViewProps(
+      firstInGroup: isFirstInGroup(at: row),
+      isLastMessage: isLastMessage(at: row),
+      isFirstMessage: isFirstMessage(at: row),
+      isRtl: false
+    )
+    
+    let tableWidth = tableView.bounds.width
+    let (size, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
+    return size.height
   }
 
   deinit {
