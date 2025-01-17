@@ -20,6 +20,10 @@ let package = Package(
       name: "InlineConfig",
       targets: ["InlineConfig"]
     ),
+    .library(
+      name: "Files",
+      targets: ["Files"]
+    ),
   ],
   dependencies: [
     .package(url: "https://github.com/inlinehq/GRDB.swift", from: "3.0.8"),
@@ -51,6 +55,13 @@ let package = Package(
 
     .target(
       name: "InlineConfig"
+    ),
+
+    .target(
+      name: "Files",
+      dependencies: [
+        .targetItem(name: "InlineKit", condition: .none),
+      ]
     ),
 
     .testTarget(
