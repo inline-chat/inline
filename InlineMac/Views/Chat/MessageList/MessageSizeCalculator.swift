@@ -32,9 +32,10 @@ class MessageSizeCalculator {
     textStorage.addLayoutManager(layoutManager)
     layoutManager.addTextContainer(textContainer)
     MessageTextConfiguration.configureTextContainer(textContainer)
-    cache.countLimit = 2000
-    textHeightCache.countLimit = 2000
-    minWidthForSingleLine.countLimit = 2000
+    // TODO: Use message id or a fast hash for the keys instead of text
+    cache.countLimit = 5000
+    textHeightCache.countLimit = 5000
+    minWidthForSingleLine.countLimit = 5000
   }
   
   func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> (NSSize, NSSize) {
