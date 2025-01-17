@@ -18,7 +18,10 @@ class MessageTableCell: NSView {
     setupView()
   }
   
-  private func setupView() {}
+  private func setupView() {
+    wantsLayer = true
+    layerContentsRedrawPolicy = .onSetNeedsDisplay
+  }
   
   func configure(with message: FullMessage, props: MessageViewProps) {
     if message == currentContent?.message && props == currentContent?.props {
@@ -35,7 +38,8 @@ class MessageTableCell: NSView {
        // same message
        currentContent.message == message,
        // different width and height (ie. window resized)
-       currentContent.props.equalExceptSize(props) {
+       currentContent.props.equalExceptSize(props)
+    {
       log.debug("updating message size")
       self.currentContent = (message, props)
       updateSize()
@@ -53,8 +57,8 @@ class MessageTableCell: NSView {
        currentContent.message.message.repliedToMessageId == message.message.repliedToMessageId,
        // same avatar
        currentContent.props.firstInGroup == props.firstInGroup
-       // different text
-       // currentContent.message.message.text != message.message.text
+    // different text
+    // currentContent.message.message.text != message.message.text
     {
       log.debug("updating message text and size")
       log.debug("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
@@ -63,11 +67,8 @@ class MessageTableCell: NSView {
       return
     }
     
-   
-    
     log.debug("recreating message view")
       
-    
     // TODO: Don't recreate on width/height change
 //    if let prevProps = currentContent?.props,
 //       message == currentContent?.message &&
@@ -92,6 +93,7 @@ class MessageTableCell: NSView {
     guard let messageView = messageView else { return }
     
     messageView.updateTextAndSize(fullMessage: content.0, props: content.1)
+    needsDisplay = true
   }
   
   func updateSize() {
@@ -99,6 +101,7 @@ class MessageTableCell: NSView {
     guard let messageView = messageView else { return }
     
     messageView.updateSize(props: content.1)
+    needsDisplay = true
   }
   
   private func updateContent() {
@@ -119,6 +122,7 @@ class MessageTableCell: NSView {
     ])
     
     messageView = newMessageView
+    needsDisplay = true
   }
 
   override func prepareForReuse() {
