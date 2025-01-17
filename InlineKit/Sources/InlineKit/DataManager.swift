@@ -452,14 +452,26 @@ public class DataManager: ObservableObject {
     let _ = try await ApiClient.shared.updateStatus(online: online)
   }
 
-  public func updateDialog(peerId: Peer, pinned: Bool?) async throws {
+  public func updateDialog(peerId: Peer, pinned: Bool? = nil, draft: String? = nil) async throws {
     try await database.dbWriter.write { db in
       var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
       dialog?.pinned = pinned
+      dialog?.draft = draft
       try dialog?.save(db, onConflict: .replace)
     }
 
-    let result = try await ApiClient.shared.updateDialog(peerId: peerId, pinned: pinned)
+    let result = try await ApiClient.shared.updateDialog(
+      peerId: peerId, pinned: pinned, draft: draft
+    )
+    try await database.dbWriter.write { db in
+      let dialog = Dialog(from: result.dialog)
+      try dialog.save(db, onConflict: .replace)
+    }
+  }
+
+  public func getDraft(peerId: Peer) async throws -> String? {
+    let result = try await ApiClient.shared.getDraft(peerId: peerId)
+    return result.draft
   }
 
   public func getSpace(spaceId: Int64) async throws {

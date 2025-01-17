@@ -55,7 +55,7 @@ class ComposeView: UIView {
   private var overlayView: UIView?
   private var isOverlayVisible = false
 
-  private lazy var textView: ComposeTextView = {
+  lazy var textView: ComposeTextView = {
     let textView = ComposeTextView()
     textView.font = .systemFont(ofSize: 17)
 
@@ -157,7 +157,7 @@ class ComposeView: UIView {
 
   @objc private func sendTapped() {
     guard let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-          !text.isEmpty
+      !text.isEmpty
     else { return }
 
     let messageText = text
@@ -240,7 +240,7 @@ class ComposeView: UIView {
   @objc private func handleTapOutside(_ gesture: UITapGestureRecognizer) {
     let location = gesture.location(in: self)
     if let overlayView = overlayView,
-       !overlayView.frame.contains(location) && !plusButton.frame.contains(location)
+      !overlayView.frame.contains(location) && !plusButton.frame.contains(location)
     {
       dismissOverlay()
     }
@@ -321,6 +321,50 @@ class ComposeView: UIView {
     let generator = UIImpactFeedbackGenerator(style: .medium)
     generator.prepare()
     generator.impactOccurred()
+  }
+
+  override func removeFromSuperview() {
+    if let text = textView.text {
+      guard let peerId = peerId else { return }
+      Task {
+        do {
+
+          try await DataManager.shared.updateDialog(peerId: peerId, draft: text.isEmpty ? nil : text)
+        } catch {
+          print("Failed to save draft", error)
+        }
+      }
+    }
+    super.removeFromSuperview()
+  }
+
+  func setDraft(_ draft: String?) {
+    if let draft = draft, !draft.isEmpty {
+      textView.text = draft
+      textView.showPlaceholder(false)
+      buttonAppear()
+      updateHeight()
+    }
+  }
+
+  func loadDraft() {
+    guard let peerId = peerId else { return }
+    Task {
+      do {
+        if let draft = try await DataManager.shared.getDraft(peerId: peerId) {
+          setDraft(draft)
+        }
+      } catch {
+        print("Failed to load draft", error)
+      }
+    }
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window != nil {
+      loadDraft()
+    }
   }
 }
 
