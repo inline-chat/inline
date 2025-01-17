@@ -45,6 +45,7 @@ public enum Path: String {
   case addMember
   case getSpace
   case logout
+  case getDraft
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -103,7 +104,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200 ... 299:
+      case 200...299:
         let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
         switch apiResponse {
         case let .success(data):
@@ -155,7 +156,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200 ... 299:
+      case 200...299:
         let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
         switch apiResponse {
         case let .success(data):
@@ -415,17 +416,27 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func updateDialog(peerId: Peer, pinned: Bool?) async throws -> UpdateDialog {
-    try await request(
+  public func updateDialog(
+    peerId: Peer,
+    pinned: Bool?,
+    draft: String?
+  ) async throws -> UpdateDialog {
+    var queryItems: [URLQueryItem] = []
+
+    queryItems.append(URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)))
+    queryItems.append(URLQueryItem(name: "peerThreadId", value: peerId.asThreadId().map(String.init)))
+
+    if let pinned = pinned {
+      queryItems.append(URLQueryItem(name: "pinned", value: "\(pinned)"))
+    }
+
+    if let draft = draft {
+      queryItems.append(URLQueryItem(name: "draft", value: draft))
+    }
+
+    return try await request(
       .updateDialog,
-      queryItems: [
-        URLQueryItem(name: "pinned", value: "\(pinned ?? false)"),
-        URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)),
-        URLQueryItem(
-          name: "peerThreadId",
-          value: peerId.asThreadId().map(String.init)
-        ),
-      ],
+      queryItems: queryItems,
       includeToken: true
     )
   }
@@ -445,6 +456,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .getSpace,
       queryItems: [URLQueryItem(name: "id", value: "\(spaceId)")],
+      includeToken: true
+    )
+  }
+
+  public func getDraft(peerId: Peer) async throws -> GetDraft {
+    try await request(
+      .getDraft,
+      queryItems: [URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init))],
       includeToken: true
     )
   }
@@ -599,6 +618,10 @@ public struct GetSpace: Codable, Sendable {
   public let members: [ApiMember]
   public let chats: [ApiChat]
   public let dialogs: [ApiDialog]
+}
+
+public struct GetDraft: Codable, Sendable {
+  public let draft: String?
 }
 
 struct SessionInfo: Codable, Sendable {
