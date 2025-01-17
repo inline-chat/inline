@@ -56,7 +56,6 @@ final class SystemMonitor: ObservableObject {
   private var timer: Timer?
     
   func startMonitoring() {
-    print("startMonitoring")
     stopMonitoring()
     timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
       self?.updateMetrics()

@@ -21,7 +21,7 @@ public class Transactions: @unchecked Sendable {
 
   let actor = TransactionsActor()
   let cache = TransactionsCache()
-  
+
   private var log = Log.scoped("Transactions")
 
   init() {
@@ -37,7 +37,7 @@ public class Transactions: @unchecked Sendable {
 
       for persistedTransaction in cache.transactions {
         log.debug("loading transaction \(persistedTransaction.transaction.id) into queue")
-        
+
         // Queue for execution
         await actor.queue(transaction: persistedTransaction.transaction.transaction)
       }
@@ -51,7 +51,7 @@ public class Transactions: @unchecked Sendable {
     let transaction = transaction_
     let transactionCopy = transaction.transaction
 
-    print("Mutating transaction: \(transaction.id)")
+    log.debug("Mutating transaction: \(transaction.id)")
     // Immediately run optimistic
     transactionCopy.optimistic()
 

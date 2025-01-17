@@ -78,7 +78,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     queryItems: [URLQueryItem] = [],
     includeToken: Bool = false
   ) async throws -> T {
-    print("URLComponents \(baseURL)/\(path.rawValue)")
     guard var urlComponents = URLComponents(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
     }

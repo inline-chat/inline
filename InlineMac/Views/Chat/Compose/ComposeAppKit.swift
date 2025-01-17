@@ -309,8 +309,6 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
   
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage) {
-    print("Image received for upload: \(image.size)")
-    
     addImage(image)
   }
   

@@ -41,7 +41,7 @@ public final class SpaceListViewModel: ObservableObject {
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
-          receiveCompletion: { error in print("Failed to get spaces \(error)") },
+          receiveCompletion: { error in Log.shared.error("Failed to get spaces \(error)") },
           receiveValue: { [weak self] spaceItems in
             self?.spaceItems = spaceItems
           }
