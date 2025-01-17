@@ -336,7 +336,7 @@ class MessageListAppKit: NSViewController {
     
     // Check if we're approaching the top
     if feature_loadsMoreWhenApproachingTop && isUserScrolling && currentScrollOffset < viewportSize.height {
-      loadBatch(at: .newer)
+      loadBatch(at: .older)
     }
   }
 
