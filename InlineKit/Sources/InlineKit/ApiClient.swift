@@ -312,13 +312,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public func sendMessage(
     peerUserId: Int64?,
     peerThreadId: Int64?,
-    text: String,
+    text: String?,
     randomId: Int64?,
     repliedToMessageId: Int64?,
     date: Double?
   ) async throws -> SendMessage {
     var body: [String: Any] = [
-      "text": text,
+      "text": text as Any,
     ]
 
     if let peerUserId = peerUserId {

@@ -108,7 +108,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   }
 
   // Send message
-  public func sendMessage(text: String) -> Bool {
+  public func sendMessage(text: String, image: NSImage? = nil) -> Bool {
     guard let chatId = chat?.id else {
       Log.shared.warning("Chat ID is nil, cannot send message")
       return false

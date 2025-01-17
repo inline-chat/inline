@@ -3,6 +3,7 @@ import SwiftUI
 extension EnvironmentValues {
   @Entry public var appDatabase = AppDatabase.empty()
   @Entry public var auth = Auth.shared
+  @Entry public var transactions = Transactions.shared
 }
 
 extension View {
