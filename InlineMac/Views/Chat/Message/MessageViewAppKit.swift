@@ -256,6 +256,10 @@ class MessageViewAppKit: NSView {
   }
 
   private func setupView() {
+    // For performance of animations
+    wantsLayer = true
+    layerContentsRedrawPolicy = .onSetNeedsDisplay
+    
     addSubview(timeAndStateView)
 
     if hasBubble {
