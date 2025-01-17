@@ -1,0 +1,3 @@
+import InlineKit
+
+class FileDownload {}
