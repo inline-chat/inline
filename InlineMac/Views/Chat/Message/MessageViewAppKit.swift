@@ -259,7 +259,7 @@ class MessageViewAppKit: NSView {
     // For performance of animations
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
-    
+
     addSubview(timeAndStateView)
 
     if hasBubble {
@@ -360,20 +360,22 @@ class MessageViewAppKit: NSView {
           bubbleView.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: bubblePadding.width),
           bubbleView.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: bubblePadding.height),
 
-          // Time and state view
-          timeAndStateView.leadingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: 12),
-          timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height - Theme.messageVerticalPadding)
-        ]
-      )
-    } else {
-      NSLayoutConstraint.activate(
-        [
-          // Time and state view
-          timeAndStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding),
-          timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height - Theme.messageVerticalPadding)
+          // Uncomment if you want to show time and state on the right side of the bubble
+//          // Time and state view
+//          timeAndStateView.leadingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: 12),
+//          timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height - Theme.messageVerticalPadding)
         ]
       )
     }
+    
+    NSLayoutConstraint.activate(
+      [
+        // Time and state view
+        timeAndStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding),
+        timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height - Theme.messageVerticalPadding)
+      ]
+    )
+
   }
 
   private func setupMessageText() {
@@ -552,6 +554,8 @@ extension MessageViewAppKit {
       updateHoverState(false)
     case .idle:
       // Re-enable hover state if needed
+      // TODO: How can I check if mouse is inside the view?
+      addHoverTrackingArea()
       break
     }
   }
