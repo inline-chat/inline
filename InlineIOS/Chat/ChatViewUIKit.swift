@@ -3,7 +3,8 @@ import SwiftUI
 import UIKit
 
 class ChatContainerView: UIView {
-  private let peerId: Peer
+  let peerId: Peer
+
   var onSend: ((String) -> Bool)?
 
   private lazy var messagesCollectionView: MessagesCollectionView = {
@@ -12,7 +13,7 @@ class ChatContainerView: UIView {
     return collectionView
   }()
 
-  private lazy var composeView: ComposeView = {
+  lazy var composeView: ComposeView = {
     let view = ComposeView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.onHeightChange = { [weak self] newHeight in
@@ -20,6 +21,7 @@ class ChatContainerView: UIView {
     }
     view.peerId = peerId
     view.onSend = onSend
+
     return view
   }()
 
@@ -71,7 +73,9 @@ class ChatContainerView: UIView {
 
       composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
       composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
-      composeView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin)
+      composeView.bottomAnchor.constraint(
+        equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin
+      ),
     ])
   }
 
@@ -93,7 +97,7 @@ class ChatContainerView: UIView {
 
   @objc private func keyboardWillShow(_ notification: Notification) {
     guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
+      let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
     else {
       return
     }
@@ -137,6 +141,7 @@ class ChatContainerView: UIView {
 struct ChatViewUIKit: UIViewRepresentable {
   let peerId: Peer
   @EnvironmentObject var fullChatViewModel: FullChatViewModel
+  @EnvironmentObject var data: DataManager
 
   func makeUIView(context: Context) -> ChatContainerView {
     return ChatContainerView(peerId: peerId) { text in
@@ -145,4 +150,5 @@ struct ChatViewUIKit: UIViewRepresentable {
   }
 
   func updateUIView(_ uiView: ChatContainerView, context: Context) {}
+
 }
