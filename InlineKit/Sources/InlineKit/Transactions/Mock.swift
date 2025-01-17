@@ -57,7 +57,6 @@ public struct MockMessageTransaction: Transaction, Codable, Sendable {
   }
   
   func optimistic() {
-    print("MockMessageCache optimistic")
     MockMessageCache.shared.add(
       MockMessage(
         id: id,
