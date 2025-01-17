@@ -14,8 +14,10 @@ class MessageSizeCalculator {
   private let cache = NSCache<NSString, NSValue>()
   private let textHeightCache = NSCache<NSString, NSValue>()
   private let minWidthForSingleLine = NSCache<NSString, NSValue>()
+  /// cache of last view height for row by id
+  private let lastHeightForRow = NSCache<NSString, NSValue>()
   
-  /// Using "" empty string gives a zero height which messes up our layout when somehow an empty text-only message gets in due to a bug 
+  /// Using "" empty string gives a zero height which messes up our layout when somehow an empty text-only message gets in due to a bug
   private let emptyFallback = " "
   
   private let log = Log.scoped("MessageSizeCalculator", enableTracing: true)
@@ -36,8 +38,29 @@ class MessageSizeCalculator {
     cache.countLimit = 5000
     textHeightCache.countLimit = 5000
     minWidthForSingleLine.countLimit = 5000
+    lastHeightForRow.countLimit = 1000
   }
   
+  func getAvailableWidth(tableWidth width: CGFloat) -> CGFloat {
+    let bubblepaddings: CGFloat = Theme.messageBubblePadding.width * 2
+    let ceiledWidth = ceil(width)
+    let paddings = Theme.messageHorizontalStackSpacing + Theme.messageSidePadding * 2 + bubblepaddings
+    let availableWidth: CGFloat = ceiledWidth - paddings - Theme.messageAvatarSize - Self.safeAreaWidth -
+      // if we don't subtract this here, it can result is wrong calculations
+      Self.extraSafeWidth
+    
+    return availableWidth
+  }
+  
+  func isSingleLine(messageText text: String, availableWidth: CGFloat) -> Bool {
+    let minSize = minWidthForSingleLine.object(forKey: text as NSString) as? CGSize
+    
+    if let minSize, minSize.width < availableWidth {
+      return true
+    }
+    return false
+  }
+    
   func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> (NSSize, NSSize) {
     let text = message.message.text ?? emptyFallback
     
@@ -51,12 +74,7 @@ class MessageSizeCalculator {
       )
     }
     
-    let bubblepaddings: CGFloat = Theme.messageBubblePadding.width * 2
-    let ceiledWidth = ceil(width)
-    let paddings = Theme.messageHorizontalStackSpacing + Theme.messageSidePadding * 2 + bubblepaddings
-    let availableWidth: CGFloat = ceiledWidth - paddings - Theme.messageAvatarSize - Self.safeAreaWidth -
-      // if we don't subtract this here, it can result is wrong calculations
-      Self.extraSafeWidth
+    let availableWidth: CGFloat = getAvailableWidth(tableWidth: width)
     
     let cacheKey = "\(message.id):\(text):\(props.toString()):\(availableWidth)" as NSString
     if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue, let cachedTextSize = textHeightCache.object(forKey: cacheKey)?.sizeValue {
@@ -80,7 +98,7 @@ class MessageSizeCalculator {
     let textSizeCeiled = CGSize(width: ceil(textWidth), height: ceil(textHeight))
     
     // Mark as single line if height is equal to single line height
-    if !cachHitForSingleLine, textHeight == heightForSingleLineText() {
+    if !cachHitForSingleLine, abs(textHeight - heightForSingleLineText()) < 0.5 {
       log.trace("cached single line text \(text) width \(textWidth)")
       minWidthForSingleLine.setObject(NSValue(size: CGSize(width: textWidth, height: textHeight)), forKey: text as NSString)
     }
@@ -109,15 +127,21 @@ class MessageSizeCalculator {
     
     cache.setObject(NSValue(size: size), forKey: cacheKey)
     textHeightCache.setObject(NSValue(size: textSizeCeiled), forKey: cacheKey)
+    lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
   
     return (size, textSizeCeiled)
+  }
+  
+  func cachedSize(messageStableId: Int64) -> CGSize? {
+    guard let size = lastHeightForRow.object(forKey: NSString(string: "\(messageStableId)")) as? NSSize else { return nil }
+    return size
   }
   
   func invalidateCache() {
     cache.removeAllObjects()
   }
 
-  private func heightForSingleLineText() -> CGFloat {
+  func heightForSingleLineText() -> CGFloat {
     if let height = heightForSingleLine {
       return height
     } else {
