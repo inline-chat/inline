@@ -8,6 +8,7 @@ public struct ApiDialog: Codable, Hashable, Sendable {
   public var unreadCount: Int?
   public var readInboxMaxId: Int64?
   public var readOutboxMaxId: Int64?
+  public var draft: String?
 }
 
 public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -20,6 +21,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var readInboxMaxId: Int64?
   public var readOutboxMaxId: Int64?
   public var pinned: Bool?
+  public var draft: String?
 
   public static let space = belongsTo(Space.self)
   public var space: QueryInterfaceRequest<Space> {
@@ -55,6 +57,7 @@ public extension Dialog {
     self.readInboxMaxId = from.readInboxMaxId
     self.readOutboxMaxId = from.readOutboxMaxId
     self.pinned = from.pinned
+    self.draft = from.draft
   }
 
   // Called when user clicks a user for the first time
@@ -70,6 +73,7 @@ public extension Dialog {
     self.readInboxMaxId = nil
     self.readOutboxMaxId = nil
     self.pinned = nil
+    self.draft = nil
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
