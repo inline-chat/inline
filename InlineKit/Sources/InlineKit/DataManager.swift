@@ -274,7 +274,7 @@ public class DataManager: ObservableObject {
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
-          chat.lastMsgId = nil  // TODO: fix
+          chat.lastMsgId = nil // TODO: fix
 
           return chat
         }
@@ -318,7 +318,7 @@ public class DataManager: ObservableObject {
     chatId: Int64,
     peerUserId: Int64?,
     peerThreadId: Int64?,
-    text: String,
+    text: String?,
     peerId: Peer?,
     randomId: Int64?,
     repliedToMessageId: Int64?,

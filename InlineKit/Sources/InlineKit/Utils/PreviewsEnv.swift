@@ -20,6 +20,7 @@ public extension View {
 
     return
       self
+        .environment(\.transactions, Transactions.shared)
         .environment(\.appDatabase, appDatabase)
         .databaseContext(.readWrite { appDatabase.dbWriter })
         .environmentObject(WebSocketManager(token: nil, userId: nil))

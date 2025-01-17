@@ -15,8 +15,8 @@ import Testing
     APIResponse<VerifyCode>.self, from: json.data(using: .utf8)!)
 
   if case let .success(result) = response {
-    #expect(result?.token == "123")
-    #expect(result?.userId == 123)
+    #expect(result.token == "123")
+    #expect(result.userId == 123)
   } else {
     #expect(Bool(false))
   }

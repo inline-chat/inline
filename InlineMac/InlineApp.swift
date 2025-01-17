@@ -30,6 +30,7 @@ struct InlineApp: App {
         .appDatabase(AppDatabase.shared)
         .environmentObject(overlay)
         .environment(\.logOut, logOut)
+        .environment(\.transactions, Transactions.shared)
         .environment(
           \.requestNotifications,
           appDelegate.notifications.requestNotifications
