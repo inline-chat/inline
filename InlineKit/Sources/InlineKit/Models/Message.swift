@@ -186,7 +186,6 @@ public extension Message {
       //            .filter(Column("chatId") == apiMessage.chatId)
       //            .fetchOne(db)
       //          {
-      //            print("found existing message \(existing)")
       //            message.globalId = existing.globalId
       //          }
 

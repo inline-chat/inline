@@ -63,7 +63,7 @@ class TransactionsCache {
       let data = try encoder.encode(transactions)
       try data.write(to: documentsURL, options: .atomic)
     } catch {
-      print("Failed to persist transactions: \(error)")
+      log.error("Failed to persist transactions: \(error)")
       // In a production app, you might want to use proper error handling
     }
   }
@@ -82,7 +82,7 @@ class TransactionsCache {
       log.info("Loaded \(loadedTransactions.count) transactions")
       return loadedTransactions.sorted { $0.order < $1.order }
     } catch {
-      print("Failed to load transactions: \(error)")
+      log.error("Failed to load transactions", error: error)
       return []
     }
   }

@@ -444,7 +444,6 @@ public class DataManager: ObservableObject {
     try await database.dbWriter.write { db in
       let reaction = Reaction(from: result.reaction)
       try reaction.save(db, onConflict: .replace)
-      print("saved reaction: \(reaction)")
     }
   }
 
