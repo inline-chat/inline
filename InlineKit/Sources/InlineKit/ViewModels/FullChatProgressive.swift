@@ -45,7 +45,7 @@ public class MessagesProgressiveViewModel {
     MessagesPublisher.shared.publisher
       .sink { [weak self] update in
         guard let self = self else { return }
-//        Log.shared.debug("Received update \(update)")
+        Log.shared.trace("Received update \(update)")
         if let changeset = applyChanges(update: update) {
           callback?(changeset)
         }
@@ -352,14 +352,16 @@ public final class MessagesPublisher {
     case reload(peer: Peer)
   }
 
+  private init() {}
+
   private let db = AppDatabase.shared
   let publisher = PassthroughSubject<UpdateType, Never>()
 
   // Static methods to publish update
-  func messageAdded(message: Message, peer: Peer) {
+  func messageAdded(message: Message, peer: Peer) async {
     Log.shared.debug("Message added: \(message)")
     do {
-      let fullMessage = try db.reader.read { db in
+      let fullMessage = try await db.reader.read { db in
         try Message
           .filter(Column("messageId") == message.messageId)
           .filter(Column("chatId") == message.chatId)
@@ -382,11 +384,10 @@ public final class MessagesPublisher {
     publisher.send(.delete(MessageDelete(messageIds: messageIds, peer: peer)))
   }
 
-  func messageUpdated(message: Message, peer: Peer) {
+  func messageUpdated(message: Message, peer: Peer) async {
 //    Log.shared.debug("Message updated: \(message)")
-
 //    Log.shared.debug("Message updated: \(message.messageId)")
-    let fullMessage = try? db.reader.read { db in
+    let fullMessage = try? await db.reader.read { db in
       let base = if let messageGlobalId = message.globalId {
         Message
           .filter(id: messageGlobalId)
