@@ -82,7 +82,7 @@ class ComposeView: UIView {
     config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
       UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
     )
-    config.baseForegroundColor = .systemBackground.withAlphaComponent(0.8)
+    config.baseForegroundColor = .white
     config.background.backgroundColor = ColorManager.shared.selectedColor
     config.cornerStyle = .capsule
 
