@@ -62,16 +62,19 @@ class MessagesCollectionView: UICollectionView {
     self.composeHeight = composeHeight
     UIView.animate(withDuration: 0.2) {
       self.updateContentInsets()
-      self.scrollToItem(
-        at: IndexPath(item: 0, section: 0),
-        at: .top,
-        animated: false
-      )
+      if !self.itemsEmpty {
+        self.scrollToItem(
+          at: IndexPath(item: 0, section: 0),
+          at: .top,
+          animated: false
+        )
+      }
     }
   }
 
   func updateContentInsets() {
     guard !UIMessageView.contextMenuOpen else { return }
+
     guard let window = window else { return }
     let topContentPadding: CGFloat = 10
     let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
@@ -101,13 +104,15 @@ class MessagesCollectionView: UICollectionView {
 
   let threshold: CGFloat = -60
   var shouldScrollToBottom: Bool { contentOffset.y < threshold }
+  var itemsEmpty: Bool { coordinator.messages.isEmpty }
+
   @objc func orientationDidChange(_ notification: Notification) {
     coordinator.clearSizeCache()
     guard !isKeyboardVisible else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
       self.updateContentInsets()
       UIView.animate(withDuration: 0.3) {
-        if self.shouldScrollToBottom {
+        if self.shouldScrollToBottom, !self.itemsEmpty {
           self.scrollToItem(
             at: IndexPath(item: 0, section: 0),
             at: .top,
@@ -160,7 +165,7 @@ class MessagesCollectionView: UICollectionView {
 
     updateContentInsets()
     UIView.animate(withDuration: duration) {
-      if self.shouldScrollToBottom {
+      if self.shouldScrollToBottom, !self.itemsEmpty {
         self.scrollToItem(
           at: IndexPath(item: 0, section: 0),
           at: .top,
@@ -179,7 +184,7 @@ class MessagesCollectionView: UICollectionView {
 
     updateContentInsets()
     UIView.animate(withDuration: duration) {
-      if self.shouldScrollToBottom {
+      if self.shouldScrollToBottom , !self.itemsEmpty {
         self.scrollToItem(
           at: IndexPath(item: 0, section: 0),
           at: .top,
@@ -211,7 +216,7 @@ private extension MessagesCollectionView {
     }
 
     private var dataSource: UICollectionViewDiffableDataSource<Section, FullMessage.ID>!
-    private var messages: [FullMessage] { viewModel.messages }
+    var messages: [FullMessage] { viewModel.messages }
 
     init(peerId: Peer) {
       viewModel = MessagesProgressiveViewModel(peer: peerId, reversed: true)
