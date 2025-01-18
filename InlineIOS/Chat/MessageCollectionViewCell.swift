@@ -4,6 +4,7 @@ import UIKit
 class MessageCollectionViewCell: UICollectionViewCell {
   static let reuseIdentifier = "MessageCell"
   private var messageView: UIMessageView?
+  var fromOtherSender: Bool = false
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -24,7 +25,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
 //    messageView = nil
 //  }
 
-  func configure(with message: FullMessage, topPadding: CGFloat, bottomPadding: CGFloat) {
+  func configure(with message: FullMessage, fromOtherSender: Bool) {
     messageView?.removeFromSuperview()
 
     let newMessageView = UIMessageView(fullMessage: message)
@@ -34,7 +35,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
     NSLayoutConstraint.activate([
       newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
       newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-      newMessageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: topPadding),
+      newMessageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: fromOtherSender ? 12 : 2),
       newMessageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: 0),
     ])
 
@@ -45,8 +46,6 @@ class MessageCollectionViewCell: UICollectionViewCell {
   override func preferredLayoutAttributesFitting(
     _ layoutAttributes: UICollectionViewLayoutAttributes
   ) -> UICollectionViewLayoutAttributes {
-
-
     let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
     layoutIfNeeded()
 
