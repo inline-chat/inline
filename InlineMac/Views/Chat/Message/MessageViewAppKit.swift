@@ -513,7 +513,7 @@ class MessageViewAppKit: NSView {
 
   private func setTimeAndStateVisibility(visible: Bool) {
     NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.1
+      context.duration = visible ? 0.05 : 0.05
       context.timingFunction = CAMediaTimingFunction(name: .easeOut)
       context.allowsImplicitAnimation = true
       timeAndStateView.layer?.opacity = visible ? 1 : 0
