@@ -234,10 +234,11 @@ private extension MessagesCollectionView {
       let cellRegistration = UICollectionView.CellRegistration<
         MessageCollectionViewCell,
         FullMessage.ID
-      > { [weak self] cell, _, messageId in
+      > { [weak self] cell, indexPath, messageId in
         guard let self, let message = viewModel.messagesByID[messageId] else { return }
+        let isFromDifferentSender = self.isMessageFromDifferentSender(at: indexPath)
 
-        cell.configure(with: message, topPadding: 2, bottomPadding: 0)
+        cell.configure(with: message, fromOtherSender: isFromDifferentSender)
       }
 
       dataSource = UICollectionViewDiffableDataSource<Section, FullMessage.ID>(
@@ -252,6 +253,20 @@ private extension MessagesCollectionView {
 
       // Set initial data after configuring the data source
       setInitialData()
+    }
+
+    private func isMessageFromDifferentSender(at indexPath: IndexPath) -> Bool {
+      // Ensure we're not accessing beyond array bounds
+      guard indexPath.item < messages.count else { return true }
+
+      let currentMessage = messages[indexPath.item]
+
+      // Ensure previous message exists
+      guard indexPath.item + 1 < messages.count else { return true }
+
+      let previousMessage = messages[indexPath.item + 1]
+
+      return currentMessage.message.fromId != previousMessage.message.fromId
     }
 
     private func setInitialData() {
