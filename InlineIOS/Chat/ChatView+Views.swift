@@ -15,5 +15,4 @@ extension ChatView {
       return fullChatViewModel.chat?.title ?? ""
     }
   }
-
 }
