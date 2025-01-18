@@ -43,7 +43,7 @@ class UIMessageView: UIView {
   }
 
   private var bubbleColor: UIColor {
-    outgoing ? ColorManager.shared.selectedColor : UIColor.systemGray5.withAlphaComponent(0.4)
+    outgoing ? ColorManager.shared.selectedColor : UIColor.systemGray5.withAlphaComponent(0.5)
   }
 
   private var textColor: UIColor {
