@@ -53,7 +53,7 @@ extension NotificationsManager: UNUserNotificationCenterDelegate {
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
     log.debug("Received notification: \(response.notification.request.content.userInfo)")
-    self.onNotificationReceivedAction.map { $0(response) }
+    onNotificationReceivedAction.map { $0(response) }
     completionHandler() // Is this correct?
   }
 }

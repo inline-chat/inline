@@ -198,6 +198,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       queryItems.append(URLQueryItem(name: "timezone", value: sessionInfo.timezone))
     }
 
+    let deviceId = try await DeviceIdentifier.shared.getIdentifier()
+    queryItems.append(URLQueryItem(name: "deviceId", value: deviceId))
+
     return try await request(
       .verifyCode,
       queryItems: queryItems,
@@ -365,7 +368,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       .savePushNotification,
       queryItems: [
         URLQueryItem(name: "applePushToken", value: pushToken),
-
       ],
       includeToken: true
     )
