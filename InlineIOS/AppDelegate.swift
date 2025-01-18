@@ -12,7 +12,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     _ application: UIApplication,
     willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Set up notification delegate here to not miss anything 
+    // Set up notification delegate here to not miss anything
     let notificationCenter = UNUserNotificationCenter.current()
     notificationCenter.delegate = self
 
@@ -75,7 +75,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     let deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
 
     Task {
-      try await ApiClient.shared.savePushNotification(
+      let _ = try await ApiClient.shared.savePushNotification(
         pushToken: deviceToken
       )
     }
