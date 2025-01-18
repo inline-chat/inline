@@ -194,7 +194,6 @@ public extension Message {
           .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
       {
         self.globalId = existing.globalId
-
         isExisting = true
       }
     } else {
@@ -206,18 +205,18 @@ public extension Message {
     if publishChanges {
       // Publish changes when save is successful
       let message = self
-      // TODO: find a way to remove this delay
+
       if isExisting {
         db.afterNextTransaction { _ in
-          DispatchQueue.main.async { // TODO: find a way to remove this delay
-            MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+          Task { @MainActor in
+            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
           }
         }
       } else {
         db.afterNextTransaction { _ in
           // This code runs after the transaction successfully commits
-          DispatchQueue.main.async {
-            MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+          Task { @MainActor in
+            await MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
           }
         }
       }

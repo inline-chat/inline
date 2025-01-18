@@ -431,7 +431,7 @@ public class DataManager: ObservableObject {
 
     // Publish
     // Reload messages
-    DispatchQueue.main.async {
+    Task { @MainActor in
       MessagesPublisher.shared.messagesReload(peer: peerId_)
     }
   }
