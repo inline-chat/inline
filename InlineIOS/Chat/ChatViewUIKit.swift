@@ -4,8 +4,7 @@ import UIKit
 
 class ChatContainerView: UIView {
   let peerId: Peer
-
-  var onSend: ((String) -> Bool)?
+  let chatId: Int64?
 
   private lazy var messagesCollectionView: MessagesCollectionView = {
     let collectionView = MessagesCollectionView(peerId: peerId)
@@ -20,8 +19,7 @@ class ChatContainerView: UIView {
       self?.handleComposeViewHeightChange(newHeight)
     }
     view.peerId = peerId
-    view.onSend = onSend
-
+    view.chatId = chatId
     return view
   }()
 
@@ -35,9 +33,10 @@ class ChatContainerView: UIView {
 
   private var blurViewBottomConstraint: NSLayoutConstraint?
 
-  init(peerId: Peer, _ onSend: @escaping (String) -> Bool) {
+  init(peerId: Peer, chatId: Int64?) {
     self.peerId = peerId
-    self.onSend = onSend
+    self.chatId = chatId
+
     super.init(frame: .zero)
     setupViews()
     setupKeyboardObservers()
@@ -97,7 +96,7 @@ class ChatContainerView: UIView {
 
   @objc private func keyboardWillShow(_ notification: Notification) {
     guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-      let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
+          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
     else {
       return
     }
@@ -140,15 +139,12 @@ class ChatContainerView: UIView {
 
 struct ChatViewUIKit: UIViewRepresentable {
   let peerId: Peer
-  @EnvironmentObject var fullChatViewModel: FullChatViewModel
+  let chatId: Int64?
   @EnvironmentObject var data: DataManager
 
   func makeUIView(context: Context) -> ChatContainerView {
-    return ChatContainerView(peerId: peerId) { text in
-      fullChatViewModel.sendMessage(text: text)
-    }
+    return ChatContainerView(peerId: peerId, chatId: chatId)
   }
 
   func updateUIView(_ uiView: ChatContainerView, context: Context) {}
-
 }
