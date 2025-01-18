@@ -158,6 +158,12 @@ public extension AppDatabase {
       try db.create(index: "message_date_idx", on: "message", columns: ["date"])
     }
 
+    migrator.registerMigration("draft") { db in
+      try db.alter(table: "dialog") { t in
+        t.add(column: "draft", .text)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
@@ -335,7 +341,7 @@ public extension AppDatabase {
       let macOSLink = "https://testflight.apple.com/join/Z8zUcWZH"
 
       print("""
-      |Test flight links|
+      |TestFlight links|
 
       iOS: \(iOSLink)
       macOS: \(macOSLink)
