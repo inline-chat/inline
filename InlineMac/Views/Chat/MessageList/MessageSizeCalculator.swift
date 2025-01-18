@@ -137,8 +137,11 @@ class MessageSizeCalculator {
     return size
   }
   
-  func invalidateCache() {
+  public func invalidateCache() {
     cache.removeAllObjects()
+    textHeightCache.removeAllObjects()
+    minWidthForSingleLine.removeAllObjects()
+    lastHeightForRow.removeAllObjects()
   }
 
   func heightForSingleLineText() -> CGFloat {
