@@ -20,7 +20,7 @@ struct ChatRowView: View {
     switch item {
     case .home(let homeItem):
       return composeActions.getComposeAction(for: Peer(userId: homeItem.user.id))?.action
-    case .space(let spaceItem):
+    case .space:
       return nil
     }
   }

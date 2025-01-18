@@ -61,11 +61,15 @@ struct MainView: View {
 
   var body: some View {
     VStack {
-      switch selectedTab {
-      case .chats:
-        chatsTab
-      case .spaces:
-        spacesTab
+      if !searchResults.isEmpty {
+        searchResultsView
+      } else {
+        switch selectedTab {
+        case .chats:
+          chatsTab
+        case .spaces:
+          spacesTab
+        }
       }
     }
     .background(Color(.systemBackground))
@@ -144,6 +148,35 @@ struct MainView: View {
       .padding(.horizontal, 16)
     }
     .animation(.default, value: home.chats)
+  }
+
+  @ViewBuilder
+  var searchResultsView: some View {
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 26) {
+        ForEach(searchResults) { user in
+
+          Button {
+            navigateToUser(user)
+          } label: {
+            HStack {
+              UserAvatar(user: user, size: 36)
+                .padding(.trailing, 6)
+
+              VStack(alignment: .leading) {
+                Text((user.firstName ?? "") + (user.lastName ?? ""))
+                  .fontWeight(.medium)
+                  .foregroundColor(.primary)
+
+                Text("@\(user.username ?? "")")
+                  .foregroundColor(.secondary)
+              }
+            }
+          }
+        }
+      }
+      .padding(.horizontal, 16)
+    }
   }
 
   // MARK: - Helper Methods
