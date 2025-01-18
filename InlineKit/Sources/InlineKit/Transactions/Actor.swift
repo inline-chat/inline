@@ -17,10 +17,7 @@ actor TransactionsActor {
   
   // Return when done
   private var completionHandler: CompletionHandler?
-  
-  // Track currently executing transaction for cancellation
-  private var currentTransaction: (any Transaction)?
-  
+
   // MARK: - Lifecycle
   
   init() {
@@ -55,17 +52,15 @@ actor TransactionsActor {
   }
   
   func cancel(transactionId: String) {
+    guard let transaction = queue.first(where: { $0.id == transactionId }) else { return }
+    
     // Remove from queue if not yet started
     queue.removeAll { $0.id == transactionId }
     
-    // If it's the current transaction, trigger rollback
-    if let current = currentTransaction,
-       current.id == transactionId
-    {
-      Task {
-        await current.rollback()
-        completionHandler?(current)
-      }
+    // Rollback
+    Task {
+      await transaction.rollback()
+      completionHandler?(transaction)
     }
   }
   
@@ -81,8 +76,6 @@ actor TransactionsActor {
 
   public func run<T: Transaction>(transaction: T) async {
     do {
-      currentTransaction = transaction
-      
       // Simple execution
       // let result = try await transaction.execute()
       
@@ -90,16 +83,11 @@ actor TransactionsActor {
       let result = try await executeWithRetry(transaction)
       
       // TODO: Proper smart retry
-      Task {
-        await transaction.didSucceed(result: result)
-      }
+      await transaction.didSucceed(result: result)
       completionHandler?(transaction)
-      currentTransaction = nil
+      
     } catch {
-      currentTransaction = nil
-      Task {
-        await transaction.didFail(error: error)
-      }
+      await transaction.didFail(error: error)
     }
   }
   
@@ -134,7 +122,11 @@ actor TransactionsActor {
       try? Task.checkCancellation()
 
       if let transaction = dequeue() {
-        await run(transaction: transaction)
+        // TODO: make it batches of 20 or sth
+        // This task paralellizes the transactions
+        Task { [self] in
+          await self.run(transaction: transaction)
+        }
         continue
       }
       
