@@ -45,14 +45,13 @@ public struct TransactionSendMessage: Transaction {
     )
     
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
-    // Task { @MainActor in
-    DispatchQueue.main.async {
-      let newMessage = try? (AppDatabase.shared.dbWriter.write { db in
+    Task { @MainActor in
+      let newMessage = try? (await AppDatabase.shared.dbWriter.write { db in
         try message.saveAndFetch(db)
       })
       
       if let message = newMessage {
-        MessagesPublisher.shared.messageAdded(message: message, peer: peerId)
+        await MessagesPublisher.shared.messageAdded(message: message, peer: peerId)
       }
     } //
   }
