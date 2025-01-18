@@ -470,8 +470,10 @@ public class DataManager: ObservableObject {
   }
 
   public func getDraft(peerId: Peer) async throws -> String? {
-    let result = try await ApiClient.shared.getDraft(peerId: peerId)
-    return result.draft
+    try await database.dbWriter.read { db in
+      let dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+      return dialog?.draft
+    }
   }
 
   public func getSpace(spaceId: Int64) async throws {
