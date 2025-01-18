@@ -33,7 +33,7 @@ class CacheAttrs {
     cache.setObject(value, forKey: NSString(string: key))
   }
   
-  func clear() {
+  func invalidate() {
     cache.removeAllObjects()
   }
 }
