@@ -12,6 +12,7 @@ struct InlineApp: App {
       ContentView()
         .environmentObject(self.ws)
         .environment(\.auth, Auth.shared)
+        .environment(\.transactions, Transactions.shared)
         .appDatabase(AppDatabase.shared)
         .environmentObject(appDelegate.notificationHandler)
         .environmentObject(appDelegate.nav)

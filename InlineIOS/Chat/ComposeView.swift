@@ -109,9 +109,9 @@ class ComposeView: UIView {
     return button
   }()
 
-  var onSend: ((String) -> Bool)?
   var onHeightChange: ((CGFloat) -> Void)?
   var peerId: Peer?
+  var chatId: Int64?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -156,14 +156,23 @@ class ComposeView: UIView {
   }
 
   @objc private func sendTapped() {
+    guard let peerId = peerId else { return }
+
     guard let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !text.isEmpty
+          !text.isEmpty
     else { return }
 
     let messageText = text
 
-    // Only clear states if send message was successful
-    if let onSend = onSend, onSend(messageText) {
+    let canSend = !text.isEmpty
+
+    if canSend {
+      let _ = Transactions.shared.mutate(
+        transaction:
+        .sendMessage(
+          .init(text: text, peerId: peerId, chatId: chatId ?? 0)
+        )
+      )
       sendMessageHaptic()
       textView.text = ""
       resetHeight()
@@ -240,7 +249,7 @@ class ComposeView: UIView {
   @objc private func handleTapOutside(_ gesture: UITapGestureRecognizer) {
     let location = gesture.location(in: self)
     if let overlayView = overlayView,
-      !overlayView.frame.contains(location) && !plusButton.frame.contains(location)
+       !overlayView.frame.contains(location) && !plusButton.frame.contains(location)
     {
       dismissOverlay()
     }
@@ -328,7 +337,6 @@ class ComposeView: UIView {
       guard let peerId = peerId else { return }
       Task {
         do {
-
           try await DataManager.shared.updateDialog(peerId: peerId, draft: text.isEmpty ? nil : text)
         } catch {
           print("Failed to save draft", error)
