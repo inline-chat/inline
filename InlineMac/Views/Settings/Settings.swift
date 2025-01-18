@@ -27,7 +27,12 @@ struct SettingsView: View {
         }
         .tag(Tabs.account)
       }
+
+      AppearanceView().tabItem {
+        Label("Appearance", systemImage: "paintbrush")
+      }
     }
+    .frame(minWidth: 300)
     .scenePadding()
     .navigationTitle("Settings")
   }
@@ -39,6 +44,23 @@ struct GeneralSettingsView: View {
   var body: some View {
     Form {
       Toggle("Launch at Login", isOn: self.$launchAtLogin)
+    }
+  }
+}
+
+struct AppearanceView: View {
+  @ObservedObject private var settings = AppSettings.shared
+  init() {}
+
+  var body: some View {
+    Form {
+      // Toggle("Launch at Login", isOn: self.$slaunchAtLogin).toggleStyle(.switch)
+
+      Picker("Message Style:", selection: self.$settings.messageStyle) {
+        Text("Bubble").tag(MessageStyle.bubble)
+        Text("Minimal").tag(MessageStyle.minimal)
+
+      }.pickerStyle(.inline)
     }
   }
 }
