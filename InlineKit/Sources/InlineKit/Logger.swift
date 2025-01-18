@@ -78,7 +78,7 @@ public final class Log: @unchecked Sendable {
       logMessage = "\(message) \(errorDescription)"
     }
     
-    logger.log(level: level.osLogType, "\(level.rawValue) | \(scope_) | \(logMessage)")
+    logger.log(level: level.osLogType, "\(level.rawValue, privacy: .public) |  \(scope_, privacy: .public) | \(logMessage, privacy: .public)")
     
     let level_ = level
     
