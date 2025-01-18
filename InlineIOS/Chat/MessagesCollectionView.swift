@@ -184,7 +184,7 @@ class MessagesCollectionView: UICollectionView {
 
     updateContentInsets()
     UIView.animate(withDuration: duration) {
-      if self.shouldScrollToBottom , !self.itemsEmpty {
+      if self.shouldScrollToBottom, !self.itemsEmpty {
         self.scrollToItem(
           at: IndexPath(item: 0, section: 0),
           at: .top,
