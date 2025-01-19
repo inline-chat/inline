@@ -1,0 +1,190 @@
+@layer priority1 {
+  /*
+1. Prevent padding and border from affecting element width
+*/
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+    border-color: currentColor;
+  }
+
+  /*
+2. Remove default margin and padding
+*/
+  blockquote,
+  dl,
+  dd,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  hr,
+  figure,
+  p,
+  pre,
+  ol,
+  ul {
+    margin: 0;
+    padding: 0;
+  }
+
+  /*
+3. Reset heading styles
+*/
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-size: inherit;
+    font-weight: inherit;
+  }
+
+  /*
+4. Reset lists
+*/
+  ol,
+  ul {
+    list-style: none;
+  }
+
+  /*
+5. Reset form elements
+*/
+  button,
+  input,
+  optgroup,
+  select,
+  textarea {
+    font-family: inherit;
+    font-size: 100%;
+    font-weight: inherit;
+    line-height: inherit;
+    color: inherit;
+    margin: 0;
+    padding: 0;
+  }
+
+  button,
+  select {
+    text-transform: none;
+  }
+
+  /*
+6. Improve consistency of default fonts
+*/
+  html {
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    -moz-tab-size: 4;
+    tab-size: 4;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+      Arial, "Noto Sans", sans-serif;
+  }
+
+  /*
+7. Media elements
+*/
+  img,
+  svg,
+  video,
+  canvas,
+  audio,
+  iframe,
+  embed,
+  object {
+    display: block;
+    vertical-align: middle;
+  }
+
+  img,
+  video {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /*
+8. Links
+*/
+  a {
+    color: inherit;
+    text-decoration: inherit;
+  }
+
+  /*
+9. Add the correct font weight in Chrome, Edge, and Safari
+*/
+  b,
+  strong {
+    font-weight: bolder;
+  }
+
+  /*
+10. Tables
+*/
+  table {
+    text-indent: 0;
+    border-color: inherit;
+    border-collapse: collapse;
+  }
+
+  /*
+11. Forms
+*/
+  button,
+  [type="button"],
+  [type="reset"],
+  [type="submit"] {
+    -webkit-appearance: button;
+    background-color: transparent;
+    background-image: none;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    opacity: 1;
+    color: #9ca3af;
+  }
+
+  ::-webkit-search-decoration {
+    -webkit-appearance: none;
+  }
+
+  /*
+12. Interactive
+*/
+  :disabled {
+    cursor: default;
+  }
+
+  /*
+13. Make sure textareas without a rows attribute are not tiny
+*/
+  textarea {
+    min-height: 2em;
+  }
+
+  /*
+14. Improve consistency of default fonts in all browsers
+*/
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 1em;
+  }
+
+  /*
+15. Remove the default border on iframes
+*/
+  iframe {
+    border-width: 0;
+  }
+}

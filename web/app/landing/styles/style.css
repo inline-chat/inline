@@ -1,0 +1,41 @@
+@import "./preflight.css";
+
+@layer priority1 {
+  /* Anti-aliasing */
+  /* html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  } */
+
+  html {
+    background: #f2f2f2;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html,
+    body {
+      background-color: #303845;
+      background-image: linear-gradient(180deg, #303845 0%, #1c2025 100%);
+      background-attachment: fixed;
+    }
+  }
+
+  /* Global styles */
+  html,
+  body {
+    min-height: 100%;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* Selection color */
+  ::selection {
+    background-color: rgba(0, 0, 0, 0.1);
+    color: inherit;
+  }
+
+  ::-moz-selection {
+    background-color: rgba(0, 0, 0, 0.1);
+    color: inherit;
+  }
+}
