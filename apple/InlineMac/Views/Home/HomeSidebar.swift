@@ -97,14 +97,16 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var spacesAndUsersView: some View {
-    Section("Spaces") {
-      ForEach(model.spaceItems) { space in
-        SpaceItem(space: space.space)
-          .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+    if !model.spaceItems.isEmpty {
+      Section("Spaces") {
+        ForEach(model.spaceItems) { space in
+          SpaceItem(space: space.space)
+            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+        }
       }
     }
 
-    Section("Private") {
+    Section("Private Chats") {
       ForEach(home.chats) { chat in
         UserItem(
           user: chat.user,
