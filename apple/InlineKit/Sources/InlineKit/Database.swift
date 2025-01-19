@@ -164,6 +164,34 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("files") { db in
+      // Files table
+      try db.create(table: "file") { t in
+        t.autoIncrementedPrimaryKey("id").unique()
+        t.column("fileUniqueId", .text).unique().indexed()
+        t.column("fileType", .text).notNull()
+        t.column("fileSize", .integer)
+
+        t.column("thumbSize", .text)
+        t
+          .column("thumbForFileId", .integer)
+          .references("file", column: "id", onDelete: .cascade)
+
+        t.column("width", .integer)
+        t.column("height", .integer)
+        t.column("temporaryUrl", .text)
+        t.column("temporaryUrlExpiresAt", .datetime)
+        t.column("localPath", .text)
+        t.column("duration", .double)
+        t.column("bytes", .blob)
+        t.column("uploading", .boolean).notNull().defaults(to: false)
+      }
+      
+      try db.alter(table: "message") { t in
+        t.add(column: "fileId", .integer).references("file", column: "id", onDelete: .setNull)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
@@ -301,12 +329,11 @@ public extension AppDatabase {
         appropriateFor: nil, create: false)
 
       let directory =
-        if let userProfile = ProjectConfig.userProfile
-      {
-        "Database_\(userProfile)"
-      } else {
-        "Database"
-      }
+        if let userProfile = ProjectConfig.userProfile {
+          "Database_\(userProfile)"
+        } else {
+          "Database"
+        }
 
       let directoryURL = appSupportURL.appendingPathComponent(directory, isDirectory: true)
       try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
