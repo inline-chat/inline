@@ -1,5 +1,17 @@
-# Inline - Web app
+# Inline - Web
 
-The source code for the Inline web app.
+Our web app and the landing page. WIP.
 
-WIP
+### Development
+
+Install the dependencies:
+
+```bash
+bun install
+```
+
+Start the development server with HMR:
+
+```bash
+bun run dev
+```

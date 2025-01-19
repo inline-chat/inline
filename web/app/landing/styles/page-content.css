@@ -1,0 +1,47 @@
+.page-content {
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 400;
+}
+
+/* Headers */
+.page-content h1 {
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+  font-weight: 700;
+}
+
+.page-content h2 {
+  font-size: 1.1rem;
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.page-content h3 {
+  font-size: 1rem;
+  margin-top: 0.8rem;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.page-content p {
+  margin-bottom: 1rem;
+}
+
+/* Lists */
+.page-content ul {
+  padding-left: 1.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.page-content li {
+  margin-bottom: 0.3rem;
+  list-style-type: disc;
+}
+
+.page-content a {
+  color: #0070f3;
+  text-decoration: underline;
+}
