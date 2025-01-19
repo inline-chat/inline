@@ -153,9 +153,8 @@ struct MainView: View {
   @ViewBuilder
   var searchResultsView: some View {
     ScrollView {
-      LazyVStack(alignment: .leading, spacing: 26) {
+      LazyVStack(alignment: .leading, spacing: 12) {
         ForEach(searchResults) { user in
-
           Button {
             navigateToUser(user)
           } label: {
