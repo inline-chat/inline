@@ -20,7 +20,7 @@ COPY . .
 RUN bun run build
 
 # Final stage
-FROM base
+FROM base AS release
 COPY --from=production-dependencies /temp/prod/node_modules node_modules
 COPY --from=build /usr/src/app/build build
 COPY package.json .
