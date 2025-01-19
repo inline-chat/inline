@@ -1,4 +1,5 @@
 import InlineKit
+import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -40,18 +41,18 @@ class ComposeTextView: UITextView {
 }
 
 class ComposeView: UIView {
-  static let minHeight: CGFloat = 46.0
+  static let minHeight: CGFloat = 42.0
   private let maxHeight: CGFloat = 600
   private var heightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
-  static let textViewVerticalPadding: CGFloat = 12.0
+  static let textViewVerticalPadding: CGFloat = 10.0
   static let textViewHorizantalPadding: CGFloat = 34.0
   static let textViewHorizantalMargin: CGFloat = 7.0
   static let textViewVerticalMargin: CGFloat = 7.0
-  private let buttonBottomPadding: CGFloat = -6.0
+  private let buttonBottomPadding: CGFloat = -4.0
   private let buttonTrailingPadding: CGFloat = -6.0
   private let buttonLeadingPadding: CGFloat = 10.0
-  private let buttonSize: CGSize = .init(width: 34, height: 34)
+  private let buttonSize: CGSize = .init(width: 36, height: 36)
   private var overlayView: UIView?
   private var isOverlayVisible = false
 
@@ -93,6 +94,8 @@ class ComposeView: UIView {
 
     return button
   }()
+
+  private var currentImagePickerPresenter: UIViewController?
 
   private lazy var plusButton: UIButton = {
     let button = UIButton()
@@ -182,68 +185,18 @@ class ComposeView: UIView {
   }
 
   @objc private func plusTapped() {
-    if isOverlayVisible {
-      dismissOverlay()
-      return
-    }
+    guard let windowScene = window?.windowScene else { return }
 
-    let overlay = UIView()
-    overlay.backgroundColor = .clear
-    overlay.translatesAutoresizingMaskIntoConstraints = false
-    overlay.layer.cornerRadius = 12
-    overlay.clipsToBounds = true
+    var configuration = PHPickerConfiguration(photoLibrary: .shared())
+    configuration.filter = .images
+    configuration.selectionLimit = 1
 
-    let blurEffect = UIBlurEffect(style: .systemThickMaterial)
-    let blurView = UIVisualEffectView(effect: blurEffect)
-    blurView.translatesAutoresizingMaskIntoConstraints = false
-    overlay.addSubview(blurView)
+    let picker = PHPickerViewController(configuration: configuration)
+    picker.delegate = self
 
-    let label = UILabel()
-    label.text = "Soon you can attach photos from here!"
-    label.numberOfLines = 0
-    label.textAlignment = .left
-    label.font = .systemFont(ofSize: 17)
-    label.textColor = .secondaryLabel
-    label.translatesAutoresizingMaskIntoConstraints = false
-
-    blurView.contentView.addSubview(label)
-
-    addSubview(overlay)
-
-    NSLayoutConstraint.activate([
-      overlay.widthAnchor.constraint(equalToConstant: 140),
-      overlay.heightAnchor.constraint(equalToConstant: 160),
-      overlay.bottomAnchor.constraint(equalTo: plusButton.topAnchor, constant: -20),
-      overlay.leadingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: 10),
-
-      blurView.topAnchor.constraint(equalTo: overlay.topAnchor),
-      blurView.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
-      blurView.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
-      blurView.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
-
-      label.centerXAnchor.constraint(equalTo: blurView.contentView.centerXAnchor),
-      label.centerYAnchor.constraint(equalTo: blurView.contentView.centerYAnchor),
-      label.leadingAnchor.constraint(greaterThanOrEqualTo: blurView.contentView.leadingAnchor, constant: 12),
-      label.trailingAnchor.constraint(lessThanOrEqualTo: blurView.contentView.trailingAnchor, constant: -12),
-    ])
-
-    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapOutside))
-    tapGesture.cancelsTouchesInView = false
-    addGestureRecognizer(tapGesture)
-
-    overlayView = overlay
-    isOverlayVisible = true
-
-    plusButton.backgroundColor = .clear
-    overlay.alpha = 0
-    overlay.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
-      .concatenating(CGAffineTransform(translationX: 0, y: 10))
-
-    UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
-      self.plusButton.backgroundColor = .systemGray6
-      overlay.alpha = 1
-      overlay.transform = .identity
-    }
+    let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow })
+    let rootVC = keyWindow?.rootViewController
+    rootVC?.present(picker, animated: true)
   }
 
   @objc private func handleTapOutside(_ gesture: UITapGestureRecognizer) {
@@ -399,6 +352,33 @@ extension ComposeView: UITextViewDelegate {
         }
       }
       buttonAppear()
+    }
+  }
+}
+
+extension ComposeView: PHPickerViewControllerDelegate {
+  func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+    picker.dismiss(animated: true)
+
+    guard let result = results.first else { return }
+
+    result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self] object, error in
+      guard let self = self else { return }
+
+      if let error = error {
+        print("Failed to load image:", error.localizedDescription)
+        return
+      }
+
+      guard let image = object as? UIImage,
+            let peerId = self.peerId else { return }
+
+      DispatchQueue.main.async {
+        self.sendButton.configuration?.showsActivityIndicator = true
+        print("I HAVE AN IMAGE")
+        self.sendButton.configuration?.showsActivityIndicator = false
+        self.sendMessageHaptic()
+      }
     }
   }
 }
