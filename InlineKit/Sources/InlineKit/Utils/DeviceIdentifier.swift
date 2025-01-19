@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 enum DeviceIdentifierError: Error {
   case identifierUnavailable
@@ -14,9 +15,17 @@ public actor DeviceIdentifier {
     self.defaults = defaults
   }
   
-  public func getIdentifier() throws -> String {
+  public func getIdentifier() async throws -> String {
+    let identifier = try await createOrRetrieveIdentifier()
+    return identifier
+  }
+  
+  private func createOrRetrieveIdentifier() async throws -> String {
     #if os(iOS) || os(tvOS)
-      if let idfv = UIDevice.current.identifierForVendor?.uuidString {
+      let idfv = await MainActor.run {
+        UIDevice.current.identifierForVendor?.uuidString
+      }
+      if let idfv {
         defaults.set(idfv, forKey: idKey)
         return idfv
       }
