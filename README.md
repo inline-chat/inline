@@ -22,10 +22,21 @@ Inline is the team chat app we wished existed, so we're building it ourselves. W
 - **Tranquil**: Stay in the flow longer by only seeing content that you need to.
 - **Better notifications**: Inline can avoid distracting you when something does not require your attention.
 
-We're currently two cofounders developing Inline full-time. Our focus is making the best app possible for small teams who use macOS and iOS primarily. We'll release our web app and Android app (in Kotlin) later this year.
+We're currently two cofounders developing Inline full-time.
+
+### Platform Support
+
+| Platform | Status                    |
+| -------- | ------------------------- |
+| macOS    | Alpha, actively developed |
+| iOS      | Alpha, actively developed |
+| Web      | In development            |
+| Android  | Not started               |
+| Windows  | Not started               |
+| Linux    | Not started               |
 
 > [!IMPORTANT]
-> Inline is in a pre-alpha state, and only suitable for use by enthusiastic testers willing to endure an incomplete app with bugs.
+> Inline is in the alpha stage, and only suitable for use by enthusiastic testers willing to endure an incomplete app with bugs. However, it's our own daily driver and we're actively developing it.
 
 ## Download
 
