@@ -285,6 +285,11 @@ class ComposeAppKit: NSView {
         )
       )
       
+      // Cancel typing
+      Task {
+        await ComposeActions.shared.stoppedTyping(for: self.peerId)
+      }
+      
       self.ignoreNextHeightChange = false
     }
   }
