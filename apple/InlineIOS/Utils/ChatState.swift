@@ -1,4 +1,5 @@
 import Foundation
+import InlineKit
 import SwiftUI
 
 @MainActor
@@ -9,40 +10,45 @@ final class ChatState: ObservableObject {
     var replyingMessageId: Int64?
   }
 
-  @Published  var states: [Int64: State] = [:]
-  @Published private(set) var currentChatId: Int64?
+  @Published var states: [Peer: State] = [:]
+  @Published private(set) var currentPeer: Peer?
 
   private let defaults = UserDefaults.standard
   private let statesKey = "chatStates"
-  private let currentChatIdKey = "currentChatId"
+  private let currentPeerKey = "currentPeer"
 
   init() {
     loadPersistedState()
   }
 
-  func setCurrentChat(id: Int64) {
-    if currentChatId != id {
-      currentChatId = id
-      defaults.set(id, forKey: currentChatIdKey)
+  func setCurrentChat(peer: Peer) {
+    if currentPeer != peer {
+      currentPeer = peer
+      if let encoded = try? JSONEncoder().encode(peer) {
+        defaults.set(encoded, forKey: currentPeerKey)
+      }
     }
   }
 
-  func getState(chatId: Int64) -> State {
-    states[chatId] ?? State()
+  func getState(peer: Peer) -> State {
+    states[peer] ?? State()
   }
 
-  func setReplyingMessageId(chatId: Int64, id: Int64) {
-    var state = getState(chatId: chatId)
+  func setReplyingMessageId(peer: Peer, id: Int64) {
+    var state = getState(peer: peer)
     state.replyingMessageId = id
-    states[chatId] = state
+    print("Setting replying message id to \(id)")
+    states[peer] = state
     persistStates()
+    NotificationCenter.default.post(name: .init("ChatStateDidChange"), object: nil)
   }
 
-  func clearReplyingMessageId(chatId: Int64) {
-    var state = getState(chatId: chatId)
+  func clearReplyingMessageId(peer: Peer) {
+    var state = getState(peer: peer)
     state.replyingMessageId = nil
-    states[chatId] = state
+    states[peer] = state
     persistStates()
+    NotificationCenter.default.post(name: .init("ChatStateDidChange"), object: nil)
   }
 
   private func persistStates() {
@@ -51,10 +57,14 @@ final class ChatState: ObservableObject {
   }
 
   private func loadPersistedState() {
-    currentChatId = Int64(defaults.integer(forKey: currentChatIdKey))
+    if let data = defaults.data(forKey: currentPeerKey),
+      let decoded = try? JSONDecoder().decode(Peer.self, from: data)
+    {
+      currentPeer = decoded
+    }
 
     if let data = defaults.data(forKey: statesKey),
-       let decoded = try? JSONDecoder().decode([Int64: State].self, from: data)
+      let decoded = try? JSONDecoder().decode([Peer: State].self, from: data)
     {
       states = decoded
     }
