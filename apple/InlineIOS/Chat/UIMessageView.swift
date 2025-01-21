@@ -131,8 +131,8 @@ class UIMessageView: UIView {
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
       messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -labelHorizantalPadding),
-      messageLabel.bottomAnchor.constraint(equalTo: metadataView.topAnchor, constant: -labelVerticalPadding),
 
+      metadataView.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: -labelVerticalPadding),
       metadataView.leadingAnchor.constraint(
         greaterThanOrEqualTo: bubbleView.leadingAnchor, constant: 14),
       metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
@@ -247,6 +247,12 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       }
 
       var actions: [UIAction] = [copyAction]
+
+      let replyAction = UIAction(title: "Reply") { _ in
+        print("REPLY \(self.message.id)")
+        ChatState.shared.setReplyingMessageId(peer: self.message.peerId, id: self.message.id)
+      }
+      actions.append(replyAction)
 
       if let url = self.getURLAtLocation(location) {
         let openLinkAction = UIAction(title: "Open Link") { _ in
