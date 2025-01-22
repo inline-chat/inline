@@ -166,11 +166,13 @@ struct MainView: View {
 
   // This difference makes collapse/uncollapse more satisfying as it doesn't lock in place when uncollapsing at minimum width
   var detailMinWidth: CGFloat {
-    if window.columnVisibility == .detailOnly {
-      400
-    } else {
-      200
-    }
+    // This was used for auto column collapse
+//    if window.columnVisibility == .detailOnly {
+//      400
+//    } else {
+//      200
+//    }
+    Theme.chatViewMinWidth
   }
   
   private func setUpSidebarAutoCollapse() {
