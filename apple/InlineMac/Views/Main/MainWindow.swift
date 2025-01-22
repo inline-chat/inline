@@ -60,6 +60,9 @@ class MainWindowViewModel: ObservableObject {
   public var windowSize: PassthroughSubject<CGSize, Never> = .init()
   public var currentSize: CGSize = .zero
 
+  // Disabled for resize performance. This actually impacted the FPS and dropped it by ~10-20fps.
+  private var feature_monitorWindowSize = false
+
   private var cancellables = Set<AnyCancellable>()
 
   init() {
@@ -92,6 +95,8 @@ class MainWindowViewModel: ObservableObject {
   }
 
   func setUpWindowSizeMonitor() {
+    guard feature_monitorWindowSize else { return }
+
     // Cache the initial size
     currentSize = window?.frame.size ?? .zero
 
