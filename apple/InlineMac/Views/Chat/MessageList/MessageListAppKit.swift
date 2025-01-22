@@ -18,9 +18,11 @@ class MessageListAppKit: NSViewController {
   private var feature_scrollsToBottomInDidLayout = true
   private var feature_setupsInsetsManually = true
   private var feature_updatesHeightsOnWidthChange = true
-  private var feature_updatesHeightsOnOffsetChange = true
+  private var feature_updatesHeightsOnLiveResizeEnd = true
   private var feature_recalculatesHeightsWhileInitialScroll = true
   private var feature_loadsMoreWhenApproachingTop = true
+  
+  private var feature_updatesHeightsOnOffsetChange = false
   
   // Debugging
   private var debug_slowAnimation = false
@@ -263,6 +265,13 @@ class MessageListAppKit: NSViewController {
       name: NSScrollView.didEndLiveScrollNotification,
       object: scrollView
     )
+    
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(liveResizeEnded),
+      name: NSWindow.didEndLiveResizeNotification,
+      object: scrollView.window
+    )
   }
   
   private var scrollState: MessageListScrollState = .idle {
@@ -286,6 +295,16 @@ class MessageListAppKit: NSViewController {
     
     maintainingBottomScroll {
       recalculateHeightsOnWidthChange()
+      return true
+    }
+  }
+  
+  // Recalculate heights for all items once resize has ended
+  @objc private func liveResizeEnded() {
+    guard feature_updatesHeightsOnLiveResizeEnd else { return }
+    
+    maintainingBottomScroll {
+      recalculateHeightsOnWidthChange(buffer: 200)
       return true
     }
   }
@@ -456,7 +475,10 @@ class MessageListAppKit: NSViewController {
     
     // Using this prevents an issue where cells height was stuck in a cut off way when using
     // MessageSizeCalculator.safeAreaWidth as the diff
-    let magicWidthDiff = 15.0
+    // let magicWidthDiff = 15.0
+    
+    // Experimental
+    let magicWidthDiff = 1.0
     
     if abs(newWidth - lastKnownWidth) > magicWidthDiff {
       lastKnownWidth = newWidth
@@ -563,8 +585,6 @@ class MessageListAppKit: NSViewController {
   
   // TODO: probably can optimize this
   private func maintainingBottomScroll(_ closure: () -> Bool?) {
-    guard let scrollView = tableView.enclosingScrollView else { return }
-    
     // Capture current scroll position relative to bottom
     let viewportHeight = scrollView.contentView.bounds.height
     let contentHeight = scrollView.documentView?.frame.height ?? 0
@@ -724,7 +744,7 @@ class MessageListAppKit: NSViewController {
 //  }
 
   // Note this function will stop any animation that is happening so must be used with caution
-  private func recalculateHeightsOnWidthChange() {
+  private func recalculateHeightsOnWidthChange(buffer: Int = 1) {
     log.trace("Recalculating heights on width change")
     
     if isPerformingUpdate {
@@ -737,7 +757,11 @@ class MessageListAppKit: NSViewController {
     
     guard visibleRange.location != NSNotFound else { return }
     
-    let buffer = 2
+    // Default
+    // let buffer = 1
+    
+    // Experimental
+    // let buffer = 100
 
     // Calculate ranges
     let visibleStartIndex = max(0, visibleRange.location - buffer)
@@ -776,7 +800,7 @@ class MessageListAppKit: NSViewController {
 //      }
       
       if let message = message(forRow: row), !sizeCalculator
-        .isSingleLine(messageText: message.message.text ?? "", availableWidth: availableWidth)
+        .isSingleLine(message, availableWidth: availableWidth)
       {
         rowsToUpdate.insert(row)
       }
@@ -835,7 +859,7 @@ class MessageListAppKit: NSViewController {
     )
     
     let tableWidth = tableView.bounds.width
-    let (size, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
+    let (size, _, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
     return size.height
   }
 
@@ -1046,10 +1070,13 @@ extension MessageListAppKit: NSTableViewDelegate {
     )
 
     let tableWidth = tableView.bounds.width
-    let (_, textSize) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
+    let (_, textSize, photoSize) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
 
     props.textWidth = textSize.width
     props.textHeight = textSize.height
+    
+    props.photoWidth = photoSize?.width
+    props.photoHeight = photoSize?.height
   
     cell.configure(with: message, props: props)
     return cell
@@ -1073,7 +1100,7 @@ extension MessageListAppKit: NSTableViewDelegate {
     
     let tableWidth = tableView.bounds.width
     
-    let (size, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
+    let (size, _, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
     return size.height
   }
 }
@@ -1082,8 +1109,6 @@ extension NSTableView {
   func scrollToBottomWithInset() {
     guard let scrollView = enclosingScrollView,
           numberOfRows > 0 else { return }
-    
-    let lastRow = numberOfRows - 1
     
     // Get the bottom inset value
     let bottomInset = scrollView.contentInsets.bottom
@@ -1098,6 +1123,7 @@ extension NSTableView {
     scrollView.contentView.scroll(targetPoint)
     
     // Ensure the last row is visible
+    // let lastRow = numberOfRows - 1
     // scrollRowToVisible(lastRow)
   }
 }

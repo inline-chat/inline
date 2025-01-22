@@ -119,8 +119,10 @@ class MessageTableCell: NSView {
     NSLayoutConstraint.activate([
       newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       newMessageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      newMessageView.topAnchor.constraint(equalTo: topAnchor),
-      newMessageView.bottomAnchor.constraint(equalTo: bottomAnchor)
+      
+      // Apply inter message paddings
+      newMessageView.topAnchor.constraint(equalTo: topAnchor, constant: Theme.messageOuterVerticalPadding),
+      newMessageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Theme.messageOuterVerticalPadding)
     ])
     
     messageView = newMessageView
