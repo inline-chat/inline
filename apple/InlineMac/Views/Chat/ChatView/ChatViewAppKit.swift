@@ -71,6 +71,11 @@ class ChatViewAppKit: NSView {
   }
   
   private func setupView() {
+    // Performance
+    wantsLayer = true
+    layerContentsRedrawPolicy = .onSetNeedsDisplay
+    layer?.drawsAsynchronously = true
+    
     // Enable Auto Layout for the main view
     translatesAutoresizingMaskIntoConstraints = false
     messageListView.translatesAutoresizingMaskIntoConstraints = false
@@ -90,9 +95,6 @@ class ChatViewAppKit: NSView {
       composeView.bottomAnchor.constraint(equalTo: bottomAnchor),
       composeView.leadingAnchor.constraint(equalTo: leadingAnchor),
       composeView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      
-      // Vertical stack
-//      composeView.topAnchor.constraint(equalTo: messageListView.bottomAnchor),
     ])
   }
   
