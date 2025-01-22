@@ -69,6 +69,11 @@ class MessageListAppKit: NSViewController {
     table.delegate = self
     table.dataSource = self
     
+    // Optimize performance
+    table.wantsLayer = true
+    table.layerContentsRedrawPolicy = .onSetNeedsDisplay
+    table.layer?.drawsAsynchronously = true
+    
     return table
   }()
   
@@ -97,6 +102,11 @@ class MessageListAppKit: NSViewController {
     scroll.postsBoundsChangedNotifications = true
     scroll.postsFrameChangedNotifications = true
     scroll.automaticallyAdjustsContentInsets = !feature_setupsInsetsManually
+    
+    // Optimize performance
+    scroll.wantsLayer = true
+    scroll.layerContentsRedrawPolicy = .onSetNeedsDisplay
+    scroll.layer?.drawsAsynchronously = true
     
     return scroll
   }()
