@@ -10,7 +10,9 @@ class ComposeAppKit: NSView {
   // State
   private weak var messageList: MessageListAppKit?
   private var viewModel: FullChatViewModel?
-  private var images: Set<NSImage> = []
+  
+  // for now we use NSImage as ID until we have proper state management
+  private var attachmentItems: [NSImage: SendMessageAttachment] = [:]
   
   // Internal
   private var heightConstraint: NSLayoutConstraint!
@@ -194,7 +196,6 @@ class ComposeAppKit: NSView {
   
   func updateHeight() {
     let height = getHeight()
-    let textViewHeight = getTextViewHeight()
 
     if feature_animateHeightChanges {
       // First update the height of scroll view immediately so it doesn't clip from top while animating
@@ -227,19 +228,30 @@ class ComposeAppKit: NSView {
   // MARK: - Actions
   
   func addImage(_ image: NSImage) {
-    images.insert(image)
+    // Update UI
     attachments.addImageView(image)
     updateHeight()
+    
+    // Update state
+    Task {
+      if let attachment = image.prepareForUpload() {
+        attachmentItems[image] = attachment
+      }
+    }
   }
   
   func removeImage(_ image: NSImage) {
-    images.remove(image)
+    // Update UI
     attachments.removeImageView(image)
     updateHeight()
+    
+    // Update state
+    attachmentItems
+      .removeValue(forKey: image)
   }
   
   func clearAttachments(updateHeights: Bool = false) {
-    images.removeAll()
+    attachmentItems.removeAll()
     attachments.clearViews()
     if updateHeights {
       updateHeight()
@@ -249,7 +261,7 @@ class ComposeAppKit: NSView {
   // Clear, reset height
   func clear() {
     // State
-    images.removeAll()
+    attachmentItems.removeAll()
     sendButton.updateCanSend(false)
     
     // Views
@@ -268,8 +280,8 @@ class ComposeAppKit: NSView {
       self.ignoreNextHeightChange = true
       let rawText = self.textEditor.string
       let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+      let attachmentItems = self.attachmentItems
       let canSend = !text.isEmpty
-      let images = self.images
       
       if !canSend { return }
     
@@ -281,7 +293,12 @@ class ComposeAppKit: NSView {
       let _ = Transactions.shared.mutate(
         transaction:
         .sendMessage(
-          .init(text: text, peerId: self.peerId, chatId: self.chatId ?? 0) // FIXME: chatId
+          TransactionSendMessage(
+            text: text,
+            peerId: self.peerId,
+            chatId: self.chatId ?? 0, // FIXME: chatId fallback
+            attachments: attachmentItems.values.map { $0 }
+          )
         )
       )
       
