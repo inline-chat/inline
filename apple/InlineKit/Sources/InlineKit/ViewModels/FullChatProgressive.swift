@@ -213,13 +213,7 @@ public class MessagesProgressiveViewModel {
   }
 
   private func loadMessages(_ loadMode: LoadMode) {
-    let peer = self.peer
     let prevCount = messages.count
-
-//    log
-//      .debug(
-//        "Loading messages for \(peer) with mode: \(loadMode)"
-//      )
 
     do {
       let messagesBatch: [FullMessage] = try db.dbWriter.read { db in
@@ -306,11 +300,7 @@ public class MessagesProgressiveViewModel {
   }
 
   private func baseQuery() -> QueryInterfaceRequest<FullMessage> {
-    var query =
-      Message
-        .including(optional: Message.from)
-        .including(all: Message.reactions)
-        .asRequest(of: FullMessage.self)
+    var query = FullMessage.queryRequest()
 
     switch peer {
     case .thread(let id):
@@ -362,12 +352,9 @@ public final class MessagesPublisher {
     Log.shared.debug("Message added: \(message)")
     do {
       let fullMessage = try await db.reader.read { db in
-        try Message
+        try FullMessage.queryRequest()
           .filter(Column("messageId") == message.messageId)
           .filter(Column("chatId") == message.chatId)
-          .including(optional: Message.from)
-          .including(all: Message.reactions)
-          .asRequest(of: FullMessage.self)
           .fetchOne(db)
       }
       guard let fullMessage = fullMessage else {
@@ -388,20 +375,17 @@ public final class MessagesPublisher {
 //    Log.shared.debug("Message updated: \(message)")
 //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? await db.reader.read { db in
+      let query = FullMessage.queryRequest()
       let base = if let messageGlobalId = message.globalId {
-        Message
+        query
           .filter(id: messageGlobalId)
       } else {
-        Message
+        query
           .filter(Column("messageId") == message.messageId)
           .filter(Column("chatId") == message.chatId)
       }
 
-      return try base
-        .including(optional: Message.from)
-        .including(all: Message.reactions)
-        .asRequest(of: FullMessage.self)
-        .fetchOne(db)
+      return try base.fetchOne(db)
     }
     guard let fullMessage = fullMessage else {
       Log.shared.error("Failed to get full message")

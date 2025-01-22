@@ -164,10 +164,10 @@ public extension AppDatabase {
       }
     }
 
-    migrator.registerMigration("files") { db in
+    migrator.registerMigration("files v2") { db in
       // Files table
       try db.create(table: "file") { t in
-        t.autoIncrementedPrimaryKey("id").unique()
+        t.column("id", .text).primaryKey()
         t.column("fileUniqueId", .text).unique().indexed()
         t.column("fileType", .text).notNull()
         t.column("fileSize", .integer)
@@ -186,9 +186,9 @@ public extension AppDatabase {
         t.column("bytes", .blob)
         t.column("uploading", .boolean).notNull().defaults(to: false)
       }
-      
+
       try db.alter(table: "message") { t in
-        t.add(column: "fileId", .integer).references("file", column: "id", onDelete: .setNull)
+        t.add(column: "fileId", .text).references("file", column: "id", onDelete: .setNull)
       }
     }
 

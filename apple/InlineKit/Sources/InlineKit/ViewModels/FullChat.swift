@@ -7,6 +7,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   Sendable, Equatable
 {
   public var user: User?
+  public var file: File?
   public var message: Message
   public var reactions: [Reaction]
   // stable id
@@ -16,6 +17,16 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   }
 
   //  public static let preview = FullMessage(user: User, message: Message)
+}
+
+extension FullMessage {
+  public static func queryRequest() -> QueryInterfaceRequest<FullMessage> {
+    return Message
+      .including(optional: Message.from)
+      .including(optional: Message.file)
+      .including(all: Message.reactions)
+      .asRequest(of: FullMessage.self)
+  }
 }
 
 public struct FullChatSection: Identifiable, Equatable, Hashable {

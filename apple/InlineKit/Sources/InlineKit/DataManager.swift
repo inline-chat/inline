@@ -229,8 +229,12 @@ public class DataManager: ObservableObject {
 
         // Save messages
         let messages = result.messages.map { message in Message(from: message) }
+//        try messages.forEach { message in
+//          try message.save(db, onConflict: .replace)
+//        }
         try messages.forEach { message in
-          try message.save(db, onConflict: .replace)
+          var mutableMessage = message
+          try mutableMessage.saveMessage(db)
         }
 
         // TODO: Optimize
@@ -295,7 +299,8 @@ public class DataManager: ObservableObject {
           Message(from: message)
         }
         try messages.forEach { message in
-          try message.save(db, onConflict: .replace)
+          var mutableMessage = message
+          try mutableMessage.saveMessage(db)
         }
 
         // Save dialogs
@@ -311,65 +316,6 @@ public class DataManager: ObservableObject {
     } catch {
       log.error("Failed to get dialogs", error: error)
       throw error
-    }
-  }
-
-  public func sendMessage(
-    chatId: Int64,
-    peerUserId: Int64?,
-    peerThreadId: Int64?,
-    text: String?,
-    peerId: Peer?,
-    randomId: Int64?,
-    repliedToMessageId: Int64?,
-    date: Double?
-  ) async throws {
-    let finalPeerUserId: Int64?
-    let finalPeerThreadId: Int64?
-
-    if let peerId = peerId {
-      switch peerId {
-      case .user(let id):
-        finalPeerUserId = id
-        finalPeerThreadId = nil
-      case .thread(let id):
-        finalPeerUserId = nil
-        finalPeerThreadId = id
-      }
-    } else {
-      finalPeerUserId = peerUserId
-      finalPeerThreadId = peerThreadId
-    }
-
-    log.debug(
-      "sendMessage with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
-    )
-
-    let result = try await ApiClient.shared.sendMessage(
-      peerUserId: finalPeerUserId,
-      peerThreadId: finalPeerThreadId,
-      text: text,
-      randomId: randomId,
-      repliedToMessageId: repliedToMessageId,
-      date: date
-    )
-
-    Task { @MainActor in
-      // Don't apply local changes if randomId is set which means optimistic update was handled
-      if randomId == nil {
-        try await database.dbWriter.write { db in
-          let message = Message(from: result.message)
-
-          do {
-            try message.save(db)
-          } catch {
-            Log.shared.error("Failed to save message", error: error)
-            throw error
-          }
-        }
-      } else if let updates = result.updates {
-        await UpdatesManager.shared.applyBatch(updates: updates)
-      }
     }
   }
 
