@@ -49,10 +49,15 @@ class MessageSizeCalculator {
       // if we don't subtract this here, it can result is wrong calculations
       Self.extraSafeWidth
     
-    return availableWidth
+    // Ensure we don't return negative width
+    return max(0.0, availableWidth)
   }
   
-  func isSingleLine(messageText text: String, availableWidth: CGFloat) -> Bool {
+  func isSingleLine(_ fullMessage: FullMessage, availableWidth: CGFloat) -> Bool {
+    // Bypass single line cache for media messages (unless when we have a max width and available width > maxWidth so we know we don't need to recalc. since this function is used in message list to bypass unneccessary calcs.
+    guard fullMessage.file == nil else { return false }
+    
+    let text = fullMessage.message.text ?? emptyFallback
     let minSize = minWidthForSingleLine.object(forKey: text as NSString) as? CGSize
     
     if let minSize, minSize.width < availableWidth {
@@ -61,29 +66,140 @@ class MessageSizeCalculator {
     return false
   }
     
-  func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> (NSSize, NSSize) {
+  func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> (NSSize, NSSize, NSSize?) {
     let text = message.message.text ?? emptyFallback
+    let hasMedia = message.file != nil
     
     // If text is empty, height is always 1 line
     // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
-    if text.isEmpty {
+    if text.isEmpty, !hasMedia {
       // TODO: fix this to include name, etc
       return (
         CGSize(width: 1, height: heightForSingleLineText()),
-        CGSize(width: 1, height: heightForSingleLineText())
+        CGSize(width: 1, height: heightForSingleLineText()),
+        nil
       )
     }
     
-    let availableWidth: CGFloat = getAvailableWidth(tableWidth: width)
+    // Total available before taking into account photo/video size constraints as they can impact it for the text view.
+    // Eg. with a narrow image with 200 width, even if window gives us 500, we should cap at 200.
+    let parentAvailableWidth: CGFloat = getAvailableWidth(tableWidth: width)
     
-    let cacheKey = "\(message.id):\(text):\(props.toString()):\(availableWidth)" as NSString
-    if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue, let cachedTextSize = textHeightCache.object(forKey: cacheKey)?.sizeValue {
-      return (cachedSize, cachedTextSize)
+    // Need it here to cap text size
+    var photoSize: CGSize?
+    
+    // Add file/photo/video sizes
+    if hasMedia {
+      let maxMediaSize = CGSize(width: 360.0, height: 310.0) // prevent too big media
+      let minMediaSize = CGSize(width: 180.0, height: 20.0) // prevent too narrow media
+      // /start photo
+      if let file = message.file, file.fileType == .photo {
+        // do we have width/height?
+        if let width = file.width, let height = file.height, width > 0, height > 0 {
+          let aspectRatio = CGFloat(width) / CGFloat(height)
+          var mediaWidth: CGFloat
+          var mediaHeight: CGFloat
+//
+//          if width > height {
+//            // for landscape
+//            let maxAvailableWidth = min(maxMediaSize.width, parentAvailableWidth)
+//
+//            mediaWidth = max(
+//              minMediaSize.width,
+//              min(CGFloat(width), maxAvailableWidth)
+//            )
+//            mediaHeight = max(
+//              minMediaSize.height,
+//              min(mediaWidth / aspectRatio, maxMediaSize.height)
+//            )
+//          } else {
+//            // for portrait
+//            // allow it to use maximum amount of width, experiemntal
+//            let maxAvailableWidth = parentAvailableWidth
+//            mediaHeight = max(
+//              minMediaSize.height,
+//              min(CGFloat(height), maxMediaSize.height)
+//            )
+//            mediaWidth = max(
+//              minMediaSize.width,
+//              min(mediaHeight * aspectRatio, maxAvailableWidth)
+//            )
+//          }
+
+          // for landscape
+          let maxAvailableWidth = min(maxMediaSize.width, parentAvailableWidth)
+          
+          if width > height {
+            mediaWidth = max(
+              minMediaSize.width,
+              min(CGFloat(width), maxAvailableWidth)
+            )
+            mediaHeight = mediaWidth / aspectRatio
+            if mediaHeight > maxMediaSize.height {
+              mediaHeight = maxMediaSize.height
+              mediaWidth = mediaHeight * aspectRatio
+            }
+          } else {
+            // for portrait
+            mediaHeight = max(
+              minMediaSize.height,
+              min(CGFloat(height), maxMediaSize.height)
+            )
+            mediaWidth = mediaHeight * aspectRatio
+            if mediaWidth > maxAvailableWidth {
+              mediaWidth = maxAvailableWidth
+              mediaHeight = mediaWidth / aspectRatio
+            }
+          }
+          
+          photoSize = CGSize(width: mediaWidth, height: mediaHeight)
+        } else {
+          // use fallback width and height
+          photoSize = minMediaSize
+        }
+        // /end photo
+      } else {
+        // Unsupported
+      }
     }
+    
+    // What's the available width for the text
+    var availableWidth = min(parentAvailableWidth, photoSize?.width ?? parentAvailableWidth)
+    
+    if let photoSize = photoSize {
+      // if we have photo, min available width is the photo width
+      availableWidth = max(availableWidth, photoSize.width)
+    }
+    
+    // Experimental: So we get smooth bubble resize but less lag
+    // Make available width divisible by 4 to do one fourth of layouting per text
+    availableWidth = floor(availableWidth / 3) * 3
+    
+    // In bubble mode, we need to take into account the padding for text sizing so
+    // media can stick to sides while text repsects the paddings.
+    if Theme.messageIsBubble {
+      availableWidth -= 2 * Theme.messageBubblePadding.width
+    }
+    
     log.trace("availableWidth \(availableWidth) for text \(text)")
     var textSize: CGSize?
+    
+    let cacheKey = "\(message.id):\(props.toString()):\(availableWidth)" as NSString
+    if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue, let cachedTextSize = textHeightCache.object(forKey: cacheKey)?.sizeValue {
+      if hasMedia {
+        // Just use the text size if we have media
+        textSize = cachedTextSize
+      } else {
+        return (cachedSize, cachedTextSize, nil)
+      }
+    }
+    
+    // MARK: Calculate text size
+
     var cachHitForSingleLine = false
-    if let minSize = minWidthForSingleLine.object(forKey: text as NSString) as? CGSize, minSize.width < availableWidth {
+    if textSize == nil,
+       let minSize = minWidthForSingleLine.object(forKey: text as NSString) as? CGSize, minSize.width < availableWidth
+    {
       log.trace("single line minWidth \(minSize.width) is less than viewport \(width)")
       cachHitForSingleLine = true
       textSize = CGSize(width: minSize.width, height: heightForSingleLineText())
@@ -103,24 +219,37 @@ class MessageSizeCalculator {
       minWidthForSingleLine.setObject(NSValue(size: CGSize(width: textWidth, height: textHeight)), forKey: text as NSString)
     }
     
+    // MARK: Add other UI element heights to the text
+
     // don't let it be smaller than that
     var totalHeight = max(textHeight, heightForSingleLineText())
+    
+    // Inter message spacing (between two bubbles vertically)
+    totalHeight += Theme.messageOuterVerticalPadding * 2
     
     if props.firstInGroup {
       totalHeight += Theme.messageNameLabelHeight
       totalHeight += Theme.messageVerticalStackSpacing
       totalHeight += Theme.messageGroupSpacing
     }
-//    if props.isLastMessage == true {
-//      totalHeight += Theme.messageListBottomInset
-//    }
-//    if props.isFirstMessage == true {
-//      totalHeight += Theme.messageListTopInset
-//    }
+    
+    // Add file/photo/video sizes
+    if hasMedia {
+      if let photoSize = photoSize {
+        totalHeight += photoSize.height
+      }
+    }
+
     if Theme.messageIsBubble {
       totalHeight += Theme.messageBubblePadding.height * 2
     }
-    totalHeight += Theme.messageVerticalPadding * 2
+    
+    var totalWidth = textWidth
+    
+    // Add back the padding
+    if Theme.messageIsBubble {
+      totalWidth += Theme.messageBubblePadding.width * 2
+    }
     
     // Fitting width
     let size = NSSize(width: textWidth, height: totalHeight)
@@ -129,7 +258,7 @@ class MessageSizeCalculator {
     textHeightCache.setObject(NSValue(size: textSizeCeiled), forKey: cacheKey)
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
   
-    return (size, textSizeCeiled)
+    return (size, textSizeCeiled, photoSize)
   }
   
   func cachedSize(messageStableId: Int64) -> CGSize? {

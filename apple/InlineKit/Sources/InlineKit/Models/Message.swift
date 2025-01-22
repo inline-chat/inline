@@ -13,6 +13,8 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var editDate: Int?
   public var date: Int
   public var repliedToMessageId: Int64?
+
+  public var photo: [ApiPhoto]?
 }
 
 public enum MessageSendingStatus: Int64, Codable, DatabaseValueConvertible, Sendable {
@@ -88,6 +90,12 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.chat)
   }
 
+  public var fileId: String?
+  public static let file = belongsTo(File.self)
+  public var file: QueryInterfaceRequest<File> {
+    request(for: Message.file)
+  }
+
   public static let from = belongsTo(User.self, using: ForeignKey(["fromId"], to: ["id"]))
   public var from: QueryInterfaceRequest<User> {
     request(for: Message.from)
@@ -121,7 +129,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     pinned: Bool? = nil,
     editDate: Date? = nil,
     status: MessageSendingStatus? = nil,
-    repliedToMessageId: Int64? = nil
+    repliedToMessageId: Int64? = nil,
+    fileId: String? = nil
   ) {
     self.messageId = messageId
     self.randomId = randomId
@@ -137,6 +146,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.pinned = pinned
     self.status = status
     self.repliedToMessageId = repliedToMessageId
+    self.fileId = fileId
+
     if peerUserId == nil && peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
@@ -194,13 +205,14 @@ public extension Message {
           .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
       {
         self.globalId = existing.globalId
+        self.fileId = existing.fileId // ... find a way for making this better
         isExisting = true
       }
     } else {
       isExisting = true
     }
 
-    try self.save(db, onConflict: .replace)
+    try self.save(db, onConflict: .ignore)
 
     if publishChanges {
       // Publish changes when save is successful

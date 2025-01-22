@@ -28,8 +28,8 @@ enum Theme {
 
   // MARK: - Message View
 
+  static let messageOuterVerticalPadding: CGFloat = 2.0 // gap between consequetive bubbles
   static let messageSidePadding: CGFloat = 14
-  static let messageVerticalPadding: CGFloat = 1.0
   static let messageAvatarSize: CGFloat = 28
 //  Space between avatar and content
   static let messageHorizontalStackSpacing: CGFloat = 8
@@ -40,7 +40,8 @@ enum Theme {
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
   static let messageBubbleRadius: CGFloat =  15.0
-  static let messageBubblePadding: CGSize = .init(width: 12.0, height: 7.0)
+//  static let messageBubblePadding: CGSize = .init(width: 12.0, height: 7.0)
+  static let messageBubblePadding: CGSize = .init(width: 12.0, height: 5.0)
   static var messageIsBubble: Bool {
     AppSettings.shared.messageStyle == .bubble
   }
@@ -67,6 +68,8 @@ enum Theme {
 
   // MARK: - Chat View
 
+  
+  static let chatViewMinWidth: CGFloat = 315 // going below this makes media calcs mess up
   static let messageGroupSpacing: CGFloat = 8
   static let messageListTopInset: CGFloat = 14
   static let messageListBottomInset: CGFloat = 10
