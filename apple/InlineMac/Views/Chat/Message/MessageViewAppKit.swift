@@ -3,6 +3,8 @@ import AppKit
 import Foundation
 import InlineKit
 import InlineUI
+import Nuke
+import NukeUI
 import SwiftUI
 import Throttler
 
@@ -30,10 +32,17 @@ class MessageViewAppKit: NSView {
 
   private var textWidth: CGFloat {
     if hasBubble {
-      max(Theme.messageBubbleMinWidth, props.textWidth ?? 100.0)
+      max(Theme.messageBubbleMinWidth, props.textWidth ?? Theme.messageBubbleMinWidth)
     } else {
       props.textWidth ?? 100.0
     }
+  }
+
+  // When we have photo, shorter text shouldn't shrink content view
+  private var contentWidth: CGFloat {
+    props.photoWidth ?? (
+      hasBubble ? textWidth + Theme.messageBubblePadding.width * 2 : textWidth
+    )
   }
 
   private var bubbleColor: NSColor {
@@ -99,6 +108,28 @@ class MessageViewAppKit: NSView {
     return label
   }()
 
+  private lazy var contentView: NSStackView = {
+    let view = NSStackView()
+    view.spacing = 0.0 // don't use this, use spacer views
+    view.orientation = .vertical
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.alignment = .leading
+    view.distribution = .fill
+    return view
+  }()
+
+  private lazy var underTextSpacer: NSView = {
+    let spacerView = NSView()
+    spacerView.translatesAutoresizingMaskIntoConstraints = false
+    return spacerView
+  }()
+
+  private lazy var aboveTextSpacer: NSView = {
+    let spacerView = NSView()
+    spacerView.translatesAutoresizingMaskIntoConstraints = false
+    return spacerView
+  }()
+
   private lazy var timeAndStateView: MessageTimeAndState = {
     let view = MessageTimeAndState(fullMessage: fullMessage)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -107,6 +138,54 @@ class MessageViewAppKit: NSView {
     view.layer?.opacity = 0
     return view
   }()
+
+  private var imageView: PhotoLazyImageView?
+
+  private func setupImageView() {
+    guard let file = fullMessage.file else { return }
+    let url = if let tempUrl = file.temporaryUrl {
+      URL(string: tempUrl)
+    } else {
+      file.getLocalURL()
+    }
+
+    guard let url = url else { return }
+
+    print("rendering Nuke url \(url)")
+    let imageView = PhotoLazyImageView()
+    imageView.url = url
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    imageView.onStart = { _ in
+      print("onStart")
+    }
+    imageView.onFailure = { error in
+      print("onFailure \(error)")
+    }
+    imageView.onSuccess = { _ in
+      print("onSuccess")
+    }
+    imageView.wantsLayer = true
+    imageView.layer?.drawsAsynchronously = true
+    imageView.layerContentsRedrawPolicy = .onSetNeedsDisplay
+
+    self.imageView = imageView
+
+    // Set corners based on bubble state
+    if hasBubble {
+      imageView.setCorners([
+        .radius(4.0, for: .topLeft),
+        .radius(4.0, for: .topRight),
+        .radius(Theme.messageBubbleRadius, for: .bottomLeft),
+        .radius(Theme.messageBubbleRadius, for: .bottomRight)
+      ])
+    } else {
+      imageView.setCorners(
+        ViewCorner.allCases.map { .radius(4.0, for: $0) }
+      )
+    }
+
+    addSubview(imageView)
+  }
 
   private var useTextKit2: Bool = true
 
@@ -246,6 +325,16 @@ class MessageViewAppKit: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  // MARK: - Lifecycle
+
+  override func layout() {
+    super.layout()
+  }
+
+  override func updateConstraints() {
+    super.updateConstraints()
+  }
+
   // MARK: - Setup
 
   deinit {
@@ -259,6 +348,7 @@ class MessageViewAppKit: NSView {
     // For performance of animations
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
+    layer?.drawsAsynchronously = true
 
     addSubview(timeAndStateView)
 
@@ -286,7 +376,20 @@ class MessageViewAppKit: NSView {
       }
     }
 
-    addSubview(textView)
+    addSubview(contentView)
+
+    setupImageView()
+
+    // addSubview(textView)
+
+    // TODO: if has text
+    contentView.addArrangedSubview(aboveTextSpacer)
+    contentView.addArrangedSubview(textView)
+    contentView.addArrangedSubview(underTextSpacer)
+
+    if let imageView = imageView {
+      contentView.addArrangedSubview(imageView)
+    }
 
     setupMessageText()
     setupConstraints()
@@ -295,12 +398,14 @@ class MessageViewAppKit: NSView {
 
   private var textViewWidthConstraint: NSLayoutConstraint!
   private var textViewHeightConstraint: NSLayoutConstraint!
+  private var photoViewHeightConstraint: NSLayoutConstraint!
+  private var contentViewWidthConstraint: NSLayoutConstraint!
 
   private func setupConstraints() {
-    var topPadding = Theme.messageVerticalPadding
+    var topPadding = 0.0
     let nameAndContentGap = Theme.messageVerticalStackSpacing
     let bgPadding = 0.0
-    let bubblePadding = Theme.messageBubblePadding
+    let bubblePadding = hasBubble ? Theme.messageBubblePadding : CGSize(width: 0.0, height: 0.0)
     let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
     let sidePadding = Theme.messageSidePadding - bgPadding
@@ -332,50 +437,120 @@ class MessageViewAppKit: NSView {
       ])
     }
 
-    let textViewSideConstraint =
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + bubblePaddingHorizontal)
+    // MARK: - Content Layout Constraints
 
-    textViewWidthConstraint = textView.widthAnchor.constraint(equalToConstant: textWidth)
+    let contentViewBubbleInset = hasBubble ? 1.0 : .zero // just a 1px border
+    contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: contentWidth)
     textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
 
-    NSLayoutConstraint.activate(
-      [
-        // Text view
-        textView.topAnchor.constraint(
-          equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
-          constant: showsName ? nameAndContentGap + bubblePaddingVertical : topPadding + bubblePaddingVertical
-        ),
-        textViewWidthConstraint,
-        textViewHeightConstraint,
-        textViewSideConstraint
-      ]
-    )
+    let hasPhoto = props.photoHeight != nil
+
+//    contentView.edgeInsets = NSEdgeInsets(
+//      // for messages with text, we need bubble padding from top here. can't add it anywhere
+//      top: bubblePadding.height,
+//      left: 0,
+//      bottom: hasPhoto ? 0 : bubblePadding.height, // bottom edge touches bubble if has photo
+//      right: 0
+//    )
+
+    /// let's not set a height for content stack view and have it use the height from text + photo + gap itself, hmm?
+    /// also i won't add width on text view as it must be enforced at content view level at this point. let's try.
+    NSLayoutConstraint.activate([
+      // Content view
+      contentViewWidthConstraint,
+      contentView
+        .leadingAnchor.constraint(equalTo: leadingAnchor,
+                                  constant: contentLeading),
+      contentView.topAnchor.constraint(
+        equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
+        constant: showsName ? nameAndContentGap : topPadding
+      ),
+
+      // Text view
+      textViewHeightConstraint,
+      // Text view bubble paddings
+      aboveTextSpacer.heightAnchor.constraint(equalToConstant: bubblePadding.height),
+      textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: bubblePadding.width),
+      textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -bubblePadding.width),
+      underTextSpacer.heightAnchor.constraint(equalToConstant: bubblePadding.height)
+    ])
+
+    if let photoView = imageView, let photoHeight = props.photoHeight {
+      photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photoHeight)
+      NSLayoutConstraint.activate(
+        [
+          photoViewHeightConstraint
+        ]
+      )
+    }
 
     if hasBubble {
       NSLayoutConstraint.activate(
         [
           // Bubble view
-          bubbleView.topAnchor.constraint(equalTo: textView.topAnchor, constant: -bubblePadding.height),
-          bubbleView.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: -bubblePadding.width),
-          bubbleView.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: bubblePadding.width),
-          bubbleView.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: bubblePadding.height),
-
-          // Uncomment if you want to show time and state on the right side of the bubble
-//          // Time and state view
-//          timeAndStateView.leadingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: 12),
-//          timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height - Theme.messageVerticalPadding)
+          bubbleView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: -contentViewBubbleInset),
+          bubbleView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: -contentViewBubbleInset),
+          bubbleView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: contentViewBubbleInset),
+          bubbleView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: contentViewBubbleInset)
         ]
       )
     }
-    
+
+    // OLD WAY WITHOUT STACK VIEW
+    // OLD WAY WITHOUT STACK VIEW
+    // OLD WAY WITHOUT STACK VIEW
+    // OLD WAY WITHOUT STACK VIEW
+    // OLD WAY WITHOUT STACK VIEW
+    // OLD WAY WITHOUT STACK VIEW
+
+//    let textViewSideConstraint =
+//      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + bubblePaddingHorizontal)
+//    textViewWidthConstraint = textView.widthAnchor.constraint(equalToConstant: textWidth)
+//    textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
+//
+//    NSLayoutConstraint.activate(
+//      [
+//        // Text view
+//        textView.topAnchor.constraint(
+//          equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
+//          constant: showsName ? nameAndContentGap + bubblePaddingVertical : topPadding + bubblePaddingVertical
+//        ),
+//        textViewWidthConstraint,
+//        textViewHeightConstraint,
+//        textViewSideConstraint
+//      ]
+//    )
+
+//    if let imageView = imageView {
+//      NSLayoutConstraint.activate(
+//        [
+//          imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading),
+//          imageView.topAnchor.constraint(equalTo: topAnchor),
+//          imageView.widthAnchor.constraint(equalToConstant: 100),
+//          imageView.heightAnchor.constraint(equalToConstant: 100)
+//        ]
+//      )
+//    }
+
+//    if hasBubble {
+//      NSLayoutConstraint.activate(
+//        [
+//          // Bubble view
+//          bubbleView.topAnchor.constraint(equalTo: textView.topAnchor, constant: -bubblePadding.height),
+//          bubbleView.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: -bubblePadding.width),
+//          bubbleView.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: bubblePadding.width),
+//          bubbleView.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: bubblePadding.height)
+//        ]
+//      )
+//    }
+
     NSLayoutConstraint.activate(
       [
         // Time and state view
         timeAndStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding),
-        timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height - Theme.messageVerticalPadding)
+        timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height)
       ]
     )
-
   }
 
   private func setupMessageText() {
@@ -471,14 +646,61 @@ class MessageViewAppKit: NSView {
 
   // MARK: - View Updates
 
+  private func updatePropsAndUpdateLayout(props: MessageViewProps) {
+    // save for comparison
+    let prevProps = self.props
+
+    // update internal props (must update so contentView is recalced)
+    self.props = props
+
+    // less granular
+    // guard props != self.props else { return }
+
+    let hasTextSizeChanged =
+      prevProps.textWidth != props.textWidth ||
+      prevProps.textHeight != props.textHeight
+    let hasPhotoSizeChanged =
+      prevProps.photoWidth != props.photoWidth ||
+      prevProps.photoHeight != props.photoHeight
+
+    // only proceed if text size or photo size has changed
+    // Fun fact: I wasted too much time on || being &&
+    guard hasTextSizeChanged || hasPhotoSizeChanged
+    else { return }
+
+    // # Update sizes
+    // Content view
+    contentViewWidthConstraint.constant = contentWidth
+
+    // Text size
+    if hasTextSizeChanged {
+      textViewHeightConstraint.constant = props.textHeight ?? 0
+
+      // This helps refresh the layout for textView
+      textView.textContainer?.containerSize = CGSize(width: textWidth, height: props.textHeight ?? 0)
+
+      if useTextKit2 {
+        textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        textView.layout()
+        textView.display()
+      }
+    }
+
+    // photo size
+    if hasPhotoSizeChanged,
+       let photoViewHeightConstraint = photoViewHeightConstraint,
+       let photoHeight = props.photoHeight
+    {
+      photoViewHeightConstraint.constant = photoHeight
+    }
+  }
+
   public func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps) {
     // update internal props
-    self.props = props
     self.fullMessage = fullMessage
 
-    // reflect changes
-    textViewWidthConstraint.constant = textWidth
-    textViewHeightConstraint.constant = props.textHeight ?? 0
+    // update props and reflect changes
+    updatePropsAndUpdateLayout(props: props)
 
     setupMessageText()
 
@@ -490,25 +712,8 @@ class MessageViewAppKit: NSView {
   }
 
   public func updateSize(props: MessageViewProps) {
-    // check if size changed
-    // wasted too much time on || being &&
-    guard props.textWidth != self.props.textWidth || props.textHeight != self.props.textHeight else { return }
-
-    // update internal props
-    self.props = props
-
-    // reflect changes
-    textViewWidthConstraint.constant = textWidth
-    textViewHeightConstraint.constant = props.textHeight ?? 0
-
-    // This helps refresh the layout
-    textView.textContainer?.containerSize = CGSize(width: textWidth, height: props.textHeight ?? 0)
-
-    if useTextKit2 {
-      textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
-      textView.layout()
-      textView.display()
-    }
+    // update props and reflect changes
+    updatePropsAndUpdateLayout(props: props)
   }
 
   private func setTimeAndStateVisibility(visible: Bool) {
@@ -556,7 +761,6 @@ extension MessageViewAppKit {
       // Re-enable hover state if needed
       // TODO: How can I check if mouse is inside the view?
       addHoverTrackingArea()
-      break
     }
   }
 
@@ -617,6 +821,9 @@ struct MessageViewProps: Equatable, Codable, Hashable {
 
   var textWidth: CGFloat?
   var textHeight: CGFloat?
+
+  var photoWidth: CGFloat?
+  var photoHeight: CGFloat?
 
   /// Used in cache key
   func toString() -> String {
