@@ -27,13 +27,6 @@ struct MainView: View {
 
   // MARK: - State
 
-  enum Tab: Int {
-    case chats
-    case spaces
-  }
-
-  @AppStorage("mainViewSelectedTab") private var selectedTab = Tab.chats
-
   @State private var text = ""
   @State private var searchResults: [User] = []
   @State private var isSearching = false
@@ -64,12 +57,41 @@ struct MainView: View {
       if !searchResults.isEmpty {
         searchResultsView
       } else {
-        switch selectedTab {
-        case .chats:
-          chatsTab
-        case .spaces:
-          spacesTab
+        List(home.chats.sorted { chat1, chat2 in
+          let pinned1 = chat1.dialog.pinned ?? false
+          let pinned2 = chat2.dialog.pinned ?? false
+          if pinned1 != pinned2 { return pinned1 }
+          return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date ?? chat2.chat?.date
+            ?? Date()
+        }) {
+          chat in
+          Button {
+            nav.push(.chat(peer: .user(id: chat.user.id)))
+          } label: {
+            ChatRowView(item: .home(chat))
+          }
+          .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button {
+              Task {
+                try await dataManager.updateDialog(
+                  peerId: .user(id: chat.user.id),
+                  pinned: !(chat.dialog.pinned ?? false)
+                )
+              }
+            } label: {
+              Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+            }
+            .tint(.indigo)
+
+            Button(role: .destructive) {
+              // Implement archive action
+            } label: {
+              Image(systemName: "archivebox.fill")
+            }
+          }
+          .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : Color.clear)
         }
+        .listStyle(.plain)
       }
     }
     .background(Color(.systemBackground))
@@ -93,62 +115,6 @@ struct MainView: View {
   }
 
   // MARK: - Content Views
-
-  @ViewBuilder
-  var spacesTab: some View {
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 26) {
-        tabbar
-        ForEach(spaceList.spaceItems) { space in
-          Button {
-            nav.push(.space(id: space.space.id))
-          } label: {
-            SpaceRowView(spaceItem: space)
-          }
-        }
-      }
-      .padding(.horizontal, 16)
-    }
-  }
-
-  @ViewBuilder
-  var chatsTab: some View {
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 26) {
-        tabbar
-        ForEach(
-          home.chats.sorted { chat1, chat2 in
-            let pinned1 = chat1.dialog.pinned ?? false
-            let pinned2 = chat2.dialog.pinned ?? false
-            if pinned1 != pinned2 { return pinned1 }
-            return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date ?? chat2
-              .chat?.date ?? Date()
-          }
-        ) { chat in
-          Button {
-            nav.push(.chat(peer: .user(id: chat.user.id)))
-          } label: {
-            ChatRowView(item: .home(chat))
-          }
-          .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button {
-              Task {
-                try await dataManager.updateDialog(
-                  peerId: .user(id: chat.user.id),
-                  pinned: !(chat.dialog.pinned ?? false)
-                )
-              }
-            } label: {
-              Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-            }
-          }
-          .tint(.indigo)
-        }
-      }
-      .padding(.horizontal, 16)
-    }
-    .animation(.default, value: home.chats)
-  }
 
   @ViewBuilder
   var searchResultsView: some View {
@@ -215,44 +181,6 @@ struct MainView: View {
         Log.shared.error("Failed to create chat", error: error)
       }
     }
-  }
-
-  @ViewBuilder
-  var tabbar: some View {
-    HStack {
-      Button {
-        withAnimation {
-          selectedTab = .chats
-        }
-      } label: {
-        ZStack {
-          Capsule()
-            .fill(selectedTab == .chats ? ColorManager.shared.swiftUIColor.opacity(0.1) : Color.gray.opacity(0.1))
-            .frame(height: 36)
-          Text("Chats")
-            .font(.callout)
-            .foregroundColor(selectedTab == .chats ? ColorManager.shared.swiftUIColor : .secondary)
-            .padding(.horizontal, 12)
-        }
-      }
-
-      Button {
-        withAnimation {
-          selectedTab = .spaces
-        }
-      } label: {
-        ZStack {
-          Capsule()
-            .fill(selectedTab == .spaces ? ColorManager.shared.swiftUIColor.opacity(0.1) : Color.gray.opacity(0.1))
-            .frame(height: 36)
-          Text("Spaces")
-            .font(.callout)
-            .foregroundColor(selectedTab == .spaces ? ColorManager.shared.swiftUIColor : .secondary)
-            .padding(.horizontal, 12)
-        }
-      }
-    }
-    .fixedSize()
   }
 
   var toolbarContent: some ToolbarContent {
