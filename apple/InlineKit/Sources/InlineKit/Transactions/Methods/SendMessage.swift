@@ -54,24 +54,26 @@ public struct TransactionSendMessage: Transaction {
   var chatId: Int64
   var attachments: [SendMessageAttachment]
   
+  var replyToMessageId: Int64? = nil
+
   // Config
   public var id = UUID().uuidString
   var config = TransactionConfig.default
   var date = Date()
-  
+
   // State
   var randomId: Int64
   var peerUserId: Int64? = nil
   var peerThreadId: Int64? = nil
   var temporaryMessageId: Int64
-  
-  public init(text: String?, peerId: Peer, chatId: Int64, attachments: [SendMessageAttachment] = []) {
+
+  public init(text: String?, peerId: Peer, chatId: Int64,  attachments: [SendMessageAttachment] = [], replyToMessageId: Int64? = nil) {
     self.text = text
     self.peerId = peerId
     self.chatId = chatId
-    self.attachments = attachments
-    
-    randomId = Int64.random(in: Int64.min ... Int64.max)
+self.attachments = attachments
+    self.replyToMessageId = replyToMessageId
+    randomId = Int64.random(in: Int64.min...Int64.max)
     peerUserId = if case .user(let id) = peerId { id } else { nil }
     peerThreadId = if case .thread(let id) = peerId { id } else { nil }
     temporaryMessageId = randomId
@@ -81,7 +83,7 @@ public struct TransactionSendMessage: Transaction {
       // TODO: handle multi-attachments
     }
   }
-  
+
   // Methods
   func optimistic() {
     let fileId = attachments.first?.id
@@ -97,8 +99,9 @@ public struct TransactionSendMessage: Transaction {
       out: true,
       status: .sending,
       fileId: fileId
+      repliedToMessageId: replyToMessageId
     )
-    
+
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
     Task { @MainActor in
       let newMessage = try? (await AppDatabase.shared.dbWriter.write { db in
@@ -119,9 +122,9 @@ public struct TransactionSendMessage: Transaction {
       if let message = newMessage {
         await MessagesPublisher.shared.messageAdded(message: message, peer: peerId)
       }
-    } //
+    }  //
   }
-  
+
   func execute() async throws -> SendMessage {
     var fileUniqueId: String? = nil
     
@@ -134,7 +137,8 @@ public struct TransactionSendMessage: Transaction {
       peerThreadId: peerThreadId,
       text: text,
       randomId: randomId,
-      repliedToMessageId: nil,
+
+      repliedToMessageId: replyToMessageId,
       date: date.timeIntervalSince1970,
       fileUniqueId: fileUniqueId
     )
@@ -154,12 +158,12 @@ public struct TransactionSendMessage: Transaction {
       Log.shared.error("No updates in send message response")
     }
   }
-  
+
   func didFail(error: Error?) async {
     Log.shared.error("Failed to send message", error: error)
-    
+
     // Mark as failed
-    
+
     let _ = try? await AppDatabase.shared.dbWriter.write { db in
       try Message
         .filter(Column("randomId") == randomId && Column("fromId") == Auth.shared.getCurrentUserId()!)
@@ -169,7 +173,7 @@ public struct TransactionSendMessage: Transaction {
         )
     }
   }
-  
+
   func rollback() async {
     // Remove from database
     let _ = try? await AppDatabase.shared.dbWriter.write { db in
@@ -178,7 +182,7 @@ public struct TransactionSendMessage: Transaction {
         .filter(Column("messageId") == temporaryMessageId)
         .deleteAll(db)
     }
-    
+
     // Remove from cache
     await MessagesPublisher.shared
       .messagesDeleted(messageIds: [temporaryMessageId], peer: peerId)

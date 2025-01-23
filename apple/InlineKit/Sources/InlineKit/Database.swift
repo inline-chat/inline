@@ -329,11 +329,12 @@ public extension AppDatabase {
         appropriateFor: nil, create: false)
 
       let directory =
-        if let userProfile = ProjectConfig.userProfile {
-          "Database_\(userProfile)"
-        } else {
-          "Database"
-        }
+        if let userProfile = ProjectConfig.userProfile
+      {
+        "Database_\(userProfile)"
+      } else {
+        "Database"
+      }
 
       let directoryURL = appSupportURL.appendingPathComponent(directory, isDirectory: true)
       try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)

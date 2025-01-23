@@ -51,11 +51,11 @@ class ColorManager {
   var selectedColor: UIColor {
     get {
       if let colorData = defaults.data(forKey: colorKey),
-         let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData)
+        let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData)
       {
         return color
       }
-      return .systemBlue // Default color
+      return .systemBlue  // Default color
     }
     set {
       if let colorData = try? NSKeyedArchiver.archivedData(

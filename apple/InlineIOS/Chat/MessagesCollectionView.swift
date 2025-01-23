@@ -44,7 +44,7 @@ class MessagesCollectionView: UICollectionView {
     keyboardDismissMode = .interactive
 
     coordinator.setupDataSource(self)
-    setupKeyboardObservers()
+    setupObservers()
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(orientationDidChange),
@@ -58,11 +58,13 @@ class MessagesCollectionView: UICollectionView {
   }
 
   private var composeHeight: CGFloat = ComposeView.minHeight
+  private var composeEmbedViewHeight: CGFloat = ChatContainerView.embedViewHeight
+
   public func updateComposeInset(composeHeight: CGFloat) {
     self.composeHeight = composeHeight
     UIView.animate(withDuration: 0.2) {
       self.updateContentInsets()
-      if !self.itemsEmpty {
+      if !self.itemsEmpty && self.shouldScrollToBottom {
         self.scrollToItem(
           at: IndexPath(item: 0, section: 0),
           at: .top,
@@ -73,9 +75,15 @@ class MessagesCollectionView: UICollectionView {
   }
 
   func updateContentInsets() {
-    guard !UIMessageView.contextMenuOpen else { return }
+    guard !UIMessageView.contextMenuOpen else {
+      Log.shared.debug("Blocked by contextMenuOpen")
+      return
+    }
+    guard let window = window else {
+      Log.shared.debug("Blocked by missing window")
+      return
+    }
 
-    guard let window = window else { return }
     let topContentPadding: CGFloat = 10
     let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
     let isLandscape = UIDevice.current.orientation.isLandscape
@@ -85,9 +93,14 @@ class MessagesCollectionView: UICollectionView {
     let messagesBottomPadding = 12.0
     var bottomInset: CGFloat = 0.0
 
+    let hasReply = ChatState.shared.getState(peer: peerId).replyingMessageId != nil
+
     bottomInset += composeHeight + (ComposeView.textViewVerticalMargin * 2)
     bottomInset += messagesBottomPadding
 
+    if hasReply {
+      bottomInset += composeEmbedViewHeight
+    }
     if isKeyboardVisible {
       bottomInset += keyboardHeight
     } else {
@@ -134,7 +147,13 @@ class MessagesCollectionView: UICollectionView {
     return nil
   }
 
-  private func setupKeyboardObservers() {
+  private func setupObservers() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(replyStateChanged),
+      name: .init("ChatStateDidChange"),
+      object: nil
+    )
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(keyboardWillShow),
@@ -191,6 +210,13 @@ class MessagesCollectionView: UICollectionView {
           animated: true
         )
       }
+    }
+  }
+
+  @objc private func replyStateChanged(_ notification: Notification) {
+    DispatchQueue.main.async {
+      self.updateContentInsets()
+      // TODO: Check if a hardware keyboard is attached; scroll to the bottom.
     }
   }
 
@@ -417,14 +443,17 @@ private extension MessagesCollectionView {
     func updateItems() {
       let currentSnapshot = dataSource.snapshot()
       let currentIds = Set(currentSnapshot.itemIdentifiers)
-
       let availableIds = Set(messages.map { $0.id })
-
       let missingIds = availableIds.subtracting(currentIds)
 
       if !missingIds.isEmpty {
-        var snapshot = currentSnapshot
-        snapshot.appendItems(Array(missingIds), toSection: .main)
+        var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
+        snapshot.appendSections([.main])
+
+        let orderedIds = messages.map { $0.id }
+
+        snapshot.appendItems(orderedIds, toSection: .main)
+
         dataSource.apply(snapshot, animatingDifferences: true)
       }
     }
