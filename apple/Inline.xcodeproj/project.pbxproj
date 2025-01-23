@@ -35,8 +35,8 @@
 		C3AA8E4E2CB942BF00800A03 /* InlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineKit; sourceTree = "<group>"; };
 		C3CC99172CCE9A7E007F7F77 /* InlineUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineUI; sourceTree = "<group>"; };
 		CD2661652CA01E3E00EB186F /* Inline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inline.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		CD5326842CE113CD00EC348D /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
-		CD5326862CE1149700EC348D /* Config.release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.release.xcconfig; sourceTree = "<group>"; };
+		CD5326842CE113CD00EC348D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -130,8 +130,8 @@
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
 				C31675032CAC167D009A1FD8 /* Frameworks */,
 				CD2661052CA01CAE00EB186F /* Products */,
-				CD5326842CE113CD00EC348D /* Config.xcconfig */,
-				CD5326862CE1149700EC348D /* Config.release.xcconfig */,
+				CD5326842CE113CD00EC348D /* Debug.xcconfig */,
+				CD5326862CE1149700EC348D /* Release.xcconfig */,
 			);
 			sourceTree = "<group>";
 		};
@@ -312,7 +312,7 @@
 /* Begin XCBuildConfiguration section */
 		C38A28582CA5AB9200D3DFB8 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = CD5326842CE113CD00EC348D /* Config.xcconfig */;
+			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -350,7 +350,7 @@
 		};
 		C38A28592CA5AB9200D3DFB8 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = CD5326862CE1149700EC348D /* Config.release.xcconfig */;
+			baseConfigurationReference = CD5326862CE1149700EC348D /* Release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -505,7 +505,7 @@
 		};
 		CD2661882CA01E4000EB186F /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = CD5326842CE113CD00EC348D /* Config.xcconfig */;
+			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -539,7 +539,7 @@
 		};
 		CD2661892CA01E4000EB186F /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = CD5326862CE1149700EC348D /* Config.release.xcconfig */;
+			baseConfigurationReference = CD5326862CE1149700EC348D /* Release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -635,7 +635,7 @@
 		};
 		CDE960FA2CE9052F00007797 /* Debug #2 */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = CD5326842CE113CD00EC348D /* Config.xcconfig */;
+			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -669,7 +669,7 @@
 		};
 		CDE960FD2CE9052F00007797 /* Debug #2 */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = CD5326842CE113CD00EC348D /* Config.xcconfig */;
+			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
