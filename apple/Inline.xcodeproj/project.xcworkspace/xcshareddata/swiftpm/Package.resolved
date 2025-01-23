@@ -1,5 +1,5 @@
 {
-  "originHash" : "b7f814b704130275e4472f7b912dc0ce07e09133adbd1902dd159fb6bc1d7542",
+  "originHash" : "c4f5f92a9c079fda92c0bd8bf18868c2bfb7a1593a17d6a023448fc7219201e0",
   "pins" : [
     {
       "identity" : "contextmenuauxiliarypreview",
@@ -31,7 +31,7 @@
     {
       "identity" : "grdb.swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/inline-chat/GRDB.swift",
+      "location" : "https://github.com/inlinehq/GRDB.swift",
       "state" : {
         "revision" : "a12353533a361854e3ba63b6cda7349cecfbb82c",
         "version" : "3.0.8"
@@ -40,7 +40,7 @@
     {
       "identity" : "grdbquery",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/inline-chat/GRDBQuery",
+      "location" : "https://github.com/inlinehq/GRDBQuery",
       "state" : {
         "revision" : "04809d6774e246c9d3b05670c23ea018f152e5b2",
         "version" : "0.10.2"
@@ -53,15 +53,6 @@
       "state" : {
         "revision" : "5e1b02b6a9dac2a759a1d5dbc175c86bd192a608",
         "version" : "24.0.0"
-      }
-    },
-    {
-      "identity" : "nuke",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/kean/Nuke",
-      "state" : {
-        "revision" : "0ead44350d2737db384908569c012fe67c421e4d",
-        "version" : "12.8.0"
       }
     },
     {

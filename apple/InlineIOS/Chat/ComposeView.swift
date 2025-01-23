@@ -167,15 +167,18 @@ class ComposeView: UIView {
 
     let messageText = text
 
+    let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
     let canSend = !text.isEmpty
 
     if canSend {
       let _ = Transactions.shared.mutate(
         transaction:
         .sendMessage(
-          .init(text: text, peerId: peerId, chatId: chatId ?? 0)
+          .init(text: text, peerId: peerId, chatId: chatId ?? 0, replyToMessageId: replyToMessageId)
         )
       )
+
+      ChatState.shared.clearReplyingMessageId(peer: peerId)
       sendMessageHaptic()
       textView.text = ""
       resetHeight()
@@ -371,7 +374,8 @@ extension ComposeView: PHPickerViewControllerDelegate {
       }
 
       guard let image = object as? UIImage,
-            let peerId = self.peerId else { return }
+            let peerId = self.peerId
+      else { return }
 
       DispatchQueue.main.async {
         self.sendButton.configuration?.showsActivityIndicator = true

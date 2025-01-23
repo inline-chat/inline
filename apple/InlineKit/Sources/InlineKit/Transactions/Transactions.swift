@@ -86,10 +86,10 @@ public enum TransactionType: Codable {
 
   var id: String {
     return transaction.id
-//    switch self {
-//    case .sendMessage(let transaction):
-//      return transaction.id
-//    }
+    //    switch self {
+    //    case .sendMessage(let transaction):
+    //      return transaction.id
+    //    }
   }
 
   var transaction: any Transaction {
@@ -102,13 +102,13 @@ public enum TransactionType: Codable {
   }
 
   // Hmm
-//  var transaction: any Transaction {
-//    let mirror = Mirror(reflecting: self)
-//    guard let associated = mirror.children.first?.value as? any Transaction else {
-//      fatalError("Invalid state")
-//    }
-//    return associated
-//  }
+  //  var transaction: any Transaction {
+  //    let mirror = Mirror(reflecting: self)
+  //    guard let associated = mirror.children.first?.value as? any Transaction else {
+  //      fatalError("Invalid state")
+  //    }
+  //    return associated
+  //  }
 
   // MARK: - Codable Implementation
 
@@ -186,7 +186,7 @@ protocol Transaction: Codable, Sendable, Identifiable {
 
 extension Transaction {
   // TODO: Figure out a way to provide a default impl
-//  func didFail() async {
-//    await rollback()
-//  }
+  //  func didFail() async {
+  //    await rollback()
+  //  }
 }

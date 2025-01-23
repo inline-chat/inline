@@ -15,6 +15,7 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var repliedToMessageId: Int64?
 
   public var photo: [ApiPhoto]?
+  public var replyToMsgId: Int64?
 }
 
 public enum MessageSendingStatus: Int64, Codable, DatabaseValueConvertible, Sendable {
@@ -109,8 +110,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.repliedToMessage)
   }
 
-  public static let reactions = hasMany(Reaction.self,
-                                        using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"]))
+  public static let reactions = hasMany(
+    Reaction.self,
+    using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"]))
   public var reactions: QueryInterfaceRequest<Reaction> {
     request(for: Message.reactions)
   }
@@ -167,7 +169,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       pinned: from.pinned,
       editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) },
       status: from.out == true ? MessageSendingStatus.sent : nil,
-      repliedToMessageId: from.repliedToMessageId
+      repliedToMessageId: from.replyToMsgId
     )
   }
 
@@ -184,8 +186,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
 // MARK: Helpers
 
-public extension Message {
-  mutating func saveMessage(_ db: Database, onConflict: Database.ConflictResolution = .abort, publishChanges: Bool = false)
+extension Message {
+  public mutating func saveMessage(
+    _ db: Database, onConflict: Database.ConflictResolution = .abort, publishChanges: Bool = false
+  )
     throws
   {
     var isExisting = false
@@ -202,10 +206,10 @@ public extension Message {
 
       if let existing =
         try? Message
-          .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
+        .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
       {
         self.globalId = existing.globalId
-        self.fileId = existing.fileId // ... find a way for making this better
+        self.fileId = existing.fileId  // ... find a way for making this better
         isExisting = true
       }
     } else {
