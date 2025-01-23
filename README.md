@@ -46,13 +46,7 @@ We're currently two cofounders developing Inline full-time.
 
 ## How to run this yourself
 
-You can hack on Inline code by running it locally and connecting it to the production API.
-
-### Add xcconfig
-
-1. Copy `Config.xcconfig.template` to `Config.xcconfig`
-2. Edit `Config.xcconfig` and make sure `USE_PRODUCTION_API` is set to `YES`
-3. Run from Xcode
+You can hack on Inline macOS/iOS code (in `apple` directory) by running it locally and connecting it to the production API.
 
 ### Contributing
 
