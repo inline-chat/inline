@@ -58,13 +58,13 @@ final class ChatState: ObservableObject {
 
   private func loadPersistedState() {
     if let data = defaults.data(forKey: currentPeerKey),
-      let decoded = try? JSONDecoder().decode(Peer.self, from: data)
+       let decoded = try? JSONDecoder().decode(Peer.self, from: data)
     {
       currentPeer = decoded
     }
 
     if let data = defaults.data(forKey: statesKey),
-      let decoded = try? JSONDecoder().decode([Peer: State].self, from: data)
+       let decoded = try? JSONDecoder().decode([Peer: State].self, from: data)
     {
       states = decoded
     }

@@ -74,7 +74,7 @@ public class MessagesProgressiveViewModel {
     let cursor = direction == .older ? minDate : maxDate
     let limit = messages.count > 300 ? 400 : messages.count > 200 ? 300 : 100
     let prepend = direction == (reversed ? .newer : .older)
-//    log.debug("Loading next batch at \(direction) \(cursor)")
+    //    log.debug("Loading next batch at \(direction) \(cursor)")
     loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend)
   }
 
@@ -91,7 +91,7 @@ public class MessagesProgressiveViewModel {
   }
 
   private func applyChanges(update: MessagesPublisher.UpdateType) -> MessagesChangeSet? {
-//    log.trace("Applying changes: \(update)")
+    //    log.trace("Applying changes: \(update)")
     switch update {
     case .add(let messageAdd):
       if messageAdd.peer == peer {
@@ -143,7 +143,7 @@ public class MessagesProgressiveViewModel {
         }
 
         messages[index] = messageUpdate.message
-        updateRange() // ??
+        updateRange()  // ??
         return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index])
       }
 
@@ -200,7 +200,7 @@ public class MessagesProgressiveViewModel {
     minDate = lowestDate
     maxDate = highestDate
 
-//    log.trace("Updated range: \(lowestDate) - \(highestDate), (count: \(messages.count))")
+    //    log.trace("Updated range: \(lowestDate) - \(highestDate), (count: \(messages.count))")
   }
 
   private func refetchCurrentRange() {
@@ -228,20 +228,20 @@ public class MessagesProgressiveViewModel {
         case .preserveRange:
           query =
             query
-              .filter(Column("date") >= minDate)
-              .filter(Column("date") <= maxDate)
-              .limit(prevCount)
+            .filter(Column("date") >= minDate)
+            .filter(Column("date") <= maxDate)
+            .limit(prevCount)
         }
 
         return try query.fetchAll(db)
       }
 
-//      log.trace("loaded messages: \(messagesBatch.count)")
+      //      log.trace("loaded messages: \(messagesBatch.count)")
       if reversed {
         // it's actually already reversed bc of our .order above
         messages = messagesBatch
       } else {
-        messages = messagesBatch.reversed() // reverse it back
+        messages = messagesBatch.reversed()  // reverse it back
       }
 
       // Uncomment if we want to sort in SQL based on anything other than date
@@ -306,11 +306,11 @@ public class MessagesProgressiveViewModel {
     case .thread(let id):
       query =
         query
-          .filter(Column("peerThreadId") == id)
+        .filter(Column("peerThreadId") == id)
     case .user(let id):
       query =
         query
-          .filter(Column("peerUserId") == id)
+        .filter(Column("peerUserId") == id)
     }
     return query
   }
@@ -355,6 +355,10 @@ public final class MessagesPublisher {
         try FullMessage.queryRequest()
           .filter(Column("messageId") == message.messageId)
           .filter(Column("chatId") == message.chatId)
+          .including(optional: Message.from.forKey("from"))
+          .including(all: Message.reactions)
+          .including(optional: Message.repliedToMessage)
+          .asRequest(of: FullMessage.self)
           .fetchOne(db)
       }
       guard let fullMessage = fullMessage else {
@@ -372,18 +376,19 @@ public final class MessagesPublisher {
   }
 
   func messageUpdated(message: Message, peer: Peer) async {
-//    Log.shared.debug("Message updated: \(message)")
-//    Log.shared.debug("Message updated: \(message.messageId)")
+    //    Log.shared.debug("Message updated: \(message)")
+    //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? await db.reader.read { db in
       let query = FullMessage.queryRequest()
-      let base = if let messageGlobalId = message.globalId {
-        query
-          .filter(id: messageGlobalId)
-      } else {
-        query
-          .filter(Column("messageId") == message.messageId)
-          .filter(Column("chatId") == message.chatId)
-      }
+      let base =
+        if let messageGlobalId = message.globalId {
+          query
+            .filter(id: messageGlobalId)
+        } else {
+          query
+            .filter(Column("messageId") == message.messageId)
+            .filter(Column("chatId") == message.chatId)
+        }
 
       return try base.fetchOne(db)
     }

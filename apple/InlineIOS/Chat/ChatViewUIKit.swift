@@ -3,6 +3,8 @@ import SwiftUI
 import UIKit
 
 class ChatContainerView: UIView {
+  static var embedViewHeight: CGFloat = 60
+
   let peerId: Peer
   let chatId: Int64?
 
@@ -23,8 +25,18 @@ class ChatContainerView: UIView {
     return view
   }()
 
+  private lazy var composeEmbedHostingController: UIHostingController<ComposeEmbedViewSwiftUI> = {
+    let hostingController = UIHostingController(
+      rootView: ComposeEmbedViewSwiftUI(
+        peerId: peerId, chatId: chatId ?? 0, messageId: ChatState.shared.getState(peer: peerId).replyingMessageId ?? 0
+      ))
+    hostingController.view.backgroundColor = .clear
+    hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+    return hostingController
+  }()
+
   private lazy var blurView: UIVisualEffectView = {
-    let blurEffect = UIBlurEffect(style: .systemMaterial)
+    let blurEffect = UIBlurEffect(style: .systemThickMaterial)
     let view = UIVisualEffectView(effect: blurEffect)
     view.backgroundColor = .clear
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -39,7 +51,7 @@ class ChatContainerView: UIView {
 
     super.init(frame: .zero)
     setupViews()
-    setupKeyboardObservers()
+    setupObservers()
   }
 
   @available(*, unavailable)
@@ -47,19 +59,41 @@ class ChatContainerView: UIView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  private var composeEmbedHeightConstraint: NSLayoutConstraint?
+  private var composeEmbedBottomConstraint: NSLayoutConstraint?
+
   private func setupViews() {
+    print("HAS REPLY ? \(hasReply)")
     backgroundColor = .systemBackground
 
     addSubview(messagesCollectionView)
     addSubview(blurView)
+    addSubview(composeEmbedHostingController.view)
     addSubview(composeView)
 
-    // Store the bottom constraint so we can modify it later
     blurViewBottomConstraint = blurView.bottomAnchor.constraint(equalTo: bottomAnchor)
+    composeEmbedHeightConstraint = composeEmbedHostingController.view.heightAnchor.constraint(
+      equalToConstant: hasReply ? Self.embedViewHeight : 0)
+    composeEmbedBottomConstraint = composeEmbedHostingController.view.bottomAnchor.constraint(
+      equalTo: composeView.topAnchor)
 
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
+    //    NSLayoutConstraint.activate([
+    //      composeEmbedHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+    //      composeEmbedHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+    //      composeEmbedHostingController.view.bottomAnchor.constraint(equalTo: composeView.topAnchor),
+    //      composeEmbedHostingController.view.heightAnchor.constraint(equalToConstant: Self.embedViewHeight),
+    //    ])
+
+    //    composeEmbedHostingController.view.isHidden = !hasReply
+
     NSLayoutConstraint.activate([
+      composeEmbedHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+      composeEmbedHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+      composeEmbedBottomConstraint!,
+      composeEmbedHeightConstraint!,
+
       messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
       messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
       messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
@@ -76,9 +110,21 @@ class ChatContainerView: UIView {
         equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin
       ),
     ])
+
+    updateComposeEmbedViewState(isReplyActive: hasReply)
+
+    //    // Initial state setup
+    //    composeEmbedHostingController.view.alpha = hasReply ? 1 : 0
+    //    composeEmbedHostingController.view.transform = hasReply ? .identity : CGAffineTransform(translationX: 0, y: 20)
   }
 
-  private func setupKeyboardObservers() {
+  private func setupObservers() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(replyStateChanged),
+      name: .init("ChatStateDidChange"),
+      object: nil
+    )
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(keyboardWillShow),
@@ -128,6 +174,53 @@ class ChatContainerView: UIView {
       self.blurViewBottomConstraint?.isActive = true
       self.layoutIfNeeded()
     }
+  }
+
+  var hasReply: Bool { ChatState.shared.getState(peer: peerId).replyingMessageId != nil }
+
+  private func updateComposeEmbedViewState(isReplyActive: Bool) {
+    let embedView = composeEmbedHostingController.view
+    guard let embedView = embedView else { return }
+
+    embedView.isHidden = !isReplyActive
+    composeEmbedHeightConstraint?.constant = isReplyActive ? Self.embedViewHeight : 0
+
+    layoutIfNeeded()
+  }
+
+  @objc private func replyStateChanged(_ notification: Notification) {
+    let state = ChatState.shared.getState(peer: peerId)
+    let isReplyActive = state.replyingMessageId != nil
+
+    if isReplyActive {
+      composeView.textView.becomeFirstResponder()
+
+      let newHostingController = UIHostingController(
+        rootView: ComposeEmbedViewSwiftUI(
+          peerId: peerId,
+          chatId: chatId ?? 0,
+          messageId: state.replyingMessageId ?? 0
+        )
+      )
+
+      newHostingController.view.backgroundColor = .clear
+      newHostingController.view.translatesAutoresizingMaskIntoConstraints = false
+
+      composeEmbedHostingController.view.removeFromSuperview()
+      composeEmbedHostingController = newHostingController
+      addSubview(composeEmbedHostingController.view)
+
+      NSLayoutConstraint.activate([
+        composeEmbedHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+        composeEmbedHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+        composeEmbedHostingController.view.bottomAnchor.constraint(equalTo: composeView.topAnchor),
+        composeEmbedHostingController.view.heightAnchor.constraint(equalToConstant: Self.embedViewHeight),
+      ])
+
+      layoutIfNeeded()
+    }
+
+    updateComposeEmbedViewState(isReplyActive: isReplyActive)
   }
 
   private func handleComposeViewHeightChange(_ newHeight: CGFloat) {
