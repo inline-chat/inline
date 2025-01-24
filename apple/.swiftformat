@@ -14,7 +14,6 @@
 --exponentcase lowercase
 --header strip
 --ifdef no-indent
---indent-switch-case true
 --linebreaks lf
 --patternlet hoist
 --self remove
