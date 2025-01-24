@@ -70,7 +70,7 @@ struct ChatView: View {
     self.peerId = peer
     self.preview = preview
     _fullChatViewModel = EnvironmentStateObject { env in
-      FullChatViewModel(db: env.appDatabase, peer: peer, limit: 1, fetchesMessages: false)
+      FullChatViewModel(db: env.appDatabase, peer: peer)
     }
   }
 
