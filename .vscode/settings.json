@@ -1,0 +1,7 @@
+{
+  "sweetpad.format.path": "swiftformat",
+  "sweetpad.format.args": ["--quiet", "${file}"],
+  "[swift]": {
+    "editor.defaultFormatter": "sweetpad.sweetpad"
+  }
+}
