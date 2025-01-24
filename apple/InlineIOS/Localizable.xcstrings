@@ -17,6 +17,9 @@
     "%@..." : {
 
     },
+    "%lld chats" : {
+
+    },
     "%lld members" : {
 
     },
@@ -33,6 +36,9 @@
 
     },
     "Appearance" : {
+
+    },
+    "Archived Chats" : {
 
     },
     "Code sent to %@." : {
@@ -359,6 +365,9 @@
       }
     },
     "Logout" : {
+
+    },
+    "No archived chats" : {
 
     },
     "No messages yet" : {

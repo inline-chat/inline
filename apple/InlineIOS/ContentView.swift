@@ -7,6 +7,7 @@ struct ContentView: View {
 
   @EnvironmentObject private var nav: Navigation
   @EnvironmentStateObject private var data: DataManager
+  @EnvironmentStateObject private var home: HomeViewModel
 
   @StateObject private var onboardingNav = OnboardingNavigation()
   @StateObject var api = ApiClient()
@@ -16,6 +17,10 @@ struct ContentView: View {
   init() {
     _data = EnvironmentStateObject { env in
       DataManager(database: env.appDatabase)
+    }
+
+    _home = EnvironmentStateObject { env in
+      HomeViewModel(db: env.appDatabase)
     }
   }
 
@@ -29,6 +34,7 @@ struct ContentView: View {
     .environmentObject(userData)
     .environmentObject(data)
     .environmentObject(mainViewRouter)
+    .environmentObject(home)
   }
 }
 
@@ -44,6 +50,8 @@ extension ContentView {
       Settings()
     case .main:
       MainView()
+    case .archivedChats:
+      ArchivedChatsView()
     case .createSpace, .createThread:
       // Handled by sheets
       EmptyView()

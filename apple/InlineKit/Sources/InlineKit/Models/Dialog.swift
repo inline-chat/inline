@@ -9,6 +9,7 @@ public struct ApiDialog: Codable, Hashable, Sendable {
   public var readInboxMaxId: Int64?
   public var readOutboxMaxId: Int64?
   public var draft: String?
+  public var archived: Bool?
 }
 
 public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -22,6 +23,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var readOutboxMaxId: Int64?
   public var pinned: Bool?
   public var draft: String?
+  public var archived: Bool?
 
   public static let space = belongsTo(Space.self)
   public var space: QueryInterfaceRequest<Space> {
@@ -42,54 +44,56 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
 public extension Dialog {
   init(from: ApiDialog) {
     switch from.peerId {
-    case .user(let id):
-      self.peerUserId = id
-      self.peerThreadId = nil
-      self.id = Self.getDialogId(peerUserId: id)
-    case .thread(let id):
-      self.peerUserId = nil
-      self.peerThreadId = id
-      self.id = Self.getDialogId(peerThreadId: id)
+      case let .user(id):
+        peerUserId = id
+        peerThreadId = nil
+        self.id = Self.getDialogId(peerUserId: id)
+      case let .thread(id):
+        peerUserId = nil
+        peerThreadId = id
+        self.id = Self.getDialogId(peerThreadId: id)
     }
 
-    self.spaceId = from.spaceId
-    self.unreadCount = from.unreadCount
-    self.readInboxMaxId = from.readInboxMaxId
-    self.readOutboxMaxId = from.readOutboxMaxId
-    self.pinned = from.pinned
-    self.draft = from.draft
+    spaceId = from.spaceId
+    unreadCount = from.unreadCount
+    readInboxMaxId = from.readInboxMaxId
+    readOutboxMaxId = from.readOutboxMaxId
+    pinned = from.pinned
+    draft = from.draft
+    archived = from.archived
   }
 
   // Called when user clicks a user for the first time
   init(optimisticForUserId: Int64) {
     let userId = optimisticForUserId
 
-    self.peerUserId = userId
-    self.peerThreadId = nil
-    self.id = Self.getDialogId(peerUserId: userId)
+    peerUserId = userId
+    peerThreadId = nil
+    id = Self.getDialogId(peerUserId: userId)
 
-    self.spaceId = nil
-    self.unreadCount = nil
-    self.readInboxMaxId = nil
-    self.readOutboxMaxId = nil
-    self.pinned = nil
-    self.draft = nil
+    spaceId = nil
+    unreadCount = nil
+    readInboxMaxId = nil
+    readOutboxMaxId = nil
+    pinned = nil
+    draft = nil
+    archived = nil
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
-    return peerUserId
+    peerUserId
   }
 
   static func getDialogId(peerThreadId: Int64) -> Int64 {
-    return peerThreadId
+    peerThreadId
   }
 
   static func getDialogId(peerId: Peer) -> Int64 {
     switch peerId {
-    case .user(let id):
-      return Self.getDialogId(peerUserId: id)
-    case .thread(let id):
-      return Self.getDialogId(peerThreadId: id)
+      case let .user(id):
+        Self.getDialogId(peerUserId: id)
+      case let .thread(id):
+        Self.getDialogId(peerThreadId: id)
     }
   }
 }

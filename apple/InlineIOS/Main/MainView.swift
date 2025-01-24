@@ -16,6 +16,7 @@ struct MainView: View {
   @EnvironmentObject private var userData: UserData
   @EnvironmentObject private var notificationHandler: NotificationHandler
   @EnvironmentObject private var mainViewRouter: MainViewRouter
+  @EnvironmentObject private var home: HomeViewModel
 
   @Environment(\.appDatabase) private var database
   @Environment(\.scenePhase) private var scene
@@ -23,7 +24,6 @@ struct MainView: View {
 
   @EnvironmentStateObject var root: RootData
   @EnvironmentStateObject private var spaceList: SpaceListViewModel
-  @EnvironmentStateObject private var home: HomeViewModel
 
   // MARK: - State
 
@@ -45,9 +45,6 @@ struct MainView: View {
     _spaceList = EnvironmentStateObject { env in
       SpaceListViewModel(db: env.appDatabase)
     }
-    _home = EnvironmentStateObject { env in
-      HomeViewModel(db: env.appDatabase)
-    }
   }
 
   // MARK: - Body
@@ -57,43 +54,91 @@ struct MainView: View {
       if !searchResults.isEmpty {
         searchResultsView
       } else {
-        List(home.chats.sorted { chat1, chat2 in
-          let pinned1 = chat1.dialog.pinned ?? false
-          let pinned2 = chat2.dialog.pinned ?? false
-          if pinned1 != pinned2 { return pinned1 }
-          return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date ?? chat2.chat?.date
-            ?? Date()
-        }) {
-          chat in
-          Button {
-            nav.push(.chat(peer: .user(id: chat.user.id)))
-          } label: {
-            ChatRowView(item: .home(chat))
-          }
-          .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+        List {
+          if home.chats.filter { $0.dialog.archived == true }.isEmpty == false {
             Button {
-              Task {
-                try await dataManager.updateDialog(
-                  peerId: .user(id: chat.user.id),
-                  pinned: !(chat.dialog.pinned ?? false)
-                )
+              nav.push(.archivedChats)
+            } label: {
+              HStack {
+                Circle()
+                  .fill(
+                    LinearGradient(
+                      colors: [
+                        Color(.systemGray6),
+                        Color(.systemGray5),
+                      ], startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                  )
+                  .frame(width: 42, height: 42)
+                  .overlay(alignment: .center) {
+                    Image(systemName: "tray.full.fill")
+                      .foregroundColor(.secondary)
+                      .font(.title3)
+                  }
+                  .padding(.trailing, 6)
+                VStack(alignment: .leading) {
+                  Text("Archived Chats")
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                  let archivedCount = home.chats.filter { $0.dialog.archived == true }.count
+                  Text("\(archivedCount) chats")
+                    .contentTransition(.numericText())
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                }
+                Spacer()
               }
-            } label: {
-              Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-            }
-            .tint(.indigo)
-
-            Button(role: .destructive) {
-              // Implement archive action
-            } label: {
-              Image(systemName: "archivebox.fill")
+              .frame(height: 48)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .contentShape(Rectangle())
             }
           }
-          .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : Color.clear)
+          ForEach(
+            home.chats.filter { $0.dialog.archived == nil || $0.dialog.archived == false }.sorted { chat1, chat2 in
+              let pinned1 = chat1.dialog.pinned ?? false
+              let pinned2 = chat2.dialog.pinned ?? false
+              if pinned1 != pinned2 { return pinned1 }
+              return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date ?? chat2.chat?.date
+                ?? Date()
+            }
+          ) { chat in
+            Button {
+              nav.push(.chat(peer: .user(id: chat.user.id)))
+            } label: {
+              ChatRowView(item: .home(chat))
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+              Button(role: .destructive) {
+                Task {
+                  try await dataManager.updateDialog(
+                    peerId: .user(id: chat.user.id),
+                    archived: true
+                  )
+                }
+              } label: {
+                Image(systemName: "tray.and.arrow.down.fill")
+              }
+              .tint(Color(.systemGray2))
+              Button {
+                Task {
+                  try await dataManager.updateDialog(
+                    peerId: .user(id: chat.user.id),
+                    pinned: !(chat.dialog.pinned ?? false)
+                  )
+                }
+              } label: {
+                Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+              }
+              .tint(.indigo)
+            }
+            .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : Color.clear)
+          }
         }
         .listStyle(.plain)
+        .animation(.default, value: home.chats)
       }
     }
+
     .background(Color(.systemBackground))
     .searchable(text: $text, prompt: "Search in users and spaces")
     .onChange(of: text) { _, newValue in
