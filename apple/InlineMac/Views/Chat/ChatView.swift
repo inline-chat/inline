@@ -32,12 +32,11 @@ struct ChatView: View {
   let timer = Timer.publish(
     every: 60, // 1 minute
     on: .main,
-    in: .common
-  ).autoconnect()
+    in: .common).autoconnect()
 
   static let formatter = RelativeDateTimeFormatter()
   private func getLastOnlineText(date: Date?) -> String {
-    guard let date = date else { return "" }
+    guard let date else { return "" }
 
     let diffSeconds = Date().timeIntervalSince(date)
     if diffSeconds < 60 {
@@ -52,14 +51,15 @@ struct ChatView: View {
   var subtitle: String {
     // TODO: support threads
     if let composeAction = currentComposeAction() {
-      return composeAction.rawValue
+      composeAction.rawValue
     } else if let online = item?.user?.online {
-      return online
+      online
         ? "online"
-        : (item?.user?.lastOnline != nil
-          ? getLastOnlineText(date: item?.user?.lastOnline) : "offline")
+        : (
+          item?.user?.lastOnline != nil
+            ? getLastOnlineText(date: item?.user?.lastOnline) : "offline")
     } else {
-      return "last seen recently"
+      "last seen recently"
     }
   }
 
@@ -68,11 +68,7 @@ struct ChatView: View {
     _fullChat = EnvironmentStateObject { env in
       FullChatViewModel(
         db: env.appDatabase,
-        peer: peerId,
-        reversed: false,
-        limit: 1,
-        fetchesMessages: false
-      )
+        peer: peerId)
     }
   }
 
@@ -139,12 +135,12 @@ struct ChatView: View {
       .onChange(of: scenePhase) { scenePhase_ in
         // Refetch on open - temporary
         switch scenePhase_ {
-        case .active:
-          Task {
-            await fetch()
-          }
-        default:
-          break
+          case .active:
+            Task {
+              await fetch()
+            }
+          default:
+            break
         }
       }
       .environmentObject(fullChat)
