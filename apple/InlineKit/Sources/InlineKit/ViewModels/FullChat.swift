@@ -28,14 +28,15 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   }
 }
 
-extension FullMessage {
-  public static func queryRequest() -> QueryInterfaceRequest<FullMessage> {
+public extension FullMessage {
+  static func queryRequest() -> QueryInterfaceRequest<FullMessage> {
     return
       Message
-      .including(optional: Message.from)
-      .including(optional: Message.file)
-      .including(all: Message.reactions)
-      .asRequest(of: FullMessage.self)
+        .including(optional: Message.from)
+        .including(optional: Message.file)
+        .including(all: Message.reactions)
+        .including(optional: Message.repliedToMessage.forKey("repliedToMessage"))
+        .asRequest(of: FullMessage.self)
   }
 }
 
@@ -88,40 +89,40 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     let peerId = peer
     chatCancellable =
       ValueObservation
-      .tracking { db in
-        switch peerId {
-        case .user:
-          // Fetch private chat
-          try Dialog
-            .filter(id: Dialog.getDialogId(peerId: peerId))
-            .including(
-              optional: Dialog.peerUser
-                .including(
-                  optional: User.chat
-                    .including(optional: Chat.lastMessage))
-            )
-            .asRequest(of: SpaceChatItem.self)
-            .fetchAll(db)
+        .tracking { db in
+          switch peerId {
+          case .user:
+            // Fetch private chat
+            try Dialog
+              .filter(id: Dialog.getDialogId(peerId: peerId))
+              .including(
+                optional: Dialog.peerUser
+                  .including(
+                    optional: User.chat
+                      .including(optional: Chat.lastMessage))
+              )
+              .asRequest(of: SpaceChatItem.self)
+              .fetchAll(db)
 
-        case .thread:
-          // Fetch thread chat
-          try Dialog
-            .filter(id: Dialog.getDialogId(peerId: peerId))
-            .including(
-              optional: Dialog.peerThread
-                .including(optional: Chat.lastMessage)
-            )
-            .asRequest(of: SpaceChatItem.self)
-            .fetchAll(db)
+          case .thread:
+            // Fetch thread chat
+            try Dialog
+              .filter(id: Dialog.getDialogId(peerId: peerId))
+              .including(
+                optional: Dialog.peerThread
+                  .including(optional: Chat.lastMessage)
+              )
+              .asRequest(of: SpaceChatItem.self)
+              .fetchAll(db)
+          }
         }
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
-        receiveValue: { [weak self] chats in
-          self?.chatItem = chats.first
-        }
-      )
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
+          receiveValue: { [weak self] chats in
+            self?.chatItem = chats.first
+          }
+        )
   }
 
   public func getGlobalId(forMessageId messageId: Int64) -> Int64? {
