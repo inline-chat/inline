@@ -47,13 +47,14 @@ extension ContentView {
     case .space(let id):
       SpaceView(spaceId: id)
     case .settings:
-      Settings()
+      SettingsView()
     case .main:
       MainView()
     case .archivedChats:
       ArchivedChatsView()
-    case .createSpace, .createThread:
-      // Handled by sheets
+    case .createSpace:
+      SettingsView()
+    case .createThread:
       EmptyView()
     }
   }
@@ -61,17 +62,8 @@ extension ContentView {
   @ViewBuilder
   func sheetContent(for destination: Navigation.Destination) -> some View {
     switch destination {
-    case .createSpace:
-      CreateSpace(showSheet: .constant(true))
-        .presentationBackground(.ultraThickMaterial)
-        .presentationCornerRadius(18)
-
     case .createThread(let spaceId):
       CreateThread(showSheet: .constant(true), spaceId: spaceId)
-        .presentationBackground(.ultraThickMaterial)
-        .presentationCornerRadius(18)
-    case .settings:
-      Settings()
         .presentationBackground(.ultraThickMaterial)
         .presentationCornerRadius(18)
     default:
