@@ -67,13 +67,13 @@ public struct TransactionSendMessage: Transaction {
   var peerThreadId: Int64? = nil
   var temporaryMessageId: Int64
 
-  public init(text: String?, peerId: Peer, chatId: Int64, attachments: [SendMessageAttachment] = [], replyToMessageId: Int64? = nil) {
+  public init(text: String?, peerId: Peer, chatId: Int64,  attachments: [SendMessageAttachment] = [], replyToMessageId: Int64? = nil) {
     self.text = text
     self.peerId = peerId
     self.chatId = chatId
-    self.attachments = attachments
+self.attachments = attachments
     self.replyToMessageId = replyToMessageId
-    randomId = Int64.random(in: Int64.min ... Int64.max)
+    randomId = Int64.random(in: Int64.min...Int64.max)
     peerUserId = if case .user(let id) = peerId { id } else { nil }
     peerThreadId = if case .thread(let id) = peerId { id } else { nil }
     temporaryMessageId = randomId
@@ -98,8 +98,8 @@ public struct TransactionSendMessage: Transaction {
       chatId: chatId,
       out: true,
       status: .sending,
-      repliedToMessageId: replyToMessageId,
       fileId: fileId
+      repliedToMessageId: replyToMessageId
     )
 
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
@@ -122,7 +122,7 @@ public struct TransactionSendMessage: Transaction {
       if let message = newMessage {
         await MessagesPublisher.shared.messageAdded(message: message, peer: peerId)
       }
-    } //
+    }  //
   }
 
   func execute() async throws -> SendMessage {
