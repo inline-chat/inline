@@ -456,11 +456,11 @@ class MessageListAppKit: NSViewController {
       if availableWidth < Theme.messageMaxWidth {
         // Update heights
 //        maintainingBottomScroll { // This ensures the scroll will not jump while resizing a multi-line message
-//          recalculateHeightsOnWidthChange()
+//          recalculateHeightsOnWidthChange
 //          return true
 //        }
 
-        recalculateHeightsOnWidthChange()
+        recalculateHeightsOnWidthChange(duringLiveResize: true)
       }
     }
   }
@@ -617,15 +617,7 @@ class MessageListAppKit: NSViewController {
         // last one fails to give correct rect...
         let index = min(tableView.rows(in: visibleRectInsetted).max - 1, tableView.numberOfRows - 2)
 
-        let rowRect = tableView.rect(
-          ofRow: index)
-
-        let calcSizeForRow: CGSize? = if index != NSNotFound, let message = message(forRow: index) {
-          sizeCalculator.cachedSize(
-            messageStableId: message.id)
-        } else {
-          nil
-        }
+        let rowRect = tableView.rect(ofRow: index)
 
         // Calculate distance from row's TOP edge to viewport's bottom edge
         let topEdgeToViewportBottom = rowRect.minY - visibleRect.maxY
@@ -637,7 +629,6 @@ class MessageListAppKit: NSViewController {
                 row.minY=\(rowRect.minY) 
                 row.maxY=\(rowRect.maxY)  
                 row.height=\(rowRect.height) 
-                calc.height=\(calcSizeForRow?.height)
                 visibleRect.minY=\(visibleRect.minY)
                 visibleRect.maxY=\(visibleRect.maxY)  
         """)
@@ -658,16 +649,18 @@ class MessageListAppKit: NSViewController {
           // Apply new scroll position
           let newOrigin = CGPoint(x: 0, y: targetY)
 
-          CATransaction.begin()
-          CATransaction.setDisableActions(true)
-          self.scrollView.contentView.scroll(newOrigin)
-          CATransaction.commit()
+          self.scrollView.withoutScrollerFlash {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.scrollView.contentView.scroll(newOrigin)
+            CATransaction.commit()
+          }
       }
     }
   }
 
   // Note this function will stop any animation that is happening so must be used with caution
-  private func recalculateHeightsOnWidthChange(buffer: Int = 0) {
+  private func recalculateHeightsOnWidthChange(buffer: Int = 0, duringLiveResize: Bool = false) {
     log.trace("Recalculating heights on width change")
 
     if isPerformingUpdate {
@@ -693,32 +686,27 @@ class MessageListAppKit: NSViewController {
     // First, immediately update visible rows
     let visibleIndexesToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
 
-    // Begin updates
-
-    // Find which rows have changed height and only trigger for those
-    // Calculate new heights and compare with current heights
     var rowsToUpdate = IndexSet()
-    let availableWidth = sizeCalculator.getAvailableWidth(
-      tableWidth: tableView.bounds.width)
 
-    for row in visibleStartIndex ..< visibleEndIndex {
-//      guard let currentRowSize = getCachedSize(
-//        forRow: row
-//      ) else {
-//        rowsToUpdate.insert(row)
-//        continue
-//      }
-//
-//      // If row's width is less than availableWidth, we need to update it
-//      if availableWidth <= currentRowSize.width {
-//        rowsToUpdate.insert(row)
-//      }
+    if duringLiveResize {
+      // Find which rows are shorter than available width
+      let availableWidth = sizeCalculator.getAvailableWidth(
+        tableWidth: tableView.bounds.width)
 
-      if let message = message(forRow: row), !sizeCalculator
-        .isSingleLine(message, availableWidth: availableWidth)
-      {
-        rowsToUpdate.insert(row)
+      for row in visibleStartIndex ..< visibleEndIndex {
+        if let message = message(forRow: row), !sizeCalculator
+          .isSingleLine(message, availableWidth: availableWidth)
+        {
+          rowsToUpdate.insert(row)
+        }
       }
+
+    } else {
+      // Update all regardless of width
+      // Why? Less optimized but quickly fixes a bug where items that crossed the threshold out of viewport, don't
+      // update
+      // even when we scroll to them.
+      rowsToUpdate = visibleIndexesToUpdate
     }
 
     log.trace("Rows to update: \(rowsToUpdate)")
