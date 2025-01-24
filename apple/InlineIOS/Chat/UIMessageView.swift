@@ -113,7 +113,7 @@ class UIMessageView: UIView {
 
     NSLayoutConstraint.activate(
       [
-        // Bubble view constraints
+        //  Bubble view constraints
         bubbleView.topAnchor.constraint(equalTo: topAnchor),
         bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
         bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
