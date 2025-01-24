@@ -57,7 +57,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case .chat:
       activeDestination = destination
       navigationPath.append(destination)
-    case .createSpace, .createThread, .settings:
+    case .createSpace, .createThread:
       activeSheet = destination
     default:
       activeDestination = destination
