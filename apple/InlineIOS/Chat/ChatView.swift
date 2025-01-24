@@ -27,7 +27,7 @@ struct ChatView: View {
   @State var currentTime = Date()
 
   let timer = Timer.publish(
-    every: 60,  // 1 minute
+    every: 60, // 1 minute
     on: .main,
     in: .common
   ).autoconnect()
@@ -86,6 +86,28 @@ struct ChatView: View {
         ToolbarItem(placement: .principal) {
           header
         }
+        #if DEBUG
+        ToolbarItem(placement: .topBarTrailing) {
+          if !preview {
+            Button(action: {
+              Task {
+                for i in 1 ... 100 {
+                  let _ = Transactions.shared.mutate(
+                    transaction: .sendMessage(
+                      .init(text: "Test message #\(i)", peerId: peerId, chatId: fullChatViewModel.chat?.id ?? 0)
+                    )
+                  )
+
+                  try? await Task.sleep(nanoseconds: 50_000_000) // 0.05 seconds
+                }
+              }
+            }) {
+              Image(systemName: "bolt.fill")
+                .foregroundColor(.orange)
+            }
+          }
+        }
+        #endif
       }
       .overlay(alignment: .top) {
         if preview {
@@ -122,25 +144,6 @@ struct ChatView: View {
     VStack {
       HStack {
         Text(title)
-        if !preview {
-          Button(action: {
-            Task {
-              // Send 100 messages
-              for i in 1...100 {
-                let _ = Transactions.shared.mutate(
-                  transaction: .sendMessage(
-                    .init(text: "Test message #\(i)", peerId: peerId, chatId: fullChatViewModel.chat?.id ?? 0)
-                  )
-                )
-                // Add a small delay to prevent overwhelming the system
-                try? await Task.sleep(nanoseconds: 50_000_000)  // 0.05 seconds
-              }
-            }
-          }) {
-            Image(systemName: "bolt.fill")
-              .foregroundColor(.orange)
-          }
-        }
       }
       if !isCurrentUser && isPrivateChat {
         Text(subtitle)

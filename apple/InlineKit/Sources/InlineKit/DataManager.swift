@@ -229,9 +229,9 @@ public class DataManager: ObservableObject {
 
         // Save messages
         let messages = result.messages.map { message in Message(from: message) }
-//        try messages.forEach { message in
-//          try message.save(db, onConflict: .replace)
-//        }
+        //        try messages.forEach { message in
+        //          try message.save(db, onConflict: .replace)
+        //        }
         try messages.forEach { message in
           var mutableMessage = message
           try mutableMessage.saveMessage(db)
@@ -322,20 +322,20 @@ public class DataManager: ObservableObject {
   public func getChatHistory(
     peerUserId: Int64?,
     peerThreadId: Int64?,
-    peerId: Peer?
-  ) async throws {
+    peerId: Peer?) async throws
+  {
     let finalPeerUserId: Int64?
     let finalPeerThreadId: Int64?
     var peerId_: Peer
 
-    if let peerId = peerId {
+    if let peerId {
       switch peerId {
-      case .user(let id):
-        finalPeerUserId = id
-        finalPeerThreadId = nil
-      case .thread(let id):
-        finalPeerUserId = nil
-        finalPeerThreadId = id
+        case let .user(id):
+          finalPeerUserId = id
+          finalPeerThreadId = nil
+        case let .thread(id):
+          finalPeerUserId = nil
+          finalPeerThreadId = id
       }
 
       peerId_ = peerId
@@ -343,9 +343,9 @@ public class DataManager: ObservableObject {
       finalPeerUserId = peerUserId
       finalPeerThreadId = peerThreadId
 
-      if let peerUserId = peerUserId {
+      if let peerUserId {
         peerId_ = .user(id: peerUserId)
-      } else if let peerThreadId = peerThreadId {
+      } else if let peerThreadId {
         peerId_ = .thread(id: peerThreadId)
       } else {
         Log.shared.error("getChatHistory: peerId is nil")
@@ -354,13 +354,11 @@ public class DataManager: ObservableObject {
     }
 
     log.debug(
-      "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
-    )
+      "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))")
 
     let result = try await ApiClient.shared.getChatHistory(
       peerUserId: finalPeerUserId,
-      peerThreadId: finalPeerThreadId
-    )
+      peerThreadId: finalPeerThreadId)
 
     try await database.dbWriter.write { db in
       for apiMessage in result.messages {
@@ -384,8 +382,7 @@ public class DataManager: ObservableObject {
 
   public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws {
     let result = try await ApiClient.shared.addReaction(
-      messageId: messageId, chatId: chatId, emoji: emoji
-    )
+      messageId: messageId, chatId: chatId, emoji: emoji)
 
     try await database.dbWriter.write { db in
       let reaction = Reaction(from: result.reaction)
@@ -398,17 +395,21 @@ public class DataManager: ObservableObject {
     let _ = try await ApiClient.shared.updateStatus(online: online)
   }
 
-  public func updateDialog(peerId: Peer, pinned: Bool? = nil, draft: String? = nil) async throws {
+  public func updateDialog(peerId: Peer, pinned: Bool? = nil, draft: String? = nil, archived: Bool? = nil) async throws
+  {
     try await database.dbWriter.write { db in
       var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
       dialog?.pinned = pinned
       dialog?.draft = draft
+      dialog?.archived = archived
       try dialog?.save(db, onConflict: .replace)
     }
 
     let result = try await ApiClient.shared.updateDialog(
-      peerId: peerId, pinned: pinned, draft: draft
-    )
+      peerId: peerId,
+      pinned: pinned,
+      draft: draft,
+      archived: archived)
     try await database.dbWriter.write { db in
       let dialog = Dialog(from: result.dialog)
       try dialog.save(db, onConflict: .replace)

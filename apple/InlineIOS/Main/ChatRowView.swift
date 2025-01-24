@@ -140,7 +140,7 @@ struct ChatRowView: View {
 
   @ViewBuilder
   func userAvatar(_ user: User) -> some View {
-    UserAvatar(user: user, size: 36)
+    UserAvatar(user: user, size: 42)
       .padding(.trailing, 6)
       .overlay(alignment: .bottomTrailing) {
         if user.online == true {
@@ -160,7 +160,7 @@ struct ChatRowView: View {
       Text(
         type == .privateChat
           ? homeItem.user.id == Auth.shared.getCurrentUserId()
-          ? "Saved Message" : homeItem.user.firstName ?? ""
+            ? "Saved Message" : homeItem.user.firstName ?? ""
           : homeItem.chat?.title ?? ""
       )
       .fontWeight(.medium)
@@ -169,7 +169,7 @@ struct ChatRowView: View {
       Text(
         type == .privateChat
           ? spaceItem.user?.id == Auth.shared.getCurrentUserId()
-          ? "Saved Message" : spaceItem.user?.firstName ?? ""
+            ? "Saved Message" : spaceItem.user?.firstName ?? ""
           : spaceItem.chat?.title ?? ""
       )
       .fontWeight(.medium)
@@ -195,7 +195,7 @@ struct ChatRowView: View {
           ], startPoint: .topLeading, endPoint: .bottomTrailing
         )
       )
-      .frame(width: 36, height: 36)
+      .frame(width: 42, height: 42)
       .overlay(alignment: .center) {
         Image(systemName: "bookmark.fill")
           .foregroundColor(.white)

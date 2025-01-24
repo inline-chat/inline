@@ -2,9 +2,9 @@ import Combine
 import Foundation
 
 #if canImport(UIKit)
-  import UIKit
+import UIKit
 #else
-  import AppKit
+import AppKit
 #endif
 
 public enum APIError: Error {
@@ -60,13 +60,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
 
     #if targetEnvironment(simulator)
-      return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://\(ProjectConfig.devHost):8000/v1"
     #elseif DEBUG && os(iOS)
-      return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://\(ProjectConfig.devHost):8000/v1"
     #elseif DEBUG && os(macOS)
-      return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://\(ProjectConfig.devHost):8000/v1"
     #else
-      return "https://api.inline.chat/v1"
+    return "https://api.inline.chat/v1"
     #endif
   }()
 
@@ -77,8 +77,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   private func request<T: Decodable & Sendable>(
     _ path: Path,
     queryItems: [URLQueryItem] = [],
-    includeToken: Bool = false
-  ) async throws -> T {
+    includeToken: Bool = false) async throws -> T
+  {
     guard var urlComponents = URLComponents(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
     }
@@ -104,21 +104,21 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200...299:
-        let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
-        switch apiResponse {
-        case let .success(data):
-          return data
-        case let .error(error, errorCode, description):
-          log.error("Error \(error): \(description ?? "")")
-          throw
-            APIError
-            .error(error: error, errorCode: errorCode, description: description)
-        }
-      case 429:
-        throw APIError.rateLimited
-      default:
-        throw APIError.httpError(statusCode: httpResponse.statusCode)
+        case 200 ... 299:
+          let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
+          switch apiResponse {
+            case let .success(data):
+              return data
+            case let .error(error, errorCode, description):
+              log.error("Error \(error): \(description ?? "")")
+              throw
+                APIError
+                .error(error: error, errorCode: errorCode, description: description)
+          }
+        case 429:
+          throw APIError.rateLimited
+        default:
+          throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
       throw APIError.decodingError(decodingError)
@@ -132,8 +132,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   private func postRequest<T: Decodable & Sendable>(
     _ path: Path,
     body: [String: Any],
-    includeToken: Bool = true
-  ) async throws -> T {
+    includeToken: Bool = true) async throws -> T
+  {
     guard let url = URL(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
     }
@@ -156,19 +156,19 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200...299:
-        let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
-        switch apiResponse {
-        case let .success(data):
-          return data
-        case let .error(error, errorCode, description):
-          log.error("Error \(error): \(description ?? "")")
-          throw APIError.error(error: error, errorCode: errorCode, description: description)
-        }
-      case 429:
-        throw APIError.rateLimited
-      default:
-        throw APIError.httpError(statusCode: httpResponse.statusCode)
+        case 200 ... 299:
+          let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
+          switch apiResponse {
+            case let .success(data):
+              return data
+            case let .error(error, errorCode, description):
+              log.error("Error \(error): \(description ?? "")")
+              throw APIError.error(error: error, errorCode: errorCode, description: description)
+          }
+        case 429:
+          throw APIError.rateLimited
+        default:
+          throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
       throw APIError.decodingError(decodingError)
@@ -204,14 +204,12 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     return try await request(
       .verifyCode,
       queryItems: queryItems,
-      includeToken: false
-    )
+      includeToken: false)
   }
 
   public func createSpace(name: String) async throws -> CreateSpace {
     try await request(
-      .createSpace, queryItems: [URLQueryItem(name: "name", value: name)], includeToken: true
-    )
+      .createSpace, queryItems: [URLQueryItem(name: "name", value: name)], includeToken: true)
   }
 
   public func updateProfile(firstName: String?, lastName: String?, username: String?) async throws
@@ -219,13 +217,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   {
     var queryItems: [URLQueryItem] = []
 
-    if let firstName = firstName {
+    if let firstName {
       queryItems.append(URLQueryItem(name: "firstName", value: firstName))
     }
-    if let lastName = lastName {
+    if let lastName {
       queryItems.append(URLQueryItem(name: "lastName", value: lastName))
     }
-    if let username = username {
+    if let username {
       queryItems.append(URLQueryItem(name: "username", value: username))
     }
 
@@ -242,54 +240,47 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       queryItems: [
         URLQueryItem(name: "title", value: title),
         URLQueryItem(name: "spaceId", value: "\(spaceId)"),
-      ], includeToken: true
-    )
+      ], includeToken: true)
   }
 
   public func checkUsername(username: String) async throws -> CheckUsername {
     try await request(
       .checkUsername, queryItems: [URLQueryItem(name: "username", value: username)],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func getMe() async throws -> GetMe {
     try await request(
       .getMe, queryItems: [],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func searchContacts(query: String) async throws -> SearchContacts {
     try await request(
       .searchContacts,
       queryItems: [URLQueryItem(name: "q", value: query)],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func createPrivateChat(userId: Int64) async throws -> CreatePrivateChat {
     try await request(
       .createPrivateChat,
       queryItems: [URLQueryItem(name: "userId", value: "\(userId)")],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func deleteSpace(spaceId: Int64) async throws -> EmptyPayload {
     try await request(
       .deleteSpace,
       queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func leaveSpace(spaceId: Int64) async throws -> EmptyPayload {
     try await request(
       .leaveSpace,
       queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func getPrivateChats() async throws -> GetPrivateChats {
@@ -300,8 +291,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public func getDialogs(spaceId: Int64) async throws -> GetDialogs {
     try await request(
       .getDialogs, queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   //    public func getFullSpace(spaceId: Int64) async throws -> FullSpacePayload {
@@ -319,37 +309,36 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     randomId: Int64?,
     repliedToMessageId: Int64?,
     date: Double?,
-    fileUniqueId: String? = nil
-  ) async throws -> SendMessage {
+    fileUniqueId: String? = nil) async throws -> SendMessage
+  {
     var body: [String: Any] = [
       "text": text as Any,
     ]
 
-    if let peerUserId = peerUserId {
+    if let peerUserId {
       body["peerUserId"] = peerUserId
     }
 
-    if let peerThreadId = peerThreadId {
+    if let peerThreadId {
       body["peerThreadId"] = peerThreadId
     }
 
-    if let randomId = randomId {
+    if let randomId {
       body["randomId"] = "\(randomId)"
     }
 
-    if let repliedToMessageId = repliedToMessageId {
+    if let repliedToMessageId {
       body["replyToMessageId"] = repliedToMessageId
     }
 
-    if let fileUniqueId = fileUniqueId {
+    if let fileUniqueId {
       body["fileUniqueId"] = fileUniqueId
     }
 
     return try await postRequest(
       .sendMessage,
       body: body,
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func getChatHistory(peerUserId: Int64?, peerThreadId: Int64?) async throws
@@ -357,11 +346,11 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   {
     var queryItems: [URLQueryItem] = []
 
-    if let peerUserId = peerUserId {
+    if let peerUserId {
       queryItems.append(URLQueryItem(name: "peerUserId", value: "\(peerUserId)"))
     }
 
-    if let peerThreadId = peerThreadId {
+    if let peerThreadId {
       queryItems.append(URLQueryItem(name: "peerThreadId", value: "\(peerThreadId)"))
     }
 
@@ -374,8 +363,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       queryItems: [
         URLQueryItem(name: "applePushToken", value: pushToken),
       ],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func updateStatus(online: Bool) async throws -> EmptyPayload {
@@ -384,8 +372,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       queryItems: [
         URLQueryItem(name: "online", value: online ? "true" : "false"),
       ],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func sendComposeAction(peerId: Peer, action: ApiComposeAction?) async throws
@@ -397,12 +384,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)),
         URLQueryItem(
           name: "peerThreadId",
-          value: peerId.asThreadId().map(String.init)
-        ),
+          value: peerId.asThreadId().map(String.init)),
         URLQueryItem(name: "action", value: action?.rawValue),
       ],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func logout() async throws -> EmptyPayload {
@@ -419,33 +404,34 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         URLQueryItem(name: "chatId", value: "\(chatId)"),
         URLQueryItem(name: "emoji", value: emoji),
       ],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func updateDialog(
     peerId: Peer,
     pinned: Bool?,
-    draft: String?
-  ) async throws -> UpdateDialog {
+    draft: String?,
+    archived: Bool?) async throws -> UpdateDialog
+  {
     var queryItems: [URLQueryItem] = []
 
     queryItems.append(URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)))
     queryItems.append(URLQueryItem(name: "peerThreadId", value: peerId.asThreadId().map(String.init)))
 
-    if let pinned = pinned {
+    if let pinned {
       queryItems.append(URLQueryItem(name: "pinned", value: "\(pinned)"))
     }
 
-    if let draft = draft {
+    if let draft {
       queryItems.append(URLQueryItem(name: "draft", value: draft))
     }
-
+    if let archived {
+      queryItems.append(URLQueryItem(name: "archived", value: "\(archived)"))
+    }
     return try await request(
       .updateDialog,
       queryItems: queryItems,
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func addMember(spaceId: Int64, userId: Int64) async throws -> AddMember {
@@ -455,24 +441,21 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         URLQueryItem(name: "spaceId", value: "\(spaceId)"),
         URLQueryItem(name: "userId", value: "\(userId)"),
       ],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func getSpace(spaceId: Int64) async throws -> GetSpace {
     try await request(
       .getSpace,
       queryItems: [URLQueryItem(name: "id", value: "\(spaceId)")],
-      includeToken: true
-    )
+      includeToken: true)
   }
 
   public func getDraft(peerId: Peer) async throws -> GetDraft {
     try await request(
       .getDraft,
       queryItems: [URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init))],
-      includeToken: true
-    )
+      includeToken: true)
   }
 }
 
@@ -508,8 +491,7 @@ public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
       self = try .error(
         error: values.decode(String.self, forKey: .error),
         errorCode: values.decodeIfPresent(Int.self, forKey: .errorCode),
-        description: values.decodeIfPresent(String.self, forKey: .description)
-      )
+        description: values.decodeIfPresent(String.self, forKey: .description))
     }
   }
 }
@@ -644,29 +626,27 @@ struct SessionInfo: Codable, Sendable {
     // let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
 
     #if os(iOS)
-      let clientType = "ios"
-      let osVersion = UIDevice.current.systemVersion
-      let deviceName = UIDevice.current.name
-      return SessionInfo(
-        clientType: clientType,
-        clientVersion: clientVersion,
-        osVersion: osVersion,
-        deviceName: deviceName,
-        timezone: timezone
-      )
+    let clientType = "ios"
+    let osVersion = UIDevice.current.systemVersion
+    let deviceName = UIDevice.current.name
+    return SessionInfo(
+      clientType: clientType,
+      clientVersion: clientVersion,
+      osVersion: osVersion,
+      deviceName: deviceName,
+      timezone: timezone)
     #elseif os(macOS)
-      let clientType = "macos"
-      let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
-      let deviceName = Host.current().name
-      return SessionInfo(
-        clientType: clientType,
-        clientVersion: clientVersion,
-        osVersion: osVersion,
-        deviceName: deviceName,
-        timezone: timezone
-      )
+    let clientType = "macos"
+    let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+    let deviceName = Host.current().name
+    return SessionInfo(
+      clientType: clientType,
+      clientVersion: clientVersion,
+      osVersion: osVersion,
+      deviceName: deviceName,
+      timezone: timezone)
     #else
-      return nil
+    return nil
     #endif
   }
 }

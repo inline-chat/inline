@@ -14,6 +14,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case settings
     case createSpace
     case createThread(spaceId: Int64)
+    case archivedChats
 
     // MARK: - Identifiable Conformance
 
@@ -25,6 +26,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
       case .settings: return "settings"
       case .createSpace: return "createSpace"
       case .createThread(let spaceId): return "createThread-\(spaceId)"
+      case .archivedChats: return "archivedChats"
       }
     }
   }
