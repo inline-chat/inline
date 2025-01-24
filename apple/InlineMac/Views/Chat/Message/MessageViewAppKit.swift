@@ -617,6 +617,14 @@ class MessageViewAppKit: NSView {
     idItem.isEnabled = false
     menu.addItem(idItem)
 
+    let indexItem = NSMenuItem(
+      title: "Index: \(props.index?.description ?? "?")",
+      action: nil,
+      keyEquivalent: ""
+    )
+    indexItem.isEnabled = false
+    menu.addItem(indexItem)
+
     let copyItem = NSMenuItem(title: "Copy", action: #selector(copyMessage), keyEquivalent: "c")
     menu.addItem(copyItem)
 
@@ -824,6 +832,8 @@ struct MessageViewProps: Equatable, Codable, Hashable {
 
   var photoWidth: CGFloat?
   var photoHeight: CGFloat?
+
+  var index: Int?
 
   /// Used in cache key
   func toString() -> String {
