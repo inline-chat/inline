@@ -21,7 +21,7 @@ public struct SpaceView: View {
   }
 
   public var body: some View {
-    Text("Space View \(spaceId)")
-      .navigationTitle("Space \(spaceId)")
+    Text("")
+      .navigationTitle("")
   }
 }
