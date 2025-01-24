@@ -30,24 +30,17 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
 
 public extension FullMessage {
   static func queryRequest() -> QueryInterfaceRequest<FullMessage> {
-    return
-      Message
-        .including(optional: Message.from)
-        .including(optional: Message.file)
-        .including(all: Message.reactions)
-        .including(optional: Message.repliedToMessage.forKey("repliedToMessage"))
-        .asRequest(of: FullMessage.self)
+    Message
+      .including(optional: Message.from)
+      .including(optional: Message.file)
+      .including(all: Message.reactions)
+      .including(optional: Message.repliedToMessage.forKey("repliedToMessage"))
+      .asRequest(of: FullMessage.self)
   }
-}
-
-public struct FullChatSection: Identifiable, Equatable, Hashable {
-  public var id: Date
-  public var date: Date
 }
 
 public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   @Published public private(set) var chatItem: SpaceChatItem?
-  @Published public private(set) var fullMessages: [FullMessage] = []
 
   public var messageIdToGlobalId: [Int64: Int64] = [:]
 
@@ -59,29 +52,15 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     chatItem?.user
   }
 
-  public var topMessage: FullMessage? {
-    reversed ? fullMessages.first : fullMessages.last
-  }
-
   private var chatCancellable: AnyCancellable?
-
-  private var peerUserCancellable: AnyCancellable?
 
   private var db: AppDatabase
   public var peer: Peer
-  public var limit: Int?
 
-  // Descending order (newest first) if true
-  private var reversed: Bool
-
-  public init(
-    db: AppDatabase, peer: Peer, reversed: Bool = true, limit: Int? = nil,
-    fetchesMessages: Bool = true
-  ) {
+  public init(db: AppDatabase, peer: Peer) {
     self.db = db
     self.peer = peer
-    self.reversed = reversed
-    self.limit = limit
+
     fetchChat()
   }
 
@@ -91,41 +70,44 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
       ValueObservation
         .tracking { db in
           switch peerId {
-          case .user:
-            // Fetch private chat
-            try Dialog
-              .filter(id: Dialog.getDialogId(peerId: peerId))
-              .including(
-                optional: Dialog.peerUser
-                  .including(
-                    optional: User.chat
-                      .including(optional: Chat.lastMessage))
-              )
-              .asRequest(of: SpaceChatItem.self)
-              .fetchAll(db)
+            case .user:
+              // Fetch private chat
+              try Dialog
+                .filter(id: Dialog.getDialogId(peerId: peerId))
+                .including(
+                  optional: Dialog.peerUser
+                    .including(
+                      optional: User.chat
+                        .including(optional: Chat.lastMessage)))
+                .asRequest(of: SpaceChatItem.self)
+                .fetchAll(db)
 
-          case .thread:
-            // Fetch thread chat
-            try Dialog
-              .filter(id: Dialog.getDialogId(peerId: peerId))
-              .including(
-                optional: Dialog.peerThread
-                  .including(optional: Chat.lastMessage)
-              )
-              .asRequest(of: SpaceChatItem.self)
-              .fetchAll(db)
+            case .thread:
+              // Fetch thread chat
+              try Dialog
+                .filter(id: Dialog.getDialogId(peerId: peerId))
+                .including(
+                  optional: Dialog.peerThread
+                    .including(optional: Chat.lastMessage))
+                .asRequest(of: SpaceChatItem.self)
+                .fetchAll(db)
           }
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
           receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
-          receiveValue: { [weak self] chats in
-            self?.chatItem = chats.first
-          }
-        )
-  }
+          receiveValue: { [weak self] (chats: [SpaceChatItem]) in
+            if let self,
+               let fullChat = chats.first,
+               
+               fullChat.dialog != self.chatItem?.dialog ||
+               fullChat.chat?.title != self.chatItem?.chat?.title
+            {
+              // Important Note
+              // Only update if the dialog is different, ignore chat and message for performance reasons
+              chatItem = chats.first
+            }
 
-  public func getGlobalId(forMessageId messageId: Int64) -> Int64? {
-    messageIdToGlobalId[messageId]
+          })
   }
 }
