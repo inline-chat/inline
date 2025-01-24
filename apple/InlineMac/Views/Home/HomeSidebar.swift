@@ -46,7 +46,7 @@ struct HomeSidebar: View {
       content: {
         VStack(alignment: .leading, spacing: 0) {
           SelfUser()
-            .padding(.top, -8)
+            .padding(.top, -6)
             .padding(.bottom, 6)
           searchBar
         }
