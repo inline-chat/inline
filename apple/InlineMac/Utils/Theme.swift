@@ -28,6 +28,7 @@ enum Theme {
 
   // MARK: - Message View
 
+  static let messageMaxWidth: CGFloat = 420
   static let messageOuterVerticalPadding: CGFloat = 2.0 // gap between consequetive bubbles
   static let messageSidePadding: CGFloat = 14
   static let messageAvatarSize: CGFloat = 28

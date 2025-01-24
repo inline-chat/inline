@@ -25,6 +25,8 @@ class MessageSizeCalculator {
   
   static let safeAreaWidth: CGFloat = 50.0
   static let extraSafeWidth = 0.0
+  
+  static let maxMessageWidth: CGFloat = Theme.messageMaxWidth
 
   init() {
     textStorage = NSTextStorage()
@@ -50,7 +52,7 @@ class MessageSizeCalculator {
       Self.extraSafeWidth
     
     // Ensure we don't return negative width
-    return max(0.0, availableWidth)
+    return min(max(0.0, availableWidth), Self.maxMessageWidth)
   }
   
   func isSingleLine(_ fullMessage: FullMessage, availableWidth: CGFloat) -> Bool {
@@ -69,6 +71,7 @@ class MessageSizeCalculator {
   func calculateSize(for message: FullMessage, with props: MessageViewProps, tableWidth width: CGFloat) -> (NSSize, NSSize, NSSize?) {
     let text = message.message.text ?? emptyFallback
     let hasMedia = message.file != nil
+    let hasBubble = Theme.messageIsBubble
     
     // If text is empty, height is always 1 line
     // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
@@ -90,7 +93,10 @@ class MessageSizeCalculator {
     
     // Add file/photo/video sizes
     if hasMedia {
-      let maxMediaSize = CGSize(width: 360.0, height: 310.0) // prevent too big media
+      let maxMediaSize = CGSize(
+        width: Theme.messageMaxWidth,
+        height: 310.0
+      ) // prevent too big media
       let minMediaSize = CGSize(width: 180.0, height: 20.0) // prevent too narrow media
       // /start photo
       if let file = message.file, file.fileType == .photo {
