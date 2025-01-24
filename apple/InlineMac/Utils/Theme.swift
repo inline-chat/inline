@@ -23,7 +23,7 @@ enum Theme {
   static let sidebarIconSpacing: CGFloat = 6
   static let sidebarItemRadius: CGFloat = 6
   static let sidebarItemPadding: CGFloat = 8
-  static let sidebarTopItemFont: Font = Font.body.weight(.medium)
+  static let sidebarTopItemFont: Font = Font.body.weight(.regular)
   static let sidebarTopItemHeight: CGFloat = 30
 
   // MARK: - Message View

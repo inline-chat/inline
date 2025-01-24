@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct SpaceSidebar: View {
@@ -8,8 +9,6 @@ struct SpaceSidebar: View {
 
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
   @Environment(\.openWindow) var openWindow
-
-  @State var search: String = ""
 
   var spaceId: Int64
 
@@ -22,12 +21,31 @@ struct SpaceSidebar: View {
 
   var body: some View {
     List {
-      Section("Threads") {
+      Section {
         ForEach(fullSpace.chats, id: \.peerId) { item in
           ChatSideItem(
             selectedRoute: navigation.spaceSelection,
-            item: item
-          )
+            item: item)
+        }
+      }
+
+      Section {
+        ForEach(fullSpace.memberChats, id: \.peerId) { item in
+          if let user = item.user {
+            UserItem(
+              user: user,
+              action: {
+                navigation.select(.chat(peer: .user(id: user.id)))
+              },
+              commandPress: {
+                openWindow(value: Peer.user(id: user.id))
+              },
+              selected: navigation.spaceSelection.wrappedValue == .chat(
+                peer: .user(id: user.id)))
+              .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+          } else {
+            EmptyView()
+          }
         }
       }
     }
@@ -37,30 +55,38 @@ struct SpaceSidebar: View {
     .safeAreaInset(
       edge: .top,
       content: {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 0) {
           HStack(spacing: 0) {
             // Back
             Button {
-              self.navigation.goHome()
+              navigation.goHome()
             } label: {
               Image(systemName: "chevron.left")
-                .font(.title3)
-                .padding(.trailing, 8)
+                .font(.caption)
+                .frame(height: Theme.sidebarIconSize)
+                .padding(.trailing, 4)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            Text(fullSpace.space?.name ?? "")
+            if let space = fullSpace.space {
+              SpaceAvatar(space: space, size: Theme.sidebarIconSize)
+                .padding(.trailing, Theme.sidebarIconSpacing)
+            }
+
+            Text(fullSpace.space?.name ?? "Loading...")
               .font(Theme.sidebarTopItemFont)
 
             Spacer()
-          }.frame(height: Theme.sidebarTopItemHeight)
-
-          SidebarSearchBar(text: $search)
+          }
+          .frame(height: Theme.sidebarTopItemHeight)
+          .padding(.top, -6)
+          // .frame(maxWidth: .infinity, alignment: .leading)
+          // .padding(.horizontal)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
-      }
-    )
+      })
     .task {
       do {
         try await data.getDialogs(spaceId: spaceId)
