@@ -1,15 +1,14 @@
 import SwiftUI
 
-extension EnvironmentValues {
-  @Entry public var appDatabase = AppDatabase.empty()
-  @Entry public var auth = Auth.shared
-  @Entry public var transactions = Transactions.shared
+public extension EnvironmentValues {
+  @Entry var appDatabase = AppDatabase.empty()
+  @Entry var auth = Auth.shared
+  @Entry var transactions = Transactions.shared
 }
 
-extension View {
-  public func appDatabase(_ appDatabase: AppDatabase) -> some View {
-    self
-      .environment(\.appDatabase, appDatabase)
+public extension View {
+  func appDatabase(_ appDatabase: AppDatabase) -> some View {
+    environment(\.appDatabase, appDatabase)
       .databaseContext(.readWrite { appDatabase.dbWriter })
   }
 }
