@@ -4,7 +4,7 @@
 --maxwidth 120
 --wraparguments before-first
 --wrapcollections before-first
---closingparen same-line
+--closingparen balanced
 --commas always
 --semicolons never
 --decimalgrouping 3
