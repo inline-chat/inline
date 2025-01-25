@@ -133,7 +133,7 @@ class UIMessageView: UIView {
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
       messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -labelHorizantalPadding),
 
-      metadataView.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: -labelVerticalPadding),
+      metadataView.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: labelVerticalPadding),
       metadataView.leadingAnchor.constraint(
         greaterThanOrEqualTo: bubbleView.leadingAnchor, constant: 14
       ),
