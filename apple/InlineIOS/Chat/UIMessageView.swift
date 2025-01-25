@@ -117,7 +117,8 @@ class UIMessageView: UIView {
         bubbleView.topAnchor.constraint(equalTo: topAnchor),
         bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
         bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
-      ] + messageConstraints)
+      ] + messageConstraints
+    )
 
     if outgoing {
       bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8).isActive = true
@@ -127,21 +128,22 @@ class UIMessageView: UIView {
   }
 
   private func setupMultilineMessageConstraints() -> [NSLayoutConstraint] {
-    return [
+    [
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
       messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -labelHorizantalPadding),
 
       metadataView.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: -labelVerticalPadding),
       metadataView.leadingAnchor.constraint(
-        greaterThanOrEqualTo: bubbleView.leadingAnchor, constant: 14),
+        greaterThanOrEqualTo: bubbleView.leadingAnchor, constant: 14
+      ),
       metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
       metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -14),
     ]
   }
 
   private func setupOneLineMessageConstraints() -> [NSLayoutConstraint] {
-    return [
+    [
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
       messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -labelVerticalPadding),
@@ -160,7 +162,8 @@ class UIMessageView: UIView {
       attributes: [
         .font: UIFont.systemFont(ofSize: 17),
         .foregroundColor: textColor,
-      ])
+      ]
+    )
 
     detectAndStyleLinks(in: text, attributedString: attributedString)
 
@@ -215,7 +218,8 @@ class UIMessageView: UIView {
     let index = layoutManager.characterIndex(
       for: point,
       in: textContainer,
-      fractionOfDistanceBetweenInsertionPoints: nil)
+      fractionOfDistanceBetweenInsertionPoints: nil
+    )
 
     // Check for tapped link
     for link in links where NSLocationInRange(index, link.range) {
@@ -237,8 +241,8 @@ class UIMessageView: UIView {
 extension UIMessageView: UIContextMenuInteractionDelegate {
   func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction,
-    configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration?
-  {
+    configurationForMenuAtLocation location: CGPoint
+  ) -> UIContextMenuConfiguration? {
     UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
       guard let self else { return nil }
 
@@ -254,7 +258,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       }
       actions.append(replyAction)
 
-      if let url = self.getURLAtLocation(location) {
+      if let url = getURLAtLocation(location) {
         let openLinkAction = UIAction(title: "Open Link") { _ in
           self.linkTapHandler?(url)
         }
@@ -282,7 +286,8 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
     let index = layoutManager.characterIndex(
       for: location,
       in: textContainer,
-      fractionOfDistanceBetweenInsertionPoints: nil)
+      fractionOfDistanceBetweenInsertionPoints: nil
+    )
 
     for link in links where NSLocationInRange(index, link.range) {
       return link.url
@@ -294,15 +299,15 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
   static var contextMenuOpen: Bool = false
   func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction, willDisplayMenuFor configuration: UIContextMenuConfiguration,
-    animator: UIContextMenuInteractionAnimating?)
-  {
+    animator: UIContextMenuInteractionAnimating?
+  ) {
     Self.contextMenuOpen = true
   }
 
   func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction, willEndFor configuration: UIContextMenuConfiguration,
-    animator: UIContextMenuInteractionAnimating?)
-  {
+    animator: UIContextMenuInteractionAnimating?
+  ) {
     Self.contextMenuOpen = false
   }
 }

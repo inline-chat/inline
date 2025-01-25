@@ -12,7 +12,7 @@ struct RemoteUserItem: View {
 
   var body: some View {
     let view = Button {
-      if let action = action {
+      if let action {
         action()
       }
     } label: {
@@ -56,11 +56,11 @@ struct RemoteUserItem: View {
 
   private var backgroundColor: Color {
     if isFocused {
-      return .primary.opacity(0.1)
+      .primary.opacity(0.1)
     } else if isHovered {
-      return .primary.opacity(0.05)
+      .primary.opacity(0.05)
     } else {
-      return .clear
+      .clear
     }
   }
 }

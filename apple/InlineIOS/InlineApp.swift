@@ -10,7 +10,7 @@ struct InlineApp: App {
   var body: some Scene {
     WindowGroup {
       ContentView()
-        .environmentObject(self.ws)
+        .environmentObject(ws)
         .environment(\.auth, Auth.shared)
         .environment(\.transactions, Transactions.shared)
         .appDatabase(AppDatabase.shared)

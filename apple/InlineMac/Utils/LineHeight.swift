@@ -1,11 +1,8 @@
-//  Created by Marcin Krzyzanowski
-//  https://github.com/krzyzanowskim/STTextView/blob/main/LICENSE.md
-
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
-  import AppKit
+import AppKit
 #endif
 #if canImport(UIKit)
-  import UIKit
+import UIKit
 #endif
 
 func calculateDefaultLineHeight(for font: CTFont) -> CGFloat {
@@ -34,12 +31,12 @@ func calculateDefaultLineHeight(for font: CTFont) -> CGFloat {
   }
 
   #if os(iOS) || targetEnvironment(macCatalyst)
-    let adjustment =
-      shouldUseAdjustment(familyName) ? ceil(ascent + descent) * kLineHeightAdjustment : 0
-    lineGap = ceil(lineGap)
-    lineSpacing = ceil(ascent) + adjustment + ceil(descent) + lineGap
-    ascent = ceil(ascent + adjustment)
-    descent = ceil(descent)
+  let adjustment =
+    shouldUseAdjustment(familyName) ? ceil(ascent + descent) * kLineHeightAdjustment : 0
+  lineGap = ceil(lineGap)
+  lineSpacing = ceil(ascent) + adjustment + ceil(descent) + lineGap
+  ascent = ceil(ascent + adjustment)
+  descent = ceil(descent)
   #endif
 
   return lineSpacing
@@ -48,6 +45,6 @@ func calculateDefaultLineHeight(for font: CTFont) -> CGFloat {
 private func shouldUseAdjustment(_ familyName: String) -> Bool {
   familyName.caseInsensitiveCompare("Times") == .orderedSame
     || familyName.caseInsensitiveCompare("Helvetica") == .orderedSame
-    || familyName.caseInsensitiveCompare("Courier") == .orderedSame  // macOS only
+    || familyName.caseInsensitiveCompare("Courier") == .orderedSame // macOS only
     || familyName.caseInsensitiveCompare(".Helvetica NeueUI") == .orderedSame
 }

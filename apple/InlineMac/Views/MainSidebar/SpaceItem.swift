@@ -45,7 +45,7 @@ struct SpaceItem: View {
         ),
         primaryButton: .destructive(Text(actionText)) {
           Task {
-            self.act(pendingAction!)
+            act(pendingAction!)
           }
         },
         secondaryButton: .cancel {
@@ -65,7 +65,7 @@ struct SpaceItem: View {
       //                .frame(height: Theme.sidebarItemHeight)
       //                .fixedSize(horizontal: false, vertical: true)
       //                .lineSpacing(0)
-      Spacer()  // Fill entire line
+      Spacer() // Fill entire line
     }
     .frame(height: Theme.sidebarItemHeight)
     .onHover { isHovered = $0 }
@@ -73,7 +73,6 @@ struct SpaceItem: View {
     .padding(.horizontal, Theme.sidebarItemPadding)
     .background(isHovered ? Color.primary.opacity(0.05) : Color.clear)
     .cornerRadius(Theme.sidebarItemRadius)
-
   }
 
   var actionText: String {
@@ -93,20 +92,20 @@ struct SpaceItem: View {
   private func act(_ action: Action) {
     Task {
       switch action {
-      case .delete:
-        if pendingAction == action {
-          try await dataManager.deleteSpace(spaceId: space.id)
-          navigateOutOfSpace()
-        } else {
-          startPendingAct(action)
-        }
-      case .leave:
-        if pendingAction == action {
-          try await dataManager.leaveSpace(spaceId: space.id)
-          navigateOutOfSpace()
-        } else {
-          startPendingAct(action)
-        }
+        case .delete:
+          if pendingAction == action {
+            try await dataManager.deleteSpace(spaceId: space.id)
+            navigateOutOfSpace()
+          } else {
+            startPendingAct(action)
+          }
+        case .leave:
+          if pendingAction == action {
+            try await dataManager.leaveSpace(spaceId: space.id)
+            navigateOutOfSpace()
+          } else {
+            startPendingAct(action)
+          }
       }
     }
   }

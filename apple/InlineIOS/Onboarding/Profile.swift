@@ -124,8 +124,7 @@ extension Profile {
     }
   }
 
-  private func parseNameComponents(from fullName: String) -> (firstName: String, lastName: String?)
-  {
+  private func parseNameComponents(from fullName: String) -> (firstName: String, lastName: String?) {
     let formatter = PersonNameComponentsFormatter()
     if let components = formatter.personNameComponents(from: fullName) {
       if components.givenName == nil {
@@ -183,18 +182,18 @@ extension Profile {
   private var usernameStatusIndicator: some View {
     if username.count >= 2 {
       switch usernameStatus {
-      case .checking:
-        Image(systemName: "hourglass")
-          .font(.callout)
-          .foregroundColor(.secondary)
-      case .available:
-        Image(systemName: "checkmark.circle")
-          .font(.callout)
-          .foregroundColor(.green)
-      case .taken:
-        Image(systemName: "xmark.circle")
-          .font(.callout)
-          .foregroundColor(.red)
+        case .checking:
+          Image(systemName: "hourglass")
+            .font(.callout)
+            .foregroundColor(.secondary)
+        case .available:
+          Image(systemName: "checkmark.circle")
+            .font(.callout)
+            .foregroundColor(.green)
+        case .taken:
+          Image(systemName: "xmark.circle")
+            .font(.callout)
+            .foregroundColor(.red)
       }
     }
   }

@@ -69,23 +69,23 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 
   public init(fromAttachment attachment: SendMessageAttachment) {
-    self.id = attachment.id
-    self.uploading = true
-    self.fileSize = attachment.fileSize
-    self.localPath = attachment.filePath
+    id = attachment.id
+    uploading = true
+    fileSize = attachment.fileSize
+    localPath = attachment.filePath
     switch attachment.type {
-    case .photo(_, let width, let height):
-      self.width = width
-      self.height = height
-      self.fileType = .photo
-    default:
-      self.fileType = .file // for now until we support more
+      case let .photo(_, width, height):
+        self.width = width
+        self.height = height
+        fileType = .photo
+      default:
+        fileType = .file // for now until we support more
     }
 
     // waiting for remote response to fill out
-    self.fileUniqueId = nil
-    self.temporaryUrl = nil
-    self.temporaryUrlExpiresAt = nil
+    fileUniqueId = nil
+    temporaryUrl = nil
+    temporaryUrlExpiresAt = nil
   }
 
   // TODO: from photo info
@@ -94,7 +94,7 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 // Helpers
 public extension File {
   func getLocalURL() -> URL? {
-    guard let localPath = localPath else {
+    guard let localPath else {
       return nil
     }
     return FileHelpers

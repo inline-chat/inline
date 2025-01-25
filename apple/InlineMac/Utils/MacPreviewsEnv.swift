@@ -1,10 +1,9 @@
-import SwiftUI
 import InlineKit
+import SwiftUI
 
 public extension View {
   func previewsEnvironmentForMac(_ preset: PreviewsEnvironemntPreset) -> some View {
-    return self
-      .previewsEnvironment(preset)
+    previewsEnvironment(preset)
       .environmentObject(MainWindowViewModel())
       .environmentObject(NavigationModel())
       .environmentObject(OverlayManager())

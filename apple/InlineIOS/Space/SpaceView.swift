@@ -116,74 +116,77 @@ struct SpaceView: View {
   @ViewBuilder
   private func combinedItemRow(for item: CombinedItem) -> some View {
     switch item {
-    case .member(let memberChat):
-      Button {
-        nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
-      } label: {
-        ChatRowView(item: .space(memberChat))
-      }
-      .contextMenu {
+      case let .member(memberChat):
         Button {
           nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
         } label: {
-          Label("Open Chat", systemImage: "bubble.left")
+          ChatRowView(item: .space(memberChat))
         }
-
-      } preview: {
-        ChatView(peer: .user(id: memberChat.user?.id ?? 0), preview: true)
-          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-          .environmentObject(nav)
-          .environmentObject(data)
-          .environmentObject(ws)
-          .environment(\.appDatabase, database)
-      }
-
-    case .chat(let chat):
-      Button {
-        nav.push(.chat(peer: chat.peerId))
-      } label: {
-        ChatRowView(item: .space(chat))
-      }
-
-      .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-        Button {
-          Task {
-            try await data.updateDialog(
-              peerId: chat.peerId,
-              pinned: !(chat.dialog.pinned ?? false)
-            )
+        .contextMenu {
+          Button {
+            nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
+          } label: {
+            Label("Open Chat", systemImage: "bubble.left")
           }
-        } label: {
-          Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+
+        } preview: {
+          ChatView(peer: .user(id: memberChat.user?.id ?? 0), preview: true)
+            .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+            .environmentObject(nav)
+            .environmentObject(data)
+            .environmentObject(ws)
+            .environment(\.appDatabase, database)
         }
-      }
-      .tint(.indigo)
-      .contextMenu {
-        Button {
-          Task {
-            try await data.updateDialog(
-              peerId: chat.peerId,
-              pinned: !(chat.dialog.pinned ?? false)
-            )
-          }
-        } label: {
-          Label(chat.dialog.pinned ?? false ? "Unpin" : "Pin", systemImage: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-        }
+
+      case let .chat(chat):
         Button {
           nav.push(.chat(peer: chat.peerId))
         } label: {
-          Label("Open Chat", systemImage: "bubble.left")
+          ChatRowView(item: .space(chat))
         }
 
-      } preview: {
-        ChatView(peer: chat.peerId, preview: true)
-          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-          .environmentObject(nav)
-          .environmentObject(data)
-          .environmentObject(ws)
-          .environment(\.appDatabase, database)
-      }
-      .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+          Button {
+            Task {
+              try await data.updateDialog(
+                peerId: chat.peerId,
+                pinned: !(chat.dialog.pinned ?? false)
+              )
+            }
+          } label: {
+            Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+          }
+        }
+        .tint(.indigo)
+        .contextMenu {
+          Button {
+            Task {
+              try await data.updateDialog(
+                peerId: chat.peerId,
+                pinned: !(chat.dialog.pinned ?? false)
+              )
+            }
+          } label: {
+            Label(
+              chat.dialog.pinned ?? false ? "Unpin" : "Pin",
+              systemImage: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill"
+            )
+          }
+          Button {
+            nav.push(.chat(peer: chat.peerId))
+          } label: {
+            Label("Open Chat", systemImage: "bubble.left")
+          }
+
+        } preview: {
+          ChatView(peer: chat.peerId, preview: true)
+            .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+            .environmentObject(nav)
+            .environmentObject(data)
+            .environmentObject(ws)
+            .environment(\.appDatabase, database)
+        }
+        .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
     }
   }
 }
@@ -196,22 +199,22 @@ private enum CombinedItem: Identifiable {
 
   var id: Int64 {
     switch self {
-    case .member(let item): return item.user?.id ?? 0
-    case .chat(let item): return item.id
+      case let .member(item): item.user?.id ?? 0
+      case let .chat(item): item.id
     }
   }
 
   var date: Date {
     switch self {
-    case .member(let item): return item.message?.date ?? item.chat?.date ?? Date()
-    case .chat(let item): return item.message?.date ?? item.chat?.date ?? Date()
+      case let .member(item): item.message?.date ?? item.chat?.date ?? Date()
+      case let .chat(item): item.message?.date ?? item.chat?.date ?? Date()
     }
   }
 
   var isPinned: Bool {
     switch self {
-    case .member(let item): return item.dialog.pinned ?? false
-    case .chat(let item): return item.dialog.pinned ?? false
+      case let .member(item): item.dialog.pinned ?? false
+      case let .chat(item): item.dialog.pinned ?? false
     }
   }
 }

@@ -42,66 +42,66 @@ extension ContentView {
   @ViewBuilder
   func destinationView(for destination: Navigation.Destination) -> some View {
     switch destination {
-    case .chat(let peer):
-      ChatView(peer: peer)
-    case .space(let id):
-      SpaceView(spaceId: id)
-    case .settings:
-      SettingsView()
-    case .main:
-      MainView()
-    case .archivedChats:
-      ArchivedChatsView()
-    case .createSpace:
-      SettingsView()
-    case .createThread:
-      EmptyView()
+      case let .chat(peer):
+        ChatView(peer: peer)
+      case let .space(id):
+        SpaceView(spaceId: id)
+      case .settings:
+        SettingsView()
+      case .main:
+        MainView()
+      case .archivedChats:
+        ArchivedChatsView()
+      case .createSpace:
+        SettingsView()
+      case .createThread:
+        EmptyView()
     }
   }
 
   @ViewBuilder
   func sheetContent(for destination: Navigation.Destination) -> some View {
     switch destination {
-    case .createThread(let spaceId):
-      CreateThread(showSheet: .constant(true), spaceId: spaceId)
-        .presentationBackground(.ultraThickMaterial)
-        .presentationCornerRadius(18)
-    default:
-      EmptyView()
+      case let .createThread(spaceId):
+        CreateThread(showSheet: .constant(true), spaceId: spaceId)
+          .presentationBackground(.ultraThickMaterial)
+          .presentationCornerRadius(18)
+      default:
+        EmptyView()
     }
   }
 
   @ViewBuilder
   var content: some View {
     switch mainViewRouter.route {
-    case .main:
-      NavigationStack(path: nav.currentStackBinding) {
-        MainView()
-          .navigationDestination(for: Navigation.Destination.self) { destination in
-            destinationView(for: destination)
-          }
-      }
-      .sheet(item: $nav.activeSheet) { destination in
-        sheetContent(for: destination)
-      }
-      .onAppear {
-        updateOnlineStatus()
-      }
-      .onChange(of: scene) { _, newScene in
-        switch newScene {
-        case .active:
-          updateOnlineStatus()
-        case .inactive:
-          break
-        case .background:
-          break
-        default:
-          break
+      case .main:
+        NavigationStack(path: nav.currentStackBinding) {
+          MainView()
+            .navigationDestination(for: Navigation.Destination.self) { destination in
+              destinationView(for: destination)
+            }
         }
-      }
+        .sheet(item: $nav.activeSheet) { destination in
+          sheetContent(for: destination)
+        }
+        .onAppear {
+          updateOnlineStatus()
+        }
+        .onChange(of: scene) { _, newScene in
+          switch newScene {
+            case .active:
+              updateOnlineStatus()
+            case .inactive:
+              break
+            case .background:
+              break
+            default:
+              break
+          }
+        }
 
-    case .onboarding:
-      OnboardingView()
+      case .onboarding:
+        OnboardingView()
     }
   }
 

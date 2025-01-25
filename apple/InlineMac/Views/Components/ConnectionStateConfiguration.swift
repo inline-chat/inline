@@ -1,5 +1,5 @@
-import SwiftUI
 import InlineKit
+import SwiftUI
 
 struct ConnectionStateConfiguration {
   let state: ConnectionState
@@ -47,12 +47,12 @@ struct ConnectionStateProvider<Content: View>: View {
 
   private func getStatusText(_ state: ConnectionState) -> String {
     switch state {
-    case .normal:
-      return "connected"
-    case .connecting:
-      return "connecting..."
-    case .updating:
-      return "updating..."
+      case .normal:
+        "connected"
+      case .connecting:
+        "connecting..."
+      case .updating:
+        "updating..."
     }
   }
 }

@@ -147,12 +147,14 @@ class MessageListAppKit: NSViewController {
         top: toolbarHeight,
         left: 0,
         bottom: Theme.messageListBottomInset + insetForCompose,
-        right: 0)
+        right: 0
+      )
       scrollView.scrollerInsets = NSEdgeInsets(
         top: 0,
         left: 0,
         bottom: -Theme.messageListBottomInset, // Offset it to touch bottom
-        right: 0)
+        right: 0
+      )
 
       log.debug("Adjusting view's toolbar")
       // make window toolbar layout and have background to fight the swiftui defaUlt behaviour
@@ -216,32 +218,37 @@ class MessageListAppKit: NSViewController {
       self,
       selector: #selector(scrollViewFrameChanged),
       name: NSView.frameDidChangeNotification,
-      object: scrollView.contentView)
+      object: scrollView.contentView
+    )
 
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(scrollViewBoundsChanged),
       name: NSView.boundsDidChangeNotification,
-      object: scrollView.contentView)
+      object: scrollView.contentView
+    )
 
     // Add scroll wheel notification
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(scrollWheelBegan),
       name: NSScrollView.willStartLiveScrollNotification,
-      object: scrollView)
+      object: scrollView
+    )
 
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(scrollWheelEnded),
       name: NSScrollView.didEndLiveScrollNotification,
-      object: scrollView)
+      object: scrollView
+    )
 
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(liveResizeEnded),
       name: NSWindow.didEndLiveResizeNotification,
-      object: scrollView.window)
+      object: scrollView.window
+    )
   }
 
   private var scrollState: MessageListScrollState = .idle {
@@ -249,7 +256,8 @@ class MessageListAppKit: NSViewController {
       NotificationCenter.default.post(
         name: .messageListScrollStateDidChange,
         object: self,
-        userInfo: ["state": scrollState])
+        userInfo: ["state": scrollState]
+      )
     }
   }
 
@@ -368,7 +376,8 @@ class MessageListAppKit: NSViewController {
     }
     log
       .trace(
-        "scroll view frame changed, maintaining scroll from bottom \(contentSize.height) \(previousViewportHeight)")
+        "scroll view frame changed, maintaining scroll from bottom \(contentSize.height) \(previousViewportHeight)"
+      )
     previousViewportHeight = viewportSize.height
 
     // TODO: min max
@@ -451,7 +460,8 @@ class MessageListAppKit: NSViewController {
       lastKnownWidth = newWidth
 
       let availableWidth = sizeCalculator.getAvailableWidth(
-        tableWidth: tableView.bounds.width)
+        tableWidth: tableView.bounds.width
+      )
 
       if availableWidth < Theme.messageMaxWidth {
         // Update heights
@@ -602,7 +612,8 @@ class MessageListAppKit: NSViewController {
       x: visibleRect.origin.x,
       y: visibleRect.origin.y,
       width: visibleRect.width,
-      height: visibleRect.height - bottomInset)
+      height: visibleRect.height - bottomInset
+    )
     log.debug("Anchoring to bottom. Visible rect: \(visibleRectInsetted) inset: \(bottomInset)")
 
     let viewportHeight = scrollView.contentView.bounds.height
@@ -677,7 +688,8 @@ class MessageListAppKit: NSViewController {
     let visibleStartIndex = max(0, visibleRange.location - buffer)
     let visibleEndIndex = min(
       tableView.numberOfRows,
-      visibleRange.location + visibleRange.length + buffer)
+      visibleRange.location + visibleRange.length + buffer
+    )
 
     if visibleStartIndex >= visibleEndIndex {
       return
@@ -691,7 +703,8 @@ class MessageListAppKit: NSViewController {
     if duringLiveResize {
       // Find which rows are shorter than available width
       let availableWidth = sizeCalculator.getAvailableWidth(
-        tableWidth: tableView.bounds.width)
+        tableWidth: tableView.bounds.width
+      )
 
       for row in visibleStartIndex ..< visibleEndIndex {
         if let message = message(forRow: row), !sizeCalculator
@@ -721,7 +734,8 @@ class MessageListAppKit: NSViewController {
       tableView
         .reloadData(
           forRowIndexes: rowsToUpdate,
-          columnIndexes: IndexSet([0]))
+          columnIndexes: IndexSet([0])
+        )
 
       apply()
     }
@@ -754,7 +768,8 @@ class MessageListAppKit: NSViewController {
       firstInGroup: isFirstInGroup(at: row),
       isLastMessage: isLastMessage(at: row),
       isFirstMessage: isFirstMessage(at: row),
-      isRtl: false)
+      isRtl: false
+    )
 
     let tableWidth = tableView.bounds.width
     let (size, _, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
@@ -817,7 +832,8 @@ extension MessageListAppKit: NSTableViewDelegate {
       isFirstMessage: isFirstMessage(at: row),
 //      isRtl: message.message.text?.isRTL ?? false
       // TODO: optimize
-      isRtl: false)
+      isRtl: false
+    )
 
     let tableWidth = tableView.bounds.width
     let (_, textSize, photoSize) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
@@ -847,7 +863,8 @@ extension MessageListAppKit: NSTableViewDelegate {
       isFirstMessage: isFirstMessage(at: row),
 //      isRtl: message.message.text?.isRTL ?? false
       // TODO: optimize
-      isRtl: false)
+      isRtl: false
+    )
 
     let tableWidth = tableView.bounds.width
 
@@ -868,7 +885,8 @@ extension NSTableView {
     let maxVisibleY = scrollView.documentView?.bounds.maxY ?? 0
     let targetPoint = NSPoint(
       x: 0,
-      y: maxVisibleY + bottomInset - scrollView.contentView.bounds.height)
+      y: maxVisibleY + bottomInset - scrollView.contentView.bounds.height
+    )
 
     scrollView.contentView.scroll(targetPoint)
 

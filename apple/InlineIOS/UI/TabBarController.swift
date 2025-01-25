@@ -7,17 +7,17 @@ enum TabItem: Int {
 
   var title: String {
     switch self {
-    case .home: return "Home"
-    case .contacts: return "Contacts"
-    case .settings: return "Settings"
+      case .home: "Home"
+      case .contacts: "Contacts"
+      case .settings: "Settings"
     }
   }
 
   var icon: String {
     switch self {
-    case .home: return "house"
-    case .contacts: return "person.2"
-    case .settings: return "gearshape"
+      case .home: "house"
+      case .contacts: "person.2"
+      case .settings: "gearshape"
     }
   }
 }

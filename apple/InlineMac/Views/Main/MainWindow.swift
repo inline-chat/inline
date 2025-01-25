@@ -24,19 +24,19 @@ struct MainWindow: View {
       // Content layer - with animation
       Group {
         switch viewModel.topLevelRoute {
-        case .main:
-          AuthenticatedWindowWrapper {
-            MainView()
+          case .main:
+            AuthenticatedWindowWrapper {
+              MainView()
+                .transition(
+                  .opacity
+                )
+            }
+
+          case .onboarding:
+            Onboarding()
               .transition(
                 .opacity
               )
-          }
-
-        case .onboarding:
-          Onboarding()
-            .transition(
-              .opacity
-            )
         }
       }
       .animation(.snappy, value: viewModel.topLevelRoute)
@@ -120,48 +120,48 @@ class MainWindowViewModel: ObservableObject {
   }
 
   private func setupWindow(for route: TopLevelRoute) {
-    guard let window = window else { return }
+    guard let window else { return }
 
     Log.shared.debug("Setting up window for route: \(route)")
 
     // configure titlebar based on we're in onboarding or main space view
 
     switch route {
-    case .main:
-      // Main style
-      window.titleVisibility = .visible
-      // This fixes the toolbar not being movable initially
-      window.isMovableByWindowBackground = true
-      window.isOpaque = true
-      window.backgroundColor = NSColor.windowBackgroundColor
+      case .main:
+        // Main style
+        window.titleVisibility = .visible
+        // This fixes the toolbar not being movable initially
+        window.isMovableByWindowBackground = true
+        window.isOpaque = true
+        window.backgroundColor = NSColor.windowBackgroundColor
 
-      setUpForInnerRoute(NavigationModel.shared.currentRoute)
-    case .onboarding:
-      // onboarding style
-      window.titlebarAppearsTransparent = true
-      window.titleVisibility = .hidden
-      window.isMovableByWindowBackground = true
-      window.isOpaque = false
-      window.backgroundColor = NSColor.clear
+        setUpForInnerRoute(NavigationModel.shared.currentRoute)
+      case .onboarding:
+        // onboarding style
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.isOpaque = false
+        window.backgroundColor = NSColor.clear
     }
   }
 
   public func setUpForInnerRoute(_ route: NavigationRoute) {
     Log.shared.debug("Setting up window for inner route: \(route)")
     switch route {
-    case .spaceRoot:
-      setToolbarVisibility(false)
-    case .homeRoot:
-      setToolbarVisibility(false)
-    case .chat:
-      setToolbarVisibility(true)
-    case .chatInfo:
-      setToolbarVisibility(false)
+      case .spaceRoot:
+        setToolbarVisibility(false)
+      case .homeRoot:
+        setToolbarVisibility(false)
+      case .chat:
+        setToolbarVisibility(true)
+      case .chatInfo:
+        setToolbarVisibility(false)
     }
   }
 
   public func setToolbarVisibility(_ isVisible: Bool) {
-    guard let window = window else { return }
+    guard let window else { return }
 
     if isVisible {
       window.titleVisibility = .visible // ensure
@@ -176,7 +176,7 @@ class MainWindowViewModel: ObservableObject {
   }
 
   public func resize(to newSize: CGSize) {
-    guard let window = window else { return }
+    guard let window else { return }
 
     let frame = window.frame
     let newFrame = NSRect(

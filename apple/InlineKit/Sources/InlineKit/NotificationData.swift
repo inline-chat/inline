@@ -14,5 +14,6 @@ public class NotificationData: Codable, ObservableObject, @unchecked Sendable {
     self.deviceName = deviceName
     self.deviceToken = deviceToken
   }
+
   public static let shared = NotificationData()
 }

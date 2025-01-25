@@ -38,19 +38,19 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 
   private init() {
     #if os(macOS)
-      accessGroup = "2487AN8AL4.chat.inline.InlineMac"
-      #if DEBUG
-        keyChainPrefix = "inline_dev_"
-      #else
-        keyChainPrefix = "inline_"
-      #endif
+    accessGroup = "2487AN8AL4.chat.inline.InlineMac"
+    #if DEBUG
+    keyChainPrefix = "inline_dev_"
+    #else
+    keyChainPrefix = "inline_"
+    #endif
     #elseif os(iOS)
-      accessGroup = "2487AN8AL4.keychainGroup"
-      #if DEBUG
-        keyChainPrefix = "inline_dev_"
-      #else
-        keyChainPrefix = ""
-      #endif
+    accessGroup = "2487AN8AL4.keychainGroup"
+    #if DEBUG
+    keyChainPrefix = "inline_dev_"
+    #else
+    keyChainPrefix = ""
+    #endif
     #endif
 
     // Check if user profile is set so we need to log in to another account

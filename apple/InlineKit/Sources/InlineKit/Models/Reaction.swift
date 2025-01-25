@@ -21,8 +21,10 @@ public struct Reaction: FetchableRecord, Identifiable, Codable, Hashable, Persis
   public var emoji: String
   public var date: Date
 
-  public static let message = belongsTo(Message.self,
-                                        using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"]))
+  public static let message = belongsTo(
+    Message.self,
+    using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"])
+  )
   public var message: QueryInterfaceRequest<Message> {
     request(for: Reaction.message)
   }
@@ -48,17 +50,17 @@ public struct Reaction: FetchableRecord, Identifiable, Codable, Hashable, Persis
 
 public extension Reaction {
   init(from: ApiReaction) {
-    self.id = from.id
-    self.messageId = from.messageId
-    self.userId = from.userId
-    self.chatId = from.chatId
-    self.emoji = from.emoji
-    self.date = Self.fromTimestamp(from: from.date)
+    id = from.id
+    messageId = from.messageId
+    userId = from.userId
+    chatId = from.chatId
+    emoji = from.emoji
+    date = Self.fromTimestamp(from: from.date)
   }
 }
 
 public extension Reaction {
   static func fromTimestamp(from: Int) -> Date {
-    return Date(timeIntervalSince1970: Double(from) / 1000)
+    Date(timeIntervalSince1970: Double(from) / 1_000)
   }
 }

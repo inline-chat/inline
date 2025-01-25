@@ -4,7 +4,7 @@ import SwiftUI
 extension View {
   // Use for macOS checks in view modifiers
   @ViewBuilder
-  func conditional<Content: View>(_ content: @escaping (Self) -> Content?) -> some View {
+  func conditional(_ content: @escaping (Self) -> (some View)?) -> some View {
     if let out = content(self) {
       out
     } else {
@@ -17,7 +17,7 @@ extension View {
   ///   - condition: The condition to evaluate.
   ///   - transform: The transform to apply to the source `View`.
   /// - Returns: Either the original `View` or the modified `View` if the condition is `true`.
-  @ViewBuilder func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+  @ViewBuilder func `if`(_ condition: Bool, transform: (Self) -> some View) -> some View {
     if condition {
       transform(self)
     } else {
@@ -45,33 +45,33 @@ extension View {
 extension View {
   func debugBackground() -> some View {
     #if DEBUG
-      background(Color.red.opacity(0.3))
+    background(Color.red.opacity(0.3))
     #else
-      self
+    self
     #endif
   }
 
   func debugBackground2() -> some View {
     #if DEBUG
-      background(Color.blue.opacity(0.3))
+    background(Color.blue.opacity(0.3))
     #else
-      self
+    self
     #endif
   }
 
   func debugBackground3() -> some View {
     #if DEBUG
-      background(Color.black.opacity(0.3))
+    background(Color.black.opacity(0.3))
     #else
-      self
+    self
     #endif
   }
 
   func debugBorder() -> some View {
     #if DEBUG
-      overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.red, lineWidth: 1))
+    overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.red, lineWidth: 1))
     #else
-      self
+    self
     #endif
   }
 }
@@ -110,32 +110,32 @@ public extension Animation {
 
 extension View {
   #if os(iOS)
-    func onBackground(_ f: @escaping () -> Void) -> some View {
-      self.onReceive(
-        NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification),
-        perform: { _ in f() }
-      )
-    }
+  func onBackground(_ f: @escaping () -> Void) -> some View {
+    onReceive(
+      NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification),
+      perform: { _ in f() }
+    )
+  }
 
-    func onForeground(_ f: @escaping () -> Void) -> some View {
-      self.onReceive(
-        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification),
-        perform: { _ in f() }
-      )
-    }
+  func onForeground(_ f: @escaping () -> Void) -> some View {
+    onReceive(
+      NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification),
+      perform: { _ in f() }
+    )
+  }
   #else
-    func onBackground(_ f: @escaping () -> Void) -> some View {
-      self.onReceive(
-        NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification),
-        perform: { _ in f() }
-      )
-    }
+  func onBackground(_ f: @escaping () -> Void) -> some View {
+    onReceive(
+      NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification),
+      perform: { _ in f() }
+    )
+  }
 
-    func onForeground(_ f: @escaping () -> Void) -> some View {
-      self.onReceive(
-        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification),
-        perform: { _ in f() }
-      )
-    }
+  func onForeground(_ f: @escaping () -> Void) -> some View {
+    onReceive(
+      NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification),
+      perform: { _ in f() }
+    )
+  }
   #endif
 }

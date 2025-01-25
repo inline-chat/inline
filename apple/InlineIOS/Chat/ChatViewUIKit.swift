@@ -29,7 +29,8 @@ class ChatContainerView: UIView {
     let hostingController = UIHostingController(
       rootView: ComposeEmbedViewSwiftUI(
         peerId: peerId, chatId: chatId ?? 0, messageId: ChatState.shared.getState(peer: peerId).replyingMessageId ?? 0
-      ))
+      )
+    )
     hostingController.view.backgroundColor = .clear
     hostingController.view.translatesAutoresizingMaskIntoConstraints = false
     return hostingController
@@ -73,9 +74,11 @@ class ChatContainerView: UIView {
 
     blurViewBottomConstraint = blurView.bottomAnchor.constraint(equalTo: bottomAnchor)
     composeEmbedHeightConstraint = composeEmbedHostingController.view.heightAnchor.constraint(
-      equalToConstant: hasReply ? Self.embedViewHeight : 0)
+      equalToConstant: hasReply ? Self.embedViewHeight : 0
+    )
     composeEmbedBottomConstraint = composeEmbedHostingController.view.bottomAnchor.constraint(
-      equalTo: composeView.topAnchor)
+      equalTo: composeView.topAnchor
+    )
 
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
@@ -115,7 +118,8 @@ class ChatContainerView: UIView {
 
     //    // Initial state setup
     //    composeEmbedHostingController.view.alpha = hasReply ? 1 : 0
-    //    composeEmbedHostingController.view.transform = hasReply ? .identity : CGAffineTransform(translationX: 0, y: 20)
+    //    composeEmbedHostingController.view.transform = hasReply ? .identity : CGAffineTransform(translationX: 0, y:
+    //    20)
   }
 
   private func setupObservers() {
@@ -180,7 +184,7 @@ class ChatContainerView: UIView {
 
   private func updateComposeEmbedViewState(isReplyActive: Bool) {
     let embedView = composeEmbedHostingController.view
-    guard let embedView = embedView else { return }
+    guard let embedView else { return }
 
     embedView.isHidden = !isReplyActive
     composeEmbedHeightConstraint?.constant = isReplyActive ? Self.embedViewHeight : 0
@@ -236,7 +240,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   @EnvironmentObject var data: DataManager
 
   func makeUIView(context: Context) -> ChatContainerView {
-    return ChatContainerView(peerId: peerId, chatId: chatId)
+    ChatContainerView(peerId: peerId, chatId: chatId)
   }
 
   func updateUIView(_ uiView: ChatContainerView, context: Context) {}

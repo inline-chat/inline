@@ -29,28 +29,28 @@ struct OnboardingProfile: View {
         .font(.system(size: 21.0, weight: .semibold))
         .foregroundStyle(.primary)
 
-      self.nameField
-        .focused(self.$focusedField, equals: .name)
-        .disabled(self.formState.isLoading)
+      nameField
+        .focused($focusedField, equals: .name)
+        .disabled(formState.isLoading)
         .padding(.top, 6)
         .padding(.bottom, 4)
         .onAppear {
-          self.focusedField = .name
+          focusedField = .name
         }
 
-      self.usernameField
-        .focused(self.$focusedField, equals: .username)
-        .disabled(self.formState.isLoading)
+      usernameField
+        .focused($focusedField, equals: .username)
+        .disabled(formState.isLoading)
         .padding(.bottom, 10)
         .onSubmit {
-          self.submit()
+          submit()
         }
       // todo .onChange start checking
 
       GrayButton {
-        self.submit()
+        submit()
       } label: {
-        if !self.formState.isLoading {
+        if !formState.isLoading {
           Text("Continue").padding(.horizontal)
         } else {
           ProgressView()
@@ -101,7 +101,7 @@ struct OnboardingProfile: View {
           try User(from: result.user).save(db, onConflict: .ignore)
         }
 
-        self.mainWindowViewModel.navigate(.main)
+        mainWindowViewModel.navigate(.main)
       } catch {
         formState.failed(error: error.localizedDescription)
       }

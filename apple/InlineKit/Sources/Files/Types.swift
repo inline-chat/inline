@@ -13,17 +13,17 @@ public enum UploadError: LocalizedError {
   case invalidFileType(extension: String)
   case preparationFailed
   case uploadFailed
-  
+
   public var errorDescription: String? {
     switch self {
-    case .fileTooLarge(let size):
-      return "File size \(size)MB exceeds maximum allowed size"
-    case .invalidFileType(let ext):
-      return "File type .\(ext) is not supported"
-    case .preparationFailed:
-      return "Failed to prepare file for upload"
-    case .uploadFailed:
-      return "Failed to upload file"
+      case let .fileTooLarge(size):
+        "File size \(size)MB exceeds maximum allowed size"
+      case let .invalidFileType(ext):
+        "File type .\(ext) is not supported"
+      case .preparationFailed:
+        "Failed to prepare file for upload"
+      case .uploadFailed:
+        "Failed to upload file"
     }
   }
 }

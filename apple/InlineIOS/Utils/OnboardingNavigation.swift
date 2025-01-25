@@ -9,11 +9,11 @@ enum OnboardingStep: Identifiable, Hashable {
 
   var id: String {
     switch self {
-    case .welcome: return "welcome"
-    case .email(let prevEmail): return "email-\(prevEmail ?? "")"
-    case .code(let email): return "code-\(email)"
-    case .profile: return "profile"
-    case .main: return "main"
+      case .welcome: "welcome"
+      case let .email(prevEmail): "email-\(prevEmail ?? "")"
+      case let .code(email): "code-\(email)"
+      case .profile: "profile"
+      case .main: "main"
     }
   }
 }

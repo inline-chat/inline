@@ -7,10 +7,10 @@ struct ChatRowView: View {
   let item: ChatRowItem
   var type: ChatType {
     switch item {
-    case .home(let homeItem):
-      return homeItem.chat?.type ?? .privateChat
-    case .space(let spaceItem):
-      return spaceItem.chat?.type ?? .privateChat
+      case let .home(homeItem):
+        homeItem.chat?.type ?? .privateChat
+      case let .space(spaceItem):
+        spaceItem.chat?.type ?? .privateChat
     }
   }
 
@@ -18,28 +18,28 @@ struct ChatRowView: View {
 
   private func currentComposeAction() -> ApiComposeAction? {
     switch item {
-    case .home(let homeItem):
-      return composeActions.getComposeAction(for: Peer(userId: homeItem.user.id))?.action
-    case .space:
-      return nil
+      case let .home(homeItem):
+        composeActions.getComposeAction(for: Peer(userId: homeItem.user.id))?.action
+      case .space:
+        nil
     }
   }
 
   private var pinned: Bool {
     switch item {
-    case .home(let homeItem):
-      return homeItem.dialog.pinned ?? false
-    case .space(let spaceItem):
-      return spaceItem.dialog.pinned ?? false
+      case let .home(homeItem):
+        homeItem.dialog.pinned ?? false
+      case let .space(spaceItem):
+        spaceItem.dialog.pinned ?? false
     }
   }
 
   private var isCurrentUser: Bool {
     switch item {
-    case .home(let homeItem):
-      return homeItem.user.id == Auth.shared.getCurrentUserId()
-    case .space(let spaceItem):
-      return spaceItem.user?.id == Auth.shared.getCurrentUserId()
+      case let .home(homeItem):
+        homeItem.user.id == Auth.shared.getCurrentUserId()
+      case let .space(spaceItem):
+        spaceItem.user?.id == Auth.shared.getCurrentUserId()
     }
   }
 
@@ -49,36 +49,36 @@ struct ChatRowView: View {
 
   private var senderName: String {
     switch item {
-    case .home(let homeItem):
-      if homeItem.from?.id == Auth.shared.getCurrentUserId() {
-        return "You"
-      } else {
-        return homeItem.from?.firstName ?? ""
-      }
-    case .space(let spaceItem):
-      if let user = spaceItem.user {
-        return user.fullName
-      } else {
-        return spaceItem.chat?.title ?? ""
-      }
+      case let .home(homeItem):
+        if homeItem.from?.id == Auth.shared.getCurrentUserId() {
+          "You"
+        } else {
+          homeItem.from?.firstName ?? ""
+        }
+      case let .space(spaceItem):
+        if let user = spaceItem.user {
+          user.fullName
+        } else {
+          spaceItem.chat?.title ?? ""
+        }
     }
   }
 
   var body: some View {
     HStack(alignment: .top) {
       switch item {
-      case .home(let homeItem):
-        if isCurrentUser {
-          savedMessageSymbol
-        } else {
-          userAvatar(homeItem.user)
-        }
-      case .space(let spaceItem):
-        if isCurrentUser {
-          savedMessageSymbol
-        } else {
-          spaceAvatar(spaceItem)
-        }
+        case let .home(homeItem):
+          if isCurrentUser {
+            savedMessageSymbol
+          } else {
+            userAvatar(homeItem.user)
+          }
+        case let .space(spaceItem):
+          if isCurrentUser {
+            savedMessageSymbol
+          } else {
+            spaceAvatar(spaceItem)
+          }
       }
 
       VStack(alignment: .leading) {
@@ -125,10 +125,10 @@ struct ChatRowView: View {
 
   private func getMessage() -> Message? {
     switch item {
-    case .home(let homeItem):
-      return homeItem.message
-    case .space(let spaceItem):
-      return spaceItem.message
+      case let .home(homeItem):
+        homeItem.message
+      case let .space(spaceItem):
+        spaceItem.message
     }
   }
 
@@ -156,24 +156,24 @@ struct ChatRowView: View {
   @ViewBuilder
   var chatTitle: some View {
     switch item {
-    case .home(let homeItem):
-      Text(
-        type == .privateChat
-          ? homeItem.user.id == Auth.shared.getCurrentUserId()
+      case let .home(homeItem):
+        Text(
+          type == .privateChat
+            ? homeItem.user.id == Auth.shared.getCurrentUserId()
             ? "Saved Message" : homeItem.user.firstName ?? ""
-          : homeItem.chat?.title ?? ""
-      )
-      .fontWeight(.medium)
-      .foregroundColor(.primary)
-    case .space(let spaceItem):
-      Text(
-        type == .privateChat
-          ? spaceItem.user?.id == Auth.shared.getCurrentUserId()
+            : homeItem.chat?.title ?? ""
+        )
+        .fontWeight(.medium)
+        .foregroundColor(.primary)
+      case let .space(spaceItem):
+        Text(
+          type == .privateChat
+            ? spaceItem.user?.id == Auth.shared.getCurrentUserId()
             ? "Saved Message" : spaceItem.user?.firstName ?? ""
-          : spaceItem.chat?.title ?? ""
-      )
-      .fontWeight(.medium)
-      .foregroundColor(.primary)
+            : spaceItem.chat?.title ?? ""
+        )
+        .fontWeight(.medium)
+        .foregroundColor(.primary)
     }
   }
 

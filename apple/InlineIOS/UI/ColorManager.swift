@@ -16,9 +16,9 @@ extension UIColor {
         var hexNumber: UInt64 = 0
 
         if scanner.scanHexInt64(&hexNumber) {
-          r = CGFloat((hexNumber & 0xff0000) >> 16) / 255
-          g = CGFloat((hexNumber & 0x00ff00) >> 8) / 255
-          b = CGFloat(hexNumber & 0x0000ff) / 255
+          r = CGFloat((hexNumber & 0xFF_0000) >> 16) / 255
+          g = CGFloat((hexNumber & 0x00_FF00) >> 8) / 255
+          b = CGFloat(hexNumber & 0x00_00FF) / 255
 
           self.init(red: r, green: g, blue: b, alpha: 1.0)
           return
@@ -51,16 +51,16 @@ class ColorManager {
   var selectedColor: UIColor {
     get {
       if let colorData = defaults.data(forKey: colorKey),
-        let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData)
+         let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData)
       {
         return color
       }
-      return .systemBlue  // Default color
+      return .systemBlue // Default color
     }
     set {
       if let colorData = try? NSKeyedArchiver.archivedData(
-        withRootObject: newValue, requiringSecureCoding: true)
-      {
+        withRootObject: newValue, requiringSecureCoding: true
+      ) {
         defaults.set(colorData, forKey: colorKey)
       }
     }

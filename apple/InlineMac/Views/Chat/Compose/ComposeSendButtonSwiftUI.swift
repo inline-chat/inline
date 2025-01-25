@@ -39,8 +39,9 @@ struct ComposeSendButtonSwiftUI: View {
     .animation(.easeInOut(duration: 0.15), value: state.canSend)
   }
 }
+
 //
-//#Preview {
+// #Preview {
 //  ComposeSendButtonSwiftUI(state: ComposeSendButtonState(canSend: true), action: {})
 //    .frame(width: 100, height: 100)
-//}
+// }

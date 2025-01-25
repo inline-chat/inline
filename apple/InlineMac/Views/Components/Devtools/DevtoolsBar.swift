@@ -11,7 +11,7 @@ struct DevtoolsBarContent: View {
           .padding(.leading, 12)
       }
       Spacer()
-      
+
       // Metrics
       // Has memory leak
 //      Divider()

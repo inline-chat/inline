@@ -1,14 +1,3 @@
-//===--- ApproximateEquality.swift ----------------------------*- swift -*-===//
-//
-// This source file is part of the Swift Numerics open source project
-//
-// Copyright (c) 2019 - 2020 Apple Inc. and the Swift Numerics project authors
-// Licensed under Apache License v2.0 with Runtime Library Exception
-//
-// See https://swift.org/LICENSE.txt for license information
-//
-//===----------------------------------------------------------------------===//
-
 extension FloatingPoint {
   /// Test approximate equality with relative tolerance.
   ///
@@ -68,8 +57,8 @@ extension FloatingPoint {
     // The simple computation below does not necessarily give sensible
     // results if one of self or other is infinite; we need to rescale
     // the computation in that case.
-    guard self.isFinite && other.isFinite else {
-      return self.rescaledAlmostEqual(to: other, tolerance: tolerance)
+    guard isFinite, other.isFinite else {
+      return rescaledAlmostEqual(to: other, tolerance: tolerance)
     }
     // This should eventually be rewritten to use a scaling facility to be
     // defined on FloatingPoint suitable for hypot and scaled sums, but the
@@ -124,18 +113,22 @@ extension FloatingPoint {
   func rescaledAlmostEqual(to other: Self, tolerance: Self) -> Bool {
     // NaN is considered to be not approximately equal to anything, not even
     // itself.
-    if self.isNaN || other.isNaN { return false }
-    if self.isInfinite {
+    if isNaN || other.isNaN { return false }
+    if isInfinite {
       if other.isInfinite { return self == other }
       // Self is infinite and other is finite. Replace self with the binade
       // of the greatestFiniteMagnitude, and reduce the exponent of other by
       // one to compensate.
-      let scaledSelf = Self(sign: self.sign,
-                            exponent: Self.greatestFiniteMagnitude.exponent,
-                            significand: 1)
-      let scaledOther = Self(sign: .plus,
-                             exponent: -1,
-                             significand: other)
+      let scaledSelf = Self(
+        sign: sign,
+        exponent: Self.greatestFiniteMagnitude.exponent,
+        significand: 1
+      )
+      let scaledOther = Self(
+        sign: .plus,
+        exponent: -1,
+        significand: other
+      )
       // Now both values are finite, so re-run the naive comparison.
       return scaledSelf.isAlmostEqual(to: scaledOther, tolerance: tolerance)
     }

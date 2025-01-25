@@ -15,7 +15,7 @@ struct GrayTextField: View {
   init(_ titleKey: LocalizedStringKey, text value: Binding<String>) {
     self.titleKey = titleKey
     self.value = value
-    self.prompt = nil
+    prompt = nil
   }
 
   init(
@@ -32,34 +32,34 @@ struct GrayTextField: View {
 
   var font: Font {
     switch size {
-    case .small:
-      return Font.body
-    case .medium:
-      return Font.system(size: 16, weight: .regular)
-    case .large:
-      return Font.system(size: 17, weight: .regular)
+      case .small:
+        Font.body
+      case .medium:
+        Font.system(size: 16, weight: .regular)
+      case .large:
+        Font.system(size: 17, weight: .regular)
     }
   }
 
   var height: CGFloat {
     switch size {
-    case .small:
-      return 26
-    case .medium:
-      return 32
-    case .large:
-      return 36
+      case .small:
+        26
+      case .medium:
+        32
+      case .large:
+        36
     }
   }
 
   var cornerRadius: CGFloat {
     switch size {
-    case .small:
-      return 6
-    case .medium:
-      return 8
-    case .large:
-      return 10
+      case .small:
+        6
+      case .medium:
+        8
+      case .large:
+        10
     }
   }
 

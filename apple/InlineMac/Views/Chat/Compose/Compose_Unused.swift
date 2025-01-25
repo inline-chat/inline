@@ -1,23 +1,23 @@
-//import AppKit
-//import Combine
-//import InlineKit
-//import SwiftUI
+// import AppKit
+// import Combine
+// import InlineKit
+// import SwiftUI
 //
-//struct Compose: View {
+// struct Compose: View {
 //  var chatId: Int64?
 //  var peerId: Peer
 //  // Used for optimistic UI
 //  var topMsgId: Int64?
-//  
-//  
+//
+//
 //  @EnvironmentObject var data: DataManager
 //  @Environment(\.appDatabase) var db
 //  @Environment(\.colorScheme) var colorScheme
-//  
+//
 //  @State private var text: String = ""
 //  @State private var event: ComposeTextEditorEvent = .none
 //  @State private var editorHeight: CGFloat = 42
-//  
+//
 //  public static let minHeight: CGFloat = 42
 //  var minHeight: CGFloat = Self.minHeight
 //  var textViewHorizontalPadding: CGFloat = Theme.messageHorizontalStackSpacing
@@ -32,7 +32,7 @@
 //        event: $event,
 //        height: $editorHeight,
 //        minHeight: minHeight,
-//        
+//
 //        horizontalPadding: textViewHorizontalPadding,
 //        verticalPadding: 4,
 //        font: Theme.messageTextFont
@@ -51,7 +51,7 @@
 //          Task { await ComposeActions.shared.startedTyping(for: peerId) }
 //        }
 //      }
-//        
+//
 //      .background(alignment: .leading) {
 //        if text.isEmpty {
 //          Text("Write a message")
@@ -69,7 +69,7 @@
 //        }
 //      }
 //      .animation(.smoothSnappy.speed(1.5), value: text.isEmpty)
-//     
+//
 //      sendButton
 //        .frame(height: minHeight, alignment: .center)
 //        .transition(.scale(scale: 0.8).combined(with: .opacity))
@@ -84,9 +84,9 @@
 //        .offset(y: -1)
 //    }
 //  }
-//  
+//
 //  @State var attachmentOverlayOpen = false
-//  
+//
 //  @ViewBuilder
 //  var attachmentButton: some View {
 //    Button {
@@ -121,11 +121,11 @@
 //      }
 //    }
 //  }
-//  
+//
 //  var canSend: Bool {
 //    !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 //  }
-//  
+//
 //  @ViewBuilder
 //  var sendButton: some View {
 //    if canSend {
@@ -149,37 +149,37 @@
 //      )
 //    }
 //  }
-//  
+//
 //  private func handleEditorEvent(_ event: ComposeTextEditorEvent) {
 //    switch event {
 //    case .focus:
 //      break
-//      
+//
 //    case .blur:
 //      break
-//      
+//
 //    case .send:
 //      send()
-//      
+//
 //    case .insertNewline:
 //      // Do nothing - let the text view handle the newline
 //      break
-//      
+//
 //    case .dismiss:
 //      break
-//      
+//
 //    default:
 //      break
 //    }
 //  }
-//  
+//
 //  struct CircleButtonStyle: ButtonStyle {
 //    let size: CGFloat
 //    let backgroundColor: Color
 //    let hoveredBackground: Color
-//    
+//
 //    @State private var isHovering = false
-//    
+//
 //    init(
 //      size: CGFloat = 32,
 //      backgroundColor: Color = .blue,
@@ -189,7 +189,7 @@
 //      self.backgroundColor = backgroundColor
 //      self.hoveredBackground = hoveredBackgroundColor
 //    }
-//    
+//
 //    func makeBody(configuration: Configuration) -> some View {
 //      configuration.label
 //        .padding(8)
@@ -207,7 +207,7 @@
 //        }
 //    }
 //  }
-// 
+//
 //  private func send() {
 //    Task {
 //      let messageText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -217,15 +217,15 @@
 //          Log.shared.warning("Chat ID is nil, cannot send message")
 //          return
 //        }
-//        
+//
 //        text = ""
-//        
+//
 //        // Reset editor height after clearing text
 //        editorHeight = minHeight
-//        
+//
 //        let peerUserId: Int64? = if case .user(let id) = peerId { id } else { nil }
 //        let peerThreadId: Int64? = if case .thread(let id) = peerId { id } else { nil }
-//        
+//
 //        let randomId = Int64.random(in: Int64.min ... Int64.max)
 //        let message = Message(
 //          messageId: -randomId,
@@ -237,13 +237,13 @@
 //          peerThreadId: peerThreadId,
 //          chatId: chatId
 //        )
-//        
+//
 //        try await db.dbWriter.write { db in
 //          try message.save(db)
 //        }
-//        
+//
 //        // TODO: Scroll to bottom
-//        
+//
 //        try await data.sendMessage(
 //          chatId: chatId,
 //          peerUserId: peerUserId,
@@ -253,12 +253,12 @@
 //          randomId: randomId,
 //          repliedToMessageId: nil
 //        )
-//        
+//
 //      } catch {
 //        Log.shared.error("Failed to send message", error: error)
 //        // Optionally show error to user
 //      }
 //    }
 //  }
-//}
+// }
 //

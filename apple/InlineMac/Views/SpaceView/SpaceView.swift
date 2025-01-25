@@ -7,17 +7,17 @@ public struct SpaceView: View {
   var inputSpaceId: Int64?
 
   var spaceId: Int64 {
-    if let inputSpaceId = inputSpaceId {
-      return inputSpaceId
+    if let inputSpaceId {
+      inputSpaceId
     } else if let spaceId = navigation.activeSpaceId {
-      return spaceId
+      spaceId
     } else {
       fatalError("Space ID is not provided")
     }
   }
 
   public init(spaceId: Int64? = nil) {
-    self.inputSpaceId = spaceId
+    inputSpaceId = spaceId
   }
 
   public var body: some View {

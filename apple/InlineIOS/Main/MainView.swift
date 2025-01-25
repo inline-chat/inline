@@ -153,7 +153,6 @@ struct MainView: View {
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
-
     .task {
       await initalFetch()
     }
@@ -232,7 +231,7 @@ struct MainView: View {
     Group {
       ToolbarItem(id: "UserAvatar", placement: .topBarLeading) {
         HStack {
-          if let user = user {
+          if let user {
             UserAvatar(user: user, size: 26)
               .padding(.trailing, 4)
           }
@@ -333,15 +332,15 @@ private enum CombinedItem: Identifiable {
 
   var id: Int64 {
     switch self {
-    case .space(let space): return space.id
-    case .chat(let chat): return chat.user.id
+      case let .space(space): space.id
+      case let .chat(chat): chat.user.id
     }
   }
 
   var date: Date {
     switch self {
-    case .space(let space): return space.space.date
-    case .chat(let chat): return chat.message?.date ?? chat.chat?.date ?? Date()
+      case let .space(space): space.space.date
+      case let .chat(chat): chat.message?.date ?? chat.chat?.date ?? Date()
     }
   }
 }

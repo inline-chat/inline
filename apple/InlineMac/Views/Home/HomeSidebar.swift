@@ -132,11 +132,11 @@ struct HomeSidebar: View {
       Section("Users") {
         ForEach(search.results, id: \.self) { result in
           switch result {
-          case .users(let user):
-            RemoteUserItem(user: user, action: {
-              remoteUserPressed(user: user)
-            })
-            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+            case let .users(user):
+              RemoteUserItem(user: user, action: {
+                remoteUserPressed(user: user)
+              })
+              .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
           }
         }
       }

@@ -8,16 +8,16 @@ struct OnboardingView: View {
       Welcome()
         .navigationDestination(for: OnboardingStep.self) { step in
           switch step {
-          case .email(let prevEmail):
-            Email(prevEmail: prevEmail)
-          case .code(let email):
-            Code(email: email)
-          case .profile:
-            Profile()
-          case .welcome:
-            Welcome()
-          case .main:
-            MainView()
+            case let .email(prevEmail):
+              Email(prevEmail: prevEmail)
+            case let .code(email):
+              Code(email: email)
+            case .profile:
+              Profile()
+            case .welcome:
+              Welcome()
+            case .main:
+              MainView()
           }
         }
     }

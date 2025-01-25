@@ -16,17 +16,18 @@ public final class UserDataViewModel: ObservableObject {
   }
 
   func getUserData() {
-    let userId = self.userId
+    let userId = userId
     cancellable =
       ValueObservation
-      .tracking { db in
-        try User.fetchOne(db, id: userId)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { _ in /* ignore error */ },
-        receiveValue: { [weak self] user in
-          self?.user = user
-        })
+        .tracking { db in
+          try User.fetchOne(db, id: userId)
+        }
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { _ in /* ignore error */ },
+          receiveValue: { [weak self] user in
+            self?.user = user
+          }
+        )
   }
 }

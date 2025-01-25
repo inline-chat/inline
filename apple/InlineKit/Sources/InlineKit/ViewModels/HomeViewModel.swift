@@ -37,7 +37,6 @@ public final class HomeViewModel: ObservableObject {
         .tracking { db in
           try Dialog
             .filter(Column("peerUserId") != nil)
-
             .including(
               required: Dialog.peerUser
                 .including(

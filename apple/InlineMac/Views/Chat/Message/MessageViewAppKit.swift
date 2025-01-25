@@ -149,7 +149,7 @@ class MessageViewAppKit: NSView {
       file.getLocalURL()
     }
 
-    guard let url = url else { return }
+    guard let url else { return }
 
     print("rendering Nuke url \(url)")
     let imageView = PhotoLazyImageView()
@@ -176,7 +176,7 @@ class MessageViewAppKit: NSView {
         .radius(4.0, for: .topLeft),
         .radius(4.0, for: .topRight),
         .radius(Theme.messageBubbleRadius, for: .bottomLeft),
-        .radius(Theme.messageBubbleRadius, for: .bottomRight)
+        .radius(Theme.messageBubbleRadius, for: .bottomRight),
       ])
     } else {
       imageView.setCorners(
@@ -222,7 +222,7 @@ class MessageViewAppKit: NSView {
     textView.linkTextAttributes = [
       .foregroundColor: linkColor,
       .underlineStyle: NSUnderlineStyle.single.rawValue,
-      .cursor: NSCursor.pointingHand
+      .cursor: NSCursor.pointingHand,
     ]
 
     // Match the sizes and spacing with the size calculator we use to calculate cell height
@@ -251,7 +251,8 @@ class MessageViewAppKit: NSView {
   }
 
   // Fix a bug that when messages were out of viewport and came back during a live resize
-  // text would not appear until the user ended live resize operation. Seems like in TextKit 2 calling layoutViewport solves this.
+  // text would not appear until the user ended live resize operation. Seems like in TextKit 2 calling layoutViewport
+  // solves this.
   // The property `allowsNonContiguousLayout` also seems to fix this issue but it has two other issues:
   // 1. that forces textkit 1
   // 2. it adds a scroll jump everytime user resizes the window
@@ -283,7 +284,8 @@ class MessageViewAppKit: NSView {
           // Choose based on multiline vs single line
           if (props.textHeight ?? 0.0) > naiveThresholdForMultiLine {
             // Important note:
-            // Less performant, but fixes flicker during live resize for large messages that are beyound viewport height and during width resize
+            // Less performant, but fixes flicker during live resize for large messages that are beyound viewport height
+            // and during width resize
             Log.shared.debug("Layouting viewport for text view \(message.id)")
             textLayoutManager.textViewportLayoutController.layoutViewport()
           } else {
@@ -292,10 +294,10 @@ class MessageViewAppKit: NSView {
               weak self,
               weak textLayoutManager
             ] in
-              guard let self = self else { return }
-              guard let textLayoutManager = textLayoutManager else { return }
+              guard let self else { return }
+              guard let textLayoutManager else { return }
 
-              Log.shared.debug("Layouting viewport for text view \(self.message.id)")
+              Log.shared.debug("Layouting viewport for text view \(message.id)")
               textLayoutManager.textViewportLayoutController.layoutViewport()
             }
           }
@@ -387,7 +389,7 @@ class MessageViewAppKit: NSView {
     contentView.addArrangedSubview(textView)
     contentView.addArrangedSubview(underTextSpacer)
 
-    if let imageView = imageView {
+    if let imageView {
       contentView.addArrangedSubview(imageView)
     }
 
@@ -420,10 +422,13 @@ class MessageViewAppKit: NSView {
     if showsAvatar {
       NSLayoutConstraint.activate([
         avatarView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: avatarLeading),
-        avatarView.topAnchor.constraint(equalTo: topAnchor, constant:
-          topPadding),
+        avatarView.topAnchor.constraint(
+          equalTo: topAnchor,
+          constant:
+          topPadding
+        ),
         avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize),
-        avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize)
+        avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize),
       ])
     }
 
@@ -433,7 +438,7 @@ class MessageViewAppKit: NSView {
         nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
         nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sidePadding),
         nameLabel.heightAnchor
-          .constraint(equalToConstant: Theme.messageNameLabelHeight)
+          .constraint(equalToConstant: Theme.messageNameLabelHeight),
       ])
     }
 
@@ -459,8 +464,10 @@ class MessageViewAppKit: NSView {
       // Content view
       contentViewWidthConstraint,
       contentView
-        .leadingAnchor.constraint(equalTo: leadingAnchor,
-                                  constant: contentLeading),
+        .leadingAnchor.constraint(
+          equalTo: leadingAnchor,
+          constant: contentLeading
+        ),
       contentView.topAnchor.constraint(
         equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
         constant: showsName ? nameAndContentGap : topPadding
@@ -472,14 +479,14 @@ class MessageViewAppKit: NSView {
       aboveTextSpacer.heightAnchor.constraint(equalToConstant: bubblePadding.height),
       textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: bubblePadding.width),
       textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -bubblePadding.width),
-      underTextSpacer.heightAnchor.constraint(equalToConstant: bubblePadding.height)
+      underTextSpacer.heightAnchor.constraint(equalToConstant: bubblePadding.height),
     ])
 
     if let photoView = imageView, let photoHeight = props.photoHeight {
       photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photoHeight)
       NSLayoutConstraint.activate(
         [
-          photoViewHeightConstraint
+          photoViewHeightConstraint,
         ]
       )
     }
@@ -491,7 +498,7 @@ class MessageViewAppKit: NSView {
           bubbleView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: -contentViewBubbleInset),
           bubbleView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: -contentViewBubbleInset),
           bubbleView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: contentViewBubbleInset),
-          bubbleView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: contentViewBubbleInset)
+          bubbleView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: contentViewBubbleInset),
         ]
       )
     }
@@ -548,7 +555,7 @@ class MessageViewAppKit: NSView {
       [
         // Time and state view
         timeAndStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding),
-        timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height)
+        timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height),
       ]
     )
   }
@@ -580,13 +587,13 @@ class MessageViewAppKit: NSView {
       string: text, // .trimmingCharacters(in: .whitespacesAndNewlines),
       attributes: [
         .font: MessageTextConfiguration.font,
-        .foregroundColor: textColor
+        .foregroundColor: textColor,
       ]
     )
 
     // Detect and add links
     let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-    if let detector = detector {
+    if let detector {
       let matches = detector.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
 
       for match in matches {
@@ -595,7 +602,7 @@ class MessageViewAppKit: NSView {
             .cursor: NSCursor.pointingHand,
             .link: url,
             .foregroundColor: linkColor,
-            .underlineStyle: NSUnderlineStyle.single.rawValue
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
           ], range: match.range)
         }
       }
@@ -696,7 +703,7 @@ class MessageViewAppKit: NSView {
 
     // photo size
     if hasPhotoSizeChanged,
-       let photoViewHeightConstraint = photoViewHeightConstraint,
+       let photoViewHeightConstraint,
        let photoHeight = props.photoHeight
     {
       photoViewHeightConstraint.constant = photoHeight
@@ -762,13 +769,13 @@ extension MessageViewAppKit {
   private func handleScrollStateChange(_ state: MessageListScrollState) {
     scrollState = state
     switch state {
-    case .scrolling:
-      // Clear hover state
-      updateHoverState(false)
-    case .idle:
-      // Re-enable hover state if needed
-      // TODO: How can I check if mouse is inside the view?
-      addHoverTrackingArea()
+      case .scrolling:
+        // Clear hover state
+        updateHoverState(false)
+      case .idle:
+        // Re-enable hover state if needed
+        // TODO: How can I check if mouse is inside the view?
+        addHoverTrackingArea()
     }
   }
 
@@ -785,7 +792,7 @@ extension MessageViewAppKit {
   }
 
   func removeHoverTrackingArea() {
-    if let hoverTrackingArea = hoverTrackingArea {
+    if let hoverTrackingArea {
       removeTrackingArea(hoverTrackingArea)
     }
   }

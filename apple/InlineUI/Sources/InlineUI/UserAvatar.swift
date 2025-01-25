@@ -20,23 +20,23 @@ public struct UserAvatar: View, Equatable {
   let nameForInitials: String
 
   public init(user: User, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
-    self.firstName = user.firstName
-    self.lastName = user.lastName
-    self.email = user.email
-    self.username = user.username
+    firstName = user.firstName
+    lastName = user.lastName
+    email = user.email
+    username = user.username
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
-    self.nameForInitials = Self.getNameForInitials(user: user)
+    nameForInitials = Self.getNameForInitials(user: user)
   }
 
   public init(apiUser: ApiUser, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
-    self.firstName = apiUser.firstName
-    self.lastName = apiUser.lastName
-    self.email = apiUser.email
-    self.username = apiUser.username
+    firstName = apiUser.firstName
+    lastName = apiUser.lastName
+    email = apiUser.email
+    username = apiUser.username
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
-    self.nameForInitials = Self.getNameForInitials(user: apiUser)
+    nameForInitials = Self.getNameForInitials(user: apiUser)
   }
 
   // This must match below

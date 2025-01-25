@@ -10,9 +10,9 @@ extension ChatView {
 
   var title: String {
     if case .user = peerId {
-      return isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser?.firstName ?? ""
+      isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser?.firstName ?? ""
     } else {
-      return fullChatViewModel.chat?.title ?? ""
+      fullChatViewModel.chat?.title ?? ""
     }
   }
 }

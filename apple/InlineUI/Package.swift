@@ -15,10 +15,10 @@ let package = Package(
     .library(
       name: "InlineUI",
       targets: ["InlineUI"]
-    )
+    ),
   ],
   dependencies: [
-    .package(path: "../InlineKit")
+    .package(path: "../InlineKit"),
   ],
   targets: [
     // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -26,10 +26,10 @@ let package = Package(
     .target(
       name: "InlineUI",
       dependencies: [
-        .product(name: "InlineKit", package: "InlineKit")
+        .product(name: "InlineKit", package: "InlineKit"),
       ],
       swiftSettings: [
-        .swiftLanguageMode(.v6)
+        .swiftLanguageMode(.v6),
       ]
     ),
     .testTarget(

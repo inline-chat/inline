@@ -95,18 +95,18 @@ class MessageTimeAndStatus: UIView {
       .applying(UIImage.SymbolConfiguration(weight: .medium))
 
     switch message.status {
-    case .sent:
-      imageName = "checkmark"
-      statusImageView.preferredSymbolConfiguration = symbolConfig
-    case .sending:
-      imageName = "clock"
-      statusImageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: symbolSize - 1)
-        .applying(UIImage.SymbolConfiguration(weight: .medium))
-    case .failed:
-      imageName = "exclamationmark"
-      statusImageView.preferredSymbolConfiguration = symbolConfig
-    case .none:
-      imageName = ""
+      case .sent:
+        imageName = "checkmark"
+        statusImageView.preferredSymbolConfiguration = symbolConfig
+      case .sending:
+        imageName = "clock"
+        statusImageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: symbolSize - 1)
+          .applying(UIImage.SymbolConfiguration(weight: .medium))
+      case .failed:
+        imageName = "exclamationmark"
+        statusImageView.preferredSymbolConfiguration = symbolConfig
+      case .none:
+        imageName = ""
     }
 
     if let newImage = UIImage(systemName: imageName) {

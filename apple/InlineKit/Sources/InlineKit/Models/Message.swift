@@ -33,19 +33,19 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   // Stable ID for fetched messages (not to be created messages)
   public var stableId: Int64 {
-    self.globalId ?? 0
+    globalId ?? 0
   }
 
   public var id: Int64 {
     // this is wrong
-    self.messageId
+    messageId
   }
 
   public var peerId: Peer {
-    if let peerUserId = self.peerUserId {
-      return .user(id: peerUserId)
-    } else if let peerThreadId = self.peerThreadId {
-      return .thread(id: peerThreadId)
+    if let peerUserId {
+      .user(id: peerUserId)
+    } else if let peerThreadId {
+      .thread(id: peerThreadId)
     } else {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
@@ -112,7 +112,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   public static let reactions = hasMany(
     Reaction.self,
-    using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"]))
+    using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"])
+  )
   public var reactions: QueryInterfaceRequest<Reaction> {
     request(for: Message.reactions)
   }
@@ -150,7 +151,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.repliedToMessageId = repliedToMessageId
     self.fileId = fileId
 
-    if peerUserId == nil && peerThreadId == nil {
+    if peerUserId == nil, peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
   }
@@ -186,15 +187,15 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
 // MARK: Helpers
 
-extension Message {
-  public mutating func saveMessage(
+public extension Message {
+  mutating func saveMessage(
     _ db: Database, onConflict: Database.ConflictResolution = .abort, publishChanges: Bool = false
   )
     throws
   {
     var isExisting = false
 
-    if self.globalId == nil {
+    if globalId == nil {
       // Alternative:
       //          if let existing = try Message
       //            .filter(Column("messageId") == apiMessage.id)
@@ -206,17 +207,17 @@ extension Message {
 
       if let existing =
         try? Message
-        .fetchOne(db, key: ["messageId": self.messageId, "chatId": self.chatId])
+          .fetchOne(db, key: ["messageId": messageId, "chatId": chatId])
       {
-        self.globalId = existing.globalId
-        self.fileId = existing.fileId  // ... find a way for making this better
+        globalId = existing.globalId
+        fileId = existing.fileId // ... find a way for making this better
         isExisting = true
       }
     } else {
       isExisting = true
     }
 
-    try self.save(db, onConflict: .ignore)
+    try save(db, onConflict: .ignore)
 
     if publishChanges {
       // Publish changes when save is successful

@@ -45,7 +45,7 @@ struct CreateThread: View {
               let threadId = try await dataManager.createThread(spaceId: spaceId, title: name)
               formState.succeeded()
               showSheet = false
-              if let threadId = threadId {
+              if let threadId {
                 nav.push(.chat(peer: .thread(id: threadId)))
               }
             } catch {

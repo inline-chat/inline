@@ -17,12 +17,12 @@ struct OnboardingEnterCode: View {
 
   var buttonLabel: String {
     switch onboardingViewModel.existingUser {
-    case .none:
-      return "Continue"
-    case .some(true):
-      return "Log In"
-    case .some(false):
-      return "Sign Up"
+      case .none:
+        "Continue"
+      case .some(true):
+        "Log In"
+      case .some(false):
+        "Sign Up"
     }
   }
 
@@ -39,20 +39,20 @@ struct OnboardingEnterCode: View {
         .font(.system(size: 21.0, weight: .semibold))
         .foregroundStyle(.primary)
 
-      self.emailField
+      emailField
         .focused($focusedField, equals: .codeField)
         .disabled(formState.isLoading)
         .padding(.top, 6)
         .padding(.bottom, 10)
         .onSubmit {
-          self.submit()
+          submit()
         }
-        .onChange(of: self.code) { newCode in
-          self.code = newCode.filter { $0.isNumber }
+        .onChange(of: code) { newCode in
+          code = newCode.filter(\.isNumber)
 
           // Auto-submit
-          if self.code.count == codeLimit, !formState.isLoading {
-            self.submit()
+          if code.count == codeLimit, !formState.isLoading {
+            submit()
           }
         }
         .onAppear {
@@ -60,9 +60,9 @@ struct OnboardingEnterCode: View {
         }
 
       GrayButton {
-        self.submit()
+        submit()
       } label: {
-        if !self.formState.isLoading {
+        if !formState.isLoading {
           Text(buttonLabel).padding(.horizontal)
         } else {
           ProgressView()
@@ -94,8 +94,8 @@ struct OnboardingEnterCode: View {
     Task {
       do {
         let result = try await ApiClient.shared.verifyCode(
-          code: self.code,
-          email: self.onboardingViewModel.email
+          code: code,
+          email: onboardingViewModel.email
         )
 
         // TODO: Extract to toplevel
@@ -112,13 +112,13 @@ struct OnboardingEnterCode: View {
         DispatchQueue.main.async {
           // Navigate
           if result.user.firstName == nil {
-            self.onboardingViewModel.navigate(to: .profile)
+            onboardingViewModel.navigate(to: .profile)
           } else {
-            self.onboardingViewModel.navigateAfterLogin()
+            onboardingViewModel.navigateAfterLogin()
           }
         }
       } catch {
-        self.formState.failed(error: "Failed: \(error.localizedDescription)")
+        formState.failed(error: "Failed: \(error.localizedDescription)")
         Log.shared.error("Failed to send code", error: error)
       }
     }

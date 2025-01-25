@@ -1,11 +1,11 @@
 
-//private actor MessageQueue {
+// private actor MessageQueue {
 //  private var pendingMessages: [(ClientMessage, Task<Void, Error>)] = []
-//    
+//
 //  func enqueue(_ message: WebSocketMessage) async throws {
 //    let task = Task { try await send(message) }
 //    pendingMessages.append((message, task))
-//        
+//
 //    do {
 //      try await task.value
 //      pendingMessages.removeAll { $0.1 == task }
@@ -17,10 +17,10 @@
 //      }
 //    }
 //  }
-//    
+//
 //  func retryPendingMessages() async {
 //    for (message, _) in pendingMessages {
 //      try? await send(message)
 //    }
 //  }
-//}
+// }

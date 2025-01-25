@@ -29,7 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
-    return true
+    true
   }
 }
 
@@ -43,7 +43,7 @@ extension AppDelegate {
     }
     UNUserNotificationCenter.current().delegate = notifications
   }
-  
+
   func application(
     _ application: NSApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
@@ -76,9 +76,9 @@ extension AppDelegate {
 
   func getPeerFromNotification(_ userInfo: [String: Any]) -> Peer? {
     if let peerUserId = userInfo["userId"] as? Int64 {
-      return .user(id: peerUserId)
+      .user(id: peerUserId)
     } else {
-      return nil
+      nil
     }
   }
 }

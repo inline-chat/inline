@@ -12,46 +12,46 @@ struct ConnectionStateIndicator: View {
     HStack(spacing: 8) {
       if state != .normal {
         switch state {
-        case .connecting:
-          Circle()
-            .fill(.red)
-            .frame(width: 12, height: 12)
-            .scaleEffect(circleScale)
-
-          Text("Connecting")
-            .font(.callout)
-            .foregroundColor(.primary)
-            .opacity(opacity)
-
-        case .updating:
-          Circle()
-            .fill(.orange)
-            .frame(width: 12, height: 12)
-            .scaleEffect(circleScale)
-
-          Text("Connecting")
-            .font(.callout)
-            .foregroundColor(.primary)
-            .opacity(opacity)
-
-        case .normal:
-          HStack {
+          case .connecting:
             Circle()
-              .fill(.green)
+              .fill(.red)
               .frame(width: 12, height: 12)
+              .scaleEffect(circleScale)
 
-            Text("Connected")
+            Text("Connecting")
               .font(.callout)
               .foregroundColor(.primary)
-          }
-          .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-              withAnimation {
-                hideState = true
+              .opacity(opacity)
+
+          case .updating:
+            Circle()
+              .fill(.orange)
+              .frame(width: 12, height: 12)
+              .scaleEffect(circleScale)
+
+            Text("Connecting")
+              .font(.callout)
+              .foregroundColor(.primary)
+              .opacity(opacity)
+
+          case .normal:
+            HStack {
+              Circle()
+                .fill(.green)
+                .frame(width: 12, height: 12)
+
+              Text("Connected")
+                .font(.callout)
+                .foregroundColor(.primary)
+            }
+            .onAppear {
+              DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                withAnimation {
+                  hideState = true
+                }
               }
             }
-          }
-          .opacity(hideState ? 0 : 1)
+            .opacity(hideState ? 0 : 1)
         }
       }
     }

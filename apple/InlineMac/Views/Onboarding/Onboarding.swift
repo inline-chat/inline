@@ -15,36 +15,35 @@ struct Onboarding: View {
   )
 
   var routeTransition: AnyTransition {
-    if self.viewModel.goingBack {
-      return self.routeTransition2
+    if viewModel.goingBack {
+      routeTransition2
     } else {
-      return self.routeTransition1
+      routeTransition1
     }
   }
 
   var body: some View {
     ZStack {
-      switch self.viewModel.path.last {
-      case .welcome:
-        OnboardingWelcome().transition(self.routeTransition)
-      case .enterEmail:
-        OnboardingEnterEmail().transition(self.routeTransition)
-      case .enterCode:
-        OnboardingEnterCode().transition(self.routeTransition)
-      case .profile:
-        OnboardingProfile().transition(self.routeTransition)
-      case .none:
-        OnboardingWelcome().transition(self.routeTransition)
+      switch viewModel.path.last {
+        case .welcome:
+          OnboardingWelcome().transition(routeTransition)
+        case .enterEmail:
+          OnboardingEnterEmail().transition(routeTransition)
+        case .enterCode:
+          OnboardingEnterCode().transition(routeTransition)
+        case .profile:
+          OnboardingProfile().transition(routeTransition)
+        case .none:
+          OnboardingWelcome().transition(routeTransition)
       }
     }
 //    .animation(.snappy.speed(1.5), value: self.viewModel.path)
-    .animation(.smoothSnappy, value: self.viewModel.path)
-
+    .animation(.smoothSnappy, value: viewModel.path)
     .toolbar(content: {
-      if self.viewModel.canGoBack {
+      if viewModel.canGoBack {
         ToolbarItem(placement: .navigation) {
           Button {
-            self.viewModel.goBack()
+            viewModel.goBack()
           } label: {
             Image(systemName: "chevron.left")
           }
@@ -58,9 +57,9 @@ struct Onboarding: View {
         }
       }
     })
-    .environmentObject(self.viewModel)
+    .environmentObject(viewModel)
     .task {
-      self.viewModel.setMainWindowViewModel(self.windowViewModel)
+      viewModel.setMainWindowViewModel(windowViewModel)
     }
   }
 }
@@ -88,7 +87,7 @@ class OnboardingViewModel: ObservableObject {
   @Published var goingBack = false
 
   var canGoBack: Bool {
-    self.path.count > 1
+    path.count > 1
   }
 
   func navigate(to route: OnboardingRoute) {
@@ -100,13 +99,13 @@ class OnboardingViewModel: ObservableObject {
   // Special navigate that decides next step after user is verified and logged in
   // i.e. we have token and current user id, should we open profile or main view?
   func navigateAfterLogin() {
-    if self.existingUser == false {
+    if existingUser == false {
       // new user -> go to profile page
-      self.navigate(to: .profile)
+      navigate(to: .profile)
     } else {
-      self.navigatingToMainView = true
+      navigatingToMainView = true
 
-      self.mainWindowViewModel?.navigate(.main)
+      mainWindowViewModel?.navigate(.main)
     }
   }
 
@@ -125,7 +124,7 @@ class OnboardingViewModel: ObservableObject {
   weak var mainWindowViewModel: MainWindowViewModel?
 
   func setMainWindowViewModel(_ mvm: MainWindowViewModel) {
-    self.mainWindowViewModel = mvm
+    mainWindowViewModel = mvm
   }
 }
 

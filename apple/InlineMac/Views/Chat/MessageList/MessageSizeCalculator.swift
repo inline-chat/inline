@@ -79,8 +79,8 @@ class MessageSizeCalculator {
   func calculateSize(
     for message: FullMessage,
     with props: MessageViewProps,
-    tableWidth width: CGFloat) -> (NSSize, NSSize, NSSize?)
-  {
+    tableWidth width: CGFloat
+  ) -> (NSSize, NSSize, NSSize?) {
     let text = message.message.text ?? emptyFallback
     let hasMedia = message.file != nil
     let hasBubble = Theme.messageIsBubble
@@ -92,7 +92,8 @@ class MessageSizeCalculator {
       return (
         CGSize(width: 1, height: heightForSingleLineText()),
         CGSize(width: 1, height: heightForSingleLineText()),
-        nil)
+        nil
+      )
     }
 
     // Total available before taking into account photo/video size constraints as they can impact it for the text view.
@@ -106,7 +107,8 @@ class MessageSizeCalculator {
     if hasMedia {
       let maxMediaSize = CGSize(
         width: Theme.messageMaxWidth,
-        height: 310.0) // prevent too big media
+        height: 310.0
+      ) // prevent too big media
       let minMediaSize = CGSize(width: 180.0, height: 20.0) // prevent too narrow media
       // /start photo
       if let file = message.file, file.fileType == .photo {
@@ -148,7 +150,8 @@ class MessageSizeCalculator {
           if width > height {
             mediaWidth = max(
               minMediaSize.width,
-              min(CGFloat(width), maxAvailableWidth))
+              min(CGFloat(width), maxAvailableWidth)
+            )
             mediaHeight = mediaWidth / aspectRatio
             if mediaHeight > maxMediaSize.height {
               mediaHeight = maxMediaSize.height
@@ -158,7 +161,8 @@ class MessageSizeCalculator {
             // for portrait
             mediaHeight = max(
               minMediaSize.height,
-              min(CGFloat(height), maxMediaSize.height))
+              min(CGFloat(height), maxMediaSize.height)
+            )
             mediaWidth = mediaHeight * aspectRatio
             if mediaWidth > maxAvailableWidth {
               mediaWidth = maxAvailableWidth
@@ -214,7 +218,7 @@ class MessageSizeCalculator {
     // MARK: Calculate text size
 
     var cachHitForSingleLine = false
-    
+
     // Previous local logic
 //    if textSize == nil,
 //       let minSize = minTextWidthForSingleLine.object(forKey: text as NSString) as? CGSize,
@@ -224,7 +228,7 @@ class MessageSizeCalculator {
 //      cachHitForSingleLine = true
 //      textSize = CGSize(width: minSize.width, height: heightForSingleLineText())
 //    }
-    
+
     // Shared logic
     if textSize == nil,
        let minTextWidth = getTextWidthIfSingleLine(message, availableWidth: availableWidth)
@@ -233,7 +237,7 @@ class MessageSizeCalculator {
       textSize = CGSize(width: minTextWidth, height: heightForSingleLineText())
     } else {
       // remove from single line cache. possibly logic can be improved
-      self.minTextWidthForSingleLine.removeObject(forKey: text as NSString)
+      minTextWidthForSingleLine.removeObject(forKey: text as NSString)
     }
 
     if textSize == nil {
@@ -249,7 +253,8 @@ class MessageSizeCalculator {
       log.trace("cached single line text \(text) width \(textWidth)")
       minTextWidthForSingleLine.setObject(
         NSValue(size: CGSize(width: textWidth, height: textHeight)),
-        forKey: text as NSString)
+        forKey: text as NSString
+      )
     }
 
     // MARK: Add other UI element heights to the text
@@ -327,7 +332,8 @@ class MessageSizeCalculator {
     } else {
       NSAttributedString(
         string: text, // whitespacesAndNewline
-        attributes: [.font: MessageTextConfiguration.font])
+        attributes: [.font: MessageTextConfiguration.font]
+      )
     }
 
 //    let attributedString = NSAttributedString(
