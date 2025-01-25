@@ -76,13 +76,14 @@ struct MainView: View {
                       .font(.title3)
                   }
                   .padding(.trailing, 6)
+                let archivedCount = home.chats.filter { $0.dialog.archived == true }.count
                 VStack(alignment: .leading) {
                   Text("Archived Chats")
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
-                  let archivedCount = home.chats.filter { $0.dialog.archived == true }.count
                   Text("\(archivedCount) chats")
                     .contentTransition(.numericText())
+                    .animation(.default, value: archivedCount)
                     .font(.callout)
                     .foregroundColor(.secondary)
                 }
