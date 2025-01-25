@@ -322,8 +322,8 @@ public class DataManager: ObservableObject {
   public func getChatHistory(
     peerUserId: Int64?,
     peerThreadId: Int64?,
-    peerId: Peer?) async throws
-  {
+    peerId: Peer?
+  ) async throws {
     let finalPeerUserId: Int64?
     let finalPeerThreadId: Int64?
     var peerId_: Peer
@@ -354,11 +354,13 @@ public class DataManager: ObservableObject {
     }
 
     log.debug(
-      "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))")
+      "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
+    )
 
     let result = try await ApiClient.shared.getChatHistory(
       peerUserId: finalPeerUserId,
-      peerThreadId: finalPeerThreadId)
+      peerThreadId: finalPeerThreadId
+    )
 
     try await database.dbWriter.write { db in
       for apiMessage in result.messages {
@@ -382,7 +384,8 @@ public class DataManager: ObservableObject {
 
   public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws {
     let result = try await ApiClient.shared.addReaction(
-      messageId: messageId, chatId: chatId, emoji: emoji)
+      messageId: messageId, chatId: chatId, emoji: emoji
+    )
 
     try await database.dbWriter.write { db in
       let reaction = Reaction(from: result.reaction)
@@ -409,7 +412,8 @@ public class DataManager: ObservableObject {
       peerId: peerId,
       pinned: pinned,
       draft: draft,
-      archived: archived)
+      archived: archived
+    )
     try await database.dbWriter.write { db in
       let dialog = Dialog(from: result.dialog)
       try dialog.save(db, onConflict: .replace)

@@ -91,9 +91,9 @@ extension NotificationsManager {
   func registerForRemoteNotifications() async {
     DispatchQueue.main.async {
       #if os(iOS)
-        UIApplication.shared.registerForRemoteNotifications()
+      UIApplication.shared.registerForRemoteNotifications()
       #elseif os(macOS)
-        NSApplication.shared.registerForRemoteNotifications()
+      NSApplication.shared.registerForRemoteNotifications()
       #endif
       self.log.debug("registerForRemoteNotifications called")
     }

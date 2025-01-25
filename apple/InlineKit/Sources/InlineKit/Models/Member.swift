@@ -34,7 +34,7 @@ public struct Member: FetchableRecord, Identifiable, Codable, Hashable, Persista
   }
 
   public init(
-    id: Int64 = Int64.random(in: 1...5000), date: Date, userId: Int64, spaceId: Int64,
+    id: Int64 = Int64.random(in: 1 ... 5_000), date: Date, userId: Int64, spaceId: Int64,
     role: MemberRole = .owner
   ) {
     self.id = id
@@ -45,8 +45,8 @@ public struct Member: FetchableRecord, Identifiable, Codable, Hashable, Persista
   }
 }
 
-extension Member {
-  public init(from: ApiMember) {
+public extension Member {
+  init(from: ApiMember) {
     id = from.id
     date = Self.fromTimestamp(from: from.date)
     userId = from.userId
@@ -54,7 +54,7 @@ extension Member {
     role = MemberRole(rawValue: from.role) ?? .member
   }
 
-  public static func fromTimestamp(from: Int) -> Date {
-    return Date(timeIntervalSince1970: Double(from) / 1000)
+  static func fromTimestamp(from: Int) -> Date {
+    Date(timeIntervalSince1970: Double(from) / 1_000)
   }
 }

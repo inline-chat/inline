@@ -10,18 +10,18 @@ struct MainView: View {
   @EnvironmentObject var navigation: NavigationModel
   @EnvironmentObject var rootData: RootData
   @EnvironmentObject var dataManager: DataManager
-  
+
   @Environment(\.requestNotifications) var requestNotifications
   @Environment(\.scenePhase) var scenePhase
 
   @State private var windowSizeCancellable: AnyCancellable?
   @State private var disableAutoCollapse = false
   @State private var autoCollapsed = false
-  
+
   @AppStorage("isDevtoolsOpen") var isDevtoolsOpen = false
 
   init() {}
-  
+
   var body: some View {
     NavigationSplitView(columnVisibility: $window.columnVisibility) {
       sidebar
@@ -33,7 +33,7 @@ struct MainView: View {
             maxWidth: .infinity,
             maxHeight: .infinity
           ).layoutPriority(2)
-          
+
         if isDevtoolsOpen {
           DevtoolsBar()
         }
@@ -49,9 +49,9 @@ struct MainView: View {
     .environmentObject(dataManager)
     .onAppear {
       Log.shared.info("MainView appeared • fetching root data")
-      self.rootData.fetch()
-      self.setUpSidebarAutoCollapse()
-        
+      rootData.fetch()
+      setUpSidebarAutoCollapse()
+
       markAsOnline()
     }
     .task {
@@ -76,13 +76,13 @@ struct MainView: View {
           ws.ensureConnected()
           markAsOnline()
         }
-        
+
       } else if phase == .inactive {
         // Evaluate offline?
       }
     }
   }
-  
+
   @ViewBuilder
   var sidebar: some View {
     Group {
@@ -97,7 +97,7 @@ struct MainView: View {
       max: 400
     )
   }
-  
+
   var detail: some View {
     NavigationStack(path: path) {
       if let spaceId = navigation.activeSpaceId {
@@ -106,7 +106,7 @@ struct MainView: View {
           .navigationDestination(for: NavigationRoute.self) { route in
             renderSpaceRoute(for: route, spaceId: spaceId)
           }
-        
+
       } else {
         renderHomeRoute(for: navigation.homeSelection)
           // Note(@mo): without this .id, route would not update correctly
@@ -117,54 +117,55 @@ struct MainView: View {
       }
     }
   }
-  
+
   var path: Binding<[NavigationRoute]> {
     if let _ = navigation.activeSpaceId {
-      return navigation.spacePath
+      navigation.spacePath
     } else {
-      return $navigation.homePath
+      $navigation.homePath
     }
   }
-  
+
   @ViewBuilder
   func renderSpaceRoute(for destination: NavigationRoute, spaceId: Int64) -> some View {
     switch destination {
-    case .spaceRoot:
-      SpaceView(spaceId: spaceId)
-        
-    case .chat(let peer):
-      ChatView(peerId: peer)
-    
-    case .chatInfo(let peer):
-      ChatInfo(peerId: peer)
-        
-    case .homeRoot:
-      // Not for space
-      HomeRoot()
+      case .spaceRoot:
+        SpaceView(spaceId: spaceId)
+
+      case let .chat(peer):
+        ChatView(peerId: peer)
+
+      case let .chatInfo(peer):
+        ChatInfo(peerId: peer)
+
+      case .homeRoot:
+        // Not for space
+        HomeRoot()
     }
   }
-  
+
   @ViewBuilder
   func renderHomeRoute(for destination: NavigationRoute) -> some View {
     switch destination {
-    case .chat(let peer):
-      ChatView(peerId: peer)
-      
-    case .homeRoot:
-      HomeRoot()
-      
-    case .chatInfo(let peer):
-      ChatInfo(peerId: peer)
-        
-    case .spaceRoot:
-      // Not for home
-      Text("")
+      case let .chat(peer):
+        ChatView(peerId: peer)
+
+      case .homeRoot:
+        HomeRoot()
+
+      case let .chatInfo(peer):
+        ChatInfo(peerId: peer)
+
+      case .spaceRoot:
+        // Not for home
+        Text("")
     }
   }
-  
+
   // MARK: - Sidebar Auto Collapse
 
-  // This difference makes collapse/uncollapse more satisfying as it doesn't lock in place when uncollapsing at minimum width
+  // This difference makes collapse/uncollapse more satisfying as it doesn't lock in place when uncollapsing at minimum
+  // width
   var detailMinWidth: CGFloat {
     // This was used for auto column collapse
 //    if window.columnVisibility == .detailOnly {
@@ -174,7 +175,7 @@ struct MainView: View {
 //    }
     Theme.chatViewMinWidth
   }
-  
+
   private func setUpSidebarAutoCollapse() {
     Task { @MainActor in
       // delay
@@ -190,7 +191,7 @@ struct MainView: View {
               autoCollapsed = true
             }
           } else {
-            if autoCollapsed && window.columnVisibility == .detailOnly {
+            if autoCollapsed, window.columnVisibility == .detailOnly {
               window.columnVisibility = .automatic
               autoCollapsed = false
             }
@@ -198,7 +199,7 @@ struct MainView: View {
         }
     }
   }
-  
+
   private func markAsOnline() {
     Task {
       try? await dataManager.updateStatus(online: true)

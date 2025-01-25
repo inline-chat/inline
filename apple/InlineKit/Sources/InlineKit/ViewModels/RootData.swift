@@ -22,22 +22,23 @@ public class RootData: ObservableObject {
 
     observationCancellable =
       ValueObservation
-      .tracking(User.filter(key: userId).fetchOne)
-      .publisher(in: db.reader, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { error in
-          self.error = error
-        },
-        receiveValue: { [weak self] user in
-          guard let self = self else { return }
-          self.currentUser = user
+        .tracking(User.filter(key: userId).fetchOne)
+        .publisher(in: db.reader, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { error in
+            self.error = error
+          },
+          receiveValue: { [weak self] user in
+            guard let self else { return }
+            currentUser = user
 
-          // Remote fetch
-          if user == nil, fetchedOnce == false {
-            self.fetch()
-            fetchedOnce = true
+            // Remote fetch
+            if user == nil, fetchedOnce == false {
+              fetch()
+              fetchedOnce = true
+            }
           }
-        })
+        )
   }
 
   public func fetch() {

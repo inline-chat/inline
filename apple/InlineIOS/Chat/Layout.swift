@@ -2,7 +2,9 @@ import InlineKit
 import UIKit
 
 final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
-  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
+  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
+    -> UICollectionViewLayoutAttributes?
+  {
     let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)
     attributes?.transform = CGAffineTransform(scaleX: 0.5, y: -0.5)
     attributes?.alpha = 0
@@ -73,7 +75,8 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
 // final class AnimatedCollectionViewCompositionalLayout: UICollectionViewCompositionalLayout {
 //  private var appearingIndexPaths: Set<IndexPath> = []
 //
-//  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
+//  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath) ->
+//  UICollectionViewLayoutAttributes? {
 //    guard let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath) else {
 //      return nil
 //    }

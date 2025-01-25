@@ -20,13 +20,13 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
     var id: String {
       switch self {
-      case .main: return "main"
-      case .space(let id): return "space-\(id)"
-      case .chat(let peer): return "chat-\(peer.hashValue)"
-      case .settings: return "settings"
-      case .createSpace: return "createSpace"
-      case .createThread(let spaceId): return "createThread-\(spaceId)"
-      case .archivedChats: return "archivedChats"
+        case .main: "main"
+        case let .space(id): "space-\(id)"
+        case let .chat(peer): "chat-\(peer.hashValue)"
+        case .settings: "settings"
+        case .createSpace: "createSpace"
+        case let .createThread(spaceId): "createThread-\(spaceId)"
+        case .archivedChats: "archivedChats"
       }
     }
   }
@@ -54,14 +54,14 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   func push(_ destination: Destination) {
     switch destination {
-    case .chat:
-      activeDestination = destination
-      navigationPath.append(destination)
-    case .createSpace, .createThread:
-      activeSheet = destination
-    default:
-      activeDestination = destination
-      navigationPath.append(destination)
+      case .chat:
+        activeDestination = destination
+        navigationPath.append(destination)
+      case .createSpace, .createThread:
+        activeSheet = destination
+      default:
+        activeDestination = destination
+        navigationPath.append(destination)
     }
   }
 

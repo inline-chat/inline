@@ -78,7 +78,9 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
                   optional: Dialog.peerUser
                     .including(
                       optional: User.chat
-                        .including(optional: Chat.lastMessage)))
+                        .including(optional: Chat.lastMessage)
+                    )
+                )
                 .asRequest(of: SpaceChatItem.self)
                 .fetchAll(db)
 
@@ -88,7 +90,8 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
                 .filter(id: Dialog.getDialogId(peerId: peerId))
                 .including(
                   optional: Dialog.peerThread
-                    .including(optional: Chat.lastMessage))
+                    .including(optional: Chat.lastMessage)
+                )
                 .asRequest(of: SpaceChatItem.self)
                 .fetchAll(db)
           }
@@ -99,7 +102,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
           receiveValue: { [weak self] (chats: [SpaceChatItem]) in
             if let self,
                let fullChat = chats.first,
-               
+
                fullChat.dialog != self.chatItem?.dialog ||
                fullChat.chat?.title != self.chatItem?.chat?.title
             {
@@ -107,7 +110,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
               // Only update if the dialog is different, ignore chat and message for performance reasons
               chatItem = chats.first
             }
-
-          })
+          }
+        )
   }
 }

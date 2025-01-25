@@ -5,13 +5,17 @@
 /// - message send should be kept in cache for 30 min even on quit (?)
 /// - archiving a channel should be retried indefinitely until success.
 ///
-/// Failure case should be handled in the transaction to revert the change in cache or something custom eg. for sending message we will mark the message as failed to send and show a resend button.
+/// Failure case should be handled in the transaction to revert the change in cache or something custom eg. for sending
+/// message we will mark the message as failed to send and show a resend button.
 ///
 /// We will mark a transaction as done when API responds `ok`: true
-/// If API responds `ok`: false, we will retry the transaction after a delay if the error is type FLOOD or INTERNAL. for a certain amount of time.
+/// If API responds `ok`: false, we will retry the transaction after a delay if the error is type FLOOD or INTERNAL. for
+/// a certain amount of time.
 ///
 /// How about conflicts?
-/// eg. we leave a group, our change isn't synced, user leaves and joins back from another client. then once our device comes online we will try to leave again and it will do something unexpected. We could see which to apply with the OG action time and compare it with joined at.
+/// eg. we leave a group, our change isn't synced, user leaves and joins back from another client. then once our device
+/// comes online we will try to leave again and it will do something unexpected. We could see which to apply with the OG
+/// action time and compare it with joined at.
 ///
 
 import Foundation
@@ -32,7 +36,7 @@ public class Transactions: @unchecked Sendable {
     Task {
       await actor.setCompletionHandler { [weak self] transaction in
         guard let self else { return }
-        self.cache.remove(transactionId: transaction.id)
+        cache.remove(transactionId: transaction.id)
       }
 
       for persistedTransaction in cache.transactions {
@@ -85,7 +89,7 @@ public enum TransactionType: Codable {
   case mockMessage(MockMessageTransaction)
 
   var id: String {
-    return transaction.id
+    transaction.id
     //    switch self {
     //    case .sendMessage(let transaction):
     //      return transaction.id
@@ -94,10 +98,10 @@ public enum TransactionType: Codable {
 
   var transaction: any Transaction {
     switch self {
-    case .sendMessage(let t):
-      return t
-    case .mockMessage(let t):
-      return t
+      case let .sendMessage(t):
+        t
+      case let .mockMessage(t):
+        t
     }
   }
 
@@ -121,12 +125,12 @@ public enum TransactionType: Codable {
     var container = encoder.container(keyedBy: CodingKeys.self)
 
     switch self {
-    case .sendMessage(let transaction):
-      try container.encode("sendMessage", forKey: .type)
-      try container.encode(transaction, forKey: .transaction)
-    case .mockMessage(let transaction):
-      try container.encode("mockMessage", forKey: .type)
-      try container.encode(transaction, forKey: .transaction)
+      case let .sendMessage(transaction):
+        try container.encode("sendMessage", forKey: .type)
+        try container.encode(transaction, forKey: .transaction)
+      case let .mockMessage(transaction):
+        try container.encode("mockMessage", forKey: .type)
+        try container.encode(transaction, forKey: .transaction)
     }
   }
 
@@ -135,18 +139,18 @@ public enum TransactionType: Codable {
     let type = try container.decode(String.self, forKey: .type)
 
     switch type {
-    case "sendMessage":
-      let transaction = try container.decode(TransactionSendMessage.self, forKey: .transaction)
-      self = .sendMessage(transaction)
-    case "mockMessage":
-      let transaction = try container.decode(MockMessageTransaction.self, forKey: .transaction)
-      self = .mockMessage(transaction)
-    default:
-      throw DecodingError.dataCorruptedError(
-        forKey: .type,
-        in: container,
-        debugDescription: "Invalid transaction type: \(type)"
-      )
+      case "sendMessage":
+        let transaction = try container.decode(TransactionSendMessage.self, forKey: .transaction)
+        self = .sendMessage(transaction)
+      case "mockMessage":
+        let transaction = try container.decode(MockMessageTransaction.self, forKey: .transaction)
+        self = .mockMessage(transaction)
+      default:
+        throw DecodingError.dataCorruptedError(
+          forKey: .type,
+          in: container,
+          debugDescription: "Invalid transaction type: \(type)"
+        )
     }
   }
 }

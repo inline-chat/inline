@@ -1,10 +1,3 @@
-//
-//  Welcome.swift
-//  Inline
-//
-//  Created by Dena Sohrabi on 9/27/24.
-//
-
 import CoreHaptics
 import SwiftUI
 
@@ -158,7 +151,8 @@ extension Welcome {
     let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.5)
     let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
     let event = CHHapticEvent(
-      eventType: .hapticTransient, parameters: [intensity, sharpness], relativeTime: 0)
+      eventType: .hapticTransient, parameters: [intensity, sharpness], relativeTime: 0
+    )
 
     do {
       let pattern = try CHHapticPattern(events: [event], parameters: [])

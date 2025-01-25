@@ -64,7 +64,7 @@ class MessagesCollectionView: UICollectionView {
     self.composeHeight = composeHeight
     UIView.animate(withDuration: 0.2) {
       self.updateContentInsets()
-      if !self.itemsEmpty && self.shouldScrollToBottom {
+      if !self.itemsEmpty, self.shouldScrollToBottom {
         self.scrollToItem(
           at: IndexPath(item: 0, section: 0),
           at: .top,
@@ -79,7 +79,7 @@ class MessagesCollectionView: UICollectionView {
       Log.shared.debug("Blocked by contextMenuOpen")
       return
     }
-    guard let window = window else {
+    guard let window else {
       Log.shared.debug("Blocked by missing window")
       return
     }
@@ -262,7 +262,7 @@ private extension MessagesCollectionView {
         FullMessage.ID
       > { [weak self] cell, indexPath, messageId in
         guard let self, let message = viewModel.messagesByID[messageId] else { return }
-        let isFromDifferentSender = self.isMessageFromDifferentSender(at: indexPath)
+        let isFromDifferentSender = isMessageFromDifferentSender(at: indexPath)
 
         cell.configure(with: message, fromOtherSender: isFromDifferentSender)
       }
@@ -302,7 +302,7 @@ private extension MessagesCollectionView {
       snapshot.appendSections([.main])
 
       // Get identifiers of all message in our model and add to initial snapshot
-      let itemIdentifiers = messages.map { $0.id }
+      let itemIdentifiers = messages.map(\.id)
 
       snapshot.appendItems(itemIdentifiers, toSection: .main)
 
@@ -311,41 +311,40 @@ private extension MessagesCollectionView {
 
     func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
       switch update {
-      case .added(let newMessages, _):
-        // get current snapshot and append new items
-        var snapshot = dataSource.snapshot()
-        let ids = newMessages.map { $0.id }
+        case let .added(newMessages, _):
+          // get current snapshot and append new items
+          var snapshot = dataSource.snapshot()
+          let ids = newMessages.map(\.id)
 
-        if let first = snapshot.itemIdentifiers.first {
-          snapshot.insertItems(ids, beforeItem: first)
-        } else {
-          snapshot.appendItems(ids, toSection: .main)
-        }
-        UIView.animate(withDuration: 0.2) {
-          self.dataSource.apply(snapshot, animatingDifferences: true)
-        }
-      case .deleted(let ids, _):
-        var snapshot = dataSource.snapshot()
+          if let first = snapshot.itemIdentifiers.first {
+            snapshot.insertItems(ids, beforeItem: first)
+          } else {
+            snapshot.appendItems(ids, toSection: .main)
+          }
+          UIView.animate(withDuration: 0.2) {
+            self.dataSource.apply(snapshot, animatingDifferences: true)
+          }
+        case let .deleted(ids, _):
+          var snapshot = dataSource.snapshot()
 
-        snapshot.deleteItems(ids)
+          snapshot.deleteItems(ids)
 
-        dataSource.apply(snapshot, animatingDifferences: true)
-      case .updated(let newMessages, let indexPaths):
+          dataSource.apply(snapshot, animatingDifferences: true)
+        case let .updated(newMessages, indexPaths):
 
-        var snapshot = dataSource.snapshot()
-        let ids = newMessages.map { $0.id }
+          var snapshot = dataSource.snapshot()
+          let ids = newMessages.map(\.id)
 
-        snapshot.reconfigureItems(ids)
+          snapshot.reconfigureItems(ids)
 
-        dataSource.apply(snapshot, animatingDifferences: false)
-
-      case .reload:
-        setInitialData()
+          dataSource.apply(snapshot, animatingDifferences: false)
+        case .reload:
+          setInitialData()
       }
     }
 
     private var sizeCache: [FullMessage.ID: CGSize] = [:]
-    private let maxCacheSize = 1000
+    private let maxCacheSize = 1_000
 
     func collectionView(
       _ collectionView: UICollectionView,
@@ -394,7 +393,7 @@ private extension MessagesCollectionView {
       layout collectionViewLayout: UICollectionViewLayout,
       minimumLineSpacingForSectionAt section: Int
     ) -> CGFloat {
-      return 0
+      0
     }
 
     func collectionView(
@@ -402,7 +401,7 @@ private extension MessagesCollectionView {
       layout collectionViewLayout: UICollectionViewLayout,
       insetForSectionAt section: Int
     ) -> UIEdgeInsets {
-      return .zero
+      .zero
     }
 
     func collectionView(
@@ -410,7 +409,7 @@ private extension MessagesCollectionView {
       layout collectionViewLayout: UICollectionViewLayout,
       minimumInteritemSpacingForSectionAt section: Int
     ) -> CGFloat {
-      return 0
+      0
     }
 
     private var isUserDragging = false
@@ -443,14 +442,14 @@ private extension MessagesCollectionView {
     func updateItems() {
       let currentSnapshot = dataSource.snapshot()
       let currentIds = Set(currentSnapshot.itemIdentifiers)
-      let availableIds = Set(messages.map { $0.id })
+      let availableIds = Set(messages.map(\.id))
       let missingIds = availableIds.subtracting(currentIds)
 
       if !missingIds.isEmpty {
         var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
         snapshot.appendSections([.main])
 
-        let orderedIds = messages.map { $0.id }
+        let orderedIds = messages.map(\.id)
 
         snapshot.appendItems(orderedIds, toSection: .main)
 
@@ -464,7 +463,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
   override func prepare() {
     super.prepare()
 
-    guard let collectionView = collectionView else { return }
+    guard let collectionView else { return }
 
     // Calculate the available width
     let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right

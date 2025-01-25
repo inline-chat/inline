@@ -8,7 +8,8 @@ public final class AppDatabase: Sendable {
   static let log = Log.scoped(
     "AppDatabase",
     // Enable tracing for seeing all SQL statements
-    enableTracing: false)
+    enableTracing: false
+  )
 
   public init(_ dbWriter: any GRDB.DatabaseWriter) throws {
     self.dbWriter = dbWriter
@@ -18,12 +19,12 @@ public final class AppDatabase: Sendable {
 
 // MARK: - Migrations
 
-extension AppDatabase {
-  public var migrator: DatabaseMigrator {
+public extension AppDatabase {
+  var migrator: DatabaseMigrator {
     var migrator = DatabaseMigrator()
 
     #if DEBUG
-      migrator.eraseDatabaseOnSchemaChange = true
+    migrator.eraseDatabaseOnSchemaChange = true
     #endif
 
     migrator.registerMigration("v1") { db in
@@ -67,7 +68,8 @@ extension AppDatabase {
         t.column("lastMsgId", .integer)
         t.foreignKey(
           ["id", "lastMsgId"], references: "message", columns: ["chatId", "messageId"],
-          onDelete: .setNull, onUpdate: .cascade, deferred: true)
+          onDelete: .setNull, onUpdate: .cascade, deferred: true
+        )
       }
 
       // Message table
@@ -103,7 +105,7 @@ extension AppDatabase {
     migrator.registerMigration("v2") { db in
       // Message table
       try db.alter(table: "message") { t in
-        t.add(column: "randomId", .integer)  // .unique()
+        t.add(column: "randomId", .integer) // .unique()
       }
     }
 
@@ -147,7 +149,8 @@ extension AppDatabase {
 
         t.foreignKey(
           ["chatId", "messageId"], references: "message", columns: ["chatId", "messageId"],
-          onDelete: .cascade, onUpdate: .cascade, deferred: true)
+          onDelete: .cascade, onUpdate: .cascade, deferred: true
+        )
         t.uniqueKey([
           "chatId", "messageId", "userId", "emoji",
         ])
@@ -207,9 +210,9 @@ extension AppDatabase {
 
 // MARK: - Database Configuration
 
-extension AppDatabase {
+public extension AppDatabase {
   /// - parameter base: A base configuration.
-  public static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
+  static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
     var config = base
 
     config.prepareDatabase { db in
@@ -217,7 +220,7 @@ extension AppDatabase {
 
       if let token = Auth.shared.getToken() {
         #if DEBUG
-          log.debug("Database passphrase: \(token)")
+        log.debug("Database passphrase: \(token)")
         #endif
         try db.usePassphrase(token)
       } else {
@@ -228,7 +231,7 @@ extension AppDatabase {
     return config
   }
 
-  public static func authenticated() async throws {
+  static func authenticated() async throws {
     if let token = Auth.shared.getToken() {
       try AppDatabase.changePassphrase(token)
     } else {
@@ -236,7 +239,7 @@ extension AppDatabase {
     }
   }
 
-  public static func clearDB() throws {
+  static func clearDB() throws {
     _ = try AppDatabase.shared.dbWriter.write { db in
 
       // Disable foreign key checks temporarily
@@ -246,11 +249,12 @@ extension AppDatabase {
       let tables = try String.fetchAll(
         db,
         sql: """
-          SELECT name FROM sqlite_master 
-          WHERE type = 'table' 
-          AND name NOT LIKE 'sqlite_%'
-          AND name NOT LIKE 'grdb_%'
-          """)
+        SELECT name FROM sqlite_master 
+        WHERE type = 'table' 
+        AND name NOT LIKE 'sqlite_%'
+        AND name NOT LIKE 'grdb_%'
+        """
+      )
 
       // Delete all rows from each table
       for table in tables {
@@ -271,7 +275,7 @@ extension AppDatabase {
     log.info("Database successfully cleared.")
   }
 
-  public static func loggedOut() throws {
+  static func loggedOut() throws {
     try clearDB()
 
     // Reset the database passphrase to a default value
@@ -297,8 +301,8 @@ extension AppDatabase {
   }
 }
 
-extension AppDatabase {
-  public static func deleteDatabaseFile() throws {
+public extension AppDatabase {
+  static func deleteDatabaseFile() throws {
     let fileManager = FileManager.default
     let databaseUrl = getDatabaseUrl()
     let databasePath = databaseUrl.path
@@ -314,25 +318,26 @@ extension AppDatabase {
 
 // MARK: - Database Access: Reads
 
-extension AppDatabase {
+public extension AppDatabase {
   /// Provides a read-only access to the database.
-  public var reader: any GRDB.DatabaseReader {
+  var reader: any GRDB.DatabaseReader {
     dbWriter
   }
 }
 
 // MARK: - The database for the application
 
-extension AppDatabase {
+public extension AppDatabase {
   /// The database for the application
-  public static let shared = makeShared()
+  static let shared = makeShared()
 
   private static func getDatabaseUrl() -> URL {
     do {
       let fileManager = FileManager.default
       let appSupportURL = try fileManager.url(
         for: .applicationSupportDirectory, in: .userDomainMask,
-        appropriateFor: nil, create: false)
+        appropriateFor: nil, create: false
+      )
 
       let directory =
         if let userProfile = ProjectConfig.userProfile {
@@ -380,7 +385,8 @@ extension AppDatabase {
         iOS: \(iOSLink)
         macOS: \(macOSLink)
         🍎🍎🍎 
-        """)
+        """
+      )
 
       // Create the AppDatabase
       let appDatabase = try AppDatabase(dbPool)
@@ -415,14 +421,14 @@ extension AppDatabase {
   }
 
   /// Creates an empty database for SwiftUI previews
-  public static func empty() -> AppDatabase {
+  static func empty() -> AppDatabase {
     // Connect to an in-memory database
     // Refrence https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/databaseconnections
     let dbQueue = try! DatabaseQueue(configuration: AppDatabase.makeConfiguration())
     return try! AppDatabase(dbQueue)
   }
 
-  public static func emptyWithSpaces() -> AppDatabase {
+  static func emptyWithSpaces() -> AppDatabase {
     let db = AppDatabase.empty()
     do {
       try db.dbWriter.write { db in
@@ -438,11 +444,11 @@ extension AppDatabase {
     return db
   }
 
-  public static func emptyWithChat() -> AppDatabase {
+  static func emptyWithChat() -> AppDatabase {
     let db = AppDatabase.empty()
     do {
       try db.dbWriter.write { db in
-        let chat = Chat(id: 1234, date: Date.now, type: .thread, title: "Main", spaceId: nil)
+        let chat = Chat(id: 1_234, date: Date.now, type: .thread, title: "Main", spaceId: nil)
 
         try chat.insert(db)
       }
@@ -451,7 +457,7 @@ extension AppDatabase {
   }
 
   /// Used for previews
-  public static func populated() -> AppDatabase {
+  static func populated() -> AppDatabase {
     let db = AppDatabase.empty()
 
     // Populate with test data
@@ -460,14 +466,17 @@ extension AppDatabase {
       let users: [User] = [
         User(
           id: 1, email: "current@example.com", firstName: "Current", lastName: "User",
-          username: "current"),
+          username: "current"
+        ),
         User(
           id: 2, email: "alice@example.com", firstName: "Alice", lastName: "Smith",
-          username: "alice"),
+          username: "alice"
+        ),
         User(id: 3, email: "bob@example.com", firstName: "Bob", lastName: "Jones", username: "bob"),
         User(
           id: 4, email: "carol@example.com", firstName: "Carol", lastName: "Wilson",
-          username: "carol"),
+          username: "carol"
+        ),
       ]
       try users.forEach { try $0.save(db) }
 
@@ -495,40 +504,46 @@ extension AppDatabase {
       let messages: [Message] = [
         // Messages in DM with Alice
         Message(
-          messageId: 1, fromId: 1, date: Date().addingTimeInterval(-3600), text: "Hey Alice!",
-          peerUserId: 2, peerThreadId: nil, chatId: 1, out: true),
+          messageId: 1, fromId: 1, date: Date().addingTimeInterval(-3_600), text: "Hey Alice!",
+          peerUserId: 2, peerThreadId: nil, chatId: 1, out: true
+        ),
         Message(
-          messageId: 2, fromId: 2, date: Date().addingTimeInterval(-3500),
-          text: "Hi there! How are you?", peerUserId: 2, peerThreadId: nil, chatId: 1),
+          messageId: 2, fromId: 2, date: Date().addingTimeInterval(-3_500),
+          text: "Hi there! How are you?", peerUserId: 2, peerThreadId: nil, chatId: 1
+        ),
         Message(
-          messageId: 3, fromId: 1, date: Date().addingTimeInterval(-3400),
+          messageId: 3, fromId: 1, date: Date().addingTimeInterval(-3_400),
           text: "I'm good! Just checking out the new chat app.", peerUserId: 2, peerThreadId: nil,
-          chatId: 1, out: true),
+          chatId: 1, out: true
+        ),
 
         // Messages in Engineering/General thread
         Message(
-          messageId: 1, fromId: 1, date: Date().addingTimeInterval(-7200),
+          messageId: 1, fromId: 1, date: Date().addingTimeInterval(-7_200),
           text: "Welcome to the Engineering space!", peerUserId: nil, peerThreadId: 3, chatId: 3,
-          out: true),
+          out: true
+        ),
         Message(
-          messageId: 2, fromId: 2, date: Date().addingTimeInterval(-7100),
-          text: "Thanks! Excited to be here.", peerUserId: nil, peerThreadId: 3, chatId: 3),
+          messageId: 2, fromId: 2, date: Date().addingTimeInterval(-7_100),
+          text: "Thanks! Excited to be here.", peerUserId: nil, peerThreadId: 3, chatId: 3
+        ),
         Message(
-          messageId: 3, fromId: 3, date: Date().addingTimeInterval(-7000),
-          text: "Let's build something awesome!", peerUserId: nil, peerThreadId: 3, chatId: 3),
+          messageId: 3, fromId: 3, date: Date().addingTimeInterval(-7_000),
+          text: "Let's build something awesome!", peerUserId: nil, peerThreadId: 3, chatId: 3
+        ),
       ]
       try messages.forEach { try $0.save(db) }
 
       // Create dialogs for quick access
       let dialogs: [Dialog] = [
         // DM dialogs
-        Dialog(id: 2, peerUserId: 2, spaceId: nil),  // Dialog with Alice
-        Dialog(id: 3, peerUserId: 3, spaceId: nil),  // Dialog with Bob
+        Dialog(id: 2, peerUserId: 2, spaceId: nil), // Dialog with Alice
+        Dialog(id: 3, peerUserId: 3, spaceId: nil), // Dialog with Bob
 
         // Thread dialogs
-        Dialog(id: -3, peerThreadId: 3, spaceId: 1),  // Engineering/General
-        Dialog(id: -4, peerThreadId: 4, spaceId: 1),  // Engineering/Random
-        Dialog(id: -5, peerThreadId: 5, spaceId: 2),  // Design/Design System
+        Dialog(id: -3, peerThreadId: 3, spaceId: 1), // Engineering/General
+        Dialog(id: -4, peerThreadId: 4, spaceId: 1), // Engineering/Random
+        Dialog(id: -5, peerThreadId: 5, spaceId: 2), // Design/Design System
       ]
       try dialogs.forEach { try $0.save(db) }
     }

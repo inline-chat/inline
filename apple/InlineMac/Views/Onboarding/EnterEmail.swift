@@ -24,22 +24,22 @@ struct OnboardingEnterEmail: View {
         .font(.system(size: 21.0, weight: .semibold))
         .foregroundStyle(.primary)
 
-      self.emailField
-        .focused(self.$focusedField, equals: .codeField)
-        .disabled(self.formState.isLoading)
+      emailField
+        .focused($focusedField, equals: .codeField)
+        .disabled(formState.isLoading)
         .padding(.top, 6)
         .padding(.bottom, 10)
         .onSubmit {
-          self.sendCode()
+          sendCode()
         }
         .onAppear {
-          self.focusedField = .codeField
+          focusedField = .codeField
         }
 
       GrayButton {
-        self.sendCode()
+        sendCode()
       } label: {
-        if !self.formState.isLoading {
+        if !formState.isLoading {
           Text("Continue").padding(.horizontal)
         } else {
           ProgressView()
@@ -65,16 +65,16 @@ struct OnboardingEnterEmail: View {
   }
 
   func sendCode() {
-    self.formState.startLoading()
+    formState.startLoading()
 
     Task {
       do {
-        let data = try await ApiClient.shared.sendCode(email: self.onboardingViewModel.email)
+        let data = try await ApiClient.shared.sendCode(email: onboardingViewModel.email)
 
-        self.onboardingViewModel.existingUser = data.existingUser
-        self.onboardingViewModel.navigate(to: .enterCode)
+        onboardingViewModel.existingUser = data.existingUser
+        onboardingViewModel.navigate(to: .enterCode)
       } catch {
-        self.formState.failed(error: "Failed: \(error.localizedDescription)")
+        formState.failed(error: "Failed: \(error.localizedDescription)")
         Log.shared.error("Failed to send code", error: error)
       }
     }

@@ -36,7 +36,7 @@ final class MessageSizeCalculator {
     let cacheKey = "\(message.message.id)-\(maxWidth)-\(isTransition)" as NSString
 
     if let cachedSize = cachedSizes[message.message.id],
-      abs(cachedSize.width - maxWidth) < 0.001
+       abs(cachedSize.width - maxWidth) < 0.001
     {
       return cachedSize
     }
@@ -78,7 +78,7 @@ final class MessageSizeCalculator {
   }
 
   func invalidateCache(for messageId: Int64? = nil) {
-    if let messageId = messageId {
+    if let messageId {
       cachedSizes.removeValue(forKey: messageId)
     } else {
       cachedSizes.removeAll()

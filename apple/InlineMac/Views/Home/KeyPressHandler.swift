@@ -30,7 +30,7 @@ struct KeyPressHandler: NSViewRepresentable {
     }
 
     deinit {
-      if let monitor = monitor {
+      if let monitor {
         NSEvent.removeMonitor(monitor)
       }
     }

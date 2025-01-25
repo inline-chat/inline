@@ -5,14 +5,14 @@ public enum Peer: Codable, Hashable, Sendable, Equatable {
   case user(id: Int64)
   case thread(id: Int64)
 
-  public static func ==(lhs: Peer, rhs: Peer) -> Bool {
+  public static func == (lhs: Peer, rhs: Peer) -> Bool {
     switch (lhs, rhs) {
-    case (.user(let lhsId), .user(let rhsId)):
-      return lhsId == rhsId
-    case (.thread(let lhsId), .thread(let rhsId)):
-      return lhsId == rhsId
-    default:
-      return false
+      case let (.user(lhsId), .user(rhsId)):
+        lhsId == rhsId
+      case let (.thread(lhsId), .thread(rhsId)):
+        lhsId == rhsId
+      default:
+        false
     }
   }
 
@@ -23,28 +23,28 @@ public enum Peer: Codable, Hashable, Sendable, Equatable {
 
   public var id: Int64 {
     switch self {
-    case .user(let id):
-      return id
-    case .thread(let id):
-      return id
+      case let .user(id):
+        id
+      case let .thread(id):
+        id
     }
   }
 
   public func asUserId() -> Int64? {
     switch self {
-    case .user(let id):
-      return id
-    case .thread:
-      return nil
+      case let .user(id):
+        id
+      case .thread:
+        nil
     }
   }
-  
+
   public func asThreadId() -> Int64? {
     switch self {
-    case .user:
-      return nil
-    case .thread(let id):
-      return id
+      case .user:
+        nil
+      case let .thread(id):
+        id
     }
   }
 
@@ -77,28 +77,28 @@ public enum Peer: Codable, Hashable, Sendable, Equatable {
     var container = encoder.container(keyedBy: CodingKeys.self)
 
     switch self {
-    case .user(let id):
-      try container.encode(id, forKey: .userId)
-    case .thread(let id):
-      try container.encode(id, forKey: .threadId)
+      case let .user(id):
+        try container.encode(id, forKey: .userId)
+      case let .thread(id):
+        try container.encode(id, forKey: .threadId)
     }
   }
 
   public var isPrivate: Bool {
     switch self {
-    case .user:
-      return true
-    case .thread:
-      return false
+      case .user:
+        true
+      case .thread:
+        false
     }
   }
 
   public var isThread: Bool {
     switch self {
-    case .user:
-      return false
-    case .thread:
-      return true
+      case .user:
+        false
+      case .thread:
+        true
     }
   }
 }

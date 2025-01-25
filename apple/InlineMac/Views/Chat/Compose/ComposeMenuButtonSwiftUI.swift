@@ -8,7 +8,7 @@ struct ComposeMenuButtonSwiftUI: View {
   private let size: CGFloat = Theme.messageAvatarSize
   private let backgroundColor: Color = .accentColor
   private let hoveredBackgroundColor: Color = .accentColor.opacity(0.8)
-  
+
   var body: some View {
     Button {
       // open picker

@@ -5,28 +5,28 @@ struct ChatSideItem: View {
   @Binding var selectedRoute: NavigationRoute
   @State private var isHovered = false
   @Environment(\.openWindow) var openWindow
-  
+
   let item: SpaceChatItem
-  
+
   // Gesture state
   @GestureState private var pressState = false
-    
+
   var currentRoute: NavigationRoute {
     .chat(peer: item.peerId)
   }
-  
+
   var title: String {
     item.chat?.title ?? item.user?.fullName ?? "Chat"
   }
-  
+
   var body: some View {
     HStack(spacing: 8) {
       Image(systemName: "bubble.middle.bottom")
         .frame(width: 16, height: 16)
-        
+
       Text(title)
         .lineLimit(1)
-        
+
       Spacer()
     }
     .padding(.horizontal, Theme.sidebarItemPadding)
@@ -64,23 +64,23 @@ struct ChatSideItem: View {
       pressed()
     })
   }
-  
+
   private var isSelected: Bool {
     selectedRoute == currentRoute
   }
-    
+
   private var backgroundColor: Color {
     if isSelected {
-      return Color.accentColor.opacity(0.2)
+      Color.accentColor.opacity(0.2)
     } else if pressState {
-      return Color.gray.opacity(0.2)
+      Color.gray.opacity(0.2)
     } else if isHovered {
-      return Color.gray.opacity(0.1)
+      Color.gray.opacity(0.1)
     } else {
-      return Color.clear
+      Color.clear
     }
   }
-    
+
   private func handleDoubleClick() {
     // Implement double click action
     openWindow(value: item.peerId)

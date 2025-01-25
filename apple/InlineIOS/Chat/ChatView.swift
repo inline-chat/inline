@@ -34,7 +34,7 @@ struct ChatView: View {
 
   static let formatter = RelativeDateTimeFormatter()
   func getLastOnlineText(date: Date?) -> String {
-    guard let date = date else { return "" }
+    guard let date else { return "" }
 
     let diffSeconds = Date().timeIntervalSince(date)
     if diffSeconds < 60 {
@@ -53,21 +53,23 @@ struct ChatView: View {
   var subtitle: String {
     // TODO: support threads
     if ws.connectionState == .connecting {
-      return "connecting..."
+      "connecting..."
     } else if let composeAction = currentComposeAction() {
-      return composeAction.rawValue
+      composeAction.rawValue
     } else if let online = fullChatViewModel.peerUser?.online {
-      return online
+      online
         ? "online"
-        : (fullChatViewModel.peerUser?.lastOnline != nil
-          ? getLastOnlineText(date: fullChatViewModel.peerUser?.lastOnline) : "offline")
+        : (
+          fullChatViewModel.peerUser?.lastOnline != nil
+            ? getLastOnlineText(date: fullChatViewModel.peerUser?.lastOnline) : "offline"
+        )
     } else {
-      return "last seen recently"
+      "last seen recently"
     }
   }
 
   init(peer: Peer, preview: Bool = false) {
-    self.peerId = peer
+    peerId = peer
     self.preview = preview
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer)
@@ -128,12 +130,12 @@ struct ChatView: View {
       }
       .onChange(of: scenePhase) { _, scenePhase_ in
         switch scenePhase_ {
-        case .active:
-          Task {
-            await fetch()
-          }
-        default:
-          break
+          case .active:
+            Task {
+              await fetch()
+            }
+          default:
+            break
         }
       }
       .environmentObject(fullChatViewModel)
@@ -145,7 +147,7 @@ struct ChatView: View {
       HStack {
         Text(title)
       }
-      if !isCurrentUser && isPrivateChat {
+      if !isCurrentUser, isPrivateChat {
         Text(subtitle)
           .font(.caption)
           .foregroundStyle(.secondary)

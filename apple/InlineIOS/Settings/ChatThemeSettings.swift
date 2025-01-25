@@ -52,7 +52,8 @@ struct ThemeColorGrid: View {
   private let gridColumns = [
     GridItem(
       .adaptive(minimum: Theme.Settings.picker.minWidth),
-      spacing: Theme.Settings.picker.spacing),
+      spacing: Theme.Settings.picker.spacing
+    ),
   ]
 
   var body: some View {
@@ -61,8 +62,8 @@ struct ThemeColorGrid: View {
         ThemeColorButton(
           color: themeColor,
           isSelected: themeColor == selectedColor,
-          selectedColor: selectedColor)
-        {
+          selectedColor: selectedColor
+        ) {
           updateThemeColor(themeColor)
         }
       }
@@ -90,14 +91,16 @@ struct ThemeColorButton: View {
         .fill(Color(uiColor: color))
         .frame(
           width: Theme.Settings.picker.buttonSize,
-          height: Theme.Settings.picker.buttonSize)
+          height: Theme.Settings.picker.buttonSize
+        )
         .scaleEffect(isSelected ? 1.1 : 1)
 
       Circle()
         .stroke(Color(uiColor: selectedColor), lineWidth: isSelected ? 2 : 0)
         .frame(
           width: Theme.Settings.picker.borderSize,
-          height: Theme.Settings.picker.borderSize)
+          height: Theme.Settings.picker.borderSize
+        )
         .opacity(isSelected ? 1 : 0)
     }
     .buttonStyle(PlainButtonStyle())

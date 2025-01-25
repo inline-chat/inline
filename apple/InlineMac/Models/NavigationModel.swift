@@ -8,17 +8,17 @@ enum NavigationRoute: Hashable, Codable, Equatable {
   case chat(peer: Peer)
   case chatInfo(peer: Peer)
 
-  static func ==(lhs: NavigationRoute, rhs: NavigationRoute) -> Bool {
+  static func == (lhs: NavigationRoute, rhs: NavigationRoute) -> Bool {
     switch (lhs, rhs) {
-    case (.homeRoot, .homeRoot),
-         (.spaceRoot, .spaceRoot):
-      return true
-    case let (.chat(lhsPeer), .chat(rhsPeer)):
-      return lhsPeer == rhsPeer
-    case let (.chatInfo(lhsPeer), .chatInfo(rhsPeer)):
-      return lhsPeer == rhsPeer
-    default:
-      return false
+      case (.homeRoot, .homeRoot),
+           (.spaceRoot, .spaceRoot):
+        true
+      case let (.chat(lhsPeer), .chat(rhsPeer)):
+        lhsPeer == rhsPeer
+      case let (.chatInfo(lhsPeer), .chatInfo(rhsPeer)):
+        lhsPeer == rhsPeer
+      default:
+        false
     }
   }
 }
@@ -67,8 +67,8 @@ class NavigationModel: ObservableObject {
               let activeSpaceId
         else { return }
 
-        self.spacePathDict[activeSpaceId] = newValue
-        self.setUpForRoute(newValue.last ?? .spaceRoot)
+        spacePathDict[activeSpaceId] = newValue
+        setUpForRoute(newValue.last ?? .spaceRoot)
       }
     )
   }
@@ -86,8 +86,8 @@ class NavigationModel: ObservableObject {
               let activeSpaceId
         else { return }
 
-        self.spaceSelectionDict[activeSpaceId] = newValue
-        self.setUpForRoute(newValue)
+        spaceSelectionDict[activeSpaceId] = newValue
+        setUpForRoute(newValue)
       }
     )
   }
@@ -104,15 +104,15 @@ class NavigationModel: ObservableObject {
     $activeSpaceId
       .sink { [weak self] newValue in
         guard let self, let spaceId = newValue else { return }
-        guard let w = self.windowManager, w.topLevelRoute == .main else { return }
-        self.setUpForRoute(self.spaceSelectionDict[spaceId] ?? .spaceRoot)
+        guard let w = windowManager, w.topLevelRoute == .main else { return }
+        setUpForRoute(spaceSelectionDict[spaceId] ?? .spaceRoot)
       }
       .store(in: &cancellables)
 
     $homePath.sink { [weak self] newValue in
-      guard let self = self else { return }
-      guard let w = self.windowManager, w.topLevelRoute == .main else { return }
-      self.setUpForRoute(newValue.last ?? self.homeSelection)
+      guard let self else { return }
+      guard let w = windowManager, w.topLevelRoute == .main else { return }
+      setUpForRoute(newValue.last ?? homeSelection)
     }.store(in: &cancellables)
   }
 
@@ -125,7 +125,7 @@ class NavigationModel: ObservableObject {
   }
 
   private func setUpForRoute(_ route: NavigationRoute) {
-    guard let windowManager = windowManager else {
+    guard let windowManager else {
       log.error("Window manager not set up")
       return
     }
@@ -250,9 +250,9 @@ class NavigationModel: ObservableObject {
 
   var currentRoute: NavigationRoute {
     if let activeSpaceId {
-      return spaceSelectionDict[activeSpaceId] ?? .spaceRoot
+      spaceSelectionDict[activeSpaceId] ?? .spaceRoot
     } else {
-      return homePath.last ?? homeSelection
+      homePath.last ?? homeSelection
     }
   }
 

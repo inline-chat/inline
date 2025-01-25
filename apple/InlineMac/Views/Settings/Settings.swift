@@ -10,7 +10,7 @@ struct SettingsView: View {
     case general = "General"
     case account = "Account"
 
-    var id: String { self.rawValue }
+    var id: String { rawValue }
   }
 
   var body: some View {
@@ -21,7 +21,7 @@ struct SettingsView: View {
       .tag(Tabs.general)
 
       // Logged in only options
-      if self.auth.isLoggedIn {
+      if auth.isLoggedIn {
         AccountSettingsView().tabItem {
           Label("Account", systemImage: "person.crop.circle")
         }
@@ -43,7 +43,7 @@ struct GeneralSettingsView: View {
 
   var body: some View {
     Form {
-      Toggle("Launch at Login", isOn: self.$launchAtLogin)
+      Toggle("Launch at Login", isOn: $launchAtLogin)
     }
   }
 }
@@ -56,7 +56,7 @@ struct AppearanceView: View {
     Form {
       // Toggle("Launch at Login", isOn: self.$slaunchAtLogin).toggleStyle(.switch)
 
-      Picker("Message Style:", selection: self.$settings.messageStyle) {
+      Picker("Message Style:", selection: $settings.messageStyle) {
         Text("Bubble").tag(MessageStyle.bubble)
         Text("Minimal").tag(MessageStyle.minimal)
 
@@ -81,11 +81,11 @@ struct AccountSettingsView: View {
     HStack {
       UserProfile()
       Button("Log Out", role: .destructive) {
-        self.logOut()
+        logOut()
       }
     }
     .frame(minWidth: 300)
-    .environmentObject(self.root)
+    .environmentObject(root)
   }
 
   struct UserProfile: View {

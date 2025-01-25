@@ -6,17 +6,17 @@ struct CreateSpace: View {
   @State private var name = ""
   @FocusState private var isFocused: Bool
   @FormState var formState
-  
+
   @EnvironmentObject var nav: Navigation
   @Environment(\.appDatabase) var database
   @Environment(\.dismiss) var dismiss
   @EnvironmentObject var dataManager: DataManager
-  
+
   @Binding var showSheet: Bool
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       AnimatedLabel(animate: $animate, text: "Create Space")
-      
+
       TextField("eg. Acme HQ", text: $name)
         .focused($isFocused)
         .keyboardType(.emailAddress)
@@ -52,20 +52,20 @@ struct CreateSpace: View {
       }
     }
   }
-  
+
   func submit() {
     Task {
       do {
         formState.startLoading()
         let id = try await dataManager.createSpace(name: name)
-        
+
         formState.succeeded()
         showSheet = false
-        
-        if let id = id {
+
+        if let id {
           nav.push(.space(id: id))
         }
-        
+
       } catch {
         // TODO: handle error
         Log.shared.error("Failed to create space", error: error)
