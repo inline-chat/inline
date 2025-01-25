@@ -116,7 +116,6 @@ extension Code {
       .autocorrectionDisabled(true)
       .font(.title2)
       .fontWeight(.semibold)
-
       .padding(.vertical, 8)
       .onSubmit {
         submitCode()

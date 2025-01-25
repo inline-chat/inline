@@ -20,7 +20,7 @@ class MessageTimeAndState: NSView {
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
-  
+
   private lazy var timeLabel = {
     let label = NSTextField()
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -30,13 +30,13 @@ class MessageTimeAndState: NSView {
     label.drawsBackground = false
     label.textColor = .tertiaryLabelColor
     label.font = .systemFont(ofSize: 11)
-    
+
     return label
   }()
-  
+
   private var imageSize: CGFloat = 10
   private var currentState = MessageSendingStatus.sent
-  
+
   private lazy var imageView = {
     let imageView = NSImageView()
 
@@ -45,41 +45,41 @@ class MessageTimeAndState: NSView {
     currentState = fullMessage.message.status ?? .sent
     imageView.imageScaling = .scaleNone
     imageView.translatesAutoresizingMaskIntoConstraints = false
-  
+
     return imageView
   }()
 
   private var hasSymbol: Bool {
     fullMessage.message.out == true
   }
-  
+
   private func setupView() {
     addSubview(timeLabel)
-    
+
     NSLayoutConstraint.activate([
       timeLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
       timeLabel.topAnchor.constraint(equalTo: topAnchor),
-      timeLabel.bottomAnchor.constraint(equalTo: bottomAnchor)
+      timeLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
-   
+
     if hasSymbol {
       addSubview(imageView)
-      
+
       NSLayoutConstraint.activate([
         imageView.leadingAnchor.constraint(equalTo: timeLabel.trailingAnchor, constant: 2),
         imageView.widthAnchor.constraint(equalToConstant: 12),
         imageView.heightAnchor.constraint(equalToConstant: 12),
         imageView.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor),
-        
-        imageView.trailingAnchor.constraint(greaterThanOrEqualTo: trailingAnchor)
+
+        imageView.trailingAnchor.constraint(greaterThanOrEqualTo: trailingAnchor),
       ])
     } else {
       NSLayoutConstraint.activate([
-        timeLabel.trailingAnchor.constraint(greaterThanOrEqualTo: trailingAnchor)
+        timeLabel.trailingAnchor.constraint(greaterThanOrEqualTo: trailingAnchor),
       ])
     }
   }
-  
+
   // Reverse layout
 //  private func setupView() {
 //    addSubview(timeLabel)
@@ -107,18 +107,18 @@ class MessageTimeAndState: NSView {
 //      ])
 //    }
 //  }
-  
+
   static let formatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.dateFormat = "HH:mm"
     return formatter
   }()
-  
+
   private func setupContent() {
     let time = Self.formatter.string(from: fullMessage.message.date)
     timeLabel.stringValue = time
-    
-    if hasSymbol && currentState != fullMessage.message.status {
+
+    if hasSymbol, currentState != fullMessage.message.status {
       currentState = fullMessage.message.status ?? .sent
       if #available(macOS 14.0, *) {
         imageView
@@ -132,27 +132,28 @@ class MessageTimeAndState: NSView {
       }
     }
   }
-  
+
   private func getSymbolImage() -> NSImage {
     let status = fullMessage.message.status ?? .sent
     let image = switch status {
-    case .sent:
-      NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Sent")!.withSymbolConfiguration(
-        .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
-      )!
-    case .sending:
-      NSImage(systemSymbolName: "clock", accessibilityDescription: "Sending")!.withSymbolConfiguration(
-        .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
-      )!
-    case .failed:
-      NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Failed")!.withSymbolConfiguration(
-        .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
-      )!
+      case .sent:
+        NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Sent")!.withSymbolConfiguration(
+          .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
+        )!
+      case .sending:
+        NSImage(systemSymbolName: "clock", accessibilityDescription: "Sending")!.withSymbolConfiguration(
+          .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
+        )!
+      case .failed:
+        NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Failed")!
+          .withSymbolConfiguration(
+            .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
+          )!
     }
 
     return image
   }
-  
+
   // MARK: - Public
 
   public func updateMessage(_ fullMessage: FullMessage) {

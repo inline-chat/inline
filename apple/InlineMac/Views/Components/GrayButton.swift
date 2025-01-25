@@ -50,34 +50,34 @@ struct GrayButton<Label>: View
 
     var font: Font {
       switch size {
-      case .small:
-        return Font.system(size: 13, weight: .regular)
-      case .medium:
-        return Font.system(size: 15, weight: .regular)
-      case .large:
-        return Font.system(size: 17, weight: .regular)
+        case .small:
+          Font.system(size: 13, weight: .regular)
+        case .medium:
+          Font.system(size: 15, weight: .regular)
+        case .large:
+          Font.system(size: 17, weight: .regular)
       }
     }
 
     var height: CGFloat {
       switch size {
-      case .small:
-        return 24
-      case .medium:
-        return 28
-      case .large:
-        return 36
+        case .small:
+          24
+        case .medium:
+          28
+        case .large:
+          36
       }
     }
 
     var cornerRadius: CGFloat {
       switch size {
-      case .small:
-        return 6
-      case .medium:
-        return 8
-      case .large:
-        return 10
+        case .small:
+          6
+        case .medium:
+          8
+        case .large:
+          10
       }
     }
 

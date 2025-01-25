@@ -108,14 +108,14 @@ private extension Color {
     let g: UInt64
     let b: UInt64
     switch hex.count {
-    case 3: // RGB (12-bit)
-      (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
-    case 6: // RGB (24-bit)
-      (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-    case 8: // ARGB (32-bit)
-      (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-    default:
-      (a, r, g, b) = (255, 0, 0, 0)
+      case 3: // RGB (12-bit)
+        (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+      case 6: // RGB (24-bit)
+        (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+      case 8: // ARGB (32-bit)
+        (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+      default:
+        (a, r, g, b) = (255, 0, 0, 0)
     }
     self.init(
       .sRGB,
@@ -128,39 +128,39 @@ private extension Color {
 
   func adjustBrightness(by amount: Double) -> Color {
     #if os(iOS)
-      guard let components = UIColor(self).cgColor.components,
-            components.count >= 3
-      else { return self }
+    guard let components = UIColor(self).cgColor.components,
+          components.count >= 3
+    else { return self }
 
-      let r = components[0]
-      let g = components[1]
-      let b = components[2]
-      let alpha = components.count >= 4 ? components[3] : 1.0
+    let r = components[0]
+    let g = components[1]
+    let b = components[2]
+    let alpha = components.count >= 4 ? components[3] : 1.0
 
-      return Color(
-        .sRGB,
-        red: min(r + amount, 1.0),
-        green: min(g + amount, 1.0),
-        blue: min(b + amount, 1.0),
-        opacity: alpha
-      )
+    return Color(
+      .sRGB,
+      red: min(r + amount, 1.0),
+      green: min(g + amount, 1.0),
+      blue: min(b + amount, 1.0),
+      opacity: alpha
+    )
     #else
-      guard let components = NSColor(self).cgColor.components,
-            components.count >= 3
-      else { return self }
+    guard let components = NSColor(self).cgColor.components,
+          components.count >= 3
+    else { return self }
 
-      let r = components[0]
-      let g = components[1]
-      let b = components[2]
-      let alpha = components.count >= 4 ? components[3] : 1.0
+    let r = components[0]
+    let g = components[1]
+    let b = components[2]
+    let alpha = components.count >= 4 ? components[3] : 1.0
 
-      return Color(
-        .sRGB,
-        red: min(r + amount, 1.0),
-        green: min(g + amount, 1.0),
-        blue: min(b + amount, 1.0),
-        opacity: alpha
-      )
+    return Color(
+      .sRGB,
+      red: min(r + amount, 1.0),
+      green: min(g + amount, 1.0),
+      blue: min(b + amount, 1.0),
+      opacity: alpha
+    )
     #endif
   }
 }
@@ -175,12 +175,12 @@ private extension Color {
     init(color: Color, amount: Double) {
       // Create a consistent hash for the color
       #if os(iOS)
-        self.colorHash = UIColor(color).hashValue
+      colorHash = UIColor(color).hashValue
       #else
-        self.colorHash = NSColor(color).hashValue
+      colorHash = NSColor(color).hashValue
       #endif
       // Round to 3 decimal places to prevent floating-point precision issues
-      self.amount = (amount * 1000).rounded() / 1000
+      self.amount = (amount * 1_000).rounded() / 1_000
     }
   }
 
@@ -196,13 +196,13 @@ private extension Color {
     let cacheKey = NSString(string: "\(key.colorHash):\(key.amount)")
     // Try to get from cache
     #if os(iOS)
-      if let cachedColor = Self.adjustmentCache.object(forKey: cacheKey) as? UIColor {
-        return Color(uiColor: cachedColor)
-      }
+    if let cachedColor = Self.adjustmentCache.object(forKey: cacheKey) as? UIColor {
+      return Color(uiColor: cachedColor)
+    }
     #else
-      if let cachedColor = Self.adjustmentCache.object(forKey: cacheKey) as? NSColor {
-        return Color(nsColor: cachedColor)
-      }
+    if let cachedColor = Self.adjustmentCache.object(forKey: cacheKey) as? NSColor {
+      return Color(nsColor: cachedColor)
+    }
     #endif
 
     // If not in cache, compute new color
@@ -210,9 +210,9 @@ private extension Color {
 
     // Store in cache
     #if os(iOS)
-      Self.adjustmentCache.setObject(UIColor(adjustedColor), forKey: cacheKey)
+    Self.adjustmentCache.setObject(UIColor(adjustedColor), forKey: cacheKey)
     #else
-      Self.adjustmentCache.setObject(NSColor(adjustedColor), forKey: cacheKey)
+    Self.adjustmentCache.setObject(NSColor(adjustedColor), forKey: cacheKey)
     #endif
 
     return adjustedColor
@@ -220,19 +220,19 @@ private extension Color {
 
   private func performLuminosityAdjustment(by amount: Double) -> Color {
     #if os(iOS)
-      let uiColor = UIColor(self)
-      guard let rgbColor = uiColor.cgColor.converted(
-        to: CGColorSpace(name: CGColorSpace.sRGB)!,
-        intent: .defaultIntent,
-        options: nil
-      ) else { return self }
+    let uiColor = UIColor(self)
+    guard let rgbColor = uiColor.cgColor.converted(
+      to: CGColorSpace(name: CGColorSpace.sRGB)!,
+      intent: .defaultIntent,
+      options: nil
+    ) else { return self }
     #else
-      let nsColor = NSColor(self)
-      guard let rgbColor = nsColor.cgColor.converted(
-        to: CGColorSpace(name: CGColorSpace.sRGB)!,
-        intent: .defaultIntent,
-        options: nil
-      ) else { return self }
+    let nsColor = NSColor(self)
+    guard let rgbColor = nsColor.cgColor.converted(
+      to: CGColorSpace(name: CGColorSpace.sRGB)!,
+      intent: .defaultIntent,
+      options: nil
+    ) else { return self }
     #endif
 
     let components = rgbColor.components ?? []

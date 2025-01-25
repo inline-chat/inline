@@ -107,15 +107,15 @@ struct UserItemButtonStyle: ButtonStyle {
 
   private func backgroundColor(_ configuration: Configuration) -> Color {
     if selected {
-      return .accentColor
+      .accentColor
     } else if configuration.isPressed {
-      return .primary.opacity(0.08)
+      .primary.opacity(0.08)
     } else if isFocused {
-      return .primary.opacity(0.1)
+      .primary.opacity(0.1)
     } else if isHovered {
-      return .primary.opacity(0.05)
+      .primary.opacity(0.05)
     } else {
-      return .clear
+      .clear
     }
   }
 }

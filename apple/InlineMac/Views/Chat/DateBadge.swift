@@ -18,20 +18,20 @@ struct DateBadge: View {
 
     var description: String {
       switch self {
-      case .today: return "Today"
-      case .yesterday: return "Yesterday"
-      case .day(let humanReadable): return humanReadable
+        case .today: "Today"
+        case .yesterday: "Yesterday"
+        case let .day(humanReadable): humanReadable
       }
     }
   }
 
   var day: Day {
     if Calendar.current.isDateInToday(date) {
-      return .today
+      .today
     } else if Calendar.current.isDateInYesterday(date) {
-      return .yesterday
+      .yesterday
     } else {
-      return .day(humanReadable: date.formatted(date: .abbreviated, time: .omitted))
+      .day(humanReadable: date.formatted(date: .abbreviated, time: .omitted))
     }
   }
 

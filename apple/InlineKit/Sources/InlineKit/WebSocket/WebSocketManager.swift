@@ -51,18 +51,18 @@ public final class WebSocketManager: ObservableObject {
     }
 
     #if targetEnvironment(simulator)
-      return "ws://localhost:8000/ws"
+    return "ws://localhost:8000/ws"
     #elseif DEBUG && os(iOS)
-      return "ws://\(ProjectConfig.devHost):8000/ws"
+    return "ws://\(ProjectConfig.devHost):8000/ws"
     #elseif DEBUG && os(macOS)
-      return "ws://\(ProjectConfig.devHost):8000/ws"
+    return "ws://\(ProjectConfig.devHost):8000/ws"
     #else
-      return "wss://api.inline.chat/ws"
+    return "wss://api.inline.chat/ws"
     #endif
   }
 
   public func start() async {
-    guard let userId = userId, let token = token else {
+    guard let userId, let token else {
       log.debug("not authenticated")
       return
     }
@@ -98,36 +98,36 @@ public final class WebSocketManager: ObservableObject {
 
   private func processMessage(_ message: WebSocketMessage) {
     switch message {
-    case .string(let text):
+      case let .string(text):
 //      log.trace("received string \(text)")
-      // Decode message as update
-      if let serverMessage = decodeServerMessage(data: text) {
-        switch serverMessage.k {
-        case .message:
-          if let updates = serverMessage.p?.updates {
-            Task {
-              await updatesManager.applyBatch(updates: updates)
-            }
+        // Decode message as update
+        if let serverMessage = decodeServerMessage(data: text) {
+          switch serverMessage.k {
+            case .message:
+              if let updates = serverMessage.p?.updates {
+                Task {
+                  await updatesManager.applyBatch(updates: updates)
+                }
+              }
+            default:
+              break
           }
-        default:
-          break
         }
-      }
 
-    case .data(let data):
-      log.trace("received data \(data)")
-      // ...
+      case let .data(data):
+        log.trace("received data \(data)")
+        // ...
     }
   }
 
   private func stateDidChange(_ state: WebSocketConnectionState) {
     switch state {
-    case .connected:
-      connectionState = .normal
-    case .disconnected:
-      connectionState = .connecting
-    case .connecting:
-      connectionState = .connecting
+      case .connected:
+        connectionState = .normal
+      case .disconnected:
+        connectionState = .connecting
+      case .connecting:
+        connectionState = .connecting
     }
   }
 

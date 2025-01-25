@@ -16,7 +16,7 @@ public class FormStateObject: ObservableObject {
   }
 
   public init() {
-    self.state = .idle
+    state = .idle
   }
 
   public func reset() {

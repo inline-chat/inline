@@ -22,11 +22,11 @@ public extension NSAttributedString {
   }
 
   func containsAttribute(attributeName: NSAttributedString.Key) -> Any? {
-    let range = NSRange(location: 0, length: self.length)
+    let range = NSRange(location: 0, length: length)
 
     var containsAttribute: Any?
 
-    self.enumerateAttribute(attributeName, in: range, options: []) { value, _, _ in
+    enumerateAttribute(attributeName, in: range, options: []) { value, _, _ in
       if value != nil {
         containsAttribute = value
       }
@@ -42,7 +42,13 @@ public extension NSAttributedString {
       fs = CTFramesetterCreateWithAttributedString(self)
     }
 
-    var textSize: CGSize = CTFramesetterSuggestFrameSizeWithConstraints(fs!, CFRangeMake(0, self.length), nil, NSMakeSize(width, CGFloat.greatestFiniteMagnitude), nil)
+    var textSize: CGSize = CTFramesetterSuggestFrameSizeWithConstraints(
+      fs!,
+      CFRangeMake(0, length),
+      nil,
+      NSMakeSize(width, CGFloat.greatestFiniteMagnitude),
+      nil
+    )
 
     textSize.width = ceil(textSize.width)
     textSize.height = ceil(textSize.height)
@@ -51,7 +57,7 @@ public extension NSAttributedString {
   }
 
   var trimNewLinesToSpace: NSAttributedString {
-    return self.replaceNewlinesWithSpaces(in: self)
+    replaceNewlinesWithSpaces(in: self)
   }
 
   func replaceNewlinesWithSpaces(in attributedString: NSAttributedString) -> NSAttributedString {
@@ -68,22 +74,27 @@ public extension NSAttributedString {
   }
 
   var range: NSRange {
-    return NSMakeRange(0, self.length)
+    NSMakeRange(0, length)
   }
 
   func trimRange(_ range: NSRange) -> NSRange {
-    let loc: Int = min(range.location, self.length)
-    let length: Int = min(range.length, self.length - loc)
+    let loc: Int = min(range.location, length)
+    let length: Int = min(range.length, length - loc)
     return NSMakeRange(loc, length)
   }
 
-  convenience init(string: String, font: NSFont? = nil, textColor: NSColor = NSColor.black, paragraphAlignment: NSTextAlignment? = nil) {
+  convenience init(
+    string: String,
+    font: NSFont? = nil,
+    textColor: NSColor = NSColor.black,
+    paragraphAlignment: NSTextAlignment? = nil
+  ) {
     var attributes: [NSAttributedString.Key: AnyObject] = [:]
-    if let font = font {
+    if let font {
       attributes[.font] = font
     }
     attributes[.foregroundColor] = textColor
-    if let paragraphAlignment = paragraphAlignment {
+    if let paragraphAlignment {
       let paragraphStyle = NSMutableParagraphStyle()
       paragraphStyle.alignment = paragraphAlignment
       attributes[.paragraphStyle] = paragraphStyle
@@ -96,7 +107,7 @@ public extension NSView {
   /// Capture a NSView as a NSImage
   var snapshot: NSImage {
     guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return NSImage() }
-    self.cacheDisplay(in: bounds, to: rep)
+    cacheDisplay(in: bounds, to: rep)
     let image = NSImage(size: bounds.size)
     image.addRepresentation(rep)
     return image
@@ -121,48 +132,48 @@ public extension NSView {
   }
 
   func removeAllSubviews() {
-    var filtered = self.subviews
+    var filtered = subviews
     while filtered.count > 0 {
       filtered.removeFirst().removeFromSuperview()
     }
   }
 
   func setFrameSize(_ width: CGFloat, _ height: CGFloat) {
-    self.setFrameSize(NSMakeSize(width, height))
+    setFrameSize(NSMakeSize(width, height))
   }
 
   func setFrameOrigin(_ x: CGFloat, _ y: CGFloat) {
-    self.setFrameOrigin(NSMakePoint(x, y))
+    setFrameOrigin(NSMakePoint(x, y))
   }
 }
 
 public extension NSTableView.AnimationOptions {
   static var none: NSTableView.AnimationOptions {
-    return NSTableView.AnimationOptions(rawValue: 0)
+    NSTableView.AnimationOptions(rawValue: 0)
   }
 }
 
 public extension NSScrollView {
   var contentOffset: NSPoint {
-    return contentView.bounds.origin
+    contentView.bounds.origin
   }
 }
 
 public extension NSRange {
   var min: Int {
-    return self.location
+    location
   }
 
   var max: Int {
-    return self.location + self.length
+    location + length
   }
 
   var isEmpty: Bool {
-    return self.length == 0
+    length == 0
   }
 
   func indexIn(_ index: Int) -> Bool {
-    return NSLocationInRange(index, self)
+    NSLocationInRange(index, self)
   }
 
   init(string: String, range: Range<String.Index>) {
@@ -177,28 +188,28 @@ public extension NSRange {
 
 public extension Int32 {
   var isFuture: Bool {
-    return self > Int32(Date().timeIntervalSince1970)
+    self > Int32(Date().timeIntervalSince1970)
   }
 }
 
 public extension NSTextField {
   func setSelectionRange(_ range: NSRange) {
-    self.textView?.setSelectedRange(range)
+    textView?.setSelectedRange(range)
   }
 
   var selectedRange: NSRange {
-    if let textView = textView {
+    if let textView {
       return textView.selectedRange
     }
     return NSMakeRange(0, 0)
   }
 
   func setCursorToStart() {
-    self.setSelectionRange(NSRange(location: 0, length: 0))
+    setSelectionRange(NSRange(location: 0, length: 0))
   }
 
   var textView: NSTextView? {
-    let textView = (self.window?.fieldEditor(true, for: self) as? NSTextView)
+    let textView = (window?.fieldEditor(true, for: self) as? NSTextView)
     textView?.backgroundColor = .clear
     textView?.drawsBackground = true
     return textView
@@ -207,45 +218,48 @@ public extension NSTextField {
 
 public extension NSTextView {
   func appendText(_ text: String) {
-    let inputText = self.attributedString().mutableCopy() as! NSMutableAttributedString
+    let inputText = attributedString().mutableCopy() as! NSMutableAttributedString
 
     if selectedRange.upperBound - selectedRange.lowerBound > 0 {
-      inputText.replaceCharacters(in: NSMakeRange(selectedRange.lowerBound, selectedRange.upperBound - selectedRange.lowerBound), with: NSAttributedString(string: text))
+      inputText.replaceCharacters(
+        in: NSMakeRange(selectedRange.lowerBound, selectedRange.upperBound - selectedRange.lowerBound),
+        with: NSAttributedString(string: text)
+      )
     } else {
       inputText.insert(NSAttributedString(string: text), at: selectedRange.lowerBound)
     }
-    self.string = inputText.string
+    string = inputText.string
   }
 }
 
 public extension String {
   var persistentHashValue: UInt64 {
-    var result = UInt64(5381)
-    let buf = [UInt8](self.utf8)
+    var result = UInt64(5_381)
+    let buf = [UInt8](utf8)
     for b in buf {
-      result = 127 * (result & 0x00ffffffffffffff) + UInt64(b)
+      result = 127 * (result & 0x00FF_FFFF_FFFF_FFFF) + UInt64(b)
     }
     return result
   }
 }
 
 extension NSEdgeInsets: @retroactive Equatable {
-  public static func ==(lhs: NSEdgeInsets, rhs: NSEdgeInsets) -> Bool {
-    return lhs.left == rhs.left && lhs.right == rhs.right && lhs.bottom == rhs.bottom && lhs.top == rhs.top
+  public static func == (lhs: NSEdgeInsets, rhs: NSEdgeInsets) -> Bool {
+    lhs.left == rhs.left && lhs.right == rhs.right && lhs.bottom == rhs.bottom && lhs.top == rhs.top
   }
 
   public var isEmpty: Bool {
-    return self.left == 0 && self.right == 0 && self.top == 0 && self.bottom == 0
+    left == 0 && right == 0 && top == 0 && bottom == 0
   }
 }
 
 public extension NSImage {
   var _cgImage: CGImage? {
-    return self.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    cgImage(forProposedRect: nil, context: nil, hints: nil)
   }
 
   var jpegCGImage: CGImage? {
-    guard let tiffData = self.tiffRepresentation,
+    guard let tiffData = tiffRepresentation,
           let bitmapImageRep = NSBitmapImageRep(data: tiffData)
     else {
       return nil
@@ -253,9 +267,17 @@ public extension NSImage {
 
     let compressionFactor: CGFloat = 1.0
 
-    guard let jpegData = bitmapImageRep.representation(using: .jpeg, properties: [.compressionFactor: compressionFactor]),
-          let dataProvider = CGDataProvider(data: jpegData as CFData),
-          let cgImage = CGImage(jpegDataProviderSource: dataProvider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+    guard let jpegData = bitmapImageRep.representation(
+      using: .jpeg,
+      properties: [.compressionFactor: compressionFactor]
+    ),
+      let dataProvider = CGDataProvider(data: jpegData as CFData),
+      let cgImage = CGImage(
+        jpegDataProviderSource: dataProvider,
+        decode: nil,
+        shouldInterpolate: true,
+        intent: .defaultIntent
+      )
     else {
       return nil
     }
@@ -265,9 +287,9 @@ public extension NSImage {
 }
 
 public func deg2rad(_ number: Float) -> Float {
-  return number * .pi / 180
+  number * .pi / 180
 }
 
 public func rad2deg(_ number: Float) -> Float {
-  return number * 180.0 / .pi
+  number * 180.0 / .pi
 }

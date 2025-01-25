@@ -98,12 +98,12 @@ class ComposeEmbedView: UIView {
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
       closeButton.centerYAnchor.constraint(equalTo: heading.centerYAnchor),
       closeButton.widthAnchor.constraint(equalToConstant: 28),
-      closeButton.heightAnchor.constraint(equalToConstant: 28)
+      closeButton.heightAnchor.constraint(equalToConstant: 28),
     ])
   }
 
   @objc func closeTapped() {
-    guard let peerId = peerId else { return }
+    guard let peerId else { return }
 
     ChatState.shared.clearReplyingMessageId(peer: peerId)
   }

@@ -15,7 +15,8 @@ struct ComposeEmbedViewSwiftUI: View {
     self.messageId = messageId
     _viewModel = EnvironmentStateObject { env in
       FullMessageViewModel(
-        db: env.appDatabase, messageId: messageId, chatId: chatId)
+        db: env.appDatabase, messageId: messageId, chatId: chatId
+      )
     }
   }
 

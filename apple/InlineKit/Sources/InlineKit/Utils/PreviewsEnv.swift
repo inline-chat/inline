@@ -19,8 +19,7 @@ public extension View {
     let auth = Auth.mocked(authenticated: preset != .unauthenticated)
 
     return
-      self
-        .environment(\.transactions, Transactions.shared)
+      environment(\.transactions, Transactions.shared)
         .environment(\.appDatabase, appDatabase)
         .databaseContext(.readWrite { appDatabase.dbWriter })
         .environmentObject(WebSocketManager(token: nil, userId: nil))

@@ -11,11 +11,11 @@ public class Debouncer: ObservableObject, @unchecked Sendable {
   public init(delay: TimeInterval) {
     cancellable =
       $input
-      // Publishes only elements that don’t match the previous element
-      .removeDuplicates()
-      .debounce(for: .seconds(delay), scheduler: DispatchQueue.main)
-      .sink { [weak self] value in
-        self?.debouncedInput = value
-      }
+        // Publishes only elements that don’t match the previous element
+        .removeDuplicates()
+        .debounce(for: .seconds(delay), scheduler: DispatchQueue.main)
+        .sink { [weak self] value in
+          self?.debouncedInput = value
+        }
   }
 }

@@ -55,7 +55,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 
   public init(
-    id: Int64 = Int64.random(in: 1...50000), date: Date, type: ChatType, title: String?,
+    id: Int64 = Int64.random(in: 1 ... 50_000), date: Date, type: ChatType, title: String?,
     spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil
   ) {
     self.id = id
@@ -68,8 +68,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 }
 
-extension Chat {
-  public enum CodingKeys: String, CodingKey {
+public extension Chat {
+  enum CodingKeys: String, CodingKey {
     case id
     case date
     case type
@@ -79,7 +79,7 @@ extension Chat {
     case lastMsgId
   }
 
-  public init(from decoder: Decoder) throws {
+  init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     id = try container.decode(Int64.self, forKey: .id)
     date = try container.decode(Date.self, forKey: .date)
@@ -91,8 +91,8 @@ extension Chat {
   }
 }
 
-extension Chat {
-  public init(from: ApiChat) {
+public extension Chat {
+  init(from: ApiChat) {
     id = from.id
     date = Self.fromTimestamp(from: from.date)
     title = from.title
@@ -101,10 +101,10 @@ extension Chat {
     peerUserId =
       if let peer = from.peer {
         switch peer {
-        case let .user(id):
-          id
-        case .thread:
-          nil
+          case let .user(id):
+            id
+          case .thread:
+            nil
         }
       } else {
         nil
@@ -112,7 +112,7 @@ extension Chat {
     lastMsgId = from.lastMsgId
   }
 
-  public static func fromTimestamp(from: Int) -> Date {
-    return Date(timeIntervalSince1970: Double(from) / 1000)
+  static func fromTimestamp(from: Int) -> Date {
+    Date(timeIntervalSince1970: Double(from) / 1_000)
   }
 }

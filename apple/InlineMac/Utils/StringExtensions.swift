@@ -11,7 +11,7 @@ extension String {
     if earlyRTL { return true }
 
     let language = CFStringTokenizerCopyBestStringLanguage(self as CFString, CFRange(location: 0, length: count))
-    if let language = language {
+    if let language {
       return NSLocale.characterDirection(forLanguage: language as String) == .rightToLeft
     }
     return false

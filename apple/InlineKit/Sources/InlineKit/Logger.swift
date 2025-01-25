@@ -8,24 +8,24 @@ public enum LogLevel: String, Sendable {
   case info = "ℹ️ INFO"
   case debug = "🐛 DEBUG"
   case trace = "🚧 TRACE"
-  
+
   var osLogType: OSLogType {
     switch self {
-    case .error: return .error
-    case .warning: return .fault
-    case .info: return .info
-    case .debug: return .debug
-    case .trace: return .debug
+      case .error: .error
+      case .warning: .fault
+      case .info: .info
+      case .debug: .debug
+      case .trace: .debug
     }
   }
-  
+
   var sentryLevel: SentryLevel {
     switch self {
-    case .error: return .error
-    case .warning: return .warning
-    case .info: return .info
-    case .debug: return .debug
-    case .trace: return .debug
+      case .error: .error
+      case .warning: .warning
+      case .info: .info
+      case .debug: .debug
+      case .trace: .debug
     }
   }
 }
@@ -40,25 +40,25 @@ public protocol Logging {
 
 public final class Log: @unchecked Sendable {
   public static let shared = Log(scope: "shared")
-  
+
   private let scope: String
   private let level: LogLevel
   private let logger: Logger
-  
+
   private init(scope: String, level: LogLevel = .debug) {
     self.scope = scope
     self.level = level
-    self.logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.app", category: scope)
+    logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.app", category: scope)
   }
-  
+
   public static func scoped(_ scope: String, enableTracing: Bool = false) -> Log {
     Log(scope: scope, level: enableTracing ? .trace : .debug)
   }
-  
+
   public static func scoped(_ scope: String) -> Log {
     Log(scope: scope)
   }
-  
+
   private func log(
     _ message: String,
     level: LogLevel,
@@ -69,7 +69,7 @@ public final class Log: @unchecked Sendable {
   ) {
     let fileName = (file as NSString).lastPathComponent
     let errorDescription = error?.localizedDescription ?? ""
-    
+
     let logMessage: String
     let scope_ = scope
     if scope == "shared" || level == .error {
@@ -77,15 +77,18 @@ public final class Log: @unchecked Sendable {
     } else {
       logMessage = "\(message) \(errorDescription)"
     }
-    
-    logger.log(level: level.osLogType, "\(level.rawValue, privacy: .public) |  \(scope_, privacy: .public) | \(logMessage, privacy: .public)")
-    
+
+    logger.log(
+      level: level.osLogType,
+      "\(level.rawValue, privacy: .public) |  \(scope_, privacy: .public) | \(logMessage, privacy: .public)"
+    )
+
     let level_ = level
-    
+
     // Handle Sentry reporting with proper isolation
     if level == .error || level == .warning {
       Task {
-        if level == .error, let error = error {
+        if level == .error, let error {
           await SentryReporter.shared.reportError(
             error,
             message: message,
@@ -115,7 +118,7 @@ extension Log: Logging {
   ) {
     log(message, level: .error, error: error, file: file, function: function, line: line)
   }
-  
+
   public func warning(
     _ message: String,
     file: String = #file,
@@ -124,7 +127,7 @@ extension Log: Logging {
   ) {
     log(message, level: .warning, file: file, function: function, line: line)
   }
-  
+
   public func info(
     _ message: String,
     file: String = #file,
@@ -133,7 +136,7 @@ extension Log: Logging {
   ) {
     log(message, level: .info, file: file, function: function, line: line)
   }
-  
+
   public func debug(
     _ message: String,
     file: String = #file,
@@ -141,10 +144,10 @@ extension Log: Logging {
     line: Int = #line
   ) {
     #if DEBUG
-      log(message, level: .debug, file: file, function: function, line: line)
+    log(message, level: .debug, file: file, function: function, line: line)
     #endif
   }
-  
+
   public func trace(
     _ message: String,
     file: String = #file,
@@ -153,7 +156,7 @@ extension Log: Logging {
   ) {
     guard level == .trace else { return }
     #if DEBUG
-      log(message, level: .trace, file: file, function: function, line: line)
+    log(message, level: .trace, file: file, function: function, line: line)
     #endif
   }
 }
@@ -161,7 +164,7 @@ extension Log: Logging {
 // Create a dedicated actor for handling Sentry operations
 private actor SentryReporter {
   static let shared = SentryReporter()
-  
+
   func reportError(_ error: Error, message: String, scope: String, level: LogLevel) {
     SentrySDK.capture(error: error) { sentryScope in
       sentryScope.setLevel(level.sentryLevel)
@@ -169,7 +172,7 @@ private actor SentryReporter {
       sentryScope.setExtra(value: message, key: "message")
     }
   }
-  
+
   func reportMessage(_ message: String, scope: String, level: LogLevel, error: Error?) {
     SentrySDK.capture(message: message) { sentryScope in
       sentryScope.setLevel(level.sentryLevel)

@@ -44,7 +44,7 @@ public class MessagesProgressiveViewModel {
     // subscribe to changes
     MessagesPublisher.shared.publisher
       .sink { [weak self] update in
-        guard let self = self else { return }
+        guard let self else { return }
         Log.shared.trace("Received update \(update)")
         if let changeset = applyChanges(update: update) {
           callback?(changeset)
@@ -57,7 +57,8 @@ public class MessagesProgressiveViewModel {
   public func observe(_ callback: @escaping (MessagesChangeSet) -> Void) {
     if self.callback != nil {
       Log.shared.warning(
-        "Callback already set, re-setting it to a new one will result in undefined behaviour")
+        "Callback already set, re-setting it to a new one will result in undefined behaviour"
+      )
     }
 
     self.callback = callback
@@ -93,74 +94,75 @@ public class MessagesProgressiveViewModel {
   private func applyChanges(update: MessagesPublisher.UpdateType) -> MessagesChangeSet? {
     //    log.trace("Applying changes: \(update)")
     switch update {
-    case .add(let messageAdd):
-      if messageAdd.peer == peer {
-        // Check if we have it to not add it again
-        let existingIds = Set(messages.map { $0.id })
-        let newMessages = messageAdd.messages.filter { !existingIds.contains($0.id) }
+      case let .add(messageAdd):
+        if messageAdd.peer == peer {
+          // Check if we have it to not add it again
+          let existingIds = Set(messages.map(\.id))
+          let newMessages = messageAdd.messages.filter { !existingIds.contains($0.id) }
 
-        // TODO: detect if we should add to the bottom or top
-        if reversed {
-          messages.insert(contentsOf: newMessages, at: 0)
-        } else {
-          messages.append(contentsOf: newMessages)
+          // TODO: detect if we should add to the bottom or top
+          if reversed {
+            messages.insert(contentsOf: newMessages, at: 0)
+          } else {
+            messages.append(contentsOf: newMessages)
+          }
+
+          // FIXME: For now until we figured a stable sort
+          // sort again
+          // sort()
+
+          updateRange()
+
+          // Return changeset
+          return MessagesChangeSet.added(newMessages, indexSet: [messages.count - 1])
         }
 
-        // FIXME: For now until we figured a stable sort
-        // sort again
-        // sort()
+      case let .delete(messageDelete):
+        if messageDelete.peer == peer {
+          let deletedIndices = messages.enumerated()
+            .filter { messageDelete.messageIds.contains($0.element.id) }
+            .map(\.offset)
 
-        updateRange()
+          // Store indices in reverse order to safely remove items
+          let sortedIndices = deletedIndices.sorted(by: >)
 
-        // Return changeset
-        return MessagesChangeSet.added(newMessages, indexSet: [messages.count - 1])
-      }
+          // Remove messages
+          sortedIndices.forEach { messages.remove(at: $0) }
 
-    case .delete(let messageDelete):
-      if messageDelete.peer == peer {
-        let deletedIndices = messages.enumerated()
-          .filter { messageDelete.messageIds.contains($0.element.id) }
-          .map { $0.offset }
+          // Update ange
+          updateRange()
 
-        // Store indices in reverse order to safely remove items
-        let sortedIndices = deletedIndices.sorted(by: >)
-
-        // Remove messages
-        sortedIndices.forEach { messages.remove(at: $0) }
-
-        // Update ange
-        updateRange()
-
-        // Return changeset
-        return MessagesChangeSet.deleted(messageDelete.messageIds, indexSet: sortedIndices)
-      }
-
-    case .update(let messageUpdate):
-      if messageUpdate.peer == peer {
-        guard let index = messages.firstIndex(where: { $0.id == messageUpdate.message.id }) else {
-          // not in our range
-          return nil
+          // Return changeset
+          return MessagesChangeSet.deleted(messageDelete.messageIds, indexSet: sortedIndices)
         }
 
-        messages[index] = messageUpdate.message
-        updateRange() // ??
-        return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index])
-      }
+      case let .update(messageUpdate):
+        if messageUpdate.peer == peer {
+          guard let index = messages.firstIndex(where: { $0.id == messageUpdate.message.id }) else {
+            // not in our range
+            return nil
+          }
 
-    case .reload(let peer):
-      if peer == self.peer {
-        if atBottom {
-          log.trace("Reloading messages at bottom")
-          // Since user is still at bottom and haven't moved this means we need to ignore the range and show them the latest messages
-          loadMessages(.limit(initialLimit))
-        } else {
-          // 90/10 solution TODO: quick way to optimize is to check if updated messages are in the current range
-          // check if actually anything changed then post update
-          refetchCurrentRange()
+          messages[index] = messageUpdate.message
+          updateRange() // ??
+          return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index])
         }
 
-        return MessagesChangeSet.reload
-      }
+      case let .reload(peer):
+        if peer == self.peer {
+          if atBottom {
+            log.trace("Reloading messages at bottom")
+            // Since user is still at bottom and haven't moved this means we need to ignore the range and show them the
+            // latest messages
+            loadMessages(.limit(initialLimit))
+          } else {
+            // 90/10 solution TODO: quick way to optimize is to check if updated messages are in the current range
+            // check if actually anything changed then post update
+            refetchCurrentRange()
+          }
+
+          return MessagesChangeSet.reload
+        }
     }
 
     return nil
@@ -222,15 +224,15 @@ public class MessagesProgressiveViewModel {
         query = query.order(Column("date").desc)
 
         switch loadMode {
-        case .limit(let limit):
-          query = query.limit(limit)
+          case let .limit(limit):
+            query = query.limit(limit)
 
-        case .preserveRange:
-          query =
-            query
-              .filter(Column("date") >= minDate)
-              .filter(Column("date") <= maxDate)
-              .limit(prevCount)
+          case .preserveRange:
+            query =
+              query
+                .filter(Column("date") >= minDate)
+                .filter(Column("date") <= maxDate)
+                .limit(prevCount)
         }
 
         return try query.fetchAll(db)
@@ -254,7 +256,7 @@ public class MessagesProgressiveViewModel {
   }
 
   private func loadAdditionalMessages(limit: Int, cursor: Date, prepend: Bool) {
-    let peer = self.peer
+    let peer = peer
 
     log
       .debug(
@@ -284,7 +286,8 @@ public class MessagesProgressiveViewModel {
 
       // dedup those with exact date as cursor as they might be included in both
       let existingMessagesAtCursor = Set(
-        messages.filter { $0.message.date == cursor }.map { $0.id })
+        messages.filter { $0.message.date == cursor }.map(\.id)
+      )
       messagesBatch.removeAll { existingMessagesAtCursor.contains($0.id) }
 
       if prepend {
@@ -303,14 +306,14 @@ public class MessagesProgressiveViewModel {
     var query = FullMessage.queryRequest()
 
     switch peer {
-    case .thread(let id):
-      query =
-        query
-          .filter(Column("peerThreadId") == id)
-    case .user(let id):
-      query =
-        query
-          .filter(Column("peerUserId") == id)
+      case let .thread(id):
+        query =
+          query
+            .filter(Column("peerThreadId") == id)
+      case let .user(id):
+        query =
+          query
+            .filter(Column("peerUserId") == id)
     }
     return query
   }
@@ -355,10 +358,9 @@ public final class MessagesPublisher {
         try FullMessage.queryRequest()
           .filter(Column("messageId") == message.messageId)
           .filter(Column("chatId") == message.chatId)
-
           .fetchOne(db)
       }
-      guard let fullMessage = fullMessage else {
+      guard let fullMessage else {
         Log.shared.error("Failed to get full message")
         return
       }
@@ -378,19 +380,18 @@ public final class MessagesPublisher {
     let fullMessage = try? await db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
-        if let messageGlobalId = message.globalId
-      {
-        query
-          .filter(id: messageGlobalId)
-      } else {
-        query
-          .filter(Column("messageId") == message.messageId)
-          .filter(Column("chatId") == message.chatId)
-      }
+        if let messageGlobalId = message.globalId {
+          query
+            .filter(id: messageGlobalId)
+        } else {
+          query
+            .filter(Column("messageId") == message.messageId)
+            .filter(Column("chatId") == message.chatId)
+        }
 
       return try base.fetchOne(db)
     }
-    guard let fullMessage = fullMessage else {
+    guard let fullMessage else {
       Log.shared.error("Failed to get full message")
       return
     }

@@ -63,7 +63,7 @@ struct Email: View {
       .opacity((!isInputValid || formState.isLoading) ? 0.5 : 1)
     }
     .onAppear {
-      if let prevEmail = prevEmail {
+      if let prevEmail {
         email = prevEmail
       }
       isFocused = true

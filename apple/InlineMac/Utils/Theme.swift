@@ -23,7 +23,7 @@ enum Theme {
   static let sidebarIconSpacing: CGFloat = 6
   static let sidebarItemRadius: CGFloat = 6
   static let sidebarItemPadding: CGFloat = 8
-  static let sidebarTopItemFont: Font = Font.body.weight(.regular)
+  static let sidebarTopItemFont: Font = .body.weight(.regular)
   static let sidebarTopItemHeight: CGFloat = 30
 
   // MARK: - Message View
@@ -40,12 +40,13 @@ enum Theme {
   static let messageTextLineFragmentPadding: CGFloat = 0
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
-  static let messageBubbleRadius: CGFloat =  15.0
+  static let messageBubbleRadius: CGFloat = 15.0
 //  static let messageBubblePadding: CGSize = .init(width: 12.0, height: 7.0)
   static let messageBubblePadding: CGSize = .init(width: 12.0, height: 5.0)
   static var messageIsBubble: Bool {
     AppSettings.shared.messageStyle == .bubble
   }
+
   static let messageBubbleLightColor: NSColor = .init(calibratedRed: 0.92, green: 0.92, blue: 0.92, alpha: 1.0)
   static let messageBubbleDarkColor: NSColor = .init(calibratedRed: 0.18, green: 0.18, blue: 0.18, alpha: 1.0)
   static let messageBubbleColor: NSColor = .init(name: "messageBubbleColor") { appearance in
@@ -69,7 +70,6 @@ enum Theme {
 
   // MARK: - Chat View
 
-  
   static let chatViewMinWidth: CGFloat = 315 // going below this makes media calcs mess up
   static let messageGroupSpacing: CGFloat = 8
   static let messageListTopInset: CGFloat = 14

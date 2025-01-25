@@ -14,7 +14,7 @@ struct CircleButtonStyle: ButtonStyle {
   ) {
     self.size = size
     self.backgroundColor = backgroundColor
-    self.hoveredBackground = hoveredBackgroundColor
+    hoveredBackground = hoveredBackgroundColor
   }
 
   func makeBody(configuration: Configuration) -> some View {

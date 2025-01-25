@@ -6,8 +6,8 @@ enum GlobalSearchResult: Hashable, Identifiable {
 
   var id: Int64 {
     switch self {
-    case .users(let user):
-      return user.id
+      case let .users(user):
+        user.id
     }
   }
 }

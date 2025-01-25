@@ -13,14 +13,14 @@ extension NSScrollView {
     // Store original states
     let hadVerticalScroller = hasVerticalScroller
     let hadHorizontalScroller = hasHorizontalScroller
-    
+
     // Temporarily disable scrollers
     hasVerticalScroller = false
     hasHorizontalScroller = false
-    
+
     // Execute the scrolling code
     action()
-    
+
     // Restore original states
     hasVerticalScroller = hadVerticalScroller
     hasHorizontalScroller = hadHorizontalScroller

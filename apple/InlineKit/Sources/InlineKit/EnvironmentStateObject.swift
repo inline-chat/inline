@@ -4,7 +4,8 @@ import SwiftUI
 // See Documentation.docc/Extensions/EnvironmentStateObject.md
 @propertyWrapper
 @MainActor public struct EnvironmentStateObject<ObjectType>: DynamicProperty
-where ObjectType: ObservableObject {
+  where ObjectType: ObservableObject
+{
   /// The environment values.
   @Environment(\.self) private var environmentValues
 
@@ -54,24 +55,24 @@ where ObjectType: ObservableObject {
     fileprivate let object: ObjectType
 
     #if compiler(>=6)
-      /// Returns a binding to the resulting value of a given key path.
-      public subscript<U>(
-        dynamicMember keyPath: ReferenceWritableKeyPath<ObjectType, U> & Sendable
-      ) -> Binding<U> {
-        Binding(
-          get: { object[keyPath: keyPath] },
-          set: { object[keyPath: keyPath] = $0 }
-        )
-      }
+    /// Returns a binding to the resulting value of a given key path.
+    public subscript<U>(
+      dynamicMember keyPath: ReferenceWritableKeyPath<ObjectType, U> & Sendable
+    ) -> Binding<U> {
+      Binding(
+        get: { object[keyPath: keyPath] },
+        set: { object[keyPath: keyPath] = $0 }
+      )
+    }
     #else
-      public subscript<U>(
-        dynamicMember keyPath: ReferenceWritableKeyPath<ObjectType, U>
-      ) -> Binding<U> {
-        Binding(
-          get: { object[keyPath: keyPath] },
-          set: { object[keyPath: keyPath] = $0 }
-        )
-      }
+    public subscript<U>(
+      dynamicMember keyPath: ReferenceWritableKeyPath<ObjectType, U>
+    ) -> Binding<U> {
+      Binding(
+        get: { object[keyPath: keyPath] },
+        set: { object[keyPath: keyPath] = $0 }
+      )
+    }
     #endif
   }
 
@@ -90,13 +91,13 @@ where ObjectType: ObservableObject {
       // Transmit all object changes
       var isUpdating = true
       cancellable = object.objectWillChange.sink { [weak self] value in
-        guard let self = self else { return }
+        guard let self else { return }
         if !isUpdating {
           // Avoid the runtime warning in the case of publishers
           // that publish values right on subscription:
           // > Publishing changes from within view updates is not
           // > allowed, this will cause undefined behavior.
-          self.objectWillChange.send(value)
+          objectWillChange.send(value)
         }
       }
       isUpdating = false

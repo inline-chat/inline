@@ -32,7 +32,7 @@ struct SelfUser: View {
               .padding(.top, -2)
           }
         }
-        
+
         .animation(.smoothSnappy, value: connection.state)
         .animation(.smoothSnappy, value: connection.shouldShow)
       }

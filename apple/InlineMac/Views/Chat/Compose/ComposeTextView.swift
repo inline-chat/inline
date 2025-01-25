@@ -26,11 +26,11 @@ class ComposeNSTextView: NSTextView {
     }
     super.keyDown(with: event)
   }
-  
+
   // Override paste operation
   override func paste(_ sender: Any?) {
     let pasteboard = NSPasteboard.general
-    
+
     // First check for files that are images
     if let files = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
       for file in files {
@@ -47,7 +47,7 @@ class ComposeNSTextView: NSTextView {
         }
       }
     }
-    
+
     // Then check for direct image data in pasteboard
     if let image = pasteboard.readObjects(forClasses: [NSImage.self], options: nil)?.first as? NSImage {
       // Notify delegate about image paste
@@ -56,7 +56,7 @@ class ComposeNSTextView: NSTextView {
         return
       }
     }
-    
+
     // If no image or no delegate, perform default paste
     super.paste(sender)
   }

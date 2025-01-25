@@ -25,7 +25,8 @@ struct SpaceSidebar: View {
         ForEach(fullSpace.chats, id: \.peerId) { item in
           ChatSideItem(
             selectedRoute: navigation.spaceSelection,
-            item: item)
+            item: item
+          )
         }
       }
 
@@ -41,8 +42,10 @@ struct SpaceSidebar: View {
                 openWindow(value: Peer.user(id: user.id))
               },
               selected: navigation.spaceSelection.wrappedValue == .chat(
-                peer: .user(id: user.id)))
-              .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+                peer: .user(id: user.id)
+              )
+            )
+            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
           } else {
             EmptyView()
           }
@@ -86,7 +89,8 @@ struct SpaceSidebar: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
-      })
+      }
+    )
     .task {
       do {
         try await data.getDialogs(spaceId: spaceId)

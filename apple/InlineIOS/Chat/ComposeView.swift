@@ -159,7 +159,7 @@ class ComposeView: UIView {
   }
 
   @objc private func sendTapped() {
-    guard let peerId = peerId else { return }
+    guard let peerId else { return }
 
     guard let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
           !text.isEmpty
@@ -204,8 +204,8 @@ class ComposeView: UIView {
 
   @objc private func handleTapOutside(_ gesture: UITapGestureRecognizer) {
     let location = gesture.location(in: self)
-    if let overlayView = overlayView,
-       !overlayView.frame.contains(location) && !plusButton.frame.contains(location)
+    if let overlayView,
+       !overlayView.frame.contains(location), !plusButton.frame.contains(location)
     {
       dismissOverlay()
     }
@@ -290,7 +290,7 @@ class ComposeView: UIView {
 
   override func removeFromSuperview() {
     if let text = textView.text {
-      guard let peerId = peerId else { return }
+      guard let peerId else { return }
       Task {
         do {
           try await DataManager.shared.updateDialog(peerId: peerId, draft: text.isEmpty ? nil : text)
@@ -303,7 +303,7 @@ class ComposeView: UIView {
   }
 
   func setDraft(_ draft: String?) {
-    if let draft = draft, !draft.isEmpty {
+    if let draft, !draft.isEmpty {
       textView.text = draft
       textView.showPlaceholder(false)
       buttonAppear()
@@ -312,7 +312,7 @@ class ComposeView: UIView {
   }
 
   func loadDraft() {
-    guard let peerId = peerId else { return }
+    guard let peerId else { return }
     Task {
       do {
         if let draft = try await DataManager.shared.getDraft(peerId: peerId) {
@@ -343,13 +343,13 @@ extension ComposeView: UITextViewDelegate {
 
     if isEmpty {
       buttonDisappear()
-      if let peerId = peerId {
+      if let peerId {
         Task {
           await ComposeActions.shared.stoppedTyping(for: peerId)
         }
       }
     } else {
-      if let peerId = peerId {
+      if let peerId {
         Task {
           await ComposeActions.shared.startedTyping(for: peerId)
         }
@@ -366,15 +366,15 @@ extension ComposeView: PHPickerViewControllerDelegate {
     guard let result = results.first else { return }
 
     result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self] object, error in
-      guard let self = self else { return }
+      guard let self else { return }
 
-      if let error = error {
+      if let error {
         print("Failed to load image:", error.localizedDescription)
         return
       }
 
       guard let image = object as? UIImage,
-            let peerId = self.peerId
+            let peerId
       else { return }
 
       DispatchQueue.main.async {

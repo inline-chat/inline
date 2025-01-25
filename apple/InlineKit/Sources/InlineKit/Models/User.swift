@@ -16,12 +16,12 @@ public struct ApiUser: Codable, Hashable, Sendable {
     email: "mo@inline.chat",
     firstName: "Mo",
     lastName: nil,
-    date: 162579240,
+    date: 162_579_240,
     username: "mo"
   )
 
   public var anyName: String {
-    self.firstName ?? self.username ?? self.email?.components(separatedBy: "@").first ?? "User \(self.id)"
+    firstName ?? username ?? email?.components(separatedBy: "@").first ?? "User \(id)"
   }
 }
 
@@ -78,14 +78,14 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   )
 
   public init(
-    id: Int64 = Int64.random(in: 1 ... 5000), email: String?, firstName: String?,
+    id: Int64 = Int64.random(in: 1 ... 5_000), email: String?, firstName: String?,
     lastName: String? = nil, username: String? = nil
   ) {
     self.id = id
     self.email = email
     self.firstName = firstName
     self.lastName = lastName
-    self.date = Date.now
+    date = Date.now
     self.username = username
   }
 
@@ -94,8 +94,8 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   private static let nameFormatter = PersonNameComponentsFormatter()
   public var fullName: String {
     let nameComponents = PersonNameComponents(
-      givenName: self.firstName,
-      familyName: self.lastName
+      givenName: firstName,
+      familyName: lastName
     )
 
     return Self.nameFormatter.string(from: nameComponents)
@@ -104,21 +104,21 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
 public extension User {
   init(from apiUser: ApiUser) {
-    self.id = apiUser.id
-    self.email = apiUser.email
-    self.firstName = apiUser.firstName
-    self.lastName = apiUser.lastName
-    self.username = apiUser.username
-    self.date = Self.fromTimestamp(from: apiUser.date)
-    self.online = apiUser.online
-    self.lastOnline = apiUser.lastOnline.map(Self.fromTimestamp(from:))
+    id = apiUser.id
+    email = apiUser.email
+    firstName = apiUser.firstName
+    lastName = apiUser.lastName
+    username = apiUser.username
+    date = Self.fromTimestamp(from: apiUser.date)
+    online = apiUser.online
+    lastOnline = apiUser.lastOnline.map(Self.fromTimestamp(from:))
   }
 
   static func fromTimestamp(from: Int) -> Date {
-    return Date(timeIntervalSince1970: Double(from))
+    Date(timeIntervalSince1970: Double(from))
   }
 
   func isCurrentUser() -> Bool {
-    return self.id == Auth.shared.getCurrentUserId()
+    id == Auth.shared.getCurrentUserId()
   }
 }

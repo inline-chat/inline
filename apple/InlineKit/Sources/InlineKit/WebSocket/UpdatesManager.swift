@@ -25,21 +25,21 @@ actor UpdatesManager {
         update.apply()
       }
     } catch {
-      self.log.error("Failed to apply update", error: error)
+      log.error("Failed to apply update", error: error)
     }
   }
 
   func applyBatch(updates: [Update]) {
-    self.log.debug("applying \(updates.count) updates")
+    log.debug("applying \(updates.count) updates")
     do {
-      try self.database.dbWriter.write { db in
+      try database.dbWriter.write { db in
         for update in updates {
           self.apply(update: update, db: db)
         }
       }
     } catch {
       // handle error
-      self.log.error("Failed to apply updates", error: error)
+      log.error("Failed to apply updates", error: error)
     }
   }
 }
@@ -81,9 +81,9 @@ struct UpdateMessageId: Codable {
       let message = try Message.filter(Column("randomId") == randomId).fetchOne(
         db
       )
-      if var message = message {
+      if var message {
         message.status = .sent
-        message.messageId = self.messageId
+        message.messageId = messageId
         message.randomId = nil
 //        try message.save(db)
         try message
@@ -108,11 +108,11 @@ struct UpdateUserStatus: Codable {
   var lastOnline: Int64?
 
   func apply(db: Database) throws {
-    try User.filter(id: self.userId).updateAll(
+    try User.filter(id: userId).updateAll(
       db,
       [
-        Column("online").set(to: self.online),
-        Column("lastOnline").set(to: self.lastOnline)
+        Column("online").set(to: online),
+        Column("lastOnline").set(to: lastOnline),
       ]
     )
   }
@@ -126,11 +126,11 @@ struct UpdateComposeAction: Codable {
   var action: ApiComposeAction?
 
   func apply() {
-    if let action = self.action {
-      Task { await ComposeActions.shared.addComposeAction(for: self.peerId, action: action, userId: self.userId) }
+    if let action {
+      Task { await ComposeActions.shared.addComposeAction(for: peerId, action: action, userId: userId) }
     } else {
       // cancel
-      Task { await ComposeActions.shared.removeComposeAction(for: self.peerId) }
+      Task { await ComposeActions.shared.removeComposeAction(for: peerId) }
     }
   }
 }

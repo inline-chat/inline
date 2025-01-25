@@ -1,4 +1,3 @@
 import AppKit
 
-class ComposeScrollView: NSScrollView {
-}
+class ComposeScrollView: NSScrollView {}

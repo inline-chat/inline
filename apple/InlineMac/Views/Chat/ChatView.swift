@@ -32,7 +32,8 @@ struct ChatView: View {
   let timer = Timer.publish(
     every: 60, // 1 minute
     on: .main,
-    in: .common).autoconnect()
+    in: .common
+  ).autoconnect()
 
   static let formatter = RelativeDateTimeFormatter()
   private func getLastOnlineText(date: Date?) -> String {
@@ -57,7 +58,8 @@ struct ChatView: View {
         ? "online"
         : (
           item?.user?.lastOnline != nil
-            ? getLastOnlineText(date: item?.user?.lastOnline) : "offline")
+            ? getLastOnlineText(date: item?.user?.lastOnline) : "offline"
+        )
     } else {
       "last seen recently"
     }
@@ -68,7 +70,8 @@ struct ChatView: View {
     _fullChat = EnvironmentStateObject { env in
       FullChatViewModel(
         db: env.appDatabase,
-        peer: peerId)
+        peer: peerId
+      )
     }
   }
 

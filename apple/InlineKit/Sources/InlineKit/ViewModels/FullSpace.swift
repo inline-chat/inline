@@ -15,20 +15,20 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
   // ------ GETTERS ----------
   // Peer user
   public var peerId: Peer {
-    if let user = user {
-      return Peer(userId: user.id)
-    } else if let chat = chat {
-      return Peer(threadId: chat.id)
+    if let user {
+      Peer(userId: user.id)
+    } else if let chat {
+      Peer(threadId: chat.id)
     } else {
       fatalError("No peer found for space chat item")
     }
   }
 
   public var title: String? {
-    if let user = user {
-      return user.fullName
+    if let user {
+      user.fullName
     } else {
-      return chat?.title ?? nil
+      chat?.title ?? nil
     }
   }
 
@@ -59,7 +59,7 @@ public final class FullSpaceViewModel: ObservableObject {
   }
 
   func fetchSpace() {
-    let spaceId = self.spaceId
+    let spaceId = spaceId
     spaceSancellable =
       ValueObservation
         .tracking { db in
@@ -75,16 +75,18 @@ public final class FullSpaceViewModel: ObservableObject {
   }
 
   func fetchMembers() {
-    let spaceId = self.spaceId
+    let spaceId = spaceId
     membersSancellable =
       ValueObservation
         .tracking { db in
           try Member.filter(Column("spaceId") == spaceId)
-            .including(optional: Member.user
-              .including(optional: User.chat
-                .including(optional: Chat.lastMessage)
-              )
-              .including(optional: User.dialog)
+            .including(
+              optional: Member.user
+                .including(
+                  optional: User.chat
+                    .including(optional: Chat.lastMessage)
+                )
+                .including(optional: User.dialog)
             )
             .asRequest(of: SpaceChatItem.self)
             .fetchAll(db)
@@ -99,7 +101,7 @@ public final class FullSpaceViewModel: ObservableObject {
   }
 
   func fetchChats() {
-    let spaceId = self.spaceId
+    let spaceId = spaceId
     chatsSancellable =
       ValueObservation
         .tracking { db in
