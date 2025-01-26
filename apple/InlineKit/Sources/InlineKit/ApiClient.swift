@@ -46,6 +46,7 @@ public enum Path: String {
   case getSpace
   case logout
   case getDraft
+  case getUser
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -256,6 +257,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public func getMe() async throws -> GetMe {
     try await request(
       .getMe, queryItems: [],
+      includeToken: true
+    )
+  }
+
+  public func getUser(userId: Int64) async throws -> GetUser {
+    try await request(
+      .getUser, queryItems: [URLQueryItem(name: "userId", value: "\(userId)")],
       includeToken: true
     )
   }
@@ -532,6 +540,10 @@ public struct CreateSpace: Codable, Sendable {
   public let member: ApiMember
   public let chats: [ApiChat]
   public let dialogs: [ApiDialog]
+}
+
+public struct GetUser: Codable, Sendable {
+  public let user: ApiUser
 }
 
 public struct UpdateProfile: Codable, Sendable {

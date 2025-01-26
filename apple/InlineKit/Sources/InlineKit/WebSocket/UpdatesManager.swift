@@ -108,6 +108,7 @@ struct UpdateUserStatus: Codable {
   var lastOnline: Int64?
 
   func apply(db: Database) throws {
+    Log.shared.debug("Updating user status \(userId) online: \(online)")
     try User.filter(id: userId).updateAll(
       db,
       [

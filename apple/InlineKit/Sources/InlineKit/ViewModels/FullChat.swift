@@ -104,7 +104,8 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
                let fullChat = chats.first,
 
                fullChat.dialog != self.chatItem?.dialog ||
-               fullChat.chat?.title != self.chatItem?.chat?.title
+               fullChat.chat?.title != self.chatItem?.chat?.title ||
+               fullChat.user != self.chatItem?.user
             {
               // Important Note
               // Only update if the dialog is different, ignore chat and message for performance reasons
