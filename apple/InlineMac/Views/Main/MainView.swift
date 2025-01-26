@@ -45,10 +45,7 @@ struct MainView: View {
       }
       .animation(.smoothSnappy, value: isDevtoolsOpen)
       .background {
-//        VisualEffectView(material: .fullScreenUI, blendingMode: .behindWindow)
-        // VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
         VisualEffectView(
-//          material: .sidebar,
           material: Theme.pageBackgroundMaterial,
           blendingMode: .behindWindow
         )
