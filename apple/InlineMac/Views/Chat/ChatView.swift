@@ -20,7 +20,15 @@ struct ChatView: View {
   }
 
   var title: String {
-    item?.title ?? "Chat"
+    isSavedMsg ? "Saved Messages" : item?.title ?? "Chat"
+  }
+
+  var isCurrentUser: Bool {
+    item?.user?.isCurrentUser() ?? false
+  }
+
+  var isSavedMsg: Bool {
+    isCurrentUser
   }
 
   private func currentComposeAction() -> ApiComposeAction? {
@@ -47,6 +55,10 @@ struct ChatView: View {
     Self.formatter.dateTimeStyle = .named
     //    Self.formatter.unitsStyle = .spellOut
     return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
+  }
+
+  var rendersSubtitle: Bool {
+    item?.user != nil && !isSavedMsg
   }
 
   var subtitle: String {
@@ -90,25 +102,32 @@ struct ChatView: View {
       .toolbar {
         ToolbarItem(placement: .navigation) {
           HStack {
-            if let user = fullChat.chatItem?.user {
-              ChatIcon(peer: .user(user))
+            if let user = fullChat.chatItem?.user, isSavedMsg {
+              ChatIcon(peer: .savedMessage(user), size: 30)
+            } else if let user = fullChat.chatItem?.user {
+              ChatIcon(peer: .user(user), size: 30)
             } else if let chat = fullChat.chatItem?.chat {
-              ChatIcon(peer: .chat(chat))
+              ChatIcon(peer: .chat(chat), size: 30)
             } else {
               // TODO: Handle
             }
 
             VStack(alignment: .leading, spacing: 0) {
               Text(title)
-                .font(.headline)
+                .font(.system(size: 14, weight: .medium))
                 .padding(.bottom, 0)
-              Text(subtitle)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.top, 0)
+
+              if rendersSubtitle {
+                Text(subtitle)
+                  .font(.system(size: 12, weight: .regular))
+                  .foregroundStyle(.secondary.opacity(0.6))
+                  .padding(.top, 0)
+              }
             }
+            .padding(.leading, 2)
           }
           .frame(minWidth: 80, maxWidth: .infinity, alignment: .leading)
+          .padding(.leading, 6)
         }
 
         // Required to clear up the space for nav title
