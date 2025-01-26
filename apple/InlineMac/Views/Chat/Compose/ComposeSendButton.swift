@@ -51,8 +51,8 @@ class ComposeSendButton: NSView {
       view.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       // Set fixed size for the button container
-      widthAnchor.constraint(equalToConstant: Theme.messageAvatarSize),
-      heightAnchor.constraint(equalToConstant: Theme.messageAvatarSize),
+      widthAnchor.constraint(equalToConstant: Theme.composeButtonSize),
+      heightAnchor.constraint(equalToConstant: Theme.composeButtonSize),
     ])
   }
 

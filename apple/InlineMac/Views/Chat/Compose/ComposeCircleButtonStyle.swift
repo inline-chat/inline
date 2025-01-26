@@ -19,7 +19,7 @@ struct CircleButtonStyle: ButtonStyle {
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .padding(8)
+      .padding(5)
       .frame(width: size, height: size)
       .background(
         Circle()
