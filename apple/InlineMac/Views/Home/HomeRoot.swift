@@ -15,7 +15,7 @@ struct HomeRoot: View {
   }
 
   var content: some View {
-    Text("Welcome to Inline.")
+    Text("")
       .padding()
       .navigationTitle("")
   }
