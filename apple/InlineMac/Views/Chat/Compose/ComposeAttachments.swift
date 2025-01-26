@@ -22,18 +22,26 @@ class ComposeAttachments: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  private var stackTopAnchor: NSLayoutConstraint!
+
   // Modify updateHeight to be public and return the height
   func getHeight() -> CGFloat {
-    attachments.isEmpty ? 0 : 80 // 80 for image
+    attachments.isEmpty ? 0 : 80 + Theme.composeVerticalPadding // 80 for image
+  }
+
+  func updateHeight() {
+    stackTopAnchor.constant = getHeight() > 0 ? Theme.composeVerticalPadding : 0.0
   }
 
   private func setupView() {
     addSubview(stackView)
+    stackTopAnchor = stackView.topAnchor.constraint(equalTo: topAnchor)
 
     NSLayoutConstraint.activate([
+      stackTopAnchor,
+
       stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
       stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-      stackView.topAnchor.constraint(equalTo: topAnchor),
       stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
   }
@@ -44,6 +52,7 @@ class ComposeAttachments: NSView {
       attachment.removeFromSuperview()
       attachments.removeValue(forKey: image)
     }
+    updateHeight()
   }
 
   public func addImageView(_ image: NSImage) {
@@ -54,6 +63,7 @@ class ComposeAttachments: NSView {
 
     attachments[image] = attachmentView
     stackView.addArrangedSubview(attachmentView)
+    updateHeight()
   }
 
   public func clearViews() {
@@ -62,5 +72,6 @@ class ComposeAttachments: NSView {
       value.removeFromSuperview()
     }
     attachments.removeAll()
+    updateHeight()
   }
 }

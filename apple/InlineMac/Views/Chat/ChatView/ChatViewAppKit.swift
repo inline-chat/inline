@@ -83,6 +83,9 @@ class ChatViewAppKit: NSView {
 
     addSubview(messageListView)
     addSubview(composeView)
+    
+    // initial height sync with msg list
+    compose.updateHeight()
 
     NSLayoutConstraint.activate([
       // messageList

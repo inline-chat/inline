@@ -5,7 +5,7 @@ struct ComposeMenuButtonSwiftUI: View {
   @State private var isHovering = false
   @State var attachmentOverlayOpen = false
 
-  private let size: CGFloat = Theme.messageAvatarSize
+  private let size: CGFloat = Theme.composeButtonSize
   private let backgroundColor: Color = .accentColor
   private let hoveredBackgroundColor: Color = .accentColor.opacity(0.8)
 
@@ -20,11 +20,11 @@ struct ComposeMenuButtonSwiftUI: View {
         .resizable()
         .scaledToFit()
         .foregroundStyle(.tertiary)
-        .fontWeight(.bold)
+        .fontWeight(.semibold)
     }
     .buttonStyle(
       CircleButtonStyle(
-        size: Theme.messageAvatarSize,
+        size: size,
         backgroundColor: .clear,
         hoveredBackgroundColor: .gray.opacity(0.1)
       )

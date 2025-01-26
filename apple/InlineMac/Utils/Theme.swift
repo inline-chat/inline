@@ -2,8 +2,13 @@ import AppKit
 import Foundation
 import SwiftUI
 
+// System colors: https://gist.github.com/andrejilderda/8677c565cddc969e6aae7df48622d47c
+
 enum Theme {
   // MARK: - General
+
+  static let pageBackgroundMaterial: NSVisualEffectView.Material = .contentBackground
+  // static let pageBackgroundMaterial: NSVisualEffectView.Material = .windowBackground
 
   // MARK: - Window
 
@@ -21,28 +26,28 @@ enum Theme {
   static let sidebarIconSize: CGFloat = 22
   static let sidebarItemHeight: CGFloat = 28
   static let sidebarIconSpacing: CGFloat = 6
-  static let sidebarItemRadius: CGFloat = 6
+  static let sidebarItemRadius: CGFloat = 10
   static let sidebarItemPadding: CGFloat = 8
+  static let sidebarItemSpacing: CGFloat = 1
   static let sidebarTopItemFont: Font = .body.weight(.regular)
-  static let sidebarTopItemHeight: CGFloat = 30
+  static let sidebarTopItemHeight: CGFloat = 24
 
   // MARK: - Message View
 
   static let messageMaxWidth: CGFloat = 420
   static let messageOuterVerticalPadding: CGFloat = 2.0 // gap between consequetive bubbles
-  static let messageSidePadding: CGFloat = 14
-  static let messageAvatarSize: CGFloat = 28
+  static let messageSidePadding: CGFloat = 20
+  static let messageAvatarSize: CGFloat = 24
 //  Space between avatar and content
-  static let messageHorizontalStackSpacing: CGFloat = 8
+  static let messageHorizontalStackSpacing: CGFloat = 6.0
   static let messageVerticalStackSpacing: CGFloat = 2.0
-  static let messageNameLabelHeight: CGFloat = 14
+  static let messageNameLabelHeight: CGFloat = 18
   static let messageTextFont: NSFont = .systemFont(ofSize: NSFont.systemFontSize)
   static let messageTextLineFragmentPadding: CGFloat = 0
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
-  static let messageBubbleRadius: CGFloat = 15.0
-//  static let messageBubblePadding: CGSize = .init(width: 12.0, height: 7.0)
-  static let messageBubblePadding: CGSize = .init(width: 12.0, height: 5.0)
+  static let messageBubbleRadius: CGFloat = 14.0
+  static let messageBubblePadding: CGSize = .init(width: 11.0, height: 5.0)
   static var messageIsBubble: Bool {
     AppSettings.shared.messageStyle == .bubble
   }
@@ -54,7 +59,7 @@ enum Theme {
   }
 
   static let messageBubbleOutgoingLightColor: NSColor = .systemBlue.blended(
-    withFraction: 0.1,
+    withFraction: 0.3,
     of: .white
   ) ?? .systemBlue
   static let messageBubbleOutgoingDarkColor: NSColor = .systemBlue
@@ -62,11 +67,12 @@ enum Theme {
     appearance.name == .darkAqua ? Self.messageBubbleOutgoingDarkColor : Self.messageBubbleOutgoingLightColor
   }
 
-//  static let messageBubbleOutgoingColor: NSColor = .systemBlue.highlight(
-//    withLevel: 0.3
-//  ) ?? .systemBlue
+  static let messageBubbleOutgoingTextColor: NSColor = .white
 
-  static let messageBubbleMinWidth: CGFloat = 12.0
+  // static let messageBubbleOutgoingColor: NSColor = .separatorColor.withAlphaComponent(0.01)
+  // static let messageBubbleOutgoingColor: NSColor = .separatorColor.withAlphaComponent(0.01)
+
+  static let messageBubbleMinWidth: CGFloat = 10.0
 
   // MARK: - Chat View
 
@@ -75,8 +81,15 @@ enum Theme {
   static let messageListTopInset: CGFloat = 14
   static let messageListBottomInset: CGFloat = 10
 
-  static let composeMinHeight: CGFloat = 44
-  static let composeVerticalPadding: CGFloat = 4
+  static let composeMinHeight: CGFloat = 30
+  static let composeButtonSize: CGFloat = 22
+  static let composeVerticalPadding: CGFloat = 6 // inner
+  static let composeOuterSpacing: CGFloat = 18
+  static let composeOutlineColor: NSColor = .init(name: "composeOutlineColor") { appearance in
+    appearance.name == .darkAqua ? NSColor.white
+      .withAlphaComponent(0.09) : NSColor.black
+      .withAlphaComponent(0.07)
+  }
 
   // MARK: - Devtools
 

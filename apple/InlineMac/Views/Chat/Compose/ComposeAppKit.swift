@@ -16,8 +16,12 @@ class ComposeAppKit: NSView {
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
-  private var minHeight = Theme.composeMinHeight
+  private var minHeight = Theme.composeMinHeight + Theme.composeOuterSpacing
+  private var radius: CGFloat = round(Theme.composeMinHeight / 2)
   private var verticalPadding = 0.0
+  private var horizontalOuterSpacing = Theme.composeOuterSpacing
+  private var buttonsSpacing = (Theme.composeMinHeight - Theme.composeButtonSize) / 2
+
   // ---
   private var textViewContentHeight: CGFloat = 0.0
   private var textViewHeight: CGFloat = 0.0
@@ -31,8 +35,18 @@ class ComposeAppKit: NSView {
 
   // MARK: Views
 
+  private lazy var box: NSView = {
+    let box = BasicView()
+    box.wantsLayer = true
+    box.cornerRadius = radius
+    box.borderColor = Theme.composeOutlineColor
+    box.borderWidth = 1.0
+    box.translatesAutoresizingMaskIntoConstraints = false
+    return box
+  }()
+
   private lazy var textEditor: ComposeTextEditor = {
-    let textEditor = ComposeTextEditor()
+    let textEditor = ComposeTextEditor(initiallySingleLine: true)
     textEditor.translatesAutoresizingMaskIntoConstraints = false
     return textEditor
   }()
@@ -92,21 +106,25 @@ class ComposeAppKit: NSView {
   lazy var background = {
     // Add vibrancy effect
     let material = NSVisualEffectView(frame: bounds)
-    material.material = .headerView // Similar to toolbar
+    material.material = Theme.pageBackgroundMaterial
     material.blendingMode = .withinWindow
-    material.state = .active
+    material.isEmphasized = false
+    material.state = .followsWindowActiveState
     material.translatesAutoresizingMaskIntoConstraints = false
     return material
   }()
+
+  var hasTopSeperator: Bool = false
 
   func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
 
     // More distinct background
-    layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5).cgColor
+    // layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5).cgColor
 
     addSubview(background)
+    addSubview(box)
     addSubview(border)
     addSubview(sendButton)
     addSubview(menuButton)
@@ -118,7 +136,7 @@ class ComposeAppKit: NSView {
   }
 
   private func setUpConstraints() {
-    heightConstraint = heightAnchor.constraint(equalToConstant: Theme.composeMinHeight)
+    heightConstraint = heightAnchor.constraint(equalToConstant: minHeight)
 
     NSLayoutConstraint.activate([
       heightConstraint,
@@ -130,22 +148,22 @@ class ComposeAppKit: NSView {
       background.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       // send
-      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing - buttonsSpacing),
+      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -horizontalOuterSpacing - buttonsSpacing),
 
       // menu
-      menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-      menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+      menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing + buttonsSpacing),
+      menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -horizontalOuterSpacing - buttonsSpacing),
 
       // Add attachments constraints
       attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor),
       attachments.trailingAnchor.constraint(equalTo: textEditor.trailingAnchor),
-      attachments.topAnchor.constraint(equalTo: topAnchor),
+      attachments.topAnchor.constraint(equalTo: topAnchor, constant: 0.0),
 
       // text editor
       textEditor.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor),
       textEditor.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor),
-      textEditor.bottomAnchor.constraint(equalTo: bottomAnchor),
+      textEditor.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -horizontalOuterSpacing),
 
       // Update text editor top constraint
       // textEditor.topAnchor.constraint(equalTo: topAnchor),
@@ -156,7 +174,19 @@ class ComposeAppKit: NSView {
       border.trailingAnchor.constraint(equalTo: trailingAnchor),
       border.topAnchor.constraint(equalTo: topAnchor),
       border.heightAnchor.constraint(equalToConstant: 1),
+
+      // outline border
+      box.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
+      box.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+      box.topAnchor.constraint(equalTo: background.topAnchor, constant: 0.0),
+      box.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -horizontalOuterSpacing),
     ])
+
+    if hasTopSeperator {
+      border.isHidden = false
+    } else {
+      border.isHidden = true
+    }
   }
 
   private func setupTextEditor() {
@@ -184,9 +214,9 @@ class ComposeAppKit: NSView {
   }
 
   // Get compose height
-  private func getHeight() -> CGFloat {
+  private func getInnerHeight() -> CGFloat {
     let textViewHeight = getTextViewHeight()
-    let contentHeight = max(textEditor.minHeight, textViewHeight) // FIXME:
+    let contentHeight = max(textEditor.minTextHeight, textViewHeight) // FIXME:
     let attachmentsHeight = attachments.getHeight()
     let height = contentHeight + attachmentsHeight + verticalPadding
     let maxHeight = 300.0
@@ -194,8 +224,16 @@ class ComposeAppKit: NSView {
     return capped
   }
 
+  private func getHeight() -> CGFloat {
+    let height = getInnerHeight() + Theme.composeOuterSpacing
+    return height
+  }
+
   func updateHeight() {
-    let height = getHeight()
+    let height = getInnerHeight()
+    let wrapperHeight = getHeight()
+
+    print("ComposeAppKit: updateHeight \(height)")
 
     if feature_animateHeightChanges {
       // First update the height of scroll view immediately so it doesn't clip from top while animating
@@ -210,16 +248,16 @@ class ComposeAppKit: NSView {
         context.allowsImplicitAnimation = true
         // Disable screen updates during animation setup
         NSAnimationContext.beginGrouping()
-        heightConstraint.animator().constant = height
+        heightConstraint.animator().constant = wrapperHeight
         textEditor.updateTextViewInsets(contentHeight: textViewContentHeight) // use height without paddings
-        messageList?.updateInsetForCompose(height)
+        messageList?.updateInsetForCompose(wrapperHeight)
         NSAnimationContext.endGrouping()
       }
     } else {
       textEditor.setHeight(height)
-      heightConstraint.constant = height
       textEditor.updateTextViewInsets(contentHeight: textViewContentHeight)
-      messageList?.updateInsetForCompose(height)
+      heightConstraint.constant = wrapperHeight
+      messageList?.updateInsetForCompose(wrapperHeight)
     }
   }
 
@@ -395,7 +433,6 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     updateHeight()
   }
 
-//
   func textViewDidChangeSelection(_ notification: Notification) {
     // guard let textView = notification.object as? NSTextView else { return }
     // Handle selection changes if needed
