@@ -5,6 +5,7 @@ import SwiftUI
 public struct InitialsCircle: View, Equatable {
   let name: String
   let size: CGFloat
+  let symbol: String?
 
   public nonisolated static func == (lhs: InitialsCircle, rhs: InitialsCircle) -> Bool {
     lhs.name == rhs.name &&
@@ -26,9 +27,9 @@ public struct InitialsCircle: View, Equatable {
       .blue,
       .teal,
       .green,
+      .primary,
       .red,
       .indigo,
-      .mint,
       .mint,
       .cyan,
 //      .gray,
@@ -36,7 +37,7 @@ public struct InitialsCircle: View, Equatable {
     ]
 
     public static func color(for name: String) -> Color {
-//      let hash = name.hashValue
+      // let hash = name.hashValue
       let hash = name.utf8.reduce(0) { $0 + Int($1) }
       return colors[abs(hash) % colors.count]
     }
@@ -68,9 +69,10 @@ public struct InitialsCircle: View, Equatable {
     )
   }
 
-  public init(name: String, size: CGFloat = 32) {
+  public init(name: String, size: CGFloat = 32, symbol: String? = nil) {
     self.name = name
     self.size = size
+    self.symbol = symbol
   }
 
   public var body: some View {
@@ -83,16 +85,24 @@ public struct InitialsCircle: View, Equatable {
             lineWidth: 0.5
           )
       )
-      .overlay(
-        Text(initials)
-          .foregroundColor(foregroundColor.opacity(1.0))
-          .font(.system(size: size * 0.55, weight: .regular))
-          .lineLimit(1)
-      )
-
+      .overlay {
+        if let symbol {
+          Image(systemName: symbol)
+            .foregroundColor(foregroundColor.opacity(1.0))
+            .font(.system(size: size * 0.46, weight: .regular))
+        } else {
+          Text(initials)
+            .foregroundColor(foregroundColor.opacity(1.0))
+            .font(.system(size: size * 0.55, weight: .regular))
+            .lineLimit(1)
+        }
+      }
       .frame(width: size, height: size)
-      .drawingGroup(opaque: true)
-      .clipShape(Circle())
+      .fixedSize()
+    
+    // Looks better without these
+//      .drawingGroup(opaque: true)
+//      .clipShape(Circle())
   }
 }
 

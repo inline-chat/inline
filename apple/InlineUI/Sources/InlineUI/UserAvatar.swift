@@ -61,6 +61,7 @@ public struct UserAvatar: View, Equatable {
       size: size
     )
     .frame(width: size, height: size)
+    .fixedSize()
   }
 
   public var body: some View {

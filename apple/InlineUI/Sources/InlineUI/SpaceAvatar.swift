@@ -14,7 +14,8 @@ public struct SpaceAvatar: View {
     ZStack {
       InitialsCircle(
         name: space.name,
-        size: size
+        size: size,
+        symbol: "person.2.fill"
       )
     }
   }
