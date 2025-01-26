@@ -7,6 +7,18 @@ class BasicView: NSView {
     didSet { configureBackground() }
   }
 
+  var borderColor: NSColor? {
+    didSet { configureBorder() }
+  }
+
+  var borderWidth: CGFloat = 0 {
+    didSet { configureBorder() }
+  }
+
+  var cornerRadius: CGFloat = 0 {
+    didSet { configureCornerRadius() }
+  }
+
   override var wantsUpdateLayer: Bool { true }
 
   // MARK: - Lifecycle
@@ -26,6 +38,8 @@ class BasicView: NSView {
   override func updateLayer() {
     super.updateLayer()
     configureBackground()
+    configureBorder()
+    configureCornerRadius()
   }
 
   private func configureView() {
@@ -34,14 +48,18 @@ class BasicView: NSView {
   }
 
   private func configureBackground() {
-    guard let layer else {
-      return
-    }
+    guard let layer else { return }
+    layer.backgroundColor = backgroundColor?.cgColor
+  }
 
-    if let backgroundColor {
-      layer.backgroundColor = backgroundColor.cgColor
-    } else {
-      layer.backgroundColor = nil
-    }
+  private func configureBorder() {
+    guard let layer else { return }
+    layer.borderColor = borderColor?.cgColor
+    layer.borderWidth = borderWidth
+  }
+
+  private func configureCornerRadius() {
+    guard let layer else { return }
+    layer.cornerRadius = cornerRadius
   }
 }

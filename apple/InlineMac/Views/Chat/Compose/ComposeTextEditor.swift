@@ -8,8 +8,9 @@ class ComposeTextEditor: NSView {
   private let log = Log.scoped("ComposeTextEditor", enableTracing: false)
   let minHeight: CGFloat = Theme.composeMinHeight
   let minTextHeight: CGFloat = Theme.composeMinHeight - 2 * Theme.composeVerticalPadding
-  private let horizontalPadding: CGFloat = 10.0
   let verticalPadding: CGFloat = Theme.composeVerticalPadding
+  
+  private let horizontalPadding: CGFloat = 5.0
 
   weak var delegate: (NSTextViewDelegate & ComposeTextViewDelegate)? {
     didSet {
@@ -42,9 +43,12 @@ class ComposeTextEditor: NSView {
     return label
   }()
 
-  init() {
+  var initiallySingleLine: Bool
+
+  init(initiallySingleLine: Bool = false) {
     scrollView = ComposeScrollView()
     textView = ComposeNSTextView()
+    self.initiallySingleLine = initiallySingleLine
 
     super.init(frame: .zero)
 
@@ -66,7 +70,7 @@ class ComposeTextEditor: NSView {
     scrollView.hasHorizontalRuler = false
     scrollView.autoresizingMask = [.width]
     scrollView.translatesAutoresizingMaskIntoConstraints = false
-    scrollView.contentInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+    scrollView.contentInsets = NSEdgeInsets(top: verticalPadding, left: 8, bottom: verticalPadding, right: 8)
     scrollView.verticalScrollElasticity = .none
     addSubview(scrollView)
 
@@ -89,11 +93,18 @@ class ComposeTextEditor: NSView {
       .foregroundColor: NSColor.labelColor,
     ]
 
-    let lineHeight = calculateLineHeight()
-    textView.textContainerInset = NSSize(
-      width: 0,
-      height: (minHeight - lineHeight) / 2
-    )
+    if !initiallySingleLine {
+      let lineHeight = calculateLineHeight()
+      textView.textContainerInset = NSSize(
+        width: 0,
+        height: (minHeight - lineHeight) / 2
+      )
+    } else {
+      textView.textContainerInset = NSSize(
+        width: 0,
+        height: verticalPadding
+      )
+    }
 
     textView.textContainer?.widthTracksTextView = true
     textView.textContainer?.lineFragmentPadding = horizontalPadding
@@ -206,14 +217,29 @@ class ComposeTextEditor: NSView {
   }
 
   func resetTextViewInsets() {
-    let lineHeight = getTypingLineHeight()
-    textView.textContainerInset = NSSize(
-      width: 0,
-      height: (minHeight - lineHeight) / 2
-    )
+    if initiallySingleLine {
+      textView.textContainerInset = NSSize(
+        width: 0,
+        height: verticalPadding
+      )
+    } else {
+      let lineHeight = getTypingLineHeight()
+      textView.textContainerInset = NSSize(
+        width: 0,
+        height: (minHeight - lineHeight) / 2
+      )
+    }
   }
 
   func updateTextViewInsets(contentHeight: CGFloat) {
+    if initiallySingleLine {
+      textView.textContainerInset = NSSize(
+        width: 0,
+        height: verticalPadding
+      )
+      return
+    }
+
     let lineHeight = getTypingLineHeight()
     let newInsets = NSSize(
       width: 0,

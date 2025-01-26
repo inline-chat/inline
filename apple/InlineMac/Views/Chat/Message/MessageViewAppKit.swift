@@ -30,6 +30,10 @@ class MessageViewAppKit: NSView {
     Theme.messageIsBubble
   }
 
+  private var outlineBubble: Bool {
+    false
+  }
+
   private var textWidth: CGFloat {
     if hasBubble {
       max(Theme.messageBubbleMinWidth, props.textWidth ?? Theme.messageBubbleMinWidth)
@@ -51,7 +55,7 @@ class MessageViewAppKit: NSView {
 
   private var textColor: NSColor {
     if hasBubble {
-      outgoing ? NSColor.white : NSColor.labelColor
+      outgoing ? Theme.messageBubbleOutgoingTextColor : NSColor.labelColor
     } else {
       NSColor.labelColor
     }
@@ -68,7 +72,7 @@ class MessageViewAppKit: NSView {
   private var senderFont: NSFont {
     if hasBubble {
       .systemFont(
-        ofSize: NSFont.smallSystemFontSize,
+        ofSize: 12.0,
         weight: .medium
       )
     } else {
@@ -88,8 +92,16 @@ class MessageViewAppKit: NSView {
     let view = BasicView()
     view.wantsLayer = true
     view.backgroundColor = bubbleColor
+    view.cornerRadius = Theme.messageBubbleRadius
     view.layer?.cornerRadius = Theme.messageBubbleRadius
     view.translatesAutoresizingMaskIntoConstraints = false
+
+    if hasBubble, outgoing, outlineBubble {
+      // Outline
+      view.borderColor = NSColor.separatorColor.withAlphaComponent(0.04)
+      view.borderWidth = 1.0
+    }
+
     return view
   }()
 
@@ -368,7 +380,8 @@ class MessageViewAppKit: NSView {
       nameLabel.stringValue = outgoing ? "You" : name
 
       if hasBubble {
-        nameLabel.textColor = NSColor.lightGray
+        // nameLabel.textColor = NSColor.lightGray
+        nameLabel.textColor = NSColor.tertiaryLabelColor
       } else {
         nameLabel.textColor = NSColor(
           InitialsCircle.ColorPalette
@@ -411,7 +424,7 @@ class MessageViewAppKit: NSView {
     let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
     let sidePadding = Theme.messageSidePadding - bgPadding
-    let senderNameLeadingPadding = hasBubble ? 4.0 : 0.0
+    let senderNameLeadingPadding = hasBubble ? 3.0 : 0.0
     let bubblePaddingVertical = hasBubble ? bubblePadding.height : 0.0
     let bubblePaddingHorizontal = hasBubble ? bubblePadding.width : 0.0
 
