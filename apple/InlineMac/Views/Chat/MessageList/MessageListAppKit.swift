@@ -46,7 +46,9 @@ class MessageListAppKit: NSViewController {
   private lazy var tableView: NSTableView = {
     let table = NSTableView()
     table.style = .plain
-    table.backgroundColor = .controlBackgroundColor
+    table.backgroundColor = .clear
+//    table.backgroundColor = .windowBackgroundColor
+    // table.backgroundColor = .controlBackgroundColor
     table.headerView = nil
     table.rowSizeStyle = .custom
     table.selectionHighlightStyle = .none
@@ -63,13 +65,12 @@ class MessageListAppKit: NSViewController {
 
     // Enable automatic resizing
     table.autoresizingMask = [.height]
-    //    table.autoresizingMask = []
     table.delegate = self
     table.dataSource = self
 
     // Optimize performance
     table.wantsLayer = true
-    table.layerContentsRedrawPolicy = .onSetNeedsDisplay
+    table.layerContentsRedrawPolicy = .onSetNeedsDisplay // could try .never too
     table.layer?.drawsAsynchronously = true
 
     return table
@@ -143,6 +144,8 @@ class MessageListAppKit: NSViewController {
     let toolbarHeight = windowFrame.height - contentFrame.height
 
     if scrollView.contentInsets.top != toolbarHeight {
+      log.trace("Adjusting view's insets")
+
       scrollView.contentInsets = NSEdgeInsets(
         top: toolbarHeight,
         left: 0,
@@ -156,10 +159,27 @@ class MessageListAppKit: NSViewController {
         right: 0
       )
 
-      log.debug("Adjusting view's toolbar")
-      // make window toolbar layout and have background to fight the swiftui defaUlt behaviour
+      updateToolbar()
+    }
+  }
+
+  private func isAtTop() -> Bool {
+    let scrollOffset = scrollView.contentView.bounds.origin
+    return scrollOffset.y <= min(-scrollView.contentInsets.top, 0)
+  }
+
+  private func updateToolbar() {
+    // make window toolbar layout and have background to fight the swiftui defaUlt behaviour
+    guard let window = view.window else { return }
+    log.debug("Adjusting view's toolbar")
+
+    window.isMovableByWindowBackground = true
+    
+    if isAtTop() {
+      window.titlebarAppearsTransparent = true
+      // window.titlebarSeparatorStyle = .
+    } else {
       window.titlebarAppearsTransparent = false
-      window.isMovableByWindowBackground = true
     }
   }
 
@@ -333,6 +353,10 @@ class MessageListAppKit: NSViewController {
     if feature_loadsMoreWhenApproachingTop, isUserScrolling, currentScrollOffset < viewportSize.height {
       loadBatch(at: .older)
     }
+    
+    // TODO: Optimize
+    // Update toolbar
+    updateToolbar()
   }
 
   // Using CFAbsoluteTimeGetCurrent()
@@ -416,6 +440,7 @@ class MessageListAppKit: NSViewController {
     super.viewDidLayout()
     updateScrollViewInsets()
     checkWidthChangeForHeights()
+    updateToolbar()
 
     // Initial scroll to bottom
     if needsInitialScroll {

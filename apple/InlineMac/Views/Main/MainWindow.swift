@@ -154,7 +154,9 @@ class MainWindowViewModel: ObservableObject {
       case .homeRoot:
         setToolbarVisibility(false)
       case .chat:
-        setToolbarVisibility(true)
+        // handled in message list appkit view bc we need to update the bg based on offset
+        // setToolbarVisibility(true)
+        break
       case .chatInfo:
         setToolbarVisibility(false)
     }
@@ -167,12 +169,13 @@ class MainWindowViewModel: ObservableObject {
       window.titleVisibility = .visible // ensure
       window.titlebarAppearsTransparent = false
       window.titlebarSeparatorStyle = .automatic
-      window.toolbarStyle = .unified
     } else {
       window.titlebarAppearsTransparent = true
       window.titlebarSeparatorStyle = .none
-      window.toolbarStyle = .unified
     }
+
+    // common
+    window.toolbarStyle = .unified
   }
 
   public func resize(to newSize: CGSize) {
@@ -209,7 +212,8 @@ struct VisualEffectView: NSViewRepresentable {
     let view = NSVisualEffectView()
     view.material = material
     view.blendingMode = blendingMode
-    view.state = .active
+    view.state = .followsWindowActiveState
+    // view.state = .active
 
     return view
   }
