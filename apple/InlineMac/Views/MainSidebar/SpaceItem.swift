@@ -10,16 +10,25 @@ struct SpaceItem: View {
   @State private var pendingAction: Action?
   @State private var isHovered: Bool = false
 
+  @FocusState private var isFocused: Bool
+  @Environment(\.appearsActive) var appearsActive
+
   var space: Space
 
   var body: some View {
-    Button {
+    let view = Button {
       nav.openSpace(id: space.id)
     } label: {
       content
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(UserItemButtonStyle(
+      isHovered: $isHovered,
+      isFocused: isFocused,
+      selected: false,
+      appearsActive: appearsActive
+    ))
+    .focused($isFocused)
     .padding(.horizontal, -Theme.sidebarItemPadding)
     // Actions on space
     .contextMenu {
@@ -53,6 +62,12 @@ struct SpaceItem: View {
         }
       )
     }
+
+    if #available(macOS 14.0, *) {
+      view.focusEffectDisabled()
+    } else {
+      view
+    }
   }
 
   var content: some View {
@@ -62,17 +77,9 @@ struct SpaceItem: View {
       Text(space.name)
         // Text has a min height
         .lineLimit(1)
-      //                .frame(height: Theme.sidebarItemHeight)
-      //                .fixedSize(horizontal: false, vertical: true)
-      //                .lineSpacing(0)
+
       Spacer() // Fill entire line
     }
-    .frame(height: Theme.sidebarItemHeight)
-    .onHover { isHovered = $0 }
-    .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
-    .padding(.horizontal, Theme.sidebarItemPadding)
-    .background(isHovered ? Color.primary.opacity(0.05) : Color.clear)
-    .cornerRadius(Theme.sidebarItemRadius)
   }
 
   var actionText: String {

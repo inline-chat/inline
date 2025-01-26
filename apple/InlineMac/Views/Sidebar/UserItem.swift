@@ -12,36 +12,44 @@ struct UserItem: View {
   var action: (() -> Void)?
   var commandPress: (() -> Void)?
   var selected: Bool = false
+  var rendersSavedMsg: Bool = false
+  
+  var isCurrentUser: Bool {
+    user.isCurrentUser()
+  }
+  
+  var isSavedMsg: Bool {
+    isCurrentUser && rendersSavedMsg
+  }
 
+  var name: String {
+    user.firstName ?? user.username ?? ""
+  }
+  
   var body: some View {
-    let text = Text(user.firstName ?? user.username ?? "")
+    let text = Text(isSavedMsg ? "Saved Messages" : name)
       .lineLimit(1)
 
     let view = Button {
       action?()
     } label: {
       HStack(spacing: 0) {
-        UserAvatar(user: user, size: Theme.sidebarIconSize)
-          .padding(.trailing, Theme.sidebarIconSpacing)
+        if isSavedMsg {
+          InitialsCircle(name: name, size: Theme.sidebarIconSize, symbol: "bookmark.fill")
+            .padding(.trailing, Theme.sidebarIconSpacing)
+        } else {
+          UserAvatar(user: user, size: Theme.sidebarIconSize)
+            .padding(.trailing, Theme.sidebarIconSpacing)
+        }
 
         HStack(spacing: 3) {
-          if selected {
-            text.foregroundColor(.white)
-          } else {
-            text.foregroundStyle(
-              appearsActive ? .primary : .tertiary
-            )
-          }
+          text
 
           // Should we show this in home? probably not, but in space we need it
-          if user.isCurrentUser() {
-            if selected {
-              Text("(You)").foregroundColor(.white.opacity(0.6))
-            } else {
-              Text("(You)").foregroundStyle(
-                appearsActive ? .tertiary : .quaternary
-              )
-            }
+          if isCurrentUser, !isSavedMsg {
+            Text("(You)").foregroundStyle(
+              appearsActive ? .tertiary : .quaternary
+            )
           }
         }
         .transaction { transaction in
@@ -50,10 +58,9 @@ struct UserItem: View {
 
         Spacer()
       }
-      .onHover { isHovered = $0 }
     }
     .buttonStyle(UserItemButtonStyle(
-      isHovered: isHovered,
+      isHovered: $isHovered,
       isFocused: isFocused,
       selected: selected,
       appearsActive: appearsActive
@@ -78,7 +85,7 @@ struct UserItem: View {
 }
 
 struct UserItemButtonStyle: ButtonStyle {
-  let isHovered: Bool
+  @Binding var isHovered: Bool
   let isFocused: Bool
   let selected: Bool
   let appearsActive: Bool
@@ -99,21 +106,24 @@ struct UserItemButtonStyle: ButtonStyle {
           }
         }
       }
+      .onHover { isHovered = $0 }
       // Optional: Add subtle scale effect when pressed
 //      .scaleEffect(!selected && configuration.isPressed ? 0.98 : 1.0)
       // Optional: Add smooth animation for press state
       .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
+      .animation(.easeOut(duration: 0.04), value: isHovered)
+      .padding(.vertical, Theme.sidebarItemSpacing)
   }
 
   private func backgroundColor(_ configuration: Configuration) -> Color {
     if selected {
-      .accentColor
+      .primary.opacity(0.1)
     } else if configuration.isPressed {
       .primary.opacity(0.08)
     } else if isFocused {
       .primary.opacity(0.1)
     } else if isHovered {
-      .primary.opacity(0.05)
+      .primary.opacity(0.04)
     } else {
       .clear
     }

@@ -25,6 +25,11 @@ struct MainView: View {
   var body: some View {
     NavigationSplitView(columnVisibility: $window.columnVisibility) {
       sidebar
+        .navigationSplitViewColumnWidth(
+          min: Theme.minimumSidebarWidth,
+          ideal: 240,
+          max: 400
+        )
     } detail: {
       VStack(spacing: 0) {
         detail
@@ -37,7 +42,18 @@ struct MainView: View {
         if isDevtoolsOpen {
           DevtoolsBar()
         }
-      }.animation(.smoothSnappy, value: isDevtoolsOpen)
+      }
+      .animation(.smoothSnappy, value: isDevtoolsOpen)
+      .background {
+//        VisualEffectView(material: .fullScreenUI, blendingMode: .behindWindow)
+        // VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
+        VisualEffectView(
+//          material: .sidebar,
+          material: Theme.pageBackgroundMaterial,
+          blendingMode: .behindWindow
+        )
+        .ignoresSafeArea()
+      }
     }
     // Required so when sidebar is uncollapsing by user command
     // it pushed the detail view to the right instead of reducing its width
@@ -85,17 +101,19 @@ struct MainView: View {
 
   @ViewBuilder
   var sidebar: some View {
-    Group {
+    let sidebar = Group {
       if let spaceId = navigation.activeSpaceId {
         SpaceSidebar(spaceId: spaceId)
       } else {
         HomeSidebar()
       }
-    }.navigationSplitViewColumnWidth(
-      min: Theme.minimumSidebarWidth,
-      ideal: 240,
-      max: 400
-    )
+    }
+
+    if #available(macOS 14.0, *), window.columnVisibility != .detailOnly {
+      sidebar.toolbar(removing: .sidebarToggle)
+    } else {
+      sidebar
+    }
   }
 
   var detail: some View {
