@@ -44,7 +44,7 @@ struct GrayTextField: View {
   var height: CGFloat {
     switch size {
       case .small:
-        26
+        28
       case .medium:
         32
       case .large:
@@ -55,11 +55,11 @@ struct GrayTextField: View {
   var cornerRadius: CGFloat {
     switch size {
       case .small:
-        6
-      case .medium:
-        8
-      case .large:
         10
+      case .medium:
+        12
+      case .large:
+        12
     }
   }
 

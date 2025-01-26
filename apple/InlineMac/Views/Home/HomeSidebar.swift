@@ -23,6 +23,15 @@ struct HomeSidebar: View {
     }
   }
 
+  fileprivate var items: [SideItem] {
+    var items: [SideItem] = []
+
+    items.append(contentsOf: model.spaceItems.map { .space($0) })
+    items.append(contentsOf: home.chats.map { .user($0) })
+
+    return items
+  }
+
   var body: some View {
     List {
       if search.hasResults || (isSearching && search.canSearch) {
@@ -32,7 +41,9 @@ struct HomeSidebar: View {
       }
     }
     .toolbar(content: {
-      ToolbarItem(placement: .automatic) {
+      ToolbarItemGroup(placement: .automatic) {
+        Spacer()
+
         Menu("New", systemImage: "plus") {
           Button("New Space") {
             nav.createSpaceSheetPresented = true
@@ -46,9 +57,11 @@ struct HomeSidebar: View {
       content: {
         VStack(alignment: .leading, spacing: 0) {
           SelfUser()
-            .padding(.top, -6)
-            .padding(.bottom, 6)
+            .padding(.top, 0)
+            .padding(.bottom, 8)
+
           searchBar
+            .padding(.bottom, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
@@ -97,32 +110,41 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var spacesAndUsersView: some View {
-    if !model.spaceItems.isEmpty {
-      Section("Spaces") {
-        ForEach(model.spaceItems) { space in
-          SpaceItem(space: space.space)
-            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-        }
-      }
+    ForEach(items) { item in
+      renderItem(item)
     }
+  }
 
-    Section("Private Chats") {
-      ForEach(home.chats) { chat in
-        UserItem(
-          user: chat.user,
-          action: {
-            userPressed(user: chat.user)
-          },
-          commandPress: {
-            openWindow(value: Peer.user(id: chat.user.id))
-          },
-          selected: nav.currentHomeRoute == .chat(
-            peer: .user(id: chat.user.id)
-          )
-        )
-        .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-      }
+  @ViewBuilder
+  fileprivate func renderItem(_ item: SideItem) -> some View {
+    switch item {
+      case let .user(chat):
+        userItem(chat: chat)
+
+      case let .space(space):
+        SpaceItem(space: space.space)
+          .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
     }
+  }
+
+  @ViewBuilder
+  func userItem(chat: HomeChatItem) -> some View {
+    let user = chat.user
+
+    UserItem(
+      user: user,
+      action: {
+        userPressed(user: user)
+      },
+      commandPress: {
+        openWindow(value: Peer.user(id: user.id))
+      },
+      selected: nav.currentHomeRoute == .chat(
+        peer: .user(id: user.id)
+      ),
+      rendersSavedMsg: true
+    )
+    .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
 
   // The view when user focuses the search input shows up
@@ -184,6 +206,20 @@ struct HomeSidebar: View {
   private func userPressed(user: User) {
     // Open chat in home
     nav.select(.chat(peer: .user(id: user.id)))
+  }
+}
+
+private enum SideItem: Identifiable {
+  case space(InlineKit.SpaceItem)
+  case user(InlineKit.HomeChatItem)
+
+  var id: Int64 {
+    switch self {
+      case let .space(space):
+        space.space.id
+      case let .user(chat):
+        chat.user.id
+    }
   }
 }
 
