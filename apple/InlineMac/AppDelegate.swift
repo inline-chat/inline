@@ -31,6 +31,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     true
   }
+
+  func applicationDidResignActive(_ notification: Notification) {
+    Task {
+      // Mark offline
+      try? await DataManager.shared.updateStatus(online: false)
+    }
+  }
+
+  func applicationDidBecomeActive(_ notification: Notification) {
+    Task {
+      // Mark online
+      try? await DataManager.shared.updateStatus(online: true)
+    }
+  }
 }
 
 // MARK: - Notifications
