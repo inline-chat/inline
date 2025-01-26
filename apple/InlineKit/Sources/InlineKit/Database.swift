@@ -201,6 +201,16 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("message sender random id unique") { db in
+      try db
+        .create(
+          index: "message_randomid_unique",
+          on: "message",
+          columns: ["fromId", "randomId"],
+          unique: true
+        )
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

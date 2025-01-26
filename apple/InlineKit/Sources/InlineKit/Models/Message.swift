@@ -3,6 +3,7 @@ import GRDB
 
 public struct ApiMessage: Codable, Hashable, Sendable {
   public var id: Int64
+  public var randomId: String?
   public var peerId: Peer
   public var fromId: Int64
   public var chatId: Int64
@@ -157,8 +158,11 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   }
 
   public init(from: ApiMessage) {
+    let randomId: Int64? = if let randomId = from.randomId { Int64(randomId) } else { nil }
+    
     self.init(
       messageId: from.id,
+      randomId: randomId,
       fromId: from.fromId,
       date: Date(timeIntervalSince1970: TimeInterval(from.date)),
       text: from.text,
