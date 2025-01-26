@@ -113,6 +113,6 @@ public extension Chat {
   }
 
   static func fromTimestamp(from: Int) -> Date {
-    Date(timeIntervalSince1970: Double(from) / 1_000)
+    Date(timeIntervalSince1970: Double(from))
   }
 }
