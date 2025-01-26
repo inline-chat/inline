@@ -360,7 +360,9 @@ class ComposeAppKit: NSView {
 extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   // Implement delegate methods as needed
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool {
-    false
+    // Send
+    send()
+    return true // handled
   }
 
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool {
