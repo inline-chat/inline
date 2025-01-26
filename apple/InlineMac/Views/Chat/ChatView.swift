@@ -44,11 +44,11 @@ struct ChatView: View {
   ).autoconnect()
 
   static let formatter = RelativeDateTimeFormatter()
-  private func getLastOnlineText(date: Date?) -> String {
+  private func getLastOnlineText(date: Date?, _ currentTime: Date) -> String {
     guard let date else { return "" }
 
-    let diffSeconds = Date().timeIntervalSince(date)
-    if diffSeconds < 60 {
+    let diffSeconds = currentTime.timeIntervalSince(date)
+    if diffSeconds < 59 {
       return "last seen just now"
     }
 
@@ -70,7 +70,7 @@ struct ChatView: View {
         ? "online"
         : (
           item?.user?.lastOnline != nil
-            ? getLastOnlineText(date: item?.user?.lastOnline) : "offline"
+            ? getLastOnlineText(date: item?.user?.lastOnline, currentTime) : "offline"
         )
     } else {
       "last seen recently"
@@ -121,7 +121,7 @@ struct ChatView: View {
                 Text(subtitle)
                   .font(.system(size: 12, weight: .regular))
                   .foregroundStyle(.secondary.opacity(0.6))
-                  .padding(.top, 0)
+                  .padding(.top, 1)
               }
             }
             .padding(.leading, 2)
@@ -174,6 +174,15 @@ struct ChatView: View {
       try await data.getChatHistory(peerUserId: nil, peerThreadId: nil, peerId: peerId)
     } catch {
       Log.shared.error("Failed to get chat history", error: error)
+    }
+
+    // Refetch user info (online, lastSeen)
+    if let user = item?.user {
+      do {
+        try await data.getUser(id: user.id)
+      } catch {
+        Log.shared.error("Failed to get user info", error: error)
+      }
     }
   }
 }

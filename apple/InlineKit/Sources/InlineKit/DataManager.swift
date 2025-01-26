@@ -160,6 +160,22 @@ public class DataManager: ObservableObject {
     }
   }
 
+  /// Get one user
+  public func getUser(id: Int64) async throws {
+    log.debug("getUser")
+    do {
+      let result = try await ApiClient.shared.getUser(userId: id)
+
+      let _ = try await database.dbWriter.write { db in
+        let user = User(from: result.user)
+
+        try user.save(db)
+      }
+    } catch {
+      throw error
+    }
+  }
+
   public func deleteSpace(spaceId: Int64) async throws {
     log.debug("deleteSpace")
     do {
