@@ -303,6 +303,16 @@ public class DataManager: ObservableObject {
           try mutableMessage.saveMessage(db)
         }
 
+        // Set last messages
+        let chats_ = result.chats.map { chat in
+          let chat = Chat(from: chat)
+
+          return chat
+        }
+        try chats_.forEach { chat in
+          try chat.save(db, onConflict: .replace)
+        }
+
         // Save dialogs
         let dialogs = result.dialogs.map { dialog in
           Dialog(from: dialog)
