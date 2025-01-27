@@ -105,7 +105,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   // needs chat id as well
   public static let repliedToMessage = belongsTo(
-    Message.self, key: "repliedToMessage", using: ForeignKey(["messageId"])
+    Message.self,
+    key: "repliedToMessage",
+    using: ForeignKey(["chatId", "repliedToMessageId"], to: ["chatId", "messageId"])
   )
   public var repliedToMessage: QueryInterfaceRequest<Message> {
     request(for: Message.repliedToMessage)

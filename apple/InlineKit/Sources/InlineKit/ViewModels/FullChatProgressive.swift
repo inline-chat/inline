@@ -380,14 +380,15 @@ public final class MessagesPublisher {
     let fullMessage = try? await db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
-        if let messageGlobalId = message.globalId {
-          query
-            .filter(id: messageGlobalId)
-        } else {
-          query
-            .filter(Column("messageId") == message.messageId)
-            .filter(Column("chatId") == message.chatId)
-        }
+        if let messageGlobalId = message.globalId
+      {
+        query
+          .filter(id: messageGlobalId)
+      } else {
+        query
+          .filter(Column("messageId") == message.messageId)
+          .filter(Column("chatId") == message.chatId)
+      }
 
       return try base.fetchOne(db)
     }
