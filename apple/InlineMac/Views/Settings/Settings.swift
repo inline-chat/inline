@@ -81,7 +81,9 @@ struct AccountSettingsView: View {
     HStack {
       UserProfile()
       Button("Log Out", role: .destructive) {
-        logOut()
+        Task {
+          await logOut()
+        }
       }
     }
     .frame(minWidth: 300)
