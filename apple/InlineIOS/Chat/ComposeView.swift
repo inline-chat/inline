@@ -20,7 +20,7 @@ class ComposeTextView: UITextView {
     let label = UILabel()
     label.text = "Write a message"
     label.font = .systemFont(ofSize: 17)
-    label.textColor = .placeholderText
+    label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false
     addSubview(label)
 
