@@ -53,13 +53,13 @@ struct SpaceSidebar: View {
     UserItem(
       user: user,
       action: {
-        navigation.select(.chat(peer: .user(id: user.id)))
+        navigation.select(.chat(peer: peerId))
       },
       commandPress: {
-        openWindow(value: Peer.user(id: user.id))
+        openWindow(value: peerId)
       },
       selected: navigation.spaceSelection.wrappedValue == .chat(
-        peer: .user(id: user.id)
+        peer: peerId
       )
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
