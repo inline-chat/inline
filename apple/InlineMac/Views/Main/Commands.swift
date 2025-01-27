@@ -8,7 +8,7 @@ struct MainWindowCommands: Commands {
 
   var isLoggedIn: Bool
   var navigation: NavigationModel
-  var logOut: () -> Void
+  var logOut: () async -> Void
 
   @ObservedObject var auth = Auth.shared
 
@@ -125,7 +125,9 @@ struct MainWindowCommands: Commands {
     button.hasDestructiveAction = true
 
     if alert.runModal() == .alertSecondButtonReturn {
-      logOut()
+      Task {
+        await logOut()
+      }
     }
   }
 

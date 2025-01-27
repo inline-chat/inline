@@ -80,7 +80,9 @@ struct InlineApp: App {
   }
 
   // Resets all state and data
-  func logOut() {
+  func logOut() async {
+    let _ = try? await ApiClient.shared.logout()
+
     // Clear creds
     Auth.shared.logOut()
 
@@ -106,5 +108,5 @@ struct InlineApp: App {
 }
 
 public extension EnvironmentValues {
-  @Entry var logOut: () -> Void = {}
+  @Entry var logOut: () async -> Void = {}
 }
