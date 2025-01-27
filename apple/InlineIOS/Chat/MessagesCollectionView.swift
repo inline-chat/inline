@@ -57,6 +57,16 @@ class MessagesCollectionView: UICollectionView {
     updateContentInsets()
   }
 
+  func scrollToBottom() {
+    if !itemsEmpty, shouldScrollToBottom {
+      scrollToItem(
+        at: IndexPath(item: 0, section: 0),
+        at: .top,
+        animated: false
+      )
+    }
+  }
+
   private var composeHeight: CGFloat = ComposeView.minHeight
   private var composeEmbedViewHeight: CGFloat = ChatContainerView.embedViewHeight
 
@@ -316,13 +326,25 @@ private extension MessagesCollectionView {
           var snapshot = dataSource.snapshot()
           let ids = newMessages.map(\.id)
 
+          let shouldScroll = newMessages.contains {
+            $0.message.fromId == Auth.shared.getCurrentUserId()
+          }
+
           if let first = snapshot.itemIdentifiers.first {
             snapshot.insertItems(ids, beforeItem: first)
           } else {
             snapshot.appendItems(ids, toSection: .main)
           }
           UIView.animate(withDuration: 0.2) {
-            self.dataSource.apply(snapshot, animatingDifferences: true)
+            self.dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+              if shouldScroll {
+                self?.currentCollectionView?.scrollToItem(
+                  at: IndexPath(item: 0, section: 0),
+                  at: .top,
+                  animated: false
+                )
+              }
+            }
           }
         case let .deleted(ids, _):
           var snapshot = dataSource.snapshot()
@@ -330,7 +352,7 @@ private extension MessagesCollectionView {
           snapshot.deleteItems(ids)
 
           dataSource.apply(snapshot, animatingDifferences: true)
-        case let .updated(newMessages, indexPaths):
+        case let .updated(newMessages, _):
 
           var snapshot = dataSource.snapshot()
           let ids = newMessages.map(\.id)
