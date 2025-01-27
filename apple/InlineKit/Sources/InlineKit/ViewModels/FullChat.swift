@@ -12,6 +12,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var message: Message
   public var reactions: [Reaction]
   public var repliedToMessage: Message?
+  public var replyToMessageSender: User?
 
   // stable id
   public var id: Int64 {
@@ -31,10 +32,10 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
 public extension FullMessage {
   static func queryRequest() -> QueryInterfaceRequest<FullMessage> {
     Message
-      .including(optional: Message.from)
+      .including(optional: Message.from.forKey("from"))
       .including(optional: Message.file)
       .including(all: Message.reactions)
-      .including(optional: Message.repliedToMessage.forKey("repliedToMessage"))
+      .including(optional: Message.repliedToMessage.forKey("repliedToMessage").including(optional: Message.from.forKey("replyToMessageSender")))
       .asRequest(of: FullMessage.self)
   }
 }
