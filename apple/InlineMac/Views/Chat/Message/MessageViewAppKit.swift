@@ -30,8 +30,11 @@ class MessageViewAppKit: NSView {
     Theme.messageIsBubble
   }
 
-  private var outlineBubble: Bool {
-    false
+  private var hasPhoto: Bool {
+    if let file = fullMessage.file, file.fileType == .photo {
+      return true
+    }
+    return false
   }
 
   private var textWidth: CGFloat {
@@ -50,7 +53,7 @@ class MessageViewAppKit: NSView {
   }
 
   private var bubbleColor: NSColor {
-    outgoing ? Theme.messageBubbleOutgoingColor : Theme.messageBubbleColor
+    outgoing ? Theme.messageBubbleOutgoingColor : Theme.messageBubbleIncomingColor
   }
 
   private var textColor: NSColor {
@@ -63,7 +66,7 @@ class MessageViewAppKit: NSView {
 
   private var linkColor: NSColor {
     if hasBubble {
-      outgoing ? NSColor.white : NSColor.linkColor
+      outgoing ? Theme.messageBubbleOutgoingLinkColor : NSColor.linkColor
     } else {
       NSColor.linkColor
     }
@@ -96,10 +99,16 @@ class MessageViewAppKit: NSView {
     view.layer?.cornerRadius = Theme.messageBubbleRadius
     view.translatesAutoresizingMaskIntoConstraints = false
 
-    if hasBubble, outgoing, outlineBubble {
-      // Outline
-      view.borderColor = NSColor.separatorColor.withAlphaComponent(0.04)
-      view.borderWidth = 1.0
+    // Outline
+    if hasBubble {
+      let hasOutline =
+        (!outgoing && Theme.messageBubbleIncomingOutline) ||
+        (outgoing && Theme.messageBubbleOutgoingOutline)
+
+      if hasOutline {
+        view.borderColor = Theme.messageOutlineColor
+        view.borderWidth = 1.0
+      }
     }
 
     return view
@@ -151,53 +160,11 @@ class MessageViewAppKit: NSView {
     return view
   }()
 
-  private var imageView: PhotoLazyImageView?
-
-  private func setupImageView() {
-    guard let file = fullMessage.file else { return }
-    let url = if let tempUrl = file.temporaryUrl {
-      URL(string: tempUrl)
-    } else {
-      file.getLocalURL()
-    }
-
-    guard let url else { return }
-
-    print("rendering Nuke url \(url)")
-    let imageView = PhotoLazyImageView()
-    imageView.url = url
-    imageView.translatesAutoresizingMaskIntoConstraints = false
-    imageView.onStart = { _ in
-      print("onStart")
-    }
-    imageView.onFailure = { error in
-      print("onFailure \(error)")
-    }
-    imageView.onSuccess = { _ in
-      print("onSuccess")
-    }
-    imageView.wantsLayer = true
-    imageView.layer?.drawsAsynchronously = true
-    imageView.layerContentsRedrawPolicy = .onSetNeedsDisplay
-
-    self.imageView = imageView
-
-    // Set corners based on bubble state
-    if hasBubble {
-      imageView.setCorners([
-        .radius(4.0, for: .topLeft),
-        .radius(4.0, for: .topRight),
-        .radius(Theme.messageBubbleRadius, for: .bottomLeft),
-        .radius(Theme.messageBubbleRadius, for: .bottomRight),
-      ])
-    } else {
-      imageView.setCorners(
-        ViewCorner.allCases.map { .radius(4.0, for: $0) }
-      )
-    }
-
-    addSubview(imageView)
-  }
+  private lazy var photoView: PhotoView = {
+    let view = PhotoView(fullMessage)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
 
   private var useTextKit2: Bool = true
 
@@ -214,7 +181,6 @@ class MessageViewAppKit: NSView {
     textView.drawsBackground = false
     textView.backgroundColor = .clear
     // Clips to bounds = false fucks up performance so badly. what!?
-    // textView.clipsToBounds = false
     textView.clipsToBounds = true
     textView.textContainerInset = MessageTextConfiguration.containerInset
     textView.font = MessageTextConfiguration.font
@@ -244,8 +210,14 @@ class MessageViewAppKit: NSView {
     return textView
   }()
 
-  func reflectBoundsChange(fraction: CGFloat) {
-    // TODO: update color reflecting the scroll
+  func reflectBoundsChange(fraction uncappedFraction: CGFloat) {
+    // Update color reflecting the scroll
+
+    let fraction = max(0.0, min(1.0, uncappedFraction))
+    if hasBubble {
+      bubbleView.backgroundColor = bubbleColor
+        .blended(withFraction: (1.0 - fraction) * 0.3, of: .white)
+    }
   }
 
   override func viewDidMoveToWindow() {
@@ -380,8 +352,15 @@ class MessageViewAppKit: NSView {
       nameLabel.stringValue = outgoing ? "You" : name
 
       if hasBubble {
-        // nameLabel.textColor = NSColor.lightGray
-        nameLabel.textColor = NSColor.tertiaryLabelColor
+        if Theme.messageBubbleColoredName {
+          nameLabel.textColor = NSColor(
+            InitialsCircle.ColorPalette
+              .color(for: name)
+              .adjustLuminosity(by: -0.08) // TODO: Optimize
+          )
+        } else {
+          nameLabel.textColor = NSColor.tertiaryLabelColor
+        }
       } else {
         nameLabel.textColor = NSColor(
           InitialsCircle.ColorPalette
@@ -393,17 +372,13 @@ class MessageViewAppKit: NSView {
 
     addSubview(contentView)
 
-    setupImageView()
-
-    // addSubview(textView)
-
     // TODO: if has text
     contentView.addArrangedSubview(aboveTextSpacer)
     contentView.addArrangedSubview(textView)
     contentView.addArrangedSubview(underTextSpacer)
 
-    if let imageView {
-      contentView.addArrangedSubview(imageView)
+    if hasPhoto {
+      contentView.addArrangedSubview(photoView)
     }
 
     setupMessageText()
@@ -461,8 +436,6 @@ class MessageViewAppKit: NSView {
     contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: contentWidth)
     textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
 
-    let hasPhoto = props.photoHeight != nil
-
 //    contentView.edgeInsets = NSEdgeInsets(
 //      // for messages with text, we need bubble padding from top here. can't add it anywhere
 //      top: bubblePadding.height,
@@ -495,7 +468,7 @@ class MessageViewAppKit: NSView {
       underTextSpacer.heightAnchor.constraint(equalToConstant: bubblePadding.height),
     ])
 
-    if let photoView = imageView, let photoHeight = props.photoHeight {
+    if hasPhoto, let photoHeight = props.photoHeight {
       photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photoHeight)
       NSLayoutConstraint.activate(
         [
