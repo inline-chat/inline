@@ -25,7 +25,7 @@ class UIMessageView: UIView {
     label.font = .systemFont(ofSize: 17)
     label.textColor = textColor
     label.numberOfLines = 0
-    label.lineBreakMode = .byWordWrapping
+    label.lineBreakMode = .byTruncatingTail
     return label
   }()
 
@@ -33,6 +33,14 @@ class UIMessageView: UIView {
     let view = UIView()
     view.layer.cornerRadius = 19
     view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  lazy var embedView: EmbedMessageView = {
+    let view = EmbedMessageView()
+
+    view.translatesAutoresizingMaskIntoConstraints = false
+
     return view
   }()
 
@@ -92,7 +100,17 @@ class UIMessageView: UIView {
     addSubview(bubbleView)
     bubbleView.addSubview(messageLabel)
     bubbleView.addSubview(metadataView)
+    if message.repliedToMessageId != nil {
+      bubbleView.addSubview(embedView)
 
+      if let repliedMessage = fullMessage.repliedToMessage {
+        embedView.configure(
+          message: repliedMessage,
+          senderName: fullMessage.replyToMessageSender?.firstName ?? "",
+          outgoing: outgoing
+        )
+      }
+    }
     addGestureRecognizer()
     setupAppearance()
     setupConstraints()
@@ -128,7 +146,7 @@ class UIMessageView: UIView {
   }
 
   private func setupMultilineMessageConstraints() -> [NSLayoutConstraint] {
-    [
+    let noEmbed = [
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
       messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -labelHorizantalPadding),
@@ -140,10 +158,28 @@ class UIMessageView: UIView {
       metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
       metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -14),
     ]
+    let withEmbed = [
+      embedView.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+      embedView.leadingAnchor.constraint(equalTo: messageLabel.leadingAnchor),
+      embedView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
+      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height),
+
+      messageLabel.topAnchor.constraint(equalTo: embedView.bottomAnchor, constant: 8),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
+      messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -labelHorizantalPadding),
+
+      metadataView.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: labelVerticalPadding),
+      metadataView.leadingAnchor.constraint(
+        greaterThanOrEqualTo: bubbleView.leadingAnchor, constant: 14
+      ),
+      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
+      metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -14),
+    ]
+    return message.repliedToMessageId != nil ? withEmbed : noEmbed
   }
 
   private func setupOneLineMessageConstraints() -> [NSLayoutConstraint] {
-    [
+    let noEmbed = [
       messageLabel.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
       messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -labelVerticalPadding),
@@ -152,6 +188,22 @@ class UIMessageView: UIView {
       metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
       metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
     ]
+    let withEmbed = [
+      embedView.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+      embedView.leadingAnchor.constraint(equalTo: messageLabel.leadingAnchor),
+      embedView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
+      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height),
+
+      messageLabel.topAnchor.constraint(equalTo: embedView.bottomAnchor, constant: 8),
+      messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
+      messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -labelVerticalPadding),
+
+      metadataView.leadingAnchor.constraint(equalTo: messageLabel.trailingAnchor, constant: 8),
+      metadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
+      metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
+    ]
+
+    return message.repliedToMessageId != nil ? withEmbed : noEmbed
   }
 
   private func setupAppearance() {

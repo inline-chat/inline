@@ -9,8 +9,6 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UIAppFonts</key>
-	<array>
-		<string>RedHatDisplay-VariableFont_wght.ttf</string>
-	</array>
+	<array/>
 </dict>
 </plist>
