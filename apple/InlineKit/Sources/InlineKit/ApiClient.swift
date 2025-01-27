@@ -263,7 +263,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   public func getUser(userId: Int64) async throws -> GetUser {
     try await request(
-      .getUser, queryItems: [URLQueryItem(name: "userId", value: "\(userId)")],
+      .getUser, queryItems: [URLQueryItem(name: "id", value: "\(userId)")],
       includeToken: true
     )
   }
