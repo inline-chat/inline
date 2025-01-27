@@ -168,13 +168,36 @@ class MessageListAppKit: NSViewController {
     return scrollOffset.y <= min(-scrollView.contentInsets.top, 0)
   }
 
+  private func userVisibleRect() -> NSRect {
+    tableView.visibleRect.insetBy(
+      dx: 0,
+      dy: -scrollView.contentInsets.bottom - scrollView.contentInsets.top
+    )
+  }
+
+  private func updateMessageViewColors() {
+    let visibleRect = userVisibleRect()
+    let visibleRange = tableView.rows(in: visibleRect)
+
+    for row in visibleRange.location ..< visibleRange.location + visibleRange.length {
+      guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell else {
+        return
+      }
+      let rect = tableView.rect(ofRow: row)
+
+      let fractionToTopOfViewport = (rect.minY - visibleRect.minY) / visibleRect.height
+
+      cell.reflectBoundsChange(fraction: fractionToTopOfViewport)
+    }
+  }
+
   private func updateToolbar() {
     // make window toolbar layout and have background to fight the swiftui defaUlt behaviour
     guard let window = view.window else { return }
     log.debug("Adjusting view's toolbar")
 
     window.isMovableByWindowBackground = true
-    
+
     if isAtTop() {
       window.titlebarAppearsTransparent = true
       // window.titlebarSeparatorStyle = .
@@ -353,10 +376,12 @@ class MessageListAppKit: NSViewController {
     if feature_loadsMoreWhenApproachingTop, isUserScrolling, currentScrollOffset < viewportSize.height {
       loadBatch(at: .older)
     }
-    
+
     // TODO: Optimize
     // Update toolbar
     updateToolbar()
+
+    updateMessageViewColors()
   }
 
   // Using CFAbsoluteTimeGetCurrent()
@@ -373,6 +398,8 @@ class MessageListAppKit: NSViewController {
   var previousViewportHeight: CGFloat = 0.0
 
   @objc func scrollViewFrameChanged(notification: Notification) {
+    updateMessageViewColors()
+
     // keep scroll view anchored from the bottom
     guard feature_maintainsScrollFromBottomOnResize else { return }
 
@@ -441,6 +468,7 @@ class MessageListAppKit: NSViewController {
     updateScrollViewInsets()
     checkWidthChangeForHeights()
     updateToolbar()
+    updateMessageViewColors()
 
     // Initial scroll to bottom
     if needsInitialScroll {

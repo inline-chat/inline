@@ -131,6 +131,10 @@ class MessageTableCell: NSView {
     needsDisplay = true
   }
 
+  func reflectBoundsChange(fraction: CGFloat) {
+    messageView?.reflectBoundsChange(fraction: fraction)
+  }
+  
   override func prepareForReuse() {
     super.prepareForReuse()
   }
