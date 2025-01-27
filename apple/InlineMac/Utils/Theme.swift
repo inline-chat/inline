@@ -36,7 +36,7 @@ enum Theme {
 
   static let messageMaxWidth: CGFloat = 420
   static let messageOuterVerticalPadding: CGFloat = 2.0 // gap between consequetive bubbles
-  static let messageSidePadding: CGFloat = 20
+  static let messageSidePadding: CGFloat = 24
   static let messageAvatarSize: CGFloat = 24
 //  Space between avatar and content
   static let messageHorizontalStackSpacing: CGFloat = 6.0
@@ -48,31 +48,34 @@ enum Theme {
   static let messageTextViewPadding: CGFloat = 0
   static let messageBubbleRadius: CGFloat = 14.0
   static let messageBubblePadding: CGSize = .init(width: 11.0, height: 5.0)
+  static let messageBubbleMinWidth: CGFloat = 10.0
   static var messageIsBubble: Bool {
     AppSettings.shared.messageStyle == .bubble
   }
 
-  static let messageBubbleLightColor: NSColor = .init(calibratedRed: 0.92, green: 0.92, blue: 0.92, alpha: 1.0)
-  static let messageBubbleDarkColor: NSColor = .init(calibratedRed: 0.18, green: 0.18, blue: 0.18, alpha: 1.0)
-  static let messageBubbleColor: NSColor = .init(name: "messageBubbleColor") { appearance in
-    appearance.name == .darkAqua ? Self.messageBubbleDarkColor : Self.messageBubbleLightColor
+  static let messageBubbleGrayLightColor: NSColor = .init(calibratedRed: 0.92, green: 0.92, blue: 0.92, alpha: 1.0)
+  static let messageBubbleGrayDarkColor: NSColor = .init(calibratedRed: 0.18, green: 0.18, blue: 0.18, alpha: 1.0)
+  static let messageBubbleGrayColor: NSColor = .init(name: "messageBubbleGrayColor") { appearance in
+    appearance.name == .darkAqua ? Self.messageBubbleGrayDarkColor : Self.messageBubbleGrayLightColor
   }
 
-  static let messageBubbleOutgoingLightColor: NSColor = .systemBlue.blended(
-    withFraction: 0.3,
+  static let messageBubbleBlueLightColor: NSColor = .systemBlue.blended(
+    withFraction: 0.2,
     of: .white
   ) ?? .systemBlue
-  static let messageBubbleOutgoingDarkColor: NSColor = .systemBlue
-  static let messageBubbleOutgoingColor: NSColor = .init(name: "messageBubbleOutgoingColor") { appearance in
-    appearance.name == .darkAqua ? Self.messageBubbleOutgoingDarkColor : Self.messageBubbleOutgoingLightColor
+  static let messageBubbleBlueDarkColor: NSColor = .systemBlue
+  static let messageBubbleBlueColor: NSColor = .init(name: "messageBubbleBlueColor") { appearance in
+    appearance.name == .darkAqua ? Self.messageBubbleBlueDarkColor : Self.messageBubbleBlueLightColor
   }
 
-  static let messageBubbleOutgoingTextColor: NSColor = .white
-
-  // static let messageBubbleOutgoingColor: NSColor = .separatorColor.withAlphaComponent(0.01)
-  // static let messageBubbleOutgoingColor: NSColor = .separatorColor.withAlphaComponent(0.01)
-
-  static let messageBubbleMinWidth: CGFloat = 10.0
+  static let messageBubbleIncomingColor: NSColor = Theme.messageBubbleGrayColor
+  static let messageBubbleOutgoingColor: NSColor = Theme.messageBubbleBlueColor
+  static let messageBubbleOutgoingTextColor: NSColor = .white // .labelColor or .white
+  static let messageBubbleOutgoingLinkColor: NSColor = .white // .linkColor or .white
+  static let messageOutlineColor: NSColor = Theme.composeOutlineColor
+  static let messageBubbleIncomingOutline: Bool = false
+  static let messageBubbleOutgoingOutline: Bool = false
+  static let messageBubbleColoredName: Bool = false
 
   // MARK: - Chat View
 
@@ -87,8 +90,8 @@ enum Theme {
   static let composeOuterSpacing: CGFloat = 18
   static let composeOutlineColor: NSColor = .init(name: "composeOutlineColor") { appearance in
     appearance.name == .darkAqua ? NSColor.white
-      .withAlphaComponent(0.09) : NSColor.black
-      .withAlphaComponent(0.07)
+      .withAlphaComponent(0.1) : NSColor.black
+      .withAlphaComponent(0.09)
   }
 
   // MARK: - Devtools
