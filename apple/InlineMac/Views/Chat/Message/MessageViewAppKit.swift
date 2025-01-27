@@ -210,6 +210,7 @@ class MessageViewAppKit: NSView {
     return textView
   }()
 
+  // Experimental: See if it looks good or has any performance bottlenecks
   func reflectBoundsChange(fraction uncappedFraction: CGFloat) {
     // Update color reflecting the scroll
 
@@ -372,14 +373,14 @@ class MessageViewAppKit: NSView {
 
     addSubview(contentView)
 
+    if hasPhoto {
+      contentView.addArrangedSubview(photoView)
+    }
+
     // TODO: if has text
     contentView.addArrangedSubview(aboveTextSpacer)
     contentView.addArrangedSubview(textView)
     contentView.addArrangedSubview(underTextSpacer)
-
-    if hasPhoto {
-      contentView.addArrangedSubview(photoView)
-    }
 
     setupMessageText()
     setupConstraints()
