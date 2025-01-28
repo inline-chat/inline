@@ -194,15 +194,15 @@ final class PhotoView: NSView {
 
     sourceFrame = window?.convertToScreen(convert(bounds, to: nil))
 
+    panel.dataSource = self
+    panel.delegate = self
+    panel.reloadData()
+
     if panel.isVisible {
       panel.orderOut(nil)
     } else {
       panel.makeKeyAndOrderFront(nil)
     }
-
-    panel.dataSource = self
-    panel.delegate = self
-    panel.reloadData()
   }
 }
 
