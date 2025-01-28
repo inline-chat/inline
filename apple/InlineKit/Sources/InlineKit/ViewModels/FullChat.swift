@@ -6,7 +6,6 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   TableRecord,
   Sendable, Equatable
 {
-  public var user: User?
   public var file: File?
   public var from: User?
   public var message: Message
@@ -30,12 +29,31 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
 }
 
 public extension FullMessage {
+  var debugDescription: String {
+    """
+    FullMessage(
+        id: \(id),
+        file: \(String(describing: file)),
+        from: \(String(describing: from)),
+        message: \(message),
+        reactions: \(reactions),
+        repliedToMessage: \(String(describing: repliedToMessage)),
+        replyToMessageSender: \(String(describing: replyToMessageSender))
+    )
+    """
+  }
+}
+
+public extension FullMessage {
   static func queryRequest() -> QueryInterfaceRequest<FullMessage> {
     Message
       .including(optional: Message.from.forKey("from"))
       .including(optional: Message.file)
       .including(all: Message.reactions)
-      .including(optional: Message.repliedToMessage.forKey("repliedToMessage").including(optional: Message.from.forKey("replyToMessageSender")))
+      .including(
+        optional: Message.repliedToMessage.forKey("repliedToMessage")
+          .including(optional: Message.from.forKey("replyToMessageSender"))
+      )
       .asRequest(of: FullMessage.self)
   }
 }

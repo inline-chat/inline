@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import MultipartFormDataKit
 
 #if canImport(UIKit)
 import UIKit
@@ -485,6 +486,75 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       includeToken: true
     )
   }
+
+  public func uploadFile(
+    type: MessageFileType,
+    data: Data,
+    filename: String,
+    mimeType: MIMEType,
+    progress: @escaping (Double) -> Void
+  ) async throws -> UploadFileResult {
+    guard let url = URL(string: "\(baseURL)/uploadFile") else {
+      throw APIError.invalidURL
+    }
+
+    let multipartFormData = try MultipartFormData.Builder.build(
+      with: [
+        (
+          name: "type",
+          filename: nil,
+          mimeType: nil,
+          data: type.rawValue.data(using: .utf8)!
+        ),
+        (
+          name: "file",
+          filename: filename,
+          mimeType: mimeType,
+          data: data
+        ),
+      ],
+      willSeparateBy: RandomBoundaryGenerator.generate()
+    )
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue(multipartFormData.contentType, forHTTPHeaderField: "Content-Type")
+    request.httpBody = multipartFormData.body
+
+    if let token = Auth.shared.getToken() {
+      request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    do {
+      let (data, response) = try await URLSession.shared.data(for: request)
+
+      guard let httpResponse = response as? HTTPURLResponse else {
+        throw APIError.invalidResponse
+      }
+
+      switch httpResponse.statusCode {
+        case 200 ... 299:
+          let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: data)
+          switch apiResponse {
+            case let .success(data):
+              return data
+            case let .error(error, errorCode, description):
+              log.error("Error \(error): \(description ?? "")")
+              throw APIError.error(error: error, errorCode: errorCode, description: description)
+          }
+        case 429:
+          throw APIError.rateLimited
+        default:
+          throw APIError.httpError(statusCode: httpResponse.statusCode)
+      }
+    } catch let decodingError as DecodingError {
+      throw APIError.decodingError(decodingError)
+    } catch let apiError as APIError {
+      throw apiError
+    } catch {
+      throw APIError.networkError
+    }
+  }
 }
 
 /// Example
@@ -633,6 +703,10 @@ public struct UpdateDialog: Codable, Sendable {
 
 public struct AddMember: Codable, Sendable {
   public let member: ApiMember
+}
+
+public struct UploadFileResult: Codable, Sendable {
+  public let fileUniqueId: String
 }
 
 public struct GetSpace: Codable, Sendable {

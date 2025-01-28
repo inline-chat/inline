@@ -1,7 +1,9 @@
 
 import AppKit
 import InlineKit
-import Quartz // Add this import for Quick Look
+import Nuke
+import NukeUI
+import Quartz
 
 final class PhotoView: NSView {
   private let imageView: NSImageView = {
@@ -33,19 +35,55 @@ final class PhotoView: NSView {
   let bottomRightRadius: CGFloat = Theme.messageIsBubble ? Theme.messageBubbleRadius - 1 : 4.0
 
   private func setupView() {
-    addSubview(imageView)
+    setupImage()
 
-    NSLayoutConstraint.activate([
+    setupMask()
+    setupDragSource()
+    setupClickGesture()
+  }
+
+  private var imageConstraints: [NSLayoutConstraint] = []
+
+  private func setupImage() {
+    guard let (isLocal, url) = imageUrl() else { return }
+
+    addSubview(imageView)
+    imageConstraints = [
       imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       imageView.topAnchor.constraint(equalTo: topAnchor),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
+    ]
+    NSLayoutConstraint.activate(imageConstraints)
 
-    setupMask()
-    loadImage()
-    setupDragSource()
-    setupClickGesture()
+    if isLocal {
+      guard let image = NSImage(contentsOf: url) else {
+        return
+      }
+      imageView.image = image
+    } else {
+      // remote
+      let request = ImageRequest(url: url)
+      if let image = ImagePipeline.shared.cache.cachedImage(for: request) {
+        // if image.isPreview
+        imageView.image = image.image
+      }
+
+      Task { @MainActor in
+        if let image = try? await ImagePipeline.shared.image(for: request) {
+          imageView.image = image
+
+          if var file = fullMessage.file {
+            // Save to local cache
+            let pathString = image.save(file: file)
+            file.localPath = pathString
+            try? await AppDatabase.shared.dbWriter.write { db in
+              try file.save(db)
+            }
+          }
+        }
+      }
+    }
   }
 
   override func layout() {
@@ -119,22 +157,19 @@ final class PhotoView: NSView {
     addGestureRecognizer(dragGesture)
   }
 
-  private func imageUrl() -> URL? {
+  private func imageUrl() -> (isLocal: Bool, url: URL)? {
     guard let file = fullMessage.file else { return nil }
-    let url = if let tempUrl = file.temporaryUrl {
-      URL(string: tempUrl)
+    
+    // prioritise local
+    if let localFile = file.getLocalURL() {
+      return (isLocal: true, url: localFile)
+    } else if let tempUrl = file.temporaryUrl,
+              let url = URL(string: tempUrl)
+    {
+      return (isLocal: false, url: url)
     } else {
-      file.getLocalURL()
+      return nil
     }
-    return url
-  }
-
-  private func loadImage() {
-    guard let url = imageUrl() else { return }
-    guard let image = NSImage(contentsOf: url) else {
-      return
-    }
-    imageView.image = image
   }
 
   // MARK: - Drag Source
@@ -143,7 +178,7 @@ final class PhotoView: NSView {
   private let dragThreshold: CGFloat = 10.0
 
   @objc private func handleDragGesture(_ gesture: NSPanGestureRecognizer) {
-    guard let url = imageUrl() else { return }
+    guard let (_, url) = imageUrl() else { return }
 
     switch gesture.state {
       case .began:
@@ -252,7 +287,7 @@ extension PhotoView: QLPreviewPanelDelegate {
 
 extension PhotoView: QLPreviewItem {
   var previewItemURL: URL! {
-    imageUrl()
+    imageUrl()?.1
   }
 
   var previewItemTitle: String! {

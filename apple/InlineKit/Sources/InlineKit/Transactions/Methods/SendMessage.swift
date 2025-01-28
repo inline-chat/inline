@@ -1,10 +1,25 @@
 import Foundation
 import GRDB
+import MultipartFormDataKit
 
 public struct SendMessageAttachment: Codable, Sendable {
   public enum ImageFormat: Codable, Sendable {
     case jpeg
     case png
+
+    public func toExt() -> String {
+      switch self {
+        case .jpeg: ".jpg"
+        case .png: ".png"
+      }
+    }
+    
+    public func toMimeType() -> String {
+      switch self {
+      case .jpeg: "image/jpeg"
+      case .png: "image/png"
+      }
+    }
   }
 
   enum AttachmentType: Codable, Sendable {
@@ -34,6 +49,11 @@ public struct SendMessageAttachment: Codable, Sendable {
   let filePath: String
   let fileName: String?
   let fileSize: Int64
+
+  public func getFilename() -> String {
+    let ext = if case .photo(.jpeg, _, _) = type { ".jpg" } else { ".png" }
+    return fileName ?? UUID().uuidString + ext
+  }
 
   // internal state
   package var id = UUID().uuidString // local file ID
@@ -124,7 +144,6 @@ public struct TransactionSendMessage: Transaction {
     Task { @MainActor in
       let newMessage = try? await (AppDatabase.shared.dbWriter.write { db in
         if let attachment = attachments.first {
-          print("has attachment")
           let file = File(fromAttachment: attachment)
 
           do {
@@ -166,7 +185,25 @@ public struct TransactionSendMessage: Transaction {
 
   // Private upload function
   private func upload(attachment: SendMessageAttachment) async throws -> String {
-    ""
+    let fileId = attachment.id
+    let path = attachment.filePath
+    let filename = attachment.fileName
+    let mimeType: String = if case let .photo(format, _, _) = attachment.type {
+      format == .jpeg ? "image/jpeg" : "image/png"
+    } else {
+      fatalError("Unsupported attachment type")
+    }
+
+    let result = try await FileUploader.shared
+      .upload(
+        localId: fileId,
+        type: .photo,
+        path: path,
+        filename: filename ?? UUID().uuidString + ".jpg",
+        mimeType: mimeType
+      )
+
+    return result.fileUniqueId
   }
 
   func didSucceed(result: SendMessage) async {

@@ -391,7 +391,22 @@ public class DataManager: ObservableObject {
     try await database.dbWriter.write { db in
       for apiMessage in result.messages {
         do {
+          var fileId: String?
+
+          // Files
+          for apiPhoto in apiMessage.photo ?? [] {
+            print("apiPhoto: \(apiPhoto)")
+            let file = try File.save(db, apiPhoto: apiPhoto)
+
+            // TODO:
+            // if apiPhoto.thumbSize
+
+            fileId = file.id
+          }
+
+          // Message
           var message = Message(from: apiMessage)
+          message.fileId = fileId
           try message.saveMessage(db, onConflict: .replace, publishChanges: false)
         } catch {
           Task {
