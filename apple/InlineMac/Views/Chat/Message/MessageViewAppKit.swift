@@ -13,7 +13,7 @@ class MessageViewAppKit: NSView {
   private var fullMessage: FullMessage
   private var props: MessageViewProps
   private var from: User {
-    fullMessage.user ?? User.deletedInstance
+    fullMessage.from ?? User.deletedInstance
   }
 
   private var showsAvatar: Bool { props.firstInGroup }
@@ -211,14 +211,14 @@ class MessageViewAppKit: NSView {
   }()
 
   // Experimental: See if it looks good or has any performance bottlenecks
+  // Update color reflecting the scroll
   func reflectBoundsChange(fraction uncappedFraction: CGFloat) {
-    // Update color reflecting the scroll
-
-    let fraction = max(0.0, min(1.0, uncappedFraction))
-    if hasBubble {
-      bubbleView.backgroundColor = bubbleColor
-        .blended(withFraction: (1.0 - fraction) * 0.3, of: .white)
-    }
+    // Disabled until I can make it more stable
+//    let fraction = max(0.0, min(1.0, uncappedFraction))
+//    if hasBubble {
+//      bubbleView.backgroundColor = bubbleColor
+//        .blended(withFraction: (1.0 - fraction) * 0.3, of: .white)
+//    }
   }
 
   override func viewDidMoveToWindow() {
