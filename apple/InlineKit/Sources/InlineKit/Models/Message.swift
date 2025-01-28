@@ -161,7 +161,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   public init(from: ApiMessage) {
     let randomId: Int64? = if let randomId = from.randomId { Int64(randomId) } else { nil }
-    
+
     self.init(
       messageId: from.id,
       randomId: randomId,
@@ -216,7 +216,11 @@ public extension Message {
           .fetchOne(db, key: ["messageId": messageId, "chatId": chatId])
       {
         globalId = existing.globalId
-        fileId = existing.fileId // ... find a way for making this better
+
+        if let existingFileId = existing.fileId {
+          fileId = existingFileId // ... find a way for making this better
+        }
+        
         isExisting = true
       }
     } else {

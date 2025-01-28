@@ -6,6 +6,7 @@ public struct ApiPhoto: Codable, Hashable, Sendable {
   public var width: Int
   public var height: Int
   public var fileSize: Int
+  public var mimeType: String? // for now optional
   public var temporaryUrl: String
 }
 
@@ -28,6 +29,12 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   // File type
   public var fileType: MessageFileType
 
+  // File name with extension
+  public var fileName: String? // optional bc added later
+
+  // Mime Type
+  public var mimeType: String? // optional bc added later
+
   // Is uploading?
   public var uploading: Bool
 
@@ -48,17 +55,20 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     id: String,
     fileUniqueId: String?,
     fileType: MessageFileType,
+    fileName: String,
     uploading: Bool,
     fileSize: Int64,
     temporaryUrl: String?,
     temporaryUrlExpiresAt: Date?,
     width: Int?,
     height: Int?,
-    localPath: String?
+    localPath: String?,
+    mimeType: String?
   ) {
     self.id = id
     self.fileUniqueId = fileUniqueId
     self.fileType = fileType
+    self.fileName = fileName
     self.uploading = uploading
     self.fileSize = fileSize
     self.temporaryUrl = temporaryUrl
@@ -66,6 +76,7 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.width = width
     self.height = height
     self.localPath = localPath
+    self.mimeType = mimeType
   }
 
   public init(fromAttachment attachment: SendMessageAttachment) {
@@ -74,11 +85,14 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     fileSize = attachment.fileSize
     localPath = attachment.filePath
     switch attachment.type {
-      case let .photo(_, width, height):
+      case let .photo(format, width, height):
+        fileName = "\(id)\(format.toExt())"
+        mimeType = format.toMimeType()
         self.width = width
         self.height = height
         fileType = .photo
       default:
+        fileName = "\(id).file" // DA DUCK .file TODO: change this
         fileType = .file // for now until we support more
     }
 
@@ -87,8 +101,68 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     temporaryUrl = nil
     temporaryUrlExpiresAt = nil
   }
+}
 
-  // TODO: from photo info
+public extension File {
+  init(fromPhoto photo: ApiPhoto) throws {
+    guard URL(string: photo.temporaryUrl) != nil else {
+      throw FileError.invalidTemporaryUrl
+    }
+
+    id = UUID().uuidString
+    fileUniqueId = photo.fileUniqueId
+    fileType = .photo
+    uploading = false
+    fileSize = Int64(photo.fileSize)
+    temporaryUrl = photo.temporaryUrl
+    temporaryUrlExpiresAt = Calendar.current.date(byAdding: .day, value: 7, to: .now)
+    width = photo.width
+    height = photo.height
+    localPath = nil
+
+    let ext = switch photo.mimeType {
+      case "image/jpeg":
+        ".jpg"
+      case "image/png":
+        ".png"
+      default:
+        ".jpg"
+    }
+
+    mimeType = photo.mimeType
+    fileName = "\(id)\(ext)"
+  }
+}
+
+public extension File {
+  /// Returns the file local ID
+  static func save(_ db: Database, apiPhoto photo: ApiPhoto) throws -> File {
+    // fetch
+    guard var existing = try File
+      .filter(Column("fileUniqueId") == photo.fileUniqueId)
+      .fetchOne(db)
+    else {
+      // ... create new
+      let file = try File(fromPhoto: photo)
+      return try file.insertAndFetch(db)
+    }
+
+    // update
+    existing.temporaryUrl = photo.temporaryUrl
+    existing.temporaryUrlExpiresAt = Calendar.current.date(byAdding: .day, value: 7, to: .now)
+
+    existing.uploading = false
+    existing.fileSize = Int64(photo.fileSize)
+    existing.width = photo.width
+    existing.height = photo.height
+
+    return try existing.updateAndFetch(db)
+  }
+}
+
+// Add this error enum
+public enum FileError: Error {
+  case invalidTemporaryUrl
 }
 
 // Helpers

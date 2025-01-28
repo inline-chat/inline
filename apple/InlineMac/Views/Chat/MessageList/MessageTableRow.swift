@@ -57,7 +57,7 @@ class MessageTableCell: NSView {
        currentContent.message.message.out == message.message.out,
        currentContent.message.message.repliedToMessageId == message.message.repliedToMessageId,
        // exclude file/photo/video
-       currentContent.message.file == message.file,
+       currentContent.message.file?.id == message.file?.id,
        // disable re-use for file message completely for now until we can optimize later
        // same avatar
        currentContent.props.firstInGroup == props.firstInGroup
@@ -71,17 +71,12 @@ class MessageTableCell: NSView {
       return
     }
 
-    log.debug("recreating message view")
-
-    // TODO: Don't recreate on width/height change
-//    if let prevProps = currentContent?.props,
-//       message == currentContent?.message &&
-//       props.equalExceptSize(prevProps)
-//    {
-//      currentContent = (message, props)
-//      ensureLayout(props)
-//      return
-//    }
+    log.debug("""
+              recreating message view for \(message.message.id)
+              
+              previous: \(currentContent?.message.debugDescription ?? "nil")
+              new: \(message.debugDescription)
+              """)
 
     currentContent = (message, props)
     updateContent()
@@ -134,7 +129,7 @@ class MessageTableCell: NSView {
   func reflectBoundsChange(fraction: CGFloat) {
     messageView?.reflectBoundsChange(fraction: fraction)
   }
-  
+
   override func prepareForReuse() {
     super.prepareForReuse()
   }

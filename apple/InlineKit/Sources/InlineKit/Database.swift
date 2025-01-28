@@ -210,6 +210,14 @@ public extension AppDatabase {
           unique: true
         )
     }
+    
+    
+    migrator.registerMigration("file 2") { db in
+      try db.alter(table: "file") { t in
+        t.add(column: "fileName", .text)
+        t.add(column: "mimeType", .text)
+      }
+    }
 
     /// TODOs:
     /// - Add indexes for performance

@@ -54,6 +54,51 @@ extension NSBitmapImageRep.FileType {
 // MARK: - Main Extension
 
 extension NSImage {
+  /// Returns locally stored path
+  func save(file: File) -> String? {
+    let ext = switch file.mimeType {
+      case "image/png":
+        ".png"
+
+      case "image/jpeg":
+        ".jpg"
+
+      default:
+        ".jpg"
+    }
+
+    let dir = FileHelpers.getDocumentsDirectory()
+    let path = file.fileName ?? UUID().uuidString + ext
+
+    let fileUrl = dir.appendingPathComponent(
+      path
+    )
+
+    guard let data = tiffRepresentation else {
+      return nil
+    }
+
+    guard let imageData = switch file.mimeType {
+      case "image/png":
+        data.bitmap?.png
+
+      case "image/jpeg":
+        data.bitmap?.jpeg
+
+      default:
+        data.bitmap?.jpeg
+    } else { return nil }
+
+    do {
+      try imageData.write(to: fileUrl)
+      return path
+    } catch {
+      return nil
+    }
+  }
+}
+
+extension NSImage {
   func prepareForUpload() -> SendMessageAttachment? {
     let maxSize = 5_024 * 1_024
 
