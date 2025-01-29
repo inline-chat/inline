@@ -98,15 +98,17 @@ class UIMessageView: UIView {
 
   private func setupViews() {
     addSubview(bubbleView)
-    bubbleView.addSubview(messageLabel)
     bubbleView.addSubview(metadataView)
+    bubbleView.addSubview(messageLabel)
+
     if message.repliedToMessageId != nil {
       bubbleView.addSubview(embedView)
 
       if let repliedMessage = fullMessage.repliedToMessage {
         embedView.configure(
           message: repliedMessage,
-          senderName: fullMessage.replyToMessageSender?.firstName ?? "",
+          senderName: Auth.shared.getCurrentUserId() == fullMessage.repliedToMessage?.fromId ? "You" : fullMessage
+            .replyToMessageSender?.firstName ?? "",
           outgoing: outgoing
         )
       }
@@ -159,12 +161,11 @@ class UIMessageView: UIView {
       metadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -14),
     ]
     let withEmbed = [
-      embedView.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+      embedView.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
       embedView.leadingAnchor.constraint(equalTo: messageLabel.leadingAnchor),
       embedView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
-      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height),
+      embedView.bottomAnchor.constraint(equalTo: messageLabel.topAnchor, constant: -labelVerticalPadding),
 
-      messageLabel.topAnchor.constraint(equalTo: embedView.bottomAnchor, constant: 8),
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
       messageLabel.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -labelHorizantalPadding),
 
@@ -189,12 +190,11 @@ class UIMessageView: UIView {
       metadataView.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
     ]
     let withEmbed = [
-      embedView.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+      embedView.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
       embedView.leadingAnchor.constraint(equalTo: messageLabel.leadingAnchor),
       embedView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -12),
-      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height),
+      embedView.bottomAnchor.constraint(equalTo: messageLabel.topAnchor, constant: -labelVerticalPadding),
 
-      messageLabel.topAnchor.constraint(equalTo: embedView.bottomAnchor, constant: 8),
       messageLabel.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
       messageLabel.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -labelVerticalPadding),
 

@@ -52,7 +52,6 @@ class EmbedMessageView: UIView {
   override func layoutSubviews() {
     super.layoutSubviews()
     updateRectangleMask()
-    
   }
     
   func configure(message: Message, senderName: String, outgoing: Bool) {
@@ -81,12 +80,11 @@ private extension EmbedMessageView {
                                             constant: -Constants.horizontalPadding),
       headerLabel.topAnchor.constraint(equalTo: topAnchor,
                                        constant: Constants.verticalPadding),
-            
+      headerLabel.bottomAnchor.constraint(equalTo: messageLabel.topAnchor),
       messageLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor,
                                             constant: Constants.contentSpacing),
       messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor,
                                              constant: -Constants.horizontalPadding),
-      messageLabel.topAnchor.constraint(equalTo: headerLabel.bottomAnchor),
       messageLabel.bottomAnchor.constraint(equalTo: bottomAnchor,
                                            constant: -Constants.verticalPadding)
     ])
