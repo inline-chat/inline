@@ -68,7 +68,7 @@ class MessagesCollectionView: UICollectionView {
   }
 
   private var composeHeight: CGFloat = ComposeView.minHeight
-  private var composeEmbedViewHeight: CGFloat = ChatContainerView.embedViewHeight
+  private var composeEmbedViewHeight: CGFloat = ComposeEmbedView.height
 
   public func updateComposeInset(composeHeight: CGFloat) {
     self.composeHeight = composeHeight
@@ -231,13 +231,15 @@ class MessagesCollectionView: UICollectionView {
 
   @objc private func replyStateChanged(_ notification: Notification) {
     DispatchQueue.main.async {
+      UIView.animate(withDuration: 0.2) {
       self.updateContentInsets()
-      if self.shouldScrollToBottom, !self.itemsEmpty {
-        self.scrollToItem(
-          at: IndexPath(item: 0, section: 0),
-          at: .top,
-          animated: true
-        )
+        if self.shouldScrollToBottom, !self.itemsEmpty {
+          self.scrollToItem(
+            at: IndexPath(item: 0, section: 0),
+            at: .top,
+            animated: true
+          )
+        }
       }
     }
   }
@@ -353,7 +355,7 @@ private extension MessagesCollectionView {
                 self?.currentCollectionView?.scrollToItem(
                   at: IndexPath(item: 0, section: 0),
                   at: .top,
-                  animated: false
+                  animated: true
                 )
               }
             }
