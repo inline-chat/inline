@@ -106,9 +106,9 @@ class ComposeAppKit: NSView {
   lazy var background = {
     // Add vibrancy effect
     let material = NSVisualEffectView(frame: bounds)
-    material.material = Theme.pageBackgroundMaterial
+    // material.material = Theme.pageBackgroundMaterial
+    material.material = .titlebar
     material.blendingMode = .withinWindow
-    material.isEmphasized = false
     material.state = .followsWindowActiveState
     material.translatesAutoresizingMaskIntoConstraints = false
     return material

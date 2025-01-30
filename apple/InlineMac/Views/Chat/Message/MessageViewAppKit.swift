@@ -87,18 +87,6 @@ class MessageViewAppKit: NSView {
     return view
   }()
 
-  private lazy var underTextSpacer: NSView = {
-    let spacerView = NSView()
-    spacerView.translatesAutoresizingMaskIntoConstraints = false
-    return spacerView
-  }()
-
-  private lazy var aboveTextSpacer: NSView = {
-    let spacerView = NSView()
-    spacerView.translatesAutoresizingMaskIntoConstraints = false
-    return spacerView
-  }()
-
   private lazy var timeAndStateView: MessageTimeAndState = {
     let view = MessageTimeAndState(fullMessage: fullMessage)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -158,16 +146,7 @@ class MessageViewAppKit: NSView {
     return textView
   }()
 
-  // Experimental: See if it looks good or has any performance bottlenecks
-  // Update color reflecting the scroll
-  func reflectBoundsChange(fraction uncappedFraction: CGFloat) {
-    // Disabled until I can make it more stable
-//    let fraction = max(0.0, min(1.0, uncappedFraction))
-//    if hasBubble {
-//      bubbleView.backgroundColor = bubbleColor
-//        .blended(withFraction: (1.0 - fraction) * 0.3, of: .white)
-//    }
-  }
+  func reflectBoundsChange(fraction uncappedFraction: CGFloat) {}
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
@@ -305,12 +284,24 @@ class MessageViewAppKit: NSView {
 
     if hasPhoto {
       contentView.addArrangedSubview(photoView)
-    }
 
-    // TODO: if has text
-    contentView.addArrangedSubview(aboveTextSpacer)
-    contentView.addArrangedSubview(textView)
-    contentView.addArrangedSubview(underTextSpacer)
+      // TODO: if has text
+      contentView.addArrangedSubview(textView)
+
+      // padding
+      // contentView.spacing = Theme.messageContentViewSpacing
+      let aboveTextPadding = NSLayoutGuide()
+      contentView.addLayoutGuide(aboveTextPadding)
+      aboveTextPadding.heightAnchor
+        .constraint(
+          lessThanOrEqualToConstant: Theme.messageContentViewSpacing
+        ).isActive = true
+      aboveTextPadding.topAnchor.constraint(equalTo: photoView.bottomAnchor).isActive = true
+      aboveTextPadding.bottomAnchor.constraint(equalTo: textView.topAnchor).isActive = true
+    } else {
+      // TODO: if has text
+      contentView.addArrangedSubview(textView)
+    }
 
     setupMessageText()
     setupConstraints()
@@ -323,8 +314,10 @@ class MessageViewAppKit: NSView {
   private var contentViewWidthConstraint: NSLayoutConstraint!
 
   private func setupConstraints() {
-    var topPadding = 0.0
+    var topPadding = Theme.messageOuterVerticalPadding
+    var bottomPadding = Theme.messageOuterVerticalPadding
     let nameAndContentGap = Theme.messageVerticalStackSpacing
+    let contentSpacing = Theme.messageContentViewSpacing
     let bgPadding = 0.0
     let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
@@ -341,7 +334,7 @@ class MessageViewAppKit: NSView {
         avatarView.topAnchor.constraint(
           equalTo: topAnchor,
           constant:
-          topPadding
+          topPadding + 2.0 // adjust to align better with name
         ),
         avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize),
         avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize),

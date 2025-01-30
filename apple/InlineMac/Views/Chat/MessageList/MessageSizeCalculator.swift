@@ -268,6 +268,9 @@ class MessageSizeCalculator {
       if let photoSize {
         totalHeight += photoSize.height
       }
+      
+      // Add some padding
+      totalHeight += Theme.messageContentViewSpacing
     }
 
     var totalWidth = textWidth
