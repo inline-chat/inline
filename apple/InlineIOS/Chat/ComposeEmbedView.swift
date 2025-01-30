@@ -13,6 +13,8 @@ class ComposeEmbedView: UIView {
     let label = UILabel()
     label.font = .systemFont(ofSize: 17, weight: .medium)
     label.textColor = ColorManager.shared.selectedColor
+    label.numberOfLines = 1
+
     return label
   }()
 
@@ -37,7 +39,7 @@ class ComposeEmbedView: UIView {
   private lazy var labelsStackView: UIStackView = {
     let stackView = UIStackView(arrangedSubviews: [nameLabel, messageLabel])
     stackView.axis = .vertical
-    stackView.spacing = 0
+    stackView.spacing = 4
     stackView.alignment = .leading
 
     return stackView
@@ -46,7 +48,6 @@ class ComposeEmbedView: UIView {
   private lazy var containerStackView: UIStackView = {
     let stackView = UIStackView(arrangedSubviews: [labelsStackView, closeButton])
     stackView.axis = .horizontal
-    stackView.spacing = 0
     stackView.alignment = .center
 
     return stackView
@@ -73,17 +74,18 @@ class ComposeEmbedView: UIView {
 
   private func setupViews() {
     backgroundColor = .clear
-    addSubview(containerStackView)
+    clipsToBounds = true
+    translatesAutoresizingMaskIntoConstraints = false
 
-    closeButton.setContentHuggingPriority(.required, for: .horizontal)
-    closeButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+    addSubview(containerStackView)
   }
 
   private func setupConstraints() {
     containerStackView.translatesAutoresizingMaskIntoConstraints = false
 
     NSLayoutConstraint.activate([
-      containerStackView.topAnchor.constraint(equalTo: topAnchor),
+      containerStackView.heightAnchor.constraint(equalToConstant: Self.height),
+      containerStackView.bottomAnchor.constraint(equalTo: bottomAnchor),
       containerStackView.leadingAnchor.constraint(equalTo: leadingAnchor),
       containerStackView.trailingAnchor.constraint(equalTo: trailingAnchor),
 
@@ -126,9 +128,8 @@ class ComposeEmbedView: UIView {
   }
 
   @objc private func closeButtonTapped() {
-    UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut) {
-      ChatState.shared.clearReplyingMessageId(peer: self.peerId)
-    }
+    print("Clicked closeButtonTapped")
+    ChatState.shared.clearReplyingMessageId(peer: peerId)
   }
 
   deinit {

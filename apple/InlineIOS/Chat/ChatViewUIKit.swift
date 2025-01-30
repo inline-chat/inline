@@ -3,8 +3,6 @@ import SwiftUI
 import UIKit
 
 class ChatContainerView: UIView {
-  static var embedViewHeight: CGFloat = 42
-
   let peerId: Peer
   let chatId: Int64?
 
@@ -25,17 +23,9 @@ class ChatContainerView: UIView {
     return view
   }()
 
-  lazy var composeEmbedView: ComposeEmbedView = {
-    let view = ComposeEmbedView(
-      peerId: peerId,
-      chatId: chatId ?? 0,
-      messageId: ChatState.shared.getState(peer: peerId).replyingMessageId ?? 0
-    )
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
+  var composeEmbedView: ComposeEmbedView?
 
-  lazy var composeEmbedFakeView: UIView = {
+  lazy var composeEmbedViewWrapper: UIView = {
     let view = UIView()
 
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -73,7 +63,7 @@ class ChatContainerView: UIView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private var composeEmbedHeightConstraint: NSLayoutConstraint?
+  private var composeEmbedHeightConstraint: NSLayoutConstraint!
   private var composeEmbedBottomConstraint: NSLayoutConstraint?
 
   private func setupViews() {
@@ -82,8 +72,7 @@ class ChatContainerView: UIView {
     addSubview(messagesCollectionView)
     addSubview(blurView)
     blurView.contentView.addSubview(borderView)
-    addSubview(composeEmbedFakeView)
-    composeEmbedFakeView.addSubview(composeEmbedView)
+    addSubview(composeEmbedViewWrapper)
     addSubview(composeView)
 
     blurViewBottomConstraint = blurView.bottomAnchor.constraint(equalTo: bottomAnchor)
@@ -91,10 +80,9 @@ class ChatContainerView: UIView {
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
     // initialize the height constraint
-    composeEmbedHeightConstraint = composeEmbedFakeView.heightAnchor
+    composeEmbedHeightConstraint = composeEmbedViewWrapper.heightAnchor
       .constraint(equalToConstant: hasReply ? ComposeEmbedView.height : 0)
-    composeEmbedHeightConstraint?.isActive = true
-    composeEmbedView.isHidden = !hasReply
+    addReplyView()
     NSLayoutConstraint.activate([
       messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
       messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
@@ -104,25 +92,21 @@ class ChatContainerView: UIView {
       blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
       blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
       blurView.topAnchor.constraint(
-        equalTo: composeEmbedFakeView.topAnchor,
+        equalTo: composeEmbedViewWrapper.topAnchor,
         constant: -ComposeView.textViewVerticalMargin
       ),
       blurViewBottomConstraint!,
 
-      composeEmbedFakeView.bottomAnchor.constraint(equalTo: composeView.topAnchor),
-      composeEmbedFakeView.leadingAnchor.constraint(
+      composeEmbedViewWrapper.bottomAnchor.constraint(equalTo: composeView.topAnchor),
+      composeEmbedViewWrapper.leadingAnchor.constraint(
         equalTo: leadingAnchor,
         constant: ComposeView.textViewHorizantalMargin
       ),
-      composeEmbedFakeView.trailingAnchor.constraint(
+      composeEmbedViewWrapper.trailingAnchor.constraint(
         equalTo: trailingAnchor,
         constant: -ComposeView.textViewHorizantalMargin
       ),
-
-      composeEmbedView.topAnchor.constraint(equalTo: composeEmbedFakeView.topAnchor),
-      composeEmbedView.leadingAnchor.constraint(equalTo: composeEmbedFakeView.leadingAnchor),
-      composeEmbedView.trailingAnchor.constraint(equalTo: composeEmbedFakeView.trailingAnchor),
-      composeEmbedView.bottomAnchor.constraint(equalTo: composeEmbedFakeView.bottomAnchor),
+      composeEmbedHeightConstraint,
 
       composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
       composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
@@ -202,35 +186,35 @@ class ChatContainerView: UIView {
 
   var hasReply: Bool { ChatState.shared.getState(peer: peerId).replyingMessageId != nil }
 
-  @objc private func setReply() {
-    composeEmbedView.removeFromSuperview()
-
+  private func addReplyView() {
     let newComposeEmbedView = ComposeEmbedView(
       peerId: peerId,
       chatId: chatId ?? 0,
       messageId: ChatState.shared.getState(peer: peerId).replyingMessageId ?? 0
     )
     newComposeEmbedView.translatesAutoresizingMaskIntoConstraints = false
-
-    composeEmbedFakeView.addSubview(newComposeEmbedView)
+    composeEmbedViewWrapper.clipsToBounds = true
+    composeEmbedViewWrapper.addSubview(newComposeEmbedView)
 
     NSLayoutConstraint.activate([
-      newComposeEmbedView.topAnchor.constraint(equalTo: composeEmbedFakeView.topAnchor),
-      newComposeEmbedView.leadingAnchor.constraint(equalTo: composeEmbedFakeView.leadingAnchor),
-      newComposeEmbedView.trailingAnchor.constraint(equalTo: composeEmbedFakeView.trailingAnchor),
-      newComposeEmbedView.bottomAnchor.constraint(equalTo: composeEmbedFakeView.bottomAnchor),
+      newComposeEmbedView.leadingAnchor.constraint(equalTo: composeEmbedViewWrapper.leadingAnchor, constant: 6),
+      newComposeEmbedView.trailingAnchor.constraint(equalTo: composeEmbedViewWrapper.trailingAnchor, constant: -6),
+      newComposeEmbedView.bottomAnchor.constraint(equalTo: composeEmbedViewWrapper.bottomAnchor, constant: -4),
+      newComposeEmbedView.heightAnchor.constraint(equalToConstant: ComposeEmbedView.height),
     ])
 
     composeEmbedView = newComposeEmbedView
-    composeEmbedView.isHidden = false
+  }
 
-    composeEmbedHeightConstraint?.isActive = false
-    composeEmbedHeightConstraint = composeEmbedFakeView.heightAnchor
-      .constraint(equalToConstant: ComposeEmbedView.height)
-    composeEmbedHeightConstraint?.isActive = true
+  @objc private func setReply() {
+    composeEmbedView?.removeFromSuperview()
+    addReplyView()
+    layoutIfNeeded()
+
+    composeEmbedHeightConstraint.constant = ComposeEmbedView.height
 
     UIView.animate(
-      withDuration: 0.02,
+      withDuration: 0.2,
       delay: 0,
       options: .curveEaseOut
     ) {
@@ -240,15 +224,13 @@ class ChatContainerView: UIView {
   }
 
   @objc private func clearReply() {
-//    composeEmbedHeightConstraint?.isActive = false
-    composeEmbedHeightConstraint = composeEmbedFakeView.heightAnchor.constraint(equalToConstant: 0)
-    composeEmbedHeightConstraint?.isActive = true
+    composeEmbedHeightConstraint.constant = 0
 
     UIView.animate(withDuration: 0.2) {
       self.layoutIfNeeded()
     } completion: { _ in
-      self.composeEmbedView.isHidden = true
-      self.composeEmbedView.removeFromSuperview()
+      self.composeEmbedView?.isHidden = true
+      self.composeEmbedView?.removeFromSuperview()
     }
   }
 
