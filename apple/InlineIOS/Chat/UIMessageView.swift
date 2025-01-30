@@ -305,7 +305,6 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       var actions: [UIAction] = [copyAction]
 
       let replyAction = UIAction(title: "Reply") { _ in
-        print("REPLY \(self.message.id)")
         ChatState.shared.setReplyingMessageId(peer: self.message.peerId, id: self.message.id)
       }
       actions.append(replyAction)

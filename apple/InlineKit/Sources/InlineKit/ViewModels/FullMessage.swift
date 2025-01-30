@@ -24,8 +24,8 @@ public final class FullMessageViewModel: ObservableObject, @unchecked Sendable {
         .tracking { db in
           try Message
             .filter(Column("messageId") == messageId && Column("chatId") == chatId)
-            .including(optional: Message.from.forKey("from"))
             .including(optional: Message.file)
+            .including(optional: Message.from.forKey("from"))
             .including(all: Message.reactions)
             .including(optional: Message.repliedToMessage.forKey("repliedToMessage"))
             .asRequest(of: FullMessage.self)
