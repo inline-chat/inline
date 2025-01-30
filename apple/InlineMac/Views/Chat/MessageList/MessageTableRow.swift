@@ -72,11 +72,11 @@ class MessageTableCell: NSView {
     }
 
     log.debug("""
-              recreating message view for \(message.message.id)
-              
-              previous: \(currentContent?.message.debugDescription ?? "nil")
-              new: \(message.debugDescription)
-              """)
+    recreating message view for \(message.message.id)
+
+    previous: \(currentContent?.message.debugDescription ?? "nil")
+    new: \(message.debugDescription)
+    """)
 
     currentContent = (message, props)
     updateContent()
@@ -116,10 +116,8 @@ class MessageTableCell: NSView {
     NSLayoutConstraint.activate([
       newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       newMessageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-
-      // Apply inter message paddings
-      newMessageView.topAnchor.constraint(equalTo: topAnchor, constant: Theme.messageOuterVerticalPadding),
-      newMessageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Theme.messageOuterVerticalPadding),
+      newMessageView.topAnchor.constraint(equalTo: topAnchor),
+      newMessageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
     messageView = newMessageView
