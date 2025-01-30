@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 class ChatContainerView: UIView {
-  static var embedViewHeight: CGFloat = 60
+  static var embedViewHeight: CGFloat = 42
 
   let peerId: Peer
   let chatId: Int64?
@@ -50,6 +50,13 @@ class ChatContainerView: UIView {
     return view
   }()
 
+  private lazy var borderView: UIView = {
+    let view = UIView()
+    view.backgroundColor = .systemGray5
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
   private var blurViewBottomConstraint: NSLayoutConstraint?
 
   init(peerId: Peer, chatId: Int64?) {
@@ -74,6 +81,7 @@ class ChatContainerView: UIView {
 
     addSubview(messagesCollectionView)
     addSubview(blurView)
+    blurView.contentView.addSubview(borderView)
     addSubview(composeEmbedFakeView)
     composeEmbedFakeView.addSubview(composeEmbedView)
     addSubview(composeView)
@@ -86,7 +94,7 @@ class ChatContainerView: UIView {
     composeEmbedHeightConstraint = composeEmbedFakeView.heightAnchor
       .constraint(equalToConstant: hasReply ? ComposeEmbedView.height : 0)
     composeEmbedHeightConstraint?.isActive = true
-
+    composeEmbedView.isHidden = !hasReply
     NSLayoutConstraint.activate([
       messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
       messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
@@ -121,6 +129,10 @@ class ChatContainerView: UIView {
       composeView.bottomAnchor.constraint(
         equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin
       ),
+      borderView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor),
+      borderView.trailingAnchor.constraint(equalTo: blurView.trailingAnchor),
+      borderView.topAnchor.constraint(equalTo: blurView.topAnchor),
+      borderView.heightAnchor.constraint(equalToConstant: 0.5),
     ])
   }
 
@@ -228,7 +240,7 @@ class ChatContainerView: UIView {
   }
 
   @objc private func clearReply() {
-    composeEmbedHeightConstraint?.isActive = false
+//    composeEmbedHeightConstraint?.isActive = false
     composeEmbedHeightConstraint = composeEmbedFakeView.heightAnchor.constraint(equalToConstant: 0)
     composeEmbedHeightConstraint?.isActive = true
 
