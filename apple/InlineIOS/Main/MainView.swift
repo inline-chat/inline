@@ -251,14 +251,6 @@ struct MainView: View {
       ToolbarItem(id: "MainToolbarTrailing", placement: .topBarTrailing) {
         HStack(spacing: 2) {
           Button {
-            nav.push(.createSpace)
-          } label: {
-            Image(systemName: "plus")
-              .tint(Color.secondary)
-              .frame(width: 38, height: 38)
-              .contentShape(Rectangle())
-          }
-          Button {
             nav.push(.settings)
           } label: {
             Image(systemName: "gearshape")
