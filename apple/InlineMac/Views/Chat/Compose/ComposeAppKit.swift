@@ -103,7 +103,7 @@ class ComposeAppKit: NSView {
     return material
   }()
 
-  var hasTopSeperator: Bool = false
+  var hasTopSeperator: Bool = true
 
   func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
