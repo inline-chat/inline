@@ -72,7 +72,7 @@ class ComposeEmbedView: UIView {
   }
 
   private func setupViews() {
-    backgroundColor = .blue
+    backgroundColor = .clear
     addSubview(containerStackView)
 
     closeButton.setContentHuggingPriority(.required, for: .horizontal)

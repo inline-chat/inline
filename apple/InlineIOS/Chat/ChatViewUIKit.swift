@@ -37,7 +37,7 @@ class ChatContainerView: UIView {
 
   lazy var composeEmbedFakeView: UIView = {
     let view = UIView()
-    view.backgroundColor = .red
+
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
