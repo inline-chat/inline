@@ -37,10 +37,14 @@ final class ChatState: ObservableObject {
   func setReplyingMessageId(peer: Peer, id: Int64) {
     var state = getState(peer: peer)
     state.replyingMessageId = id
-    print("Setting replying message id to \(id)")
     states[peer] = state
     persistStates()
-    NotificationCenter.default.post(name: .init("ChatStateDidChange"), object: nil)
+
+    NotificationCenter.default.post(
+      name: .init("ChatStateSetReplyCalled"),
+      object: nil,
+      userInfo: ["messageId": id]
+    )
   }
 
   func clearReplyingMessageId(peer: Peer) {
@@ -48,7 +52,7 @@ final class ChatState: ObservableObject {
     state.replyingMessageId = nil
     states[peer] = state
     persistStates()
-    NotificationCenter.default.post(name: .init("ChatStateDidChange"), object: nil)
+    NotificationCenter.default.post(name: .init("ChatStateClearReplyCalled"), object: nil)
   }
 
   private func persistStates() {
