@@ -10,7 +10,7 @@ class ComposeTextEditor: NSView {
   let minTextHeight: CGFloat = Theme.composeMinHeight - 2 * Theme.composeVerticalPadding
   let verticalPadding: CGFloat = Theme.composeVerticalPadding
   
-  private let horizontalPadding: CGFloat = 5.0
+  private let horizontalPadding: CGFloat = Theme.composeTextViewHorizontalPadding
 
   weak var delegate: (NSTextViewDelegate & ComposeTextViewDelegate)? {
     didSet {

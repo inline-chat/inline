@@ -8,6 +8,9 @@ enum Theme {
   // MARK: - General
 
   static let pageBackgroundMaterial: NSVisualEffectView.Material = .contentBackground
+  static let whiteOnLight: NSColor = .init(name: "whiteOrBlack") { appearance in
+    appearance.name == .darkAqua ? NSColor.black : NSColor.white
+  }
 
   // MARK: - Window
 
@@ -55,10 +58,11 @@ enum Theme {
   static let messageListTopInset: CGFloat = 14
   static let messageListBottomInset: CGFloat = 10
 
-  static let composeMinHeight: CGFloat = 30
-  static let composeButtonSize: CGFloat = 22
-  static let composeVerticalPadding: CGFloat = 6 // inner
-  static let composeOuterSpacing: CGFloat = 18
+  static let composeMinHeight: CGFloat = 44
+  static let composeButtonSize: CGFloat = 24
+  static let composeTextViewHorizontalPadding: CGFloat = 10.0
+  static let composeVerticalPadding: CGFloat = 2.0 // inner, higher makes 2 line compose increase height
+  static let composeOuterSpacing: CGFloat = 18 // horizontal
   static let composeOutlineColor: NSColor = .init(name: "composeOutlineColor") { appearance in
     appearance.name == .darkAqua ? NSColor.white
       .withAlphaComponent(0.1) : NSColor.black
