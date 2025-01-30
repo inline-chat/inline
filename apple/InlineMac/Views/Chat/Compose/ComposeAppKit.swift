@@ -20,7 +20,7 @@ class ComposeAppKit: NSView {
   private var radius: CGFloat = round(Theme.composeMinHeight / 2)
   private var verticalPadding = 0.0
   private var horizontalOuterSpacing = Theme.composeOuterSpacing
-  private var buttonsSpacing = (Theme.composeMinHeight - Theme.composeButtonSize) / 2
+  private var buttonsBottomSpacing = (Theme.composeMinHeight - Theme.composeButtonSize) / 2
 
   // ---
   private var textViewContentHeight: CGFloat = 0.0
@@ -35,18 +35,8 @@ class ComposeAppKit: NSView {
 
   // MARK: Views
 
-  private lazy var box: NSView = {
-    let box = BasicView()
-    box.wantsLayer = true
-    box.cornerRadius = radius
-    box.borderColor = Theme.composeOutlineColor
-    box.borderWidth = 1.0
-    box.translatesAutoresizingMaskIntoConstraints = false
-    return box
-  }()
-
   private lazy var textEditor: ComposeTextEditor = {
-    let textEditor = ComposeTextEditor(initiallySingleLine: true)
+    let textEditor = ComposeTextEditor(initiallySingleLine: false)
     textEditor.translatesAutoresizingMaskIntoConstraints = false
     return textEditor
   }()
@@ -106,7 +96,6 @@ class ComposeAppKit: NSView {
   lazy var background = {
     // Add vibrancy effect
     let material = NSVisualEffectView(frame: bounds)
-    // material.material = Theme.pageBackgroundMaterial
     material.material = .titlebar
     material.blendingMode = .withinWindow
     material.state = .followsWindowActiveState
@@ -124,7 +113,6 @@ class ComposeAppKit: NSView {
     // layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5).cgColor
 
     addSubview(background)
-    addSubview(box)
     addSubview(border)
     addSubview(sendButton)
     addSubview(menuButton)
@@ -148,12 +136,12 @@ class ComposeAppKit: NSView {
       background.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       // send
-      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing - buttonsSpacing),
-      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -horizontalOuterSpacing - buttonsSpacing),
+      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+      sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
 
       // menu
-      menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing + buttonsSpacing),
-      menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -horizontalOuterSpacing - buttonsSpacing),
+      menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
+      menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
 
       // Add attachments constraints
       attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor),
@@ -163,7 +151,7 @@ class ComposeAppKit: NSView {
       // text editor
       textEditor.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor),
       textEditor.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor),
-      textEditor.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -horizontalOuterSpacing),
+      textEditor.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       // Update text editor top constraint
       // textEditor.topAnchor.constraint(equalTo: topAnchor),
@@ -174,12 +162,6 @@ class ComposeAppKit: NSView {
       border.trailingAnchor.constraint(equalTo: trailingAnchor),
       border.topAnchor.constraint(equalTo: topAnchor),
       border.heightAnchor.constraint(equalToConstant: 1),
-
-      // outline border
-      box.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
-      box.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
-      box.topAnchor.constraint(equalTo: background.topAnchor, constant: 0.0),
-      box.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -horizontalOuterSpacing),
     ])
 
     if hasTopSeperator {
@@ -208,15 +190,17 @@ class ComposeAppKit: NSView {
   // MARK: - Height
 
   private func getTextViewHeight() -> CGFloat {
-    // FIXME: move to text editor
-    textViewHeight = max(textEditor.minHeight, textViewContentHeight + textEditor.verticalPadding * 2)
+    textViewHeight = max(
+      textEditor.minHeight,
+      textViewContentHeight + textEditor.verticalPadding * 2
+    )
     return textViewHeight
   }
 
   // Get compose height
   private func getInnerHeight() -> CGFloat {
     let textViewHeight = getTextViewHeight()
-    let contentHeight = max(textEditor.minTextHeight, textViewHeight) // FIXME:
+    let contentHeight = max(textEditor.minHeight, textViewHeight)
     let attachmentsHeight = attachments.getHeight()
     let height = contentHeight + attachmentsHeight + verticalPadding
     let maxHeight = 300.0
@@ -225,7 +209,7 @@ class ComposeAppKit: NSView {
   }
 
   private func getHeight() -> CGFloat {
-    let height = getInnerHeight() + Theme.composeOuterSpacing
+    let height = getInnerHeight()
     return height
   }
 
