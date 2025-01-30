@@ -220,7 +220,7 @@ public extension Message {
         if let existingFileId = existing.fileId {
           fileId = existingFileId // ... find a way for making this better
         }
-        
+
         isExisting = true
       }
     } else {
@@ -248,5 +248,54 @@ public extension Message {
         }
       }
     }
+  }
+}
+
+public extension ApiMessage {
+  func saveFullMessage(
+    _ db: Database, publishChanges: Bool = false
+  )
+    throws -> Message
+  {
+    let existing = try? Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
+    let isUpdate = existing != nil
+    var message = Message(from: self)
+
+    if let existing {
+      message.globalId = existing.globalId
+      message.status = existing.status
+      message.fileId = existing.fileId
+      // ... anything else?
+    } else {
+      // attach main photo
+      // TODO: handle multiple files
+      let file: File? = if let photo = photo?.first {
+        try? File.save(db, apiPhoto: photo)
+      } else {
+        nil
+      }
+      message.fileId = file?.id
+      try message.saveMessage(db, publishChanges: false) // publish is below
+    }
+
+    if publishChanges {
+      // Publish changes when save is successful
+      if isUpdate {
+        db.afterNextTransaction { _ in
+          Task { @MainActor in
+            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+          }
+        }
+      } else {
+        db.afterNextTransaction { _ in
+          // This code runs after the transaction successfully commits
+          Task { @MainActor in
+            await MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+          }
+        }
+      }
+    }
+    
+    return message
   }
 }

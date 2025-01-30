@@ -244,13 +244,8 @@ public class DataManager: ObservableObject {
         }
 
         // Save messages
-        let messages = result.messages.map { message in Message(from: message) }
-        //        try messages.forEach { message in
-        //          try message.save(db, onConflict: .replace)
-        //        }
-        try messages.forEach { message in
-          var mutableMessage = message
-          try mutableMessage.saveMessage(db)
+        try result.messages.forEach { message in
+          let _ = try message.saveFullMessage(db, publishChanges: false)
         }
 
         // TODO: Optimize
@@ -391,23 +386,7 @@ public class DataManager: ObservableObject {
     try await database.dbWriter.write { db in
       for apiMessage in result.messages {
         do {
-          var fileId: String?
-
-          // Files
-          for apiPhoto in apiMessage.photo ?? [] {
-            print("apiPhoto: \(apiPhoto)")
-            let file = try File.save(db, apiPhoto: apiPhoto)
-
-            // TODO:
-            // if apiPhoto.thumbSize
-
-            fileId = file.id
-          }
-
-          // Message
-          var message = Message(from: apiMessage)
-          message.fileId = fileId
-          try message.saveMessage(db, onConflict: .replace, publishChanges: false)
+          let _ = try apiMessage.saveFullMessage(db, publishChanges: false)
         } catch {
           Task {
             await self.log.error("failed to save message  from: \(apiMessage)", error: error)
