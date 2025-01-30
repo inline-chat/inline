@@ -30,9 +30,8 @@ final class PhotoView: NSView {
   private let maskLayer = CAShapeLayer()
   let topLeftRadius: CGFloat = 4.0
   let topRightRadius: CGFloat = 4.0
-  // minus 1px makes it look better bc of the 1px padding
-  let bottomLeftRadius: CGFloat = Theme.messageIsBubble ? Theme.messageBubbleRadius - 1 : 4.0
-  let bottomRightRadius: CGFloat = Theme.messageIsBubble ? Theme.messageBubbleRadius - 1 : 4.0
+  let bottomLeftRadius: CGFloat = 4.0
+  let bottomRightRadius: CGFloat = 4.0
 
   private func setupView() {
     setupImage()
@@ -159,7 +158,7 @@ final class PhotoView: NSView {
 
   private func imageUrl() -> (isLocal: Bool, url: URL)? {
     guard let file = fullMessage.file else { return nil }
-    
+
     // prioritise local
     if let localFile = file.getLocalURL() {
       return (isLocal: true, url: localFile)
