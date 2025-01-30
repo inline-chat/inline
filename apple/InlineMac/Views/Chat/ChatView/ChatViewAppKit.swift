@@ -14,8 +14,6 @@ class ChatViewAppKit: NSView {
     setupView()
   }
 
-  private var cancellables = Set<AnyCancellable>()
-
   init(peerId: Peer) {
     self.peerId = peerId
 
@@ -24,21 +22,6 @@ class ChatViewAppKit: NSView {
 
     super.init(frame: .zero)
     setupView()
-
-    AppSettings.shared.$messageStyle
-      .sink { [weak self] _ in
-        // A delay so value changes
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-          // Bubble vs no bubble requires a lot of resetting
-
-          CacheAttrs.shared.invalidate()
-          MessageSizeCalculator.shared.invalidateCache()
-
-          print("message style changed")
-          self?.resetViews()
-        }
-      }
-      .store(in: &cancellables)
   }
 
   private func resetViews() {
@@ -83,7 +66,7 @@ class ChatViewAppKit: NSView {
 
     addSubview(messageListView)
     addSubview(composeView)
-    
+
     // initial height sync with msg list
     compose.updateHeight()
 

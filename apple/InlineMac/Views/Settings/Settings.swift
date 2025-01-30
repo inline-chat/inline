@@ -54,12 +54,9 @@ struct AppearanceView: View {
 
   var body: some View {
     Form {
-      // Toggle("Launch at Login", isOn: self.$slaunchAtLogin).toggleStyle(.switch)
-
-      Picker("Message Style:", selection: $settings.messageStyle) {
-        Text("Bubble").tag(MessageStyle.bubble)
-        Text("Minimal").tag(MessageStyle.minimal)
-
+      Picker("Sends with:", selection: $settings.sendsWithCmdEnter) {
+        Text("Return").tag(false)
+        Text("Command + Return").tag(true)
       }.pickerStyle(.inline)
     }
   }

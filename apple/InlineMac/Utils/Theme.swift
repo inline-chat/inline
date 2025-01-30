@@ -8,7 +8,6 @@ enum Theme {
   // MARK: - General
 
   static let pageBackgroundMaterial: NSVisualEffectView.Material = .contentBackground
-  // static let pageBackgroundMaterial: NSVisualEffectView.Material = .windowBackground
 
   // MARK: - Window
 
@@ -46,36 +45,6 @@ enum Theme {
   static let messageTextLineFragmentPadding: CGFloat = 0
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
-  static let messageBubbleRadius: CGFloat = 14.0
-  static let messageBubblePadding: CGSize = .init(width: 11.0, height: 5.0)
-  static let messageBubbleMinWidth: CGFloat = 10.0
-  static var messageIsBubble: Bool {
-    AppSettings.shared.messageStyle == .bubble
-  }
-
-  static let messageBubbleGrayLightColor: NSColor = .init(calibratedRed: 0.92, green: 0.92, blue: 0.92, alpha: 1.0)
-  static let messageBubbleGrayDarkColor: NSColor = .init(calibratedRed: 0.18, green: 0.18, blue: 0.18, alpha: 1.0)
-  static let messageBubbleGrayColor: NSColor = .init(name: "messageBubbleGrayColor") { appearance in
-    appearance.name == .darkAqua ? Self.messageBubbleGrayDarkColor : Self.messageBubbleGrayLightColor
-  }
-
-  static let messageBubbleBlueLightColor: NSColor = .systemBlue.blended(
-    withFraction: 0.2,
-    of: .white
-  ) ?? .systemBlue
-  static let messageBubbleBlueDarkColor: NSColor = .systemBlue
-  static let messageBubbleBlueColor: NSColor = .init(name: "messageBubbleBlueColor") { appearance in
-    appearance.name == .darkAqua ? Self.messageBubbleBlueDarkColor : Self.messageBubbleBlueLightColor
-  }
-
-  static let messageBubbleIncomingColor: NSColor = Theme.messageBubbleGrayColor
-  static let messageBubbleOutgoingColor: NSColor = Theme.messageBubbleBlueColor
-  static let messageBubbleOutgoingTextColor: NSColor = .white // .labelColor or .white
-  static let messageBubbleOutgoingLinkColor: NSColor = .white // .linkColor or .white
-  static let messageOutlineColor: NSColor = Theme.composeOutlineColor
-  static let messageBubbleIncomingOutline: Bool = false
-  static let messageBubbleOutgoingOutline: Bool = false
-  static let messageBubbleColoredName: Bool = false
 
   // MARK: - Chat View
 

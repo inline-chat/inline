@@ -45,9 +45,8 @@ class MessageSizeCalculator {
   }
 
   func getAvailableWidth(tableWidth width: CGFloat) -> CGFloat {
-    let bubblepaddings: CGFloat = Theme.messageBubblePadding.width * 2
     let ceiledWidth = ceil(width)
-    let paddings = Theme.messageHorizontalStackSpacing + Theme.messageSidePadding * 2 + bubblepaddings
+    let paddings = Theme.messageHorizontalStackSpacing + Theme.messageSidePadding * 2
     let availableWidth: CGFloat = ceiledWidth - paddings - Theme.messageAvatarSize - Self.safeAreaWidth -
       // if we don't subtract this here, it can result is wrong calculations
       Self.extraSafeWidth
@@ -66,7 +65,7 @@ class MessageSizeCalculator {
 
     // This is just text size, we need to take bubble paddings into account as well
     // we can probably refactor this to be more maintainable
-    if let minTextSize, minTextSize.width + (2 * Theme.messageBubblePadding.width) < availableWidth {
+    if let minTextSize, minTextSize.width < availableWidth {
       return minTextSize.width
     }
     return nil
@@ -83,7 +82,6 @@ class MessageSizeCalculator {
   ) -> (NSSize, NSSize, NSSize?) {
     let text = message.message.text ?? emptyFallback
     let hasMedia = message.file != nil
-    let hasBubble = Theme.messageIsBubble
 
     // If text is empty, height is always 1 line
     // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
@@ -194,12 +192,6 @@ class MessageSizeCalculator {
     // Make available width divisible by 4 to do one fourth of layouting per text
     availableWidth = floor(availableWidth / 3) * 3
 
-    // In bubble mode, we need to take into account the padding for text sizing so
-    // media can stick to sides while text repsects the paddings.
-    if Theme.messageIsBubble {
-      availableWidth -= 2 * Theme.messageBubblePadding.width
-    }
-
     log.trace("availableWidth \(availableWidth) for text \(text)")
     var textSize: CGSize?
 
@@ -278,16 +270,7 @@ class MessageSizeCalculator {
       }
     }
 
-    if Theme.messageIsBubble {
-      totalHeight += Theme.messageBubblePadding.height * 2
-    }
-
     var totalWidth = textWidth
-
-    // Add back the padding
-    if Theme.messageIsBubble {
-      totalWidth += Theme.messageBubblePadding.width * 2
-    }
 
     // Fitting width
     let size = NSSize(width: textWidth, height: totalHeight)

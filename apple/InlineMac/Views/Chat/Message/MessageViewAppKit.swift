@@ -26,10 +26,6 @@ class MessageViewAppKit: NSView {
     message.out == true
   }
 
-  private var hasBubble: Bool {
-    Theme.messageIsBubble
-  }
-
   private var hasPhoto: Bool {
     if let file = fullMessage.file, file.fileType == .photo {
       return true
@@ -38,81 +34,33 @@ class MessageViewAppKit: NSView {
   }
 
   private var textWidth: CGFloat {
-    if hasBubble {
-      max(Theme.messageBubbleMinWidth, props.textWidth ?? Theme.messageBubbleMinWidth)
-    } else {
-      props.textWidth ?? 100.0
-    }
+    props.textWidth ?? 100.0
   }
 
   // When we have photo, shorter text shouldn't shrink content view
   private var contentWidth: CGFloat {
-    props.photoWidth ?? (
-      hasBubble ? textWidth + Theme.messageBubblePadding.width * 2 : textWidth
-    )
-  }
-
-  private var bubbleColor: NSColor {
-    outgoing ? Theme.messageBubbleOutgoingColor : Theme.messageBubbleIncomingColor
+    props.photoWidth ?? textWidth
   }
 
   private var textColor: NSColor {
-    if hasBubble {
-      outgoing ? Theme.messageBubbleOutgoingTextColor : NSColor.labelColor
-    } else {
-      NSColor.labelColor
-    }
+    NSColor.labelColor
   }
 
   private var linkColor: NSColor {
-    if hasBubble {
-      outgoing ? Theme.messageBubbleOutgoingLinkColor : NSColor.linkColor
-    } else {
-      NSColor.linkColor
-    }
+    NSColor.linkColor
   }
 
   private var senderFont: NSFont {
-    if hasBubble {
-      .systemFont(
-        ofSize: 12.0,
-        weight: .medium
-      )
-    } else {
-      .systemFont(
-        ofSize: NSFont.systemFontSize,
-        weight: .semibold
-      )
-    }
+    .systemFont(
+      ofSize: NSFont.systemFontSize,
+      weight: .medium
+    )
   }
 
   // State
   private var isMouseInside = false
 
   // MARK: Views
-
-  private lazy var bubbleView: BasicView = {
-    let view = BasicView()
-    view.wantsLayer = true
-    view.backgroundColor = bubbleColor
-    view.cornerRadius = Theme.messageBubbleRadius
-    view.layer?.cornerRadius = Theme.messageBubbleRadius
-    view.translatesAutoresizingMaskIntoConstraints = false
-
-    // Outline
-    if hasBubble {
-      let hasOutline =
-        (!outgoing && Theme.messageBubbleIncomingOutline) ||
-        (outgoing && Theme.messageBubbleOutgoingOutline)
-
-      if hasOutline {
-        view.borderColor = Theme.messageOutlineColor
-        view.borderWidth = 1.0
-      }
-    }
-
-    return view
-  }()
 
   private lazy var avatarView: UserAvatarView = {
     let view = UserAvatarView(user: self.from)
@@ -339,10 +287,6 @@ class MessageViewAppKit: NSView {
 
     addSubview(timeAndStateView)
 
-    if hasBubble {
-      addSubview(bubbleView)
-    }
-
     if showsAvatar {
       addSubview(avatarView)
     }
@@ -351,24 +295,10 @@ class MessageViewAppKit: NSView {
       addSubview(nameLabel)
       let name = from.firstName ?? from.username ?? ""
       nameLabel.stringValue = outgoing ? "You" : name
-
-      if hasBubble {
-        if Theme.messageBubbleColoredName {
-          nameLabel.textColor = NSColor(
-            InitialsCircle.ColorPalette
-              .color(for: name)
-              .adjustLuminosity(by: -0.08) // TODO: Optimize
-          )
-        } else {
-          nameLabel.textColor = NSColor.tertiaryLabelColor
-        }
-      } else {
-        nameLabel.textColor = NSColor(
-          InitialsCircle.ColorPalette
-            .color(for: name)
-            .adjustLuminosity(by: -0.08) // TODO: Optimize
-        )
-      }
+      nameLabel.textColor = NSColor(
+        InitialsCircle.ColorPalette
+          .color(for: name)
+      )
     }
 
     addSubview(contentView)
@@ -396,13 +326,10 @@ class MessageViewAppKit: NSView {
     var topPadding = 0.0
     let nameAndContentGap = Theme.messageVerticalStackSpacing
     let bgPadding = 0.0
-    let bubblePadding = hasBubble ? Theme.messageBubblePadding : CGSize(width: 0.0, height: 0.0)
     let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
     let sidePadding = Theme.messageSidePadding - bgPadding
-    let senderNameLeadingPadding = hasBubble ? 3.0 : 0.0
-    let bubblePaddingVertical = hasBubble ? bubblePadding.height : 0.0
-    let bubblePaddingHorizontal = hasBubble ? bubblePadding.width : 0.0
+    let senderNameLeadingPadding = 0.0
 
     if props.firstInGroup {
       topPadding += Theme.messageGroupSpacing
@@ -433,17 +360,8 @@ class MessageViewAppKit: NSView {
 
     // MARK: - Content Layout Constraints
 
-    let contentViewBubbleInset = hasBubble ? 1.0 : .zero // just a 1px border
     contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: contentWidth)
     textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
-
-//    contentView.edgeInsets = NSEdgeInsets(
-//      // for messages with text, we need bubble padding from top here. can't add it anywhere
-//      top: bubblePadding.height,
-//      left: 0,
-//      bottom: hasPhoto ? 0 : bubblePadding.height, // bottom edge touches bubble if has photo
-//      right: 0
-//    )
 
     /// let's not set a height for content stack view and have it use the height from text + photo + gap itself, hmm?
     /// also i won't add width on text view as it must be enforced at content view level at this point. let's try.
@@ -463,10 +381,8 @@ class MessageViewAppKit: NSView {
       // Text view
       textViewHeightConstraint,
       // Text view bubble paddings
-      aboveTextSpacer.heightAnchor.constraint(equalToConstant: bubblePadding.height),
-      textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: bubblePadding.width),
-      textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -bubblePadding.width),
-      underTextSpacer.heightAnchor.constraint(equalToConstant: bubblePadding.height),
+      textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+      textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
     ])
 
     if hasPhoto, let photoHeight = props.photoHeight {
@@ -478,71 +394,11 @@ class MessageViewAppKit: NSView {
       )
     }
 
-    if hasBubble {
-      NSLayoutConstraint.activate(
-        [
-          // Bubble view
-          bubbleView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: -contentViewBubbleInset),
-          bubbleView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: -contentViewBubbleInset),
-          bubbleView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: contentViewBubbleInset),
-          bubbleView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: contentViewBubbleInset),
-        ]
-      )
-    }
-
-    // OLD WAY WITHOUT STACK VIEW
-    // OLD WAY WITHOUT STACK VIEW
-    // OLD WAY WITHOUT STACK VIEW
-    // OLD WAY WITHOUT STACK VIEW
-    // OLD WAY WITHOUT STACK VIEW
-    // OLD WAY WITHOUT STACK VIEW
-
-//    let textViewSideConstraint =
-//      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading + bubblePaddingHorizontal)
-//    textViewWidthConstraint = textView.widthAnchor.constraint(equalToConstant: textWidth)
-//    textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
-//
-//    NSLayoutConstraint.activate(
-//      [
-//        // Text view
-//        textView.topAnchor.constraint(
-//          equalTo: showsName ? nameLabel.bottomAnchor : topAnchor,
-//          constant: showsName ? nameAndContentGap + bubblePaddingVertical : topPadding + bubblePaddingVertical
-//        ),
-//        textViewWidthConstraint,
-//        textViewHeightConstraint,
-//        textViewSideConstraint
-//      ]
-//    )
-
-//    if let imageView = imageView {
-//      NSLayoutConstraint.activate(
-//        [
-//          imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading),
-//          imageView.topAnchor.constraint(equalTo: topAnchor),
-//          imageView.widthAnchor.constraint(equalToConstant: 100),
-//          imageView.heightAnchor.constraint(equalToConstant: 100)
-//        ]
-//      )
-//    }
-
-//    if hasBubble {
-//      NSLayoutConstraint.activate(
-//        [
-//          // Bubble view
-//          bubbleView.topAnchor.constraint(equalTo: textView.topAnchor, constant: -bubblePadding.height),
-//          bubbleView.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: -bubblePadding.width),
-//          bubbleView.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: bubblePadding.width),
-//          bubbleView.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: bubblePadding.height)
-//        ]
-//      )
-//    }
-
     NSLayoutConstraint.activate(
       [
         // Time and state view
         timeAndStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding),
-        timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bubblePadding.height),
+        timeAndStateView.bottomAnchor.constraint(equalTo: bottomAnchor),
       ]
     )
   }
@@ -627,23 +483,14 @@ class MessageViewAppKit: NSView {
   }
 
   override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
-    if hasBubble {
-      bubbleView.backgroundColor = bubbleColor
-        .highlight(withLevel: 0.3)
-    } else {
-      // Apply selection style when menu is about to open
-      layer?.backgroundColor = NSColor.darkGray
-        .withAlphaComponent(0.1).cgColor
-    }
+    // Apply selection style when menu is about to open
+    layer?.backgroundColor = NSColor.darkGray
+      .withAlphaComponent(0.05).cgColor
   }
 
   override func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) {
-    if hasBubble {
-      bubbleView.backgroundColor = bubbleColor
-    } else {
-      // Remove selection style when menu closes
-      layer?.backgroundColor = nil
-    }
+    // Remove selection style when menu closes
+    layer?.backgroundColor = nil
   }
 
   // MARK: - View Updates
