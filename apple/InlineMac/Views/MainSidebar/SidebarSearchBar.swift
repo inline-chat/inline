@@ -67,18 +67,18 @@ struct OutlineField: View {
       .frame(height: height)
       .focused($isFocused)
       .cornerRadius(cornerRadius)
-//      .background(
+      .background(
+        RoundedRectangle(cornerRadius: cornerRadius)
+          .fill(.primary.opacity(0.05))
+          .animation(.easeOut.speed(3), value: isFocused)
+      )
+//      .overlay(
 //        RoundedRectangle(cornerRadius: cornerRadius)
-//          .fill(.primary.opacity(isFocused ? 0.09 : 0.04))
+//          .strokeBorder(
+//            Color.primary.opacity(isFocused ? 0.12 : 0.1),
+//            lineWidth: 1
+//          )
 //          .animation(.easeOut.speed(2), value: isFocused)
 //      )
-      .overlay(
-        RoundedRectangle(cornerRadius: cornerRadius)
-          .strokeBorder(
-            Color.primary.opacity(isFocused ? 0.12 : 0.1),
-            lineWidth: 1
-          )
-          .animation(.easeOut.speed(2), value: isFocused)
-      )
   }
 }
