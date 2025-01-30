@@ -42,7 +42,6 @@ struct ChatView: View {
     }
 
     Self.formatter.dateTimeStyle = .named
-    //    Self.formatter.unitsStyle = .spellOut
     return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
   }
 
@@ -143,14 +142,15 @@ struct ChatView: View {
 
   @ViewBuilder
   var header: some View {
-    VStack {
-      HStack {
+    HStack {
+      VStack(spacing: 0) {
         Text(title)
-      }
-      if !isCurrentUser, isPrivateChat {
-        Text(subtitle)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+
+        if !isCurrentUser, isPrivateChat {
+          Text(subtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
     }
   }
