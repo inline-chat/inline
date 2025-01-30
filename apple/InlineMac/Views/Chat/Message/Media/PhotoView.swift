@@ -28,10 +28,10 @@ final class PhotoView: NSView {
 
   // Corner radius properties
   private let maskLayer = CAShapeLayer()
-  let topLeftRadius: CGFloat = 4.0
-  let topRightRadius: CGFloat = 4.0
-  let bottomLeftRadius: CGFloat = 4.0
-  let bottomRightRadius: CGFloat = 4.0
+  let topLeftRadius: CGFloat = 8.0
+  let topRightRadius: CGFloat = 8.0
+  let bottomLeftRadius: CGFloat = 8.0
+  let bottomRightRadius: CGFloat = 8.0
 
   private func setupView() {
     setupImage()

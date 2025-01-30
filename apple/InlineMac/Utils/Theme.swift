@@ -34,17 +34,19 @@ enum Theme {
   // MARK: - Message View
 
   static let messageMaxWidth: CGFloat = 420
-  static let messageOuterVerticalPadding: CGFloat = 2.0 // gap between consequetive bubbles
-  static let messageSidePadding: CGFloat = 24
-  static let messageAvatarSize: CGFloat = 24
-//  Space between avatar and content
-  static let messageHorizontalStackSpacing: CGFloat = 6.0
-  static let messageVerticalStackSpacing: CGFloat = 2.0
-  static let messageNameLabelHeight: CGFloat = 18
+  static let messageOuterVerticalPadding: CGFloat = 2.0 // gap between consequetive messages
+  static let messageSidePadding: CGFloat = 20.0
+  static let messageAvatarSize: CGFloat = 28
+  // between avatar and content
+  static let messageHorizontalStackSpacing: CGFloat = 8.0
+  // between name and text
+  static let messageVerticalStackSpacing: CGFloat = 0.0
+  static let messageNameLabelHeight: CGFloat = 16
   static let messageTextFont: NSFont = .systemFont(ofSize: NSFont.systemFontSize)
   static let messageTextLineFragmentPadding: CGFloat = 0
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
+  static let messageContentViewSpacing: CGFloat = 8.0
 
   // MARK: - Chat View
 

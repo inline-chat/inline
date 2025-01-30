@@ -200,9 +200,9 @@ class MessageListAppKit: NSViewController {
 
     if isAtTop() {
       window.titlebarAppearsTransparent = true
-      // window.titlebarSeparatorStyle = .
     } else {
       window.titlebarAppearsTransparent = false
+      window.titlebarSeparatorStyle = .automatic
     }
   }
 
