@@ -58,16 +58,14 @@ struct UpdateNewMessage: Codable {
   var message: ApiMessage
 
   func apply(db: Database) throws {
-    var message = Message(from: message)
-    try message
-      .saveMessage(
-        db,
-        onConflict: .ignore,
-        publishChanges: true
-      ) // handles update internally
-//    try message.save(db, onConflict: .ignore) // NOTE: @Mo: we ignore to avoid animation issues for our own messages
+    let msg = try message.saveFullMessage(
+      db,
+      publishChanges: true
+    )
+
+    // I think this needs to be more elegant
     var chat = try Chat.fetchOne(db, id: message.chatId)
-    chat?.lastMsgId = message.messageId
+    chat?.lastMsgId = msg.messageId
     try chat?.save(db)
   }
 }
@@ -84,7 +82,7 @@ struct UpdateMessageId: Codable {
       if var message {
         message.status = .sent
         message.messageId = messageId
-        message.randomId = nil
+        message.randomId = nil // should we do this?
 //        try message.save(db)
         try message
           .saveMessage(
