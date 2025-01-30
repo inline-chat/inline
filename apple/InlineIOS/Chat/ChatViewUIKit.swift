@@ -25,15 +25,21 @@ class ChatContainerView: UIView {
     return view
   }()
 
-  private lazy var composeEmbedHostingController: UIHostingController<ComposeEmbedViewSwiftUI> = {
-    let hostingController = UIHostingController(
-      rootView: ComposeEmbedViewSwiftUI(
-        peerId: peerId, chatId: chatId ?? 0, messageId: ChatState.shared.getState(peer: peerId).replyingMessageId ?? 0
-      )
+  lazy var composeEmbedView: ComposeEmbedView = {
+    let view = ComposeEmbedView(
+      peerId: peerId,
+      chatId: chatId ?? 0,
+      messageId: ChatState.shared.getState(peer: peerId).replyingMessageId ?? 0
     )
-    hostingController.view.backgroundColor = .clear
-    hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-    return hostingController
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  lazy var composeEmbedFakeView: UIView = {
+    let view = UIView()
+    view.backgroundColor = .red
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
   }()
 
   private lazy var blurView: UIVisualEffectView = {
@@ -64,39 +70,24 @@ class ChatContainerView: UIView {
   private var composeEmbedBottomConstraint: NSLayoutConstraint?
 
   private func setupViews() {
-    print("HAS REPLY ? \(hasReply)")
     backgroundColor = .systemBackground
 
     addSubview(messagesCollectionView)
     addSubview(blurView)
-    addSubview(composeEmbedHostingController.view)
+    addSubview(composeEmbedFakeView)
+    composeEmbedFakeView.addSubview(composeEmbedView)
     addSubview(composeView)
 
     blurViewBottomConstraint = blurView.bottomAnchor.constraint(equalTo: bottomAnchor)
-    composeEmbedHeightConstraint = composeEmbedHostingController.view.heightAnchor.constraint(
-      equalToConstant: hasReply ? Self.embedViewHeight : 0
-    )
-    composeEmbedBottomConstraint = composeEmbedHostingController.view.bottomAnchor.constraint(
-      equalTo: composeView.topAnchor
-    )
 
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
-    //    NSLayoutConstraint.activate([
-    //      composeEmbedHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-    //      composeEmbedHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
-    //      composeEmbedHostingController.view.bottomAnchor.constraint(equalTo: composeView.topAnchor),
-    //      composeEmbedHostingController.view.heightAnchor.constraint(equalToConstant: Self.embedViewHeight),
-    //    ])
-
-    //    composeEmbedHostingController.view.isHidden = !hasReply
+    // Initialize the height constraint
+    composeEmbedHeightConstraint = composeEmbedFakeView.heightAnchor
+      .constraint(equalToConstant: hasReply ? ComposeEmbedView.height : 0)
+    composeEmbedHeightConstraint?.isActive = true
 
     NSLayoutConstraint.activate([
-      composeEmbedHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-      composeEmbedHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
-      composeEmbedBottomConstraint!,
-      composeEmbedHeightConstraint!,
-
       messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
       messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
       messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
@@ -104,8 +95,26 @@ class ChatContainerView: UIView {
 
       blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
       blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      blurView.topAnchor.constraint(equalTo: composeView.topAnchor, constant: -ComposeView.textViewVerticalMargin),
+      blurView.topAnchor.constraint(
+        equalTo: composeEmbedFakeView.topAnchor,
+        constant: -ComposeView.textViewVerticalMargin
+      ),
       blurViewBottomConstraint!,
+
+      composeEmbedFakeView.bottomAnchor.constraint(equalTo: composeView.topAnchor),
+      composeEmbedFakeView.leadingAnchor.constraint(
+        equalTo: leadingAnchor,
+        constant: ComposeView.textViewHorizantalMargin
+      ),
+      composeEmbedFakeView.trailingAnchor.constraint(
+        equalTo: trailingAnchor,
+        constant: -ComposeView.textViewHorizantalMargin
+      ),
+
+      composeEmbedView.topAnchor.constraint(equalTo: composeEmbedFakeView.topAnchor),
+      composeEmbedView.leadingAnchor.constraint(equalTo: composeEmbedFakeView.leadingAnchor),
+      composeEmbedView.trailingAnchor.constraint(equalTo: composeEmbedFakeView.trailingAnchor),
+      composeEmbedView.bottomAnchor.constraint(equalTo: composeEmbedFakeView.bottomAnchor),
 
       composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
       composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
@@ -113,20 +122,19 @@ class ChatContainerView: UIView {
         equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin
       ),
     ])
-
-    updateComposeEmbedViewState(isReplyActive: hasReply)
-
-    //    // Initial state setup
-    //    composeEmbedHostingController.view.alpha = hasReply ? 1 : 0
-    //    composeEmbedHostingController.view.transform = hasReply ? .identity : CGAffineTransform(translationX: 0, y:
-    //    20)
   }
 
   private func setupObservers() {
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(replyStateChanged),
-      name: .init("ChatStateDidChange"),
+      selector: #selector(setReply),
+      name: .init("ChatStateSetReplyCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(clearReply),
+      name: .init("ChatStateClearReplyCalled"),
       object: nil
     )
     NotificationCenter.default.addObserver(
@@ -182,49 +190,54 @@ class ChatContainerView: UIView {
 
   var hasReply: Bool { ChatState.shared.getState(peer: peerId).replyingMessageId != nil }
 
-  private func updateComposeEmbedViewState(isReplyActive: Bool) {
-    let embedView = composeEmbedHostingController.view
-    guard let embedView else { return }
+  @objc private func setReply() {
+    composeEmbedView.removeFromSuperview()
 
-    embedView.isHidden = !isReplyActive
-    composeEmbedHeightConstraint?.constant = isReplyActive ? Self.embedViewHeight : 0
+    let newComposeEmbedView = ComposeEmbedView(
+      peerId: peerId,
+      chatId: chatId ?? 0,
+      messageId: ChatState.shared.getState(peer: peerId).replyingMessageId ?? 0
+    )
+    newComposeEmbedView.translatesAutoresizingMaskIntoConstraints = false
 
-    layoutIfNeeded()
+    composeEmbedFakeView.addSubview(newComposeEmbedView)
+
+    NSLayoutConstraint.activate([
+      newComposeEmbedView.topAnchor.constraint(equalTo: composeEmbedFakeView.topAnchor),
+      newComposeEmbedView.leadingAnchor.constraint(equalTo: composeEmbedFakeView.leadingAnchor),
+      newComposeEmbedView.trailingAnchor.constraint(equalTo: composeEmbedFakeView.trailingAnchor),
+      newComposeEmbedView.bottomAnchor.constraint(equalTo: composeEmbedFakeView.bottomAnchor),
+    ])
+
+    composeEmbedView = newComposeEmbedView
+    composeEmbedView.isHidden = false
+
+    composeEmbedHeightConstraint?.isActive = false
+    composeEmbedHeightConstraint = composeEmbedFakeView.heightAnchor
+      .constraint(equalToConstant: ComposeEmbedView.height)
+    composeEmbedHeightConstraint?.isActive = true
+
+    UIView.animate(
+      withDuration: 0.02,
+      delay: 0,
+      options: .curveEaseOut
+    ) {
+      self.layoutIfNeeded()
+      self.composeView.textView.becomeFirstResponder()
+    }
   }
 
-  @objc private func replyStateChanged(_ notification: Notification) {
-    let state = ChatState.shared.getState(peer: peerId)
-    let isReplyActive = state.replyingMessageId != nil
+  @objc private func clearReply() {
+    composeEmbedHeightConstraint?.isActive = false
+    composeEmbedHeightConstraint = composeEmbedFakeView.heightAnchor.constraint(equalToConstant: 0)
+    composeEmbedHeightConstraint?.isActive = true
 
-    if isReplyActive {
-      composeView.textView.becomeFirstResponder()
-
-      let newHostingController = UIHostingController(
-        rootView: ComposeEmbedViewSwiftUI(
-          peerId: peerId,
-          chatId: chatId ?? 0,
-          messageId: state.replyingMessageId ?? 0
-        )
-      )
-
-      newHostingController.view.backgroundColor = .clear
-      newHostingController.view.translatesAutoresizingMaskIntoConstraints = false
-
-      composeEmbedHostingController.view.removeFromSuperview()
-      composeEmbedHostingController = newHostingController
-      addSubview(composeEmbedHostingController.view)
-
-      NSLayoutConstraint.activate([
-        composeEmbedHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-        composeEmbedHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
-        composeEmbedHostingController.view.bottomAnchor.constraint(equalTo: composeView.topAnchor),
-        composeEmbedHostingController.view.heightAnchor.constraint(equalToConstant: Self.embedViewHeight),
-      ])
-
-      layoutIfNeeded()
+    UIView.animate(withDuration: 0.2) {
+      self.layoutIfNeeded()
+    } completion: { _ in
+      self.composeEmbedView.isHidden = true
+      self.composeEmbedView.removeFromSuperview()
     }
-
-    updateComposeEmbedViewState(isReplyActive: isReplyActive)
   }
 
   private func handleComposeViewHeightChange(_ newHeight: CGFloat) {
