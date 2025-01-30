@@ -161,7 +161,13 @@ class MessagesCollectionView: UICollectionView {
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(replyStateChanged),
-      name: .init("ChatStateDidChange"),
+      name: .init("ChatStateSetReplyCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(replyStateChanged),
+      name: .init("ChatStateClearReplyCalled"),
       object: nil
     )
     NotificationCenter.default.addObserver(
@@ -226,7 +232,13 @@ class MessagesCollectionView: UICollectionView {
   @objc private func replyStateChanged(_ notification: Notification) {
     DispatchQueue.main.async {
       self.updateContentInsets()
-      // TODO: Check if a hardware keyboard is attached; scroll to the bottom.
+      if self.shouldScrollToBottom, !self.itemsEmpty {
+        self.scrollToItem(
+          at: IndexPath(item: 0, section: 0),
+          at: .top,
+          animated: true
+        )
+      }
     }
   }
 
