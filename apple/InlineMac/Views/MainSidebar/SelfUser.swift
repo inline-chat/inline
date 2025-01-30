@@ -10,18 +10,29 @@ struct SelfUser: View {
     rootData.currentUser ?? defaultUser()
   }
 
+  var visibleName: String {
+    currentUser.firstName ??
+      currentUser.lastName ??
+      (currentUser.username != nil ? "@\(currentUser.username ?? "")" : nil) ??
+      currentUser.email ??
+      "Loading..."
+  }
+
   var body: some View {
     HStack(spacing: 0) {
       UserAvatar(user: currentUser, size: Theme.sidebarIconSize)
         .padding(.trailing, Theme.sidebarIconSpacing)
 
       ConnectionStateProvider { connection in
+        // TODO: Extract to a separate view
         VStack(alignment: .leading, spacing: 0) {
-          Text(currentUser.firstName ?? "You")
+          // <name>
+          Text(visibleName)
             .font(Theme.sidebarTopItemFont)
-            .foregroundStyle(
-              appearsActive ? .primary : .tertiary
-            ).padding(.bottom, 0)
+            +
+            Text(" (you)")
+            .font(Theme.sidebarTopItemFont)
+            .foregroundColor(Color.secondary.opacity(0.7))
 
           if connection.shouldShow {
             Text(connection.humanReadable)
@@ -38,6 +49,7 @@ struct SelfUser: View {
       }
     }
     .frame(height: Theme.sidebarTopItemHeight)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   func defaultUser() -> User {
