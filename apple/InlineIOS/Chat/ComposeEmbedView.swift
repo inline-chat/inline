@@ -2,16 +2,68 @@ import InlineKit
 import UIKit
 
 class ComposeEmbedView: UIView {
-  var peerId: Peer?
+  static let height: CGFloat = 56
 
-  init(peerId: Peer?) {
-    super.init(frame: .zero)
+  var peerId: Peer
+  private var chatId: Int64
+  private var messageId: Int64
+  private var viewModel: FullMessageViewModel
+
+  private lazy var nameLabel: UILabel = {
+    let label = UILabel()
+    label.font = .systemFont(ofSize: 17, weight: .medium)
+    label.textColor = ColorManager.shared.selectedColor
+    return label
+  }()
+
+  private lazy var messageLabel: UILabel = {
+    let label = UILabel()
+    label.font = .systemFont(ofSize: 17, weight: .regular)
+    label.textColor = .secondaryLabel
+    label.numberOfLines = 1
+
+    return label
+  }()
+
+  private lazy var closeButton: UIButton = {
+    let button = UIButton()
+    let config = UIImage.SymbolConfiguration(pointSize: 17)
+    button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
+    button.tintColor = .secondaryLabel
+    button.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
+    return button
+  }()
+
+  private lazy var labelsStackView: UIStackView = {
+    let stackView = UIStackView(arrangedSubviews: [nameLabel, messageLabel])
+    stackView.axis = .vertical
+    stackView.spacing = 0
+    stackView.alignment = .leading
+
+    return stackView
+  }()
+
+  private lazy var containerStackView: UIStackView = {
+    let stackView = UIStackView(arrangedSubviews: [labelsStackView, closeButton])
+    stackView.axis = .horizontal
+    stackView.spacing = 0
+    stackView.alignment = .center
+
+    return stackView
+  }()
+
+  init(peerId: Peer, chatId: Int64, messageId: Int64) {
     self.peerId = peerId
-  }
+    self.chatId = chatId
+    self.messageId = messageId
+    viewModel = FullMessageViewModel(db: AppDatabase.shared, messageId: messageId, chatId: chatId)
 
-  override init(frame: CGRect) {
-    super.init(frame: frame)
+    super.init(frame: .zero)
+
     setupViews()
+    setupConstraints()
+    setupObservers()
+    updateContent()
   }
 
   @available(*, unavailable)
@@ -19,92 +71,67 @@ class ComposeEmbedView: UIView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  static var height: CGFloat = 60.0
-
-  private lazy var line: UIView = {
-    let view = UIView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-
-    view.backgroundColor = ColorManager.shared.selectedColor
-    view.layer.cornerRadius = 2
-
-    return view
-  }()
-
-  private lazy var heading: UILabel = {
-    let label = UILabel()
-    label.translatesAutoresizingMaskIntoConstraints = false
-    label.text = "Replying to Dena"
-    label.textColor = ColorManager.shared.selectedColor
-    label.font = .systemFont(ofSize: 14, weight: .semibold)
-
-    return label
-  }()
-
-  private lazy var text: UILabel = {
-    let label = UILabel()
-    label.translatesAutoresizingMaskIntoConstraints = false
-    label.text = "Sample message"
-    label.textColor = .black
-    label.numberOfLines = 1
-    label.font = .systemFont(ofSize: 14, weight: .regular)
-    return label
-  }()
-
-  private lazy var closeButton: UIButton = {
-    let button = UIButton()
-    button.translatesAutoresizingMaskIntoConstraints = false
-
-    var config = UIButton.Configuration.plain()
-    config.image = UIImage(systemName: "xmark")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
-    )
-    config.baseForegroundColor = .secondaryLabel
-
-    button.configuration = config
-    button.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-
-    button.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
-
-    return button
-  }()
-
   private func setupViews() {
-    backgroundColor = .clear
+    backgroundColor = .blue
+    addSubview(containerStackView)
 
-    addSubview(text)
-    addSubview(heading)
-    addSubview(line)
-    addSubview(closeButton)
+    closeButton.setContentHuggingPriority(.required, for: .horizontal)
+    closeButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+  }
+
+  private func setupConstraints() {
+    containerStackView.translatesAutoresizingMaskIntoConstraints = false
 
     NSLayoutConstraint.activate([
-      heightAnchor.constraint(equalToConstant: Self.height),
+      containerStackView.topAnchor.constraint(equalTo: topAnchor),
+      containerStackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      containerStackView.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-      line.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-      line.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-      line.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
-      line.heightAnchor.constraint(equalToConstant: Self.height),
-      line.widthAnchor.constraint(equalToConstant: 4),
-
-      heading.leadingAnchor.constraint(equalTo: line.trailingAnchor, constant: 8),
-      heading.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-      heading.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-
-      text.leadingAnchor.constraint(equalTo: line.trailingAnchor, constant: 8),
-      text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-      text.topAnchor.constraint(equalTo: heading.bottomAnchor),
-      text.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
-
-      closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-      closeButton.centerYAnchor.constraint(equalTo: heading.centerYAnchor),
-      closeButton.widthAnchor.constraint(equalToConstant: 28),
-      closeButton.heightAnchor.constraint(equalToConstant: 28),
+      closeButton.widthAnchor.constraint(equalToConstant: 24),
+      closeButton.heightAnchor.constraint(equalToConstant: 24),
     ])
   }
 
-  @objc func closeTapped() {
-    guard let peerId else { return }
+  private func setupObservers() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(messageUpdated),
+      name: .init("FullMessageDidChange"),
+      object: nil
+    )
+  }
 
-    ChatState.shared.clearReplyingMessageId(peer: peerId)
+  @objc private func messageUpdated() {
+    updateContent()
+  }
+
+  func setMessageIdToVM(_ msgId: Int64) {
+    viewModel = FullMessageViewModel(db: AppDatabase.shared, messageId: msgId, chatId: chatId)
+  }
+
+  func fetchMessage(_ msgId: Int64, chatId: Int64) {
+    viewModel.fetchMessage(msgId, chatId: chatId)
+
+    DispatchQueue.main.async { [weak self] in
+      self?.updateContent()
+    }
+  }
+
+  func updateContent() {
+    let name = Auth.shared.getCurrentUserId() == viewModel.fullMessage?.message.fromId ?
+      "You" : viewModel.fullMessage?.from?.firstName ?? "User"
+
+    nameLabel.text = "Replying to \(name)"
+    messageLabel.text = viewModel.fullMessage?.message.text ?? ""
+  }
+
+  @objc private func closeButtonTapped() {
+    UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut) {
+      ChatState.shared.clearReplyingMessageId(peer: self.peerId)
+    }
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
   }
 }
