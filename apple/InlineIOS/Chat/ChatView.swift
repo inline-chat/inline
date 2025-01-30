@@ -87,28 +87,12 @@ struct ChatView: View {
         ToolbarItem(placement: .principal) {
           header
         }
-        #if DEBUG
-        ToolbarItem(placement: .topBarTrailing) {
-          if !preview {
-            Button(action: {
-              Task {
-                for i in 1 ... 100 {
-                  let _ = Transactions.shared.mutate(
-                    transaction: .sendMessage(
-                      .init(text: "Test message #\(i)", peerId: peerId, chatId: fullChatViewModel.chat?.id ?? 0)
-                    )
-                  )
-
-                  try? await Task.sleep(nanoseconds: 50_000_000) // 0.05 seconds
-                }
-              }
-            }) {
-              Image(systemName: "bolt.fill")
-                .foregroundColor(.orange)
-            }
+        if let user = fullChatViewModel.peerUser {
+          ToolbarItem(placement: .topBarTrailing) {
+            UserAvatar(user: user)
           }
         }
-        #endif
+       
       }
       .overlay(alignment: .top) {
         if preview {
@@ -142,15 +126,13 @@ struct ChatView: View {
 
   @ViewBuilder
   var header: some View {
-    HStack {
-      VStack(spacing: 0) {
-        Text(title)
-
-        if !isCurrentUser, isPrivateChat {
-          Text(subtitle)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
+    VStack(spacing: 0) {
+      Text(title)
+        .fontWeight(.semibold)
+      if !isCurrentUser, isPrivateChat {
+        Text(subtitle)
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
     }
   }
