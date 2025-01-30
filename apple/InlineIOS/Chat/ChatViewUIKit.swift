@@ -82,7 +82,7 @@ class ChatContainerView: UIView {
 
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
-    // Initialize the height constraint
+    // initialize the height constraint
     composeEmbedHeightConstraint = composeEmbedFakeView.heightAnchor
       .constraint(equalToConstant: hasReply ? ComposeEmbedView.height : 0)
     composeEmbedHeightConstraint?.isActive = true
