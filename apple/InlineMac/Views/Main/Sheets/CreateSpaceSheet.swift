@@ -46,6 +46,10 @@ struct CreateSpaceSheet: View {
 
   private func submit() {
     Task {
+      if spaceName.isEmpty {
+        return
+      }
+      
       do {
         formState.startLoading()
         let result = try await ApiClient.shared.createSpace(name: spaceName)
