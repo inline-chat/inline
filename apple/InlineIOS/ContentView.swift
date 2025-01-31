@@ -75,7 +75,7 @@ extension ContentView {
   var content: some View {
     switch mainViewRouter.route {
       case .main:
-        NavigationStack(path: $nav.pathComponents) { 
+        NavigationStack(path: $nav.pathComponents) {
           MainView()
             .navigationDestination(for: Navigation.Destination.self) { destination in
               destinationView(for: destination)
@@ -84,9 +84,9 @@ extension ContentView {
         .sheet(item: $nav.activeSheet) { destination in
           sheetContent(for: destination)
         }
-        .onAppear {
-          updateOnlineStatus()
-        }
+//        .onAppear {
+//          updateOnlineStatus()
+//        }
         .onChange(of: scene) { _, newScene in
           switch newScene {
             case .active:

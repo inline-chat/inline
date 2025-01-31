@@ -44,6 +44,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     return true
   }
 
+  private func applicationDidResignActive(_ notification: Notification) {
+    Task {
+      // Mark offline
+      try? await DataManager.shared.updateStatus(online: false)
+    }
+  }
+
+  private func applicationDidBecomeActive(_ notification: Notification) {
+    Task {
+      // Mark online
+      try? await DataManager.shared.updateStatus(online: true)
+    }
+  }
+
   @objc private func handleAuthenticationChange(_ notification: Notification) {
     if let authenticated = notification.object as? Bool, authenticated {
       requestPushNotifications()
