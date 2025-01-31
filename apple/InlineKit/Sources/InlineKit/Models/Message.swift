@@ -195,55 +195,60 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
 public extension Message {
   mutating func saveMessage(
-    _ db: Database, onConflict: Database.ConflictResolution = .abort, publishChanges: Bool = false
-  )
-    throws
-  {
+    _ db: Database,
+    onConflict: Database.ConflictResolution = .abort,
+    publishChanges: Bool = false
+  ) throws {
     var isExisting = false
 
+    // Check if message exists
     if globalId == nil {
-      // Alternative:
-      //          if let existing = try Message
-      //            .filter(Column("messageId") == apiMessage.id)
-      //            .filter(Column("chatId") == apiMessage.chatId)
-      //            .fetchOne(db)
-      //          {
-      //            message.globalId = existing.globalId
-      //          }
-
-      if let existing =
-        try? Message
-          .fetchOne(db, key: ["messageId": messageId, "chatId": chatId])
-      {
+      if let existing = try? Message.fetchOne(db, key: ["messageId": messageId, "chatId": chatId]) {
         globalId = existing.globalId
-
-        if let existingFileId = existing.fileId {
-          fileId = existingFileId // ... find a way for making this better
-        }
-
+        fileId = existing.fileId ?? fileId
         isExisting = true
       }
     } else {
       isExisting = true
     }
 
+    // Save the message
     try save(db, onConflict: .ignore)
 
-    if publishChanges {
-      // Publish changes when save is successful
-      let message = self
+    // Handle unarchiving for incoming messages
+    if !isExisting, out != true {
+      if let dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)),
+         dialog.archived == true
+      {
+        var updatedDialog = dialog
+        updatedDialog.archived = false
+        try updatedDialog.save(db, onConflict: .replace)
 
-      if isExisting {
+        // Schedule API update after transaction
+        let peer = peerId
         db.afterNextTransaction { _ in
-          Task { @MainActor in
-            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+          Task {
+            try? await ApiClient.shared.updateDialog(
+              peerId: peer,
+              pinned: nil,
+              draft: nil,
+              archived: false
+            )
           }
         }
-      } else {
-        db.afterNextTransaction { _ in
-          // This code runs after the transaction successfully commits
-          Task { @MainActor in
-            await MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+      }
+    }
+
+    // Publish changes if needed
+    if publishChanges {
+      let message = self // Create an immutable copy
+      let peer = peerId // Capture the peer value
+      db.afterNextTransaction { _ in
+        Task { @MainActor in
+          if isExisting {
+            await MessagesPublisher.shared.messageUpdated(message: message, peer: peer)
+          } else {
+            await MessagesPublisher.shared.messageAdded(message: message, peer: peer)
           }
         }
       }
@@ -275,6 +280,7 @@ public extension ApiMessage {
         nil
       }
       message.fileId = file?.id
+
       try message.saveMessage(db, publishChanges: false) // publish is below
     }
 
@@ -295,7 +301,7 @@ public extension ApiMessage {
         }
       }
     }
-    
+
     return message
   }
 }
