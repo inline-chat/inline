@@ -450,8 +450,8 @@ public class DataManager: ObservableObject {
 
     let result = try await ApiClient.shared.updateDialog(
       peerId: peerId,
-      pinned: pinned == nil ? updatedDialog.pinned : pinned,
-      draft: draft == nil ? updatedDialog.draft : draft,
+      pinned:  pinned,
+      draft: draft,
       archived: archived == nil ? updatedDialog.archived : archived
     )
 
