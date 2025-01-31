@@ -75,7 +75,7 @@ extension ContentView {
   var content: some View {
     switch mainViewRouter.route {
       case .main:
-        NavigationStack(path: nav.currentStackBinding) {
+        NavigationStack(path: $nav.pathComponents) { 
           MainView()
             .navigationDestination(for: Navigation.Destination.self) { destination in
               destinationView(for: destination)

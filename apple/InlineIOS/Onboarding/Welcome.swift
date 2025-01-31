@@ -163,8 +163,3 @@ extension Welcome {
     }
   }
 }
-
-#Preview {
-  Welcome()
-    .environmentObject(Navigation())
-}
