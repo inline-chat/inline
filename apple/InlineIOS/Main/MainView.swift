@@ -21,6 +21,7 @@ struct MainView: View {
   @Environment(\.appDatabase) private var database
   @Environment(\.scenePhase) private var scene
   @Environment(\.auth) private var auth
+  @Environment(\.scenePhase) var scenePhase
 
   @EnvironmentStateObject var root: RootData
   @EnvironmentStateObject private var spaceList: SpaceListViewModel
@@ -139,9 +140,20 @@ struct MainView: View {
         .animation(.default, value: home.chats)
       }
     }
-
     .background(Color(.systemBackground))
     .searchable(text: $text, prompt: "Search in users and spaces")
+    .onAppear {
+      markAsOnline()
+    }
+    .onChange(of: scenePhase) { phase in
+      if phase == .active {
+        Task {
+          ws.ensureConnected()
+          markAsOnline()
+        }
+
+      } else if phase == .inactive {}
+    }
     .onChange(of: text) { _, newValue in
       searchDebouncer.input = newValue
     }
@@ -313,6 +325,12 @@ struct MainView: View {
           isSearching = false
         }
       }
+    }
+  }
+
+  private func markAsOnline() {
+    Task {
+      try? await dataManager.updateStatus(online: true)
     }
   }
 }
