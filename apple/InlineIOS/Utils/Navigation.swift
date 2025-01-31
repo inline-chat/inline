@@ -7,7 +7,10 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   // MARK: - Destinations
 
-  enum Destination: Identifiable, Hashable {
+  let pathKey = "persistedNavigationPath"
+  let sheetKey = "persistedActiveSheet"
+
+  enum Destination: Identifiable, Hashable, Codable {
     case main
     case space(id: Int64)
     case chat(peer: Peer)
@@ -33,7 +36,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   // MARK: - Published Properties
 
-  @Published private var navigationPath = NavigationPath()
+  @Published var navigationPath = NavigationPath()
   @Published var activeSheet: Destination?
   @Published var activeDestination: Destination?
 
@@ -52,34 +55,70 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   // MARK: - Navigation Actions
 
+  init() {
+    loadNavigationState()
+  }
+
+  // MARK: - Persistence
+
+  @Published var pathComponents: [Destination] = [] {
+    didSet {
+      saveNavigationState()
+    }
+  }
+
+  func saveNavigationState() {
+    if let encodedPath = try? JSONEncoder().encode(pathComponents) {
+      UserDefaults.standard.set(encodedPath, forKey: pathKey)
+    }
+    if let encodedSheet = try? JSONEncoder().encode(activeSheet) {
+      UserDefaults.standard.set(encodedSheet, forKey: sheetKey)
+    }
+  }
+
+  func loadNavigationState() {
+    if let pathData = UserDefaults.standard.data(forKey: pathKey),
+       let decodedPath = try? JSONDecoder().decode([Destination].self, from: pathData)
+    {
+      pathComponents = decodedPath
+    }
+
+    if let sheetData = UserDefaults.standard.data(forKey: sheetKey),
+       let decodedSheet = try? JSONDecoder().decode(Destination?.self, from: sheetData)
+    {
+      activeSheet = decodedSheet
+    }
+  }
+
+  // MARK: - Navigation Actions (updated to use pathComponents)
+
   func push(_ destination: Destination) {
     switch destination {
       case .chat:
         activeDestination = destination
-        navigationPath.append(destination)
+        pathComponents.append(destination)
       case .createSpace, .createThread:
         activeSheet = destination
       default:
         activeDestination = destination
-        navigationPath.append(destination)
+        pathComponents.append(destination)
     }
   }
 
   func popPush(_ destination: Destination) {
     activeDestination = destination
-    navigationPath = NavigationPath()
-    navigationPath.append(destination)
+    pathComponents = [destination]
   }
 
   func popToRoot() {
-    navigationPath = NavigationPath()
+    pathComponents = []
     activeSheet = nil
   }
 
   func pop() {
-    guard !navigationPath.isEmpty else { return }
+    guard !pathComponents.isEmpty else { return }
     withAnimation(.snappy) {
-      navigationPath.removeLast()
+      pathComponents.removeLast()
     }
   }
 
