@@ -206,8 +206,6 @@ struct MainView: View {
       try await dataManager.getPrivateChats()
     } catch {
       Log.shared.error("Failed to getPrivateChats", error: error)
-      Log.shared.error("Failed to getPrivateChats", error: error)
-      Log.shared.error("Failed to getPrivateChats", error: error)
     }
 
     do {
