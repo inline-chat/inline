@@ -88,12 +88,13 @@ struct ChatRowView: View {
 
           messageDate
         }
+
         HStack {
           if showTypingIndicator {
             Text("\(currentComposeAction()?.rawValue ?? "")...")
               .font(.callout)
               .foregroundColor(.secondary)
-              .lineLimit(1)
+              .lineLimit(2)
               .frame(maxWidth: .infinity, alignment: .leading)
           } else if let lastMsgText = getMessage()?.text {
             Text(
@@ -101,13 +102,14 @@ struct ChatRowView: View {
             )
             .font(.callout)
             .foregroundColor(.secondary)
-            .lineLimit(1)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
           } else {
             Text("No messages yet")
               .font(.callout)
               .foregroundColor(.secondary)
-              .lineLimit(1)
+              .lineLimit(2)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
           if pinned {
@@ -116,9 +118,11 @@ struct ChatRowView: View {
               .font(.caption)
           }
         }
+        Spacer()
       }
     }
-    .frame(height: 48)
+    .padding(.top, 8)
+    .frame(height: 66)
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
   }
