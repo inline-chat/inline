@@ -418,24 +418,49 @@ public class DataManager: ObservableObject {
     let _ = try await ApiClient.shared.updateStatus(online: online)
   }
 
-  public func updateDialog(peerId: Peer, pinned: Bool? = nil, draft: String? = nil, archived: Bool? = nil) async throws
-  {
+  public func updateDialog(
+    peerId: Peer,
+    pinned: Bool? = nil,
+    draft: String? = nil,
+    archived: Bool? = nil
+  ) async throws {
     try await database.dbWriter.write { db in
       var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
-      dialog?.pinned = pinned
-      dialog?.draft = draft
-      dialog?.archived = archived
+
+      if let pinned = pinned {
+        dialog?.pinned = pinned
+      }
+      if let draft = draft {
+        dialog?.draft = draft
+      }
+      if let archived = archived {
+        dialog?.archived = archived
+      }
+
       try dialog?.save(db, onConflict: .replace)
+    }
+
+    let updatedDialog = try await database.reader.read { db in
+      try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+    }
+    guard let updatedDialog else {
+      log.error("Failed to update dialog")
+      return
     }
 
     let result = try await ApiClient.shared.updateDialog(
       peerId: peerId,
-      pinned: pinned,
-      draft: draft,
-      archived: archived
+      pinned: pinned == nil ? updatedDialog.pinned : pinned,
+      draft: draft == nil ? updatedDialog.draft : draft,
+      archived: archived == nil ? updatedDialog.archived : archived
     )
+
     try await database.dbWriter.write { db in
-      let dialog = Dialog(from: result.dialog)
+      var dialog = Dialog(from: result.dialog)
+      if archived != nil {
+        dialog.archived = archived
+      }
+
       try dialog.save(db, onConflict: .replace)
     }
   }
@@ -460,6 +485,7 @@ public class DataManager: ObservableObject {
 
       for dialog in result.dialogs {
         let dialog = Dialog(from: dialog)
+
         try dialog.save(db, onConflict: .replace)
       }
 
