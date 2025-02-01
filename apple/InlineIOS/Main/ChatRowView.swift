@@ -146,15 +146,6 @@ struct ChatRowView: View {
   func userAvatar(_ user: User) -> some View {
     UserAvatar(user: user, size: 42)
       .padding(.trailing, 6)
-      .overlay(alignment: .bottomTrailing) {
-        if user.online == true {
-          Circle()
-            .fill(.green)
-            .frame(width: 10, height: 10)
-            .padding(.leading, -15)
-            .padding(.top, -14)
-        }
-      }
   }
 
   @ViewBuilder
