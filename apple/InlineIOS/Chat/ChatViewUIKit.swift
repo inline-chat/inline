@@ -172,6 +172,7 @@ class ChatContainerView: UIView {
     else {
       return
     }
+
     UIView.animate(
       withDuration: duration,
       delay: 0,
@@ -219,6 +220,8 @@ class ChatContainerView: UIView {
       options: .curveEaseOut
     ) {
       self.layoutIfNeeded()
+    } completion: { _ in
+      self.becomeFirstResponder()
       self.composeView.textView.becomeFirstResponder()
     }
   }
