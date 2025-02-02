@@ -16,6 +16,8 @@
 		C38C90602CB9432200B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905F2CB9432200B78B8A /* InlineKit */; };
 		C3AE72D02D1B0ED0009F70D8 /* ContextMenuAuxiliaryPreview in Frameworks */ = {isa = PBXBuildFile; productRef = C3AE72CF2D1B0ED0009F70D8 /* ContextMenuAuxiliaryPreview */; };
 		C3AE72D32D1B1716009F70D8 /* EmojiPicker in Frameworks */ = {isa = PBXBuildFile; productRef = C3AE72D22D1B1716009F70D8 /* EmojiPicker */; };
+		C3AEE6AA2D4FCDC9005D1179 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = C3AEE6A92D4FCDC9005D1179 /* Nuke */; };
+		C3AEE6AC2D4FCDD0005D1179 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3AEE6AB2D4FCDD0005D1179 /* NukeUI */; };
 		C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC99182CCE9AF7007F7F77 /* InlineUI */; };
 		C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC991A2CCE9AFF007F7F77 /* InlineUI */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
@@ -80,9 +82,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C3AEE6AC2D4FCDD0005D1179 /* NukeUI in Frameworks */,
 				C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */,
 				C3AE72D32D1B1716009F70D8 /* EmojiPicker in Frameworks */,
 				C3AE72D02D1B0ED0009F70D8 /* ContextMenuAuxiliaryPreview in Frameworks */,
+				C3AEE6AA2D4FCDC9005D1179 /* Nuke in Frameworks */,
 				CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */,
 				C35EC8222CC2A24A0067979B /* InlineKit in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
@@ -175,6 +179,8 @@
 				CD27856E2CFB053C008A0EEF /* InlineConfig */,
 				C3AE72CF2D1B0ED0009F70D8 /* ContextMenuAuxiliaryPreview */,
 				C3AE72D22D1B1716009F70D8 /* EmojiPicker */,
+				C3AEE6A92D4FCDC9005D1179 /* Nuke */,
+				C3AEE6AB2D4FCDD0005D1179 /* NukeUI */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -856,6 +862,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C3AE72D12D1B1716009F70D8 /* XCRemoteSwiftPackageReference "EmojiPicker" */;
 			productName = EmojiPicker;
+		};
+		C3AEE6A92D4FCDC9005D1179 /* Nuke */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CDB123D32D3E8066001AFC1A /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = Nuke;
+		};
+		C3AEE6AB2D4FCDD0005D1179 /* NukeUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CDB123D32D3E8066001AFC1A /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = NukeUI;
 		};
 		C3CC99182CCE9AF7007F7F77 /* InlineUI */ = {
 			isa = XCSwiftPackageProductDependency;
