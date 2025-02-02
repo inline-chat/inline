@@ -70,6 +70,7 @@ class MessageTableCell: NSView {
       log.debug("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
       self.currentContent = (message, props)
       updateTextAndSize()
+      
       return
     }
 
