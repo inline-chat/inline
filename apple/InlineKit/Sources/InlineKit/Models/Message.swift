@@ -217,26 +217,7 @@ public extension Message {
 
     // Handle unarchiving for incoming messages
     if !isExisting, out != true {
-      if let dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)),
-         dialog.archived == true
-      {
-        var updatedDialog = dialog
-        updatedDialog.archived = false
-        try updatedDialog.save(db, onConflict: .replace)
-
-        // Schedule API update after transaction
-        let peer = peerId
-        db.afterNextTransaction { _ in
-          Task {
-            try? await ApiClient.shared.updateDialog(
-              peerId: peer,
-              pinned: nil,
-              draft: nil,
-              archived: false
-            )
-          }
-        }
-      }
+      try unarchiveIncomingMessagesChat(db, peerId: peerId)
     }
 
     // Publish changes if needed
@@ -250,6 +231,32 @@ public extension Message {
           } else {
             await MessagesPublisher.shared.messageAdded(message: message, peer: peer)
           }
+        }
+      }
+    }
+  }
+
+  func unarchiveIncomingMessagesChat(
+    _ db: Database,
+    peerId: Peer
+  ) throws {
+    if let dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)),
+       dialog.archived == true
+    {
+      var updatedDialog = dialog
+      updatedDialog.archived = false
+      try updatedDialog.save(db, onConflict: .replace)
+
+      // Schedule API update after transaction
+      let peer = peerId
+      db.afterNextTransaction { _ in
+        Task {
+          try? await ApiClient.shared.updateDialog(
+            peerId: peer,
+            pinned: nil,
+            draft: nil,
+            archived: false
+          )
         }
       }
     }
