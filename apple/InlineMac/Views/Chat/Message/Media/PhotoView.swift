@@ -10,6 +10,11 @@ final class PhotoView: NSView {
     let view = NSImageView()
     view.imageScaling = .scaleProportionallyUpOrDown
     view.translatesAutoresizingMaskIntoConstraints = false
+
+    // Disable the built-in drag behavior so chat view's drop handler works
+    view.unregisterDraggedTypes()
+    view.isEditable = false // Prevents drag-to-change-image behavior
+
     return view
   }()
 
@@ -53,6 +58,7 @@ final class PhotoView: NSView {
     ]
     NSLayoutConstraint.activate(imageConstraints)
     
+
     updateImage()
   }
 
@@ -187,6 +193,22 @@ final class PhotoView: NSView {
   private func setupDragSource() {
     let dragGesture = NSPanGestureRecognizer(target: self, action: #selector(handleDragGesture(_:)))
     addGestureRecognizer(dragGesture)
+
+    // ...
+    unregisterDraggedTypes()
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    // Check if we're in a drag operation
+    if let currentEvent = NSApplication.shared.currentEvent {
+      // Pass through for drag events that aren't our own drag gesture
+      if currentEvent.type == .leftMouseDragged,
+         dragStartPoint == nil
+      {
+        return nil
+      }
+    }
+    return super.hitTest(point)
   }
 
   private func imageUrl() -> (isLocal: Bool, url: URL)? {
