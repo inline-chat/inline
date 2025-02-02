@@ -1,7 +1,10 @@
+import CoreServices
+import ImageIO
 import InlineKit
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 class ComposeTextView: UITextView {
   private var placeholderLabel: UILabel?
@@ -55,6 +58,12 @@ class ComposeView: UIView {
   private let buttonSize: CGSize = .init(width: 36, height: 36)
   private var overlayView: UIView?
   private var isOverlayVisible = false
+
+  private var selectedImage: UIImage?
+  private var showingPhotoPreview: Bool = false
+  private var imageCaption: String = ""
+  private let previewViewModel = PhotoPreviewViewModel()
+  private var attachmentItems: [UIImage: SendMessageAttachment] = [:]
 
   lazy var textView: ComposeTextView = {
     let textView = ComposeTextView()
@@ -366,27 +375,113 @@ extension ComposeView: UITextViewDelegate {
 
 extension ComposeView: PHPickerViewControllerDelegate {
   func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-    picker.dismiss(animated: true)
+    guard let result = results.first else {
+      picker.dismiss(animated: true)
+      return
+    }
 
-    guard let result = results.first else { return }
-
-    result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self] object, error in
-      guard let self else { return }
+    result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self, weak picker] object, error in
+      guard let self, let picker else { return }
 
       if let error {
         print("Failed to load image:", error.localizedDescription)
+        DispatchQueue.main.async {
+          picker.dismiss(animated: true)
+        }
         return
       }
 
-      guard let image = object as? UIImage,
-            let peerId
-      else { return }
+      guard let image = object as? UIImage else {
+        DispatchQueue.main.async {
+          picker.dismiss(animated: true)
+        }
+        return
+      }
 
       DispatchQueue.main.async {
-        self.sendButton.configuration?.showsActivityIndicator = true
-        print("I HAVE AN IMAGE")
-        self.sendButton.configuration?.showsActivityIndicator = false
-        self.sendMessageHaptic()
+        self.selectedImage = image
+        self.previewViewModel.isPresented = true
+
+        let previewView = PhotoPreviewView(
+          image: image,
+          caption: Binding(
+            get: { [weak self] in self?.previewViewModel.caption ?? "" },
+            set: { [weak self] newValue in self?.previewViewModel.caption = newValue }
+          ),
+          isPresented: Binding(
+            get: { [weak self] in self?.previewViewModel.isPresented ?? false },
+            set: { [weak self] newValue in
+              self?.previewViewModel.isPresented = newValue
+              if !newValue {
+                self?.dismissPreview()
+              }
+            }
+          ),
+          onSend: { [weak self] image, caption in
+            self?.sendImage(image, caption: caption)
+          }
+        )
+
+        let previewVC = UIHostingController(rootView: previewView)
+        previewVC.modalPresentationStyle = .fullScreen
+        previewVC.modalTransitionStyle = .crossDissolve
+
+        picker.present(previewVC, animated: true)
+      }
+    }
+  }
+
+  private func dismissPreview() {
+    if let windowScene = window?.windowScene,
+       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+       let rootVC = keyWindow.rootViewController
+    {
+      rootVC.dismiss(animated: true) { [weak self] in
+        self?.selectedImage = nil
+        self?.previewViewModel.caption = ""
+        self?.previewViewModel.isPresented = false
+      }
+    }
+  }
+
+  private func sendImage(_ image: UIImage, caption: String) {
+    guard let peerId else { return }
+
+    DispatchQueue.main.async {
+      self.sendButton.configuration?.showsActivityIndicator = true
+
+      Task {
+        // Prepare image for upload
+        if let attachment = await image.prepareForUpload() {
+          self.attachmentItems[image] = attachment
+        }
+
+        let _ = Transactions.shared.mutate(
+          transaction: .sendMessage(
+            .init(
+              text: caption,
+              peerId: self.peerId!,
+              chatId: self.chatId ?? 0,
+              attachments: self.attachmentItems.values.map { $0 },
+              replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
+            )
+          )
+        )
+
+        DispatchQueue.main.async {
+          self.sendMessageHaptic()
+          self.previewViewModel.caption = ""
+          self.selectedImage = nil
+          self.previewViewModel.isPresented = false
+          self.sendButton.configuration?.showsActivityIndicator = false
+
+          if let windowScene = self.window?.windowScene,
+             let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+             let rootVC = keyWindow.rootViewController
+          {
+            rootVC.dismiss(animated: true)
+          }
+        }
       }
     }
   }
