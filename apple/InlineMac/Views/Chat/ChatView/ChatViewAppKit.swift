@@ -11,6 +11,10 @@ class ChatViewAppKit: NSView {
   private var viewModel: FullChatViewModel?
   private var chat: Chat? // TODO: get rid of ?
 
+  override var acceptsFirstResponder: Bool {
+    return true
+  }
+
   private func createViews() {
     setupView()
   }
@@ -25,6 +29,7 @@ class ChatViewAppKit: NSView {
 
     super.init(frame: .zero)
     setupView()
+    setupDragAndDrop()
   }
 
   @available(*, unavailable)
@@ -77,5 +82,95 @@ class ChatViewAppKit: NSView {
     self.viewModel = viewModel
     // Update compose
     compose.update(viewModel: viewModel)
+  }
+}
+
+// MARK: Drag
+
+extension ChatViewAppKit {
+  private func setupDragAndDrop() {
+    // Register for drag types
+    registerForDraggedTypes([
+      .fileURL,
+      .tiff,
+      .png,
+//      .jpeg,
+      NSPasteboard.PasteboardType("public.image"), // Generic image type
+      NSPasteboard.PasteboardType("public.file-url"), // Generic file URL
+    ])
+  }
+
+  // Called when the drag enters the view
+  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    print("dragging entered")
+    // Check if the drag contains acceptable types
+    if checkForValidDraggedItems(sender) {
+      return .copy
+    }
+    return []
+  }
+
+  override func draggingExited(_ sender: NSDraggingInfo?) {
+    print("Dragging exited")
+  }
+
+//  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+//    checkForValidDraggedItems(sender) ? .copy : []
+//  }
+
+  // Called when the drag is released
+  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    let pasteboard = sender.draggingPasteboard
+
+    // Try to get URLs first
+    if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+      for url in urls {
+        if let image = NSImage(contentsOf: url) {
+          handleDroppedImage(image)
+          return true
+        }
+        // Handle file drop
+        handleDroppedFile(url)
+        return true
+      }
+    }
+
+    // Try to get image data
+    if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+       let image = images.first
+    {
+      handleDroppedImage(image)
+      return true
+    }
+
+    return false
+  }
+
+  private func checkForValidDraggedItems(_ sender: NSDraggingInfo) -> Bool {
+    // Check for files
+    if sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self, NSImage.self], options: nil) {
+      return true
+    }
+
+    // Check for images
+    if sender.draggingPasteboard.data(forType: .tiff) != nil ||
+      sender.draggingPasteboard.data(forType: .png) != nil
+    {
+      return true
+    }
+
+    return false
+  }
+
+  // FILE DROPPED
+  private func handleDroppedFile(_ url: URL) {
+    if let image = NSImage(contentsOf: url) {
+      compose.handleImageDropOrPaste(image)
+    }
+  }
+
+  // IMAGE DROPPED
+  private func handleDroppedImage(_ image: NSImage) {
+    compose.handleImageDropOrPaste(image)
   }
 }
