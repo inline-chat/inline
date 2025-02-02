@@ -5,6 +5,9 @@ class ImageAttachmentView: NSView, QLPreviewItem {
   private let imageView: NSImageView
   private let closeButton: NSButton
   private var onRemove: (() -> Void)?
+  
+  private let height: CGFloat = 80
+  private var width: CGFloat = 80
 
   init(image: NSImage, onRemove: @escaping () -> Void) {
     self.onRemove = onRemove
@@ -14,6 +17,10 @@ class ImageAttachmentView: NSView, QLPreviewItem {
     imageView.image = image
     imageView.imageScaling = .scaleProportionallyUpOrDown
     imageView.translatesAutoresizingMaskIntoConstraints = false
+    
+    // calc width
+    let aspectRatio = image.size.width / image.size.height
+    width = height * aspectRatio
 
     // Initialize close button
     closeButton = NSButton(frame: .zero)
@@ -50,8 +57,8 @@ class ImageAttachmentView: NSView, QLPreviewItem {
       imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       imageView.topAnchor.constraint(equalTo: topAnchor),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      imageView.widthAnchor.constraint(equalToConstant: 80),
-      imageView.heightAnchor.constraint(equalToConstant: 80),
+      imageView.widthAnchor.constraint(equalToConstant: width),
+      imageView.heightAnchor.constraint(equalToConstant: height),
 
       // Close button constraints
       closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),

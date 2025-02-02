@@ -18,6 +18,7 @@ class ComposeAppKit: NSView {
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
+  private var textHeightConstraint: NSLayoutConstraint!
   private var minHeight = Theme.composeMinHeight + Theme.composeOuterSpacing
   private var radius: CGFloat = round(Theme.composeMinHeight / 2)
   private var horizontalOuterSpacing = Theme.composeOuterSpacing
@@ -152,6 +153,7 @@ class ComposeAppKit: NSView {
 
   private func setUpConstraints() {
     heightConstraint = heightAnchor.constraint(equalToConstant: minHeight)
+    textHeightConstraint = textEditor.heightAnchor.constraint(equalToConstant: minHeight)
 
     let textViewHorizontalPadding = textEditor.horizontalPadding
 
@@ -177,7 +179,7 @@ class ComposeAppKit: NSView {
       // reply (height handled internally)
       replyView.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
       replyView.trailingAnchor.constraint(equalTo: textEditor.trailingAnchor),
-      replyView.topAnchor.constraint(equalTo: topAnchor, constant: 0.0),
+      //replyView.topAnchor.constraint(equalTo: topAnchor, constant: 0.0),
 
       // attachments
       attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
@@ -187,6 +189,7 @@ class ComposeAppKit: NSView {
       // text editor
       textEditor.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor),
       textEditor.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor),
+      textHeightConstraint,
       textEditor.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       // Update text editor top constraint
@@ -216,7 +219,7 @@ class ComposeAppKit: NSView {
     state.replyingToMsgIdPublisher
       .sink { [weak self] replyingToMsgId in
         guard let self else { return }
-        updateReplyingView(to: replyingToMsgId)
+        updateReplyingView(to: replyingToMsgId, animate: true)
       }.store(in: &cancellables)
   }
 
@@ -262,11 +265,11 @@ class ComposeAppKit: NSView {
     return height
   }
 
-  func updateHeight() {
+  func updateHeight(animate: Bool = false) {
     let textEditorHeight = getTextViewHeight()
     let wrapperHeight = getHeight()
 
-    if feature_animateHeightChanges {
+    if feature_animateHeightChanges || animate {
       // First update the height of scroll view immediately so it doesn't clip from top while animating
       CATransaction.begin()
       CATransaction.disableActions()
@@ -274,13 +277,15 @@ class ComposeAppKit: NSView {
       CATransaction.commit()
 
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.15
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        context.duration = 0.2
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         context.allowsImplicitAnimation = true
         // Disable screen updates during animation setup
         NSAnimationContext.beginGrouping()
         heightConstraint.animator().constant = wrapperHeight
+        textHeightConstraint.animator().constant = textEditorHeight
         textEditor.updateTextViewInsets(contentHeight: textViewContentHeight) // use height without paddings
+        attachments.updateHeight(animated: true)
         messageList?.updateInsetForCompose(wrapperHeight)
         NSAnimationContext.endGrouping()
       }
@@ -288,6 +293,8 @@ class ComposeAppKit: NSView {
       textEditor.setHeight(textEditorHeight)
       textEditor.updateTextViewInsets(contentHeight: textViewContentHeight)
       heightConstraint.constant = wrapperHeight
+      textHeightConstraint.constant = textEditorHeight
+      attachments.updateHeight(animated: false)
       messageList?.updateInsetForCompose(wrapperHeight)
     }
   }
@@ -317,7 +324,7 @@ class ComposeAppKit: NSView {
 
     if shouldUpdateHeight {
       // Update height to accommodate the reply view
-      updateHeight()
+      updateHeight(animate: animate)
     }
   }
 
@@ -326,7 +333,7 @@ class ComposeAppKit: NSView {
   func addImage(_ image: NSImage) {
     // Update UI
     attachments.addImageView(image)
-    updateHeight()
+    updateHeight(animate: true)
 
     // Update state
     Task {
@@ -339,7 +346,7 @@ class ComposeAppKit: NSView {
   func removeImage(_ image: NSImage) {
     // Update UI
     attachments.removeImageView(image)
-    updateHeight()
+    updateHeight(animate: true)
 
     // Update state
     attachmentItems
