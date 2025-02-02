@@ -174,7 +174,12 @@ class ComposeView: UIView {
       let _ = Transactions.shared.mutate(
         transaction:
         .sendMessage(
-          .init(text: text, peerId: peerId, chatId: chatId ?? 0, replyToMessageId: replyToMessageId)
+          .init(
+            text: text,
+            peerId: peerId,
+            chatId: chatId ?? 0,
+            replyToMsgId: replyToMessageId
+          )
         )
       )
 

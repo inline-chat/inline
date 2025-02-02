@@ -9,6 +9,7 @@ class ChatViewAppKit: NSView {
   private var messageList: MessageListAppKit
   private var compose: ComposeAppKit
   private var viewModel: FullChatViewModel?
+  private var chat: Chat? // TODO: get rid of ?
 
   private func createViews() {
     setupView()
@@ -17,27 +18,13 @@ class ChatViewAppKit: NSView {
   init(peerId: Peer) {
     self.peerId = peerId
 
+    chat = try? Chat.getByPeerId(peerId: peerId)
+
     messageList = MessageListAppKit(peerId: peerId)
-    compose = ComposeAppKit(peerId: peerId, messageList: messageList)
+    compose = ComposeAppKit(peerId: peerId, messageList: messageList, chat: chat)
 
     super.init(frame: .zero)
     setupView()
-  }
-
-  private func resetViews() {
-    messageList.view.removeFromSuperview()
-    compose.removeFromSuperview()
-
-    messageList = MessageListAppKit(peerId: peerId)
-    compose = ComposeAppKit(peerId: peerId, messageList: messageList)
-
-    setupView()
-    needsLayout = true
-    needsLayout = true
-    layoutSubtreeIfNeeded()
-    if let viewModel {
-      compose.update(viewModel: viewModel)
-    }
   }
 
   @available(*, unavailable)

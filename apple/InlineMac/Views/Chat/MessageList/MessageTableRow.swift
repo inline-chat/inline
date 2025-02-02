@@ -56,8 +56,10 @@ class MessageTableCell: NSView {
        // same message layout
        currentContent.message.message.out == message.message.out,
        currentContent.message.message.repliedToMessageId == message.message.repliedToMessageId,
-       // exclude file/photo/video
+       // exclude file/photo/video from reuse
        currentContent.message.file?.id == message.file?.id,
+       // exclude replies from reuse
+       currentContent.message.repliedToMessage?.id == message.repliedToMessage?.id,
        // disable re-use for file message completely for now until we can optimize later
        // same avatar
        currentContent.props.firstInGroup == props.firstInGroup

@@ -122,3 +122,5 @@ public extension User {
     id == Auth.shared.getCurrentUserId()
   }
 }
+
+// TODO: add a get color item for the user

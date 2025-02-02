@@ -116,3 +116,21 @@ public extension Chat {
     Date(timeIntervalSince1970: Double(from))
   }
 }
+
+extension Chat {
+  public static func getByPeerId(peerId: Peer) throws -> Chat? {
+    try AppDatabase.shared.reader.read { db in
+      switch peerId {
+        case let .user(id):
+          // Fetch private chat
+          try Chat
+            .filter(Column("peerUserId") == id)
+            .fetchOne(db)
+
+        case let .thread(id):
+          // Fetch thread chat
+          try Chat.filter(Column("id") == id).fetchOne(db)
+      }
+    }
+  }
+}

@@ -9,8 +9,8 @@ class ComposeTextEditor: NSView {
   let minHeight: CGFloat = Theme.composeMinHeight
   let minTextHeight: CGFloat = Theme.composeMinHeight - 2 * Theme.composeVerticalPadding
   let verticalPadding: CGFloat = Theme.composeVerticalPadding
-  
-  private let horizontalPadding: CGFloat = Theme.composeTextViewHorizontalPadding
+
+  let horizontalPadding: CGFloat = Theme.composeTextViewHorizontalPadding
 
   weak var delegate: (NSTextViewDelegate & ComposeTextViewDelegate)? {
     didSet {
@@ -86,6 +86,16 @@ class ComposeTextEditor: NSView {
     textView.autoresizingMask = [.width]
     textView.isHorizontallyResizable = false
     textView.isAutomaticLinkDetectionEnabled = true
+
+    // Smart
+    textView.isAutomaticTextCompletionEnabled = true
+    //textView.enabledTextCheckingTypes = [.spelling, .grammar, .replacement]
+
+    // Optional: Enable other smart features
+    textView.isContinuousSpellCheckingEnabled = true
+    textView.isGrammarCheckingEnabled = true
+    textView.isAutomaticQuoteSubstitutionEnabled = true
+    textView.isAutomaticDashSubstitutionEnabled = true
 
     textView.typingAttributes = [
       .paragraphStyle: paragraphStyle,

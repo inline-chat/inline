@@ -1,0 +1,131 @@
+import AppKit
+import InlineKit
+import InlineUI
+
+class EmbeddedMessageView: NSView {
+  // MARK: - Constants
+
+  private enum Constants {
+    static let cornerRadius: CGFloat = 0
+    static let rectangleWidth: CGFloat = 3
+    static let contentSpacing: CGFloat = 6
+    static let verticalPadding: CGFloat = 2
+    static let horizontalPadding: CGFloat = 6
+    static let height: CGFloat = Theme.embeddedMessageHeight
+  }
+
+  // MARK: - Properties
+
+  enum Kind {
+    case replyInMessage
+    case replyingInCompose
+  }
+
+  private var kind: Kind
+
+  private var senderFont: NSFont {
+    .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+  }
+
+  private var messageFont: NSFont {
+    Theme.messageTextFont
+  }
+
+  private var textColor: NSColor {
+    .labelColor
+  }
+
+  // MARK: - Views
+
+  private lazy var rectangleView: NSView = {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.layer?.backgroundColor = NSColor.systemGray.cgColor // use sender color
+    return view
+  }()
+
+  private lazy var nameLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "")
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = senderFont
+    label.lineBreakMode = .byTruncatingTail
+    label.textColor = textColor
+    label.heightAnchor.constraint(equalToConstant: Theme.messageNameLabelHeight).isActive = true
+    return label
+  }()
+
+  private lazy var messageLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "")
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = messageFont
+    label.lineBreakMode = .byTruncatingTail
+    label.textColor = textColor
+    return label
+  }()
+
+  // MARK: - Initialization
+
+  init(kind: Kind) {
+    self.kind = kind
+    super.init(frame: .zero)
+    setupView()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func setupView() {
+    wantsLayer = true
+    layer?.cornerRadius = Constants.cornerRadius
+    layer?.masksToBounds = true
+
+    addSubview(rectangleView)
+    addSubview(nameLabel)
+    addSubview(messageLabel)
+
+    NSLayoutConstraint.activate([
+      // Rectangle view
+      rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth),
+      rectangleView.topAnchor.constraint(equalTo: topAnchor),
+      rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      // Name label
+      nameLabel.leadingAnchor.constraint(
+        equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
+      ),
+      nameLabel.trailingAnchor.constraint(
+        equalTo: trailingAnchor, constant: -Constants.horizontalPadding
+      ),
+      nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding),
+
+      // Message label
+      messageLabel.leadingAnchor.constraint(
+        equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
+      ),
+      messageLabel.trailingAnchor.constraint(
+        equalTo: trailingAnchor, constant: -Constants.horizontalPadding
+      ),
+      messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor),
+      messageLabel.bottomAnchor.constraint(
+        equalTo: bottomAnchor, constant: -Constants.verticalPadding
+      ),
+    ])
+  }
+
+  func update(with message: Message, from: User) {
+    let senderName = from.fullName
+    nameLabel.stringValue = switch kind {
+      case .replyInMessage:
+        "\(senderName)"
+
+      case .replyingInCompose:
+        "Replying to \(senderName)"
+    }
+    nameLabel.textColor = NSColor(InitialsCircle.ColorPalette.color(for: senderName))
+    messageLabel.stringValue = message.text ?? ""
+  }
+}
