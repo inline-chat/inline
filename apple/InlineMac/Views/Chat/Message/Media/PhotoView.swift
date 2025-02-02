@@ -203,6 +203,10 @@ final class PhotoView: NSView {
         }
 
       case .ended, .cancelled:
+        if dragStartPoint != nil {
+          // finished half-way, open preview
+          handleClickAction()
+        }
         dragStartPoint = nil
 
       default:
@@ -223,9 +227,8 @@ final class PhotoView: NSView {
     addGestureRecognizer(clickGesture)
   }
 
-  @objc private func handleClick(_ gesture: NSClickGestureRecognizer) {
+  private func handleClickAction() {
     guard let panel = quickLookPanel else { return }
-
     sourceFrame = window?.convertToScreen(convert(bounds, to: nil))
 
     panel.dataSource = self
@@ -237,6 +240,10 @@ final class PhotoView: NSView {
     } else {
       panel.makeKeyAndOrderFront(nil)
     }
+  }
+
+  @objc private func handleClick(_ gesture: NSClickGestureRecognizer) {
+    handleClickAction()
   }
 }
 
