@@ -80,13 +80,14 @@ class MessageSizeCalculator {
     with props: MessageViewProps,
     tableWidth width: CGFloat
   ) -> (NSSize, NSSize, NSSize?) {
+    let hasText = message.message.text != nil
     let text = message.message.text ?? emptyFallback
     let hasMedia = message.file != nil
     let hasReply = message.message.repliedToMessageId != nil
 
     // If text is empty, height is always 1 line
     // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
-    if text.isEmpty, !hasMedia, !hasReply {
+    if hasText, text.isEmpty, !hasMedia, !hasReply {
       // TODO: fix this to include name, etc
       return (
         CGSize(width: 1, height: heightForSingleLineText()),
@@ -197,7 +198,8 @@ class MessageSizeCalculator {
 //    }
 
     // Shared logic
-    if textSize == nil,
+    if hasText,
+       textSize == nil,
        let minTextWidth = getTextWidthIfSingleLine(message, availableWidth: availableWidth)
     {
       cachHitForSingleLine = true
@@ -207,16 +209,16 @@ class MessageSizeCalculator {
       minTextWidthForSingleLine.removeObject(forKey: text as NSString)
     }
 
-    if textSize == nil {
+    if hasText, textSize == nil {
       textSize = calculateSizeForText(text, width: availableWidth, message: message.message)
     }
 
-    let textHeight = ceil(textSize!.height)
-    let textWidth = textSize!.width
+    let textHeight = ceil(textSize?.height ?? 0.0)
+    let textWidth = textSize?.width ?? 0.0
     let textSizeCeiled = CGSize(width: ceil(textWidth), height: ceil(textHeight))
 
     // Mark as single line if height is equal to single line height
-    if !cachHitForSingleLine, abs(textHeight - heightForSingleLineText()) < 0.5 {
+    if hasText, !cachHitForSingleLine, abs(textHeight - heightForSingleLineText()) < 0.5 {
       log.trace("cached single line text \(text) width \(textWidth)")
       minTextWidthForSingleLine.setObject(
         NSValue(size: CGSize(width: textWidth, height: textHeight)),
@@ -227,7 +229,11 @@ class MessageSizeCalculator {
     // MARK: Add other UI element heights to the text
 
     // don't let it be smaller than that
-    var totalHeight = max(textHeight, heightForSingleLineText())
+    var totalHeight = 1.0
+
+    if hasText {
+      totalHeight = max(textHeight, heightForSingleLineText())
+    }
 
     // Inter message spacing (between two bubbles vertically)
     totalHeight += Theme.messageOuterVerticalPadding * 2
@@ -247,13 +253,13 @@ class MessageSizeCalculator {
       // Add some padding
       totalHeight += Theme.messageContentViewSpacing
     }
-    
+
     if hasReply {
       totalHeight += Theme.embeddedMessageHeight
       totalHeight += Theme.messageContentViewSpacing
     }
 
-    var totalWidth = textWidth
+    let totalWidth = textWidth
 
     // Fitting width
     let size = NSSize(width: textWidth, height: totalHeight)

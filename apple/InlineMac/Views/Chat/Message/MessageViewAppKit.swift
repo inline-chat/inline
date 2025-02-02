@@ -37,6 +37,10 @@ class MessageViewAppKit: NSView {
     fullMessage.repliedToMessage != nil
   }
 
+  private var hasText: Bool {
+    fullMessage.message.text != nil
+  }
+
   private var textWidth: CGFloat {
     props.textWidth ?? 100.0
   }
@@ -113,7 +117,7 @@ class MessageViewAppKit: NSView {
   }()
 
   private lazy var replyView: EmbeddedMessageView = {
-    let view = EmbeddedMessageView(kind:.replyInMessage)
+    let view = EmbeddedMessageView(kind: .replyInMessage)
     view.translatesAutoresizingMaskIntoConstraints = false
     if let message = fullMessage.repliedToMessage, let from = fullMessage.replyToMessageSender {
       view.update(with: message, from: from)
@@ -204,6 +208,10 @@ class MessageViewAppKit: NSView {
     {
       // Only do this during live resize
       if !textView.inLiveResize {
+        return
+      }
+
+      if !hasText {
         return
       }
 
@@ -312,8 +320,9 @@ class MessageViewAppKit: NSView {
       contentView.addArrangedSubview(photoView)
     }
 
-    // TODO: if has text
-    contentView.addArrangedSubview(textView)
+    if hasText {
+      contentView.addArrangedSubview(textView)
+    }
 
 //    if hasPhoto {
 //      // padding
@@ -332,16 +341,14 @@ class MessageViewAppKit: NSView {
     setupContextMenu()
   }
 
-  private var textViewWidthConstraint: NSLayoutConstraint!
-  private var textViewHeightConstraint: NSLayoutConstraint!
-  private var photoViewHeightConstraint: NSLayoutConstraint!
+  private var textViewWidthConstraint: NSLayoutConstraint?
+  private var textViewHeightConstraint: NSLayoutConstraint?
+  private var photoViewHeightConstraint: NSLayoutConstraint?
   private var contentViewWidthConstraint: NSLayoutConstraint!
 
   private func setupConstraints() {
     var topPadding = Theme.messageOuterVerticalPadding
-    var bottomPadding = Theme.messageOuterVerticalPadding
     let nameAndContentGap = Theme.messageVerticalStackSpacing
-    let contentSpacing = Theme.messageContentViewSpacing
     let bgPadding = 0.0
     let avatarLeading = Theme.messageSidePadding
     let contentLeading = avatarLeading + Self.avatarSize + Theme.messageHorizontalStackSpacing - bgPadding
@@ -378,9 +385,20 @@ class MessageViewAppKit: NSView {
     // MARK: - Content Layout Constraints
 
     contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: contentWidth)
-    textViewWidthConstraint = textView.widthAnchor
-      .constraint(greaterThanOrEqualToConstant: textWidth)
-    textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
+
+    if hasText {
+      textViewWidthConstraint = textView.widthAnchor
+        .constraint(greaterThanOrEqualToConstant: textWidth)
+      textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
+
+      NSLayoutConstraint.activate([
+        // Text view
+        textViewHeightConstraint!,
+        textViewWidthConstraint!,
+        textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+        textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+      ])
+    }
 
     /// let's not set a height for content stack view and have it use the height from text + photo + gap itself, hmm?
     /// also i won't add width on text view as it must be enforced at content view level at this point. let's try.
@@ -397,19 +415,13 @@ class MessageViewAppKit: NSView {
         constant: showsName ? nameAndContentGap : topPadding
       ),
 
-      // Text view
-      textViewHeightConstraint,
-      textViewWidthConstraint,
-      // Text view bubble paddings
-      textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-      textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
     ])
 
     if hasPhoto, let photoHeight = props.photoHeight {
       photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photoHeight)
       NSLayoutConstraint.activate(
         [
-          photoViewHeightConstraint,
+          photoViewHeightConstraint!,
         ]
       )
     }
@@ -427,6 +439,10 @@ class MessageViewAppKit: NSView {
     // Setup time and state
     // Show when failed or sending
     setTimeAndStateVisibility(visible: shouldAlwaysShowTimeAndState)
+    
+    guard hasText else {
+      return
+    }
 
     // Setup text
     let text = message.text ?? ""
@@ -502,8 +518,10 @@ class MessageViewAppKit: NSView {
     let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
     menu.addItem(replyItem)
 
-    let copyItem = NSMenuItem(title: "Copy", action: #selector(copyMessage), keyEquivalent: "c")
-    menu.addItem(copyItem)
+    if hasText {
+      let copyItem = NSMenuItem(title: "Copy", action: #selector(copyMessage), keyEquivalent: "c")
+      menu.addItem(copyItem)
+    }
 
     menu.delegate = self
     self.menu = menu
@@ -562,11 +580,11 @@ class MessageViewAppKit: NSView {
     // # Update sizes
     // Content view
     contentViewWidthConstraint.constant = contentWidth
-    textViewWidthConstraint.constant = textWidth
+    textViewWidthConstraint?.constant = textWidth
 
     // Text size
     if hasTextSizeChanged {
-      textViewHeightConstraint.constant = props.textHeight ?? 0
+      textViewHeightConstraint?.constant = props.textHeight ?? 0
 
       // This helps refresh the layout for textView
       textView.textContainer?.containerSize = CGSize(width: textWidth, height: props.textHeight ?? 0)
