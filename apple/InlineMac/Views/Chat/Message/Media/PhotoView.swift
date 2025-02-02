@@ -281,23 +281,54 @@ final class PhotoView: NSView {
     addGestureRecognizer(clickGesture)
   }
 
-  private func handleClickAction() {
-    guard let panel = quickLookPanel else { return }
-    sourceFrame = window?.convertToScreen(convert(bounds, to: nil))
+  // In your PhotoView class
+  override var acceptsFirstResponder: Bool {
+    true
+  }
 
-    panel.dataSource = self
-    panel.delegate = self
-    panel.reloadData()
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became {
+      QLPreviewPanel.shared()?.updateController()
+    }
+    return became
+  }
+
+  private func handleClickAction() {
+    guard let panel = QLPreviewPanel.shared() else { return }
 
     if panel.isVisible {
       panel.orderOut(nil)
     } else {
+      // Update the responder chain
+      window?.makeFirstResponder(self)
+      panel.updateController()
       panel.makeKeyAndOrderFront(nil)
     }
   }
 
   @objc private func handleClick(_ gesture: NSClickGestureRecognizer) {
     handleClickAction()
+  }
+}
+
+// MARK: - QLPreviewPanel
+
+extension PhotoView {
+  // Required for proper panel management
+  override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+    true
+  }
+
+  override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+    panel.dataSource = self
+    panel.delegate = self
+    panel.reloadData()
+  }
+
+  override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+    panel.dataSource = nil
+    panel.delegate = nil
   }
 }
 
@@ -317,7 +348,7 @@ extension PhotoView: QLPreviewPanelDataSource {
 
 extension PhotoView: QLPreviewPanelDelegate {
   func previewPanel(_ panel: QLPreviewPanel!, sourceFrameOnScreenFor item: QLPreviewItem!) -> NSRect {
-    sourceFrame ?? .zero
+    window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
   }
 
   // Doesn't work.
