@@ -321,7 +321,7 @@ public class MessagesProgressiveViewModel {
 
 @MainActor
 public final class MessagesPublisher {
-  static let shared = MessagesPublisher()
+  public static let shared = MessagesPublisher()
 
   public struct MessageUpdate {
     public let message: FullMessage
@@ -374,7 +374,7 @@ public final class MessagesPublisher {
     publisher.send(.delete(MessageDelete(messageIds: messageIds, peer: peer)))
   }
 
-  func messageUpdated(message: Message, peer: Peer) async {
+  public func messageUpdated(message: Message, peer: Peer) async {
     //    Log.shared.debug("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? await db.reader.read { db in
