@@ -82,10 +82,11 @@ class MessageSizeCalculator {
   ) -> (NSSize, NSSize, NSSize?) {
     let text = message.message.text ?? emptyFallback
     let hasMedia = message.file != nil
+    let hasReply = message.message.repliedToMessageId != nil
 
     // If text is empty, height is always 1 line
     // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
-    if text.isEmpty, !hasMedia {
+    if text.isEmpty, !hasMedia, !hasReply {
       // TODO: fix this to include name, etc
       return (
         CGSize(width: 1, height: heightForSingleLineText()),
@@ -115,32 +116,6 @@ class MessageSizeCalculator {
           let aspectRatio = CGFloat(width) / CGFloat(height)
           var mediaWidth: CGFloat
           var mediaHeight: CGFloat
-//
-//          if width > height {
-//            // for landscape
-//            let maxAvailableWidth = min(maxMediaSize.width, parentAvailableWidth)
-//
-//            mediaWidth = max(
-//              minMediaSize.width,
-//              min(CGFloat(width), maxAvailableWidth)
-//            )
-//            mediaHeight = max(
-//              minMediaSize.height,
-//              min(mediaWidth / aspectRatio, maxMediaSize.height)
-//            )
-//          } else {
-//            // for portrait
-//            // allow it to use maximum amount of width, experiemntal
-//            let maxAvailableWidth = parentAvailableWidth
-//            mediaHeight = max(
-//              minMediaSize.height,
-//              min(CGFloat(height), maxMediaSize.height)
-//            )
-//            mediaWidth = max(
-//              minMediaSize.width,
-//              min(mediaHeight * aspectRatio, maxAvailableWidth)
-//            )
-//          }
 
           // for landscape
           let maxAvailableWidth = min(maxMediaSize.width, parentAvailableWidth)
@@ -199,7 +174,7 @@ class MessageSizeCalculator {
     if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue,
        let cachedTextSize = textHeightCache.object(forKey: cacheKey)?.sizeValue
     {
-      if hasMedia {
+      if hasMedia || hasReply { // we can skip reply probably
         // Just use the text size if we have media
         textSize = cachedTextSize
       } else {
@@ -268,8 +243,13 @@ class MessageSizeCalculator {
       if let photoSize {
         totalHeight += photoSize.height
       }
-      
+
       // Add some padding
+      totalHeight += Theme.messageContentViewSpacing
+    }
+    
+    if hasReply {
+      totalHeight += Theme.embeddedMessageHeight
       totalHeight += Theme.messageContentViewSpacing
     }
 
