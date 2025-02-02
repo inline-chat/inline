@@ -100,7 +100,7 @@ extension NSImage {
 
 extension NSImage {
   func prepareForUpload() -> SendMessageAttachment? {
-    let maxSize = 5_024 * 1_024
+    let maxSize = 5_024 * 1_024 * 1_024 // 5 MB
 
     // Step 1: Create a proper image source from our NSImage
     guard let tiffData = tiffRepresentation else {
@@ -121,7 +121,7 @@ extension NSImage {
     _ = saveImage(
       to: temporaryFileURL,
       fileType: fileType,
-      properties: [.compressionFactor: 0.9]
+      properties: [.compressionFactor: 1.0]
     )
 
     return SendMessageAttachment.photo(
