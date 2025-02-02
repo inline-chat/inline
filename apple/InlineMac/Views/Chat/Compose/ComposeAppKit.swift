@@ -179,7 +179,7 @@ class ComposeAppKit: NSView {
       // reply (height handled internally)
       replyView.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
       replyView.trailingAnchor.constraint(equalTo: textEditor.trailingAnchor),
-      //replyView.topAnchor.constraint(equalTo: topAnchor, constant: 0.0),
+      // replyView.topAnchor.constraint(equalTo: topAnchor, constant: 0.0),
 
       // attachments
       attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
@@ -384,11 +384,17 @@ class ComposeAppKit: NSView {
   func send() {
     DispatchQueue.main.async {
       self.ignoreNextHeightChange = true
-      let rawText = self.textEditor.string
-      let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+      let rawText = self.textEditor.string.trimmingCharacters(in: .whitespacesAndNewlines)
       let replyToMsgId = self.state.replyingToMsgId
       let attachmentItems = self.attachmentItems
-      let canSend = !text.isEmpty
+      let canSend = !rawText.isEmpty || attachmentItems.count > 0
+
+      // make it nil if empty
+      let text = if rawText.isEmpty && !attachmentItems.isEmpty {
+        nil as String?
+      } else {
+        rawText
+      }
 
       if !canSend { return }
 
