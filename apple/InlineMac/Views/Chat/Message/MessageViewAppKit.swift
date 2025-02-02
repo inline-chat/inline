@@ -439,7 +439,7 @@ class MessageViewAppKit: NSView {
     // Setup time and state
     // Show when failed or sending
     setTimeAndStateVisibility(visible: shouldAlwaysShowTimeAndState)
-    
+
     guard hasText else {
       return
     }
@@ -619,6 +619,11 @@ class MessageViewAppKit: NSView {
 
     // Update time and state
     timeAndStateView.updateMessage(fullMessage)
+
+    // Update photo
+    if hasPhoto {
+      photoView.update(with: fullMessage)
+    }
   }
 
   public func updateSize(props: MessageViewProps) {

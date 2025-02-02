@@ -44,8 +44,6 @@ final class PhotoView: NSView {
   private var imageConstraints: [NSLayoutConstraint] = []
 
   private func setupImage() {
-    guard let (isLocal, url) = imageUrl() else { return }
-
     addSubview(imageView)
     imageConstraints = [
       imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -54,6 +52,32 @@ final class PhotoView: NSView {
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ]
     NSLayoutConstraint.activate(imageConstraints)
+    
+    updateImage()
+  }
+
+  // Call for updating image when the message is updated
+  public func update(with fullMessage: FullMessage) {
+    let prev = self.fullMessage
+    self.fullMessage = fullMessage
+
+    let wasLocal = prev.file?.localPath != nil
+    let isLocal = fullMessage.file?.localPath != nil
+
+    // Only reload if file id or image source has changed
+    if wasLocal == isLocal,
+       // and same file
+       prev.file?.id == fullMessage.file?.id
+    {
+      Log.shared.debug("not reloading image view")
+      return
+    }
+
+    updateImage()
+  }
+
+  private func updateImage() {
+    guard let (isLocal, url) = imageUrl() else { return }
 
     if isLocal {
       guard let image = NSImage(contentsOf: url) else {
@@ -79,9 +103,18 @@ final class PhotoView: NSView {
             try? await AppDatabase.shared.dbWriter.write { db in
               try file.save(db)
             }
+            // reload message view to show local image
+            triggerMessageReload()
           }
         }
       }
+    }
+  }
+
+  private func triggerMessageReload() {
+    Task { @MainActor in
+      await MessagesPublisher.shared
+        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId)
     }
   }
 
