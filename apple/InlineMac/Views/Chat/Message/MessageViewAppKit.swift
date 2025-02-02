@@ -523,6 +523,18 @@ class MessageViewAppKit: NSView {
       menu.addItem(copyItem)
     }
 
+    if hasPhoto {
+      let saveItem = NSMenuItem(title: "Save Image", action: #selector(photoView.saveImage), keyEquivalent: "m")
+      saveItem.target = photoView
+      saveItem.isEnabled = true
+      menu.addItem(saveItem)
+
+      let copyItem = NSMenuItem(title: "Copy Image", action: #selector(photoView.copyImage), keyEquivalent: "i")
+      copyItem.target = photoView
+      copyItem.isEnabled = true
+      menu.addItem(copyItem)
+    }
+
     menu.delegate = self
     self.menu = menu
   }

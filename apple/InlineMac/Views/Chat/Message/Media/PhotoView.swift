@@ -57,7 +57,6 @@ final class PhotoView: NSView {
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ]
     NSLayoutConstraint.activate(imageConstraints)
-    
 
     updateImage()
   }
@@ -375,42 +374,31 @@ extension PhotoView: NSDraggingSource {
   }
 }
 
-// guard let file = fullMessage.file else { return }
-// let url = if let tempUrl = file.temporaryUrl {
-//  URL(string: tempUrl)
-// } else {
-//  file.getLocalURL()
-// }
-//
-// guard let url else { return }
-//
-//
-// let imageView = LazyImageView()
-// imageView.priority = .high
-// imageView.url = url
-// imageView.translatesAutoresizingMaskIntoConstraints = false
-// imageView.transition = .fadeIn(duration: 1.0)
-////    let imageView = PhotoLazyImageView(url: url)
-////    imageView.translatesAutoresizingMaskIntoConstraints = false
-////    imageView.onStart = { _ in
-////    }
-////    imageView.onFailure = { _ in
-////    }
-////    imageView.onSuccess = { _ in
-////    }
-//
-// self.imageView = imageView
-//
-//// Set corners based on bubble state
-////    if hasBubble {
-////      imageView.setCorners([
-////        .radius(1.0, for: .topLeft),
-////        .radius(1.0, for: .topRight),
-////        .radius(Theme.messageBubbleRadius, for: .bottomLeft),
-////        .radius(Theme.messageBubbleRadius, for: .bottomRight),
-////      ])
-////    } else {
-////      imageView.setCorners(
-////        ViewCorner.allCases.map { .radius(4.0, for: $0) }
-////      )
-////    }
+// MARK: - External Interface
+
+extension PhotoView {
+  @objc func copyImage() {
+    guard let image = imageView.image else { return }
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.writeObjects([image])
+  }
+
+  @objc func saveImage() {
+    guard let image = imageView.image else { return }
+    let savePanel = NSSavePanel()
+    savePanel.allowedContentTypes = [.png, .jpeg]
+    savePanel.nameFieldStringValue = fullMessage.file?.fileName ?? "image"
+    savePanel.begin { response in
+      guard response == .OK, let url = savePanel.url else { return }
+
+      // copy it from local url
+      guard let (_, localUrl) = self.imageUrl() else { return }
+      do {
+        try FileManager.default.copyItem(at: localUrl, to: url)
+      } catch {
+        Log.shared.error("Failed to save image: \(error)")
+      }
+    }
+  }
+}
