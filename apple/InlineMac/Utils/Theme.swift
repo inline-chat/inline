@@ -60,6 +60,8 @@ enum Theme {
   static let embeddedMessageHeight: CGFloat = 34.0
 
   static let composeMinHeight: CGFloat = 44
+  static let composeAttachmentsVPadding: CGFloat = 6
+  static let composeAttachmentImageHeight: CGFloat = 80
   static let composeButtonSize: CGFloat = 24
   static let composeTextViewHorizontalPadding: CGFloat = 10.0
   static let composeVerticalPadding: CGFloat = 2.0 // inner, higher makes 2 line compose increase height
