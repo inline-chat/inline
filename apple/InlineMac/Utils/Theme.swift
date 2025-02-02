@@ -57,6 +57,7 @@ enum Theme {
   static let messageGroupSpacing: CGFloat = 8
   static let messageListTopInset: CGFloat = 14
   static let messageListBottomInset: CGFloat = 10
+  static let embeddedMessageHeight: CGFloat = 34.0
 
   static let composeMinHeight: CGFloat = 44
   static let composeButtonSize: CGFloat = 24
@@ -68,6 +69,7 @@ enum Theme {
       .withAlphaComponent(0.1) : NSColor.black
       .withAlphaComponent(0.09)
   }
+  
 
   // MARK: - Devtools
 

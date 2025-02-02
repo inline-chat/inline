@@ -44,6 +44,17 @@ public extension FullMessage {
   }
 }
 
+// Helpers
+public extension FullMessage {
+  var peerId: Peer {
+    message.peerId
+  }
+
+  var chatId: Int64 {
+    message.chatId
+  }
+}
+
 public extension FullMessage {
   static func queryRequest() -> QueryInterfaceRequest<FullMessage> {
     Message
@@ -132,5 +143,17 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             }
           }
         )
+  }
+}
+
+public extension FullMessage {
+  static func get(messageId: Int64, chatId: Int64) throws -> FullMessage? {
+    try AppDatabase.shared.reader.read { db in
+      try FullMessage
+        .queryRequest()
+        .filter(Column("messageId") == messageId)
+        .filter(Column("chatId") == chatId)
+        .fetchOne(db)
+    }
   }
 }

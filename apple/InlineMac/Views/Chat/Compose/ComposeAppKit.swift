@@ -1,11 +1,13 @@
 import AppKit
+import Combine
 import InlineKit
 import SwiftUI
 
 class ComposeAppKit: NSView {
   // Props
   private var peerId: Peer
-  private var chatId: Int64? { viewModel?.chat?.id }
+  private var chat: Chat?
+  private var chatId: Int64? { chat?.id }
 
   // State
   private weak var messageList: MessageListAppKit?
@@ -18,7 +20,6 @@ class ComposeAppKit: NSView {
   private var heightConstraint: NSLayoutConstraint!
   private var minHeight = Theme.composeMinHeight + Theme.composeOuterSpacing
   private var radius: CGFloat = round(Theme.composeMinHeight / 2)
-  private var verticalPadding = 0.0
   private var horizontalOuterSpacing = Theme.composeOuterSpacing
   private var buttonsBottomSpacing = (Theme.composeMinHeight - Theme.composeButtonSize) / 2
 
@@ -42,14 +43,30 @@ class ComposeAppKit: NSView {
   }()
 
   private lazy var sendButton: ComposeSendButton = {
-    let view = ComposeSendButton(frame: .zero, onSend: { [weak self] in
-      self?.send()
-    })
+    let view = ComposeSendButton(
+      frame: .zero,
+      onSend: { [weak self] in
+        self?.send()
+      }
+    )
     return view
   }()
 
   private lazy var menuButton: ComposeMenuButton = {
     let view = ComposeMenuButton(frame: .zero)
+    return view
+  }()
+
+  // Add reply view
+  private lazy var replyView: ComposeReplyView = {
+    let view = ComposeReplyView(
+      kind: .replyingInCompose,
+      onClose: { [weak self] in
+        self?.state.clearReplyingToMsgId()
+      }
+    )
+
+    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -59,32 +76,6 @@ class ComposeAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
-
-  // -------
-
-  override func viewDidMoveToWindow() {
-    super.viewDidMoveToWindow()
-
-    // Focus the text editor
-    focus()
-  }
-
-  // MARK: Initialization
-
-  init(peerId: Peer, messageList: MessageListAppKit) {
-    self.peerId = peerId
-    self.messageList = messageList
-
-    super.init(frame: .zero)
-    setupView()
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  // MARK: Setup
 
   lazy var border = {
     let border = NSBox()
@@ -105,6 +96,34 @@ class ComposeAppKit: NSView {
 
   var hasTopSeperator: Bool = true
 
+  // -------
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+
+    // Focus the text editor
+    focus()
+  }
+
+  // MARK: Initialization
+
+  init(peerId: Peer, messageList: MessageListAppKit, chat: Chat?) {
+    self.peerId = peerId
+    self.messageList = messageList
+    self.chat = chat
+
+    super.init(frame: .zero)
+    setupView()
+    setupObservers()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  // MARK: Setup
+
   func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
@@ -112,19 +131,29 @@ class ComposeAppKit: NSView {
     // More distinct background
     // layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5).cgColor
 
+    // bg
     addSubview(background)
     addSubview(border)
+
+    // from top
+    addSubview(replyView)
+
+    addSubview(attachments)
+
+    // to bottom
     addSubview(sendButton)
     addSubview(menuButton)
     addSubview(textEditor)
-    addSubview(attachments)
 
+    setupReplyingView()
     setUpConstraints()
     setupTextEditor()
   }
 
   private func setUpConstraints() {
     heightConstraint = heightAnchor.constraint(equalToConstant: minHeight)
+
+    let textViewHorizontalPadding = textEditor.horizontalPadding
 
     NSLayoutConstraint.activate([
       heightConstraint,
@@ -136,17 +165,24 @@ class ComposeAppKit: NSView {
       background.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       // send
-      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+      sendButton.trailingAnchor.constraint(
+        equalTo: trailingAnchor, constant: -horizontalOuterSpacing
+      ),
       sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
 
       // menu
       menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
       menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
 
-      // Add attachments constraints
-      attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor),
+      // reply (height handled internally)
+      replyView.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
+      replyView.trailingAnchor.constraint(equalTo: textEditor.trailingAnchor),
+      replyView.topAnchor.constraint(equalTo: topAnchor, constant: 0.0),
+
+      // attachments
+      attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
       attachments.trailingAnchor.constraint(equalTo: textEditor.trailingAnchor),
-      attachments.topAnchor.constraint(equalTo: topAnchor, constant: 0.0),
+      attachments.topAnchor.constraint(equalTo: replyView.bottomAnchor),
 
       // text editor
       textEditor.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor),
@@ -171,6 +207,19 @@ class ComposeAppKit: NSView {
     }
   }
 
+  private var cancellables: Set<AnyCancellable> = []
+  private var state: ChatState {
+    ChatsManager.get(for: peerId, chatId: chatId ?? 0)
+  }
+
+  func setupObservers() {
+    state.replyingToMsgIdPublisher
+      .sink { [weak self] replyingToMsgId in
+        guard let self else { return }
+        updateReplyingView(to: replyingToMsgId)
+      }.store(in: &cancellables)
+  }
+
   private func setupTextEditor() {
     // Set the delegate if needed
     textEditor.delegate = self
@@ -190,40 +239,38 @@ class ComposeAppKit: NSView {
   // MARK: - Height
 
   private func getTextViewHeight() -> CGFloat {
-    textViewHeight = max(
+    textViewHeight = min(300.0, max(
       textEditor.minHeight,
       textViewContentHeight + textEditor.verticalPadding * 2
-    )
+    ))
+
     return textViewHeight
   }
 
-  // Get compose height
-  private func getInnerHeight() -> CGFloat {
-    let textViewHeight = getTextViewHeight()
-    let contentHeight = max(textEditor.minHeight, textViewHeight)
-    let attachmentsHeight = attachments.getHeight()
-    let height = contentHeight + attachmentsHeight + verticalPadding
-    let maxHeight = 300.0
-    let capped = max(Theme.composeMinHeight, min(maxHeight, height))
-    return capped
-  }
-
+  // Get compose wrapper height
   private func getHeight() -> CGFloat {
-    let height = getInnerHeight()
+    var height = getTextViewHeight()
+
+    // Reply view
+    if state.replyingToMsgId != nil {
+      height += Theme.embeddedMessageHeight
+    }
+
+    // Attachments
+    height += attachments.getHeight()
+
     return height
   }
 
   func updateHeight() {
-    let height = getInnerHeight()
+    let textEditorHeight = getTextViewHeight()
     let wrapperHeight = getHeight()
-
-    print("ComposeAppKit: updateHeight \(height)")
 
     if feature_animateHeightChanges {
       // First update the height of scroll view immediately so it doesn't clip from top while animating
       CATransaction.begin()
       CATransaction.disableActions()
-      textEditor.setHeight(height)
+      textEditor.setHeight(textEditorHeight)
       CATransaction.commit()
 
       NSAnimationContext.runAnimationGroup { context in
@@ -238,7 +285,7 @@ class ComposeAppKit: NSView {
         NSAnimationContext.endGrouping()
       }
     } else {
-      textEditor.setHeight(height)
+      textEditor.setHeight(textEditorHeight)
       textEditor.updateTextViewInsets(contentHeight: textViewContentHeight)
       heightConstraint.constant = wrapperHeight
       messageList?.updateInsetForCompose(wrapperHeight)
@@ -246,6 +293,33 @@ class ComposeAppKit: NSView {
   }
 
   private var ignoreNextHeightChange = false
+
+  // MARK: - Reply View
+
+  private func setupReplyingView() {
+    if let replyingToMsgId = state.replyingToMsgId {
+      print("setupReplyingView: \(replyingToMsgId)")
+      updateReplyingView(to: replyingToMsgId, animate: false, shouldUpdateHeight: false)
+    }
+  }
+
+  private func updateReplyingView(to replyingToMsgId: Int64?, animate: Bool = false, shouldUpdateHeight: Bool = true) {
+    if let replyingToMsgId {
+      // Update and show the reply view
+      if let message = try? FullMessage.get(messageId: replyingToMsgId, chatId: chatId ?? 0) {
+        replyView.update(with: message)
+        replyView.open(animated: animate)
+      }
+    } else {
+      // Hide and remove the reply view
+      replyView.close(animated: false)
+    }
+
+    if shouldUpdateHeight {
+      // Update height to accommodate the reply view
+      updateHeight()
+    }
+  }
 
   // MARK: - Actions
 
@@ -285,11 +359,13 @@ class ComposeAppKit: NSView {
     // State
     attachmentItems.removeAll()
     sendButton.updateCanSend(false)
+    state.clearReplyingToMsgId()
 
     // Views
     attachments.clearViews()
-    textViewContentHeight = textEditor
-      .getTypingLineHeight() // manually for now, FIXME: make it automatic in texteditor.clear
+    textViewContentHeight =
+      textEditor
+        .getTypingLineHeight() // manually for now, FIXME: make it automatic in texteditor.clear
     textEditor.clear()
     clearAttachments(updateHeights: false)
 
@@ -303,6 +379,7 @@ class ComposeAppKit: NSView {
       self.ignoreNextHeightChange = true
       let rawText = self.textEditor.string
       let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+      let replyToMsgId = self.state.replyingToMsgId
       let attachmentItems = self.attachmentItems
       let canSend = !text.isEmpty
 
@@ -320,7 +397,8 @@ class ComposeAppKit: NSView {
             text: text,
             peerId: self.peerId,
             chatId: self.chatId ?? 0, // FIXME: chatId fallback
-            attachments: attachmentItems.values.map { $0 }
+            attachments: attachmentItems.values.map { $0 },
+            replyToMsgId: replyToMsgId
           )
         )
       )
@@ -396,7 +474,8 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func calculateContentHeight(for textView: NSTextView) -> CGFloat {
     guard let layoutManager = textView.layoutManager,
-          let textContainer = textView.textContainer else { return 0 }
+          let textContainer = textView.textContainer
+    else { return 0 }
 
     layoutManager.ensureLayout(for: textContainer)
     return layoutManager.usedRect(for: textContainer).height
@@ -404,7 +483,8 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func updateHeightIfNeeded(for textView: NSTextView) {
     guard let layoutManager = textView.layoutManager,
-          let textContainer = textView.textContainer else { return }
+          let textContainer = textView.textContainer
+    else { return }
 
     layoutManager.ensureLayout(for: textContainer)
     let contentHeight = layoutManager.usedRect(for: textContainer).height

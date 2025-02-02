@@ -33,13 +33,23 @@ class MessageViewAppKit: NSView {
     return false
   }
 
+  private var hasReply: Bool {
+    fullMessage.repliedToMessage != nil
+  }
+
   private var textWidth: CGFloat {
     props.textWidth ?? 100.0
   }
 
   // When we have photo, shorter text shouldn't shrink content view
   private var contentWidth: CGFloat {
-    props.photoWidth ?? textWidth
+    if let photoWidth = props.photoWidth {
+      photoWidth
+    } else if hasReply {
+      max(textWidth, 120.0) // some width for the reply
+    } else {
+      textWidth
+    }
   }
 
   private var textColor: NSColor {
@@ -99,6 +109,15 @@ class MessageViewAppKit: NSView {
   private lazy var photoView: PhotoView = {
     let view = PhotoView(fullMessage)
     view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private lazy var replyView: EmbeddedMessageView = {
+    let view = EmbeddedMessageView(kind:.replyInMessage)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    if let message = fullMessage.repliedToMessage, let from = fullMessage.replyToMessageSender {
+      view.update(with: message, from: from)
+    }
     return view
   }()
 
@@ -282,26 +301,31 @@ class MessageViewAppKit: NSView {
 
     addSubview(contentView)
 
+    // Simpler
+    contentView.spacing = Theme.messageContentViewSpacing
+
+    if hasReply {
+      contentView.addArrangedSubview(replyView)
+    }
+
     if hasPhoto {
       contentView.addArrangedSubview(photoView)
-
-      // TODO: if has text
-      contentView.addArrangedSubview(textView)
-
-      // padding
-      // contentView.spacing = Theme.messageContentViewSpacing
-      let aboveTextPadding = NSLayoutGuide()
-      contentView.addLayoutGuide(aboveTextPadding)
-      aboveTextPadding.heightAnchor
-        .constraint(
-          lessThanOrEqualToConstant: Theme.messageContentViewSpacing
-        ).isActive = true
-      aboveTextPadding.topAnchor.constraint(equalTo: photoView.bottomAnchor).isActive = true
-      aboveTextPadding.bottomAnchor.constraint(equalTo: textView.topAnchor).isActive = true
-    } else {
-      // TODO: if has text
-      contentView.addArrangedSubview(textView)
     }
+
+    // TODO: if has text
+    contentView.addArrangedSubview(textView)
+
+//    if hasPhoto {
+//      // padding
+//      let aboveTextPadding = NSLayoutGuide()
+//      contentView.addLayoutGuide(aboveTextPadding)
+//      aboveTextPadding.heightAnchor
+//        .constraint(
+//          lessThanOrEqualToConstant: Theme.messageContentViewSpacing
+//        ).isActive = true
+//      aboveTextPadding.topAnchor.constraint(equalTo: photoView.bottomAnchor).isActive = true
+//      aboveTextPadding.bottomAnchor.constraint(equalTo: textView.topAnchor).isActive = true
+//    }
 
     setupMessageText()
     setupConstraints()
@@ -354,6 +378,8 @@ class MessageViewAppKit: NSView {
     // MARK: - Content Layout Constraints
 
     contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: contentWidth)
+    textViewWidthConstraint = textView.widthAnchor
+      .constraint(greaterThanOrEqualToConstant: textWidth)
     textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
 
     /// let's not set a height for content stack view and have it use the height from text + photo + gap itself, hmm?
@@ -373,6 +399,7 @@ class MessageViewAppKit: NSView {
 
       // Text view
       textViewHeightConstraint,
+      textViewWidthConstraint,
       // Text view bubble paddings
       textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
       textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
@@ -453,9 +480,12 @@ class MessageViewAppKit: NSView {
     CacheAttrs.shared.set(message: message, value: attributedString)
   }
 
+  // MARK: - Context Menu
+
   private func setupContextMenu() {
     let menu = NSMenu()
 
+    #if DEBUG
     let idItem = NSMenuItem(title: "ID: \(message.id)", action: nil, keyEquivalent: "")
     idItem.isEnabled = false
     menu.addItem(idItem)
@@ -467,12 +497,31 @@ class MessageViewAppKit: NSView {
     )
     indexItem.isEnabled = false
     menu.addItem(indexItem)
+    #endif
+
+    let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
+    menu.addItem(replyItem)
 
     let copyItem = NSMenuItem(title: "Copy", action: #selector(copyMessage), keyEquivalent: "c")
     menu.addItem(copyItem)
 
     menu.delegate = self
     self.menu = menu
+  }
+
+  @objc private func copyMessage() {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(message.text ?? "", forType: .string)
+  }
+
+  @objc private func reply() {
+    let state = ChatsManager
+      .get(
+        for: fullMessage.peerId,
+        chatId: fullMessage.chatId
+      )
+
+    state.setReplyingToMsgId(fullMessage.message.messageId)
   }
 
   override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
@@ -513,6 +562,7 @@ class MessageViewAppKit: NSView {
     // # Update sizes
     // Content view
     contentViewWidthConstraint.constant = contentWidth
+    textViewWidthConstraint.constant = textWidth
 
     // Text size
     if hasTextSizeChanged {
@@ -568,11 +618,6 @@ class MessageViewAppKit: NSView {
   }
 
   // MARK: - Actions
-
-  @objc private func copyMessage() {
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(message.text ?? "", forType: .string)
-  }
 
   // ---
   private var notificationObserver: NSObjectProtocol?
