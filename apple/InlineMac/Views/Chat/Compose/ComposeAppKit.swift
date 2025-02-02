@@ -417,6 +417,16 @@ class ComposeAppKit: NSView {
   }
 }
 
+// MARK: External Interface for file drop
+
+extension ComposeAppKit {
+  func handleFileDrop(_ urls: [URL]) {}
+
+  func handleImageDropOrPaste(_ image: NSImage) {
+    addImage(image)
+  }
+}
+
 // MARK: Delegate
 
 extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
@@ -434,7 +444,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage) {
-    addImage(image)
+    handleImageDropOrPaste(image)
   }
 
   func textDidChange(_ notification: Notification) {
