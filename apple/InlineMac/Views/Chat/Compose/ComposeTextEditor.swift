@@ -48,6 +48,7 @@ class ComposeTextEditor: NSView {
   init(initiallySingleLine: Bool = false) {
     scrollView = ComposeScrollView()
     textView = ComposeNSTextView()
+
     self.initiallySingleLine = initiallySingleLine
 
     super.init(frame: .zero)
@@ -87,9 +88,12 @@ class ComposeTextEditor: NSView {
     textView.isHorizontallyResizable = false
     textView.isAutomaticLinkDetectionEnabled = true
 
+    // Enables paste command for NSImages from clipboard
+    textView.importsGraphics = true
+
     // Smart
     textView.isAutomaticTextCompletionEnabled = true
-    //textView.enabledTextCheckingTypes = [.spelling, .grammar, .replacement]
+    // textView.enabledTextCheckingTypes = [.spelling, .grammar, .replacement]
 
     // Optional: Enable other smart features
     textView.isContinuousSpellCheckingEnabled = true
