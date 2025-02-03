@@ -390,7 +390,7 @@ class ComposeAppKit: NSView {
       let canSend = !rawText.isEmpty || attachmentItems.count > 0
 
       // make it nil if empty
-      let text = if rawText.isEmpty && !attachmentItems.isEmpty {
+      let text = if rawText.isEmpty, !attachmentItems.isEmpty {
         nil as String?
       } else {
         rawText
@@ -403,18 +403,21 @@ class ComposeAppKit: NSView {
 
       // Add message
 
-      let _ = Transactions.shared.mutate(
-        transaction:
-        .sendMessage(
-          TransactionSendMessage(
-            text: text,
-            peerId: self.peerId,
-            chatId: self.chatId ?? 0, // FIXME: chatId fallback
-            attachments: attachmentItems.values.map { $0 },
-            replyToMsgId: replyToMsgId
+      for (index, (image, attachment)) in attachmentItems.enumerated() {
+        let isFirst = index == 0
+        let _ = Transactions.shared.mutate(
+          transaction:
+          .sendMessage(
+            TransactionSendMessage(
+              text: isFirst ? text : nil,
+              peerId: self.peerId,
+              chatId: self.chatId ?? 0, // FIXME: chatId fallback
+              attachments: [attachment],
+              replyToMsgId: isFirst ? replyToMsgId : nil
+            )
           )
         )
-      )
+      }
 
       // Cancel typing
       Task {
