@@ -55,7 +55,7 @@ class UIMessageView: UIView {
     let label = UILabel()
     label.backgroundColor = .clear
     label.textAlignment = .natural
-    label.font = .systemFont(ofSize: 17)
+    label.font = .systemFont(ofSize: 18)
     label.textColor = textColor
     label.numberOfLines = 0
     label.lineBreakMode = .byTruncatingTail
@@ -104,7 +104,7 @@ class UIMessageView: UIView {
     return text.count > 24 || text.contains("\n")
   }
 
-  private let labelVerticalPadding: CGFloat = 9.0
+  private let labelVerticalPadding: CGFloat = 10.0
   private let labelHorizantalPadding: CGFloat = 12.0
 
   // MARK: - Initialization
@@ -170,7 +170,6 @@ class UIMessageView: UIView {
       multiLineContainer.addArrangedSubview(messageLabel)
       multiLineContainer.addArrangedSubview(metadataView)
       containerStack.addArrangedSubview(multiLineContainer)
-
     } else {
       singleLineContainer.addArrangedSubview(messageLabel)
       singleLineContainer.addArrangedSubview(metadataView)
@@ -190,7 +189,7 @@ class UIMessageView: UIView {
     NSLayoutConstraint.activate([
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
+      bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.85),
 
       containerStack.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
       containerStack.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
@@ -200,7 +199,6 @@ class UIMessageView: UIView {
         constant: isMultiline ? -14 : -labelVerticalPadding
       ),
     ])
-
     if outgoing {
       bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8).isActive = true
     } else {
