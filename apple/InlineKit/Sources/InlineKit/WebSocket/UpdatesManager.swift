@@ -63,10 +63,16 @@ struct UpdateNewMessage: Codable {
       publishChanges: true
     )
 
-    // I think this needs to be more elegant
+    // I think this needs to be faster
     var chat = try Chat.fetchOne(db, id: message.chatId)
     chat?.lastMsgId = msg.messageId
     try chat?.save(db)
+
+    // increase unread count if message is not ours
+    if var dialog = try? Dialog.get(peerId: msg.peerId).fetchOne(db) {
+      dialog.unreadCount = (dialog.unreadCount ?? 0) + (msg.out == false ? 1 : 0)
+      try dialog.update(db)
+    }
   }
 }
 

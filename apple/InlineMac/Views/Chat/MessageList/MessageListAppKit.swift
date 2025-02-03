@@ -5,6 +5,8 @@ import SwiftUI
 class MessageListAppKit: NSViewController {
   // Data
   private var peerId: Peer
+  private var chat: Chat?
+  private var chatId: Int64 { chat?.id ?? 0 }
   private var viewModel: MessagesProgressiveViewModel
   private var messages: [FullMessage] { viewModel.messages }
 
@@ -27,14 +29,19 @@ class MessageListAppKit: NSViewController {
   // Debugging
   private var debug_slowAnimation = false
 
-  init(peerId: Peer) {
+  init(peerId: Peer, chat: Chat?) {
     self.peerId = peerId
+    self.chat = chat
     viewModel = MessagesProgressiveViewModel(peer: peerId)
 
     super.init(nibName: nil, bundle: nil)
 
     viewModel.observe { [weak self] update in
       self?.applyUpdate(update)
+
+      DispatchQueue.main.async {
+        self?.updateUnreadIfNeeded()
+      }
     }
   }
 
@@ -112,6 +119,9 @@ class MessageListAppKit: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupScrollObserver()
+
+    // Read messages
+    readAll()
   }
 
   // MARK: - Insets
@@ -312,6 +322,8 @@ class MessageListAppKit: NSViewController {
   @objc private func scrollWheelEnded() {
     isUserScrolling = false
     scrollState = .idle
+
+    updateUnreadIfNeeded()
   }
 
   // Recalculate heights for all items once resize has ended
@@ -831,6 +843,29 @@ class MessageListAppKit: NSViewController {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+  }
+
+  // MARK: - Unread
+
+  func readAll() {
+    UnreadManager.shared.readAll(peerId, chatId: chatId)
+  }
+
+  func updateUnreadIfNeeded() {
+    // Quicker check
+    if isAtBottom {
+      readAll()
+      return
+    }
+
+    let visibleRect = tableView.visibleRect
+    let visibleRange = tableView.rows(in: visibleRect)
+    let maxRow = tableView.numberOfRows - 1
+    let isLastRowVisible = visibleRange.location + visibleRange.length >= maxRow
+
+    if isLastRowVisible {
+      readAll()
+    }
   }
 }
 

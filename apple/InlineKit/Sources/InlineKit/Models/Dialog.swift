@@ -61,6 +61,7 @@ public extension Dialog {
     pinned = from.pinned
     draft = from.draft
     archived = from.archived
+    unreadCount = from.unreadCount
   }
 
   // Called when user clicks a user for the first time
@@ -78,6 +79,7 @@ public extension Dialog {
     pinned = nil
     draft = nil
     archived = nil
+    unreadCount = nil
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
@@ -95,5 +97,24 @@ public extension Dialog {
       case let .thread(id):
         Self.getDialogId(peerThreadId: id)
     }
+  }
+
+  var peerId: Peer {
+    if let peerUserId {
+      .user(id: peerUserId)
+    } else if let peerThreadId {
+      .thread(id: peerThreadId)
+    } else {
+      fatalError("One of peerUserId or peerThreadId must be set")
+    }
+  }
+}
+
+public extension Dialog {
+  static func get(peerId: Peer) -> QueryInterfaceRequest<Dialog> {
+    Dialog
+      .filter(
+        Column("id") == Dialog.getDialogId(peerId: peerId)
+      )
   }
 }

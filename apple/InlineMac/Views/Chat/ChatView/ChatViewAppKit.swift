@@ -12,7 +12,7 @@ class ChatViewAppKit: NSView {
   private var chat: Chat? // TODO: get rid of ?
 
   override var acceptsFirstResponder: Bool {
-    return true
+    true
   }
 
   private func createViews() {
@@ -24,7 +24,7 @@ class ChatViewAppKit: NSView {
 
     chat = try? Chat.getByPeerId(peerId: peerId)
 
-    messageList = MessageListAppKit(peerId: peerId)
+    messageList = MessageListAppKit(peerId: peerId, chat: chat)
     compose = ComposeAppKit(peerId: peerId, messageList: messageList, chat: chat)
 
     super.init(frame: .zero)

@@ -64,7 +64,8 @@ struct HomeSidebar: View {
             .padding(.bottom, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal)
+        .padding(.horizontal) // default side padding
+        .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
       }
     )
     // For now
@@ -130,9 +131,13 @@ struct HomeSidebar: View {
   @ViewBuilder
   func userItem(chat: HomeChatItem) -> some View {
     let user = chat.user
+    let dialog = chat.dialog
+    let chatChat = chat.chat
 
     UserItem(
       user: user,
+      dialog: dialog,
+      chat: chatChat,
       action: {
         userPressed(user: user)
       },

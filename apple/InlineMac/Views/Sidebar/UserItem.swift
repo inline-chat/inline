@@ -9,15 +9,17 @@ struct UserItem: View {
   @Environment(\.appearsActive) var appearsActive
 
   var user: User
+  var dialog: Dialog?
+  var chat: Chat?
   var action: (() -> Void)?
   var commandPress: (() -> Void)?
   var selected: Bool = false
   var rendersSavedMsg: Bool = false
-  
+
   var isCurrentUser: Bool {
     user.isCurrentUser()
   }
-  
+
   var isSavedMsg: Bool {
     isCurrentUser && rendersSavedMsg
   }
@@ -25,7 +27,15 @@ struct UserItem: View {
   var name: String {
     user.firstName ?? user.username ?? ""
   }
-  
+
+  var unreadCount: Int {
+    dialog?.unreadCount ?? 0
+  }
+
+  var hasUnread: Bool {
+    unreadCount > 0
+  }
+
   var body: some View {
     let text = Text(isSavedMsg ? "Saved Messages" : name)
       .lineLimit(1)
@@ -52,9 +62,9 @@ struct UserItem: View {
             )
           }
         }
-        .transaction { transaction in
-          transaction.disablesAnimations = true
-        }
+//        .transaction { transaction in
+//          transaction.disablesAnimations = true
+//        }
 
         Spacer()
       }
@@ -65,8 +75,29 @@ struct UserItem: View {
       selected: selected,
       appearsActive: appearsActive
     ))
+    // unread dot
+    .overlay(alignment: .leading) {
+      AnimatedUnreadDot(isVisible: hasUnread)
+    }
     .focused($isFocused)
     .padding(.horizontal, -Theme.sidebarItemPadding)
+
+    // Menu
+    .contextMenu(menuItems: {
+      // Only creators can delete space for now
+      if hasUnread {
+        Button("Read All") {
+          if let peerId = dialog?.peerId, let chatId = chat?.id {
+            UnreadManager.shared.readAll(peerId, chatId: chatId)
+          }
+        }
+      } else {
+        Button("Mark as Unread") {
+          // TODO:
+        }.disabled(true)
+      }
+    })
+
     // Command-click handler
     .simultaneousGesture(
       TapGesture(count: 1)
@@ -84,6 +115,33 @@ struct UserItem: View {
   }
 }
 
+struct UnreadDot: View {
+  @Environment(\.appearsActive) var appearsActive
+  var body: some View {
+    Circle()
+      // muted gray makes app window less distractive if user does not want to pay attention
+      .fill(
+        appearsActive ?
+          Color.blue :
+          Color.gray.opacity(0.5)
+      )
+      .frame(width: 4, height: 4)
+  }
+}
+
+struct AnimatedUnreadDot: View {
+  let isVisible: Bool
+
+  var body: some View {
+    UnreadDot()
+      .padding(.leading, 4.0)
+      .opacity(isVisible ? 1 : 0)
+      .scaleEffect(isVisible ? 1 : 0)
+      // a slight delay to avoid quick flicker .delay(0.1)
+      .animation(.easeOut(duration: 0.15), value: isVisible)
+  }
+}
+
 struct UserItemButtonStyle: ButtonStyle {
   @Binding var isHovered: Bool
   let isFocused: Bool
@@ -94,17 +152,19 @@ struct UserItemButtonStyle: ButtonStyle {
     configuration.label
       .frame(height: Theme.sidebarItemHeight)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
-      .padding(.horizontal, Theme.sidebarItemPadding)
+      .padding(.trailing, Theme.sidebarItemPadding)
+      .padding(.leading, Theme.sidebarItemPadding + Theme.sidebarItemLeadingGutter) // gutter makes place for unread
       .background {
         Group {
           RoundedRectangle(cornerRadius: Theme.sidebarItemRadius)
             .fill(backgroundColor(configuration))
-        }.transaction { transaction in
-          if selected {
-            transaction.disablesAnimations = true
-            transaction.animation = .none
-          }
         }
+//        .transaction { transaction in
+//          if selected {
+//            transaction.disablesAnimations = true
+//            transaction.animation = .none
+//          }
+//        }
       }
       .onHover { isHovered = $0 }
       // Optional: Add subtle scale effect when pressed

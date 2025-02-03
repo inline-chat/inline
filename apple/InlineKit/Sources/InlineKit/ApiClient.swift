@@ -48,6 +48,7 @@ public enum Path: String {
   case logout
   case getDraft
   case getUser
+  case readMessages
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -483,6 +484,28 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .getDraft,
       queryItems: [URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init))],
+      includeToken: true
+    )
+  }
+
+  public func readMessages(peerId: Peer, maxId: Int64?) async throws
+    -> EmptyPayload
+  {
+    var queryItems: [URLQueryItem] = [
+      URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)),
+      URLQueryItem(
+        name: "peerThreadId",
+        value: peerId.asThreadId().map(String.init)
+      ),
+    ]
+
+    if let maxId {
+      queryItems.append(URLQueryItem(name: "maxId", value: "\(maxId)"))
+    }
+
+    return try await request(
+      .readMessages,
+      queryItems: queryItems,
       includeToken: true
     )
   }
