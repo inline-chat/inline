@@ -29,7 +29,9 @@ enum Theme {
   static let sidebarItemHeight: CGFloat = 28
   static let sidebarIconSpacing: CGFloat = 6
   static let sidebarItemRadius: CGFloat = 10
-  static let sidebarItemPadding: CGFloat = 8
+  static let sidebarItemPadding: CGFloat = 7.0
+  // extra to above padding. note: weird thing is making this 3.0 fucks up home sidebar.
+  static let sidebarItemLeadingGutter: CGFloat = 4.0
   static let sidebarItemSpacing: CGFloat = 1
   static let sidebarTopItemFont: Font = .body.weight(.regular)
   static let sidebarTopItemHeight: CGFloat = 24
