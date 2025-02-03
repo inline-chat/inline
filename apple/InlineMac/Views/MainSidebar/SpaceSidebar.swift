@@ -49,9 +49,13 @@ struct SpaceSidebar: View {
   @ViewBuilder
   func userItem(_ user: User, _ item: SpaceChatItem) -> some View {
     let peerId: Peer = .user(id: user.id)
+    let dialog = item.dialog
+    let chat = item.chat
 
     UserItem(
       user: user,
+      dialog: dialog,
+      chat: chat,
       action: {
         navigation.select(.chat(peer: peerId))
       },
@@ -106,9 +110,11 @@ struct SpaceSidebar: View {
           .padding(.top, 0)
           // .frame(maxWidth: .infinity, alignment: .leading)
           // .padding(.horizontal)
+          
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
+        .padding(.leading, Theme.sidebarItemLeadingGutter)
       }
     )
     .task {
