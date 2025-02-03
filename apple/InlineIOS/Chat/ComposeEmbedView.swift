@@ -27,6 +27,16 @@ class ComposeEmbedView: UIView {
     return label
   }()
 
+  private lazy var imageIconView: UIImageView = {
+    let imageView = UIImageView()
+    let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+    imageView.image = UIImage(systemName: "photo.fill", withConfiguration: config)
+    imageView.tintColor = .secondaryLabel
+    imageView.contentMode = .scaleAspectFit
+
+    return imageView
+  }()
+
   private lazy var closeButton: UIButton = {
     let button = UIButton()
     let config = UIImage.SymbolConfiguration(pointSize: 17)
@@ -36,12 +46,19 @@ class ComposeEmbedView: UIView {
     return button
   }()
 
+  private lazy var messageStackView: UIStackView = {
+    let stackView = UIStackView(arrangedSubviews: [imageIconView, messageLabel])
+    stackView.axis = .horizontal
+    stackView.spacing = 6
+    stackView.alignment = .center
+    return stackView
+  }()
+
   private lazy var labelsStackView: UIStackView = {
-    let stackView = UIStackView(arrangedSubviews: [nameLabel, messageLabel])
+    let stackView = UIStackView(arrangedSubviews: [nameLabel, messageStackView])
     stackView.axis = .vertical
     stackView.spacing = 4
     stackView.alignment = .leading
-
     return stackView
   }()
 
@@ -77,13 +94,26 @@ class ComposeEmbedView: UIView {
     clipsToBounds = true
     translatesAutoresizingMaskIntoConstraints = false
 
+    messageStackView.addArrangedSubview(imageIconView)
+    messageStackView.addArrangedSubview(messageLabel)
+
+    labelsStackView.addArrangedSubview(nameLabel)
+    labelsStackView.addArrangedSubview(messageStackView)
+
+    containerStackView.addArrangedSubview(labelsStackView)
+    containerStackView.addArrangedSubview(closeButton)
+
     addSubview(containerStackView)
   }
 
   private func setupConstraints() {
     containerStackView.translatesAutoresizingMaskIntoConstraints = false
+    imageIconView.translatesAutoresizingMaskIntoConstraints = false
 
     NSLayoutConstraint.activate([
+      imageIconView.widthAnchor.constraint(equalToConstant: 20),
+      imageIconView.heightAnchor.constraint(equalToConstant: 20),
+
       containerStackView.heightAnchor.constraint(equalToConstant: Self.height),
       containerStackView.bottomAnchor.constraint(equalTo: bottomAnchor),
       containerStackView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -124,11 +154,26 @@ class ComposeEmbedView: UIView {
       "You" : viewModel.fullMessage?.from?.firstName ?? "User"
 
     nameLabel.text = "Replying to \(name)"
-    messageLabel.text = viewModel.fullMessage?.message.text ?? ""
+
+    if let message = viewModel.fullMessage?.message {
+      let hasFile = viewModel.fullMessage?.file != nil
+      let hasText = message.text?.isEmpty != true
+
+      if hasFile {
+        imageIconView.isHidden = false
+        if hasText {
+          messageLabel.text = message.text
+        } else {
+          messageLabel.text = "Photo"
+        }
+      } else {
+        imageIconView.isHidden = true
+        messageLabel.text = message.text
+      }
+    }
   }
 
   @objc private func closeButtonTapped() {
-    print("Clicked closeButtonTapped")
     ChatState.shared.clearReplyingMessageId(peer: peerId)
   }
 
