@@ -62,7 +62,7 @@ class MessagesCollectionView: UICollectionView {
       scrollToItem(
         at: IndexPath(item: 0, section: 0),
         at: .top,
-        animated: false
+        animated: true
       )
     }
   }
@@ -232,7 +232,7 @@ class MessagesCollectionView: UICollectionView {
   @objc private func replyStateChanged(_ notification: Notification) {
     DispatchQueue.main.async {
       UIView.animate(withDuration: 0.2) {
-      self.updateContentInsets()
+        self.updateContentInsets()
         if self.shouldScrollToBottom, !self.itemsEmpty {
           self.scrollToItem(
             at: IndexPath(item: 0, section: 0),
