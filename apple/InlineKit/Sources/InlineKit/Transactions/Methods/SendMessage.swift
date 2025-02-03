@@ -13,11 +13,11 @@ public struct SendMessageAttachment: Codable, Sendable {
         case .png: ".png"
       }
     }
-    
+
     public func toMimeType() -> String {
       switch self {
-      case .jpeg: "image/jpeg"
-      case .png: "image/png"
+        case .jpeg: "image/jpeg"
+        case .png: "image/png"
       }
     }
   }
@@ -116,8 +116,15 @@ public struct TransactionSendMessage: Transaction {
     temporaryMessageId = randomId
 
     if !attachments.isEmpty {
-      self.attachments[0].randomId = randomId
-      // TODO: handle multi-attachments
+      // iterate over attachments and attach random id to all
+      for i in 0 ..< attachments.count {
+        if i == 0 {
+          self.attachments[0].randomId = randomId
+        } else {
+          Log.shared.warning("Multiple attachments in send message transaction not supported yet")
+          // self.attachments[i].randomId = Int64.random(in: Int64.min ... Int64.max)
+        }
+      }
     }
   }
 
