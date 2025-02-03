@@ -5,9 +5,11 @@ import SwiftUI
 import UIKit
 
 final class PhotoView: UIView {
+  var aspectRatioConstraint: NSLayoutConstraint?
+
   private let imageView: UIImageView = {
     let view = UIImageView()
-    view.contentMode = .scaleAspectFill
+    view.contentMode = .scaleAspectFit
     view.clipsToBounds = true
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -48,6 +50,7 @@ final class PhotoView: UIView {
     guard let (isLocal, url) = imageUrl() else { return }
         
     addSubview(imageView)
+    
     imageConstraints = [
       imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -55,10 +58,14 @@ final class PhotoView: UIView {
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ]
     NSLayoutConstraint.activate(imageConstraints)
-        
+    let updateImage: (UIImage) -> Void = { [weak self] image in
+      guard let self else { return }
+      self.imageView.image = image
+      self.updateAspectRatio(for: image)
+    }
     if isLocal {
       if let image = UIImage(contentsOfFile: url.path) {
-        imageView.image = image
+        updateImage(image)
       }
     } else {
       let request = ImageRequest(url: url)
@@ -83,6 +90,17 @@ final class PhotoView: UIView {
     }
   }
     
+  private func updateAspectRatio(for image: UIImage) {
+    let aspectRatio = image.size.width / image.size.height
+    aspectRatioConstraint?.isActive = false
+    aspectRatioConstraint = widthAnchor.constraint(
+      equalTo: heightAnchor,
+      multiplier: aspectRatio
+    )
+    aspectRatioConstraint?.priority = .required - 1
+    aspectRatioConstraint?.isActive = true
+  }
+
   override func layoutSubviews() {
     super.layoutSubviews()
     updateMask()
@@ -125,7 +143,7 @@ final class PhotoView: UIView {
       
     maskLayer.path = bezierPath.cgPath
   }
-
+  
   private func setupGestures() {
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
     addGestureRecognizer(tapGesture)
@@ -148,18 +166,18 @@ final class PhotoView: UIView {
   }
     
   @objc private func handleTap() {
-    guard let image = imageView.image else { return }
-        
-    let previewVC = UIHostingController(rootView: PhotoPreviewView(
-      image: image,
-      caption: .constant(""),
-      isPresented: .constant(true),
-      onSend: { _, _ in }
-    ))
-    previewVC.modalPresentationStyle = .fullScreen
-    previewVC.modalTransitionStyle = .crossDissolve
-        
-    window?.rootViewController?.present(previewVC, animated: true)
+//    guard let image = imageView.image else { return }
+//
+//    let previewVC = UIHostingController(rootView: PhotoPreviewView(
+//      image: image,
+//      caption: .constant(""),
+//      isPresented: .constant(true),
+//      onSend: { _, _ in }
+//    ))
+//    previewVC.modalPresentationStyle = .fullScreen
+//    previewVC.modalTransitionStyle = .crossDissolve
+//
+//    window?.rootViewController?.present(previewVC, animated: true)
   }
     
   @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
