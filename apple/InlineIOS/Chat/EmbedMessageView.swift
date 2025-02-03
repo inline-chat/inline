@@ -8,6 +8,7 @@ class EmbedMessageView: UIView {
     static let contentSpacing: CGFloat = 6
     static let verticalPadding: CGFloat = 2
     static let horizontalPadding: CGFloat = 6
+    static let imageIconSize: CGFloat = 16
   }
     
   static let height = 42.0
@@ -18,10 +19,19 @@ class EmbedMessageView: UIView {
     label.translatesAutoresizingMaskIntoConstraints = false
     label.font = .systemFont(ofSize: 14, weight: .bold)
     label.numberOfLines = 1
-    
     return label
   }()
-
+    
+  private lazy var imageIconView: UIImageView = {
+    let imageView = UIImageView()
+    let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+    imageView.image = UIImage(systemName: "photo.fill", withConfiguration: config)
+    imageView.contentMode = .scaleAspectFit
+    imageView.setContentHuggingPriority(.required, for: .horizontal)
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    return imageView
+  }()
+    
   private lazy var messageLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -29,7 +39,16 @@ class EmbedMessageView: UIView {
     label.numberOfLines = 1
     return label
   }()
-
+    
+  private lazy var messageStackView: UIStackView = {
+    let stackView = UIStackView(arrangedSubviews: [imageIconView, messageLabel])
+    stackView.axis = .horizontal
+    stackView.spacing = 4
+    stackView.alignment = .center
+    stackView.translatesAutoresizingMaskIntoConstraints = false
+    return stackView
+  }()
+    
   private lazy var rectangleView: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -57,7 +76,22 @@ class EmbedMessageView: UIView {
   func configure(message: Message, senderName: String, outgoing: Bool) {
     self.outgoing = outgoing
     headerLabel.text = senderName
-    messageLabel.text = message.text
+        
+    let hasFile = message.fileId != nil
+    let hasText = message.text?.isEmpty != true
+        
+    imageIconView.isHidden = !hasFile
+        
+    if hasFile {
+      if hasText {
+        messageLabel.text = message.text
+      } else {
+        messageLabel.text = "Photo"
+      }
+    } else {
+      messageLabel.text = message.text
+    }
+        
     updateColors()
   }
 }
@@ -66,7 +100,7 @@ private extension EmbedMessageView {
   func setupViews() {
     addSubview(rectangleView)
     addSubview(headerLabel)
-    addSubview(messageLabel)
+    addSubview(messageStackView)
         
     NSLayoutConstraint.activate([
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -80,13 +114,17 @@ private extension EmbedMessageView {
                                             constant: -Constants.horizontalPadding),
       headerLabel.topAnchor.constraint(equalTo: topAnchor,
                                        constant: Constants.verticalPadding),
-      headerLabel.bottomAnchor.constraint(equalTo: messageLabel.topAnchor),
-      messageLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor,
-                                            constant: Constants.contentSpacing),
-      messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor,
-                                             constant: -Constants.horizontalPadding),
-      messageLabel.bottomAnchor.constraint(equalTo: bottomAnchor,
-                                           constant: -Constants.verticalPadding)
+      headerLabel.bottomAnchor.constraint(equalTo: messageStackView.topAnchor),
+            
+      messageStackView.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor,
+                                                constant: Constants.contentSpacing),
+      messageStackView.trailingAnchor.constraint(equalTo: trailingAnchor,
+                                                 constant: -Constants.horizontalPadding),
+      messageStackView.bottomAnchor.constraint(equalTo: bottomAnchor,
+                                               constant: -Constants.verticalPadding),
+            
+      imageIconView.widthAnchor.constraint(equalToConstant: Constants.imageIconSize),
+      imageIconView.heightAnchor.constraint(equalToConstant: Constants.imageIconSize)
     ])
   }
     
@@ -103,6 +141,7 @@ private extension EmbedMessageView {
         
     headerLabel.textColor = textColor
     messageLabel.textColor = textColor
+    imageIconView.tintColor = textColor
     rectangleView.backgroundColor = rectangleColor
   }
 }
