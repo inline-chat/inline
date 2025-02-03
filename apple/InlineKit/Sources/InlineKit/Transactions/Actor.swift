@@ -44,8 +44,12 @@ actor TransactionsActor {
       await processQueue()
     }
   }
+  
 
   // MARK: - Public Methods
+  public func clearAll() {
+    queue.removeAll()
+  }
 
   func setCompletionHandler(_ handler: @escaping CompletionHandler) {
     completionHandler = handler

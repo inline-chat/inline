@@ -86,4 +86,9 @@ class TransactionsCache {
       return []
     }
   }
+  
+  func clearAll() {
+    transactions = []
+    persistAll()
+  }
 }
