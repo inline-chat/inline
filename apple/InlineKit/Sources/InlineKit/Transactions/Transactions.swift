@@ -82,6 +82,13 @@ public class Transactions: @unchecked Sendable {
       await actor.cancel(transactionId: transactionId)
     }
   }
+  
+  public func clearAll() {
+    Task {
+      await actor.clearAll()
+      cache.clearAll()
+    }
+  }
 }
 
 public enum TransactionType: Codable {
