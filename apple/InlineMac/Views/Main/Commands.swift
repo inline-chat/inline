@@ -24,6 +24,10 @@ struct MainWindowCommands: Commands {
         Text("Clear Cache...")
       }
 
+      Button(action: clearTransactions) {
+        Text("Clear Transactions...")
+      }
+
       Divider()
     }
 
@@ -129,6 +133,10 @@ struct MainWindowCommands: Commands {
         await logOut()
       }
     }
+  }
+
+  func clearTransactions() {
+    Transactions.shared.clearAll()
   }
 
   func clearCache() {
