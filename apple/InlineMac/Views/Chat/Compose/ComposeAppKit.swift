@@ -402,21 +402,37 @@ class ComposeAppKit: NSView {
       self.clear()
 
       // Add message
-
-      for (index, (image, attachment)) in attachmentItems.enumerated() {
-        let isFirst = index == 0
+      if attachmentItems.isEmpty {
+        // Text-only
         let _ = Transactions.shared.mutate(
           transaction:
           .sendMessage(
             TransactionSendMessage(
-              text: isFirst ? text : nil,
+              text: text,
               peerId: self.peerId,
               chatId: self.chatId ?? 0, // FIXME: chatId fallback
-              attachments: [attachment],
-              replyToMsgId: isFirst ? replyToMsgId : nil
+              attachments: [],
+              replyToMsgId: replyToMsgId
             )
           )
         )
+      } else {
+        // With image/file/video
+        for (index, (image, attachment)) in attachmentItems.enumerated() {
+          let isFirst = index == 0
+          let _ = Transactions.shared.mutate(
+            transaction:
+            .sendMessage(
+              TransactionSendMessage(
+                text: isFirst ? text : nil,
+                peerId: self.peerId,
+                chatId: self.chatId ?? 0, // FIXME: chatId fallback
+                attachments: [attachment],
+                replyToMsgId: isFirst ? replyToMsgId : nil
+              )
+            )
+          )
+        }
       }
 
       // Cancel typing
