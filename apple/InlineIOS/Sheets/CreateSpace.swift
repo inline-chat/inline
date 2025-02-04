@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct CreateSpace: View {
@@ -13,41 +14,40 @@ struct CreateSpace: View {
   @EnvironmentObject var dataManager: DataManager
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      AnimatedLabel(animate: $animate, text: "Create Space")
-
-      TextField("eg. Acme HQ", text: $name)
-        .focused($isFocused)
-        .keyboardType(.emailAddress)
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled(true)
-        .font(.title2)
-        .fontWeight(.semibold)
-        .padding(.vertical, 8)
-        .onChange(of: isFocused) { _, newValue in
-          withAnimation(.smooth(duration: 0.15)) {
-            animate = newValue
+    NavigationStack {
+      List {
+        Section {
+          HStack {
+            InitialsCircle(name: name, size: 40)
+            TextField("Space Name", text: $name)
+              .focused($isFocused)
+              .keyboardType(.emailAddress)
+              .textInputAutocapitalization(.never)
+              .autocorrectionDisabled(true)
+              .onSubmit {
+                submit()
+              }
           }
         }
-        .onSubmit {
-          submit()
+      }
+      .background(.clear)
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar(content: {
+        ToolbarItem(placement: .topBarLeading) {
+          Text("Create Space")
+            .fontWeight(.bold)
         }
-    }
-    .onAppear {
-      isFocused = true
-    }
-    .padding(.horizontal, 50)
-    .frame(maxHeight: .infinity)
-    .safeAreaInset(edge: .bottom) {
-      VStack {
-        Button(formState.isLoading ? "Creating..." : "Create") {
-          submit()
+        ToolbarItem(placement: .topBarTrailing) {
+          Button(formState.isLoading ? "Creating..." : "Create") {
+            submit()
+          }
+          .buttonStyle(.borderless)
+          .disabled(name.isEmpty)
+          .opacity(name.isEmpty ? 0.5 : 1)
         }
-        .buttonStyle(SimpleButtonStyle())
-        .padding(.horizontal, OnboardingUtils.shared.hPadding)
-        .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-        .disabled(name.isEmpty)
-        .opacity(name.isEmpty ? 0.5 : 1)
+      })
+      .onAppear {
+        isFocused = true
       }
     }
   }

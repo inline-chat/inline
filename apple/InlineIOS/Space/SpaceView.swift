@@ -99,9 +99,9 @@ struct SpaceView: View {
 
   // MARK: - Helper Methods
 
-  private func getCombinedItems() -> [CombinedItem] {
-    let memberItems = fullSpaceViewModel.memberChats.map { CombinedItem.member($0) }
-    let chatItems = fullSpaceViewModel.chats.map { CombinedItem.chat($0) }
+  private func getCombinedItems() -> [SpaceCombinedItem] {
+    let memberItems = fullSpaceViewModel.memberChats.map { SpaceCombinedItem.member($0) }
+    let chatItems = fullSpaceViewModel.chats.map { SpaceCombinedItem.chat($0) }
 
     return (memberItems + chatItems).sorted { item1, item2 in
 
@@ -114,29 +114,28 @@ struct SpaceView: View {
   }
 
   @ViewBuilder
-  private func combinedItemRow(for item: CombinedItem) -> some View {
+  private func combinedItemRow(for item: SpaceCombinedItem) -> some View {
     switch item {
       case let .member(memberChat):
         Button {
           nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
         } label: {
-          ChatRowView(item: .space(memberChat))
+          ChatRowView(item: .space(memberChat), showPinned: false)
         }
-        .contextMenu {
-          Button {
-            nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
-          } label: {
-            Label("Open Chat", systemImage: "bubble.left")
-          }
-
-        } preview: {
-          ChatView(peer: .user(id: memberChat.user?.id ?? 0), preview: true)
-            .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-            .environmentObject(nav)
-            .environmentObject(data)
-            .environmentObject(ws)
-            .environment(\.appDatabase, database)
-        }
+//        .contextMenu {
+//          Button {
+//            nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
+//          } label: {
+//            Label("Open Chat", systemImage: "bubble.left")
+//          }
+//        } preview: {
+//          ChatView(peer: .user(id: memberChat.user?.id ?? 0), preview: true)
+//            .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+//            .environmentObject(nav)
+//            .environmentObject(data)
+//            .environmentObject(ws)
+//            .environment(\.appDatabase, database)
+//        }
 
       case let .chat(chat):
         Button {
@@ -193,7 +192,7 @@ struct SpaceView: View {
 
 // MARK: - CombinedItem Enum
 
-private enum CombinedItem: Identifiable {
+private enum SpaceCombinedItem: Identifiable {
   case member(SpaceChatItem)
   case chat(SpaceChatItem)
 

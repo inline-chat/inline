@@ -6,7 +6,7 @@ import SwiftUI
 import UIKit
 
 final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
-   static let imageCache: NSCache<NSString, UIImage> = {
+  static let imageCache: NSCache<NSString, UIImage> = {
     let cache = NSCache<NSString, UIImage>()
     cache.countLimit = 100
     return cache

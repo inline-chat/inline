@@ -7,7 +7,7 @@ struct SpaceRowView: View {
 
   var body: some View {
     HStack(alignment: .top) {
-      SpaceAvatar(space: spaceItem.space, size: 36)
+      SpaceAvatar(space: spaceItem.space, size: 42)
         .padding(.trailing, 6)
 
       VStack(alignment: .leading) {
@@ -20,10 +20,10 @@ struct SpaceRowView: View {
           .foregroundColor(.secondary)
           .lineLimit(1)
           .frame(maxWidth: .infinity, alignment: .leading)
-        Divider()
       }
     }
-    .frame(height: 48)
+    .padding(.top, 8)
+    .frame(height: 66)
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
   }
