@@ -53,7 +53,7 @@ extension ContentView {
       case .archivedChats:
         ArchivedChatsView()
       case .createSpace:
-        SettingsView()
+        EmptyView()
       case .createThread:
         EmptyView()
     }
@@ -64,7 +64,10 @@ extension ContentView {
     switch destination {
       case let .createThread(spaceId):
         CreateThread(showSheet: .constant(true), spaceId: spaceId)
-          .presentationBackground(.ultraThickMaterial)
+          .presentationCornerRadius(18)
+
+      case .createSpace:
+      CreateSpace()
           .presentationCornerRadius(18)
       default:
         EmptyView()
