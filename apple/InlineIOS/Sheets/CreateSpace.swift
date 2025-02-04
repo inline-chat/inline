@@ -12,7 +12,6 @@ struct CreateSpace: View {
   @Environment(\.dismiss) var dismiss
   @EnvironmentObject var dataManager: DataManager
 
-  @Binding var showSheet: Bool
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       AnimatedLabel(animate: $animate, text: "Create Space")
@@ -60,7 +59,7 @@ struct CreateSpace: View {
         let id = try await dataManager.createSpace(name: name)
 
         formState.succeeded()
-        showSheet = false
+        dismiss()
 
         if let id {
           nav.push(.space(id: id))
