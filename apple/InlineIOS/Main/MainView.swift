@@ -56,7 +56,7 @@ struct MainView: View {
         searchResultsView
       } else {
         List {
-          if home.chats.filter { $0.dialog.archived == true }.isEmpty == false {
+          if home.chats.filter({ $0.dialog.archived == true }).isEmpty == false {
             Button {
               nav.push(.archivedChats)
             } label: {
@@ -95,45 +95,48 @@ struct MainView: View {
               .contentShape(Rectangle())
             }
           }
-          ForEach(
-            home.chats.filter { $0.dialog.archived == nil || $0.dialog.archived == false }.sorted { chat1, chat2 in
-              let pinned1 = chat1.dialog.pinned ?? false
-              let pinned2 = chat2.dialog.pinned ?? false
-              if pinned1 != pinned2 { return pinned1 }
-              return chat1.message?.date ?? chat1.chat?.date ?? Date() > chat2.message?.date ?? chat2.chat?.date
-                ?? Date()
-            }
-          ) { chat in
-            Button {
-              nav.push(.chat(peer: .user(id: chat.user.id)))
-            } label: {
-              ChatRowView(item: .home(chat))
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-              Button(role: .destructive) {
-                Task {
-                  try await dataManager.updateDialog(
-                    peerId: .user(id: chat.user.id),
-                    archived: true
-                  )
+          ForEach(combinedItems) { item in
+            switch item {
+              case let .space(spaceItem):
+                Button {
+                  nav.push(.space(id: spaceItem.id))
+                } label: {
+                  SpaceRowView(spaceItem: spaceItem)
                 }
-              } label: {
-                Image(systemName: "tray.and.arrow.down.fill")
-              }
-              .tint(Color(.systemGray2))
-              Button {
-                Task {
-                  try await dataManager.updateDialog(
-                    peerId: .user(id: chat.user.id),
-                    pinned: !(chat.dialog.pinned ?? false)
-                  )
+
+              case let .chat(chatItem):
+                Button {
+                  nav.push(.chat(peer: .user(id: chatItem.user.id)))
+                } label: {
+                  ChatRowView(item: .home(chatItem))
                 }
-              } label: {
-                Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-              }
-              .tint(.indigo)
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                  Button(role: .destructive) {
+                    Task {
+                      try await dataManager.updateDialog(
+                        peerId: .user(id: chatItem.user.id),
+                        archived: true
+                      )
+                    }
+                  } label: {
+                    Image(systemName: "tray.and.arrow.down.fill")
+                  }
+                  .tint(Color(.systemGray2))
+
+                  Button {
+                    Task {
+                      try await dataManager.updateDialog(
+                        peerId: .user(id: chatItem.user.id),
+                        pinned: !(chatItem.dialog.pinned ?? false)
+                      )
+                    }
+                  } label: {
+                    Image(systemName: chatItem.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+                  }
+                  .tint(.indigo)
+                }
+                .listRowBackground(chatItem.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : Color.clear)
             }
-            .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : Color.clear)
           }
         }
         .listStyle(.plain)
@@ -341,9 +344,44 @@ struct MainView: View {
       try? await dataManager.updateStatus(online: true)
     }
   }
+
+  var combinedItems: [CombinedItem] {
+    var items: [CombinedItem] = []
+
+    // Add non-archived chats
+    items.append(
+      contentsOf: home.chats
+        .filter { $0.dialog.archived == nil || $0.dialog.archived == false }
+        .map { .chat($0) }
+    )
+
+    // Add spaces
+    items.append(contentsOf: spaceList.spaceItems.map { .space($0) })
+
+    // Sort by date, pinned items first
+    return items.sorted { item1, item2 in
+      let pinned1: Bool
+      let pinned2: Bool
+
+      switch (item1, item2) {
+        case let (.chat(chat1), .chat(chat2)):
+          pinned1 = chat1.dialog.pinned ?? false
+          pinned2 = chat2.dialog.pinned ?? false
+        case (.space, _):
+          pinned1 = true
+          pinned2 = false
+        case (_, .space):
+          pinned1 = false
+          pinned2 = true
+      }
+
+      if pinned1 != pinned2 { return pinned1 }
+      return item1.date > item2.date
+    }
+  }
 }
 
-private enum CombinedItem: Identifiable {
+ enum CombinedItem: Identifiable {
   case space(SpaceItem)
   case chat(HomeChatItem)
 

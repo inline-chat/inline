@@ -89,7 +89,7 @@ public struct InitialsCircle: View, Equatable {
         if let symbol {
           Image(systemName: symbol)
             .foregroundColor(foregroundColor.opacity(1.0))
-            .font(.system(size: size * 0.46, weight: .regular))
+            .font(.system(size: size * 0.35, weight: .regular))
         } else {
           Text(initials)
             .foregroundColor(foregroundColor.opacity(1.0))
@@ -99,7 +99,7 @@ public struct InitialsCircle: View, Equatable {
       }
       .frame(width: size, height: size)
       .fixedSize()
-    
+
     // Looks better without these
 //      .drawingGroup(opaque: true)
 //      .clipShape(Circle())
