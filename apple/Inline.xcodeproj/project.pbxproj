@@ -528,6 +528,7 @@
 				INFOPLIST_FILE = InlineMac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Inline;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -562,6 +563,7 @@
 				INFOPLIST_FILE = InlineMac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Inline;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -646,7 +648,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
-				CODE_SIGN_ENTITLEMENTS = InlineMac/InlineMac.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "InlineMac/InlineMacDebug #2.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -658,6 +660,7 @@
 				INFOPLIST_FILE = InlineMac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Inline;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
