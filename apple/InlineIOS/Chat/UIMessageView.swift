@@ -45,8 +45,8 @@ class UIMessageView: UIView {
     let stack = UIStackView()
     stack.axis = .vertical
     stack.spacing = 10
-    stack.alignment = .trailing
-//    stack.distribution = .fill
+    stack.alignment = .fill
+    stack.distribution = .fill
     stack.translatesAutoresizingMaskIntoConstraints = false
     return stack
   }()
@@ -58,7 +58,8 @@ class UIMessageView: UIView {
     label.font = .systemFont(ofSize: 18)
     label.textColor = textColor
     label.numberOfLines = 0
-    label.lineBreakMode = .byTruncatingTail
+    label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    label.setContentCompressionResistancePriority(.required, for: .horizontal)
     return label
   }()
 
@@ -100,11 +101,19 @@ class UIMessageView: UIView {
   }
 
   private var isMultiline: Bool {
+    if let file = fullMessage.file,
+       let width = file.width,
+       let height = file.height,
+       height > width && width < 250
+    {
+      return true
+    }
+
     guard let text = message.text else { return false }
     return text.count > 24 || text.contains("\n")
   }
 
-  private let labelVerticalPadding: CGFloat = 10.0
+  private let labelVerticalPadding: CGFloat = 9.0
   private let labelHorizantalPadding: CGFloat = 12.0
 
   // MARK: - Initialization
@@ -168,7 +177,11 @@ class UIMessageView: UIView {
   private func setupMessageContainer() {
     if isMultiline {
       multiLineContainer.addArrangedSubview(messageLabel)
-      multiLineContainer.addArrangedSubview(metadataView)
+      let metadataContainer = UIStackView()
+      metadataContainer.axis = .horizontal
+      metadataContainer.addArrangedSubview(UIView()) // Spacer
+      metadataContainer.addArrangedSubview(metadataView)
+      multiLineContainer.addArrangedSubview(metadataContainer)
       containerStack.addArrangedSubview(multiLineContainer)
     } else {
       singleLineContainer.addArrangedSubview(messageLabel)
@@ -189,7 +202,7 @@ class UIMessageView: UIView {
     NSLayoutConstraint.activate([
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.85),
+      bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
 
       containerStack.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
       containerStack.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
@@ -207,6 +220,7 @@ class UIMessageView: UIView {
   }
 
   private func setupAppearance() {
+    bubbleView.backgroundColor = bubbleColor
     guard let text = message.text else { return }
 
     let attributedString = NSMutableAttributedString(
@@ -221,7 +235,6 @@ class UIMessageView: UIView {
     cacheLink(attributedString, key: text)
 
     messageLabel.attributedText = attributedString
-    bubbleView.backgroundColor = bubbleColor
   }
 
   private func cacheLink(_ attributedString: NSMutableAttributedString, key: String) {

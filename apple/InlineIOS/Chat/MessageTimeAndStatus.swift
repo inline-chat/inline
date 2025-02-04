@@ -70,9 +70,9 @@ class MessageTimeAndStatus: UIView {
       NSLayoutConstraint.activate([
         dateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         dateLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+        dateLabel.trailingAnchor.constraint(equalTo: statusImageView.leadingAnchor, constant: -4),
 
         statusImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-        statusImageView.leadingAnchor.constraint(equalTo: dateLabel.trailingAnchor, constant: 4),
         statusImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
         statusImageView.widthAnchor.constraint(equalToConstant: symbolSize),
         statusImageView.heightAnchor.constraint(equalToConstant: symbolSize),
@@ -81,7 +81,7 @@ class MessageTimeAndStatus: UIView {
       NSLayoutConstraint.activate([
         dateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         dateLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-        dateLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+        dateLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
       ])
     }
   }
