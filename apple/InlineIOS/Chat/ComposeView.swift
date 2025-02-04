@@ -451,6 +451,9 @@ extension ComposeView: PHPickerViewControllerDelegate {
       self.sendButton.configuration?.showsActivityIndicator = true
 
       Task {
+        // Clear previous attachments before adding new ones
+        self.attachmentItems.removeAll()
+
         // Prepare image for upload
         if let attachment = await image.prepareForUpload() {
           self.attachmentItems[image] = attachment
@@ -474,6 +477,9 @@ extension ComposeView: PHPickerViewControllerDelegate {
           self.selectedImage = nil
           self.previewViewModel.isPresented = false
           self.sendButton.configuration?.showsActivityIndicator = false
+
+          // Clear attachments after sending
+          self.attachmentItems.removeAll()
 
           if let windowScene = self.window?.windowScene,
              let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
