@@ -60,6 +60,7 @@ class UIMessageView: UIView {
     label.numberOfLines = 0
     label.setContentHuggingPriority(.defaultLow, for: .horizontal)
     label.setContentCompressionResistancePriority(.required, for: .horizontal)
+
     return label
   }()
 
@@ -222,6 +223,12 @@ class UIMessageView: UIView {
   private func setupAppearance() {
     bubbleView.backgroundColor = bubbleColor
     guard let text = message.text else { return }
+
+    if let cachedString = Self.attributedCache.object(forKey: text as NSString) {
+      messageLabel.attributedText = cachedString
+
+      return
+    }
 
     let attributedString = NSMutableAttributedString(
       string: text,

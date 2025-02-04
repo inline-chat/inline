@@ -14,6 +14,13 @@ struct ChatRowView: View {
     }
   }
 
+  let showPinned: Bool
+
+  init(item: ChatRowItem, showPinned: Bool = true) {
+    self.item = item
+    self.showPinned = showPinned
+  }
+
   @ObservedObject var composeActions: ComposeActions = .shared
 
   private func currentComposeAction() -> ApiComposeAction? {
@@ -112,7 +119,7 @@ struct ChatRowView: View {
               .lineLimit(2)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
-          if pinned {
+          if pinned && showPinned {
             Image(systemName: "pin.fill")
               .foregroundColor(.secondary)
               .font(.caption)
