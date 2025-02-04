@@ -55,6 +55,8 @@ class ComposeAppKit: NSView {
 
   private lazy var menuButton: ComposeMenuButton = {
     let view = ComposeMenuButton(frame: .zero)
+    view.delegate = self
+    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -88,7 +90,7 @@ class ComposeAppKit: NSView {
   lazy var background = {
     // Add vibrancy effect
     let material = NSVisualEffectView(frame: bounds)
-    material.material = .titlebar
+    material.material = .headerView
     material.blendingMode = .withinWindow
     material.state = .followsWindowActiveState
     material.translatesAutoresizingMaskIntoConstraints = false
@@ -544,5 +546,21 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   func textViewDidChangeSelection(_ notification: Notification) {
     // guard let textView = notification.object as? NSTextView else { return }
     // Handle selection changes if needed
+  }
+}
+
+// MARK: ComposeMenuButtonDelegate
+
+extension ComposeAppKit: ComposeMenuButtonDelegate {
+  func composeMenuButton(_ button: ComposeMenuButton, didSelectImage image: NSImage) {
+    handleImageDropOrPaste(image)
+  }
+
+  func composeMenuButton(_ button: ComposeMenuButton, didSelectFiles urls: [URL]) {
+    handleFileDrop(urls)
+  }
+
+  func composeMenuButton(didCaptureImage image: NSImage) {
+    handleImageDropOrPaste(image)
   }
 }
