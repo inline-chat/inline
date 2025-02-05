@@ -71,6 +71,15 @@ struct ChatRowView: View {
     }
   }
 
+  var hasUnread: Bool {
+    switch item {
+      case let .home(homeItem):
+        homeItem.dialog.unreadCount ?? 0 > 0
+      case let .space(spaceItem):
+        spaceItem.dialog.unreadCount ?? 0 > 0
+    }
+  }
+
   var body: some View {
     HStack(alignment: .top) {
       switch item {
@@ -96,7 +105,7 @@ struct ChatRowView: View {
           messageDate
         }
 
-        HStack {
+        HStack(alignment: .top) {
           if showTypingIndicator {
             Text("\(currentComposeAction()?.rawValue ?? "")...")
               .font(.callout)
@@ -119,11 +128,20 @@ struct ChatRowView: View {
               .lineLimit(2)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
-          if pinned && showPinned {
-            Image(systemName: "pin.fill")
-              .foregroundColor(.secondary)
-              .font(.caption)
+        }
+        .overlay(alignment: .topTrailing) {
+          Group {
+            if pinned && showPinned && !hasUnread {
+              Image(systemName: "pin.fill")
+                .foregroundColor(.secondary)
+                .font(.caption)
+            } else if hasUnread {
+              Circle()
+                .fill(Color.blue)
+                .frame(width: 10, height: 10)
+            }
           }
+          .padding(.top, 4)
         }
         Spacer()
       }
