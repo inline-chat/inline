@@ -92,7 +92,6 @@ struct ChatView: View {
             UserAvatar(user: user)
           }
         }
-       
       }
       .overlay(alignment: .top) {
         if preview {
@@ -108,6 +107,7 @@ struct ChatView: View {
       .toolbarTitleDisplayMode(.inline)
       .onAppear {
         Task {
+          _ = try? await ApiClient.shared.readMessages(peerId: peerId, maxId: nil)
           await fetch()
         }
       }
