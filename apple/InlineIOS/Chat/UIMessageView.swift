@@ -58,9 +58,8 @@ class UIMessageView: UIView {
     label.font = .systemFont(ofSize: 18)
     label.textColor = textColor
     label.numberOfLines = 0
-    label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-    label.setContentCompressionResistancePriority(.required, for: .horizontal)
-
+//    label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+//    label.setContentCompressionResistancePriority(.required, for: .horizontal)
     return label
   }()
 
