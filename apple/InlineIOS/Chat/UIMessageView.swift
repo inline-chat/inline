@@ -210,7 +210,7 @@ class UIMessageView: UIView {
       containerStack.bottomAnchor.constraint(
         equalTo: bubbleView.bottomAnchor,
         constant: isMultiline ? -14 : -labelVerticalPadding
-      ),
+      ).withPriority(.defaultHigh),
     ])
     if outgoing {
       bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8).isActive = true
@@ -377,5 +377,13 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
     animator: UIContextMenuInteractionAnimating?
   ) {
     Self.contextMenuOpen = false
+  }
+}
+
+// Add this extension to help with constraint priorities
+extension NSLayoutConstraint {
+  func withPriority(_ priority: UILayoutPriority) -> NSLayoutConstraint {
+    self.priority = priority
+    return self
   }
 }

@@ -83,34 +83,30 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
     backgroundColor = .clear
     addSubview(imageView)
 
-    if let width = fullMessage.file?.width,
-       let height = fullMessage.file?.height
-    {
-      let dimensions = calculateImageDimensions(width: width, height: height)
-
-      let containerWidth = max(dimensions.width, minWidth)
-
-      imageConstraints = [
-        // Container constraints
-        widthAnchor.constraint(equalToConstant: containerWidth),
-        heightAnchor.constraint(equalToConstant: dimensions.height),
-
-        // Center image within container
-        imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
-        imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-        // Image size constraints
-        imageView.widthAnchor.constraint(equalToConstant: dimensions.width),
-        imageView.heightAnchor.constraint(equalToConstant: dimensions.height),
-      ]
-    } else {
-      imageConstraints = [
-        imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-        imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-        imageView.topAnchor.constraint(equalTo: topAnchor),
-        imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      ]
+    guard let file = fullMessage.file,
+          let width = file.width,
+          let height = file.height
+    else {
+      return
     }
+
+    let dimensions = calculateImageDimensions(width: width, height: height)
+    let containerWidth = max(dimensions.width, minWidth)
+
+    imageConstraints = [
+      widthAnchor.constraint(equalToConstant: containerWidth),
+      heightAnchor.constraint(greaterThanOrEqualToConstant: dimensions.height),
+
+      imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+      imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+      imageView.widthAnchor.constraint(equalToConstant: dimensions.width),
+      imageView.heightAnchor.constraint(lessThanOrEqualToConstant: dimensions.height),
+    ]
+
+    let heightConstraint = heightAnchor.constraint(equalToConstant: dimensions.height)
+    heightConstraint.priority = .defaultHigh
+    heightConstraint.isActive = true
 
     NSLayoutConstraint.activate(imageConstraints)
 
