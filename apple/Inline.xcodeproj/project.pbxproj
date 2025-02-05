@@ -18,6 +18,7 @@
 		C3AE72D32D1B1716009F70D8 /* EmojiPicker in Frameworks */ = {isa = PBXBuildFile; productRef = C3AE72D22D1B1716009F70D8 /* EmojiPicker */; };
 		C3AEE6AA2D4FCDC9005D1179 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = C3AEE6A92D4FCDC9005D1179 /* Nuke */; };
 		C3AEE6AC2D4FCDD0005D1179 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3AEE6AB2D4FCDD0005D1179 /* NukeUI */; };
+		C3C1F2C32D539F550039BCA8 /* NukeExtensions in Frameworks */ = {isa = PBXBuildFile; productRef = C3C1F2C22D539F550039BCA8 /* NukeExtensions */; };
 		C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC99182CCE9AF7007F7F77 /* InlineUI */; };
 		C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC991A2CCE9AFF007F7F77 /* InlineUI */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
@@ -91,6 +92,7 @@
 				C35EC8222CC2A24A0067979B /* InlineKit in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
+				C3C1F2C32D539F550039BCA8 /* NukeExtensions in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
@@ -181,6 +183,7 @@
 				C3AE72D22D1B1716009F70D8 /* EmojiPicker */,
 				C3AEE6A92D4FCDC9005D1179 /* Nuke */,
 				C3AEE6AB2D4FCDD0005D1179 /* NukeUI */,
+				C3C1F2C22D539F550039BCA8 /* NukeExtensions */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -875,6 +878,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CDB123D32D3E8066001AFC1A /* XCRemoteSwiftPackageReference "Nuke" */;
 			productName = NukeUI;
+		};
+		C3C1F2C22D539F550039BCA8 /* NukeExtensions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CDB123D32D3E8066001AFC1A /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = NukeExtensions;
 		};
 		C3CC99182CCE9AF7007F7F77 /* InlineUI */ = {
 			isa = XCSwiftPackageProductDependency;
