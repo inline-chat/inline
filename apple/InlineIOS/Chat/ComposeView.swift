@@ -437,7 +437,11 @@ class ComposeView: UIView {
       topmostVC = presentedVC
     }
 
+    let picker = topmostVC.presentingViewController as? PHPickerViewController
+
     topmostVC.dismiss(animated: true) { [weak self] in
+      // Dismiss the picker if it exists
+      picker?.dismiss(animated: true)
       self?.selectedImage = nil
       self?.previewViewModel.caption = ""
       self?.previewViewModel.isPresented = false
@@ -455,7 +459,7 @@ class ComposeView: UIView {
         self.attachmentItems.removeAll()
 
         // Prepare image for upload
-        if let attachment = await image.prepareForUpload() {
+        if let attachment = image.prepareForUpload() {
           self.attachmentItems[image] = attachment
         }
 
