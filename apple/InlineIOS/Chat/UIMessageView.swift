@@ -115,9 +115,9 @@ class UIMessageView: UIView {
 
   var isJustFile: Bool {
     if fullMessage.file != nil, fullMessage.message.text?.isEmpty == true, fullMessage.repliedToMessage == nil {
-      return true
+      true
     } else {
-      return false
+      false
     }
   }
 
@@ -216,9 +216,18 @@ class UIMessageView: UIView {
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
       bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
 
-      containerStack.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: isJustFile ? 2 : labelVerticalPadding),
-      containerStack.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: isJustFile ? 2 : labelHorizantalPadding),
-      containerStack.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: isJustFile ? -2 : -labelHorizantalPadding),
+      containerStack.topAnchor.constraint(
+        equalTo: bubbleView.topAnchor,
+        constant: isJustFile ? 2 : labelVerticalPadding
+      ),
+      containerStack.leadingAnchor.constraint(
+        equalTo: bubbleView.leadingAnchor,
+        constant: isJustFile ? 2 : labelHorizantalPadding
+      ),
+      containerStack.trailingAnchor.constraint(
+        equalTo: bubbleView.trailingAnchor,
+        constant: isJustFile ? -2 : -labelHorizantalPadding
+      ),
       containerStack.bottomAnchor.constraint(
         equalTo: bubbleView.bottomAnchor,
         constant: isJustFile ? 6 : isMultiline ? -14 : -labelVerticalPadding
@@ -325,7 +334,9 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       guard let self else { return nil }
 
       let copyAction = UIAction(title: "Copy") { _ in
-        UIPasteboard.general.string = self.message.text
+        UIPasteboard.general.string = "\(self.message.messageId) \(self.message.chatId)"
+
+        // UIPasteboard.general.string = self.message.text
       }
 
       var actions: [UIAction] = [copyAction]
