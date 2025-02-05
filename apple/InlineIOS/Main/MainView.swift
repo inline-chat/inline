@@ -358,7 +358,7 @@ struct MainView: View {
     // Add spaces
     items.append(contentsOf: spaceList.spaceItems.map { .space($0) })
 
-    // Sort by date, pinned items first
+    // Sort items: pinned chats first, then spaces, then unpinned chats
     return items.sorted { item1, item2 in
       let pinned1: Bool
       let pinned2: Bool
@@ -367,21 +367,22 @@ struct MainView: View {
         case let (.chat(chat1), .chat(chat2)):
           pinned1 = chat1.dialog.pinned ?? false
           pinned2 = chat2.dialog.pinned ?? false
-        case (.space, _):
-          pinned1 = true
-          pinned2 = false
-        case (_, .space):
-          pinned1 = false
-          pinned2 = true
+          if pinned1 != pinned2 { return pinned1 }
+          return item1.date > item2.date
+        case let (.chat(chat), .space(_)):
+          pinned1 = chat.dialog.pinned ?? false
+          return pinned1 // if chat is pinned, it goes above space
+        case let (.space(_), .chat(chat)):
+          pinned2 = chat.dialog.pinned ?? false
+          return !pinned2 // if chat is not pinned, space goes above
+        case (.space, .space):
+          return item1.date > item2.date
       }
-
-      if pinned1 != pinned2 { return pinned1 }
-      return item1.date > item2.date
     }
   }
 }
 
- enum CombinedItem: Identifiable {
+enum CombinedItem: Identifiable {
   case space(SpaceItem)
   case chat(HomeChatItem)
 
