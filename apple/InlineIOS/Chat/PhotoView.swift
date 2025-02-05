@@ -124,31 +124,61 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
     }
 
     if isLocal {
-      if let image = UIImage(contentsOfFile: url.path) {
-        updateImage(image)
+      DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        if let image = UIImage(contentsOfFile: url.path) {
+          DispatchQueue.main.async {
+            updateImage(image)
+          }
+        }
       }
     } else {
-      let request = ImageRequest(url: url)
-      if let image = ImagePipeline.shared.cache.cachedImage(for: request) {
-        updateImage(image.image)
+      let request = ImageRequest(
+        url: url,
+        processors: [.resize(width: 300)],
+        priority: .high
+      )
+
+      // Show a low quality placeholder while loading
+      if let thumbnail = generateThumbnail() {
+        imageView.image = thumbnail
       }
 
       Task { @MainActor in
         if let image = try? await ImagePipeline.shared.image(for: request) {
           updateImage(image)
-          print("Image loaded")
+
+          // Save to local cache if needed
           if var file = fullMessage.file {
-            // Save to local cache
-            let pathString = image.save(file: file)
-            file.localPath = pathString
-            try? await AppDatabase.shared.dbWriter.write { db in
-              try file.save(db)
+            Task {
+              let pathString = image.save(file: file)
+              file.localPath = pathString
+              try? await AppDatabase.shared.dbWriter.write { db in
+                try file.save(db)
+              }
+              self.triggerMessageReload()
             }
-            triggerMessageReload()
           }
         }
       }
     }
+  }
+
+  private func generateThumbnail() -> UIImage? {
+    guard let file = fullMessage.file,
+          let width = file.width,
+          let height = file.height
+    else {
+      return nil
+    }
+
+    // Create a small colored placeholder based on image dimensions
+    let size = CGSize(width: 30, height: 30 * CGFloat(height) / CGFloat(width))
+    UIGraphicsBeginImageContextWithOptions(size, false, 1)
+    UIColor.systemGray5.setFill()
+    UIRectFill(CGRect(origin: .zero, size: size))
+    let thumbnail = UIGraphicsGetImageFromCurrentImageContext()
+    UIGraphicsEndImageContext()
+    return thumbnail
   }
 
   private func triggerMessageReload() {
@@ -213,8 +243,9 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
               let url = URL(string: tempUrl)
     {
       return (isLocal: false, url: url)
+    } else {
+      return nil
     }
-    return nil
   }
 
   @objc private func handleTap() {
