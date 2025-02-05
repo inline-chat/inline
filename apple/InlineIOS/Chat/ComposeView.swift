@@ -383,6 +383,7 @@ class ComposeView: UIView {
   private func handleDroppedImage(_ image: UIImage) {
     selectedImage = image
     previewViewModel.isPresented = true
+    previewViewModel.caption = textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
     let previewView = PhotoPreviewView(
       image: image,
@@ -481,6 +482,10 @@ class ComposeView: UIView {
           dismissPreview()
           sendButton.configuration?.showsActivityIndicator = false
           attachmentItems.removeAll()
+          textView.text = ""
+          textView.showPlaceholder(true)
+          buttonDisappear()
+          resetHeight()
         }
       }
     }
@@ -491,6 +496,7 @@ class ComposeView: UIView {
 
     selectedImage = image
     previewViewModel.isPresented = true
+    previewViewModel.caption = textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
     let previewView = PhotoPreviewView(
       image: image,
@@ -585,6 +591,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
       DispatchQueue.main.async {
         self.selectedImage = image
         self.previewViewModel.isPresented = true
+        self.previewViewModel.caption = self.textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let previewView = PhotoPreviewView(
           image: image,
