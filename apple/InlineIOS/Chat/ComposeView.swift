@@ -33,7 +33,7 @@ class ComposeTextView: UITextView {
 
     NSLayoutConstraint.activate([
       label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalPadding + 5),
-      label.topAnchor.constraint(equalTo: topAnchor, constant: ComposeView.textViewVerticalPadding),
+      label.centerYAnchor.constraint(equalTo: centerYAnchor),
     ])
 
     placeholderLabel = label
@@ -73,8 +73,8 @@ class ComposeView: UIView {
   private let maxHeight: CGFloat = 600
   private var heightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
-  static let textViewVerticalPadding: CGFloat = 10.0
-  static let textViewHorizantalPadding: CGFloat = 34.0
+  static let textViewVerticalPadding: CGFloat = 9.0
+  static let textViewHorizantalPadding: CGFloat = 12.0
   static let textViewHorizantalMargin: CGFloat = 7.0
   static let textViewVerticalMargin: CGFloat = 7.0
   private let buttonBottomPadding: CGFloat = -4.0
@@ -127,7 +127,7 @@ class ComposeView: UIView {
     NSLayoutConstraint.activate([
       heightConstraint,
 
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
       textView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -137,10 +137,10 @@ class ComposeView: UIView {
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
 
-      plusButton.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: 6),
-      plusButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
-      plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
-      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
+      plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+      plusButton.centerYAnchor.constraint(equalTo: textView.centerYAnchor),
+      plusButton.widthAnchor.constraint(equalToConstant: Self.minHeight - 6),
+      plusButton.heightAnchor.constraint(equalToConstant: Self.minHeight - 6),
     ])
 
     // Add drop interaction
@@ -153,8 +153,10 @@ class ComposeView: UIView {
     textView.font = .systemFont(ofSize: 17)
 
     textView.isScrollEnabled = true
-    textView.backgroundColor = .systemBackground
+    textView.backgroundColor = .systemBackground.withAlphaComponent(0.4)
     textView.layer.cornerRadius = 22
+    textView.layer.borderWidth = 0.5
+    textView.layer.borderColor = UIColor.tertiaryLabel.cgColor
     textView.textContainerInset = UIEdgeInsets(
       top: Self.textViewVerticalPadding,
       left: Self.textViewHorizantalPadding + 2,
@@ -195,9 +197,11 @@ class ComposeView: UIView {
     config.image = UIImage(systemName: "plus")?.withConfiguration(
       UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
     )
-    config.baseForegroundColor = .systemGray2
-    button.layer.cornerRadius = 18
+    config.baseForegroundColor = .secondaryLabel
+    config.background.backgroundColor = .secondarySystemBackground
     button.configuration = config
+    button.layer.cornerRadius = Self.minHeight / 2
+    button.clipsToBounds = true
     button.addTarget(self, action: #selector(plusTapped), for: .touchUpInside)
     return button
   }
@@ -383,7 +387,6 @@ class ComposeView: UIView {
   private func handleDroppedImage(_ image: UIImage) {
     selectedImage = image
     previewViewModel.isPresented = true
-    previewViewModel.caption = textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
     let previewView = PhotoPreviewView(
       image: image,
@@ -482,10 +485,6 @@ class ComposeView: UIView {
           dismissPreview()
           sendButton.configuration?.showsActivityIndicator = false
           attachmentItems.removeAll()
-          textView.text = ""
-          textView.showPlaceholder(true)
-          buttonDisappear()
-          resetHeight()
         }
       }
     }
@@ -496,7 +495,6 @@ class ComposeView: UIView {
 
     selectedImage = image
     previewViewModel.isPresented = true
-    previewViewModel.caption = textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
     let previewView = PhotoPreviewView(
       image: image,
@@ -591,7 +589,6 @@ extension ComposeView: PHPickerViewControllerDelegate {
       DispatchQueue.main.async {
         self.selectedImage = image
         self.previewViewModel.isPresented = true
-        self.previewViewModel.caption = self.textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let previewView = PhotoPreviewView(
           image: image,
