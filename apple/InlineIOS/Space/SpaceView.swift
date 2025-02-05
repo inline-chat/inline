@@ -58,7 +58,7 @@ struct SpaceView: View {
             Button(action: {
               openCreateThreadSheet = true
             }) {
-              Text("Create Thread")
+              Text("Create Chat")
             }
             Button(action: {
               openAddMemberSheet = true
@@ -74,7 +74,7 @@ struct SpaceView: View {
     }
     .toolbarRole(.editor)
     .sheet(isPresented: $openCreateThreadSheet) {
-      CreateThread(showSheet: $openCreateThreadSheet, spaceId: spaceId)
+      CreateThread(spaceId: spaceId)
         .presentationBackground(.thinMaterial)
         .presentationCornerRadius(28)
     }

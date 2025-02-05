@@ -44,6 +44,9 @@
     "Archived Chats" : {
 
     },
+    "Chat Title" : {
+
+    },
     "Code sent to %@." : {
 
     },
@@ -59,10 +62,10 @@
     "Create" : {
 
     },
-    "Create Space" : {
+    "Create Chat" : {
 
     },
-    "Create Thread" : {
+    "Create Space" : {
 
     },
     "Creating Account..." : {
@@ -72,9 +75,6 @@
 
     },
     "Edit" : {
-
-    },
-    "eg. ideas" : {
 
     },
     "Email" : {
