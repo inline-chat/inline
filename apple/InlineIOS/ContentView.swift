@@ -63,11 +63,11 @@ extension ContentView {
   func sheetContent(for destination: Navigation.Destination) -> some View {
     switch destination {
       case let .createThread(spaceId):
-        CreateThread(showSheet: .constant(true), spaceId: spaceId)
+        CreateThread(spaceId: spaceId)
           .presentationCornerRadius(18)
 
       case .createSpace:
-      CreateSpace()
+        CreateSpace()
           .presentationCornerRadius(18)
       default:
         EmptyView()
