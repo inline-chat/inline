@@ -50,7 +50,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
 
       // Add avatar if we have user info
       if let from = message.from {
-        let avatar = UserAvatar(user: from, size: 26)
+        let avatar = UserAvatar(user: from, size: 28)
         let hostingController = UIHostingController(rootView: avatar)
         avatarHostingController = hostingController
         hostingController.view.backgroundColor = .clear
@@ -58,9 +58,9 @@ class MessageCollectionViewCell: UICollectionViewCell {
         contentView.addSubview(hostingController.view)
 
         var constraints = [
-          hostingController.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
-          hostingController.view.widthAnchor.constraint(equalToConstant: 26),
-          hostingController.view.heightAnchor.constraint(equalToConstant: 26),
+          hostingController.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+          hostingController.view.widthAnchor.constraint(equalToConstant: 28),
+          hostingController.view.heightAnchor.constraint(equalToConstant: 28),
         ]
 
         if outgoing {
@@ -104,11 +104,11 @@ class MessageCollectionViewCell: UICollectionViewCell {
 
     let leadingConstraint: NSLayoutConstraint = if isThread {
       if outgoing {
-        newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 26)
+        newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28)
       } else if fromOtherSender, let avatarView = avatarHostingController?.view {
         newMessageView.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: -2)
       } else {
-        newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 26)
+        newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28)
       }
     } else {
       newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
@@ -118,7 +118,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
       if outgoing, let avatarView = avatarHostingController?.view {
         newMessageView.trailingAnchor.constraint(equalTo: avatarView.leadingAnchor, constant: 2)
       } else {
-        newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -26)
+        newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28)
       }
     } else {
       newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
