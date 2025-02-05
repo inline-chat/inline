@@ -23,7 +23,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
 
   lazy var nameLabel: UILabel = {
     var label = UILabel()
-    label.font = .systemFont(ofSize: 12, weight: .regular)
+    label.font = .systemFont(ofSize: 13, weight: .medium)
     label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false
 
@@ -97,7 +97,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
     contentView.addSubview(newMessageView)
 
     let topConstraint: NSLayoutConstraint = if isThread, fromOtherSender {
-      newMessageView.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 4)
+      newMessageView.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2)
     } else {
       newMessageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: fromOtherSender ? 12 : 2)
     }
