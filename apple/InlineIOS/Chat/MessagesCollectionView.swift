@@ -1,9 +1,12 @@
 import InlineKit
+import Nuke
+import NukeUI
 import UIKit
 
 class MessagesCollectionView: UICollectionView {
   private let peerId: Peer
   private var coordinator: Coordinator
+  private var imagePrefetchDataSource: ImagePrefetchDataSource?
 
   init(peerId: Peer) {
     self.peerId = peerId
@@ -21,26 +24,17 @@ class MessagesCollectionView: UICollectionView {
   }
 
   private func setupCollectionView() {
-    // Basic setup
     backgroundColor = .clear
     delegate = coordinator
     autoresizingMask = [.flexibleHeight]
 
-    // Register cell
     register(
       MessageCollectionViewCell.self,
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
     )
 
-    // Bottom-up scrolling transform
     transform = CGAffineTransform(scaleX: 1, y: -1)
-
-    // Performance optimizations
-    isPrefetchingEnabled = true
-
-    // Scroll indicator setup
     showsVerticalScrollIndicator = true
-
     keyboardDismissMode = .interactive
 
     coordinator.setupDataSource(self)
@@ -51,6 +45,11 @@ class MessagesCollectionView: UICollectionView {
       name: UIDevice.orientationDidChangeNotification,
       object: nil
     )
+
+    let prefetchDS = ImagePrefetchDataSource(coordinator: coordinator)
+    imagePrefetchDataSource = prefetchDS
+    prefetchDataSource = prefetchDS
+    prefetchDS.prefetchIfNeeded()
   }
 
   override func didMoveToWindow() {
@@ -86,11 +85,9 @@ class MessagesCollectionView: UICollectionView {
 
   func updateContentInsets() {
     guard !UIMessageView.contextMenuOpen else {
-      Log.shared.debug("Blocked by contextMenuOpen")
       return
     }
     guard let window else {
-      Log.shared.debug("Blocked by missing window")
       return
     }
 
@@ -521,4 +518,54 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     attributes.transform = CGAffineTransform(translationX: 0, y: -50)
     return attributes
   }
+}
+
+// Add new ImagePrefetchDataSource class
+private class ImagePrefetchDataSource: NSObject, UICollectionViewDataSourcePrefetching {
+  private weak var coordinator: MessagesCollectionView.Coordinator?
+  private let pipeline = ImagePipeline {
+    $0.imageCache = ImageCache(costLimit: 100 * 1_024 * 1_024) // 100MB memory cache
+    $0.dataCache = try? DataCache(name: "com.inline.messages.images")
+    $0.isProgressiveDecodingEnabled = true
+    $0.isRateLimiterEnabled = true
+  }
+
+  init(coordinator: MessagesCollectionView.Coordinator) {
+    self.coordinator = coordinator
+    super.init()
+  }
+
+  func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+    guard let coordinator else { return }
+
+    // Prioritize closer items
+    let sortedIndexPaths = indexPaths.sorted { $0.item < $1.item }
+
+    for indexPath in sortedIndexPaths {
+      guard indexPath.item < coordinator.messages.count else { continue }
+      let message = coordinator.messages[indexPath.item]
+
+      if let file = message.file,
+         let tempUrl = file.temporaryUrl,
+         let url = URL(string: tempUrl)
+      {
+        // Check if image is already cached
+        if PhotoView.imageCache.object(forKey: url.absoluteString as NSString) == nil {
+          let request = ImageRequest(
+            url: url,
+            processors: [.resize(width: 300)], // Resize to reasonable size
+            priority: .high
+          )
+
+          pipeline.loadImage(with: request) { _ in }
+        }
+      }
+    }
+  }
+
+  func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+    // Cancel any in-progress prefetch requests if needed
+  }
+
+  func prefetchIfNeeded() {}
 }
