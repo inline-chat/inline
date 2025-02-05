@@ -6,6 +6,8 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+// MARK: - ComposeTextView Implementation
+
 class ComposeTextView: UITextView {
   private var placeholderLabel: UILabel?
 
@@ -18,6 +20,8 @@ class ComposeTextView: UITextView {
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
+
+  // MARK: Placeholder Management
 
   private func setupPlaceholder() {
     let label = UILabel()
@@ -41,9 +45,30 @@ class ComposeTextView: UITextView {
       self.placeholderLabel?.transform = show ? .identity : CGAffineTransform(translationX: 50, y: 0)
     }
   }
+
+  // MARK: Paste Handling
+
+  override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    if action == #selector(paste(_:)) {
+      return UIPasteboard.general.hasStrings || UIPasteboard.general.hasImages
+    }
+    return super.canPerformAction(action, withSender: sender)
+  }
+
+  override func paste(_ sender: Any?) {
+    if UIPasteboard.general.hasImages {
+      (delegate as? ComposeView)?.handlePastedImage()
+    } else {
+      super.paste(sender)
+    }
+  }
 }
 
+// MARK: - Main ComposeView Implementation
+
 class ComposeView: UIView {
+  // MARK: Configuration Constants
+
   static let minHeight: CGFloat = 42.0
   private let maxHeight: CGFloat = 600
   private var heightConstraint: NSLayoutConstraint!
@@ -59,67 +84,19 @@ class ComposeView: UIView {
   private var overlayView: UIView?
   private var isOverlayVisible = false
 
-  private var selectedImage: UIImage?
-  private var showingPhotoPreview: Bool = false
-  private var imageCaption: String = ""
-  private let previewViewModel = PhotoPreviewViewModel()
-  private var attachmentItems: [UIImage: SendMessageAttachment] = [:]
+  // MARK: UI Components
 
-  lazy var textView: ComposeTextView = {
-    let textView = ComposeTextView()
-    textView.font = .systemFont(ofSize: 17)
+  lazy var textView = makeTextView()
+  lazy var sendButton = makeSendButton()
+  lazy var plusButton = makePlusButton()
 
-    textView.isScrollEnabled = true
-    textView.backgroundColor = .systemBackground
-    textView.layer.cornerRadius = 22
-    textView.textContainerInset = UIEdgeInsets(
-      top: Self.textViewVerticalPadding,
-      left: Self.textViewHorizantalPadding + 2,
-      bottom: Self.textViewVerticalPadding,
-      right: Self.textViewHorizantalPadding + 5
-    )
-    textView.delegate = self
-    textView.translatesAutoresizingMaskIntoConstraints = false
+  // MARK: State Management
 
-    return textView
-  }()
-
-  private lazy var sendButton: UIButton = {
-    let button = UIButton()
-    button.translatesAutoresizingMaskIntoConstraints = false
-
-    var config = UIButton.Configuration.plain()
-    config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
-    )
-    config.baseForegroundColor = .white
-    config.background.backgroundColor = ColorManager.shared.selectedColor
-    config.cornerStyle = .capsule
-
-    button.configuration = config
-    button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
-    button.alpha = 0
-    button.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
-
-    return button
-  }()
-
-  private var currentImagePickerPresenter: UIViewController?
-
-  private lazy var plusButton: UIButton = {
-    let button = UIButton()
-    button.translatesAutoresizingMaskIntoConstraints = false
-
-    var config = UIButton.Configuration.plain()
-    config.image = UIImage(systemName: "plus")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-    )
-    config.baseForegroundColor = .systemGray2
-    button.layer.cornerRadius = 18
-    button.configuration = config
-    button.addTarget(self, action: #selector(plusTapped), for: .touchUpInside)
-    return button
-  }()
+  var selectedImage: UIImage?
+  var showingPhotoPreview: Bool = false
+  var imageCaption: String = ""
+  let previewViewModel = PhotoPreviewViewModel()
+  var attachmentItems: [UIImage: SendMessageAttachment] = [:]
 
   var onHeightChange: ((CGFloat) -> Void)?
   var peerId: Peer?
@@ -135,6 +112,8 @@ class ComposeView: UIView {
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
+
+  // MARK: Setup & Layout
 
   private func setupViews() {
     backgroundColor = .clear
@@ -155,8 +134,6 @@ class ComposeView: UIView {
 
       sendButton.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: buttonTrailingPadding),
       sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
-      //      sendButton.centerYAnchor.constraint(equalTo: textView.centerYAnchor),
-
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
 
@@ -165,6 +142,64 @@ class ComposeView: UIView {
       plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
       plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
     ])
+
+    // Add drop interaction
+    let dropInteraction = UIDropInteraction(delegate: self)
+    addInteraction(dropInteraction)
+  }
+
+  private func makeTextView() -> ComposeTextView {
+    let textView = ComposeTextView()
+    textView.font = .systemFont(ofSize: 17)
+
+    textView.isScrollEnabled = true
+    textView.backgroundColor = .systemBackground
+    textView.layer.cornerRadius = 22
+    textView.textContainerInset = UIEdgeInsets(
+      top: Self.textViewVerticalPadding,
+      left: Self.textViewHorizantalPadding + 2,
+      bottom: Self.textViewVerticalPadding,
+      right: Self.textViewHorizantalPadding + 5
+    )
+    textView.delegate = self
+    textView.translatesAutoresizingMaskIntoConstraints = false
+
+    return textView
+  }
+
+  private func makeSendButton() -> UIButton {
+    let button = UIButton()
+    button.translatesAutoresizingMaskIntoConstraints = false
+
+    var config = UIButton.Configuration.plain()
+    config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+    )
+    config.baseForegroundColor = .white
+    config.background.backgroundColor = ColorManager.shared.selectedColor
+    config.cornerStyle = .capsule
+
+    button.configuration = config
+    button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
+    button.alpha = 0
+    button.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+
+    return button
+  }
+
+  private func makePlusButton() -> UIButton {
+    let button = UIButton()
+    button.translatesAutoresizingMaskIntoConstraints = false
+
+    var config = UIButton.Configuration.plain()
+    config.image = UIImage(systemName: "plus")?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+    )
+    config.baseForegroundColor = .systemGray2
+    button.layer.cornerRadius = 18
+    button.configuration = config
+    button.addTarget(self, action: #selector(plusTapped), for: .touchUpInside)
+    return button
   }
 
   @objc private func sendTapped() {
@@ -344,17 +379,162 @@ class ComposeView: UIView {
       loadDraft()
     }
   }
+
+  private func handleDroppedImage(_ image: UIImage) {
+    selectedImage = image
+    previewViewModel.isPresented = true
+
+    let previewView = PhotoPreviewView(
+      image: image,
+      caption: Binding(
+        get: { [weak self] in self?.previewViewModel.caption ?? "" },
+        set: { [weak self] newValue in self?.previewViewModel.caption = newValue }
+      ),
+      isPresented: Binding(
+        get: { [weak self] in self?.previewViewModel.isPresented ?? false },
+        set: { [weak self] newValue in
+          self?.previewViewModel.isPresented = newValue
+          if !newValue {
+            self?.dismissPreview()
+          }
+        }
+      ),
+      onSend: { [weak self] image, caption in
+        self?.sendImage(image, caption: caption)
+      }
+    )
+
+    let previewVC = UIHostingController(rootView: previewView)
+    previewVC.modalPresentationStyle = .fullScreen
+    previewVC.modalTransitionStyle = .crossDissolve
+
+    if let windowScene = window?.windowScene,
+       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+       let rootVC = keyWindow.rootViewController
+    {
+      rootVC.present(previewVC, animated: true)
+    }
+  }
+
+  private func dismissPreview() {
+    var responder: UIResponder? = self
+    var currentVC: UIViewController?
+
+    while let nextResponder = responder?.next {
+      if let viewController = nextResponder as? UIViewController {
+        currentVC = viewController
+        break
+      }
+      responder = nextResponder
+    }
+
+    guard let currentVC else {
+      return
+    }
+
+    var topmostVC = currentVC
+    while let presentedVC = topmostVC.presentedViewController {
+      topmostVC = presentedVC
+    }
+
+    topmostVC.dismiss(animated: true) { [weak self] in
+      self?.selectedImage = nil
+      self?.previewViewModel.caption = ""
+      self?.previewViewModel.isPresented = false
+    }
+  }
+
+  private func sendImage(_ image: UIImage, caption: String) {
+    guard let peerId else { return }
+
+    DispatchQueue.main.async {
+      self.sendButton.configuration?.showsActivityIndicator = true
+
+      Task {
+        // Clear previous attachments before adding new ones
+        self.attachmentItems.removeAll()
+
+        // Prepare image for upload
+        if let attachment = await image.prepareForUpload() {
+          self.attachmentItems[image] = attachment
+        }
+
+        let _ = Transactions.shared.mutate(
+          transaction: .sendMessage(
+            .init(
+              text: caption,
+              peerId: self.peerId!,
+              chatId: self.chatId ?? 0,
+              attachments: self.attachmentItems.values.map { $0 },
+              replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
+            )
+          )
+        )
+
+        DispatchQueue.main.async { [weak self] in
+          guard let self else { return }
+          sendMessageHaptic()
+          dismissPreview()
+          sendButton.configuration?.showsActivityIndicator = false
+          attachmentItems.removeAll()
+        }
+      }
+    }
+  }
+
+  func handlePastedImage() {
+    guard let image = UIPasteboard.general.image else { return }
+
+    selectedImage = image
+    previewViewModel.isPresented = true
+
+    let previewView = PhotoPreviewView(
+      image: image,
+      caption: Binding(
+        get: { [weak self] in self?.previewViewModel.caption ?? "" },
+        set: { [weak self] newValue in self?.previewViewModel.caption = newValue }
+      ),
+      isPresented: Binding(
+        get: { [weak self] in self?.previewViewModel.isPresented ?? false },
+        set: { [weak self] newValue in
+          self?.previewViewModel.isPresented = newValue
+          if !newValue {
+            self?.dismissPreview()
+          }
+        }
+      ),
+      onSend: { [weak self] image, caption in
+        self?.sendImage(image, caption: caption)
+      }
+    )
+
+    let previewVC = UIHostingController(rootView: previewView)
+    previewVC.modalPresentationStyle = .fullScreen
+    previewVC.modalTransitionStyle = .crossDissolve
+
+    var responder: UIResponder? = self
+    while let nextResponder = responder?.next {
+      if let viewController = nextResponder as? UIViewController {
+        viewController.present(previewVC, animated: true)
+        break
+      }
+      responder = nextResponder
+    }
+  }
 }
+
+// MARK: - User Interaction Handling
 
 extension ComposeView: UITextViewDelegate {
   func textViewDidChange(_ textView: UITextView) {
-    UIView.animate(withDuration: 0.2) {
-      self.updateHeight()
-    }
+    // Height Management
+    UIView.animate(withDuration: 0.2) { self.updateHeight() }
 
+    // Placeholder Visibility
     let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     self.textView.showPlaceholder(isEmpty)
 
+    // Typing Indicators
     if isEmpty {
       buttonDisappear()
       if let peerId {
@@ -430,63 +610,27 @@ extension ComposeView: PHPickerViewControllerDelegate {
       }
     }
   }
+}
 
-  private func dismissPreview() {
-    if let windowScene = window?.windowScene,
-       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
-       let rootVC = keyWindow.rootViewController
-    {
-      rootVC.dismiss(animated: true) { [weak self] in
-        self?.selectedImage = nil
-        self?.previewViewModel.caption = ""
-        self?.previewViewModel.isPresented = false
-      }
-    }
+extension ComposeView: UIDropInteractionDelegate {
+  func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+    session.hasItemsConforming(toTypeIdentifiers: [UTType.image.identifier])
   }
 
-  private func sendImage(_ image: UIImage, caption: String) {
-    guard let peerId else { return }
+  func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession) -> UIDropProposal {
+    UIDropProposal(operation: .copy)
+  }
 
-    DispatchQueue.main.async {
-      self.sendButton.configuration?.showsActivityIndicator = true
-
-      Task {
-        // Clear previous attachments before adding new ones
-        self.attachmentItems.removeAll()
-
-        // Prepare image for upload
-        if let attachment = await image.prepareForUpload() {
-          self.attachmentItems[image] = attachment
-        }
-
-        let _ = Transactions.shared.mutate(
-          transaction: .sendMessage(
-            .init(
-              text: caption,
-              peerId: self.peerId!,
-              chatId: self.chatId ?? 0,
-              attachments: self.attachmentItems.values.map { $0 },
-              replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
-            )
-          )
-        )
+  func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+    for provider in session.items {
+      provider.itemProvider.loadObject(ofClass: UIImage.self) { [weak self] (
+        image: NSItemProviderReading?,
+        _: Error?
+      ) in
+        guard let image = image as? UIImage else { return }
 
         DispatchQueue.main.async {
-          self.sendMessageHaptic()
-          self.previewViewModel.caption = ""
-          self.selectedImage = nil
-          self.previewViewModel.isPresented = false
-          self.sendButton.configuration?.showsActivityIndicator = false
-
-          // Clear attachments after sending
-          self.attachmentItems.removeAll()
-
-          if let windowScene = self.window?.windowScene,
-             let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
-             let rootVC = keyWindow.rootViewController
-          {
-            rootVC.dismiss(animated: true)
-          }
+          self?.handleDroppedImage(image)
         }
       }
     }
