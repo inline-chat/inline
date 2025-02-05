@@ -113,6 +113,14 @@ class UIMessageView: UIView {
     return text.count > 24 || text.contains("\n")
   }
 
+  var isJustFile: Bool {
+    if fullMessage.file != nil, fullMessage.message.text?.isEmpty == true, fullMessage.repliedToMessage == nil {
+      return true
+    } else {
+      return false
+    }
+  }
+
   private let labelVerticalPadding: CGFloat = 9.0
   private let labelHorizantalPadding: CGFloat = 12.0
 
@@ -181,11 +189,15 @@ class UIMessageView: UIView {
       metadataContainer.axis = .horizontal
       metadataContainer.addArrangedSubview(UIView()) // Spacer
       metadataContainer.addArrangedSubview(metadataView)
-      multiLineContainer.addArrangedSubview(metadataContainer)
+      if !isJustFile {
+        multiLineContainer.addArrangedSubview(metadataContainer)
+      }
       containerStack.addArrangedSubview(multiLineContainer)
     } else {
       singleLineContainer.addArrangedSubview(messageLabel)
-      singleLineContainer.addArrangedSubview(metadataView)
+      if !isJustFile {
+        singleLineContainer.addArrangedSubview(metadataView)
+      }
       containerStack.addArrangedSubview(singleLineContainer)
     }
   }
@@ -204,12 +216,12 @@ class UIMessageView: UIView {
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
       bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
 
-      containerStack.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: labelVerticalPadding),
-      containerStack.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: labelHorizantalPadding),
-      containerStack.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -labelHorizantalPadding),
+      containerStack.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: isJustFile ? 2 : labelVerticalPadding),
+      containerStack.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: isJustFile ? 2 : labelHorizantalPadding),
+      containerStack.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: isJustFile ? -2 : -labelHorizantalPadding),
       containerStack.bottomAnchor.constraint(
         equalTo: bubbleView.bottomAnchor,
-        constant: isMultiline ? -14 : -labelVerticalPadding
+        constant: isJustFile ? 6 : isMultiline ? -14 : -labelVerticalPadding
       ).withPriority(.defaultHigh),
     ])
     if outgoing {
