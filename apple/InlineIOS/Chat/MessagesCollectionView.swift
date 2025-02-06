@@ -357,12 +357,12 @@ private extension MessagesCollectionView {
               }
             }
           }
+
         case let .deleted(ids, _):
           var snapshot = dataSource.snapshot()
-
           snapshot.deleteItems(ids)
-
           dataSource.apply(snapshot, animatingDifferences: true)
+
         case let .updated(newMessages, _):
 
           var snapshot = dataSource.snapshot()
@@ -371,6 +371,7 @@ private extension MessagesCollectionView {
           snapshot.reconfigureItems(ids)
 
           dataSource.apply(snapshot, animatingDifferences: false)
+
         case .reload:
           setInitialData()
       }

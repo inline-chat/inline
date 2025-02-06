@@ -490,4 +490,36 @@ public class DataManager: ObservableObject {
       try member.save(db, onConflict: .replace)
     }
   }
+
+  public func deleteMessage(
+    messageId: Int64, chatId: Int64, peerId: Peer
+  ) async throws {
+    print("deleteMessage", messageId, chatId, peerId)
+    let _ = try await ApiClient.shared.deleteMessage(messageId: messageId, chatId: chatId, peerId: peerId)
+
+    try await database.dbWriter.write { db in
+
+      if var chat = try Chat.fetchOne(db, id: chatId) {
+        if chat.lastMsgId == messageId {
+          let previousMessage = try Message
+            .filter(Column("chatId") == chatId)
+            .order(Column("date").desc)
+            .limit(1, offset: 1)
+            .fetchOne(db)
+
+          chat.lastMsgId = previousMessage?.messageId
+          try chat.save(db)
+        }
+      }
+
+      try Message
+        .filter(Column("messageId") == messageId)
+        .filter(Column("chatId") == chatId)
+        .deleteAll(db)
+    }
+
+    Task { @MainActor in
+      MessagesPublisher.shared.messagesDeleted(messageIds: [messageId], peer: peerId)
+    }
+  }
 }
