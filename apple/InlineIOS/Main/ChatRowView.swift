@@ -87,7 +87,7 @@ struct ChatRowView: View {
           if isCurrentUser {
             savedMessageSymbol
           } else {
-            userAvatar(homeItem.user)
+            userAvatar(homeItem.user.user)
           }
         case let .space(spaceItem):
           if isCurrentUser {
@@ -180,7 +180,7 @@ struct ChatRowView: View {
         Text(
           type == .privateChat
             ? homeItem.user.id == Auth.shared.getCurrentUserId()
-            ? "Saved Message" : homeItem.user.firstName ?? ""
+            ? "Saved Message" : homeItem.user.user.firstName ?? ""
             : homeItem.chat?.title ?? ""
         )
         .fontWeight(.medium)
