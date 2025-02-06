@@ -4,7 +4,12 @@ import GRDBQuery
 
 @MainActor
 public class RootData: ObservableObject {
-  @Published public var currentUser: User?
+  @Published public var currentUserInfo: UserInfo?
+
+  public var currentUser: User? {
+    currentUserInfo?.user
+  }
+
   @Published public var error: Subscribers.Completion<any Error>?
 
   private var fetchedOnce = false
@@ -22,7 +27,12 @@ public class RootData: ObservableObject {
 
     observationCancellable =
       ValueObservation
-        .tracking(User.filter(key: userId).fetchOne)
+        .tracking(
+          User
+            .userInfoQuery()
+            .filter(key: userId)
+            .fetchOne
+        )
         .publisher(in: db.reader, scheduling: .immediate)
         .sink(
           receiveCompletion: { error in
@@ -30,7 +40,7 @@ public class RootData: ObservableObject {
           },
           receiveValue: { [weak self] user in
             guard let self else { return }
-            currentUser = user
+            currentUserInfo = user
 
             // Remote fetch
             if user == nil, fetchedOnce == false {
@@ -45,8 +55,8 @@ public class RootData: ObservableObject {
     Task { @MainActor in
       do {
         Log.shared.debug("Fetching me")
-        let user = try await DataManager.shared.fetchMe()
-        self.currentUser = user
+        let _ = try await DataManager.shared.fetchMe()
+        // self.currentUser = user
       } catch {
         Log.shared.error("Error fetching user", error: error)
       }

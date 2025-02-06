@@ -131,14 +131,7 @@ struct AddMember: View {
 
         try await database.dbWriter.write { db in
           for apiUser in result.users {
-            let user = User(
-              id: apiUser.id,
-              email: apiUser.email,
-              firstName: apiUser.firstName,
-              lastName: apiUser.lastName,
-              username: apiUser.username
-            )
-            try user.save(db)
+            try apiUser.saveFull(db)
           }
         }
 

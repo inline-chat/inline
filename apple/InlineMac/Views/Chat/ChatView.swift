@@ -104,8 +104,8 @@ struct ChatView: View {
           HStack {
             if let user = fullChat.chatItem?.user, isSavedMsg {
               ChatIcon(peer: .savedMessage(user), size: 30)
-            } else if let user = fullChat.chatItem?.user {
-              ChatIcon(peer: .user(user), size: 30)
+            } else if let userInfo = fullChat.chatItem?.userInfo {
+              ChatIcon(peer: .user(userInfo), size: 30)
             } else if let chat = fullChat.chatItem?.chat {
               ChatIcon(peer: .chat(chat), size: 30)
             } else {

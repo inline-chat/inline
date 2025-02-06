@@ -53,7 +53,7 @@ struct SpaceSidebar: View {
     let chat = item.chat
 
     UserItem(
-      user: user,
+      userInfo: item.userInfo ?? .init(user: user),
       dialog: dialog,
       chat: chat,
       action: {

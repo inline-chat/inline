@@ -22,13 +22,8 @@ public final class FullMessageViewModel: ObservableObject, @unchecked Sendable {
     cancellable =
       ValueObservation
         .tracking { db in
-          try Message
+          try FullMessage.queryRequest()
             .filter(Column("messageId") == messageId && Column("chatId") == chatId)
-            .including(optional: Message.file)
-            .including(optional: Message.from.forKey("from"))
-            .including(all: Message.reactions)
-            .including(optional: Message.repliedToMessage.forKey("repliedToMessage"))
-            .asRequest(of: FullMessage.self)
             .fetchOne(db)
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
