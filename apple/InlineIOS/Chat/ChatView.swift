@@ -46,7 +46,7 @@ struct ChatView: View {
   }
 
   var isPrivateChat: Bool {
-    fullChatViewModel.chat?.type == .privateChat
+    fullChatViewModel.peer.isPrivate
   }
 
   var subtitle: String {
