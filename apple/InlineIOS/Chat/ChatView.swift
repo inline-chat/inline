@@ -107,7 +107,7 @@ struct ChatView: View {
       .toolbarTitleDisplayMode(.inline)
       .onAppear {
         Task {
-          _ = try? await ApiClient.shared.readMessages(peerId: peerId, maxId: nil)
+          UnreadManager.shared.readAll(peerId, chatId: fullChatViewModel.chat?.id ?? 0)
           await fetch()
         }
       }

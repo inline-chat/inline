@@ -79,7 +79,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
       }
 
       var constraints = [
-        nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 2),
+        nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
         nameLabel.heightAnchor.constraint(equalToConstant: 16),
       ]
 

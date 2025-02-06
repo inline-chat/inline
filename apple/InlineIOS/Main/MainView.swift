@@ -4,6 +4,9 @@ import InlineUI
 import SwiftUI
 
 /// The main view of the application showing spaces and direct messages
+enum TabType {
+  case spaces, chats
+}
 
 struct MainView: View {
   // MARK: - Environment
@@ -32,6 +35,7 @@ struct MainView: View {
   @State private var searchResults: [User] = []
   @State private var isSearching = false
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
+  @State private var selectedTab: TabType = .chats
 
   var user: User? {
     root.currentUser
@@ -51,12 +55,23 @@ struct MainView: View {
   // MARK: - Body
 
   var body: some View {
-    VStack {
+    VStack(spacing: 0) {
+      // Custom tab bar
+      HStack(spacing: 8) {
+        TabButton(title: "Chats", type: .chats, selectedTab: $selectedTab)
+        TabButton(title: "Spaces", type: .spaces, selectedTab: $selectedTab)
+        Spacer()
+      }
+      .padding(.horizontal)
+      .padding(.bottom, 8)
+
+      // Existing content with filtering based on selected tab
       if !searchResults.isEmpty {
         searchResultsView
       } else {
         List {
-          if home.chats.filter({ $0.dialog.archived == true }).isEmpty == false {
+          // Archived chats section - only show in chats tab
+          if selectedTab == .chats, !home.chats.filter({ $0.dialog.archived == true }).isEmpty {
             Button {
               nav.push(.archivedChats)
             } label: {
@@ -95,7 +110,8 @@ struct MainView: View {
               .contentShape(Rectangle())
             }
           }
-          ForEach(combinedItems) { item in
+
+          ForEach(filteredItems) { item in
             switch item {
               case let .space(spaceItem):
                 Button {
@@ -373,6 +389,21 @@ struct MainView: View {
       }
     }
   }
+
+  var filteredItems: [CombinedItem] {
+    switch selectedTab {
+      case .spaces:
+        combinedItems.filter { item in
+          if case .space = item { return true }
+          return false
+        }
+      case .chats:
+        combinedItems.filter { item in
+          if case .chat = item { return true }
+          return false
+        }
+    }
+  }
 }
 
 enum CombinedItem: Identifiable {
@@ -390,6 +421,37 @@ enum CombinedItem: Identifiable {
     switch self {
       case let .space(space): space.space.date
       case let .chat(chat): chat.message?.date ?? chat.chat?.date ?? Date()
+    }
+  }
+}
+
+private struct TabButton: View {
+  let title: String
+  let type: TabType
+  @Binding var selectedTab: TabType
+
+  var body: some View {
+    Button {
+      let impact = UIImpactFeedbackGenerator(style: .light)
+      impact.impactOccurred()
+
+      withAnimation(.easeOut(duration: 0.1)) {
+        selectedTab = type
+      }
+    } label: {
+      Text(title)
+        .foregroundColor(selectedTab == type ? Color(ColorManager.shared.swiftUIColor) : .secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+          Group {
+            if selectedTab == type {
+              Color(ColorManager.shared.swiftUIColor).opacity(0.2).clipShape(Capsule())
+            } else {
+              Color.clear
+            }
+          }
+        )
     }
   }
 }

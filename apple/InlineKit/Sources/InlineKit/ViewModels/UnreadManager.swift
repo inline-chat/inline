@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import UIKit
 
 public final class UnreadManager: Sendable {
   public static let shared = UnreadManager()
@@ -19,7 +20,7 @@ public final class UnreadManager: Sendable {
     // avoid applying old remote unread count, etc.
 
     // update server
-    // todo: add throttle
+    // TODO: add throttle
     Task {
       try? await apiClient.readMessages(peerId: peerId, maxId: maxId)
     }
@@ -44,6 +45,35 @@ public final class UnreadManager: Sendable {
     // Update remote server
     Task {
       try? await apiClient.readMessages(peerId: peerId, maxId: nil)
+    }
+
+    updateAppIconBadge()
+  }
+
+  public func updateAppIconBadge() {
+    Task {
+      do {
+        let unreadChatsCount = try await AppDatabase.shared.reader.read { db in
+          try Dialog
+            .filter(Column("archived") == false)
+            .filter(Column("unreadCount") > 0)
+            // Only count private chats by checking peerUserId is not null
+            .filter(Column("peerUserId") != nil)
+            .fetchCount(db)
+        }
+
+        #if os(iOS)
+        DispatchQueue.main.async {
+          UIApplication.shared.applicationIconBadgeNumber = unreadChatsCount
+        }
+        // #elseif os(macOS)
+        // DispatchQueue.main.async {
+        //   NSApplication.shared.dockTile.badgeLabel = unreadChatsCount > 0 ? "\(unreadChatsCount)" : ""
+        // }
+        #endif
+      } catch {
+        log.error("Failed to update app badge: \(error)")
+      }
     }
   }
 }
