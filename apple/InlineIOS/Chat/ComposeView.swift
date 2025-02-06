@@ -64,6 +64,40 @@ class ComposeTextView: UITextView {
   }
 }
 
+// Add new container view class
+class TextViewContainer: UIView {
+  let textView: ComposeTextView
+
+  init(textView: ComposeTextView) {
+    self.textView = textView
+    super.init(frame: .zero)
+
+    setupView()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func setupView() {
+    translatesAutoresizingMaskIntoConstraints = false
+    backgroundColor = .systemBackground.withAlphaComponent(0.4)
+    layer.cornerRadius = 22
+    layer.borderWidth = 0.5
+    layer.borderColor = UIColor.tertiaryLabel.cgColor
+
+    addSubview(textView)
+
+    NSLayoutConstraint.activate([
+      textView.topAnchor.constraint(equalTo: topAnchor),
+      textView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -42),
+    ])
+  }
+}
+
 // MARK: - Main ComposeView Implementation
 
 class ComposeView: UIView {
@@ -86,7 +120,24 @@ class ComposeView: UIView {
 
   // MARK: UI Components
 
-  lazy var textView = makeTextView()
+  lazy var textView: ComposeTextView = makeTextView()
+
+  lazy var textViewContainer: TextViewContainer = {
+    let container = TextViewContainer(textView: textView)
+//    container.backgroundColor = .blue
+    container.translatesAutoresizingMaskIntoConstraints = false
+    return container
+  }()
+
+  lazy var sendButtonContainer: UIView = {
+    let container = UIView()
+    container.translatesAutoresizingMaskIntoConstraints = false
+    container.isUserInteractionEnabled = true
+    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(sendTapped))
+    container.addGestureRecognizer(tapGesture)
+    return container
+  }()
+
   lazy var sendButton = makeSendButton()
   lazy var plusButton = makePlusButton()
 
@@ -117,9 +168,9 @@ class ComposeView: UIView {
 
   private func setupViews() {
     backgroundColor = .clear
-
-    addSubview(textView)
-    addSubview(sendButton)
+    addSubview(textViewContainer)
+    addSubview(sendButtonContainer)
+    sendButtonContainer.addSubview(sendButton)
     addSubview(plusButton)
 
     heightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
@@ -127,18 +178,29 @@ class ComposeView: UIView {
     NSLayoutConstraint.activate([
       heightConstraint,
 
-      textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
-      textView.topAnchor.constraint(equalTo: topAnchor),
-      textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      textViewContainer.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
+      textViewContainer.topAnchor.constraint(equalTo: topAnchor),
+      textViewContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+      textViewContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-      sendButton.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: buttonTrailingPadding),
-      sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
+      sendButtonContainer.trailingAnchor.constraint(
+        equalTo: textViewContainer.trailingAnchor,
+        constant: 6
+      ),
+      sendButtonContainer.bottomAnchor.constraint(
+        equalTo: textViewContainer.bottomAnchor,
+        constant: 7
+      ),
+      sendButtonContainer.widthAnchor.constraint(equalToConstant: buttonSize.width + 20),
+      sendButtonContainer.heightAnchor.constraint(equalToConstant: buttonSize.height + 20),
+
+      sendButton.centerXAnchor.constraint(equalTo: sendButtonContainer.centerXAnchor),
+      sendButton.centerYAnchor.constraint(equalTo: sendButtonContainer.centerYAnchor),
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
 
       plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
-      plusButton.centerYAnchor.constraint(equalTo: textView.centerYAnchor),
+      plusButton.bottomAnchor.constraint(equalTo: textViewContainer.bottomAnchor, constant: -3),
       plusButton.widthAnchor.constraint(equalToConstant: Self.minHeight - 6),
       plusButton.heightAnchor.constraint(equalToConstant: Self.minHeight - 6),
     ])
@@ -151,12 +213,8 @@ class ComposeView: UIView {
   private func makeTextView() -> ComposeTextView {
     let textView = ComposeTextView()
     textView.font = .systemFont(ofSize: 17)
-
     textView.isScrollEnabled = true
-    textView.backgroundColor = .systemBackground.withAlphaComponent(0.4)
-    textView.layer.cornerRadius = 22
-    textView.layer.borderWidth = 0.5
-    textView.layer.borderColor = UIColor.tertiaryLabel.cgColor
+    textView.backgroundColor = .clear
     textView.textContainerInset = UIEdgeInsets(
       top: Self.textViewVerticalPadding,
       left: Self.textViewHorizantalPadding + 2,
@@ -165,14 +223,13 @@ class ComposeView: UIView {
     )
     textView.delegate = self
     textView.translatesAutoresizingMaskIntoConstraints = false
-
     return textView
   }
 
   private func makeSendButton() -> UIButton {
     let button = UIButton()
     button.translatesAutoresizingMaskIntoConstraints = false
-
+    button.frame = CGRect(origin: .zero, size: buttonSize)
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
       UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
@@ -182,10 +239,7 @@ class ComposeView: UIView {
     config.cornerStyle = .capsule
 
     button.configuration = config
-    button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
-    button.alpha = 0
-    button.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
-
+    button.isUserInteractionEnabled = false
     return button
   }
 
@@ -209,7 +263,7 @@ class ComposeView: UIView {
   @objc private func sendTapped() {
     guard let peerId else { return }
 
-    guard let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+    guard let text = textViewContainer.textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
           !text.isEmpty
     else { return }
 
@@ -233,9 +287,9 @@ class ComposeView: UIView {
 
       ChatState.shared.clearReplyingMessageId(peer: peerId)
       sendMessageHaptic()
-      textView.text = ""
+      textViewContainer.textView.text = ""
       resetHeight()
-      textView.showPlaceholder(true)
+      textViewContainer.textView.showPlaceholder(true)
       buttonDisappear()
     }
   }
@@ -291,8 +345,8 @@ class ComposeView: UIView {
   }
 
   private func updateHeight() {
-    let layoutManager = textView.layoutManager
-    let textContainer = textView.textContainer
+    let layoutManager = textViewContainer.textView.layoutManager
+    let textContainer = textViewContainer.textView.textContainer
 
     // layoutManager.ensureLayout(for: textContainer)
     let contentHeight = layoutManager.usedRect(for: textContainer).height
@@ -323,15 +377,15 @@ class ComposeView: UIView {
 
   func buttonDisappear() {
     UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseIn) {
-      self.sendButton.alpha = 0
-      self.sendButton.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+      self.sendButtonContainer.alpha = 0
+      self.sendButtonContainer.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
     }
   }
 
   func buttonAppear() {
     UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseOut) {
-      self.sendButton.alpha = 1
-      self.sendButton.transform = .identity
+      self.sendButtonContainer.alpha = 1
+      self.sendButtonContainer.transform = .identity
     }
   }
 
@@ -342,7 +396,7 @@ class ComposeView: UIView {
   }
 
   override func removeFromSuperview() {
-    if let text = textView.text {
+    if let text = textViewContainer.textView.text {
       guard let peerId else { return }
       Task {
         do {
@@ -357,8 +411,8 @@ class ComposeView: UIView {
 
   func setDraft(_ draft: String?) {
     if let draft, !draft.isEmpty {
-      textView.text = draft
-      textView.showPlaceholder(false)
+      textViewContainer.textView.text = draft
+      textViewContainer.textView.showPlaceholder(false)
       buttonAppear()
       updateHeight()
     }
@@ -540,7 +594,7 @@ extension ComposeView: UITextViewDelegate {
 
     // Placeholder Visibility
     let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    self.textView.showPlaceholder(isEmpty)
+    textViewContainer.textView.showPlaceholder(isEmpty)
 
     // Typing Indicators
     if isEmpty {
