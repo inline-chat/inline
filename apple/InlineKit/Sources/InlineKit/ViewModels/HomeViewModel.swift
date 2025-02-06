@@ -1,22 +1,65 @@
 import Combine
 import GRDB
 
+public struct UserInfo: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable, Identifiable {
+  public var user: User
+  public var profilePhoto: [File]?
+  public var id: Int64 { user.id }
+
+  // coding keys
+  public enum CodingKeys: String, CodingKey {
+    case user
+    case profilePhoto
+  }
+
+  public init(user: User, profilePhotos: [File]? = nil) {
+    self.user = user
+    profilePhoto = profilePhotos
+  }
+
+  public static let deleted = Self(user: .deletedInstance, profilePhotos: nil)
+}
+
 public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable,
   Identifiable
 {
   public var dialog: Dialog
-  public var user: User
+  public var user: UserInfo
   public var chat: Chat?
   public var message: Message?
   public var from: User?
   public var id: Int64 { user.id }
 
-  public init(dialog: Dialog, user: User, chat: Chat?, message: Message?, from: User?) {
+  public init(dialog: Dialog, user: UserInfo, chat: Chat?, message: Message?, from: User?) {
     self.dialog = dialog
     self.user = user
     self.chat = chat
     self.message = message
     self.from = from
+  }
+
+  // Add a static method to create the request
+  static func all() -> QueryInterfaceRequest<HomeChatItem> {
+    Dialog
+      .filter(Column("peerUserId") != nil)
+      .including(
+        required: Dialog.peerUser
+          .forKey(CodingKeys.user)
+          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      )
+      .including(
+        optional: Dialog.peerUserChat
+          .forKey(CodingKeys.chat)
+          .including(
+            optional: Chat.lastMessage
+              .forKey(CodingKeys.message)
+              .including(
+                optional: Message.from
+                  .forKey(CodingKeys.from)
+              )
+          )
+      )
+      .asRequest(of: HomeChatItem.self)
   }
 }
 
@@ -35,25 +78,15 @@ public final class HomeViewModel: ObservableObject {
     cancellable =
       ValueObservation
         .tracking { db in
-          try Dialog
-            .filter(Column("peerUserId") != nil)
-            .including(
-              required: Dialog.peerUser
-                .including(
-                  optional: User.chat
-                    .including(
-                      optional: Chat.lastMessage
-                        .including(optional: Message.from.forKey("from"))
-                    )
-                )
-            )
-            .asRequest(of: HomeChatItem.self)
+          try HomeChatItem
+
+            .all()
             .fetchAll(db)
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
-          receiveCompletion: { _ in
-            Log.shared.error("Failed to get home chats")
+          receiveCompletion: { error in
+            Log.shared.error("Failed to get home chats \(error)")
           },
           receiveValue: { [weak self] chats in
             self?.chats = chats

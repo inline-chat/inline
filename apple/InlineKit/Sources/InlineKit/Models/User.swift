@@ -10,6 +10,7 @@ public struct ApiUser: Codable, Hashable, Sendable {
   public var lastOnline: Int?
   public var date: Int
   public var username: String?
+  public var photo: [ApiPhoto]?
 
   public static let preview = Self(
     id: 1,
@@ -25,7 +26,9 @@ public struct ApiUser: Codable, Hashable, Sendable {
   }
 }
 
-public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable, Equatable {
+public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable,
+  Equatable
+{
   public var id: Int64
   public var email: String?
   public var firstName: String?
@@ -34,6 +37,17 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var username: String?
   public var online: Bool?
   public var lastOnline: Date?
+
+  public var profileFileId: String?
+
+  // Add hasMany for all files (including historical profile photos)
+  public static let photos = hasMany(
+    File.self,
+    using: ForeignKey(["profileForUserId"], to: ["id"])
+  )
+  public var photos: QueryInterfaceRequest<File> {
+    request(for: User.photos)
+  }
 
   public static let members = hasMany(Member.self)
   public static let dialog = hasOne(Dialog.self)
@@ -124,3 +138,63 @@ public extension User {
 }
 
 // TODO: add a get color item for the user
+
+public struct UserWithPhoto: Codable, Hashable {
+  public var user: User
+  public var photo: File?
+}
+
+public extension User {
+  static func userInfoQuery() -> QueryInterfaceRequest<UserInfo> {
+    User
+      .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      .asRequest(of: UserInfo.self)
+  }
+}
+
+public extension ApiUser {
+  @discardableResult
+  func saveFull(
+    _ db: Database
+  )
+    throws -> User
+  {
+    let existing = try? User.fetchOne(db, id: id)
+    var user = User(from: self)
+
+    // TODO: support clearing photo
+    let file: File? = if let photo = photo?.first {
+      // save file
+      try? File.save(db, apiPhoto: photo, forUserId: user.id)
+    } else {
+      nil
+    }
+
+    // remove old photos except new ones for existing users
+    if let file,
+       let existing,
+       // main file changed
+       existing.profileFileId != file.id
+    {
+      // clear all other files for this user
+      try File
+        .filter(Column("profileForUserId") == user.id)
+        .filter(Column("id") != file.id)
+        .deleteAll(db)
+    }
+
+    if let existing {
+      // keep exitsing values
+      user.profileFileId = file?.id ?? existing.profileFileId
+      try user.save(db)
+      // ... anything else?
+    } else {
+      // attach main photo
+      user.profileFileId = file?.id
+      // TODO: handle multiple files
+      try user.save(db)
+    }
+
+    return user
+  }
+}

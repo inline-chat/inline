@@ -51,6 +51,20 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   // Local path
   public var localPath: String?
 
+  // For a message
+//  public var messageLocalId: Int64?
+//  public static let message = belongsTo(
+//    Message.self,
+//    using: ForeignKey(["messageLocalId"], to: ["id"])
+//  )
+
+  // For a profile photo
+  public var profileForUserId: Int64?
+  public static let profileForUser = belongsTo(
+    User.self,
+    using: ForeignKey(["profileForUserId"], to: ["id"])
+  )
+
   public init(
     id: String,
     fileUniqueId: String?,
@@ -120,14 +134,15 @@ public extension File {
     height = photo.height
     localPath = nil
 
-    let ext = switch photo.mimeType {
-      case "image/jpeg":
-        ".jpg"
-      case "image/png":
-        ".png"
-      default:
-        ".jpg"
-    }
+    let ext =
+      switch photo.mimeType {
+        case "image/jpeg":
+          ".jpg"
+        case "image/png":
+          ".png"
+        default:
+          ".jpg"
+      }
 
     mimeType = photo.mimeType
     fileName = "\(id)\(ext)"
@@ -136,14 +151,32 @@ public extension File {
 
 public extension File {
   /// Returns the file local ID
-  static func save(_ db: Database, apiPhoto photo: ApiPhoto) throws -> File {
+  static func save(
+    _ db: Database,
+    apiPhoto photo: ApiPhoto,
+    forMessageLocalId: Int64? = nil,
+    forUserId: Int64? = nil
+  ) throws -> File {
     // fetch
-    guard var existing = try File
-      .filter(Column("fileUniqueId") == photo.fileUniqueId)
-      .fetchOne(db)
+    guard
+      var existing =
+      try File
+        .filter(Column("fileUniqueId") == photo.fileUniqueId)
+        .fetchOne(db)
     else {
       // ... create new
-      let file = try File(fromPhoto: photo)
+      var file = try File(fromPhoto: photo)
+      
+      print("saving file \(file)")
+
+      // associate
+      if let forMessageLocalId {
+        //file.messageLocalId = forMessageLocalId
+      } else if let forUserId {
+        file.profileForUserId = forUserId
+      }
+
+      // insert
       return try file.insertAndFetch(db)
     }
 
@@ -155,6 +188,13 @@ public extension File {
     existing.fileSize = Int64(photo.fileSize)
     existing.width = photo.width
     existing.height = photo.height
+
+    // associate
+    if let forMessageLocalId {
+      //existing.messageLocalId = forMessageLocalId
+    } else if let forUserId {
+      existing.profileForUserId = forUserId
+    }
 
     return try existing.updateAndFetch(db)
   }
@@ -171,8 +211,16 @@ public extension File {
     guard let localPath else {
       return nil
     }
-    return FileHelpers
-      .getDocumentsDirectory()
-      .appending(path: localPath)
+    return
+      FileHelpers
+        .getDocumentsDirectory()
+        .appending(path: localPath)
+  }
+
+  func getRemoteURL() -> URL? {
+    guard let temporaryUrl else {
+      return nil
+    }
+    return URL(string: temporaryUrl)
   }
 }

@@ -8,13 +8,21 @@ struct UserItem: View {
   @FocusState private var isFocused: Bool
   @Environment(\.appearsActive) var appearsActive
 
-  var user: User
+  var userInfo: UserInfo
   var dialog: Dialog?
   var chat: Chat?
   var action: (() -> Void)?
   var commandPress: (() -> Void)?
   var selected: Bool = false
   var rendersSavedMsg: Bool = false
+
+  var user: User {
+    userInfo.user
+  }
+
+  var profilePhoto: File? {
+    userInfo.profilePhoto?.first
+  }
 
   var isCurrentUser: Bool {
     user.isCurrentUser()
@@ -48,7 +56,7 @@ struct UserItem: View {
           InitialsCircle(name: name, size: Theme.sidebarIconSize, symbol: "bookmark.fill")
             .padding(.trailing, Theme.sidebarIconSpacing)
         } else {
-          UserAvatar(user: user, size: Theme.sidebarIconSize)
+          UserAvatar(userInfo: userInfo, size: Theme.sidebarIconSize)
             .padding(.trailing, Theme.sidebarIconSpacing)
         }
 
@@ -190,16 +198,16 @@ struct UserItemButtonStyle: ButtonStyle {
   }
 }
 
-#Preview {
-  VStack(spacing: 0) {
-    UserItem(user: User.preview)
-    UserItem(
-      user: User.preview,
-      action: {
-        print("Custom action")
-      }
-    )
-  }
-  .frame(width: 200)
-  .previewsEnvironmentForMac(.populated)
-}
+// #Preview {
+//  VStack(spacing: 0) {
+//    UserItem(user: User.preview)
+//    UserItem(
+//      user: User.preview,
+//      action: {
+//        print("Custom action")
+//      }
+//    )
+//  }
+//  .frame(width: 200)
+//  .previewsEnvironmentForMac(.populated)
+// }

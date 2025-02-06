@@ -4,12 +4,16 @@ import InlineUI
 import SwiftUI
 
 class UserAvatarView: NSView {
-  private var user: User?
+  private var userInfo: UserInfo?
+
+  private var user: User? {
+    userInfo?.user
+  }
 
   private var hostingView: NSHostingView<UserAvatar>?
 
-  init(user: User) {
-    self.user = user
+  init(userInfo: UserInfo) {
+    self.userInfo = userInfo
 
     super.init(frame: NSRect(
       x: 0,
@@ -36,25 +40,20 @@ class UserAvatarView: NSView {
     translatesAutoresizingMaskIntoConstraints = true
   }
 
-  func setUser(_ user: User) {
-    self.user = user
-    updateAvatar()
-  }
-
   required init?(coder: NSCoder) {
     super.init(coder: coder)
     setupView()
   }
 
   private func updateAvatar() {
-    guard let user else { return }
+    guard let userInfo else { return }
 
     // Remove existing hosting view
     hostingView?.removeFromSuperview()
 
     // Create new SwiftUI view
     let swiftUIView = UserAvatar(
-      user: user,
+      userInfo: userInfo,
       size: Theme.messageAvatarSize,
       ignoresSafeArea: true
     )

@@ -8,7 +8,11 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
   // Useful for threads
   public var chat: Chat? // made optional as when optimistic, this is fake, maybe will change
   // Only for private chats
-  public var user: User?
+  public var userInfo: UserInfo?
+  public var user: User? {
+    userInfo?.user
+  }
+
   // Last message
   public var message: Message?
 
@@ -79,21 +83,16 @@ public final class FullSpaceViewModel: ObservableObject {
     membersSancellable =
       ValueObservation
         .tracking { db in
-          try Member.filter(Column("spaceId") == spaceId)
-            .including(
-              optional: Member.user
-                .including(
-                  optional: User.chat
-                    .including(optional: Chat.lastMessage)
-                )
-                .including(optional: User.dialog)
-            )
-            .asRequest(of: SpaceChatItem.self)
+          try Member
+            .spaceChatItemRequest()
+            .filter(Column("spaceId") == spaceId)
             .fetchAll(db)
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
-          receiveCompletion: { _ in },
+          receiveCompletion: { error in
+            Log.shared.error("failed to fetch members in space view model. error: \(error)")
+          },
           receiveValue: { [weak self] members in
             self?.memberChats = members
           }
@@ -105,22 +104,15 @@ public final class FullSpaceViewModel: ObservableObject {
     chatsSancellable =
       ValueObservation
         .tracking { db in
-          try Dialog.filter(Column("spaceId") == spaceId)
-            .including(
-              optional: Dialog.peerThread
-                .including(optional: Chat.lastMessage)
-            )
-            .including(
-              optional: Dialog.peerUser
-                .including(optional: User.chat)
-            )
-            .asRequest(of: SpaceChatItem.self)
+          try Dialog
+            .spaceChatItemQuery()
+            .filter(Column("spaceId") == spaceId)
             .fetchAll(db)
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
           receiveCompletion: { error in
-            Log.shared.error("error: \(error)")
+            Log.shared.error("failed to fetch chats in space view model. error: \(error)")
           },
           receiveValue: { [weak self] chats in
             self?.chats = chats

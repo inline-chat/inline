@@ -159,6 +159,8 @@ class MainWindowViewModel: ObservableObject {
         break
       case .chatInfo:
         setToolbarVisibility(false)
+      case .profile:
+        setToolbarVisibility(false)
     }
   }
 

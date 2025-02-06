@@ -98,6 +98,15 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.file)
   }
 
+  // Add hasMany for all files attached to this message
+  public static let files = hasMany(
+    File.self,
+    using: ForeignKey(["id"], to: ["messageLocalId"])
+  )
+  public var files: QueryInterfaceRequest<File> {
+    request(for: Message.files)
+  }
+
   public static let from = belongsTo(User.self, using: ForeignKey(["fromId"], to: ["id"]))
   public var from: QueryInterfaceRequest<User> {
     request(for: Message.from)
@@ -193,8 +202,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
 // MARK: Helpers
 
-public extension Message {
-  mutating func saveMessage(
+extension Message {
+  public mutating func saveMessage(
     _ db: Database,
     onConflict: Database.ConflictResolution = .abort,
     publishChanges: Bool = false
@@ -222,8 +231,8 @@ public extension Message {
 
     // Publish changes if needed
     if publishChanges {
-      let message = self // Create an immutable copy
-      let peer = peerId // Capture the peer value
+      let message = self  // Create an immutable copy
+      let peer = peerId  // Capture the peer value
       db.afterNextTransaction { _ in
         Task { @MainActor in
           if isExisting {
@@ -236,12 +245,12 @@ public extension Message {
     }
   }
 
-  func unarchiveIncomingMessagesChat(
+  public func unarchiveIncomingMessagesChat(
     _ db: Database,
     peerId: Peer
   ) throws {
     if let dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)),
-       dialog.archived == true
+      dialog.archived == true
     {
       var updatedDialog = dialog
       updatedDialog.archived = false
@@ -263,8 +272,8 @@ public extension Message {
   }
 }
 
-public extension ApiMessage {
-  func saveFullMessage(
+extension ApiMessage {
+  public func saveFullMessage(
     _ db: Database, publishChanges: Bool = false
   )
     throws -> Message
@@ -281,14 +290,15 @@ public extension ApiMessage {
     } else {
       // attach main photo
       // TODO: handle multiple files
-      let file: File? = if let photo = photo?.first {
-        try? File.save(db, apiPhoto: photo)
-      } else {
-        nil
-      }
+      let file: File? =
+        if let photo = photo?.first {
+          try? File.save(db, apiPhoto: photo)
+        } else {
+          nil
+        }
       message.fileId = file?.id
 
-      try message.saveMessage(db, publishChanges: false) // publish is below
+      try message.saveMessage(db, publishChanges: false)  // publish is below
     }
 
     if publishChanges {
