@@ -3,9 +3,9 @@ import Foundation
 import MultipartFormDataKit
 
 #if canImport(UIKit)
-  import UIKit
+import UIKit
 #else
-  import AppKit
+import AppKit
 #endif
 
 public enum APIError: Error {
@@ -50,6 +50,7 @@ public enum Path: String {
   case getUser
   case readMessages
   case updateProfilePhoto
+  case deleteMessage
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -64,13 +65,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
 
     #if targetEnvironment(simulator)
-      return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://\(ProjectConfig.devHost):8000/v1"
     #elseif DEBUG && os(iOS)
-      return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://\(ProjectConfig.devHost):8000/v1"
     #elseif DEBUG && os(macOS)
-      return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://\(ProjectConfig.devHost):8000/v1"
     #else
-      return "https://api.inline.chat/v1"
+    return "https://api.inline.chat/v1"
     #endif
   }()
 
@@ -108,21 +109,21 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200...299:
-        let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
-        switch apiResponse {
-        case let .success(data):
-          return data
-        case let .error(error, errorCode, description):
-          log.error("Error \(error): \(description ?? "")")
-          throw
-            APIError
-            .error(error: error, errorCode: errorCode, description: description)
-        }
-      case 429:
-        throw APIError.rateLimited
-      default:
-        throw APIError.httpError(statusCode: httpResponse.statusCode)
+        case 200 ... 299:
+          let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
+          switch apiResponse {
+            case let .success(data):
+              return data
+            case let .error(error, errorCode, description):
+              log.error("Error \(error): \(description ?? "")")
+              throw
+                APIError
+                .error(error: error, errorCode: errorCode, description: description)
+          }
+        case 429:
+          throw APIError.rateLimited
+        default:
+          throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
       throw APIError.decodingError(decodingError)
@@ -160,19 +161,19 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200...299:
-        let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
-        switch apiResponse {
-        case let .success(data):
-          return data
-        case let .error(error, errorCode, description):
-          log.error("Error \(error): \(description ?? "")")
-          throw APIError.error(error: error, errorCode: errorCode, description: description)
-        }
-      case 429:
-        throw APIError.rateLimited
-      default:
-        throw APIError.httpError(statusCode: httpResponse.statusCode)
+        case 200 ... 299:
+          let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
+          switch apiResponse {
+            case let .success(data):
+              return data
+            case let .error(error, errorCode, description):
+              log.error("Error \(error): \(description ?? "")")
+              throw APIError.error(error: error, errorCode: errorCode, description: description)
+          }
+        case 429:
+          throw APIError.rateLimited
+        default:
+          throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
       throw APIError.decodingError(decodingError)
@@ -333,7 +334,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     fileUniqueId: String? = nil
   ) async throws -> SendMessage {
     var body: [String: Any] = [
-      "text": text as Any
+      "text": text as Any,
     ]
 
     if let peerUserId {
@@ -383,7 +384,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .savePushNotification,
       queryItems: [
-        URLQueryItem(name: "applePushToken", value: pushToken)
+        URLQueryItem(name: "applePushToken", value: pushToken),
       ],
       includeToken: true
     )
@@ -393,7 +394,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .updateStatus,
       queryItems: [
-        URLQueryItem(name: "online", value: online ? "true" : "false")
+        URLQueryItem(name: "online", value: online ? "true" : "false"),
       ],
       includeToken: true
     )
@@ -444,7 +445,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     queryItems.append(URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)))
     queryItems.append(
-      URLQueryItem(name: "peerThreadId", value: peerId.asThreadId().map(String.init)))
+      URLQueryItem(name: "peerThreadId", value: peerId.asThreadId().map(String.init))
+    )
 
     if let pinned {
       queryItems.append(URLQueryItem(name: "pinned", value: "\(pinned)"))
@@ -558,19 +560,19 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
 
       switch httpResponse.statusCode {
-      case 200...299:
-        let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: data)
-        switch apiResponse {
-        case let .success(data):
-          return data
-        case let .error(error, errorCode, description):
-          log.error("Error \(error): \(description ?? "")")
-          throw APIError.error(error: error, errorCode: errorCode, description: description)
-        }
-      case 429:
-        throw APIError.rateLimited
-      default:
-        throw APIError.httpError(statusCode: httpResponse.statusCode)
+        case 200 ... 299:
+          let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: data)
+          switch apiResponse {
+            case let .success(data):
+              return data
+            case let .error(error, errorCode, description):
+              log.error("Error \(error): \(description ?? "")")
+              throw APIError.error(error: error, errorCode: errorCode, description: description)
+          }
+        case 429:
+          throw APIError.rateLimited
+        default:
+          throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
       throw APIError.decodingError(decodingError)
@@ -587,7 +589,22 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .updateProfilePhoto,
       queryItems: [
-        URLQueryItem(name: "fileUniqueId", value: fileUniqueId)
+        URLQueryItem(name: "fileUniqueId", value: fileUniqueId),
+      ],
+      includeToken: true
+    )
+  }
+
+  public func deleteMessage(messageId: Int64, chatId: Int64, peerId: Peer) async throws
+    -> EmptyPayload
+  {
+    try await request(
+      .deleteMessage,
+      queryItems: [
+        URLQueryItem(name: "messageId", value: "\(messageId)"),
+        URLQueryItem(name: "chatId", value: "\(chatId)"),
+        URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)),
+        URLQueryItem(name: "peerThreadId", value: peerId.asThreadId().map(String.init)),
       ],
       includeToken: true
     )
@@ -774,29 +791,29 @@ struct SessionInfo: Codable, Sendable {
     // let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
 
     #if os(iOS)
-      let clientType = "ios"
-      let osVersion = UIDevice.current.systemVersion
-      let deviceName = UIDevice.current.name
-      return SessionInfo(
-        clientType: clientType,
-        clientVersion: clientVersion,
-        osVersion: osVersion,
-        deviceName: deviceName,
-        timezone: timezone
-      )
+    let clientType = "ios"
+    let osVersion = UIDevice.current.systemVersion
+    let deviceName = UIDevice.current.name
+    return SessionInfo(
+      clientType: clientType,
+      clientVersion: clientVersion,
+      osVersion: osVersion,
+      deviceName: deviceName,
+      timezone: timezone
+    )
     #elseif os(macOS)
-      let clientType = "macos"
-      let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
-      let deviceName = Host.current().name
-      return SessionInfo(
-        clientType: clientType,
-        clientVersion: clientVersion,
-        osVersion: osVersion,
-        deviceName: deviceName,
-        timezone: timezone
-      )
+    let clientType = "macos"
+    let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+    let deviceName = Host.current().name
+    return SessionInfo(
+      clientType: clientType,
+      clientVersion: clientVersion,
+      osVersion: osVersion,
+      deviceName: deviceName,
+      timezone: timezone
+    )
     #else
-      return nil
+    return nil
     #endif
   }
 }
