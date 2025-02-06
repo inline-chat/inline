@@ -21,7 +21,7 @@ struct InlineApp: App {
 
   var body: some Scene {
     // Note(@mo): Using Window here messes up with our title bar handling upon window re-open after close
-    WindowGroup("main") {
+    WindowGroup(id: "main") {
       MainWindow()
         .environmentObject(ws)
         .environmentObject(viewModel)
