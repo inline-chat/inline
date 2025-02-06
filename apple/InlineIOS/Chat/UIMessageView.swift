@@ -331,12 +331,10 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
     configurationForMenuAtLocation location: CGPoint
   ) -> UIContextMenuConfiguration? {
     UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-      guard let self else { return nil }
+      guard let self else { return UIMenu(children: []) }
 
       let copyAction = UIAction(title: "Copy") { _ in
-        UIPasteboard.general.string = "\(self.message.messageId) \(self.message.chatId)"
-
-        // UIPasteboard.general.string = self.message.text
+        UIPasteboard.general.string = self.message.text
       }
 
       var actions: [UIAction] = [copyAction]
@@ -352,6 +350,16 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
         }
         actions.append(openLinkAction)
       }
+
+      let deleteAction = UIAction(
+        title: "Delete",
+        attributes: .destructive
+      ) { _ in
+        Task {
+          try? await DataManager.shared.deleteMessage(messageId: self.message.messageId, chatId: self.message.chatId, peerId: self.message.peerId)
+        }
+      }
+      actions.append(deleteAction)
 
       return UIMenu(children: actions)
     }
