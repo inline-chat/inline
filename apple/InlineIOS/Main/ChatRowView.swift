@@ -147,7 +147,7 @@ struct ChatRowView: View {
       }
     }
     .padding(.top, 8)
-    .frame(height: 66)
+    .frame(height: 62)
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
   }

@@ -20,10 +20,11 @@ struct SpaceRowView: View {
           .foregroundColor(.secondary)
           .lineLimit(1)
           .frame(maxWidth: .infinity, alignment: .leading)
+        Spacer()
       }
     }
     .padding(.top, 8)
-    .frame(height: 66)
+    .frame(height: 62)
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
   }
