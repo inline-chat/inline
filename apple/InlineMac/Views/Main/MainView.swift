@@ -156,6 +156,9 @@ struct MainView: View {
       case .homeRoot:
         // Not for space
         HomeRoot()
+
+      case let .profile(userInfo):
+        UserProfile(userInfo: userInfo)
     }
   }
 
@@ -170,6 +173,9 @@ struct MainView: View {
 
       case let .chatInfo(peer):
         ChatInfo(peerId: peer)
+
+      case let .profile(userInfo):
+        UserProfile(userInfo: userInfo)
 
       case .spaceRoot:
         // Not for home

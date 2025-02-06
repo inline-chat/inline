@@ -33,6 +33,18 @@ public struct Member: FetchableRecord, Identifiable, Codable, Hashable, Persista
     request(for: Member.user)
   }
 
+  public static let chat = hasOne(
+    Chat.self,
+    through: Self.user,
+    using: User.chat
+  )
+
+  public static let dialog = hasOne(
+    Dialog.self,
+    through: Self.user,
+    using: User.dialog
+  )
+
   public init(
     id: Int64 = Int64.random(in: 1 ... 5_000), date: Date, userId: Int64, spaceId: Int64,
     role: MemberRole = .owner
@@ -56,5 +68,26 @@ public extension Member {
 
   static func fromTimestamp(from: Int) -> Date {
     Date(timeIntervalSince1970: Double(from) / 1_000)
+  }
+}
+
+public extension Member {
+  static func spaceChatItemRequest() -> QueryInterfaceRequest<SpaceChatItem> {
+    including(
+      optional:
+      // user info
+      Member.user
+        .forKey("userInfo")
+        .including(
+          all: User.photos
+            .forKey("profilePhoto")
+        )
+    )
+    .including(
+      optional: Member.chat
+        .including(optional: Chat.lastMessage)
+    )
+    .including(optional: Member.dialog)
+    .asRequest(of: SpaceChatItem.self)
   }
 }

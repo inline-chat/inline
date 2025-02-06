@@ -23,15 +23,14 @@ public class DataManager: ObservableObject {
   public static let shared = DataManager(database: AppDatabase.shared)
 
   public func fetchMe() async throws -> User {
-    //    log.debug("fetchMe")
+    log.debug("fetchMe")
     do {
       let result = try await ApiClient.shared.getMe()
-      //      log.trace("fetchMe result: \(result)")
-      let user = User(from: result.user)
-      try await database.dbWriter.write { db in
-        try user.save(db)
+
+      let user = try await database.dbWriter.write { db in
+        try result.user.saveFull(db)
       }
-      //      log.trace("currentUserId: \(Auth.shared.getCurrentUserId() ?? Int64.min)")
+
       return user
     } catch {
       Log.shared.error("Error fetching user", error: error)
@@ -86,8 +85,6 @@ public class DataManager: ObservableObject {
         try chat.save(db)
         let dialog = Dialog(from: result.dialog)
         try dialog.save(db)
-        let user = User(from: result.user)
-        try user.save(db)
       }
 
       return Peer.user(id: result.user.id)
@@ -102,9 +99,7 @@ public class DataManager: ObservableObject {
 
     // Optimistic
     try await database.dbWriter.write { db in
-
-      let user = User(from: user)
-      try user.save(db, onConflict: .ignore)
+      try user.saveFull(db)
       let dialog = Dialog(optimisticForUserId: user.id)
       try dialog.save(db, onConflict: .ignore)
     }
@@ -122,8 +117,6 @@ public class DataManager: ObservableObject {
           try chat.save(db, onConflict: .replace)
           let dialog = Dialog(from: result.dialog)
           try dialog.save(db, onConflict: .replace)
-          let user = User(from: result.user)
-          try user.save(db, onConflict: .replace)
         }
         Log.shared.info("Created private chat with \(user.anyName) with chatID: \(result.chat.id)")
       } catch {
@@ -167,9 +160,7 @@ public class DataManager: ObservableObject {
       let result = try await ApiClient.shared.getUser(userId: id)
 
       let _ = try await database.dbWriter.write { db in
-        let user = User(from: result.user)
-
-        try user.save(db)
+        try result.user.saveFull(db)
       }
     } catch {
       throw error
@@ -228,9 +219,8 @@ public class DataManager: ObservableObject {
 
       let chats = try await database.dbWriter.write { db in
         // First save peer users if they exist
-        let peerUsers = result.peerUsers.map { User(from: $0) }
-        try peerUsers.forEach { user in
-          try user.save(db, onConflict: .replace)
+        try result.peerUsers.forEach { apiUser in
+          try apiUser.saveFull(db)
         }
 
         // Then save chats with lastMsgId set to nil
@@ -298,11 +288,8 @@ public class DataManager: ObservableObject {
         }
 
         // Save users
-        let users = result.users.map { user in
-          User(from: user)
-        }
-        try users.forEach { user in
-          try user.save(db, onConflict: .replace)
+        try result.users.forEach { user in
+          try user.saveFull(db)
         }
 
         // Save messages
@@ -427,13 +414,13 @@ public class DataManager: ObservableObject {
     try await database.dbWriter.write { db in
       var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
 
-      if let pinned = pinned {
+      if let pinned {
         dialog?.pinned = pinned
       }
-      if let draft = draft {
+      if let draft {
         dialog?.draft = draft
       }
-      if let archived = archived {
+      if let archived {
         dialog?.archived = archived
       }
 
@@ -450,7 +437,7 @@ public class DataManager: ObservableObject {
 
     let result = try await ApiClient.shared.updateDialog(
       peerId: peerId,
-      pinned:  pinned,
+      pinned: pinned,
       draft: draft,
       archived: archived == nil ? updatedDialog.archived : archived
     )

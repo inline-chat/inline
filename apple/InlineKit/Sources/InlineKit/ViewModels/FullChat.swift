@@ -7,7 +7,13 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   Sendable, Equatable
 {
   public var file: File?
-  public var from: User?
+
+  public var senderInfo: UserInfo?
+
+  public var from: User? {
+    senderInfo?.user
+  }
+
   public var message: Message
   public var reactions: [Reaction]
   public var repliedToMessage: Message?
@@ -20,8 +26,8 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   }
 
   //  public static let preview = FullMessage(user: User, message: Message)
-  public init(from: User?, message: Message, reactions: [Reaction], repliedToMessage: Message?) {
-    self.from = from
+  public init(senderInfo: UserInfo?, message: Message, reactions: [Reaction], repliedToMessage: Message?) {
+    self.senderInfo = senderInfo
     self.message = message
     self.reactions = reactions
     self.repliedToMessage = repliedToMessage
@@ -58,7 +64,13 @@ public extension FullMessage {
 public extension FullMessage {
   static func queryRequest() -> QueryInterfaceRequest<FullMessage> {
     Message
-      .including(optional: Message.from.forKey("from"))
+      // user info
+      .including(
+        optional:
+        Message.from
+          .forKey(CodingKeys.senderInfo)
+          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      )
       .including(optional: Message.file)
       .including(all: Message.reactions)
       .including(
@@ -103,26 +115,15 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             case .user:
               // Fetch private chat
               try Dialog
+                .spaceChatItemQuery()
                 .filter(id: Dialog.getDialogId(peerId: peerId))
-                .including(
-                  optional: Dialog.peerUser
-                    .including(
-                      optional: User.chat
-                        .including(optional: Chat.lastMessage)
-                    )
-                )
-                .asRequest(of: SpaceChatItem.self)
                 .fetchAll(db)
 
             case .thread:
               // Fetch thread chat
               try Dialog
+                .spaceChatItemQuery()
                 .filter(id: Dialog.getDialogId(peerId: peerId))
-                .including(
-                  optional: Dialog.peerThread
-                    .including(optional: Chat.lastMessage)
-                )
-                .asRequest(of: SpaceChatItem.self)
                 .fetchAll(db)
           }
         }

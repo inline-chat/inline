@@ -45,8 +45,8 @@ struct ChatInfo: View {
 
   @ViewBuilder
   var icon: some View {
-    if let user = fullChat.chatItem?.user {
-      ChatIcon(peer: .user(user), size: 100)
+    if let userInfo = fullChat.chatItem?.userInfo {
+      ChatIcon(peer: .user(userInfo), size: 100)
     } else if let chat = fullChat.chatItem?.chat {
       ChatIcon(peer: .chat(chat), size: 100)
     } else {

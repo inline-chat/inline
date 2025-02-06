@@ -70,14 +70,8 @@ extension Code {
           Log.shared.error("Failed to setup database or save user", error: error)
         }
 
-        try await database.dbWriter.write { db in
-          let user = User(
-            id: result.userId,
-            email: email,
-            firstName: result.user.firstName,
-            lastName: nil
-          )
-          try user.save(db)
+        let _ = try await database.dbWriter.write { db in
+          try result.user.saveFull(db)
         }
 
         formState.reset()

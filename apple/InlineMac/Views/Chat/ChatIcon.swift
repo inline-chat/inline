@@ -5,7 +5,7 @@ import SwiftUI
 struct ChatIcon: View {
   enum PeerType {
     case chat(Chat)
-    case user(User)
+    case user(UserInfo)
     case savedMessage(User)
   }
 
@@ -28,8 +28,8 @@ struct ChatIcon: View {
 //        .frame(width: size, height: size)
 //        .fixedSize()
 
-      case let .user(user):
-        UserAvatar(user: user, size: size)
+      case let .user(userInfo):
+        UserAvatar(userInfo: userInfo, size: size)
 
       case let .savedMessage(user):
         InitialsCircle(name: user.firstName ?? user.username ?? "", size: size, symbol: "bookmark.fill")

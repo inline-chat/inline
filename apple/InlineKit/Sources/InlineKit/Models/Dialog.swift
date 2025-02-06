@@ -30,6 +30,12 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     request(for: Dialog.space)
   }
 
+  static let peerUserChat = hasOne(
+    Chat.self,
+    through: peerUser,
+    using: User.chat
+  )
+
   public static let peerUser = belongsTo(User.self)
   public var peerUser: QueryInterfaceRequest<User> {
     request(for: Dialog.peerUser)
@@ -116,5 +122,21 @@ public extension Dialog {
       .filter(
         Column("id") == Dialog.getDialogId(peerId: peerId)
       )
+  }
+
+  static func spaceChatItemQuery() -> QueryInterfaceRequest<SpaceChatItem> {
+    // chat through dialog thread
+    including(
+      optional: Dialog.peerThread
+        .including(optional: Chat.lastMessage)
+    )
+    // user info
+    .including(
+      optional: Dialog.peerUser.forKey("userInfo")
+        .including(all: User.photos.forKey("profilePhoto"))
+    )
+    // chat through user
+    .including(optional: Dialog.peerUserChat)
+    .asRequest(of: SpaceChatItem.self)
   }
 }

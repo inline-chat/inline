@@ -130,12 +130,13 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   func userItem(chat: HomeChatItem) -> some View {
-    let user = chat.user
+    let userInfo = chat.user
+    let user = userInfo.user
     let dialog = chat.dialog
     let chatChat = chat.chat
 
     UserItem(
-      user: user,
+      userInfo: userInfo,
       dialog: dialog,
       chat: chatChat,
       action: {

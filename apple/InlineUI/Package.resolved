@@ -1,6 +1,15 @@
 {
-  "originHash" : "473450a8e956d9ff05121ade5e6ed6c88cfec9baefdfe2d9c956aa95388f9756",
+  "originHash" : "57eac82d17c06efddf3cf20f51508295e3188aa507859a2b6b661de76f6fa20e",
   "pins" : [
+    {
+      "identity" : "get",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/kean/Get",
+      "state" : {
+        "revision" : "31249885da1052872e0ac91a2943f62567c0d96d",
+        "version" : "2.2.1"
+      }
+    },
     {
       "identity" : "grdb.swift",
       "kind" : "remoteSourceControl",
@@ -26,6 +35,15 @@
       "state" : {
         "revision" : "5e1b02b6a9dac2a759a1d5dbc175c86bd192a608",
         "version" : "24.0.0"
+      }
+    },
+    {
+      "identity" : "multipartformdatakit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kuniwak/MultipartFormDataKit",
+      "state" : {
+        "revision" : "27bf281a9adfd742fa2fb3318c176dcc7a111599",
+        "version" : "1.0.1"
       }
     },
     {

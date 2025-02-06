@@ -77,7 +77,7 @@ class MessageViewAppKit: NSView {
   // MARK: Views
 
   private lazy var avatarView: UserAvatarView = {
-    let view = UserAvatarView(user: self.from)
+    let view = UserAvatarView(userInfo: fullMessage.senderInfo ?? .deleted)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()

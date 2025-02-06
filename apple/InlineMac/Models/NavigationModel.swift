@@ -7,6 +7,7 @@ enum NavigationRoute: Hashable, Codable, Equatable {
   case spaceRoot
   case chat(peer: Peer)
   case chatInfo(peer: Peer)
+  case profile(userInfo: UserInfo)
 
   static func == (lhs: NavigationRoute, rhs: NavigationRoute) -> Bool {
     switch (lhs, rhs) {
@@ -17,6 +18,8 @@ enum NavigationRoute: Hashable, Codable, Equatable {
         lhsPeer == rhsPeer
       case let (.chatInfo(lhsPeer), .chatInfo(rhsPeer)):
         lhsPeer == rhsPeer
+      case let (.profile(lhsUser), .profile(rhsUser)):
+        lhsUser == rhsUser
       default:
         false
     }
