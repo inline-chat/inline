@@ -14,6 +14,7 @@ actor UpdatesManager {
       if let update = update.newMessage {
 //        self.log.debug("applying new message")
         try update.apply(db: db)
+        UnreadManager.shared.updateAppIconBadge()
       } else if let update = update.updateMessageId {
 //        self.log.debug("applying update message id")
         try update.apply(db: db)
@@ -78,6 +79,7 @@ struct UpdateNewMessage: Codable {
       dialog.unreadCount = (dialog.unreadCount ?? 0) + (msg.out == false ? 1 : 0)
       try dialog.update(db)
     }
+    UnreadManager.shared.updateAppIconBadge()
   }
 }
 
@@ -106,6 +108,7 @@ struct UpdateMessageId: Codable {
         var chat = try Chat.fetchOne(db, id: message.chatId)
         chat?.lastMsgId = message.messageId
         try chat?.save(db)
+        UnreadManager.shared.updateAppIconBadge()
       }
     }
   }
@@ -175,5 +178,6 @@ struct UpdateDeleteMessage: Codable {
     Task { @MainActor in
       MessagesPublisher.shared.messagesDeleted(messageIds: [messageId], peer: peerId)
     }
+    UnreadManager.shared.updateAppIconBadge()
   }
 }
