@@ -23,6 +23,10 @@ actor UpdatesManager {
       } else if let update = update.updateComposeAction {
 //        self.log.debug("applying update compose action")
         update.apply()
+      } else if let update = update.deleteMessage {
+        try update.apply(db: db)
+      } else {
+        log.warning("Unknown update type")
       }
     } catch {
       log.error("Failed to apply update", error: error)
@@ -52,6 +56,7 @@ public struct Update: Codable, Sendable {
   var updateMessageId: UpdateMessageId?
   var updateUserStatus: UpdateUserStatus?
   var updateComposeAction: UpdateComposeAction?
+  var deleteMessage: UpdateDeleteMessage?
 }
 
 struct UpdateNewMessage: Codable {
@@ -136,6 +141,39 @@ struct UpdateComposeAction: Codable {
     } else {
       // cancel
       Task { await ComposeActions.shared.removeComposeAction(for: peerId) }
+    }
+  }
+}
+
+struct UpdateDeleteMessage: Codable {
+  var messageId: Int64
+  var peerId: Peer
+
+  func apply(db: Database) throws {
+    guard let chat = try Chat.getByPeerId(peerId: peerId) else {
+      Log.shared.error("Failed to find chat for peer \(peerId)")
+      return
+    }
+
+    if chat.lastMsgId == messageId {
+      let previousMessage = try Message
+        .filter(Column("chatId") == chat.id)
+        .order(Column("date").desc)
+        .limit(1, offset: 1)
+        .fetchOne(db)
+
+      var updatedChat = chat
+      updatedChat.lastMsgId = previousMessage?.messageId
+      try updatedChat.save(db)
+    }
+
+    try Message
+      .filter(Column("messageId") == messageId)
+      .filter(Column("chatId") == chat.id)
+      .deleteAll(db)
+
+    Task { @MainActor in
+      MessagesPublisher.shared.messagesDeleted(messageIds: [messageId], peer: peerId)
     }
   }
 }

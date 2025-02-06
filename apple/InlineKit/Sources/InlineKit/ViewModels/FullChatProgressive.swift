@@ -87,6 +87,7 @@ public class MessagesProgressiveViewModel {
     // TODO: case prepend...
     case added([FullMessage], indexSet: [Int])
     case updated([FullMessage], indexSet: [Int])
+    // Global IDs for list identity
     case deleted([Int64], indexSet: [Int])
     case reload
   }
@@ -117,11 +118,14 @@ public class MessagesProgressiveViewModel {
           return MessagesChangeSet.added(newMessages, indexSet: [messages.count - 1])
         }
 
+      // .messageId, then globalID out for lists
       case let .delete(messageDelete):
         if messageDelete.peer == peer {
+          print("deleting messages: \(messageDelete.messageIds) peer: \(messageDelete.peer)")
           let deletedIndices = messages.enumerated()
-            .filter { messageDelete.messageIds.contains($0.element.id) }
+            .filter { messageDelete.messageIds.contains($0.element.message.messageId) }
             .map(\.offset)
+          var deletedGlobalIds: [Int64] = deletedIndices.map { messages[$0].id }
 
           // Store indices in reverse order to safely remove items
           let sortedIndices = deletedIndices.sorted(by: >)
@@ -133,7 +137,7 @@ public class MessagesProgressiveViewModel {
           updateRange()
 
           // Return changeset
-          return MessagesChangeSet.deleted(messageDelete.messageIds, indexSet: sortedIndices)
+          return MessagesChangeSet.deleted(deletedGlobalIds, indexSet: sortedIndices)
         }
 
       case let .update(messageUpdate):
@@ -334,6 +338,7 @@ public final class MessagesPublisher {
   }
 
   public struct MessageDelete {
+    // messageID not globalID or stable
     public let messageIds: [Int64]
     let peer: Peer
   }
@@ -370,6 +375,7 @@ public final class MessagesPublisher {
     }
   }
 
+  // Message IDs not Global IDs
   func messagesDeleted(messageIds: [Int64], peer: Peer) {
     publisher.send(.delete(MessageDelete(messageIds: messageIds, peer: peer)))
   }
