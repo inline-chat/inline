@@ -135,6 +135,7 @@ class ComposeView: UIView {
     container.isUserInteractionEnabled = true
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(sendTapped))
     container.addGestureRecognizer(tapGesture)
+    container.alpha = 0
     return container
   }()
 
