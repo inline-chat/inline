@@ -38,7 +38,7 @@ struct MainView: View {
   @State private var selectedTab: TabType = .chats
 
   var user: User? {
-    root.currentUser
+    root.currentUserInfo?.user
   }
 
   // MARK: - Initialization
@@ -160,7 +160,7 @@ struct MainView: View {
       }
     }
     .background(Color(.systemBackground))
-    .searchable(text: $text, prompt: "Search in users and spaces")
+    .searchable(text: $text, prompt: "Search in users")
     .onAppear {
       markAsOnline()
     }
@@ -170,8 +170,11 @@ struct MainView: View {
           ws.ensureConnected()
           markAsOnline()
         }
-
-      } else if phase == .inactive {}
+      } else if phase == .inactive {
+        markAsOffline()
+      } else if phase == .background {
+        markAsOffline()
+      }
     }
     .onChange(of: text) { _, newValue in
       searchDebouncer.input = newValue
@@ -265,10 +268,14 @@ struct MainView: View {
             UserAvatar(user: user, size: 26)
               .padding(.trailing, 4)
           }
-          VStack(alignment: .leading) {
+          HStack(alignment: .center, spacing: 4) {
             Text(user?.firstName ?? user?.lastName ?? user?.email ?? "User")
               .font(.title3)
               .fontWeight(.semibold)
+            Text("(you)")
+              .font(.body)
+              .fontWeight(.semibold)
+              .foregroundStyle(.secondary)
           }
         }
       }
@@ -351,6 +358,12 @@ struct MainView: View {
   private func markAsOnline() {
     Task {
       try? await dataManager.updateStatus(online: true)
+    }
+  }
+
+  private func markAsOffline() {
+    Task {
+      try? await dataManager.updateStatus(online: false)
     }
   }
 

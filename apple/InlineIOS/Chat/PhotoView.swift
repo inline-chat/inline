@@ -6,14 +6,8 @@ import SwiftUI
 import UIKit
 
 final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
-  static let imageCache: NSCache<NSString, UIImage> = {
-    let cache = NSCache<NSString, UIImage>()
-    cache.countLimit = 100
-    return cache
-  }()
-
-  private let imageView: UIImageView = {
-    let view = UIImageView()
+  private let imageView: LazyImageView = {
+    let view = LazyImageView()
     view.contentMode = .scaleAspectFit
     view.clipsToBounds = true
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -110,53 +104,45 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
 
     NSLayoutConstraint.activate(imageConstraints)
 
-    let updateImage: (UIImage) -> Void = { [weak self] image in
-      guard let self else { return }
-      imageView.image = image
-      // Cache the image when it's set
-      Self.imageCache.setObject(image, forKey: url.absoluteString as NSString)
-    }
+    // Configure NukeUI's LazyImageView with proper placeholder
+    imageView.placeholderImage = generateThumbnail()
+    imageView.priority = .high
+    imageView.processors = [.resize(width: 300)]
+    imageView.backgroundColor = .clear
 
-    // Check memory cache first
-    if let cachedImage = Self.imageCache.object(forKey: url.absoluteString as NSString) {
-      imageView.image = cachedImage
-      return
-    }
+    // Create proper image request
+    let request = ImageRequest(
+      url: url,
+      processors: [.resize(width: 300)],
+      priority: .high
+    )
 
-    if isLocal {
-      DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-        if let image = UIImage(contentsOfFile: url.path) {
-          DispatchQueue.main.async {
-            updateImage(image)
-          }
-        }
-      }
+    // Check cache using proper API
+    if ImageCache.shared[ImageCacheKey(request: request)] == nil {
+      imageView.request = request
     } else {
-      let request = ImageRequest(
+      // Use cached image with proper options
+      imageView.request = ImageRequest(
         url: url,
         processors: [.resize(width: 300)],
-        priority: .high
+        priority: .high,
+        options: [.returnCacheDataDontLoad]
       )
+    }
 
-      // Show a low quality placeholder while loading
-      if let thumbnail = generateThumbnail() {
-        imageView.image = thumbnail
-      }
-
-      Task { @MainActor in
-        if let image = try? await ImagePipeline.shared.image(for: request) {
-          updateImage(image)
-
-          // Save to local cache if needed
-          if var file = fullMessage.file {
-            Task {
-              let pathString = image.save(file: file)
-              file.localPath = pathString
-              try? await AppDatabase.shared.dbWriter.write { db in
-                try file.save(db)
-              }
-              self.triggerMessageReload()
+    // Handle image loading completion
+    imageView.onCompletion = { [weak self] result in
+      guard let self else { return }
+      if case let .success(response) = result {
+        // Save to local storage if needed
+        if var file = fullMessage.file {
+          Task {
+            let pathString = response.image.save(file: file)
+            file.localPath = pathString
+            try? await AppDatabase.shared.dbWriter.write { db in
+              try file.save(db)
             }
+            self.triggerMessageReload()
           }
         }
       }
@@ -166,19 +152,24 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
   private func generateThumbnail() -> UIImage? {
     guard let file = fullMessage.file,
           let width = file.width,
-          let height = file.height
+          let height = file.height,
+          width > 0, height > 0
     else {
       return nil
     }
 
-    // Create a small colored placeholder based on image dimensions
-    let size = CGSize(width: 30, height: 30 * CGFloat(height) / CGFloat(width))
-    UIGraphicsBeginImageContextWithOptions(size, false, 1)
+    // Match exact calculated dimensions from setupImage()
+    let dimensions = calculateImageDimensions(width: width, height: height)
+    let size = CGSize(width: dimensions.width, height: dimensions.height)
+
+    UIGraphicsBeginImageContextWithOptions(size, false, 0)
+    defer { UIGraphicsEndImageContext() }
+
+    // Solid background matching chat bubbles
     UIColor.systemGray5.setFill()
     UIRectFill(CGRect(origin: .zero, size: size))
-    let thumbnail = UIGraphicsGetImageFromCurrentImageContext()
-    UIGraphicsEndImageContext()
-    return thumbnail
+
+    return UIGraphicsGetImageFromCurrentImageContext()
   }
 
   private func triggerMessageReload() {
@@ -282,15 +273,18 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
 
   func previewControllerDidDismiss(_ controller: QLPreviewController) {}
 
-  // MARK: - QLPreviewControllerDataSource
-
   func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-    1
+    guard imageUrl() != nil else {
+      return 0 // Prevent trying to show preview for non-existent URL
+    }
+    return 1
   }
 
   func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-    guard let (isLocal, url) = imageUrl() else {
-      fatalError("Invalid image URL")
+    guard let (_, url) = imageUrl() else {
+      // Return a safe default instead of crashing
+      assertionFailure("Missing image URL for preview")
+      return URL(fileURLWithPath: "") as QLPreviewItem
     }
     return url as QLPreviewItem
   }

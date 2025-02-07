@@ -525,7 +525,7 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
 private class ImagePrefetchDataSource: NSObject, UICollectionViewDataSourcePrefetching {
   private weak var coordinator: MessagesCollectionView.Coordinator?
   private let pipeline = ImagePipeline {
-    $0.imageCache = ImageCache(costLimit: 100 * 1_024 * 1_024) // 100MB memory cache
+    $0.imageCache = ImageCache.shared
     $0.dataCache = try? DataCache(name: "com.inline.messages.images")
     $0.isProgressiveDecodingEnabled = true
     $0.isRateLimiterEnabled = true
@@ -539,10 +539,7 @@ private class ImagePrefetchDataSource: NSObject, UICollectionViewDataSourcePrefe
   func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
     guard let coordinator else { return }
 
-    // Prioritize closer items
-    let sortedIndexPaths = indexPaths.sorted { $0.item < $1.item }
-
-    for indexPath in sortedIndexPaths {
+    for indexPath in indexPaths {
       guard indexPath.item < coordinator.messages.count else { continue }
       let message = coordinator.messages[indexPath.item]
 
@@ -550,14 +547,13 @@ private class ImagePrefetchDataSource: NSObject, UICollectionViewDataSourcePrefe
          let tempUrl = file.temporaryUrl,
          let url = URL(string: tempUrl)
       {
-        // Check if image is already cached
-        if PhotoView.imageCache.object(forKey: url.absoluteString as NSString) == nil {
-          let request = ImageRequest(
-            url: url,
-            processors: [.resize(width: 300)], // Resize to reasonable size
-            priority: .high
-          )
+        let request = ImageRequest(
+          url: url,
+          processors: [.resize(width: 300)],
+          priority: .high
+        )
 
+        if ImageCache.shared[ImageCacheKey(request: request)] == nil {
           pipeline.loadImage(with: request) { _ in }
         }
       }
