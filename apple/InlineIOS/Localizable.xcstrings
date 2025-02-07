@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "(you)" : {
+
+    },
     "@%@" : {
 
     },
@@ -388,7 +391,7 @@
     "Search by username" : {
 
     },
-    "Search in users and spaces" : {
+    "Search in users" : {
 
     },
     "Searching..." : {

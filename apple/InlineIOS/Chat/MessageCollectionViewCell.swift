@@ -49,7 +49,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
       contentView.addSubview(nameLabel)
 
       // Add avatar if we have user info
-      if let from = message.from {
+      if let from = message.senderInfo?.user {
         let avatar = UserAvatar(user: from, size: 28)
         let hostingController = UIHostingController(rootView: avatar)
         avatarHostingController = hostingController
@@ -79,7 +79,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
       }
 
       var constraints = [
-        nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
+        nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
         nameLabel.heightAnchor.constraint(equalToConstant: 16),
       ]
 

@@ -113,14 +113,6 @@ class UIMessageView: UIView {
     return text.count > 24 || text.contains("\n")
   }
 
-  var isJustFile: Bool {
-    if fullMessage.file != nil, fullMessage.message.text?.isEmpty == true, fullMessage.repliedToMessage == nil {
-      true
-    } else {
-      false
-    }
-  }
-
   private let labelVerticalPadding: CGFloat = 9.0
   private let labelHorizantalPadding: CGFloat = 12.0
 
@@ -189,15 +181,13 @@ class UIMessageView: UIView {
       metadataContainer.axis = .horizontal
       metadataContainer.addArrangedSubview(UIView()) // Spacer
       metadataContainer.addArrangedSubview(metadataView)
-      if !isJustFile {
-        multiLineContainer.addArrangedSubview(metadataContainer)
-      }
+      multiLineContainer.addArrangedSubview(metadataContainer)
+
       containerStack.addArrangedSubview(multiLineContainer)
     } else {
       singleLineContainer.addArrangedSubview(messageLabel)
-      if !isJustFile {
-        singleLineContainer.addArrangedSubview(metadataView)
-      }
+      singleLineContainer.addArrangedSubview(metadataView)
+
       containerStack.addArrangedSubview(singleLineContainer)
     }
   }
@@ -218,19 +208,19 @@ class UIMessageView: UIView {
 
       containerStack.topAnchor.constraint(
         equalTo: bubbleView.topAnchor,
-        constant: isJustFile ? 2 : labelVerticalPadding
+        constant: labelVerticalPadding
       ),
       containerStack.leadingAnchor.constraint(
         equalTo: bubbleView.leadingAnchor,
-        constant: isJustFile ? 2 : labelHorizantalPadding
+        constant: labelHorizantalPadding
       ),
       containerStack.trailingAnchor.constraint(
         equalTo: bubbleView.trailingAnchor,
-        constant: isJustFile ? -2 : -labelHorizantalPadding
+        constant: -labelHorizantalPadding
       ),
       containerStack.bottomAnchor.constraint(
         equalTo: bubbleView.bottomAnchor,
-        constant: isJustFile ? 6 : isMultiline ? -14 : -labelVerticalPadding
+        constant: isMultiline ? -14 : -labelVerticalPadding
       ).withPriority(.defaultHigh),
     ])
     if outgoing {
