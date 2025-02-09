@@ -115,14 +115,14 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             case .user:
               // Fetch private chat
               try Dialog
-                .spaceChatItemQuery()
+                .spaceChatItemQueryForUser()
                 .filter(id: Dialog.getDialogId(peerId: peerId))
                 .fetchAll(db)
 
             case .thread:
               // Fetch thread chat
               try Dialog
-                .spaceChatItemQuery()
+                .spaceChatItemQueryForChat()
                 .filter(id: Dialog.getDialogId(peerId: peerId))
                 .fetchAll(db)
           }

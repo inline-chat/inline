@@ -78,7 +78,7 @@ struct ChatView: View {
   // MARK: - Body
 
   var body: some View {
-    ChatViewUIKit(peerId: peerId, chatId: fullChatViewModel.chat?.id)
+    ChatViewUIKit(peerId: peerId, chatId: fullChatViewModel.chat?.id ?? 0)
       .edgesIgnoringSafeArea(.all)
       .onReceive(timer) { _ in
         currentTime = Date()
