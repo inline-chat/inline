@@ -85,7 +85,11 @@ public extension Member {
     )
     .including(
       optional: Member.chat
-        .including(optional: Chat.lastMessage)
+        .including(optional: Chat.lastMessage.including(optional: Message.from.forKey("from")
+            .including(
+              all: User.photos
+                .forKey("profilePhoto")
+            )))
     )
     .including(optional: Member.dialog)
     .asRequest(of: SpaceChatItem.self)
