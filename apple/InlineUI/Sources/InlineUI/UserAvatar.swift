@@ -8,7 +8,7 @@ public struct UserAvatar: View, Equatable {
     lhs.firstName == rhs.firstName && lhs.lastName == rhs.lastName && lhs.email == rhs.email
       && lhs.username == rhs.username && lhs.size == rhs.size
       && lhs.ignoresSafeArea == rhs.ignoresSafeArea
-      && lhs.remoteUrl == rhs.remoteUrl  // ???
+      && lhs.remoteUrl == rhs.remoteUrl // ???
       && lhs.fileId == rhs.fileId && lhs.localUrl == rhs.localUrl
   }
 
@@ -90,6 +90,63 @@ public struct UserAvatar: View, Equatable {
       .ignoresSafeArea()
   }
 
+  @Environment(\.colorScheme) private var colorScheme
+
+  @MainActor
+  public enum ColorPalette {
+    @MainActor
+
+    static let colors: [Color] = [
+      .pink.adjustLuminosity(by: -0.1),
+      .orange,
+      .purple,
+      .yellow.adjustLuminosity(by: -0.1),
+      .teal,
+      .blue,
+      .teal,
+      .green,
+      .primary,
+      .red,
+      .indigo,
+      .mint,
+      .cyan,
+//      .gray,
+//      .brown,
+    ]
+
+    public static func color(for name: String) -> Color {
+      // let hash = name.hashValue
+      let hash = name.utf8.reduce(0) { $0 + Int($1) }
+      return colors[abs(hash) % colors.count]
+    }
+  }
+
+  var name: String {
+    "\(firstName ?? "") \(lastName ?? "")"
+  }
+
+  private var initialsName: String {
+    name.first.map(String.init)?.uppercased() ?? ""
+  }
+
+  private var backgroundColor: Color {
+    let baseColor = ColorPalette.color(for: name)
+    return colorScheme == .dark
+      ? baseColor.adjustLuminosity(by: -0.1)
+      : baseColor.adjustLuminosity(by: 0)
+  }
+
+  private var backgroundGradient: LinearGradient {
+    LinearGradient(
+      colors: [
+        backgroundColor.adjustLuminosity(by: 0.2),
+        backgroundColor.adjustLuminosity(by: 0),
+      ],
+      startPoint: .topLeading,
+      endPoint: .bottomTrailing
+    )
+  }
+
   @ViewBuilder
   public var avatar: some View {
     if remoteUrl != nil || localUrl != nil {
@@ -106,6 +163,7 @@ public struct UserAvatar: View, Equatable {
               .resizable()
               .aspectRatio(contentMode: .fit)
               .frame(width: size, height: size)
+              .background(backgroundGradient)
               .clipShape(Circle())
               .fixedSize()
               .task {
@@ -133,6 +191,7 @@ public struct UserAvatar: View, Equatable {
           }
         }
       )
+
     } else {
       initials
     }
@@ -141,7 +200,6 @@ public struct UserAvatar: View, Equatable {
   public var body: some View {
     if ignoresSafeArea {
       avatar
-
         // Important so the toolbar safe area doesn't affect it
         .ignoresSafeArea()
     } else {
