@@ -419,7 +419,7 @@ struct MainView: View {
   }
 }
 
-enum CombinedItem: Identifiable {
+enum CombinedItem2: Identifiable {
   case space(SpaceItem)
   case chat(HomeChatItem)
 
