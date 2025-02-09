@@ -267,6 +267,7 @@ class ComposeView: UIView {
     guard let text = textViewContainer.textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
           !text.isEmpty
     else { return }
+    guard let chatId  else { return }
 
     let messageText = text
 
@@ -280,7 +281,7 @@ class ComposeView: UIView {
           .init(
             text: text,
             peerId: peerId,
-            chatId: chatId ?? 0,
+            chatId: chatId,
             replyToMsgId: replyToMessageId
           )
         )

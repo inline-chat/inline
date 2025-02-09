@@ -158,8 +158,12 @@ public struct TransactionSendMessage: Transaction {
             Log.shared.error("Failed to save file", error: error)
           }
         }
-
-        return try message.saveAndFetch(db)
+        do {
+          return try message.saveAndFetch(db)
+        } catch {
+          Log.shared.error("Failed to save and fetch message", error: error)
+          return nil
+        }
       })
 
       if let message = newMessage {
