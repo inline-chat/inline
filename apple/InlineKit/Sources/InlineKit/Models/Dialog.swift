@@ -124,11 +124,16 @@ public extension Dialog {
       )
   }
 
+  // use for array fetches
   static func spaceChatItemQuery() -> QueryInterfaceRequest<SpaceChatItem> {
     // chat through dialog thread
     including(
       optional: Dialog.peerThread
-        .including(optional: Chat.lastMessage)
+        .including(optional: Chat.lastMessage.including(optional: Message.from.forKey("from")
+            .including(
+              all: User.photos
+                .forKey("profilePhoto")
+            )))
     )
     // user info
     .including(
@@ -137,6 +142,30 @@ public extension Dialog {
     )
     // chat through user
     .including(optional: Dialog.peerUserChat)
+    .asRequest(of: SpaceChatItem.self)
+  }
+
+  static func spaceChatItemQueryForUser() -> QueryInterfaceRequest<SpaceChatItem> {
+    // user info
+    including(
+      optional: Dialog.peerUser.forKey("userInfo")
+        .including(all: User.photos.forKey("profilePhoto"))
+    )
+    // chat through user
+    .including(optional: Dialog.peerUserChat)
+    .asRequest(of: SpaceChatItem.self)
+  }
+
+  static func spaceChatItemQueryForChat() -> QueryInterfaceRequest<SpaceChatItem> {
+    // chat through dialog thread
+    including(
+      optional: Dialog.peerThread
+        .including(optional: Chat.lastMessage.including(optional: Message.from.forKey("from")
+            .including(
+              all: User.photos
+                .forKey("profilePhoto")
+            )))
+    )
     .asRequest(of: SpaceChatItem.self)
   }
 }
