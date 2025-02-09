@@ -99,16 +99,17 @@ public extension Chat {
     spaceId = from.spaceId
     type = from.type == "private" ? .privateChat : .thread
     peerUserId =
-      if let peer = from.peer {
-        switch peer {
-          case let .user(id):
-            id
-          case .thread:
-            nil
-        }
-      } else {
-        nil
+      if let peer = from.peer
+    {
+      switch peer {
+        case let .user(id):
+          id
+        case .thread:
+          nil
       }
+    } else {
+      nil
+    }
     lastMsgId = from.lastMsgId
   }
 
@@ -117,8 +118,8 @@ public extension Chat {
   }
 }
 
-extension Chat {
-  public static func getByPeerId(peerId: Peer) throws -> Chat? {
+public extension Chat {
+  static func getByPeerId(peerId: Peer) throws -> Chat? {
     try AppDatabase.shared.reader.read { db in
       switch peerId {
         case let .user(id):

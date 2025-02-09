@@ -1,6 +1,10 @@
 import Foundation
 import GRDB
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+#endif
 
 public final class UnreadManager: Sendable {
   public static let shared = UnreadManager()

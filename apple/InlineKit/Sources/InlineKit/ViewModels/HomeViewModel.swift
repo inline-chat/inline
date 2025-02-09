@@ -61,6 +61,30 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
       )
       .asRequest(of: HomeChatItem.self)
   }
+
+  // Add a static method to create the request for space chats
+  static func spaceChats(spaceId: Int64) -> QueryInterfaceRequest<HomeChatItem> {
+    Dialog
+      .filter(Column("spaceId") == spaceId)
+      .including(
+        required: Dialog.peerUser
+          .forKey(CodingKeys.user)
+          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      )
+      .including(
+        optional: Dialog.peerUserChat
+          .forKey(CodingKeys.chat)
+          .including(
+            optional: Chat.lastMessage
+              .forKey(CodingKeys.message)
+              .including(
+                optional: Message.from
+                  .forKey(CodingKeys.from)
+              )
+          )
+      )
+      .asRequest(of: HomeChatItem.self)
+  }
 }
 
 public final class HomeViewModel: ObservableObject {
