@@ -72,7 +72,7 @@ struct ChatItemView: View {
       .overlay {
         Group {
           if let emoji = chat?.emoji {
-            Text(String(emoji))
+            Text(String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "").replacingOccurrences(of: "\")", with: ""))
               .font(.customTitle())
           } else {
             Image(systemName: "message.fill")

@@ -26,8 +26,17 @@ struct CreateThread: View {
             Button {
               isPresented.toggle()
             } label: {
-              InitialsCircle(name: name, size: 40)
-                .overlay {
+              Circle()
+                .fill(
+                  LinearGradient(
+                    colors: [
+                      Color(.systemGray3).adjustLuminosity(by: 0.2),
+                      Color(.systemGray5).adjustLuminosity(by: 0),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                  )
+                ).overlay {
                   if !selectedEmoji.isEmpty {
                     Text(selectedEmoji)
                       .font(.title3)
