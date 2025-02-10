@@ -94,6 +94,10 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     chatItem?.user
   }
 
+  public var peerUserInfo: UserInfo? {
+    chatItem?.userInfo
+  }
+
   private var chatCancellable: AnyCancellable?
 
   private var db: AppDatabase
