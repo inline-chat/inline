@@ -12,6 +12,7 @@
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
 		C35EC8222CC2A24A0067979B /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C35EC8212CC2A24A0067979B /* InlineKit */; };
 		C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */; };
+		C37F34402D5A4D4800D7D7CC /* MCEmojiPicker in Frameworks */ = {isa = PBXBuildFile; productRef = C37F343F2D5A4D4800D7D7CC /* MCEmojiPicker */; };
 		C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905D2CB9431900B78B8A /* InlineKit */; };
 		C38C90602CB9432200B78B8A /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = C38C905F2CB9432200B78B8A /* InlineKit */; };
 		C3AE72D02D1B0ED0009F70D8 /* ContextMenuAuxiliaryPreview in Frameworks */ = {isa = PBXBuildFile; productRef = C3AE72CF2D1B0ED0009F70D8 /* ContextMenuAuxiliaryPreview */; };
@@ -94,6 +95,7 @@
 				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
 				C3C1F2C32D539F550039BCA8 /* NukeExtensions in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
+				C37F34402D5A4D4800D7D7CC /* MCEmojiPicker in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
 				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
@@ -184,6 +186,7 @@
 				C3AEE6A92D4FCDC9005D1179 /* Nuke */,
 				C3AEE6AB2D4FCDD0005D1179 /* NukeUI */,
 				C3C1F2C22D539F550039BCA8 /* NukeExtensions */,
+				C37F343F2D5A4D4800D7D7CC /* MCEmojiPicker */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -272,6 +275,7 @@
 				C3AE72D12D1B1716009F70D8 /* XCRemoteSwiftPackageReference "EmojiPicker" */,
 				CD4D56CB2D2D4393006072AE /* XCRemoteSwiftPackageReference "Throttler" */,
 				CDB123D32D3E8066001AFC1A /* XCRemoteSwiftPackageReference "Nuke" */,
+				C37F343E2D5A4D4800D7D7CC /* XCRemoteSwiftPackageReference "MCEmojiPicker" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -770,6 +774,14 @@
 				minimumVersion = 24.0.0;
 			};
 		};
+		C37F343E2D5A4D4800D7D7CC /* XCRemoteSwiftPackageReference "MCEmojiPicker" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/izyumkin/MCEmojiPicker";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.2.3;
+			};
+		};
 		C3AE72CE2D1B0ED0009F70D8 /* XCRemoteSwiftPackageReference "ContextMenuAuxiliaryPreview" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/dominicstop/ContextMenuAuxiliaryPreview";
@@ -851,6 +863,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CDE960142CB94C4F004C541C /* XCRemoteSwiftPackageReference "swiftui-introspect" */;
 			productName = SwiftUIIntrospect;
+		};
+		C37F343F2D5A4D4800D7D7CC /* MCEmojiPicker */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C37F343E2D5A4D4800D7D7CC /* XCRemoteSwiftPackageReference "MCEmojiPicker" */;
+			productName = MCEmojiPicker;
 		};
 		C38C905D2CB9431900B78B8A /* InlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
