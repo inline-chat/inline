@@ -61,8 +61,8 @@ struct ChatItemView: View {
       .fill(
         LinearGradient(
           colors: [
-            Color(.systemGray2).adjustLuminosity(by: 0.2),
-            Color(.systemGray4).adjustLuminosity(by: 0),
+            Color(.systemGray3).adjustLuminosity(by: 0.2),
+            Color(.systemGray5).adjustLuminosity(by: 0),
           ],
           startPoint: .top,
           endPoint: .bottom
@@ -70,9 +70,16 @@ struct ChatItemView: View {
       )
       .frame(width: 38, height: 38)
       .overlay {
-        Image(systemName: "message.fill")
-          .foregroundColor(.secondary)
-          .font(.callout)
+        Group {
+          if let emoji = chat?.emoji {
+            Text(String(emoji))
+              .font(.customTitle())
+          } else {
+            Image(systemName: "message.fill")
+              .foregroundColor(.secondary)
+              .font(.callout)
+          }
+        }
       }
   }
 
