@@ -57,11 +57,10 @@ public class DataManager: ObservableObject {
     }
   }
 
-  public func createThread(spaceId: Int64, title: String) async throws -> Int64? {
+  public func createThread(spaceId: Int64, title: String, emoji: String? = nil) async throws -> Int64? {
     log.debug("createThread")
     do {
-      // TODO: API call to create thread
-      let result = try await ApiClient.shared.createThread(title: title, spaceId: spaceId)
+      let result = try await ApiClient.shared.createThread(title: title, spaceId: spaceId, emoji: emoji)
       // Create the chat
       let chat = Chat(from: result.chat)
       try await database.dbWriter.write { db in

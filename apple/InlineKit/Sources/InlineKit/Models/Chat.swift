@@ -15,6 +15,7 @@ public struct ApiChat: Codable, Hashable, Sendable {
   public var threadNumber: Int?
   public var peer: Peer?
   public var lastMsgId: Int64?
+  public var emoji: String?
 }
 
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -25,6 +26,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var spaceId: Int64?
   public var peerUserId: Int64?
   public var lastMsgId: Int64?
+  public var emoji: String?
 
   public static let space = belongsTo(Space.self)
   public var space: QueryInterfaceRequest<Space> {
@@ -56,7 +58,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
   public init(
     id: Int64 = Int64.random(in: 1 ... 50_000), date: Date, type: ChatType, title: String?,
-    spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil
+    spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil
   ) {
     self.id = id
     self.date = date
@@ -65,6 +67,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.spaceId = spaceId
     self.peerUserId = peerUserId
     self.lastMsgId = lastMsgId
+    self.emoji = emoji
   }
 }
 
@@ -77,6 +80,7 @@ public extension Chat {
     case spaceId
     case peerUserId
     case lastMsgId
+    case emoji
   }
 
   init(from decoder: Decoder) throws {
@@ -88,6 +92,7 @@ public extension Chat {
     spaceId = try container.decodeIfPresent(Int64.self, forKey: .spaceId)
     peerUserId = try container.decodeIfPresent(Int64.self, forKey: .peerUserId)
     lastMsgId = try container.decodeIfPresent(Int64.self, forKey: .lastMsgId)
+    emoji = try container.decodeIfPresent(String.self, forKey: .emoji)
   }
 }
 
@@ -111,6 +116,7 @@ public extension Chat {
       nil
     }
     lastMsgId = from.lastMsgId
+    emoji = from.emoji
   }
 
   static func fromTimestamp(from: Int) -> Date {

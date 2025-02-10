@@ -1,9 +1,13 @@
 import InlineKit
 import InlineUI
+import MCEmojiPicker
 import SwiftUI
+
 struct CreateThread: View {
   @State private var animate: Bool = false
+  @State private var isPresented: Bool = false
   @State private var name = ""
+  @State private var selectedEmoji = ""
   @FocusState private var isFocused: Bool
   @FormState var formState
 
@@ -19,7 +23,25 @@ struct CreateThread: View {
       List {
         Section {
           HStack {
-            InitialsCircle(name: name, size: 40)
+            Button {
+              isPresented.toggle()
+            } label: {
+              InitialsCircle(name: name, size: 40)
+                .overlay {
+                  if !selectedEmoji.isEmpty {
+                    Text(selectedEmoji)
+                      .font(.title3)
+                  } else {
+                    Image(systemName: "plus")
+                      .font(.title3)
+                      .foregroundColor(.secondary)
+                  }
+                }
+            }
+            .emojiPicker(
+              isPresented: $isPresented,
+              selectedEmoji: $selectedEmoji
+            )
             TextField("Chat Title", text: $name)
               .focused($isFocused)
               .textInputAutocapitalization(.never)
@@ -56,7 +78,7 @@ struct CreateThread: View {
     Task {
       do {
         formState.startLoading()
-        let threadId = try await dataManager.createThread(spaceId: spaceId, title: name)
+        let threadId = try await dataManager.createThread(spaceId: spaceId, title: name, emoji: selectedEmoji)
 
         formState.succeeded()
         dismiss()
