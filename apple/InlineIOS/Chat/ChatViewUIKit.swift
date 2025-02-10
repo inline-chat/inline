@@ -7,7 +7,7 @@ class ChatContainerView: UIView {
   let chatId: Int64?
 
   private lazy var messagesCollectionView: MessagesCollectionView = {
-    let collectionView = MessagesCollectionView(peerId: peerId)
+    let collectionView = MessagesCollectionView(peerId: peerId, chatId: chatId ?? 0)
     collectionView.translatesAutoresizingMaskIntoConstraints = false
     return collectionView
   }()
