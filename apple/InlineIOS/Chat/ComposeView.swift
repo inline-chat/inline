@@ -32,7 +32,7 @@ class ComposeTextView: UITextView {
     addSubview(label)
 
     NSLayoutConstraint.activate([
-      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalPadding + 5),
+      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
       label.centerYAnchor.constraint(equalTo: centerYAnchor),
     ])
 
@@ -92,7 +92,7 @@ class TextViewContainer: UIView {
     NSLayoutConstraint.activate([
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
       textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -42),
     ])
   }
@@ -124,7 +124,6 @@ class ComposeView: UIView {
 
   lazy var textViewContainer: TextViewContainer = {
     let container = TextViewContainer(textView: textView)
-//    container.backgroundColor = .blue
     container.translatesAutoresizingMaskIntoConstraints = false
     return container
   }()
@@ -218,9 +217,9 @@ class ComposeView: UIView {
     textView.backgroundColor = .clear
     textView.textContainerInset = UIEdgeInsets(
       top: Self.textViewVerticalPadding,
-      left: Self.textViewHorizantalPadding + 2,
+      left: 0,
       bottom: Self.textViewVerticalPadding,
-      right: Self.textViewHorizantalPadding + 5
+      right: 0
     )
     textView.delegate = self
     textView.translatesAutoresizingMaskIntoConstraints = false
@@ -267,7 +266,7 @@ class ComposeView: UIView {
     guard let text = textViewContainer.textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
           !text.isEmpty
     else { return }
-    guard let chatId  else { return }
+    guard let chatId else { return }
 
     let messageText = text
 
