@@ -142,8 +142,8 @@ public struct UserAvatar: View, Equatable {
         backgroundColor.adjustLuminosity(by: 0.2),
         backgroundColor.adjustLuminosity(by: 0),
       ],
-      startPoint: .topLeading,
-      endPoint: .bottomTrailing
+      startPoint: .top,
+      endPoint: .bottom
     )
   }
 
