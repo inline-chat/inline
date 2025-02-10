@@ -154,11 +154,10 @@ class ComposeEmbedView: UIView {
       "You" : viewModel.fullMessage?.from?.firstName ?? "User"
 
     nameLabel.text = "Replying to \(name)"
-
     if let message = viewModel.fullMessage?.message {
-      let hasFile = viewModel.fullMessage?.file != nil
-      let hasText = message.text?.isEmpty != true
-
+      let hasFile = viewModel.fullMessage?.message.fileId != nil
+      let hasText = message.text?.isEmpty == false
+      print("I fucking have file is \(hasFile)")
       if hasFile {
         imageIconView.isHidden = false
         if hasText {

@@ -78,20 +78,19 @@ class EmbedMessageView: UIView {
     headerLabel.text = senderName
         
     let hasFile = message.fileId != nil
-    let hasText = message.text?.isEmpty != true
-        
-    imageIconView.isHidden = !hasFile
-        
+    let hasText = message.text?.isEmpty == false
+
     if hasFile {
+      imageIconView.isHidden = false
       if hasText {
         messageLabel.text = message.text
       } else {
         messageLabel.text = "Photo"
       }
     } else {
+      imageIconView.isHidden = true
       messageLabel.text = message.text
     }
-        
     updateColors()
   }
 }

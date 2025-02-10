@@ -180,6 +180,12 @@ class MessagesCollectionView: UICollectionView {
       name: UIResponder.keyboardWillHideNotification,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleScrollToBottom),
+      name: .scrollToBottom,
+      object: nil
+    )
   }
 
   private var isKeyboardVisible: Bool = false
@@ -238,6 +244,16 @@ class MessagesCollectionView: UICollectionView {
           )
         }
       }
+    }
+  }
+
+  @objc private func handleScrollToBottom() {
+    if !itemsEmpty {
+      scrollToItem(
+        at: IndexPath(item: 0, section: 0),
+        at: .top,
+        animated: true
+      )
     }
   }
 
@@ -448,6 +464,7 @@ private extension MessagesCollectionView {
 
     private var isUserDragging = false
     private var isUserScrollInEffect = false
+    private var wasPreviouslyAtBottom = false
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
       isUserDragging = true
@@ -463,6 +480,15 @@ private extension MessagesCollectionView {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+      let isAtBottom = scrollView.contentOffset.y > -60
+      if isAtBottom != wasPreviouslyAtBottom {
+        NotificationCenter.default.post(
+          name: .scrollToBottomChanged,
+          object: nil,
+          userInfo: ["isAtBottom": isAtBottom]
+        )
+        wasPreviouslyAtBottom = isAtBottom
+      }
       if isUserScrollInEffect {
         let isAtBottom = scrollView.contentOffset.y >= (scrollView.contentSize.height - scrollView.bounds.size.height)
 
@@ -565,4 +591,8 @@ private class ImagePrefetchDataSource: NSObject, UICollectionViewDataSourcePrefe
   }
 
   func prefetchIfNeeded() {}
+}
+
+extension Notification.Name {
+  static let scrollToBottomChanged = Notification.Name("scrollToBottomChanged")
 }
