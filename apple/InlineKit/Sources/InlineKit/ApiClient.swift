@@ -241,12 +241,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(.getSpaces, includeToken: true)
   }
 
-  public func createThread(title: String, spaceId: Int64) async throws -> CreateThread {
+  public func createThread(title: String, spaceId: Int64, emoji: String? = nil) async throws -> CreateThread {
     try await request(
       .createThread,
       queryItems: [
         URLQueryItem(name: "title", value: title),
         URLQueryItem(name: "spaceId", value: "\(spaceId)"),
+        URLQueryItem(name: "emoji", value: "\(emoji)"),
       ], includeToken: true
     )
   }
