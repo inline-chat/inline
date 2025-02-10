@@ -48,6 +48,8 @@ class ChatContainerView: UIView {
     return view
   }()
 
+  let scrollButton = BlurCircleButton()
+
   private var blurViewBottomConstraint: NSLayoutConstraint?
 
   init(peerId: Peer, chatId: Int64?) {
@@ -75,7 +77,8 @@ class ChatContainerView: UIView {
     blurView.contentView.addSubview(borderView)
     addSubview(composeEmbedViewWrapper)
     addSubview(composeView)
-
+    addSubview(scrollButton)
+    scrollButton.isHidden = true
     blurViewBottomConstraint = blurView.bottomAnchor.constraint(equalTo: bottomAnchor)
 
     keyboardLayoutGuide.followsUndockedKeyboard = true
@@ -118,6 +121,10 @@ class ChatContainerView: UIView {
       borderView.trailingAnchor.constraint(equalTo: blurView.trailingAnchor),
       borderView.topAnchor.constraint(equalTo: blurView.topAnchor),
       borderView.heightAnchor.constraint(equalToConstant: 0.5),
+
+      scrollButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+      scrollButton.bottomAnchor.constraint(equalTo: blurView.topAnchor, constant: -16),
+
     ])
   }
 
@@ -147,6 +154,37 @@ class ChatContainerView: UIView {
       name: UIResponder.keyboardWillHideNotification,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleScrollToBottomChanged),
+      name: .scrollToBottomChanged,
+      object: nil
+    )
+  }
+
+  @objc private func handleScrollToBottomChanged(_ notification: Notification) {
+    if let isAtBottom = notification.userInfo?["isAtBottom"] as? Bool {
+      if isAtBottom {
+        scrollButton.isHidden = false
+      }
+
+      UIView.animate(
+        withDuration: 0.3,
+        delay: 0,
+        usingSpringWithDamping: 0.6,
+        initialSpringVelocity: 0.1,
+        options: [.curveEaseInOut],
+        animations: {
+          self.scrollButton.transform = isAtBottom ? .identity : CGAffineTransform(scaleX: 0.01, y: 0.01)
+          self.layoutIfNeeded()
+        },
+        completion: { _ in
+          if !isAtBottom {
+            self.scrollButton.isHidden = true
+          }
+        }
+      )
+    }
   }
 
   @objc private func keyboardWillShow(_ notification: Notification) {
