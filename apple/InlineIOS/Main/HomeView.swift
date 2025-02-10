@@ -201,21 +201,30 @@ struct HomeViw: View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 12) {
         ForEach(searchResults) { user in
-          Button {
-            navigateToUser(user)
-          } label: {
-            HStack {
-              UserAvatar(user: user, size: 36)
-                .padding(.trailing, 6)
 
-              VStack(alignment: .leading) {
-                Text((user.firstName ?? "") + (user.lastName ?? ""))
-                  .fontWeight(.medium)
-                  .foregroundColor(.primary)
+          HStack(spacing: 9) {
+            UserAvatar(user: user, size: 38)
 
-                Text("@\(user.username ?? "")")
-                  .foregroundColor(.secondary)
-              }
+            VStack(alignment: .leading, spacing: 0) {
+              Text((user.firstName ?? "") + " " + (user.lastName ?? ""))
+                .fontWeight(.medium)
+                .foregroundColor(.primary)
+
+              Text(user.username ?? "")
+                .foregroundColor(.secondary)
+            }
+
+            Spacer()
+            Button {
+              navigateToUser(user)
+            } label: {
+              Circle()
+                .fill(Color(.systemGray5))
+                .frame(width: 36, height: 36)
+                .overlay {
+                  Image(systemName: "message.fill")
+                    .foregroundColor(ColorManager.shared.swiftUIColor)
+                }
             }
           }
         }
