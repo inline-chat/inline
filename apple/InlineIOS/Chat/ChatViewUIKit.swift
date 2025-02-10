@@ -122,8 +122,8 @@ class ChatContainerView: UIView {
       borderView.topAnchor.constraint(equalTo: blurView.topAnchor),
       borderView.heightAnchor.constraint(equalToConstant: 0.5),
 
-      scrollButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-      scrollButton.bottomAnchor.constraint(equalTo: blurView.topAnchor, constant: -16),
+      scrollButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+      scrollButton.bottomAnchor.constraint(equalTo: blurView.topAnchor, constant: -10),
 
     ])
   }
