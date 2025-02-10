@@ -58,7 +58,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
         contentView.addSubview(hostingController.view)
 
         var constraints = [
-          hostingController.view.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 30),
+          hostingController.view.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 34),
           hostingController.view.widthAnchor.constraint(equalToConstant: 32),
           hostingController.view.heightAnchor.constraint(equalToConstant: 32),
         ]
