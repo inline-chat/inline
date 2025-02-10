@@ -87,9 +87,9 @@ struct ChatView: View {
         ToolbarItem(placement: .principal) {
           header
         }
-        if let user = fullChatViewModel.peerUser {
+        if let user = fullChatViewModel.peerUserInfo {
           ToolbarItem(placement: .topBarTrailing) {
-            UserAvatar(user: user)
+            UserAvatar(userInfo: user)
           }
         }
       }
