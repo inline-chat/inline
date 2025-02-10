@@ -27,6 +27,12 @@ struct SpaceView: View {
         Section {
           ForEach(getCombinedItems(), id: \.id) { item in
             combinedItemRow(for: item)
+              .listRowInsets(.init(
+                top: 9,
+                leading: 16,
+                bottom: 2,
+                trailing: 0
+              ))
           }
         }
       }
@@ -41,7 +47,7 @@ struct SpaceView: View {
         ToolbarItem(id: "Space", placement: .topBarLeading) {
           HStack {
             if let space = fullSpaceViewModel.space {
-              SpaceAvatar(space: space, size: 26)
+              SpaceAvatar(space: space, size: 28)
                 .padding(.trailing, 4)
 
               VStack(alignment: .leading) {
@@ -120,7 +126,13 @@ struct SpaceView: View {
         Button {
           nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
         } label: {
-          ChatRowView(item: .space(memberChat), showPinned: false)
+          DirectChatItem(props: Props(
+            dialog: memberChat.dialog,
+            user: memberChat.userInfo,
+            chat: memberChat.chat,
+            message: memberChat.message,
+            from: memberChat.from?.user
+          ))
         }
 //        .contextMenu {
 //          Button {
@@ -141,7 +153,13 @@ struct SpaceView: View {
         Button {
           nav.push(.chat(peer: chat.peerId))
         } label: {
-          ChatRowView(item: .space(chat))
+          ChatItemView(props: ChatItemProps(
+            dialog: chat.dialog,
+            user: chat.userInfo,
+            chat: chat.chat,
+            message: chat.message,
+            from: chat.from
+          ))
         }
 
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {

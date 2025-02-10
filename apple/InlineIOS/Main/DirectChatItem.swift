@@ -4,7 +4,7 @@ import SwiftUI
 
 struct Props {
   let dialog: Dialog
-  let user: UserInfo
+  let user: UserInfo?
   let chat: Chat?
   let message: Message?
   let from: User?
@@ -21,7 +21,7 @@ struct DirectChatItem: View {
     props.dialog
   }
 
-  var userInfo: UserInfo {
+  var userInfo: UserInfo? {
     props.user
   }
 
@@ -57,7 +57,9 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var userProfile: some View {
-    UserAvatar(userInfo: userInfo, size: 38)
+    if let userInfo = userInfo {
+      UserAvatar(userInfo: userInfo, size: 38)
+    }
   }
 
   @ViewBuilder
@@ -73,7 +75,7 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var title: some View {
-    Text(userInfo.user.firstName ?? "")
+    Text(userInfo?.user.firstName ?? "")
       .font(.customTitle())
       .foregroundColor(.primary)
   }
