@@ -100,6 +100,8 @@ struct SpaceItemView: View {
         .font(.customCaption())
         .foregroundColor(.primary)
     }
+    .padding(.top, 2)
+
   }
 
   @ViewBuilder
