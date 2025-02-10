@@ -5,13 +5,15 @@ import UIKit
 
 class MessagesCollectionView: UICollectionView {
   private let peerId: Peer
+  private var chatId: Int64
   private var coordinator: Coordinator
   private var imagePrefetchDataSource: ImagePrefetchDataSource?
 
-  init(peerId: Peer) {
+  init(peerId: Peer, chatId: Int64) {
     self.peerId = peerId
+    self.chatId = chatId
     let layout = MessagesCollectionView.createLayout()
-    coordinator = Coordinator(peerId: peerId)
+    coordinator = Coordinator(peerId: peerId, chatId: chatId)
 
     super.init(frame: .zero, collectionViewLayout: layout)
 
@@ -39,6 +41,8 @@ class MessagesCollectionView: UICollectionView {
 
     coordinator.setupDataSource(self)
     setupObservers()
+    UnreadManager.shared.readAll(peerId, chatId: chatId)
+
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(orientationDidChange),
@@ -273,6 +277,8 @@ private extension MessagesCollectionView {
   class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
     private var currentCollectionView: UICollectionView?
     private let viewModel: MessagesProgressiveViewModel
+    private let peerId: Peer
+    private let chatId: Int64
 
     enum Section {
       case main
@@ -281,7 +287,9 @@ private extension MessagesCollectionView {
     private var dataSource: UICollectionViewDiffableDataSource<Section, FullMessage.ID>!
     var messages: [FullMessage] { viewModel.messages }
 
-    init(peerId: Peer) {
+    init(peerId: Peer, chatId: Int64) {
+      self.peerId = peerId
+      self.chatId = chatId
       viewModel = MessagesProgressiveViewModel(peer: peerId, reversed: true)
 
       super.init()
@@ -481,6 +489,9 @@ private extension MessagesCollectionView {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
       let isAtBottom = scrollView.contentOffset.y > -60
+      if isAtBottom == true {
+        UnreadManager.shared.readAll(peerId, chatId: chatId)
+      }
       if isAtBottom != wasPreviouslyAtBottom {
         NotificationCenter.default.post(
           name: .scrollToBottomChanged,
