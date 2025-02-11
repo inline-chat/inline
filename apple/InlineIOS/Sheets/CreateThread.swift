@@ -36,7 +36,9 @@ struct CreateThread: View {
                     startPoint: .top,
                     endPoint: .bottom
                   )
-                ).overlay {
+                )
+                .frame(width: 40, height: 40)
+                .overlay {
                   if !selectedEmoji.isEmpty {
                     Text(selectedEmoji)
                       .font(.title3)
@@ -89,16 +91,18 @@ struct CreateThread: View {
         formState.startLoading()
         let threadId = try await dataManager.createThread(spaceId: spaceId, title: name, emoji: selectedEmoji)
 
-        formState.succeeded()
-        dismiss()
-
         if let threadId {
+          // First fetch dialogs to ensure the thread is in the list
+          try await dataManager.getDialogs(spaceId: spaceId)
+
+          formState.succeeded()
+          dismiss()
+
           nav.push(.chat(peer: .thread(id: threadId)))
         }
       } catch {
-        Log.shared.error("Failed to create space", error: error)
+        Log.shared.error("Failed to create thread", error: error)
       }
-      dismiss()
     }
   }
 }
