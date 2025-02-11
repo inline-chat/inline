@@ -3,7 +3,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
-struct HomeViw: View {
+struct HomeView: View {
   // MARK: - Environment
 
   @EnvironmentObject private var nav: Navigation
@@ -37,7 +37,11 @@ struct HomeViw: View {
     // Add non-archived chats
     items.append(
       contentsOf: home.chats
-        .filter { $0.dialog.archived == nil || $0.dialog.archived == false }
+        .filter {
+          ($0.dialog.archived == nil || $0.dialog.archived == false) &&
+            $0.dialog.peerUserId != Auth.shared.getCurrentUserId() &&
+            $0.dialog.peerUserId != nil
+        }
         .map { .chat($0) }
     )
 
