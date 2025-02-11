@@ -85,7 +85,7 @@ extension ContentView {
     switch mainViewRouter.route {
       case .main:
         NavigationStack(path: $nav.pathComponents) {
-          HomeViw()
+          HomeView()
             .navigationDestination(for: Navigation.Destination.self) { destination in
               destinationView(for: destination)
             }
