@@ -36,13 +36,16 @@ struct HomeToolbarContent: ToolbarContent {
 
   private var userAvatarView: some View {
     HStack {
-      if let user {
+      if let userInfo {
+        UserAvatar(userInfo: userInfo, size: 26)
+
+      } else if let user {
         UserAvatar(user: user, size: 26)
-          .padding(.trailing, 4)
       }
 
       userNameView
     }
+    .padding(.horizontal, 18)
     .onTapGesture {
       if let userInfo = userInfo {
         nav.push(.profile(userInfo: userInfo))
@@ -61,6 +64,7 @@ struct HomeToolbarContent: ToolbarContent {
         .fontWeight(.semibold)
         .foregroundStyle(.secondary)
     }
+    .scaledToFill()
   }
 
   private var trailingButtons: some View {
