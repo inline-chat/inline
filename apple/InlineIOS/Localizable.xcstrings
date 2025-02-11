@@ -50,6 +50,9 @@
     "Archived Chats" : {
 
     },
+    "Change Profile Photo" : {
+
+    },
     "Chat Title" : {
 
     },
@@ -78,6 +81,9 @@
 
     },
     "Creating..." : {
+
+    },
+    "Double tap to change profile photo" : {
 
     },
     "Edit" : {
@@ -388,10 +394,19 @@
     "No users found" : {
 
     },
+    "OK" : {
+
+    },
     "Open Chat" : {
 
     },
     "Pin" : {
+
+    },
+    "Profile" : {
+
+    },
+    "Profile photo" : {
 
     },
     "Search by username" : {

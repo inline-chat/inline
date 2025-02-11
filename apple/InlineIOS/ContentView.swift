@@ -56,6 +56,8 @@ extension ContentView {
         EmptyView()
       case .createThread:
         EmptyView()
+      case .profile:
+        EmptyView()
     }
   }
 
@@ -69,6 +71,10 @@ extension ContentView {
       case .createSpace:
         CreateSpace()
           .presentationCornerRadius(18)
+
+      case let .profile(userInfo):
+        ProfilePage(userInfo: userInfo)
+
       default:
         EmptyView()
     }
