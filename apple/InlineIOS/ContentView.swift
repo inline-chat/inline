@@ -49,7 +49,7 @@ extension ContentView {
       case .settings:
         SettingsView()
       case .main:
-        MainView()
+        HomeView()
       case .archivedChats:
         ArchivedChatsView()
       case .createSpace:

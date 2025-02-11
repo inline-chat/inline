@@ -49,6 +49,10 @@ struct ChatView: View {
     fullChatViewModel.peer.isPrivate
   }
 
+  var isThreadChat: Bool {
+    fullChatViewModel.peer.isThread
+  }
+
   var subtitle: String {
     // TODO: support threads
     if ws.connectionState == .connecting {
@@ -90,6 +94,11 @@ struct ChatView: View {
         if let user = fullChatViewModel.peerUserInfo {
           ToolbarItem(placement: .topBarTrailing) {
             UserAvatar(userInfo: user)
+          }
+        } else if let emoji = fullChatViewModel.chat?.emoji, isThreadChat {
+          ToolbarItem(placement: .topBarTrailing) {
+            Text(String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "").replacingOccurrences(of: "\")", with: ""))
+              .font(.customTitle())
           }
         }
       }

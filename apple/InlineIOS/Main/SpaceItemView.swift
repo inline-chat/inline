@@ -87,21 +87,22 @@ struct SpaceItemView: View {
   @ViewBuilder
   var lastActiveChatView: some View {
     HStack(spacing: 4) {
-      // TODO: Add icon emoji then render it here
-//      Text("⚙️")
-//        .font(.customCaption())
-//        .foregroundColor(.primary)
+      if let lastActiveChat = lastActiveChat {
+        if let emoji = lastActiveChat.chat?.emoji {
+          Text(String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "").replacingOccurrences(of: "\")", with: ""))
+            .font(.customCaption())
+        } else {
+          Image(systemName: "bubble.right.fill")
+            .foregroundColor(.secondary)
+            .font(.caption2)
+        }
 
-      Image(systemName: "bubble.right.fill")
-        .foregroundColor(.secondary)
-        .font(.caption2)
-
-      Text(lastActiveChat?.chat?.title ?? "")
-        .font(.customCaption())
-        .foregroundColor(.primary)
+        Text(lastActiveChat.chat?.title ?? "")
+          .font(.customCaption())
+          .foregroundColor(.primary)
+      }
     }
     .padding(.top, 2)
-
   }
 
   @ViewBuilder
@@ -109,15 +110,21 @@ struct SpaceItemView: View {
     HStack(spacing: 4) {
       if let lastActiveChatMessageSender {
         UserAvatar(userInfo: lastActiveChatMessageSender, size: 15)
+        Text("\(lastMsgSenderName):")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+        Text(lastActiveChatMessage?.text ?? "")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
       } else if let user = lastActiveChat?.from?.user {
         UserAvatar(user: user, size: 15)
+        Text("\(lastMsgSenderName):")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+        Text(lastActiveChatMessage?.text ?? "")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
       }
-      Text("\(lastMsgSenderName):")
-        .font(.customCaption())
-        .foregroundColor(.secondary)
-      Text(lastActiveChatMessage?.text ?? "")
-        .font(.customCaption())
-        .foregroundColor(.secondary)
     }
   }
 
