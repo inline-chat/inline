@@ -135,14 +135,15 @@ public extension File {
     localPath = nil
 
     let ext =
-      switch photo.mimeType {
-        case "image/jpeg":
-          ".jpg"
-        case "image/png":
-          ".png"
-        default:
-          ".jpg"
-      }
+      switch photo.mimeType
+    {
+      case "image/jpeg":
+        ".jpg"
+      case "image/png":
+        ".png"
+      default:
+        ".jpg"
+    }
 
     mimeType = photo.mimeType
     fileName = "\(id)\(ext)"
@@ -166,12 +167,12 @@ public extension File {
     else {
       // ... create new
       var file = try File(fromPhoto: photo)
-      
+
       print("saving file \(file)")
 
       // associate
       if let forMessageLocalId {
-        //file.messageLocalId = forMessageLocalId
+        // file.messageLocalId = forMessageLocalId
       } else if let forUserId {
         file.profileForUserId = forUserId
       }
@@ -191,7 +192,7 @@ public extension File {
 
     // associate
     if let forMessageLocalId {
-      //existing.messageLocalId = forMessageLocalId
+      // existing.messageLocalId = forMessageLocalId
     } else if let forUserId {
       existing.profileForUserId = forUserId
     }
