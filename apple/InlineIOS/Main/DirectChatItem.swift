@@ -75,9 +75,17 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var title: some View {
-    Text(userInfo?.user.firstName ?? "")
-      .font(.customTitle())
-      .foregroundColor(.primary)
+    HStack(spacing: 4) {
+      Text(userInfo?.user.firstName ?? "")
+        .font(.customTitle())
+        .foregroundColor(.primary)
+      if userInfo?.user.id == Auth.shared.getCurrentUserId() {
+        Text("(you)")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+          .fontWeight(.medium)
+      }
+    }
   }
 
   @ViewBuilder
