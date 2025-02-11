@@ -18,6 +18,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case createSpace
     case createThread(spaceId: Int64)
     case archivedChats
+    case profile(userInfo: UserInfo)
 
     // MARK: - Identifiable Conformance
 
@@ -30,6 +31,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
         case .createSpace: "createSpace"
         case let .createThread(spaceId): "createThread-\(spaceId)"
         case .archivedChats: "archivedChats"
+        case let .profile(userInfo): "profile-\(userInfo.id)"
       }
     }
   }
@@ -97,7 +99,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
       case .chat:
         activeDestination = destination
         pathComponents.append(destination)
-      case .createSpace, .createThread:
+      case .createSpace, .createThread, .profile:
         activeSheet = destination
       default:
         activeDestination = destination

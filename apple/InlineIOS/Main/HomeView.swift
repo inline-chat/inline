@@ -31,10 +31,6 @@ struct HomeViw: View {
   @State private var isSearching = false
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
 
-  var user: User? {
-    root.currentUserInfo?.user
-  }
-
   var combinedItems: [CombinedItem] {
     var items: [CombinedItem] = []
 
@@ -118,7 +114,7 @@ struct HomeViw: View {
       searchUsers(query: value)
     }
     .toolbar {
-      HomeToolbarContent(user: user)
+      HomeToolbarContent(userInfo: root.currentUserInfo)
     }
     .onAppear {
       Task {
