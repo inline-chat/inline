@@ -35,19 +35,21 @@ struct HomeToolbarContent: ToolbarContent {
   }
 
   private var userAvatarView: some View {
-    HStack {
-      if let userInfo {
-        UserAvatar(userInfo: userInfo, size: 26)
-
-      } else if let user {
+    HStack(spacing: 8) {
+//        if let userInfo {
+//          UserAvatar(userInfo: userInfo, size: 26)
+//        } else if let user {
+//          UserAvatar(user: user, size: 26)
+//        }
+      if let user {
         UserAvatar(user: user, size: 26)
       }
 
       userNameView
     }
-    .padding(.horizontal, 18)
+
     .onTapGesture {
-      if let userInfo = userInfo {
+      if let userInfo {
         nav.push(.profile(userInfo: userInfo))
       }
     }
@@ -64,7 +66,6 @@ struct HomeToolbarContent: ToolbarContent {
         .fontWeight(.semibold)
         .foregroundStyle(.secondary)
     }
-    .scaledToFill()
   }
 
   private var trailingButtons: some View {

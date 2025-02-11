@@ -37,7 +37,7 @@ struct Profile: View {
 
   // MARK: - Constants
 
-  private let placeHolder = "Dena"
+  private let placeHolder = "Name"
 
   // MARK: - Body
 

@@ -93,6 +93,20 @@ struct HomeView: View {
     Group {
       if !searchResults.isEmpty {
         searchResultsView
+      } else if combinedItems.isEmpty {
+        VStack(spacing: 4) {
+          Text("💬")
+            .font(.system(size: 48))
+            .foregroundColor(.primary)
+            .padding(.bottom, 14)
+          Text("No chats or spaces")
+            .font(.headline)
+            .foregroundColor(.primary)
+          Text("Add a space or start a chat with someone to get started.")
+            .foregroundColor(.secondary)
+            .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 45)
       } else {
         List {
           ForEach(combinedItems, id: \.id) { item in
@@ -109,6 +123,7 @@ struct HomeView: View {
       }
     }
     .navigationBarTitleDisplayMode(.inline)
+    .navigationBarBackButtonHidden()
     .searchable(text: $text, prompt: "Find")
     .onChange(of: text) { _, newValue in
       searchDebouncer.input = newValue
