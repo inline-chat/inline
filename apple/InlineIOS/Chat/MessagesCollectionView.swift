@@ -359,17 +359,21 @@ private extension MessagesCollectionView {
         case let .added(newMessages, _):
           // get current snapshot and append new items
           var snapshot = dataSource.snapshot()
-          let ids = newMessages.map(\.id)
+          let existingIds = Set(snapshot.itemIdentifiers)
+          let newIds = newMessages.map(\.id)
+          let missingIds = newIds.filter { !existingIds.contains($0) }
 
+          guard !missingIds.isEmpty else { return }
           let shouldScroll = newMessages.contains {
             $0.message.fromId == Auth.shared.getCurrentUserId()
           }
 
           if let first = snapshot.itemIdentifiers.first {
-            snapshot.insertItems(ids, beforeItem: first)
+            snapshot.insertItems(missingIds, beforeItem: first)
           } else {
-            snapshot.appendItems(ids, toSection: .main)
+            snapshot.appendItems(missingIds, toSection: .main)
           }
+
           UIView.animate(withDuration: 0.2) {
             self.dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
               if shouldScroll {
