@@ -286,6 +286,8 @@ class ComposeView: UIView {
         )
       )
 
+      UnreadManager.shared.readAll(peerId, chatId: chatId)
+
       ChatState.shared.clearReplyingMessageId(peer: peerId)
       sendMessageHaptic()
       textViewContainer.textView.text = ""
