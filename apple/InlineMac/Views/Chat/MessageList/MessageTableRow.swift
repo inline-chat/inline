@@ -2,6 +2,7 @@ import AppKit
 import InlineKit
 import InlineUI
 import SwiftUI
+import Logger
 
 class MessageTableCell: NSView {
   private var messageView: MessageViewAppKit?

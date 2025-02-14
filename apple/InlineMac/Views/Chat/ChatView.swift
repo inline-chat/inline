@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 import SwiftUIIntrospect
+import Logger
 
 struct ChatView: View {
   let peerId: Peer

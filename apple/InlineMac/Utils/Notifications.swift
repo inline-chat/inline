@@ -1,6 +1,7 @@
 import InlineKit
 import SwiftUI
 import UserNotifications
+import Logger
 
 extension EnvironmentValues {
   @Entry var requestNotifications: () async -> Void = {}

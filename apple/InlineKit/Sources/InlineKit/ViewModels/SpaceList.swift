@@ -1,6 +1,6 @@
 import Combine
 import GRDB
-
+import Logger
 public struct SpaceItem: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
   Sendable, Equatable

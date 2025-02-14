@@ -48,7 +48,7 @@ public final class Log: @unchecked Sendable {
   private init(scope: String, level: LogLevel = .debug) {
     self.scope = scope
     self.level = level
-    logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.app", category: scope)
+    logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "chat.inline", category: scope)
   }
 
   public static func scoped(_ scope: String, enableTracing: Bool = false) -> Log {

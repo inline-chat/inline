@@ -2,6 +2,8 @@ import Combine
 import GRDB
 import InlineKit
 import InlineUI
+import Logger
+import RealtimeAPI
 import SwiftUI
 
 struct MainView: View {
@@ -13,6 +15,7 @@ struct MainView: View {
 
   @Environment(\.requestNotifications) var requestNotifications
   @Environment(\.scenePhase) var scenePhase
+  @Environment(\.realtime) var realtime
 
   @State private var windowSizeCancellable: AnyCancellable?
   @State private var disableAutoCollapse = false
@@ -66,6 +69,8 @@ struct MainView: View {
       setUpSidebarAutoCollapse()
 
       markAsOnline()
+
+      fetchMe()
     }
     .task {
       await requestNotifications()
@@ -224,6 +229,17 @@ struct MainView: View {
   private func markAsOnline() {
     Task {
       try? await dataManager.updateStatus(online: true)
+    }
+  }
+
+  private func fetchMe() {
+    Task {
+      do {
+        let result = try await realtime.invoke(.getMe, input: .getMe(.init()))
+        Log.shared.debug("Fetched me \(result)")
+      } catch let RealtimeAPIError.rpcError(errorCode, message) {
+        Log.shared.error("Failed to fetch me \(errorCode) \(message)")
+      }
     }
   }
 }

@@ -1,6 +1,7 @@
 import AppKit
 import InlineKit
 import SwiftUI
+import Logger
 
 class MessageListAppKit: NSViewController {
   // Data
