@@ -1,5 +1,6 @@
 import Combine
 import GRDB
+import Logger
 
 /// todos
 /// - listen to changes of count to first id - last id to detect new messages in between

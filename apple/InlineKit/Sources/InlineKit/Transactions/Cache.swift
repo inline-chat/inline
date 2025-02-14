@@ -1,4 +1,5 @@
 import Foundation
+import Logger
 
 struct PersistedTransaction: Codable {
   var transaction: TransactionType

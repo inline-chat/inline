@@ -1,41 +1,34 @@
 import Atomics
 import Foundation
-import Network
+import InlineConfig
 import Logger
+import Network
+import InlineProtocol
 
 #if canImport(UIKit)
 import UIKit
 #endif
 
-enum WebSocketMessage: Sendable {
-  case string(String)
-  case data(Data)
-}
-
-enum WebSocketError: Error, Sendable {
-  case disconnected
-  case invalidMessage
-  case connectionTimeout
-}
-
-enum WebSocketConnectionState: Sendable {
+enum TransportConnectionState {
   case disconnected
   case connecting
   case connected
 }
 
-struct WebSocketCredentials: Sendable {
-  let token: String
-  let userId: Int64
-}
+/// This is a stateless websocket transport layer that can be used to send and receive messages.
+/// We'll provide messages at a higher level. This is a dumb reconnecting transport layer.
+/// We'll track the ack'ed messages higher level.
+/// scope:
+/// - connect to websocket endpoint
+/// - provide a send method
+/// - provide an onReceive publisher
+/// - handle reconnections
+/// - handle ping/pong
+/// - handle network changes
+/// - handle background/foreground changes
+/// - handle connection timeout
 
-actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
-  // As long as `isActive` is true, we retry
-  private var isActive = false
-
-  // TBD
-  private var inBackground = false
-
+actor WebSocketTransport: NSObject, Sendable {
   // Tasks
   private var webSocketTask: URLSessionWebSocketTask?
   private var pingPongTask: Task<Void, Never>? = nil
@@ -43,40 +36,40 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   private var connectionTimeoutTask: Task<Void, Never>? = nil
 
   // State
-  private var id = UUID()
-  private var connectionState: WebSocketConnectionState = .disconnected {
-    didSet {
-      log.trace("State changed to \(connectionState) (id: \(id))")
-    }
-  }
-
+  private var running = false
+  public var connectionState: TransportConnectionState = .disconnected
   private var networkAvailable = true
 
-  private var reconnectAttempts = 0
-
   // Configuration
-  private let url: URL
+  private let urlString: String = {
+    if ProjectConfig.useProductionApi {
+      return "wss://api.inline.chat/ws"
+    }
+
+    #if targetEnvironment(simulator)
+    return "ws://localhost:8000/realtime"
+    #elseif DEBUG && os(iOS)
+    return "ws://\(ProjectConfig.devHost):8000/realtime"
+    #elseif DEBUG && os(macOS)
+    return "ws://\(ProjectConfig.devHost):8000/realtime"
+    #else
+    return "wss://api.inline.chat/realtime"
+    #endif
+  }()
+
   private var session: URLSession?
-  private let credentials: WebSocketCredentials
 
   // Internals
-  private var stateObservers: [(WebSocketConnectionState) -> Void] = []
-  private var messageHandler: ((WebSocketMessage) -> Void)? = nil
-  private var log = Log.scoped("WebsocketClient")
+  private var stateObservers: [(TransportConnectionState) -> Void] = []
+  private var messageHandler: ((ServerProtocolMessage) -> Void)? = nil
+  private var log = Log.scoped("Realtime_TransportWS")
   private var pathMonitor: NWPathMonitor?
 
-  init(
-    url: URL,
-    credentials: WebSocketCredentials
-  ) {
-    self.url = url
-    self.credentials = credentials
-
+  override init() {
+    log.debug("Initializing WebSocketTransport")
     // Create session configuration
     let configuration = URLSessionConfiguration.default
     configuration.shouldUseExtendedBackgroundIdleMode = true
-    // configuration.waitsForConnectivity = true
-    // configuration.timeoutIntervalForResource = 300 // 5 minutes
 
     session = nil
 
@@ -137,7 +130,6 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   #endif
 
   deinit {
-    isActive = false
     webSocketTask?.cancel()
 
     Task { @MainActor [self] in
@@ -145,51 +137,24 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     }
   }
 
-  var state: WebSocketConnectionState {
-    connectionState
-  }
-
   // MARK: - Connection Management
 
   private func handleConnected() {
-    // Reset state
-    reconnectAttempts = 0
-
     // Update state
     connectionState = .connected
     notifyStateChange()
 
     setupPingPong()
 
-    // TODO: handle error
-    Task {
-      log.trace("Sending connection init")
-      do {
-        try await self.send(
-          .connectionInit(token: self.credentials.token, userId: self.credentials.userId)
-        )
-      } catch {
-        log.error("Failed to send connection init", error: error)
-        await handleDisconnection(error: error)
-      }
-    }
-
     msgTask = Task {
-      log.trace("Starting message receiving")
+      log.debug("starting message receiving")
       await receiveMessages()
     }
   }
 
-//  private var isConnecting = false
-
   func start() async {
-    guard !isActive else {
-      log.trace("Already started")
-      return
-    }
-
-    isActive = true
-
+    log.debug("starting")
+    running = true
     setupNetworkMonitoring()
     startBackgroundObservers()
 
@@ -209,29 +174,35 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     notifyStateChange()
 
     setupConnectionTimeout()
+    let url = URL(string: urlString)!
     webSocketTask = session!.webSocketTask(with: url)
     webSocketTask?.resume()
+    log.debug("connecting to \(urlString)")
   }
 
   func stop() async {
     log.trace("Disconnecting and stopping (manual)")
-    isActive = false
     webSocketTask?.cancel(with: .normalClosure, reason: nil)
     webSocketTask = nil
 
     connectionState = .disconnected
     notifyStateChange()
+    running = false
   }
 
   // MARK: - State Management
 
-  func addStateObserver(_ observer: @escaping @Sendable (WebSocketConnectionState) -> Void) {
+  func addStateObserver(
+    _ observer: @escaping @Sendable (TransportConnectionState) -> Void
+  ) {
     stateObservers.append(observer)
     // Immediately notify of current state
     observer(connectionState)
   }
 
-  func addMessageHandler(_ handler: @escaping @Sendable (WebSocketMessage) -> Void) {
+  func addMessageHandler(
+    _ handler: @escaping @Sendable (ServerProtocolMessage) -> Void
+  ) {
     messageHandler = handler
   }
 
@@ -244,7 +215,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     }
   }
 
-  private func notifyMessageReceived(_ message: WebSocketMessage) {
+  private func notifyMessageReceived(_ message: ServerProtocolMessage) {
     messageHandler?(message)
   }
 
@@ -259,6 +230,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
         await connect()
 
       case .connected:
+        // TODO: Fix this BS
         // Verify the connection is actually alive with a ping
         do {
           try await sendPing()
@@ -280,12 +252,11 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
       var consecutiveFailures = 0
 
       while connectionState == .connected,
-            isActive,
+            running,
             !Task.isCancelled
       {
         do {
           try await Task.sleep(for: .seconds(10))
-          log.trace("Sending ping \(id)")
           try await sendPing()
           consecutiveFailures = 0
         } catch {
@@ -302,12 +273,8 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   }
 
   private func sendPing() async throws {
-    guard let task = webSocketTask else {
-      log.trace("Ping timeout occurred")
-      throw WebSocketError.disconnected
-    }
-
-    guard isActive else { return }
+    guard running else { return }
+    guard let webSocketTask else { return }
 
     try await withThrowingTaskGroup(of: Void.self) { group in
 
@@ -317,14 +284,14 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
       group.addTask {
         try await Task.sleep(for: .seconds(5)) // 5 seconds timeout for ping
         if hasCompleted.compareExchange(expected: false, desired: true, ordering: .relaxed).exchanged {
-          throw WebSocketError.connectionTimeout
+          throw TransportError.connectionTimeout
         }
       }
 
       // Add ping task
       group.addTask {
         try await withCheckedThrowingContinuation { continuation in
-          task.sendPing { error in
+          webSocketTask.sendPing { error in
             if hasCompleted.compareExchange(expected: false, desired: true, ordering: .relaxed).exchanged {
               if let error {
                 continuation.resume(throwing: error)
@@ -350,47 +317,51 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   private func setupConnectionTimeout() {
     connectionTimeoutTask?.cancel()
     connectionTimeoutTask = Task {
-      try? await Task.sleep(for: .seconds(10))
-      if self.connectionState == .connecting, !Task.isCancelled, isActive {
-        log.error("Connection timeout after 10s")
-        await handleDisconnection(error: WebSocketError.connectionTimeout)
+      try? await Task.sleep(for: .seconds(20))
+      if self.connectionState == .connecting, !Task.isCancelled, running {
+        log.error("Connection timeout after 20s")
+        await handleDisconnection()
       }
     }
   }
 
-  func send(_ message: WebSocketMessage) async throws {
-    guard connectionState == .connected, let webSocketTask else {
-      throw WebSocketError.disconnected
+  func send(_ message: ClientMessage) async throws {
+    guard connectionState == .connected else {
+      throw TransportError.notConnected
     }
-
-    let wsMessage: URLSessionWebSocketTask.Message = switch message {
-      case let .string(text):
-        .string(text)
-      case let .data(data):
-        .data(data)
+    guard let webSocketTask else {
+      throw TransportError.notConnected
     }
-
+    let wsMessage: URLSessionWebSocketTask.Message = try .data(message.serializedData())
     try await webSocketTask.send(wsMessage)
   }
 
   private func receiveMessages() async {
+    log.debug("waiting for messages")
     guard let webSocketTask else { return }
 
     do {
-      while isActive, connectionState == .connected, !Task.isCancelled {
+      while running, connectionState == .connected, !Task.isCancelled {
         let message = try await webSocketTask.receive()
-
+        log.debug("got message")
         switch message {
           case let .string(text):
-            notifyMessageReceived(.string(text))
+            // unsupported
+            break
           case let .data(data):
-            notifyMessageReceived(.data(data))
+            log.debug("got data message \(data.count) bytes")
+
+            let message = try ServerProtocolMessage(serializedBytes: data)
+          log.debug("decoded message \(message.id)")
+            notifyMessageReceived(message)
           @unknown default:
-            throw WebSocketError.invalidMessage
+            // unsupported
+            break
         }
       }
     } catch {
-      if isActive {
+      log.error("Error receiving messages", error: error)
+      if running {
         await handleDisconnection()
       }
     }
@@ -400,11 +371,6 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
     // Cancel all tasks first
     let tasks = [pingPongTask, msgTask].compactMap { $0 }
     tasks.forEach { $0.cancel() }
-
-    // Wait for all tasks to complete
-//    for task in tasks {
-//      let _ = await task.value
-//    }
 
     // Then nullify references
     webSocketTask?.cancel(with: .normalClosure, reason: nil)
@@ -432,7 +398,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
 
     await cancelTasks()
 
-    if isActive {
+    if running {
       attemptReconnection()
     }
   }
@@ -440,7 +406,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
   private let reconnectionInProgress = ManagedAtomic<Bool>(false)
 
   private func attemptReconnection() {
-    guard isActive else { return }
+    guard running else { return }
 
     // Atomic check and set for reconnection state
     guard reconnectionInProgress.compareExchange(
@@ -452,12 +418,10 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
       return
     }
 
-    reconnectAttempts += 1
-    let backoff = 1.2
-    let jitter = Double.random(in: 0 ... 0.3)
-    let delay = min(backoff * TimeInterval(reconnectAttempts), 24) + jitter
+    let jitter = Double.random(in: 0 ... 3)
+    let delay = 5.0 + jitter
 
-    log.trace("Attempting reconnection after \(delay) seconds, attempt \(reconnectAttempts)")
+    log.trace("Attempting reconnection after \(delay) seconds")
 
     // Task is important here
     Task {
@@ -474,7 +438,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
         }
 
         // if still needed
-        if connectionState == .disconnected, isActive {
+        if connectionState == .disconnected, running {
           await connect()
         }
       } catch {
@@ -487,7 +451,7 @@ actor WebSocketClient: NSObject, Sendable, URLSessionWebSocketDelegate {
 
 // MARK: Network Connectivity
 
-extension WebSocketClient {
+extension WebSocketTransport {
   private func setNetworkAvailable(_ networkAvailable: Bool) async {
     if networkAvailable {
       log.trace("Network became available")
@@ -524,7 +488,7 @@ extension WebSocketClient {
 
 // MARK: - URLSessionWebSocketDelegate
 
-extension WebSocketClient {
+extension WebSocketTransport: URLSessionWebSocketDelegate {
   nonisolated func urlSession(
     _ session: URLSession,
     webSocketTask: URLSessionWebSocketTask,
@@ -548,38 +512,5 @@ extension WebSocketClient {
     didCompleteWithError error: Error?
   ) {
     Task { await handleDisconnection(error: error) }
-  }
-}
-
-// MARK: - Convenience Methods
-
-extension WebSocketClient {
-  private func send(text: String) async throws {
-    try await send(.string(text))
-  }
-
-  private func send(data: Data) async throws {
-    try await send(.data(data))
-  }
-
-  func send(_ message: ClientMessage<some Codable>) async throws {
-    //    log.trace("sending message \(message)")
-
-    let encoder = JSONEncoder()
-    // Configure encoder for better JSON formatting
-    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-    encoder.dateEncodingStrategy = .iso8601
-
-    do {
-      let jsonData = try encoder.encode(message)
-      // Convert JSON data to string for WebSocket text frame
-      if let jsonString = String(data: jsonData, encoding: .utf8) {
-        try await send(.string(jsonString))
-      } else {
-        throw INWebSocketError.encodingFailed
-      }
-    } catch {
-      throw INWebSocketError.encodingFailed
-    }
   }
 }

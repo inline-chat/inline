@@ -20,6 +20,18 @@ let package = Package(
       name: "InlineConfig",
       targets: ["InlineConfig"]
     ),
+    .library(
+      name: "Logger",
+      targets: ["Logger"]
+    ),
+    .library(
+      name: "InlineProtocol",
+      targets: ["InlineProtocol"]
+    ),
+    .library(
+      name: "RealtimeAPI",
+      targets: ["RealtimeAPI"]
+    ),
   ],
   dependencies: [
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "3.0.8"),
@@ -33,10 +45,19 @@ let package = Package(
       url: "https://github.com/apple/swift-atomics.git",
       .upToNextMajor(from: "1.2.0")
     ),
+    .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
   ],
   targets: [
     // Targets are the basic building blocks of a package, defining a module or a test suite.
     // Targets can depend on other targets in this package and products from dependencies.
+
+    .target(
+      name: "Logger",
+      dependencies: [
+        .product(name: "Sentry", package: "sentry-cocoa"),
+      ]
+    ),
+
     .target(
       name: "InlineKit",
       dependencies: [
@@ -47,6 +68,10 @@ let package = Package(
         .product(name: "Atomics", package: "swift-atomics"),
         .product(name: "MultipartFormDataKit", package: "MultipartFormDataKit"),
         .product(name: "Get", package: "Get"),
+        "InlineConfig",
+        "Logger",
+        "InlineProtocol",
+        "RealtimeAPI",
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
@@ -55,6 +80,33 @@ let package = Package(
 
     .target(
       name: "InlineConfig"
+    ),
+
+    .target(
+      name: "Auth",
+      dependencies: [
+        .product(name: "KeychainSwift", package: "keychain-swift"),
+        "InlineConfig",
+        "Logger",
+      ]
+    ),
+
+    .target(
+      name: "InlineProtocol",
+      dependencies: [
+        .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+      ]
+    ),
+
+    .target(
+      name: "RealtimeAPI",
+      dependencies: [
+        .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
+        "Logger",
+        "InlineProtocol",
+        "InlineConfig",
+        "Auth",
+      ]
     ),
 
     .testTarget(

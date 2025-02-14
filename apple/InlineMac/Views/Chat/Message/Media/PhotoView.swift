@@ -4,6 +4,7 @@ import InlineKit
 import Nuke
 import NukeUI
 import Quartz
+import Logger
 
 final class PhotoView: NSView {
   private let imageView: NSImageView = {

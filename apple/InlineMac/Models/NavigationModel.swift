@@ -1,6 +1,7 @@
 import Combine
 import InlineKit
 import SwiftUI
+import Logger
 
 enum NavigationRoute: Hashable, Codable, Equatable {
   case homeRoot
