@@ -1,0 +1,191 @@
+syntax = "proto3";
+
+// --- Protocol Messages ---
+
+message ClientMessage  { 
+  uint64 id = 1;
+  uint32 seq = 2;
+
+  reserved 3;
+
+  oneof body {
+    ConnectionInit connection_init = 4;
+    RpcCall rpc_call = 5;
+    Ack ack = 6;
+    Ping ping = 7;
+  }
+}
+
+message ConnectionInit {
+  string token = 1;
+}
+
+message ServerProtocolMessage {
+  uint64 id = 1;
+
+  reserved 2, 3;
+
+  oneof body {
+    ConnectionOpen connection_open = 4;
+    RpcResult rpc_result = 5;
+    RpcError rpc_error = 6;
+    ServerMessage message = 7;
+    Ack ack = 8;
+    Pong pong = 9;
+  }
+}
+
+message ServerMessage {
+  reserved 1,2,3;
+
+  oneof payload {
+    Update update = 4;
+  }
+}
+
+message Ack {
+  uint64 msg_id = 1;
+}
+
+message ConnectionOpen {
+}
+
+message Ping {
+  uint64 nonce = 1;
+}
+
+message Pong {
+  uint64 nonce = 1;
+}
+
+// --- Application Types ---
+
+message InputPeer {
+  reserved  1;
+  oneof type {
+    InputPeerSelf self = 2;
+    InputPeerChat chat = 3;
+    InputPeerUser user = 4;
+  }
+}
+
+message InputPeerSelf {}
+
+message InputPeerChat {
+  int64 chat_id = 1;
+}
+
+message InputPeerUser {
+  int64 user_id = 1;
+}
+
+message Peer {
+  reserved 1;
+  oneof type {
+    PeerChat chat = 2;
+    PeerUser user = 3;
+  }
+}
+
+message PeerChat {
+  int64 chat_id = 1;
+}
+
+message PeerUser {
+  int64 user_id = 1;
+}
+
+
+message User {
+  int64 id = 1;
+  optional string first_name = 2;
+  optional string last_name = 3;
+  optional string username = 4;
+}
+
+
+message SelfUser {
+  int64 id = 1;
+  optional string first_name = 2;
+  optional string last_name = 3;
+  optional string username = 4;
+  optional string phone_number = 5;
+  optional string email = 6;
+}
+
+message Message {
+  int64 id = 1;
+  int64 from_id = 2;
+  int64 date = 3;
+  optional string message = 4;
+}
+
+
+// --- Application RPC Functions ---
+
+message RpcError {
+  uint64 req_msg_id = 1;
+  Code error_code = 2;
+  string message = 3;
+   
+  enum Code {
+    UNKNOWN = 0;
+    BAD_REQUEST = 1;
+    UNAUTHENTICATED = 2;    
+    RATE_LIMIT = 3;
+    INTERNAL_ERROR = 4;
+  }
+}
+
+message RpcCall {
+  Method method = 1;
+  oneof input {
+    GetMeInput getMe = 2;
+  }
+}
+
+message RpcResult {
+  uint64 req_msg_id = 1;
+  
+  oneof result {
+    GetMeResult getMe = 2;
+  }
+}
+
+enum Method {
+  UNSPECIFIED = 0;
+  GET_ME = 1;
+  SEND_MESSAGE = 2;
+}
+
+message GetMeInput {
+}
+
+message GetMeResult {
+  SelfUser user = 1;
+}
+
+
+//  Updates Subsystem
+message Update {
+  reserved 1,2,3;
+
+  oneof update {
+    NewMessage new_message = 4;
+    MessageEdited message_edited = 5;
+    MessageIdUpdate message_id_update = 6;
+  }
+}
+
+message NewMessage {
+  Message message = 1;
+}
+
+message MessageEdited {
+  Message message = 1;
+}
+
+message MessageIdUpdate {
+  int64 message_id = 1;
+  int64 random_id = 2;
+}
