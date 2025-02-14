@@ -77,7 +77,6 @@ class ComposeTextEditor: NSView {
 
     // Text view
     textView.drawsBackground = false
-    textView.isRichText = false
     textView.font = font
     textView.backgroundColor = .clear
     textView.textColor = .labelColor
@@ -90,10 +89,12 @@ class ComposeTextEditor: NSView {
 
     // Enables paste command for NSImages from clipboard
     textView.importsGraphics = true
+    
+    // Must be called after import graphics as that enables it
+    textView.isRichText = false
 
     // Smart
     textView.isAutomaticTextCompletionEnabled = true
-    // textView.enabledTextCheckingTypes = [.spelling, .grammar, .replacement]
 
     // Optional: Enable other smart features
     textView.isContinuousSpellCheckingEnabled = true
