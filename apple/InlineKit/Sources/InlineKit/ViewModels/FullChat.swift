@@ -1,6 +1,7 @@
 import Combine
 import GRDB
 import SwiftUI
+import Logger
 
 public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,

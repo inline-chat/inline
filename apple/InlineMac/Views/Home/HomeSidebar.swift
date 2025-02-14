@@ -1,5 +1,6 @@
 import InlineKit
 import SwiftUI
+import Logger
 
 struct HomeSidebar: View {
   @EnvironmentObject var ws: WebSocketManager

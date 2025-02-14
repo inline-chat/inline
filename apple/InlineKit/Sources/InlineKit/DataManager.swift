@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import Logger
 
 enum DataManagerError: Error {
   case networkError

@@ -1,5 +1,6 @@
 import InlineKit
 import SwiftUI
+import Logger
 
 struct OnboardingEnterEmail: View {
   @EnvironmentObject var onboardingViewModel: OnboardingViewModel

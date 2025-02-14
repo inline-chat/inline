@@ -2,6 +2,7 @@ import Combine
 import InlineKit
 import SwiftUI
 import SwiftUIIntrospect
+import Logger
 
 struct MainWindow: View {
   @EnvironmentObject var viewModel: MainWindowViewModel

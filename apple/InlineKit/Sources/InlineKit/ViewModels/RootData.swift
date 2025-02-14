@@ -1,7 +1,7 @@
 import Combine
 import GRDB
 import GRDBQuery
-
+import Logger
 @MainActor
 public class RootData: ObservableObject {
   @Published public var currentUserInfo: UserInfo?

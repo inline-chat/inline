@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 import MultipartFormDataKit
+import InlineConfig
+import Logger
 
 #if canImport(UIKit)
 import UIKit

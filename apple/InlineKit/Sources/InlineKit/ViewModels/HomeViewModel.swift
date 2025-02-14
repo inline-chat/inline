@@ -1,6 +1,6 @@
 import Combine
 import GRDB
-
+import Logger
 public struct UserInfo: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable, Identifiable {
   public var user: User
   public var profilePhoto: [File]?

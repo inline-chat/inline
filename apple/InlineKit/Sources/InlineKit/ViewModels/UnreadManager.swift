@@ -1,9 +1,11 @@
 import Foundation
 import GRDB
+import Logger
+
 #if os(iOS)
-import UIKit
+  import UIKit
 #else
-import AppKit
+  import AppKit
 #endif
 
 public final class UnreadManager: Sendable {
@@ -67,9 +69,9 @@ public final class UnreadManager: Sendable {
         }
 
         #if os(iOS)
-        DispatchQueue.main.async {
-          UIApplication.shared.applicationIconBadgeNumber = unreadChatsCount
-        }
+          DispatchQueue.main.async {
+            UIApplication.shared.applicationIconBadgeNumber = unreadChatsCount
+          }
         // #elseif os(macOS)
         // DispatchQueue.main.async {
         //   NSApplication.shared.dockTile.badgeLabel = unreadChatsCount > 0 ? "\(unreadChatsCount)" : ""

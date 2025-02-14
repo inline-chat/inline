@@ -7,6 +7,7 @@ import Nuke
 import NukeUI
 import SwiftUI
 import Throttler
+import Logger
 
 class MessageViewAppKit: NSView {
   static let avatarSize: CGFloat = Theme.messageAvatarSize

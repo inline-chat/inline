@@ -1,6 +1,6 @@
 import Combine
 import GRDB
-
+import Logger
 public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendable, Hashable,
   Identifiable
 {

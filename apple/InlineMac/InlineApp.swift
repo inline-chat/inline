@@ -1,6 +1,7 @@
 import GRDB
 import GRDBQuery
 import InlineKit
+import RealtimeAPI
 import Sentry
 import SwiftUI
 
@@ -31,6 +32,7 @@ struct InlineApp: App {
         .environmentObject(overlay)
         .environment(\.logOut, logOut)
         .environment(\.transactions, Transactions.shared)
+        .environment(\.realtime, Realtime.shared)
         .environment(
           \.requestNotifications,
           appDelegate.notifications.requestNotifications

@@ -1,5 +1,5 @@
 {
-  "originHash" : "7349d4c2051d0b7d893502e46c4766413d2903654f1d5dcd319a5b10f11973a2",
+  "originHash" : "3301fddd8e5016c821283b8b3d34c02bd553a268e27d5121f34c460615d050f9",
   "pins" : [
     {
       "identity" : "contextmenuauxiliarypreview",
@@ -65,15 +65,6 @@
       }
     },
     {
-      "identity" : "mcemojipicker",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/izyumkin/MCEmojiPicker",
-      "state" : {
-        "revision" : "e0b4903b75ae1cc418d276d84d1cb946b8a1d73c",
-        "version" : "1.2.3"
-      }
-    },
-    {
       "identity" : "multipartformdatakit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kuniwak/MultipartFormDataKit.git",
@@ -101,12 +92,30 @@
       }
     },
     {
+      "identity" : "swift-async-algorithms",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-async-algorithms",
+      "state" : {
+        "revision" : "4c3ea81f81f0a25d0470188459c6d4bf20cf2f97",
+        "version" : "1.0.3"
+      }
+    },
+    {
       "identity" : "swift-atomics",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-atomics.git",
       "state" : {
         "revision" : "cd142fd2f64be2100422d658e7411e39489da985",
         "version" : "1.2.0"
+      }
+    },
+    {
+      "identity" : "swift-collections",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-collections.git",
+      "state" : {
+        "revision" : "671108c96644956dddcd89dd59c203dcdb36cec7",
+        "version" : "1.1.4"
       }
     },
     {

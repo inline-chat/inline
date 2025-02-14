@@ -19,7 +19,9 @@
 ///
 
 import Foundation
+import Logger
 
+// TODO: fix @unchecked sendable
 public class Transactions: @unchecked Sendable {
   public static let shared = Transactions()
 

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import InlineKit
+import Logger
 
 // Known issues:
 // 1. trailing and leading new lines are not calculated properly

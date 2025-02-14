@@ -1,9 +1,12 @@
+import Logger
+import RealtimeAPI
 import SwiftUI
 
 public extension EnvironmentValues {
   @Entry var appDatabase = AppDatabase.empty()
   @Entry var auth = Auth.shared
   @Entry var transactions = Transactions.shared
+  @Entry var realtime = Realtime.shared
 }
 
 public extension View {

@@ -4,6 +4,7 @@ import InlineKit
 import Sentry
 import SwiftUI
 import UserNotifications
+import Logger
 
 class AppDelegate: NSObject, NSApplicationDelegate {
   let notifications = NotificationsManager()

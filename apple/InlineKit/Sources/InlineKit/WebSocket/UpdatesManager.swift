@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import Logger
 
 actor UpdatesManager {
   public static let shared = UpdatesManager()

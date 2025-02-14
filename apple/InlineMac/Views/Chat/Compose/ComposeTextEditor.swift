@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import Logger
 
 class ComposeTextEditor: NSView {
   public let scrollView: ComposeScrollView
