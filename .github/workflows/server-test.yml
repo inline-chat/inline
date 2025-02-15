@@ -48,16 +48,16 @@ jobs:
           echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
 
       - name: Run database migrations
-        run: bun db:migrate
+        run: cd server && bun db:migrate
 
       - name: Run tests
-        run: bun test
+        run: cd server && bun test
 
       - name: Run linter
-        run: bun lint
+        run: cd server && bun lint
 
       - name: Type check
-        run: bun typecheck
+        run: cd server && bun typecheck
 
       - name: Cache dependencies
         uses: actions/cache@v4
