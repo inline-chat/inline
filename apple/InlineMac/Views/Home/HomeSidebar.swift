@@ -1,6 +1,6 @@
 import InlineKit
-import SwiftUI
 import Logger
+import SwiftUI
 
 struct HomeSidebar: View {
   @EnvironmentObject var ws: WebSocketManager
@@ -27,7 +27,7 @@ struct HomeSidebar: View {
   fileprivate var items: [SideItem] {
     var items: [SideItem] = []
 
-    items.append(contentsOf: model.spaceItems.map { .space($0) })
+    items.append(contentsOf: model.fullSpaces.map { .space($0) })
     items.append(contentsOf: home.chats.map { .user($0) })
 
     return items
@@ -124,7 +124,7 @@ struct HomeSidebar: View {
         userItem(chat: chat)
 
       case let .space(space):
-        SpaceItem(space: space.space)
+        SpaceItem(space: space)
           .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
     }
   }
@@ -217,13 +217,13 @@ struct HomeSidebar: View {
 }
 
 private enum SideItem: Identifiable {
-  case space(InlineKit.SpaceItem)
+  case space(InlineKit.Space)
   case user(InlineKit.HomeChatItem)
 
   var id: Int64 {
     switch self {
       case let .space(space):
-        space.space.id
+        space.id
       case let .user(chat):
         chat.user.id
     }

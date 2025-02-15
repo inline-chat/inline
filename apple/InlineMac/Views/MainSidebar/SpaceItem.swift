@@ -30,21 +30,7 @@ struct SpaceItem: View {
     ))
     .focused($isFocused)
     .padding(.horizontal, -Theme.sidebarItemPadding)
-    // Actions on space
-    .contextMenu {
-      // Only creators can delete space for now
-      if let creator = space.creator, creator == true {
-        Button("Delete Space", role: .destructive) {
-          act(.delete)
-        }
-      } else {
-        Button("Leave Space", role: .destructive) {
-          act(.leave)
-        }
-      }
-    }
-    // Offset context menu border padding
-    //        .padding(.vertical, -3)
+
     // Alert for delete confirmation
     .alert(isPresented: $alertPresented) {
       Alert(
@@ -61,6 +47,20 @@ struct SpaceItem: View {
           pendingAction = nil
         }
       )
+    }
+
+    // Actions on space
+    .contextMenu {
+      // Only creators can delete space for now
+      if let creator = space.creator, creator == true {
+        Button("Delete Space", role: .destructive) {
+          act(.delete)
+        }
+      } else {
+        Button("Leave Space", role: .destructive) {
+          act(.leave)
+        }
+      }
     }
 
     if #available(macOS 14.0, *) {
