@@ -2,7 +2,7 @@ import { UsersModel } from "@in/server/db/models/users"
 import type { GetMeInput, GetMeResult } from "@in/server/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 
-export const getMe = async (params: GetMeInput, handlerContext: HandlerContext): Promise<GetMeResult> => {
+export const getMe = async (input: GetMeInput, handlerContext: HandlerContext): Promise<GetMeResult> => {
   let user = await UsersModel.getUserById(handlerContext.userId)
 
   if (!user) {
