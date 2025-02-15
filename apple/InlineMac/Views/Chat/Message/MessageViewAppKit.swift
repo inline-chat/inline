@@ -51,7 +51,7 @@ class MessageViewAppKit: NSView {
     if let photoWidth = props.photoWidth {
       photoWidth
     } else if hasReply {
-      max(textWidth, 120.0) // some width for the reply
+      max(textWidth, 220.0) // some width for the reply
     } else {
       textWidth
     }
