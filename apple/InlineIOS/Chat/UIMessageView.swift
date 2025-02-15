@@ -249,7 +249,7 @@ class UIMessageView: UIView {
     )
 
     detectAndStyleLinks(in: text, attributedString: attributedString)
-    cacheLink(attributedString, key: text)
+    cacheLink(attributedString, key: String("\(message.globalId ?? 0)"))
 
     messageLabel.attributedText = attributedString
   }
