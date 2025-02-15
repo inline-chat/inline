@@ -16,7 +16,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
   switch (call.method) {
     case Method.GET_ME: {
-      let result = await getMe(call.params, handlerContext)
+      let result = await getMe(call.input, handlerContext)
       return { oneofKind: "getMe", getMe: result }
     }
 
