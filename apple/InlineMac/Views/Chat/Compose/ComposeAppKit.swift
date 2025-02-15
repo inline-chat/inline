@@ -222,6 +222,7 @@ class ComposeAppKit: NSView {
       .sink { [weak self] replyingToMsgId in
         guard let self else { return }
         updateReplyingView(to: replyingToMsgId, animate: true)
+        focus()
       }.store(in: &cancellables)
   }
 
