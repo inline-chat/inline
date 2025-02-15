@@ -22,7 +22,7 @@ class MessageSizeCalculator {
   /// in due to a bug
   private let emptyFallback = " "
 
-  private let log = Log.scoped("MessageSizeCalculator", enableTracing: true)
+  private let log = Log.scoped("MessageSizeCalculator", enableTracing: false)
   private var heightForSingleLine: CGFloat?
 
   static let safeAreaWidth: CGFloat = 50.0
