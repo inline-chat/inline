@@ -1,5 +1,5 @@
 {
-  "originHash" : "3301fddd8e5016c821283b8b3d34c02bd553a268e27d5121f34c460615d050f9",
+  "originHash" : "8c4d5adb8675007b82f51858400428d361df9e5dab7d5bf3b32fa49ddfaad6ba",
   "pins" : [
     {
       "identity" : "contextmenuauxiliarypreview",
@@ -62,6 +62,15 @@
       "state" : {
         "revision" : "5e1b02b6a9dac2a759a1d5dbc175c86bd192a608",
         "version" : "24.0.0"
+      }
+    },
+    {
+      "identity" : "mcemojipicker",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/izyumkin/MCEmojiPicker",
+      "state" : {
+        "revision" : "e0b4903b75ae1cc418d276d84d1cb946b8a1d73c",
+        "version" : "1.2.3"
       }
     },
     {

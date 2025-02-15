@@ -1,6 +1,7 @@
 import Combine
 import InlineKit
 import InlineUI
+import Logger
 import SwiftUI
 
 struct ChatView: View {
