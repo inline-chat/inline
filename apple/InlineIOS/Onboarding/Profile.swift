@@ -1,4 +1,5 @@
 import InlineKit
+import Logger
 import SwiftUI
 
 enum UsernameStatus {

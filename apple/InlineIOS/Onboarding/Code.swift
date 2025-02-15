@@ -1,6 +1,7 @@
 import GRDBQuery
 import InlineKit
 import SwiftUI
+import Logger
 
 struct Code: View {
   var email: String

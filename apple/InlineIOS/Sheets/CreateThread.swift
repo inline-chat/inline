@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import MCEmojiPicker
 import SwiftUI
+import Logger
 
 struct CreateThread: View {
   @State private var animate: Bool = false

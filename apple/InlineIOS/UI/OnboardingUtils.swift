@@ -1,5 +1,6 @@
 import Foundation
 import InlineKit
+import Logger
 import SwiftUI
 
 public class OnboardingUtils: @unchecked Sendable {
