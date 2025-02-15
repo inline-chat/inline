@@ -32,14 +32,14 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
 
     let props: DbNewUser = {}
     if ("firstName" in input) {
-      if (input.firstName.length < 1) {
+      if (input.firstName && input.firstName.length < 1) {
         throw new InlineError(InlineError.ApiError.FIRST_NAME_INVALID)
       }
       props.firstName = input.firstName ?? null
     }
     if ("lastName" in input) props.lastName = input.lastName ?? null
     if ("username" in input) {
-      if (input.username.length < 2) {
+      if (input.username && input.username.length < 2) {
         throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
       }
       props.username = input.username ?? null
