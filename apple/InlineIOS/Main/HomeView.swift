@@ -38,9 +38,7 @@ struct HomeView: View {
     items.append(
       contentsOf: home.chats
         .filter {
-          ($0.dialog.archived == nil || $0.dialog.archived == false) &&
-            $0.dialog.peerUserId != Auth.shared.getCurrentUserId() &&
-            $0.dialog.peerUserId != nil
+          $0.dialog.archived == nil || $0.dialog.archived == false
         }
         .map { .chat($0) }
     )
@@ -137,11 +135,7 @@ struct HomeView: View {
     }
     .onAppear {
       Task {
-        do {
-          try await dataManager.getSpaces()
-        } catch {
-          Log.shared.error("Failed to getSpaces", error: error)
-        }
+        await initalFetch()
       }
     }
     .task {
