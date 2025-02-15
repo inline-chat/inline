@@ -1,36 +1,12 @@
-# Inline
+# Inline's Server
 
 [![Better Stack Badge](https://uptime.betterstack.com/status-badges/v2/monitor/1murw.svg)](https://uptime.betterstack.com/?utm_source=status_badge)
 
-[Inline](https://inline.chat) is a chat app for teams.
+You need to have bun installed and a postgres database running. Create a database with the name `inline_dev` and adjust the `DATABASE_URL` in the `.env` file. You can make your `.env` file by copying the `.env.sample` file.
 
-## Development
-
-```sh
-bun dev
-```
-
-To get up to date and run the API:
-
-```sh
-git pull origin main
+```bash
+cd server
 bun install
-bun db:migrate
-bun dev:server
+bun run db:migrate
+bun run dev
 ```
-
-Setup Swift:
-
-```sh
-# Install Swift Protobuf
-brew install swift-protobuf
-```
-
-Development Setup
-
-### Use xcconfig
-
-1. Copy `Config.xcconfig.template` to `Config.xcconfig`
-2. Edit `Config.xcconfig` and set your local development machine's IP address
-
-## TBD

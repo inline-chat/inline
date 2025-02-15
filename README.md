@@ -46,7 +46,20 @@ We're currently two cofounders developing Inline full-time.
 
 ## How to run this yourself
 
+### Running the macOS/iOS apps
+
 You can hack on Inline macOS/iOS code (in `apple` directory) by running it locally and connecting it to the production API.
+
+### Running the server
+
+You need to have bun installed and a postgres database running. Create a database with the name `inline_dev` and adjust the `DATABASE_URL` in the `.env` file. You can make your `.env` file by copying the `.env.sample` file.
+
+```bash
+cd server
+bun install
+bun run db:migrate
+bun run dev
+```
 
 ### Contributing
 
