@@ -1,0 +1,60 @@
+{
+  "name": "@inline/server",
+  "private": true,
+  "version": "0.0.2",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development bun --watch src/index.ts",
+    "build": "NODE_ENV=production bun scripts/build.ts",
+    "start": "NODE_ENV=production bun dist/index.js",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "bun scripts/migrate.ts",
+    "db:dangerously-reset-db": "bun scripts/reset-db.ts",
+    "db:generate": "drizzle-kit generate --schema src/db/schema/index.ts --out drizzle --dialect postgresql --name",
+    "db:push": "drizzle-kit push --schema src/db/schema/index.ts --dialect postgresql",
+    "db:drop": "drizzle-kit drop --out drizzle",
+    "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql",
+    "drizzle:up": "drizzle-kit up --dialect=postgresql",
+    "proto:generate-ts": "npx protoc --ts_out ./protocol/ --proto_path protos protos/messages.proto",
+    "lint": "eslint . --cache",
+    "lint:fix": "eslint . --fix"
+  },
+  "overrides": {
+    "elysia": "=1.1.26",
+    "@sinclair/typebox": "0.32.34"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.675.0",
+    "@bufbuild/protobuf": "^2.2.3",
+    "@effect/schema": "^0.75.5",
+    "@elysiajs/cors": "^1.1.1",
+    "@elysiajs/html": "^1.1.1",
+    "@elysiajs/swagger": "^1.1.5",
+    "@protobuf-ts/plugin": "^2.9.4",
+    "@sentry/bun": "^8.32.0",
+    "@sinclair/typebox": "=0.32.34",
+    "apn": "^2.2.0",
+    "drizzle-orm": "^0.36.4",
+    "elysia": "=1.1.26",
+    "elysia-helmet": "^2.0.0",
+    "elysia-rate-limit": "^4.1.0",
+    "nanoid": "^5.0.7",
+    "nanoid-dictionary": "^4.3.0",
+    "postgres": "^3.4.4",
+    "resend": "^4.0.0",
+    "sharp": "^0.33.5",
+    "tiny-invariant": "^1.3.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.16",
+    "@types/nanoid-dictionary": "^4.2.3",
+    "@typescript-eslint/eslint-plugin": "^8.17.0",
+    "@typescript-eslint/parser": "^8.17.0",
+    "drizzle-kit": "^0.28.1",
+    "eslint": "^9.16.0",
+    "eslint-plugin-react": "^7.37.2",
+    "typescript-eslint": "^8.17.0",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,27 @@
+# Dependencies
+node_modules
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Version control
+.git
+.gitignore
+
+# IDE and system
+.vscode
+.idea
+.DS_Store
+
+# Config & docs
+.env
+.editorconfig
+README.md
+LICENSE
+Makefile
+helm-charts
+
+# Testing
+coverage*

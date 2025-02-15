@@ -1,0 +1,107 @@
+# General JS world
+**/.cache
+**/build
+.env
+.env.test
+.env.prod
+.env.staging
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Ignore package locks for anything other than bun
+package-lock.json
+yarn.lock
+
+.index-build
+
+# React
+/build
+/dist
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# iOS
+## User settings
+xcuserdata/
+
+## Obj-C/Swift specific
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+## Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+.build/
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+
+# Accio dependency management
+Dependencies/
+.accio/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Code Injection
+iOSInjectionProject/
+
+# General
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+.DS_Store
+/Packages
+xcuserdata/
+DerivedData/
+**/.build
+**/.swiftpm/configuration/registries.json
+**/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+**/.netrc
+
+server/dist
+
+buildServer.json
+
+apple/Config.xcconfig
+# apple/Config.release.xcconfig
+apple/Config.prod.xcconfig
+apple/Config.dev.xcconfig
+apple/Config.staging.xcconfig
+
+.eslintcache
