@@ -41,7 +41,6 @@ class MessagesCollectionView: UICollectionView {
 
     coordinator.setupDataSource(self)
     setupObservers()
-    UnreadManager.shared.readAll(peerId, chatId: chatId)
 
     NotificationCenter.default.addObserver(
       self,
@@ -493,9 +492,6 @@ private extension MessagesCollectionView {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
       let isAtBottom = scrollView.contentOffset.y > -60
-      if isAtBottom == true {
-        UnreadManager.shared.readAll(peerId, chatId: chatId)
-      }
       if isAtBottom != wasPreviouslyAtBottom {
         NotificationCenter.default.post(
           name: .scrollToBottomChanged,
