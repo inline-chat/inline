@@ -7,7 +7,7 @@ import Logger
 class MessageTableCell: NSView {
   private var messageView: MessageViewAppKit?
   private var currentContent: (message: FullMessage, props: MessageViewProps)?
-  private let log = Log.scoped("MessageTableCell", enableTracing: true)
+  private let log = Log.scoped("MessageTableCell", enableTracing: false)
 
   override init(frame: NSRect) {
     super.init(frame: frame)
@@ -42,7 +42,7 @@ class MessageTableCell: NSView {
        // different width and height (ie. window resized)
        currentContent.props.equalExceptSize(props)
     {
-      log.debug("updating message size")
+      log.trace("updating message size")
       self.currentContent = (message, props)
       updateSize()
       return
@@ -67,15 +67,15 @@ class MessageTableCell: NSView {
     // different text
     // currentContent.message.message.text != message.message.text
     {
-      log.debug("updating message text and size")
-      log.debug("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
+      log.trace("updating message text and size")
+      log.trace("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
       self.currentContent = (message, props)
       updateTextAndSize()
       
       return
     }
 
-    log.debug("""
+    log.trace("""
     recreating message view for \(message.message.id)
 
     previous: \(currentContent?.message.debugDescription ?? "nil")

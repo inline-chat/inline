@@ -205,7 +205,7 @@ class MessageListAppKit: NSViewController {
   private func updateToolbar() {
     // make window toolbar layout and have background to fight the swiftui defaUlt behaviour
     guard let window = view.window else { return }
-    log.debug("Adjusting view's toolbar")
+    log.trace("Adjusting view's toolbar")
 
     window.isMovableByWindowBackground = true
 
