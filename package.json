@@ -5,5 +5,9 @@
     "server",
     "web",
     "scripts"
-  ]
+  ],
+  "scripts": {
+    "generate:proto": "cd scripts && bun run generate",
+    "dev:server": "cd server && bun run dev"
+  }
 }
