@@ -3,6 +3,7 @@ import InlineUI
 import MultipartFormDataKit
 import SwiftUI
 import UniformTypeIdentifiers
+import Logger
 
 // MARK: - Custom Errors
 

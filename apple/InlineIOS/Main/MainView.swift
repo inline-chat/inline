@@ -1,6 +1,7 @@
 import GRDB
 import InlineKit
 import InlineUI
+import Logger
 import SwiftUI
 
 /// The main view of the application showing spaces and direct messages

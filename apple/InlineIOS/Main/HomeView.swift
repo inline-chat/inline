@@ -2,6 +2,8 @@ import GRDB
 import InlineKit
 import InlineUI
 import SwiftUI
+import Logger
+
 
 struct HomeView: View {
   // MARK: - Environment
