@@ -12,7 +12,7 @@ class UIMessageView: UIView {
 
   private static let attributedCache: NSCache<NSString, NSAttributedString> = {
     let cache = NSCache<NSString, NSAttributedString>()
-    cache.countLimit = 100
+    cache.countLimit = 1000
     return cache
   }()
 
@@ -234,7 +234,7 @@ class UIMessageView: UIView {
     bubbleView.backgroundColor = bubbleColor
     guard let text = message.text else { return }
 
-    if let cachedString = Self.attributedCache.object(forKey: text as NSString) {
+    if let cachedString = Self.attributedCache.object(forKey: NSString(string: "\(message.globalId ?? 0)")) {
       messageLabel.attributedText = cachedString
 
       return
