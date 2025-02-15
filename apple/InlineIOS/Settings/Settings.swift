@@ -3,16 +3,51 @@ import InlineKit
 import SwiftUI
 
 struct SettingsView: View {
-  @Query(CurrentUser()) var currentUser: User?
+  @Query(CurrentUser()) var currentUser: UserInfo?
   @Environment(\.auth) var auth
   @EnvironmentObject private var webSocket: WebSocketManager
   @EnvironmentObject private var navigation: Navigation
   @EnvironmentObject private var onboardingNavigation: OnboardingNavigation
   @EnvironmentObject private var mainRouter: MainViewRouter
+  @EnvironmentObject private var fileUploadViewModel: FileUploadViewModel
 
   var body: some View {
     List {
       UserProfileSection(currentUser: currentUser)
+      Section {
+        Button {
+          fileUploadViewModel.showImagePicker = true
+        } label: {
+          HStack {
+            Image(systemName: "camera.fill")
+              .font(.callout)
+              .foregroundColor(.white)
+              .frame(width: 25, height: 25)
+              .background(Color.pink)
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            Text("Change Profile Photo")
+              .foregroundColor(.primary)
+              .padding(.leading, 4)
+            Spacer()
+          }
+          .padding(.vertical, 2)
+        }
+      }
+
+      NavigationLink(destination: IntegrationsView()) {
+        HStack {
+          Image(systemName: "app.connected.to.app.below.fill")
+            .foregroundColor(.white)
+            .frame(width: 25, height: 25)
+            .background(Color.purple)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+          Text("Integrations")
+            .foregroundColor(.primary)
+            .padding(.leading, 4)
+          Spacer()
+        }
+        .padding(.vertical, 2)
+      }
       NavigationLink(destination: ThemeSection()) {
         HStack {
           Image(systemName: "paintbrush.fill")
@@ -27,6 +62,7 @@ struct SettingsView: View {
         }
         .padding(.vertical, 2)
       }
+
       LogoutSection()
     }
     .navigationBarTitleDisplayMode(.inline)
@@ -42,6 +78,17 @@ struct SettingsView: View {
             Text("Settings")
               .font(.body)
               .fontWeight(.semibold)
+          }
+        }
+      }
+    }
+    .sheet(isPresented: $fileUploadViewModel.showImagePicker) {
+      ImagePicker(sourceType: .photoLibrary) { image in
+        Task {
+          if let pngData = image.pngData() {
+            await fileUploadViewModel.uploadImage(pngData, fileType: .png)
+          } else if let jpegData = image.jpegData(compressionQuality: 0.8) {
+            await fileUploadViewModel.uploadImage(jpegData, fileType: .jpeg)
           }
         }
       }
