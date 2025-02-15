@@ -41,7 +41,7 @@ class EmbeddedMessageView: NSView {
     let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
-    view.layer?.backgroundColor = NSColor.systemGray.cgColor // use sender color
+    view.layer?.backgroundColor = NSColor.controlAccentColor.cgColor // use sender color
     return view
   }()
 
@@ -85,13 +85,15 @@ class EmbeddedMessageView: NSView {
     addSubview(rectangleView)
     addSubview(nameLabel)
     addSubview(messageLabel)
+    
+    
 
     NSLayoutConstraint.activate([
       // Rectangle view
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
       rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth),
-      rectangleView.topAnchor.constraint(equalTo: topAnchor),
-      rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      rectangleView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding),
+      rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Constants.verticalPadding),
 
       // Name label
       nameLabel.leadingAnchor.constraint(
