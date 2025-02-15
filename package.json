@@ -1,0 +1,9 @@
+{
+  "name": "inline",
+  "private": true,
+  "workspaces": [
+    "server",
+    "web",
+    "scripts"
+  ]
+}

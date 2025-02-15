@@ -1,5 +1,5 @@
 {
-  "name": "inline",
+  "name": "@inline-chat/web",
   "private": true,
   "type": "module",
   "scripts": {
