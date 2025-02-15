@@ -1,0 +1,1 @@
+ALTER TABLE "dialogs" ADD COLUMN "draft" text;

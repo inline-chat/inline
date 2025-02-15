@@ -1,0 +1,1 @@
+ALTER TABLE "dialogs" ADD COLUMN "archived" boolean DEFAULT false;
