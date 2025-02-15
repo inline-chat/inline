@@ -1,6 +1,7 @@
 import Combine
 import GRDB
 import Logger
+
 public struct SpaceItem: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
   Sendable, Equatable
@@ -27,6 +28,7 @@ public final class SpaceListViewModel: ObservableObject {
   @Published public private(set) var spaceChats: [Int64: [SpaceChatItem]] = [:]
 
   private var cancellables = Set<AnyCancellable>()
+  private var depsCancellables = Set<AnyCancellable>()
   private var db: AppDatabase
   public init(db: AppDatabase) {
     self.db = db
@@ -51,7 +53,7 @@ public final class SpaceListViewModel: ObservableObject {
 
   private func observeSpaces(_ spaces: [Space]) {
     // Clear existing observations
-    cancellables.removeAll()
+    depsCancellables.removeAll()
 
     // Observe each space
     for space in spaces {
@@ -61,7 +63,7 @@ public final class SpaceListViewModel: ObservableObject {
         .sink { [weak self] chats in
           self?.spaceChats[space.id] = chats
         }
-        .store(in: &cancellables)
+        .store(in: &depsCancellables)
     }
   }
 }
