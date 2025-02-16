@@ -73,7 +73,7 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
   }
 
   private func setupImage() {
-    guard let (isLocal, url) = imageUrl() else { return }
+    guard let (_, url) = imageUrl() else { return }
     backgroundColor = .clear
     addSubview(imageView)
 
@@ -104,7 +104,7 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
 
     NSLayoutConstraint.activate(imageConstraints)
 
-    // Configure NukeUI's LazyImageView with proper placeholder
+    // Placeholder
     imageView.placeholderImage = generateThumbnail()
     imageView.priority = .high
     imageView.processors = [.resize(width: 300)]
