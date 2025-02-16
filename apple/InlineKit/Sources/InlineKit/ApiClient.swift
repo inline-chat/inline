@@ -1,8 +1,8 @@
 import Combine
 import Foundation
-import MultipartFormDataKit
 import InlineConfig
 import Logger
+import MultipartFormDataKit
 
 #if canImport(UIKit)
 import UIKit
@@ -53,6 +53,7 @@ public enum Path: String {
   case readMessages
   case updateProfilePhoto
   case deleteMessage
+  case createLinearIssue
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -61,7 +62,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   private let log = Log.scoped("ApiClient")
 
-  static let baseURL: String = {
+  public static let baseURL: String = {
     if ProjectConfig.useProductionApi {
       return "https://api.inline.chat/v1"
     }
@@ -77,7 +78,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     #endif
   }()
 
-  private var baseURL: String { Self.baseURL }
+  public var baseURL: String { Self.baseURL }
 
   private let decoder = JSONDecoder()
 
@@ -144,6 +145,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     guard let url = URL(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
     }
+    print("url: \(url)")
 
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -363,6 +365,24 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     return try await postRequest(
       .sendMessage,
       body: body,
+      includeToken: true
+    )
+  }
+
+  public func createLinearIssue(
+    text: String,
+    spaceId: Int64,
+    messageId: Int64,
+    chatId: Int64
+  ) async throws -> EmptyPayload {
+    try await postRequest(
+      .createLinearIssue,
+      body: [
+        "text": text,
+        "spaceId": spaceId,
+        "messageId": messageId,
+        "chatId": chatId,
+      ],
       includeToken: true
     )
   }
@@ -823,4 +843,8 @@ struct SessionInfo: Codable, Sendable {
 
 public enum ApiComposeAction: String, Codable, Sendable {
   case typing
+}
+
+public struct LinearAuthUrl: Codable, Sendable {
+  public let url: String
 }
