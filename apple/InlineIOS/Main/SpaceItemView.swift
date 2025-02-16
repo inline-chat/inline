@@ -93,7 +93,7 @@ struct SpaceItemView: View {
             .font(.customCaption())
         } else {
           Image(systemName: "bubble.right.fill")
-            .foregroundColor(.secondary)
+            .foregroundColor(.primary)
             .font(.caption2)
         }
 
