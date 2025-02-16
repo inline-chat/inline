@@ -5,9 +5,10 @@ import UIKit
 class ChatContainerView: UIView {
   let peerId: Peer
   let chatId: Int64?
+  let spaceId: Int64
 
   private lazy var messagesCollectionView: MessagesCollectionView = {
-    let collectionView = MessagesCollectionView(peerId: peerId, chatId: chatId ?? 0)
+    let collectionView = MessagesCollectionView(peerId: peerId, chatId: chatId ?? 0, spaceId : spaceId)
     collectionView.translatesAutoresizingMaskIntoConstraints = false
     return collectionView
   }()
@@ -52,9 +53,10 @@ class ChatContainerView: UIView {
 
   private var blurViewBottomConstraint: NSLayoutConstraint?
 
-  init(peerId: Peer, chatId: Int64?) {
+  init(peerId: Peer, chatId: Int64?, spaceId: Int64) {
     self.peerId = peerId
     self.chatId = chatId
+    self.spaceId = spaceId
 
     super.init(frame: .zero)
     setupViews()
@@ -286,10 +288,11 @@ class ChatContainerView: UIView {
 struct ChatViewUIKit: UIViewRepresentable {
   let peerId: Peer
   let chatId: Int64?
+  let spaceId: Int64
   @EnvironmentObject var data: DataManager
 
   func makeUIView(context: Context) -> ChatContainerView {
-    ChatContainerView(peerId: peerId, chatId: chatId)
+    ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId)
   }
 
   func updateUIView(_ uiView: ChatContainerView, context: Context) {}
