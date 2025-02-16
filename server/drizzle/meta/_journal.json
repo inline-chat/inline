@@ -169,6 +169,13 @@
       "when": 1738777220250,
       "tag": "0023_remove_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1739718465209,
+      "tag": "0024_add_linear_tables",
+      "breakpoints": true
     }
   ]
 }
