@@ -40,7 +40,7 @@ export const chats = pgTable(
     // pts: integer(),
 
     date: creationDate,
-    emoji: varchar({ length: 60 }),
+    emoji: varchar({ length: 20 }),
   },
   (table) => ({
     /** Ensure correctness */
