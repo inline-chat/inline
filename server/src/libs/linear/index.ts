@@ -147,6 +147,29 @@ const getLinearUser = async ({ userId }: { userId: number }) => {
   }
 }
 
+const getLinearUsers = async ({ userId }: { userId: number }) => {
+  if (isNaN(userId)) {
+    throw new Error("Invalid userId")
+  }
+
+  const { accessToken } = await IntegrationsModel.getWithUserId(userId)
+
+  const response = await queryLinear({
+    query: `{ users { nodes { id name email } } }`,
+    token: accessToken,
+  })
+
+  const usersData = await response.json()
+
+  if (!usersData.data?.users) {
+    throw new Error("Invalid response from Linear API")
+  }
+
+  return {
+    users: usersData.data.users.nodes,
+  }
+}
+
 const createIssue = async ({
   userId,
   title,
@@ -216,4 +239,4 @@ const createIssue = async ({
   }
 }
 
-export { getLinearIssueLabels, getLinearIssueStatuses, getLinearTeams, getLinearUser, createIssue }
+export { getLinearIssueLabels, getLinearIssueStatuses, getLinearTeams, getLinearUser, createIssue, getLinearUsers }

@@ -9,6 +9,7 @@ import {
   getLinearIssueStatuses,
   getLinearTeams,
   getLinearUser,
+  getLinearUsers,
 } from "@in/server/libs/linear"
 import { openaiClient } from "../libs/openAI"
 
@@ -60,6 +61,8 @@ export const handler = async (
   
   2. Requirements:
      - Include numbers when specified ("Increase timeout to 30s")
+     - Please make sure you explain the complete issue in the title for example: 
+     "User have issue with translating long message in zh" should be "Fix translation failure for long messages in zh"
      - Mention integrated services ("Add Zoom to calendar")
      - Keep under 60 characters
      - Use specific terms like "increase height" instead of general terms like "make taller."
@@ -129,13 +132,15 @@ export const handler = async (
         .filter(Boolean) || []
 
     for (const user of matchingUsers) {
+      console.log("user", user)
       await createIssueFunc({
-        userId: user.id,
+        userEmail: user.email,
         title: jsonResponse.title,
         description: jsonResponse.description.original,
         messageId: messageId,
         chatId: chatId,
-        labelIds: jsonResponse.labels,
+        labels: jsonResponse.labels,
+        currentUserId: currentUserId,
       })
     }
   } catch (error) {
@@ -159,35 +164,37 @@ const getSpace = async (spaceId: number) => {
 }
 
 type CreateIssueProps = {
-  userId: number
+  userEmail: string
   title: string
   description: string
   messageId: number
   chatId: number
-  labelIds: string[]
+  labels: string[]
+  currentUserId: number
 }
 
 const createIssueFunc = async (props: CreateIssueProps) => {
-  const teamId = await getLinearTeams({ userId: props.userId })
+  const teamId = await getLinearTeams({ userId: props.currentUserId })
   const teamIdValue = teamId.teams.teams.nodes[0].id
 
-  const labels = await getLinearIssueLabels({ userId: props.userId })
-  const matchingLabels = labels.labels.filter((label: any) => props.labelIds.includes(label.name.toLowerCase()))
+  const labels = await getLinearIssueLabels({ userId: props.currentUserId })
+  const matchingLabels = labels.labels.filter((label: any) => props.labels.includes(label.name.toLowerCase()))
 
-  const linearUser = await getLinearUser({ userId: props.userId })
-  const statuses = await getLinearIssueStatuses({ userId: props.userId })
+  const linearUsers = await getLinearUsers({ userId: props.currentUserId })
+  const linearUser = linearUsers.users.find((user: any) => user.email === props.userEmail)
+  const statuses = await getLinearIssueStatuses({ userId: props.currentUserId })
   const unstarded = statuses.workflowStates.filter((status: any) => status.type === "unstarted")
-
+  console.log("linearUser", linearUser)
   try {
     await createIssue({
-      userId: props.userId,
+      userId: props.currentUserId,
       title: props.title,
       description: props.description,
       teamId: teamIdValue,
       messageId: props.messageId,
       chatId: props.chatId,
       labelIds: matchingLabels.map((l: any) => l.id),
-      assigneeId: linearUser.user.id,
+      assigneeId: linearUser.id,
       statusId: unstarded[0].id,
     })
   } catch (error) {
