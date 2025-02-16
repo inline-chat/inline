@@ -13,6 +13,7 @@ struct ContentView: View {
   @StateObject var api = ApiClient()
   @StateObject var userData = UserData()
   @StateObject var mainViewRouter = MainViewRouter()
+  @StateObject private var fileUploadViewModel = FileUploadViewModel()
 
   init() {
     _data = EnvironmentStateObject { env in
@@ -35,6 +36,7 @@ struct ContentView: View {
     .environmentObject(data)
     .environmentObject(mainViewRouter)
     .environmentObject(home)
+    .environmentObject(fileUploadViewModel)
   }
 }
 
