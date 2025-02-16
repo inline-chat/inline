@@ -1,7 +1,25 @@
+import AuthenticationServices
+import InlineConfig
 import InlineKit
 import SwiftUI
 
 struct IntegrationsView: View {
+  @State private var isConnectingLinear = false
+  @State private var isConnected = false
+  @Environment(\.openURL) private var openURL
+
+  let baseURL: String = {
+    if ProjectConfig.useProductionApi {
+      return "https://api.inline.chat"
+    }
+
+    #if DEBUG
+    return "http://localhost:8000"
+    #else
+    return "https://api.inline.chat"
+    #endif
+  }()
+
   var body: some View {
     List {
       HStack(alignment: .center) {
@@ -18,13 +36,27 @@ struct IntegrationsView: View {
             .font(.caption)
         }
         Spacer()
-        Button("Connect") {
-          // TODO: Implement Linear integration
+        Button(isConnectingLinear ? "Connecting..." : isConnected ? "Connected" : "Connect") {
+          guard let token = Auth.shared.getToken() else {
+            return
+          }
+          if let url = URL(string: "\(baseURL)/integrations/linear/integrate?token=\(token)") {
+            openURL(url)
+          }
         }
         .buttonStyle(.borderless)
+        .disabled(isConnectingLinear || isConnected)
       }
     }
-//    .listStyle(.plain)
+    .onOpenURL { url in
+      if url.scheme == "in", url.host == "integrations", url.path == "/linear",
+         let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+         components.queryItems?.first(where: { $0.name == "success" })?.value == "true"
+      {
+        isConnected = true
+      }
+    }
+
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
     .toolbar {
@@ -42,5 +74,43 @@ struct IntegrationsView: View {
         }
       }
     }
+  }
+}
+
+class WebAuthenticationSession: NSObject, ObservableObject, ASWebAuthenticationPresentationContextProviding {
+  private var webAuthSession: ASWebAuthenticationSession?
+
+  func webAuthenticationSession(
+    _ session: ASWebAuthenticationSession,
+
+    didCompleteWithCallbackURL callbackURL: URL
+  ) {}
+
+  func webAuthenticationSession(
+    _ session: ASWebAuthenticationSession,
+
+    didFailWithError error: Error
+  ) {}
+
+  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+    UIApplication.shared.windows.first ?? ASPresentationAnchor()
+  }
+
+  func authenticate(
+    url: URL,
+
+    callbackScheme: String,
+
+    completion: @escaping (URL?, Error?) -> Void
+  ) {
+    webAuthSession = ASWebAuthenticationSession(
+      url: url,
+      callbackURLScheme: callbackScheme,
+      completionHandler: completion
+    )
+
+    webAuthSession?.presentationContextProvider = self
+    webAuthSession?.prefersEphemeralWebBrowserSession = true
+    webAuthSession?.start()
   }
 }

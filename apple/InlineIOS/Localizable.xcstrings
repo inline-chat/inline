@@ -65,10 +65,19 @@
     "Code sent to %@." : {
 
     },
+    "Connect" : {
+
+    },
+    "Connect your Linear to create issues from messages with AI" : {
+
+    },
     "Connected" : {
 
     },
     "Connecting" : {
+
+    },
+    "Connecting..." : {
 
     },
     "Continue" : {
@@ -196,6 +205,9 @@
       }
     },
     "Hey there! This is how your messages will look" : {
+
+    },
+    "Integrations" : {
 
     },
     "It's an all new way to chat with your team." : {
@@ -387,6 +399,9 @@
           }
         }
       }
+    },
+    "Linear" : {
+
     },
     "Logout" : {
 
