@@ -6,14 +6,16 @@ import UIKit
 class MessagesCollectionView: UICollectionView {
   private let peerId: Peer
   private var chatId: Int64
+  private var spaceId: Int64
   private var coordinator: Coordinator
   private var imagePrefetchDataSource: ImagePrefetchDataSource?
 
-  init(peerId: Peer, chatId: Int64) {
+  init(peerId: Peer, chatId: Int64, spaceId: Int64) {
     self.peerId = peerId
     self.chatId = chatId
+    self.spaceId = spaceId
     let layout = MessagesCollectionView.createLayout()
-    coordinator = Coordinator(peerId: peerId, chatId: chatId)
+    coordinator = Coordinator(peerId: peerId, chatId: chatId, spaceId: spaceId)
 
     super.init(frame: .zero, collectionViewLayout: layout)
 
@@ -278,6 +280,7 @@ private extension MessagesCollectionView {
     private let viewModel: MessagesProgressiveViewModel
     private let peerId: Peer
     private let chatId: Int64
+    private let spaceId: Int64
 
     enum Section {
       case main
@@ -286,9 +289,10 @@ private extension MessagesCollectionView {
     private var dataSource: UICollectionViewDiffableDataSource<Section, FullMessage.ID>!
     var messages: [FullMessage] { viewModel.messages }
 
-    init(peerId: Peer, chatId: Int64) {
+    init(peerId: Peer, chatId: Int64, spaceId: Int64) {
       self.peerId = peerId
       self.chatId = chatId
+      self.spaceId = spaceId
       viewModel = MessagesProgressiveViewModel(peer: peerId, reversed: true)
 
       super.init()
@@ -308,7 +312,7 @@ private extension MessagesCollectionView {
         guard let self, let message = viewModel.messagesByID[messageId] else { return }
         let isFromDifferentSender = isMessageFromDifferentSender(at: indexPath)
 
-        cell.configure(with: message, fromOtherSender: isFromDifferentSender)
+        cell.configure(with: message, fromOtherSender: isFromDifferentSender, spaceId: spaceId)
       }
 
       dataSource = UICollectionViewDiffableDataSource<Section, FullMessage.ID>(
