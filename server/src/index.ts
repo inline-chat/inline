@@ -20,6 +20,7 @@ import { webSocket } from "@in/server/ws"
 import { connectionManager } from "@in/server/ws/connections"
 import { Log } from "@in/server/utils/log"
 import { realtime } from "@in/server/realtime"
+import { integrationsRouter } from "./controllers/integrations/integrationsRouter"
 
 const port = process.env["PORT"] || 8000
 
@@ -36,6 +37,7 @@ export const app = new Elysia()
   .use(realtime)
   .use(waitlist)
   .use(there)
+  .use(integrationsRouter)
   .use(
     swagger({
       path: "/v1/docs",
