@@ -33,142 +33,73 @@ export const handler = async (
   const space = await getSpace(spaceId)
 
   const message = `
-You are an AI that converts user-reported issues into standardized JSON reports.
-[PLACEHOLDER_FOR_ISSUE_TEXT]
-${text}
-[END_PLACEHOLDER]
-You should:
-1. Recognize issues reported in any language
-2. Translate the content to English with high accuracy, maintaining:
-   - Technical terms in their original form (if text contains words like "*auth*" for example, keep it as "Fix *auth*" not "Fix *authentication*")
-   - Cultural context (e.g., Lunar New Year terms)
-   - Emojis and expressions
-   - Professional tone while preserving sentiment
-3. Maintain the standardized JSON format
-Structure:
-{
-  "title": "Action verb + clear description of the issue (in English)",
-  "core_components": {
-    "issue_type": "Bug/Enhancement/UX/etc.",
-    "component": "Affected system component",
-    "problem": "Concise problem statement",
-    "scope": "Impact scope"
-  },
-  "description": {
-    "original": "Original user report text in original language",
-    "english": "English translation of the report"
-  },
-  "labels": [
-    // Standard labels: "bug", "enhancement", "ux", "accessibility", "crash"
-  ],
-  "platforms": [
-    // Platform array: "iOS", "Android", "Web", etc.
-  ],
-  "assignees": [
-    // Names without @ mentions
-  ],
-  "metadata": {
-    "character_count": "<title length>",
-    "includes_platform": true/false,
-    "includes_action_verb": true/false,
-    "priority_level": "low/medium/high"
-  }
-}
-Examples:
-Input 1 (English):
-"@Mo mobile app is crashing whenever I open direct messages with Vlad. I think this started once he sent a video."
-Output 1:
-{
-  "title": "Fix mobile app crash on open direct message with video message",
-  "core_components": {
-    "issue_type": "Bug",
-    "component": "Direct Messages",
-    "problem": "App crashes when opening specific DM with video",
-    "scope": "Message rendering and video handling"
-  },
-  "description": {
-    "original": "@Mo mobile app is crashing whenever I open direct messages with Vlad. I think this started once he sent a video.",
-    "english": "@Mo mobile app is crashing whenever I open direct messages with Vlad. I think this started once he sent a video."
-  },
-  "labels": ["bug", "crash"],
-  "platforms": ["iOS", "Android"],
-  "assignees": ["Mo"],
-  "metadata": {
-    "character_count": 56,
-    "includes_platform": true,
-    "includes_action_verb": true,
-    "priority_level": "high"
-  }
-}
-Input 2 (Chinese):
-"@Ellie @Maylin 除夕的商品一樣是明天下午兩天釋出, 但是我會一直放到跟初一的商品一起下架(週四23:29)."
-Output 2:
-{
-  "title": "Set Lunar New Year Eve products release schedule and extended end time",
-  "analysis": {
-    "core_components": {
-      "issue_type": "Enhancement",
-      "component": "Product Management",
-      "problem": "Need to set special timing for holiday products",
-      "scope": "Product release scheduling"
+  Convert user reports to JSON tickets with this structure:
+  [input text]
+  ${text}
+  [end input text]
+  {
+    "title": <"Specific action + target element">,
+    "description": {
+      "original": <"Raw input">,
+      "english": <"Cleaned translation">
     },
-    "metadata": {
-      "character_count": 58,
-      "includes_platform": false,
-      "includes_action_verb": true,
-      "priority_level": "medium"
-    },
-    "task_details": {
-      "description": {
-        "original": "除夕的商品一樣是明天下午兩天釋出, 但是我會一直放到跟初一的商品一起下架(週四23:29).",
-        "english": "Lunar New Year Eve products will be released tomorrow afternoon for two days, but will remain available until being taken down together with first day of New Year products (Thursday 23:29)"
-      },
-      "labels": [
-        "enhancement"
-      ],
-      "platforms": [
-        "Web"
-      ],
-      "assignees": [
-        "Ellie",
-        "Maylin"
-      ]
-    }
+    "labels": [ // "bug", "enhancement", "ux", "accessibility", "crash" ,"feature", or some other label like these],
+    "platforms": ["iOS", "Android", "Web"],
+    "assignees": [ // "Names from input"]
   }
-}
-Translation Guidelines:
-1. Context Awareness:
-   - Understand e-commerce and streaming context
-   - Preserve brand names (e.g., "Coach Outlet")
-   - Maintain technical terms consistently
-   - Keep time and date formats clear
-2. Cultural Elements:
-   - Properly translate cultural references (e.g., Lunar New Year terms)
-   - Keep appropriate level of formality
-   - Preserve emojis and emotional context
-   - Handle mixed language input appropriately
-3. Technical Accuracy:
-   - Distinguish between meetings and streams
-   - Understand e-commerce terminology
-   - Maintain platform-specific terms
-   - Keep consistent technical vocabulary
-4. Title Creation:
-   - Start with action verb
-   - Be concise but complete
-   - Include key technical terms
-   - Maintain professional tone
-Key rules:
-1. Accept input in any language
-2. Keep original text in description
-3. Provide accurate English translation
-4. Generate all analysis and titles in English
-5. Maintain names as they appear in original text
-6. Keep technical terms unchanged
-7. Use only standard labels: "bug", "enhancement", "ux", "accessibility", "crash"
-8. Remove @ symbols from assignee names
-9. Keep platform names standard: "iOS", "Android", "Web"
-Parse the provided issue and return a properly formatted JSON report following these guidelines.
-JUST RETURN THE JSON, NO OTHER TEXT.
+  
+  [Title Rules]
+  1. Required verbs:
+     - Add "[Feature]"
+     - Fix "[UI/Breakage]" 
+     - Increase/Decrease "[Metric]"
+     - Make "[Element]" [bigger/smaller/clearer]
+     - Move "[Component]"
+     - Change "[Behavior]"
+  - Or common and human like verbs like the top ones
+  
+  2. Requirements:
+     - Include numbers when specified ("Increase timeout to 30s")
+     - Mention integrated services ("Add Zoom to calendar")
+     - Keep under 60 characters
+     - Use specific terms like "increase height" instead of general terms like "make taller."
+  
+  
+  [Examples]
+  Input: "@Mo will do→Notion broken #noor-bugs"
+  Output:
+  {
+    "title": "Add 'Will do' to Notion issue creation",
+    "description": {
+      "original": "@Mo it would be useful to have will do actually work here. instead Isaac has to reply to Matthew, and engage the Notion issue creator #noor-bugs",
+      "english": "Implement 'Will do' functionality for automatic Notion issue creation instead of manual replies"
+    },
+    "labels": ["enhancement"],
+    "platforms": ["Web"],
+    "assignees": ["Mo"]
+  }
+  
+  Input: "Text in settings too damn small"
+  Output:
+  {
+    "title": "Make settings text size 20% larger",
+    "description": {
+      "original": "Text in settings too damn small",
+      "english": "Increase settings interface text size for better readability"
+    },
+    "labels": ["ux"],
+    "platforms": ["Android"],
+    "assignees": []
+  }
+  
+  [Processing Rules]
+  1. Convert implied requests to explicit metrics
+  2. Remove hashtags/internal codes
+  3. Keep brand names in titles
+  4. Use exact numbers from input
+  5. Never add new fields
+  
+  Return ONLY JSON, no other text.  
   `
 
   const response = await openaiClient?.chat.completions.create({
@@ -202,12 +133,9 @@ JUST RETURN THE JSON, NO OTHER TEXT.
         userId: user.id,
         title: jsonResponse.title,
         description: jsonResponse.description.original,
-        teamId: jsonResponse.metadata.teamId,
         messageId: messageId,
         chatId: chatId,
         labelIds: jsonResponse.labels,
-        assigneeId: jsonResponse.assignees[0],
-        statusId: jsonResponse.metadata.statusId,
       })
     }
   } catch (error) {
@@ -234,19 +162,18 @@ type CreateIssueProps = {
   userId: number
   title: string
   description: string
-  teamId: string
   messageId: number
   chatId: number
   labelIds: string[]
-  assigneeId: string
-  statusId: string
 }
 
 const createIssueFunc = async (props: CreateIssueProps) => {
   const teamId = await getLinearTeams({ userId: props.userId })
   const teamIdValue = teamId.teams.teams.nodes[0].id
+
   const labels = await getLinearIssueLabels({ userId: props.userId })
   const matchingLabels = labels.labels.filter((label: any) => props.labelIds.includes(label.name.toLowerCase()))
+
   const linearUser = await getLinearUser({ userId: props.userId })
   const statuses = await getLinearIssueStatuses({ userId: props.userId })
   const unstarded = statuses.workflowStates.filter((status: any) => status.type === "unstarted")
