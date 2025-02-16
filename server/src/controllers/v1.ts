@@ -158,6 +158,12 @@ import {
   Response as DeleteMessageResponse,
 } from "@in/server/methods/deleteMessage"
 
+import {
+  handler as createLinearIssueHandler,
+  Input as CreateLinearIssueInput,
+  Response as CreateLinearIssueResponse,
+} from "@in/server/methods/createLinearIssue"
+
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
@@ -213,6 +219,9 @@ export const apiV1 = new Elysia({ name: "v1" })
           UpdateProfilePhotoResponse,
           updateProfilePhotoHandler,
         ),
+      )
+      .use(
+        makeApiRoute("/createLinearIssue", CreateLinearIssueInput, CreateLinearIssueResponse, createLinearIssueHandler),
       )
       .use(makeApiRoute("/deleteMessage", DeleteMessageInput, DeleteMessageResponse, deleteMessageHandler))
       .all("/*", () => {
