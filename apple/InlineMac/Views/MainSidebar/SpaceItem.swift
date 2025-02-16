@@ -32,22 +32,16 @@ struct SpaceItem: View {
     .padding(.horizontal, -Theme.sidebarItemPadding)
 
     // Alert for delete confirmation
-    .alert(isPresented: $alertPresented) {
-      Alert(
-        title: Text("Are you sure?"),
-        message: Text(
-          "Confirm you want to \(actionText.lowercased()) this space"
-        ),
-        primaryButton: .destructive(Text(actionText)) {
-          Task {
-            act(pendingAction!)
-          }
-        },
-        secondaryButton: .cancel {
-          pendingAction = nil
-        }
-      )
-    }
+    .alert("Are you sure?", isPresented: $alertPresented, presenting: pendingAction, actions: { action in
+      Button(actionText(action), role: .destructive) {
+        act(action)
+      }
+      Button("Cancel", role: .cancel) {
+        pendingAction = nil
+      }
+    }, message: { action in
+      Text("Confirm you want to \(actionText(action).lowercased()) this space")
+    })
 
     // Actions on space
     .contextMenu {
@@ -82,8 +76,8 @@ struct SpaceItem: View {
     }
   }
 
-  var actionText: String {
-    pendingAction == .delete ? "Delete" : "Leave"
+  func actionText(_ action: Action) -> String {
+    action == .delete ? "Delete" : "Leave"
   }
 
   enum Action {
@@ -93,7 +87,9 @@ struct SpaceItem: View {
 
   private func startPendingAct(_ action: Action) {
     pendingAction = action
-    alertPresented = true
+    DispatchQueue.main.async {
+      alertPresented = true
+    }
   }
 
   private func act(_ action: Action) {
