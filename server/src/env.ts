@@ -25,6 +25,13 @@ export const R2_ENDPOINT = process.env["R2_ENDPOINT"] as string
 
 // OPTIONAL
 export const IPINFO_TOKEN = process.env["IPINFO_TOKEN"]
+export const OPENAI_API_KEY = process.env["OPENAI_API_KEY"]
+export const OPENAI_BASE_URL = process.env["OPENAI_BASE_URL"]
+
+export const LINEAR_CLIENT_ID = process.env["LINEAR_CLIENT_ID"]
+export const LINEAR_CLIENT_SECRET = process.env["LINEAR_CLIENT_SECRET"]
+export const LINEAR_DEVELOPMENT_TOKEN = process.env["LINEAR_DEVELOPMENT_TOKEN"]
+export const LINEAR_REDIRECT_URI = process.env["LINEAR_REDIRECT_URI"]
 
 // Check required variables
 const requiredProductionVariables = [
@@ -55,7 +62,18 @@ for (const variable of requiredProductionVariables) {
 }
 
 // Check optional variables
-const optionalVariables = ["TWILIO_AUTH_TOKEN", "TWILIO_SID", "TWILIO_VERIFY_SERVICE_SID", "SENTRY_DSN", "IPINFO_TOKEN"]
+const optionalVariables = [
+  "TWILIO_AUTH_TOKEN",
+  "TWILIO_SID",
+  "TWILIO_VERIFY_SERVICE_SID",
+  "SENTRY_DSN",
+  "IPINFO_TOKEN",
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "LINEAR_CLIENT_ID",
+  "LINEAR_CLIENT_SECRET",
+  "LINEAR_DEVELOPMENT_TOKEN",
+]
 
 optionalVariables.forEach((variable) => {
   if (!process.env[variable] && isProd) {

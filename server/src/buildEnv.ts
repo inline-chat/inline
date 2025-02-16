@@ -44,6 +44,11 @@ declare global {
       SENTRY_DSN: string
       RESEND_API_KEY: string
       IPINFO_TOKEN?: string
+      LINEAR_CLIENT_ID?: string
+      LINEAR_CLIENT_SECRET?: string
+      LINEAR_REDIRECT_URI?: string
+      OPENAI_API_KEY?: string
+      OPENAI_BASE_URL?: string
       // Allow for additional dynamic environment variables
       [key: string]: string | undefined
     }
