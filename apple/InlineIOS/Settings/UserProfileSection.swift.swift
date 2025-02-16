@@ -3,12 +3,12 @@ import InlineUI
 import SwiftUI
 
 struct UserProfileSection: View {
-  let currentUser: User?
+  let currentUser: UserInfo?
 
   var body: some View {
     Section(header: Text("Account")) {
       if let user = currentUser {
-        ProfileRow(user: user)
+        ProfileRow(userInfo: user)
       } else {
         Button("Set up profile") {
           // TODO: Add profile setup
@@ -19,7 +19,10 @@ struct UserProfileSection: View {
 }
 
 struct ProfileRow: View {
-  let user: User
+  let userInfo: UserInfo
+  var user: User {
+    userInfo.user
+  }
 
   private var fullName: String {
     [user.firstName, user.lastName]
@@ -29,7 +32,7 @@ struct ProfileRow: View {
 
   var body: some View {
     HStack {
-      UserAvatar(user: user, size: 42)
+      UserAvatar(userInfo: userInfo, size: 42)
         .padding(.trailing, 6)
 
       VStack(alignment: .leading) {
