@@ -9,7 +9,7 @@ import * as arctic from "arctic"
 
 export let linearOauth: arctic.Linear | undefined
 
-if (process.env.LINEAR_CLIENT_ID && process.env.LINEAR_CLIENT_SECRET) {
+if (process.env.LINEAR_CLIENT_ID && process.env.LINEAR_CLIENT_SECRET && process.env.LINEAR_REDIRECT_URI) {
   linearOauth = new arctic.Linear(
     process.env.LINEAR_CLIENT_ID,
     process.env.LINEAR_CLIENT_SECRET,
