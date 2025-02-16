@@ -63,7 +63,7 @@ public struct UserAvatar: View, Equatable {
   }
 
   // This must match below
-  static func getNameForInitials(user: User) -> String {
+  public static func getNameForInitials(user: User) -> String {
     let firstName = user.firstName ?? user.email?.components(separatedBy: "@").first ?? "User"
     let lastName = user.lastName
     let name = "\(firstName) \(lastName ?? "")"
