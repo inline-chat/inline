@@ -301,10 +301,11 @@ class MessageViewAppKit: NSView {
     if showsName {
       addSubview(nameLabel)
       let name = from.firstName ?? from.username ?? ""
+      let nameForInitials = UserAvatar.getNameForInitials(user: from)
       nameLabel.stringValue = outgoing ? "You" : name
       nameLabel.textColor = NSColor(
         InitialsCircle.ColorPalette
-          .color(for: name)
+          .color(for: nameForInitials)
       )
     }
 
