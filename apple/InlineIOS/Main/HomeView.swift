@@ -1,9 +1,8 @@
 import GRDB
 import InlineKit
 import InlineUI
-import SwiftUI
 import Logger
-
+import SwiftUI
 
 struct HomeView: View {
   // MARK: - Environment
@@ -270,6 +269,31 @@ struct HomeView: View {
               message: chatItem.message,
               from: chatItem.from
             ))
+          }
+          .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+              Task {
+                try await dataManager.updateDialog(
+                  peerId: .user(id: chatItem.user.id),
+                  archived: true
+                )
+              }
+            } label: {
+              Image(systemName: "tray.and.arrow.down.fill")
+            }
+            .tint(Color(.systemGray2))
+
+            Button {
+              Task {
+                try await dataManager.updateDialog(
+                  peerId: .user(id: chatItem.user.id),
+                  pinned: !(chatItem.dialog.pinned ?? false)
+                )
+              }
+            } label: {
+              Image(systemName: chatItem.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+            }
+            .tint(.indigo)
           }
         } else {
           EmptyView()
