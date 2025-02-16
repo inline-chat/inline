@@ -8,6 +8,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
   private var messageView: UIMessageView?
   private var avatarHostingController: UIHostingController<UserAvatar>?
   var fromOtherSender: Bool = false
+  var messageContent: FullMessage? = nil
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -30,7 +31,8 @@ class MessageCollectionViewCell: UICollectionViewCell {
     return label
   }()
 
-  func configure(with message: FullMessage, fromOtherSender: Bool) {
+  func configure(with message: FullMessage, fromOtherSender: Bool, spaceId: Int64) {
+    messageContent = message
     var isThread: Bool {
       message.peerId.isThread
     }
@@ -39,7 +41,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
     }
 
     nameLabel.text = message.from?.firstName ?? "USER"
-    // Clean up previous state first
+
     messageView?.removeFromSuperview()
     nameLabel.removeFromSuperview()
     avatarHostingController?.view.removeFromSuperview()
@@ -92,7 +94,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
       NSLayoutConstraint.activate(constraints)
     }
 
-    let newMessageView = UIMessageView(fullMessage: message)
+    let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId)
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     contentView.addSubview(newMessageView)
 

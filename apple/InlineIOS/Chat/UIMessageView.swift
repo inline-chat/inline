@@ -12,7 +12,7 @@ class UIMessageView: UIView {
 
   private static let attributedCache: NSCache<NSString, NSAttributedString> = {
     let cache = NSCache<NSString, NSAttributedString>()
-    cache.countLimit = 1000
+    cache.countLimit = 1_000
     return cache
   }()
 
@@ -82,6 +82,7 @@ class UIMessageView: UIView {
   }()
 
   var fullMessage: FullMessage
+  let spaceId: Int64
   private let metadataView: MessageTimeAndStatus
 
   var outgoing: Bool {
@@ -118,8 +119,9 @@ class UIMessageView: UIView {
 
   // MARK: - Initialization
 
-  init(fullMessage: FullMessage) {
+  init(fullMessage: FullMessage, spaceId: Int64) {
     self.fullMessage = fullMessage
+    self.spaceId = spaceId
     metadataView = MessageTimeAndStatus(fullMessage)
     super.init(frame: .zero)
 
@@ -334,6 +336,22 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       }
       actions.append(replyAction)
 
+      let createIssueAction = UIAction(title: "Create Linear issue") { _ in
+        Task {
+          do {
+            await try ApiClient.shared.createLinearIssue(
+              text: self.message.text ?? "",
+              spaceId: self.spaceId,
+              messageId: self.message.messageId,
+              chatId: self.message.chatId
+            )
+          } catch {
+            print("FAILED to create issue \(error)")
+          }
+        }
+      }
+      actions.append(createIssueAction)
+
       if let url = getURLAtLocation(location) {
         let openLinkAction = UIAction(title: "Open Link") { _ in
           self.linkTapHandler?(url)
@@ -346,7 +364,11 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
         attributes: .destructive
       ) { _ in
         Task {
-          try? await DataManager.shared.deleteMessage(messageId: self.message.messageId, chatId: self.message.chatId, peerId: self.message.peerId)
+          try? await DataManager.shared.deleteMessage(
+            messageId: self.message.messageId,
+            chatId: self.message.chatId,
+            peerId: self.message.peerId
+          )
         }
       }
       actions.append(deleteAction)
