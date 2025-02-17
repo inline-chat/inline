@@ -1,7 +1,7 @@
 import AppKit
 import InlineKit
-import SwiftUI
 import Logger
+import SwiftUI
 
 class MessageListAppKit: NSViewController {
   // Data
@@ -17,14 +17,17 @@ class MessageListAppKit: NSViewController {
 
   // Specification - mostly useful in debug
   private var feature_scrollsToBottomOnNewMessage = true
-  private var feature_scrollsToBottomInDidLayout = true
   private var feature_setupsInsetsManually = true
   private var feature_updatesHeightsOnWidthChange = true
   private var feature_updatesHeightsOnLiveResizeEnd = true
   private var feature_recalculatesHeightsWhileInitialScroll = true
   private var feature_loadsMoreWhenApproachingTop = true
 
+  // Testing
+  private var feature_scrollsToBottomInDidLayout = true
   private var feature_maintainsScrollFromBottomOnResize = true
+  
+  // Not needed
   private var feature_updatesHeightsOnOffsetChange = false
 
   // Debugging
@@ -187,19 +190,19 @@ class MessageListAppKit: NSViewController {
   }
 
   private func updateMessageViewColors() {
-    let visibleRect = userVisibleRect()
-    let visibleRange = tableView.rows(in: visibleRect)
-
-    for row in visibleRange.location ..< visibleRange.location + visibleRange.length {
-      guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell else {
-        return
-      }
-      let rect = tableView.rect(ofRow: row)
-
-      let fractionToTopOfViewport = (rect.minY - visibleRect.minY) / visibleRect.height
-
-      cell.reflectBoundsChange(fraction: fractionToTopOfViewport)
-    }
+//    let visibleRect = userVisibleRect()
+//    let visibleRange = tableView.rows(in: visibleRect)
+//
+//    for row in visibleRange.location ..< visibleRange.location + visibleRange.length {
+//      guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell else {
+//        return
+//      }
+//      let rect = tableView.rect(ofRow: row)
+//
+//      let fractionToTopOfViewport = (rect.minY - visibleRect.minY) / visibleRect.height
+//
+//      cell.reflectBoundsChange(fraction: fractionToTopOfViewport)
+//    }
   }
 
   private func updateToolbar() {
@@ -207,14 +210,10 @@ class MessageListAppKit: NSViewController {
     guard let window = view.window else { return }
     log.trace("Adjusting view's toolbar")
 
+    let atTop = isAtTop()
+    window.titlebarAppearsTransparent = atTop
     window.isMovableByWindowBackground = true
-
-    if isAtTop() {
-      window.titlebarAppearsTransparent = true
-    } else {
-      window.titlebarAppearsTransparent = false
-      window.titlebarSeparatorStyle = .automatic
-    }
+    window.titlebarSeparatorStyle = .automatic
   }
 
   private func setupViews() {
@@ -331,8 +330,12 @@ class MessageListAppKit: NSViewController {
   @objc private func liveResizeEnded() {
     guard feature_updatesHeightsOnLiveResizeEnd else { return }
 
-    // Recalculate all height when user is done resizing
-    recalculateHeightsOnWidthChange(buffer: 400)
+    precalculateHeightsInBackground()
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+      // Recalculate all height when user is done resizing
+      self?.recalculateHeightsOnWidthChange(buffer: 400)
+    }
   }
 
   // True while we're changing scroll position programmatically
@@ -390,10 +393,7 @@ class MessageListAppKit: NSViewController {
       loadBatch(at: .older)
     }
 
-    // TODO: Optimize
-    // Update toolbar
     updateToolbar()
-
     updateMessageViewColors()
   }
 
@@ -430,14 +430,16 @@ class MessageListAppKit: NSViewController {
 
     log.trace("scroll view frame changed, maintaining scroll from bottom")
 
-    let scrollOffset = scrollView.contentView.bounds.origin
     let viewportSize = scrollView.contentView.bounds.size
-    let contentSize = scrollView.documentView?.frame.size ?? .zero
 
     // Only do this if frame height changed. Width is handled in another function
     if abs(viewportSize.height - previousViewportHeight) < 0.1 {
       return
     }
+
+    let scrollOffset = scrollView.contentView.bounds.origin
+    let contentSize = scrollView.documentView?.frame.size ?? .zero
+
     log
       .trace(
         "scroll view frame changed, maintaining scroll from bottom \(contentSize.height) \(previousViewportHeight)"
@@ -455,29 +457,26 @@ class MessageListAppKit: NSViewController {
     // Early return if no change needed
     if abs(nextScrollPosition - scrollOffset.y) < 0.5 { return }
 
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    // Set new scroll position
-    documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
-    CATransaction.commit()
+//    CATransaction.begin()
+//    CATransaction.setDisableActions(true)
+//    // Set new scroll position
+//    documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
+//    CATransaction.commit()
 
     //    Looked a bit laggy to me
-    //    NSAnimationContext.runAnimationGroup { context in
-    //      context.duration = 0
-    //      documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
-    //    }
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0
+      context.allowsImplicitAnimation = false
+      documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
+    }
   }
 
   private var lastKnownWidth: CGFloat = 0
   private var needsInitialScroll = true
 
-  override func viewDidAppear() {
-    super.viewDidAppear()
-    updateScrollViewInsets()
-  }
-
   override func viewDidLayout() {
     super.viewDidLayout()
+    log.trace("viewDidLayout() called")
     updateScrollViewInsets()
     checkWidthChangeForHeights()
     updateToolbar()
@@ -489,7 +488,7 @@ class MessageListAppKit: NSViewController {
         // Note(@mo): I still don't know why this fixes it but as soon as I compare the widths for the change,
         // it no longer works. this needs to be called unconditionally.
         // this is needed to ensure the scroll is done after the initial layout and prevents cutting off last msg
-        let _ = recalculateHeightsOnWidthChange()
+        let _ = recalculateHeightsOnWidthChange() // FIXME: optimize this or get rid of it
       }
 
       scrollToBottom(animated: false)
@@ -506,6 +505,34 @@ class MessageListAppKit: NSViewController {
         scrollToBottom(animated: false)
       }
     }
+  }
+
+  override func viewWillAppear() {
+    super.viewWillAppear()
+    log.trace("viewWillAppear() called")
+  }
+
+  override func viewDidAppear() {
+    super.viewDidAppear()
+    log.trace("viewDidAppear() called")
+
+    updateScrollViewInsets()
+    updateToolbar()
+  }
+
+  override func viewWillDisappear() {
+    super.viewWillDisappear()
+    log.trace("viewWillDisappear() called")
+  }
+
+  override func viewDidDisappear() {
+    super.viewDidDisappear()
+    log.trace("viewDidDisappear() called")
+  }
+
+  override func viewWillLayout() {
+    super.viewWillLayout()
+    log.trace("viewWillLayout() called")
   }
 
   // Called on did layout
@@ -525,19 +552,19 @@ class MessageListAppKit: NSViewController {
     if abs(newWidth - lastKnownWidth) > magicWidthDiff {
       lastKnownWidth = newWidth
 
-      let availableWidth = sizeCalculator.getAvailableWidth(
-        tableWidth: tableView.bounds.width
-      )
+      recalculateHeightsOnWidthChange(duringLiveResize: true)
 
-      if availableWidth < Theme.messageMaxWidth {
-        // Update heights
-//        maintainingBottomScroll { // This ensures the scroll will not jump while resizing a multi-line message
-//          recalculateHeightsOnWidthChange
-//          return true
-//        }
+      /// Below used to check if width is above max width to not calculate anything, but
+      /// this results in very subtle bugs, eg. when window was smaller, then increased width beyond max (so the
+      /// calculations are paused, then increases height. now the recalc doesn't happen for older messages.
 
-        recalculateHeightsOnWidthChange(duringLiveResize: true)
-      }
+//      let availableWidth = sizeCalculator.getAvailableWidth(
+//        tableWidth: tableWidth()
+//      )
+//      // FIXME: it doesn't do one last calc at the exact limit
+//      if availableWidth < Theme.messageMaxWidth {
+//        recalculateHeightsOnWidthChange(duringLiveResize: true)
+//      }
     }
   }
 
@@ -737,6 +764,7 @@ class MessageListAppKit: NSViewController {
   }
 
   // Note this function will stop any animation that is happening so must be used with caution
+  // increasing buffer results in unstable scroll if not maintained
   private func recalculateHeightsOnWidthChange(buffer: Int = 0, duringLiveResize: Bool = false) {
     log.trace("Recalculating heights on width change")
 
@@ -789,21 +817,68 @@ class MessageListAppKit: NSViewController {
     }
 
     log.trace("Rows to update: \(rowsToUpdate)")
-    let apply = anchorScroll(to: .bottomRow)
+    let apply: (() -> Void)? = if !duringLiveResize { anchorScroll(to: .bottomRow) } else { nil }
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
       context.allowsImplicitAnimation = false
 
+      self.tableView.beginUpdates()
+      // Update heights in cells and setNeedsDisplay
+      updateHeightsForRows(at: rowsToUpdate)
+
       // Experimental: noteheight of rows was below reload data initially
-      tableView.noteHeightOfRows(withIndexesChanged: rowsToUpdate)
+      self.tableView.noteHeightOfRows(withIndexesChanged: rowsToUpdate)
+      self.tableView.endUpdates()
 
-      tableView
-        .reloadData(
-          forRowIndexes: rowsToUpdate,
-          columnIndexes: IndexSet([0])
-        )
+      apply?()
+    }
+  }
 
-      apply()
+  private func updateHeightsForRows(at indexSet: IndexSet) {
+    for row in indexSet {
+      if let rowView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell {
+        var props = messageProps(for: row)
+        if let message = message(forRow: row) {
+          let (_, textSize, photoSize) = sizeCalculator.calculateSize(
+            for: message,
+            with: props,
+            tableWidth: tableWidth()
+          )
+          props.photoWidth = photoSize?.width
+          props.photoHeight = photoSize?.height
+          props.textWidth = textSize.width
+          props.textHeight = textSize.height
+          rowView.updateTextAndSizeWithProps(props: props)
+        }
+      }
+    }
+  }
+
+  enum RowGroup {
+    case all
+    case visible
+  }
+
+  /// precalculate heights for a width
+  private func precalculateHeightsInBackground(rowGroup: RowGroup = .all, width: CGFloat? = nil) {
+    log.trace("precalculateHeightsInBackground")
+    let width_ = width ?? tableWidth()
+    // for now
+    let rowsToUpdate: IndexSet
+    switch rowGroup {
+      case .all:
+        rowsToUpdate = IndexSet(integersIn: 0 ..< tableView.numberOfRows)
+      case .visible:
+        let visibleRange = tableView.rows(in: tableView.visibleRect)
+        rowsToUpdate = IndexSet(integersIn: visibleRange.location ..< visibleRange.location + visibleRange.length)
+    }
+
+    Task(priority: .userInitiated) {
+      for row in rowsToUpdate {
+        guard let message = message(forRow: row) else { continue }
+        let props = messageProps(for: row)
+        let _ = sizeCalculator.calculateSize(for: message, with: props, tableWidth: width_)
+      }
     }
   }
 
@@ -824,21 +899,34 @@ class MessageListAppKit: NSViewController {
     return sizeCalculator.cachedSize(messageStableId: message.id)
   }
 
+  private func messageProps(for row: Int) -> MessageViewProps {
+    guard row >= 0, row < messages.count else {
+      return MessageViewProps(
+        firstInGroup: true,
+        isLastMessage: true,
+        isFirstMessage: true,
+        isRtl: false
+      )
+    }
+
+    let message = messages[row]
+    return MessageViewProps(
+      firstInGroup: isFirstInGroup(at: row),
+      isLastMessage: isLastMessage(at: row),
+      isFirstMessage: isFirstMessage(at: row),
+      isRtl: false
+    )
+  }
+
   private func calculateNewHeight(forRow row: Int) -> CGFloat {
     guard row >= 0, row < messages.count else {
       return defaultRowHeight
     }
 
     let message = messages[row]
-    let props = MessageViewProps(
-      firstInGroup: isFirstInGroup(at: row),
-      isLastMessage: isLastMessage(at: row),
-      isFirstMessage: isFirstMessage(at: row),
-      isRtl: false
-    )
+    let props = messageProps(for: row)
 
-    let tableWidth = tableView.bounds.width
-    let (size, _, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
+    let (size, _, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth())
     return size.height
   }
 
@@ -905,8 +993,15 @@ extension MessageListAppKit: NSTableViewDelegate {
     row == 0
   }
 
+  /// ceil'ed table width.
+  /// ceiling prevent subpixel differences in height calc passes which can cause jitter
+  private func tableWidth() -> CGFloat {
+    ceil(tableView.bounds.width)
+  }
+
   func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     guard row >= 0, row < messages.count else { return nil }
+    log.trace("Making/using view for row \(row)")
 
     let message = messages[row]
     let identifier = NSUserInterfaceItemIdentifier("MessageCell")
@@ -915,17 +1010,9 @@ extension MessageListAppKit: NSTableViewDelegate {
       ?? MessageTableCell()
     cell.identifier = identifier
 
-    var props = MessageViewProps(
-      firstInGroup: isFirstInGroup(at: row),
-      isLastMessage: isLastMessage(at: row),
-      isFirstMessage: isFirstMessage(at: row),
-//      isRtl: message.message.text?.isRTL ?? false
-      // TODO: optimize
-      isRtl: false
-    )
+    var props = messageProps(for: row)
 
-    let tableWidth = tableView.bounds.width
-    let (_, textSize, photoSize) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
+    let (_, textSize, photoSize) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth())
 
     props.textWidth = textSize.width
     props.textHeight = textSize.height
@@ -943,22 +1030,20 @@ extension MessageListAppKit: NSTableViewDelegate {
     guard row >= 0, row < messages.count else {
       return defaultRowHeight
     }
+    log.trace("Noting height change for row \(row)")
 
     let message = messages[row]
 
-    let props = MessageViewProps(
-      firstInGroup: isFirstInGroup(at: row),
-      isLastMessage: isLastMessage(at: row),
-      isFirstMessage: isFirstMessage(at: row),
-//      isRtl: message.message.text?.isRTL ?? false
-      // TODO: optimize
-      isRtl: false
-    )
+    var height: CGFloat = 0.0
 
-    let tableWidth = tableView.bounds.width
+    let props = messageProps(for: row)
+
+    let tableWidth = ceil(tableView.bounds.width)
 
     let (size, _, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
-    return size.height
+    height = size.height
+
+    return height
   }
 }
 
@@ -977,7 +1062,8 @@ extension NSTableView {
       y: maxVisibleY + bottomInset - scrollView.contentView.bounds.height
     )
 
-    scrollView.contentView.scroll(targetPoint)
+    // scrollView.contentView.scroll(targetPoint)
+    scrollView.documentView?.scroll(targetPoint)
 
     // Ensure the last row is visible
     // let lastRow = numberOfRows - 1
