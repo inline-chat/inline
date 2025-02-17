@@ -20,6 +20,8 @@ class FPSHistory: ObservableObject {
 @available(macOS 14.0, *)
 class FPSCounter: ObservableObject {
   @Published private(set) var fps = 0
+  @Published private(set) var totalLostFrames = 0
+
   private(set) var fpsHistory = FPSHistory()
 
   private var displayLink: CADisplayLink?
@@ -89,10 +91,18 @@ class FPSCounter: ObservableObject {
     let elapsed = link.timestamp - lastTimestamp
     if elapsed >= updateInterval {
       let currentFPS = Int(round(Double(frameCount) / elapsed))
+      let capturedFrameCount = frameCount
 
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
         fps = currentFPS // Remove the min(maxFPS) constraint
+
+        // Calculate lost frames
+        let lostFrames = Int((Double(maxFPS) * elapsed) - Double(capturedFrameCount))
+        if lostFrames > 0 {
+          print("Lost frames detected: \(lostFrames.formatted(.number.grouping(.never)))")
+        }
+        totalLostFrames += lostFrames
 
         withAnimation(.linear(duration: 0.195)) {
           if self.fpsHistory.history.isEmpty {
@@ -187,7 +197,11 @@ struct FPSView: View {
         .font(.system(size: 12, weight: .semibold))
         .offset(y: 2).fixedSize()
 //        .animation(.easeOut(duration: 0.08), value: counter.fps)
-      Text("\(counter.maxFPS)Hz")
+//      Text("\(counter.maxFPS)Hz")
+//        .foregroundColor(.gray)
+//        .font(.caption)
+//        .offset(y: -1)
+      Text("Lost: \(counter.totalLostFrames)")
         .foregroundColor(.gray)
         .font(.caption)
         .offset(y: -1)
