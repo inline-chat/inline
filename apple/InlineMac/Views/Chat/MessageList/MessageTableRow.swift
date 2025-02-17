@@ -1,8 +1,8 @@
 import AppKit
 import InlineKit
 import InlineUI
-import SwiftUI
 import Logger
+import SwiftUI
 
 class MessageTableCell: NSView {
   private var messageView: MessageViewAppKit?
@@ -71,7 +71,7 @@ class MessageTableCell: NSView {
       log.trace("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
       self.currentContent = (message, props)
       updateTextAndSize()
-      
+
       return
     }
 
@@ -96,6 +96,14 @@ class MessageTableCell: NSView {
     guard let messageView else { return }
 
     messageView.updateTextAndSize(fullMessage: content.0, props: content.1)
+    needsDisplay = true
+  }
+
+  func updateTextAndSizeWithProps(props: MessageViewProps) {
+    guard let content = currentContent else { return }
+    guard let messageView else { return }
+
+    messageView.updateTextAndSize(fullMessage: content.0, props: props)
     needsDisplay = true
   }
 

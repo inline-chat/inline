@@ -3,11 +3,11 @@ import AppKit
 import Foundation
 import InlineKit
 import InlineUI
+import Logger
 import Nuke
 import NukeUI
 import SwiftUI
 import Throttler
-import Logger
 
 class MessageViewAppKit: NSView {
   static let avatarSize: CGFloat = Theme.messageAvatarSize
@@ -603,6 +603,8 @@ class MessageViewAppKit: NSView {
       // This helps refresh the layout for textView
       textView.textContainer?.containerSize = CGSize(width: textWidth, height: props.textHeight ?? 0)
 
+      // very subtle fix:
+      // ensure the change is reflected even if it was offscreen when live resize started
       if useTextKit2 {
         textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
         textView.layout()
