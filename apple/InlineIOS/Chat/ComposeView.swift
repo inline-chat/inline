@@ -105,7 +105,7 @@ class ComposeView: UIView {
 
   static let minHeight: CGFloat = 42.0
   private let maxHeight: CGFloat = 600
-  private var heightConstraint: NSLayoutConstraint!
+  private var composeHeightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
   static let textViewVerticalPadding: CGFloat = 9.0
   static let textViewHorizantalPadding: CGFloat = 12.0
@@ -173,10 +173,10 @@ class ComposeView: UIView {
     sendButtonContainer.addSubview(sendButton)
     addSubview(plusButton)
 
-    heightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
+    composeHeightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
 
     NSLayoutConstraint.activate([
-      heightConstraint,
+      composeHeightConstraint,
 
       textViewContainer.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
       textViewContainer.topAnchor.constraint(equalTo: topAnchor),
@@ -362,9 +362,9 @@ class ComposeView: UIView {
     prevTextHeight = contentHeight
 
     let newHeight = textViewHeightByContentHeight(contentHeight)
-    guard abs(heightConstraint.constant - newHeight) > 1 else { return }
+    guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
 
-    heightConstraint.constant = newHeight
+    composeHeightConstraint.constant = newHeight
     superview?.layoutIfNeeded()
 
     onHeightChange?(newHeight)
@@ -372,7 +372,7 @@ class ComposeView: UIView {
 
   private func resetHeight() {
     UIView.animate(withDuration: 0.2) {
-      self.heightConstraint.constant = Self.minHeight
+      self.composeHeightConstraint.constant = Self.minHeight
       self.superview?.layoutIfNeeded()
     }
     onHeightChange?(Self.minHeight)
