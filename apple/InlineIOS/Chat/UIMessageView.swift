@@ -1,4 +1,6 @@
+import ContextMenuAuxiliaryPreview
 import InlineKit
+import Logger
 import Nuke
 import NukeUI
 import SwiftUI
@@ -18,6 +20,7 @@ class UIMessageView: UIView {
 
   var linkTapHandler: ((URL) -> Void)?
   private var interaction: UIContextMenuInteraction?
+  private var contextMenuManager: ContextMenuManager?
 
   // MARK: - UI Components
 
@@ -311,18 +314,40 @@ class UIMessageView: UIView {
   private func setupContextMenu() {
     let interaction = UIContextMenuInteraction(delegate: self)
     self.interaction = interaction
+
+    contextMenuManager = ContextMenuManager(
+      contextMenuInteraction: interaction,
+      menuTargetView: self
+    )
+    contextMenuManager?.delegate = self
+    contextMenuManager?.auxiliaryPreviewConfig = AuxiliaryPreviewConfig(
+      verticalAnchorPosition: .automatic,
+      horizontalAlignment: outgoing ? .targetTrailing : .targetLeading,
+      preferredWidth: .none,
+      preferredHeight: .none,
+      marginInner: 10,
+      marginOuter: 10,
+      transitionConfigEntrance: .syncedToMenuEntranceTransition(),
+      transitionExitPreset: .fade
+    )
+
     bubbleView.addInteraction(interaction)
   }
 }
 
 // MARK: - Context Menu
 
-extension UIMessageView: UIContextMenuInteractionDelegate {
+extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDelegate {
   func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction,
     configurationForMenuAtLocation location: CGPoint
   ) -> UIContextMenuConfiguration? {
-    UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+    contextMenuManager?.notifyOnContextMenuInteraction(
+      interaction,
+      configurationForMenuAtLocation: location
+    )
+
+    return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
       guard let self else { return UIMenu(children: []) }
 
       let copyAction = UIAction(title: "Copy") { _ in
@@ -339,7 +364,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       let createIssueAction = UIAction(title: "Create Linear issue") { _ in
         Task {
           do {
-            await try ApiClient.shared.createLinearIssue(
+            _ = try await ApiClient.shared.createLinearIssue(
               text: self.message.text ?? "",
               spaceId: self.spaceId,
               messageId: self.message.messageId,
@@ -411,6 +436,11 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
     willDisplayMenuFor configuration: UIContextMenuConfiguration,
     animator: UIContextMenuInteractionAnimating?
   ) {
+    contextMenuManager?.notifyOnContextMenuInteraction(
+      interaction,
+      willDisplayMenuFor: configuration,
+      animator: animator
+    )
     Self.contextMenuOpen = true
   }
 
@@ -419,7 +449,65 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
     willEndFor configuration: UIContextMenuConfiguration,
     animator: UIContextMenuInteractionAnimating?
   ) {
+    contextMenuManager?.notifyOnContextMenuInteraction(
+      interaction,
+      willEndFor: configuration,
+      animator: animator
+    )
     Self.contextMenuOpen = false
+  }
+
+  func onRequestMenuAuxiliaryPreview(sender: ContextMenuManager) -> UIView? {
+    let emojis = ["👍", "👎", "☕️", "🫡", "🥹", "🥲", "🙏", "❤️"]
+    let previewHeight: CGFloat = 55
+
+    let stackView = UIStackView()
+    stackView.axis = .horizontal
+    stackView.distribution = .fillEqually
+    stackView.spacing = 2
+    stackView.alignment = .center
+    stackView.backgroundColor = .systemBackground.withAlphaComponent(0.8)
+    stackView.isLayoutMarginsRelativeArrangement = true
+    stackView.layoutMargins = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
+
+    stackView.layer.cornerRadius = previewHeight / 2
+    stackView.layer.masksToBounds = true
+
+    // Add emoji buttons
+    for emoji in emojis {
+      let button = UIButton()
+      button.setTitle(emoji, for: .normal)
+      button.titleLabel?.font = UIFont.systemFont(ofSize: 20)
+      button.backgroundColor = .clear
+      button.addTarget(self, action: #selector(handleEmojiTap(_:)), for: .touchUpInside)
+      stackView.addArrangedSubview(button)
+    }
+
+    let buttonCount = CGFloat(emojis.count)
+    let width = (buttonCount * 40) + ((buttonCount - 1) * stackView.spacing) + 12
+    stackView.frame = CGRect(x: 0, y: 0, width: width, height: previewHeight)
+
+    return stackView
+  }
+
+  @objc private func handleEmojiTap(_ sender: UIButton) {
+    guard let emoji = sender.titleLabel?.text else { return }
+
+    Task {
+      do {
+        try await DataManager.shared.addReaction(messageId: message.messageId, chatId: message.chatId, emoji: emoji)
+        triggerMessageReload()
+      } catch {
+        Log.shared.error("Failed to add reaction \(error)")
+      }
+    }
+  }
+
+  private func triggerMessageReload() {
+    Task { @MainActor in
+      await MessagesPublisher.shared
+        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId)
+    }
   }
 }
 
