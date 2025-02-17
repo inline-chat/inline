@@ -167,7 +167,7 @@ class MessageSizeCalculator {
     // Highly Experimental:
     // So we get smooth bubble resize but less lag
     // Make available width divisible by 4 to do one fourth of layouting per text
-    availableWidth = floor(availableWidth / 3) * 3
+    //availableWidth = floor(availableWidth / 3) * 3
 
     log.trace("availableWidth \(availableWidth) for text \(text)")
     var textSize: CGSize?
