@@ -78,7 +78,7 @@ Please return a simple JSON like this with the results:
       throw new Error("Invalid JSON response from OpenAI")
     }
 
-    Log.shared.debug("Parsed JSON response", jsonResponse)
+    Log.shared.info("Parsed JSON response", jsonResponse)
 
     await createIssueFunc({
       assigneeId: jsonResponse.assigneeId,
@@ -109,10 +109,10 @@ const createIssueFunc = async (props: CreateIssueProps) => {
 
   const teamId = await getLinearTeams({ userId: props.currentUserId })
   const teamIdValue = teamId.teams.teams.nodes[0].id
-  Log.shared.debug("Retrieved team ID")
+  Log.shared.info("Retrieved team ID")
   const statuses = await getLinearIssueStatuses({ userId: props.currentUserId })
   const unstarded = statuses.workflowStates.filter((status: any) => status.type === "unstarted")
-  Log.shared.debug("Retrieved workflow states")
+  Log.shared.info("Retrieved workflow states")
 
   try {
     await createIssue({
