@@ -371,7 +371,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   public func createLinearIssue(
     text: String,
-    spaceId: Int64,
     messageId: Int64,
     chatId: Int64
   ) async throws -> EmptyPayload {
@@ -379,7 +378,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       .createLinearIssue,
       body: [
         "text": text,
-        "spaceId": spaceId,
         "messageId": messageId,
         "chatId": chatId,
       ],
