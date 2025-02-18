@@ -63,9 +63,10 @@ Please return a simple JSON like this with the results:
 
   try {
     const content = response.choices[0]?.message?.content
-    Log.shared.debug("Got OpenAI response")
+    Log.shared.info("Got OpenAI response", content)
 
     if (!content) {
+      Log.shared.error("Empty response from OpenAI")
       throw new Error("Empty response from OpenAI")
     }
 
@@ -77,7 +78,7 @@ Please return a simple JSON like this with the results:
       throw new Error("Invalid JSON response from OpenAI")
     }
 
-    Log.shared.debug("Parsed JSON response")
+    Log.shared.debug("Parsed JSON response", jsonResponse)
 
     await createIssueFunc({
       assigneeId: jsonResponse.assigneeId,
@@ -104,7 +105,7 @@ type CreateIssueProps = {
 }
 
 const createIssueFunc = async (props: CreateIssueProps) => {
-  Log.shared.info("Starting issue creation")
+  Log.shared.info("Starting issue creation", props)
 
   const teamId = await getLinearTeams({ userId: props.currentUserId })
   const teamIdValue = teamId.teams.teams.nodes[0].id
