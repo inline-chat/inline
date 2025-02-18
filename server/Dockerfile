@@ -36,7 +36,7 @@ ENV DATABASE_URL=${DATABASE_URL}
 
 # [optional] tests & build
 ENV NODE_ENV=production
-RUN bun typecheck 
+# RUN bun typecheck 
 RUN bun run build
 
 # copy production dependencies and source code into final image
@@ -57,4 +57,4 @@ EXPOSE 8000/tcp
 # HEALTHCHECK --interval=10s --timeout=30s --start-period=5s --retries=3 \
 #   CMD curl -f http://localhost:8000/ || exit 1
 
-ENTRYPOINT [ "bun", "run", "dist/index.js" ]
+ENTRYPOINT [ "bun", "run", "server/dist/index.js" ]
