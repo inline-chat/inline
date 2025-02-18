@@ -9,11 +9,13 @@ import * as arctic from "arctic"
 
 export let linearOauth: arctic.Linear | undefined
 
-if (process.env.LINEAR_CLIENT_ID && process.env.LINEAR_CLIENT_SECRET && process.env.LINEAR_REDIRECT_URI) {
+if (process.env.LINEAR_CLIENT_ID && process.env.LINEAR_CLIENT_SECRET) {
   linearOauth = new arctic.Linear(
     process.env.LINEAR_CLIENT_ID,
     process.env.LINEAR_CLIENT_SECRET,
-    process.env.NODE_ENV === "production" ? process.env.LINEAR_REDIRECT_URI : "https://api.inline.chat/",
+    process.env.NODE_ENV === "production"
+      ? "https://api.inline.chat/integrations/linear/callback"
+      : "https://api.inline.chat/",
   )
 }
 
