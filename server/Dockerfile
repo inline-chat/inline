@@ -37,12 +37,13 @@ ENV DATABASE_URL=${DATABASE_URL}
 # [optional] tests & build
 ENV NODE_ENV=production
 # RUN bun typecheck 
-RUN bun run build
+RUN cd server && bun run build
 
 # copy production dependencies and source code into final image
 FROM base AS release
 COPY --from=install /temp/prod/node_modules node_modules
-COPY --from=prerelease /usr/src/app/dist ./dist
+COPY --from=prerelease /usr/src/app/server/dist ./server/dist
+COPY --from=prerelease /usr/src/app/server/package.json ./server/package.json
 COPY --from=prerelease /usr/src/app/package.json .
 
 # Install curl for Coolify healthcheck
