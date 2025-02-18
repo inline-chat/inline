@@ -31,7 +31,6 @@ export const handler = async (
   { currentUserId }: Context,
 ): Promise<Static<typeof Response>> => {
   let { text, messageId, chatId } = input
-  Log.shared.info("Creating Linear issue", { input })
 
   const labels = await getLinearIssueLabels({ userId: currentUserId })
 
@@ -63,7 +62,6 @@ Please return a simple JSON like this with the results:
 
   try {
     const content = response.choices[0]?.message?.content
-    Log.shared.info("Got OpenAI response", content)
 
     if (!content) {
       Log.shared.error("Empty response from OpenAI")
@@ -77,8 +75,6 @@ Please return a simple JSON like this with the results:
       Log.shared.error("Failed to parse OpenAI response", { content, parseError })
       throw new Error("Invalid JSON response from OpenAI")
     }
-
-    Log.shared.info("Parsed JSON response", jsonResponse)
 
     await createIssueFunc({
       assigneeId: jsonResponse.assigneeId,
@@ -105,14 +101,11 @@ type CreateIssueProps = {
 }
 
 const createIssueFunc = async (props: CreateIssueProps) => {
-  Log.shared.info("Starting issue creation", props)
-
   const teamId = await getLinearTeams({ userId: props.currentUserId })
   const teamIdValue = teamId.teams.teams.nodes[0].id
-  Log.shared.info("Retrieved team ID")
+
   const statuses = await getLinearIssueStatuses({ userId: props.currentUserId })
   const unstarded = statuses.workflowStates.filter((status: any) => status.type === "unstarted")
-  Log.shared.info("Retrieved workflow states")
 
   try {
     await createIssue({
@@ -126,7 +119,6 @@ const createIssueFunc = async (props: CreateIssueProps) => {
       assigneeId: props.assigneeId,
       statusId: unstarded[0].id,
     })
-    Log.shared.info("Successfully created Linear issue")
   } catch (error) {
     Log.shared.error("Failed to create Linear issue", { error })
   }
