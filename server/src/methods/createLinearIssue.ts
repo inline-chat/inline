@@ -83,7 +83,7 @@ Please return a simple JSON like this with the results:
     await createIssueFunc({
       assigneeId: jsonResponse.assigneeId,
       title: jsonResponse.title,
-      description: jsonResponse.description.original,
+      description: jsonResponse.description,
       messageId: messageId,
       chatId: chatId,
       labelIds: jsonResponse.labelIds,
