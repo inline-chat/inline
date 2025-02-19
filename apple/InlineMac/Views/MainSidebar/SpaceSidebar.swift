@@ -4,7 +4,7 @@ import SwiftUI
 
 struct SpaceSidebar: View {
   @EnvironmentObject var ws: WebSocketManager
-  @EnvironmentObject var navigation: NavigationModel
+  @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
 
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
@@ -34,14 +34,12 @@ struct SpaceSidebar: View {
     ThreadItem(
       thread: chat,
       action: {
-        navigation.select(.chat(peer: peerId))
+        nav.open(.chat(peer: peerId))
       },
       commandPress: {
         openWindow(value: peerId)
       },
-      selected: navigation.spaceSelection.wrappedValue == .chat(
-        peer: peerId
-      )
+      selected: nav.currentRoute == .chat(peer: peerId)
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
@@ -57,14 +55,12 @@ struct SpaceSidebar: View {
       dialog: dialog,
       chat: chat,
       action: {
-        navigation.select(.chat(peer: peerId))
+        nav.open(.chat(peer: peerId))
       },
       commandPress: {
         openWindow(value: peerId)
       },
-      selected: navigation.spaceSelection.wrappedValue == .chat(
-        peer: peerId
-      )
+      selected: nav.currentRoute == .chat(peer: peerId)
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
@@ -84,13 +80,13 @@ struct SpaceSidebar: View {
     .listRowInsets(EdgeInsets())
     .listRowBackground(Color.clear)
     .listStyle(.sidebar)
-    .toolbar {
-      ToolbarItemGroup(placement: .automatic) {
-        Button("Back to Home", systemImage: "house") {
-          navigation.goHome()
-        }
-      }
-    }
+//    .toolbar {
+//      ToolbarItemGroup(placement: .automatic) {
+//        Button("Back to Home", systemImage: "house") {
+//          nav.openHome()
+//        }
+//      }
+//    }
     .safeAreaInset(
       edge: .top,
       content: {
@@ -110,7 +106,6 @@ struct SpaceSidebar: View {
           .padding(.top, 0)
           // .frame(maxWidth: .infinity, alignment: .leading)
           // .padding(.horizontal)
-          
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
@@ -129,8 +124,7 @@ struct SpaceSidebar: View {
 #Preview {
   NavigationSplitView {
     SpaceSidebar(spaceId: 2)
-      .previewsEnvironment(.populated)
-      .environmentObject(NavigationModel())
+      .previewsEnvironmentForMac(.populated)
   } detail: {
     Text("Welcome.")
   }
