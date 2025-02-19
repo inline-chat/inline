@@ -4,7 +4,7 @@ import SwiftUI
 
 struct SpaceItem: View {
   @EnvironmentObject var dataManager: DataManager
-  @EnvironmentObject var nav: NavigationModel
+  @EnvironmentObject var nav: Nav
 
   @State private var alertPresented: Bool = false
   @State private var pendingAction: Action?
@@ -17,7 +17,7 @@ struct SpaceItem: View {
 
   var body: some View {
     let view = Button {
-      nav.openSpace(id: space.id)
+      nav.openSpace(space.id)
     } label: {
       content
         .frame(maxWidth: .infinity, maxHeight: .infinity)

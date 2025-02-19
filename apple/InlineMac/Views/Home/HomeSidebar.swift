@@ -4,11 +4,10 @@ import SwiftUI
 
 struct HomeSidebar: View {
   @EnvironmentObject var ws: WebSocketManager
-  @EnvironmentObject var nav: NavigationModel
+  @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager
   @Environment(\.appDatabase) var db
-  @Environment(\.openWindow) var openWindow
 
   @EnvironmentStateObject var model: SpaceListViewModel
   @EnvironmentStateObject var home: HomeViewModel
@@ -41,17 +40,17 @@ struct HomeSidebar: View {
         spacesAndUsersView
       }
     }
-    .toolbar(content: {
-      ToolbarItemGroup(placement: .automatic) {
-        Spacer()
-
-        Menu("New", systemImage: "plus") {
-          Button("New Space") {
-            nav.createSpaceSheetPresented = true
-          }
-        }
-      }
-    })
+//    .toolbar(content: {
+//      ToolbarItemGroup(placement: .automatic) {
+//        Spacer()
+//
+//        Menu("New", systemImage: "plus") {
+//          Button("New Space") {
+//            nav.createSpaceSheetPresented = true
+//          }
+//        }
+//      }
+//    })
     .listStyle(.sidebar)
     .safeAreaInset(
       edge: .top,
@@ -100,7 +99,7 @@ struct HomeSidebar: View {
               isSearching = false
             } else {
               // Navigate to home root and clear selection
-              nav.select(.homeRoot)
+              nav.openHome()
             }
             return nil
           }
@@ -144,11 +143,9 @@ struct HomeSidebar: View {
         userPressed(user: user)
       },
       commandPress: {
-        openWindow(value: Peer.user(id: user.id))
+        openInWindow(Peer.user(id: user.id))
       },
-      selected: nav.currentHomeRoute == .chat(
-        peer: .user(id: user.id)
-      ),
+      selected: nav.currentRoute == .chat(peer: .user(id: user.id)),
       rendersSavedMsg: true
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
@@ -202,7 +199,7 @@ struct HomeSidebar: View {
         search.clear()
         isSearching = false
 
-        nav.navigate(to: .chat(peer: .user(id: user.id)))
+        nav.open(.chat(peer: .user(id: user.id)))
       } catch {
         Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
         overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
@@ -212,7 +209,12 @@ struct HomeSidebar: View {
 
   private func userPressed(user: User) {
     // Open chat in home
-    nav.select(.chat(peer: .user(id: user.id)))
+    nav.open(.chat(peer: .user(id: user.id)))
+  }
+
+  private func openInWindow(_ peer: Peer) {
+    // TODO: implement when we support multiple windows
+    nav.open(.chat(peer: peer))
   }
 }
 
