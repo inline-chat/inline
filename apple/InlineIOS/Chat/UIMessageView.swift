@@ -545,7 +545,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
         try await DataManager.shared.addReaction(messageId: message.messageId, chatId: message.chatId, emoji: emoji)
         triggerMessageReload()
       } catch {
-        Log.shared.error("Failed to add reaction \(error)")
+        Log.shared.error("Failed to add reaction", error: error)
       }
     }
   }
