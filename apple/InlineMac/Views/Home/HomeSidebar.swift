@@ -99,7 +99,7 @@ struct HomeSidebar: View {
               isSearching = false
             } else {
               // Navigate to home root and clear selection
-              nav.openHome()
+              nav.handleEsc()
             }
             return nil
           }
