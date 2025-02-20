@@ -10,7 +10,10 @@ class MainWindowController: NSWindowController {
     dependencies.viewModel.topLevelRoute
   }
 
-  private var currentToolbarItems: [NSToolbarItem.Identifier] = []
+  private var navBackButton: NSButton?
+  private var navForwardButton: NSButton?
+//  private var navBackButton: NSToolbarItem?
+//  private var navForwardButton: NSToolbarItem?
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
@@ -79,16 +82,8 @@ class MainWindowController: NSWindowController {
     window?.isMovableByWindowBackground = true
     window?.titlebarAppearsTransparent = true
     window?.titleVisibility = .hidden
-    // window?.toolbarStyle = .unified
 
-    // setup toolbar
-    currentToolbarItems = []
-    
-    while toolbar.items.count > 0 {
-      toolbar.removeItem(at: 0)
-    }
-    
-    toolbar.validateVisibleItems()
+    reloadToolbar()
   }
 
   private func setupMainSplitView() {
@@ -100,25 +95,24 @@ class MainWindowController: NSWindowController {
     window?.isMovableByWindowBackground = false
     window?.titlebarAppearsTransparent = false // depends on inner route as well
 
-    while toolbar.items.count > 0 {
-      toolbar.removeItem(at: 0)
+    reloadToolbar()
+  }
+
+  private func reloadToolbar() {
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.0
+      context.allowsImplicitAnimation = false
+
+      while toolbar.items.count > 0 {
+        toolbar.removeItem(at: 0)
+      }
+
+      for item in currentToolbarIdentifiers {
+        toolbar.insertItem(withItemIdentifier: item, at: toolbar.items.count)
+      }
+
+      toolbar.validateVisibleItems()
     }
-
-    currentToolbarItems = [
-      .toggleSidebar,
-      .flexibleSpace,
-      .homePlus,
-      .sidebarTrackingSeparator,
-      .flexibleSpace,
-    ]
-
-    for item in currentToolbarItems {
-      toolbar.insertItem(withItemIdentifier: item, at: toolbar.items.count)
-    }
-
-    toolbar.validateVisibleItems()
-    window?.toolbar = toolbar
-    toolbar.isVisible = true
   }
 
   private func switchTopLevel(_ route: TopLevelRoute) {
@@ -134,6 +128,22 @@ class MainWindowController: NSWindowController {
   private func subscribe() {
     dependencies.viewModel.$topLevelRoute.sink { route in
       self.switchTopLevel(route)
+    }.store(in: &cancellables)
+
+    dependencies.nav.$currentRoute.sink { [weak self] _ in
+      guard let self else { return }
+      guard topLevelRoute == .main else { return }
+
+      // Make sure this is called with the right route. Probably in sink we don't have latest value yet
+      reloadToolbar()
+    }.store(in: &cancellables)
+
+    dependencies.nav.$canGoBack.sink { [weak self] value in
+      self?.navBackButton?.isEnabled = value
+    }.store(in: &cancellables)
+
+    dependencies.nav.$canGoForward.sink { [weak self] value in
+      self?.navForwardButton?.isEnabled = value
     }.store(in: &cancellables)
   }
 
@@ -170,6 +180,12 @@ class MainWindowController: NSWindowController {
       window.close()
     }
   }
+
+  deinit {
+    cancellables.removeAll()
+    navBackButton = nil
+    navForwardButton = nil
+  }
 }
 
 // MARK: - NSToolbarDelegate
@@ -177,33 +193,24 @@ class MainWindowController: NSWindowController {
 extension MainWindowController: NSToolbarDelegate {
   func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
     // Return current items or empty array for initial state
-    currentToolbarItems
+    currentToolbarIdentifiers
   }
 
   func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
     // Return all possible items that could be shown
-    [.toggleSidebar, .homePlus, .sidebarTrackingSeparator, .flexibleSpace]
+    [
+      .toggleSidebar,
+      .homePlus,
+      .sidebarTrackingSeparator,
+      .flexibleSpace,
+      .navGroup,
+      .navBack,
+      .navForward,
+      .chatTitle,
+      .backToHome,
+    ]
   }
 
-//  func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier) -> NSToolbarItem? {
-//    switch identifier {
-//      case .toggleSidebar:
-//        let item = NSToolbarItem(itemIdentifier: identifier)
-//        item.label = "Toggle Sidebar"
-//        item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: nil)
-//        item.action = #selector(NSSplitViewController.toggleSidebar(_:))
-//        return item
-//
-//      case .homePlus:
-//        let item = NSMenuToolbarItem(itemIdentifier: identifier)
-//        item.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add")
-//        item.menu = createAddMenu()
-//        return item
-//
-//      default:
-//        return nil
-//    }
-//  }
   func toolbar(
     _ toolbar: NSToolbar,
     itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
@@ -212,6 +219,7 @@ extension MainWindowController: NSToolbarDelegate {
     switch itemIdentifier {
       case .toggleSidebar:
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.isBordered = true
         item.label = "Toggle Sidebar"
         item.image = NSImage(
           systemSymbolName: "sidebar.left",
@@ -219,7 +227,6 @@ extension MainWindowController: NSToolbarDelegate {
         )
         item.action = #selector(NSSplitViewController.toggleSidebar(_:))
         item.target = window?.contentViewController as? NSSplitViewController
-
         return item
 
       case .homePlus:
@@ -241,6 +248,9 @@ extension MainWindowController: NSToolbarDelegate {
       case .flexibleSpace:
         return NSToolbarItem(itemIdentifier: .flexibleSpace)
 
+      case .navGroup:
+        return makeNavigationButtons()
+
       default:
         return nil
     }
@@ -260,11 +270,25 @@ extension MainWindowController: NSToolbarDelegate {
   @objc private func createNewSpace() {
     // Implement your space creation logic here
   }
+
+  @objc private func goBack() {
+    dependencies.nav.goBack()
+  }
+
+  @objc private func goForward() {
+    print("go forward")
+    dependencies.nav.goForward()
+  }
 }
 
 extension NSToolbarItem.Identifier {
   static let toggleSidebar = Self("ToggleSidebar")
   static let homePlus = Self("HomePlus")
+  static let backToHome = Self("BackToHome")
+  static let navGroup = Self("NavGroup")
+  static let navBack = Self("NavBack")
+  static let navForward = Self("NavForward")
+  static let chatTitle = Self("ChatTitle")
 }
 
 // MARK: - Top level router
@@ -321,5 +345,190 @@ class MainWindowViewModel: ObservableObject {
 //
 //    // common
 //    window.toolbarStyle = .unified
+  }
+}
+
+// MARK: - Toolbar Builders
+
+extension MainWindowController {
+  private var currentToolbarIdentifiers: [NSToolbarItem.Identifier] {
+    let nav = dependencies.nav
+    var items: [NSToolbarItem.Identifier] = []
+
+    if topLevelRoute == .onboarding {
+      return items
+    }
+
+    // Base
+    items.append(.toggleSidebar)
+
+    // Sidebar items
+    if nav.currentSpaceId != nil {
+      items.append(.flexibleSpace)
+      // items.append(.backToHome)
+    } else {
+      items.append(.flexibleSpace)
+      items.append(.homePlus)
+    }
+
+    // Close sidebar
+    items.append(.sidebarTrackingSeparator)
+
+    // Nav
+    items.append(.navGroup)
+
+    // Route dependant items
+    switch nav.currentRoute {
+      case let .chat(peer):
+        break
+        // items.append(.chatTitle)
+
+      default:
+        break
+    }
+
+    return items
+  }
+
+  private func makeNavigationButtons() -> NSToolbarItem {
+    let item = NSToolbarItemGroup(itemIdentifier: .navGroup)
+    item.isNavigational = true
+    item.label = "Navigation"
+
+    // Create a container view for the buttons
+    let containerView = NSView()
+
+    // Create buttons
+    let backButton = NSButton()
+    backButton.bezelStyle = .texturedRounded
+    backButton.isBordered = true
+    backButton.controlSize = .large
+    backButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")
+    backButton.target = self
+    backButton.action = #selector(goBack)
+    backButton.isEnabled = dependencies.nav.canGoBack
+
+    let forwardButton = NSButton()
+    forwardButton.bezelStyle = .texturedRounded
+    forwardButton.controlSize = .large
+    forwardButton.isBordered = true
+    forwardButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward")
+    forwardButton.target = self
+    forwardButton.action = #selector(goForward)
+    forwardButton.isEnabled = dependencies.nav.canGoForward
+    
+    // Add buttons to container
+    containerView.addSubview(backButton)
+    containerView.addSubview(forwardButton)
+
+    // Layout constraints
+    backButton.translatesAutoresizingMaskIntoConstraints = false
+    forwardButton.translatesAutoresizingMaskIntoConstraints = false
+
+    NSLayoutConstraint.activate([
+      backButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+      backButton.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+
+      forwardButton.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 0), // No gap
+      forwardButton.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+      forwardButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+
+
+      // Make sure the container sizes itself to fit the buttons
+      containerView.heightAnchor.constraint(equalTo: backButton.heightAnchor),
+    ])
+
+    item.view = containerView
+
+    // Store references for state updates
+    navBackButton = backButton
+    navForwardButton = forwardButton
+
+    return item
+
+    // TG MULTI
+//    let item = NSToolbarItemGroup(itemIdentifier: .navGroup)
+//    item.isNavigational = true
+//
+//    let back = NSToolbarItem(itemIdentifier: .navBack)
+//
+//    back.label = "Go Back"
+//    back.image = NSImage(
+//      systemSymbolName: "chevron.left",
+//      accessibilityDescription: "Go Back"
+//    )
+//    back.action = #selector(goBack)
+//    back.isNavigational = true
+//    back.isBordered = true
+//    back.isEnabled = dependencies.nav.canGoBack
+//
+//    let forward = NSToolbarItem(itemIdentifier: .navForward)
+//    forward.label = "Go Forward"
+//    forward.isNavigational = true
+//    forward.isBordered = true
+//    forward.image = NSImage(
+//      systemSymbolName: "chevron.right",
+//      accessibilityDescription: "Go Forward"
+//    )
+//    forward.action = #selector(goForward)
+//    forward.isEnabled = dependencies.nav.canGoForward
+//
+//    navBackButton = back
+//    navForwardButton = forward
+//
+//    item.subitems = [back, forward]
+//    item.selectionMode = .momentary
+
+    // TG INS
+//    let item = NSToolbarItemGroup(
+//      itemIdentifier: .navGroup,
+//      images: [
+//        NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")!,
+//        NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward")!,
+//      ],
+//      selectionMode: .momentary,
+//      labels: ["Back", "Forward"],
+//      target: self,
+//      action: #selector(segmentedNavAction(_:))
+//    )
+//    item.isNavigational = true
+
+    // 3. SEG
+//    let segmented = NSSegmentedControl(
+//      images: [
+//        NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")!,
+//        NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward")!,
+//      ],
+//      trackingMode: .momentary,
+//      target: self,
+//      action: #selector(segmentedNavAction(_:))
+//    )
+//
+//    // Use a "textured-rounded," "automatic," or "segmented" style
+//    // if you want it to look more like Finder
+//    segmented.segmentStyle = .texturedRounded
+//
+//    // Initially enable/disable segments as needed
+//    segmented.setEnabled(dependencies.nav.canGoBack, forSegment: 0)
+//    segmented.setEnabled(dependencies.nav.canGoForward, forSegment: 1)
+//
+//    // Wrap it in an NSToolbarItem
+//    let item = NSToolbarItemGroup(itemIdentifier: .navGroup)
+//    item.view = segmented
+//    item.isNavigational = true
+
+    return item
+  }
+
+  // Then in your action:
+  @objc private func segmentedNavAction(_ sender: NSSegmentedControl) {
+    switch sender.selectedSegment {
+      case 0:
+        goBack()
+      case 1:
+        goForward()
+      default:
+        break
+    }
   }
 }
