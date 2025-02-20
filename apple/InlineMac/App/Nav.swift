@@ -45,31 +45,9 @@ class Nav: ObservableObject {
   // Nav State
 
   /// History of navigation entries, current entry is last item in the history array
-  public var history: [NavEntry] = [] {
-    didSet {
-      // Update current route
-      currentRoute = history.last?.route ?? .empty
+  public var history: [NavEntry] = []
 
-      // Update current space id
-      currentSpaceId = history.last?.spaceId
-
-      // Update can go back
-      let nextCanGoBack = history.count > 1
-      if canGoBack != nextCanGoBack {
-        canGoBack = nextCanGoBack
-      }
-    }
-  }
-
-  public var forwardHistory: [NavEntry] = [] {
-    didSet {
-      // Update can go forward
-      let nextCanGoForward = forwardHistory.count > 0
-      if canGoForward != nextCanGoForward {
-        canGoForward = nextCanGoForward
-      }
-    }
-  }
+  public var forwardHistory: [NavEntry] = []
 
   // UI State
   @Published var canGoBack: Bool = false
@@ -80,6 +58,29 @@ class Nav: ObservableObject {
   private init() {
     loadState()
   }
+
+  private func reflectHistoryChange() {
+    // Update can go back
+    let nextCanGoBack = history.count > 1 // below 1 must be go with esc
+    if canGoBack != nextCanGoBack {
+      canGoBack = nextCanGoBack
+    }
+
+    // Update can go forward
+    let nextCanGoForward = forwardHistory.count > 0
+    if canGoForward != nextCanGoForward {
+      canGoForward = nextCanGoForward
+    }
+
+    // Update current route
+    currentRoute = history.last?.route ?? .empty
+
+    // Update current space id
+    currentSpaceId = history.last?.spaceId
+
+    // Persist
+    saveStateLowPrio()
+  }
 }
 
 // MARK: - Navigation APIs
@@ -89,12 +90,16 @@ extension Nav {
     // TODO: Implement a caching for last viewed route in that space and restore that instead of opening .empty
     let entry = NavEntry(route: .empty, spaceId: spaceId)
     history.append(entry)
+
+    reflectHistoryChange()
   }
 
   public func openHome() {
     // TODO: Implement a caching for last viewed route in home
     let entry = NavEntry(route: .empty, spaceId: nil)
     history.append(entry)
+
+    reflectHistoryChange()
   }
 
   public func open(_ route: NavEntry.Route) {
@@ -108,13 +113,19 @@ extension Nav {
 
     // forward history is cleared on open
     forwardHistory.removeAll()
+
+    reflectHistoryChange()
   }
 
   public func goBack() {
-    guard history.count > 1 else { return }
+    print("goBack")
+    print("history: \(history)")
+    guard history.count > 0 else { return }
 
     let current = history.removeLast()
     forwardHistory.append(current)
+
+    reflectHistoryChange()
   }
 
   public func goForward() {
@@ -122,6 +133,18 @@ extension Nav {
 
     let current = forwardHistory.removeLast()
     history.append(current)
+
+    reflectHistoryChange()
+  }
+
+  public func handleEsc() {
+    if history.count == 1 {
+      history = []
+      forwardHistory = []
+      reflectHistoryChange()
+    } else {
+      open(.empty)
+    }
   }
 }
 
@@ -135,14 +158,12 @@ extension Nav {
   }
 
   struct Persisted: Codable {
-    var history: [NavEntry]
-    var forwardHistory: [NavEntry]
+    var lastEntry: NavEntry?
   }
 
   private func saveState() {
     let state = Persisted(
-      history: history,
-      forwardHistory: forwardHistory
+      lastEntry: history.last
     )
 
     do {
@@ -162,9 +183,11 @@ extension Nav {
       let decoder = JSONDecoder()
       let state = try decoder.decode(Persisted.self, from: data)
 
+      print("loaded nav state \(state)")
       // Update state
-      history = state.history
-      forwardHistory = state.forwardHistory
+      history = if let navEntry = state.lastEntry { [navEntry] } else { [] }
+      
+      reflectHistoryChange()
     } catch {
       Log.shared.error("Failed to load navigation state: \(error.localizedDescription)")
       // If loading fails, reset to default state
@@ -175,6 +198,8 @@ extension Nav {
   // Called on logout
   func reset() {
     history = []
+
+    reflectHistoryChange()
 
     // Delete persisted state file
     try? FileManager.default.removeItem(at: stateFileURL)
