@@ -48,6 +48,9 @@ struct IntegrationsView: View {
         .disabled(isConnectingLinear || isConnected)
       }
     }
+    .onAppear {
+      checkIntegrationConnection()
+    }
     .onOpenURL { url in
       if url.scheme == "in", url.host == "integrations", url.path == "/linear",
          let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
@@ -55,6 +58,8 @@ struct IntegrationsView: View {
       {
         isConnected = true
       }
+
+      checkIntegrationConnection()
     }
 
     .navigationBarTitleDisplayMode(.inline)
@@ -72,6 +77,21 @@ struct IntegrationsView: View {
               .fontWeight(.semibold)
           }
         }
+      }
+    }
+  }
+
+  func checkIntegrationConnection() {
+    Task {
+      do {
+        let result = try await ApiClient.shared.getIntegrations(userId: Auth.shared.getCurrentUserId() ?? 0)
+        if result.hasLinearConnected {
+          isConnected = true
+        } else {
+          isConnected = false
+        }
+      } catch {
+        print("Failed to get integrations \(error)")
       }
     }
   }
