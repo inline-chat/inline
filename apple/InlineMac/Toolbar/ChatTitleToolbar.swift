@@ -7,8 +7,24 @@ class ChatTitleToolbar: NSToolbarItem {
   private var dependencies: AppDependencies
   private var iconSize: CGFloat = Theme.chatToolbarIconSize
 
-  private lazy var iconView = ChatIconView(iconSize: iconSize)
+  private lazy var iconView = ChatIconView(peer: peer, iconSize: iconSize)
   private lazy var statusView = ChatStatusView(peer: peer)
+
+  private var user: UserInfo? {
+    if case let .user(id) = peer {
+      ObjectCache.shared.getUser(id: id)
+    } else {
+      nil
+    }
+  }
+
+  private var chat: Chat? {
+    if case let .thread(id) = peer {
+      ObjectCache.shared.getChat(id: id)
+    } else {
+      nil
+    }
+  }
 
   private let nameLabel: NSTextField = {
     let tf = NSTextField(labelWithString: "")
@@ -18,7 +34,10 @@ class ChatTitleToolbar: NSToolbarItem {
   }()
 
   private lazy var textStack: NSStackView = {
-    let stack = NSStackView(views: [nameLabel, statusView])
+    let subviews = if user?.user.isCurrentUser() == true { [nameLabel] } else { [nameLabel, statusView] }
+    let stack = NSStackView(
+      views: subviews
+    )
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.spacing = 2
@@ -29,24 +48,13 @@ class ChatTitleToolbar: NSToolbarItem {
     self.peer = peer
     self.dependencies = dependencies
     super.init(itemIdentifier: .chatTitle)
-    
+
     visibilityPriority = .high
 
     setupView()
     setupConstraints()
     setupInteraction()
-    setupData()
-  }
-
-  private func setupData() {
-    switch peer {
-      case let .user(id):
-        let userInfo: UserInfo = ObjectCache.shared.getUser(id: id) ?? .deleted
-        configure(userInfo)
-
-      default:
-        break
-    }
+    configure()
   }
 
   private let containerView: NSView = {
@@ -82,9 +90,23 @@ class ChatTitleToolbar: NSToolbarItem {
     // NSApp.sendAction(#selector(ChatWindowController.showChatInfo(_:)), to: nil, from: self)
   }
 
-  func configure(_ userInfo: UserInfo) {
-    nameLabel.stringValue = userInfo.user.fullName
-    iconView.configure(with: userInfo)
+  var chatTitle: String {
+    if let user {
+      if user.user.isCurrentUser() {
+        "Saved Messages"
+      } else {
+        user.user.fullName
+      }
+    } else if let chat {
+      chat.title ?? "Untitled"
+    } else {
+      "Unknown"
+    }
+  }
+
+  func configure() {
+    nameLabel.stringValue = chatTitle
+    iconView.configure()
   }
 }
 
@@ -164,6 +186,10 @@ final class ChatStatusView: NSView {
 
     guard let user else { return "last seen a long time ago" }
 
+    if user.isCurrentUser() {
+      return ""
+    }
+
     if let action = currentComposeAction {
       return action.toHumanReadable()
     } else if user.online == true {
@@ -209,12 +235,31 @@ final class ChatStatusView: NSView {
 
 final class ChatIconView: NSView {
   private let iconSize: CGFloat
+  private let peer: Peer
   private var currentAvatar: NSView?
 
-  init(iconSize: CGFloat) {
+  init(peer: Peer, iconSize: CGFloat) {
+    self.peer = peer
     self.iconSize = iconSize
+
     super.init(frame: .zero)
     setupConstraints()
+  }
+
+  private var user: UserInfo? {
+    if case let .user(id) = peer {
+      ObjectCache.shared.getUser(id: id)
+    } else {
+      nil
+    }
+  }
+
+  private var chat: Chat? {
+    if case let .thread(id) = peer {
+      ObjectCache.shared.getChat(id: id)
+    } else {
+      nil
+    }
   }
 
   @available(*, unavailable)
@@ -222,11 +267,34 @@ final class ChatIconView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func configure(with userInfo: UserInfo) {
+  func configure() {
     currentAvatar?.removeFromSuperview()
-    let avatar = UserAvatarView(userInfo: userInfo, size: iconSize)
-    avatar.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(avatar)
+
+    let avatar = {
+      if let user {
+        if user.user.isCurrentUser() {
+          let avatar = ChatIconSwiftUIBridge(.savedMessage(user.user), size: iconSize)
+          avatar.translatesAutoresizingMaskIntoConstraints = false
+          addSubview(avatar)
+          return avatar
+        } else {
+          let avatar = ChatIconSwiftUIBridge(.user(user), size: iconSize)
+          avatar.translatesAutoresizingMaskIntoConstraints = false
+          addSubview(avatar)
+          return avatar
+        }
+      } else if let chat {
+        let avatar = ChatIconSwiftUIBridge(.chat(chat), size: iconSize)
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(avatar)
+        return avatar
+      } else {
+        let avatar = ChatIconSwiftUIBridge(.user(.deleted), size: iconSize)
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(avatar)
+        return avatar
+      }
+    }()
 
     NSLayoutConstraint.activate([
       avatar.widthAnchor.constraint(equalToConstant: iconSize),
