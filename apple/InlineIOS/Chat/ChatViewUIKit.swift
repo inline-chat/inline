@@ -8,7 +8,7 @@ class ChatContainerView: UIView {
   let spaceId: Int64
 
   private lazy var messagesCollectionView: MessagesCollectionView = {
-    let collectionView = MessagesCollectionView(peerId: peerId, chatId: chatId ?? 0, spaceId : spaceId)
+    let collectionView = MessagesCollectionView(peerId: peerId, chatId: chatId ?? 0, spaceId: spaceId)
     collectionView.translatesAutoresizingMaskIntoConstraints = false
     return collectionView
   }()
@@ -165,27 +165,28 @@ class ChatContainerView: UIView {
   }
 
   @objc private func handleScrollToBottomChanged(_ notification: Notification) {
-    if let isAtBottom = notification.userInfo?["isAtBottom"] as? Bool {
-      if isAtBottom {
-        scrollButton.isHidden = false
-      }
+    guard let isAtBottom = notification.userInfo?["isAtBottom"] as? Bool else { return }
 
-      UIView.animate(
-        withDuration: 0.3,
-        delay: 0,
-        usingSpringWithDamping: 0.6,
-        initialSpringVelocity: 0.1,
-        options: [.curveEaseInOut],
-        animations: {
-          self.scrollButton.transform = isAtBottom ? .identity : CGAffineTransform(scaleX: 0.01, y: 0.01)
-          self.layoutIfNeeded()
-        },
-        completion: { _ in
-          if !isAtBottom {
-            self.scrollButton.isHidden = true
-          }
-        }
-      )
+    scrollButton.layer.removeAllAnimations()
+    scrollButton.isHidden = false
+
+    let targetTransform: CGAffineTransform = isAtBottom ? .identity : CGAffineTransform(scaleX: 0.5, y: 0.5)
+    let targetAlpha: CGFloat = isAtBottom ? 1.0 : 0.0
+
+    UIView.animate(
+      withDuration: 0.25,
+      delay: 0,
+      usingSpringWithDamping: 0.8,
+      initialSpringVelocity: 0.5,
+      options: [.beginFromCurrentState, .allowUserInteraction],
+      animations: {
+        self.scrollButton.transform = targetTransform
+        self.scrollButton.alpha = targetAlpha
+      }
+    )
+
+    if !isAtBottom {
+      scrollButton.isHidden = true
     }
   }
 
