@@ -183,11 +183,6 @@ class UIMessageView: UIView {
     if isMultiline {
       multiLineContainer.addArrangedSubview(messageLabel)
 
-      if !fullMessage.reactions.isEmpty {
-        let reactionsStack = createReactionsStack()
-        multiLineContainer.addArrangedSubview(reactionsStack)
-      }
-
       let metadataContainer = UIStackView()
       metadataContainer.axis = .horizontal
       metadataContainer.addArrangedSubview(UIView()) // Spacer
@@ -325,65 +320,14 @@ class UIMessageView: UIView {
       contextMenuInteraction: interaction,
       menuTargetView: self
     )
-    contextMenuManager?.delegate = self
-    contextMenuManager?.auxiliaryPreviewConfig = AuxiliaryPreviewConfig(
-      verticalAnchorPosition: .automatic,
-      horizontalAlignment: outgoing ? .targetTrailing : .targetLeading,
-      preferredWidth: .none,
-      preferredHeight: .none,
-      marginInner: 10,
-      marginOuter: 10,
-      transitionConfigEntrance: .syncedToMenuEntranceTransition(),
-      transitionExitPreset: .fade
-    )
 
     bubbleView.addInteraction(interaction)
-  }
-
-  private func createReactionsStack() -> UIView {
-    let containerView = UIView()
-    containerView.translatesAutoresizingMaskIntoConstraints = false
-    containerView.setContentHuggingPriority(.defaultLow, for: .horizontal)
-    let flowLayout = UICollectionViewFlowLayout()
-    flowLayout.scrollDirection = .horizontal
-    flowLayout.minimumInteritemSpacing = 4
-    flowLayout.minimumLineSpacing = 4
-    flowLayout.estimatedItemSize = CGSize(width: 60, height: 28)
-    flowLayout.sectionInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-    let collectionView = UICollectionView(frame: .zero, collectionViewLayout: flowLayout)
-    collectionView.backgroundColor = .clear
-    collectionView.translatesAutoresizingMaskIntoConstraints = false
-    collectionView.isScrollEnabled = false
-    collectionView.contentInsetAdjustmentBehavior = .never
-
-    containerView.addSubview(collectionView)
-
-    NSLayoutConstraint.activate([
-      collectionView.topAnchor.constraint(equalTo: containerView.topAnchor),
-      collectionView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-      collectionView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-      collectionView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-      collectionView.heightAnchor.constraint(greaterThanOrEqualToConstant: 28),
-    ])
-
-    // Register cell
-    collectionView.register(ReactionCell.self, forCellWithReuseIdentifier: "ReactionCell")
-
-    // Set up data source
-    let groupedReactions = Dictionary(grouping: fullMessage.reactions) { $0.emoji }
-    let dataSource = ReactionDataSource(reactions: groupedReactions, outgoing: outgoing)
-    collectionView.dataSource = dataSource
-
-    // Keep a reference to prevent deallocation
-    objc_setAssociatedObject(collectionView, "dataSource", dataSource, .OBJC_ASSOCIATION_RETAIN)
-
-    return containerView
   }
 }
 
 // MARK: - Context Menu
 
-extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDelegate {
+extension UIMessageView: UIContextMenuInteractionDelegate {
   func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction,
     configurationForMenuAtLocation location: CGPoint
@@ -408,24 +352,63 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
       actions.append(replyAction)
 
       let createIssueAction = UIAction(title: "Create Linear issue") { _ in
-        Task {
+
+        Task { @MainActor in
           do {
-            _ = try await ApiClient.shared.createLinearIssue(
-              text: self.message.text ?? "",
-              messageId: self.message.messageId,
-              chatId: self.message.chatId
-            )
+            let result = try await ApiClient.shared.getIntegrations(userId: Auth.shared.getCurrentUserId() ?? 0)
+            if !result.hasLinearConnected {
+              ToastManager.shared.showToast(
+                "Please connect Linear integration from Settings > Integrations",
+                type: .info,
+                systemImage: "link.circle"
+              )
+            } else {
+              ToastManager.shared.showToast(
+                "Creating Linear issue...",
+                type: .loading,
+                systemImage: "circle.dotted"
+              )
+
+              do {
+                let result = try await ApiClient.shared.createLinearIssue(
+                  text: self.message.text ?? "",
+                  messageId: self.message.messageId,
+                  chatId: self.message.chatId
+                )
+
+                ToastManager.shared.showToast(
+                  "Issue created",
+                  type: .success,
+                  systemImage: "checkmark.circle.fill",
+                  action: {
+                    if let url = URL(string: result.link ?? "") {
+                      UIApplication.shared.open(url)
+                    }
+                  },
+                  actionTitle: "Open"
+                )
+              } catch {
+                print("FAILED to create issue \(error)")
+                ToastManager.shared.showToast(
+                  "Failed to create issue",
+                  type: .info,
+                  systemImage: "xmark.circle.fill"
+                )
+              }
+            }
           } catch {
-            print("FAILED to create issue \(error)")
+            print("Failed to get integrations \(error)")
           }
         }
       }
       actions.append(createIssueAction)
 
-      if let url = getURLAtLocation(location) {
-        let openLinkAction = UIAction(title: "Open Link") { _ in
+      let openLinkAction = UIAction(title: "Open Link") { _ in
+        if let url = self.getURLAtLocation(location) {
           self.linkTapHandler?(url)
         }
+      }
+      if let url = getURLAtLocation(location) {
         actions.append(openLinkAction)
       }
 
@@ -501,163 +484,11 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
     )
     Self.contextMenuOpen = false
   }
-
-  func onRequestMenuAuxiliaryPreview(sender: ContextMenuManager) -> UIView? {
-    let emojis = ["👍", "👎", "☕️", "🫡", "🥹", "🥲", "🙏", "❤️"]
-    let previewHeight: CGFloat = 55
-
-    let stackView = UIStackView()
-    stackView.axis = .horizontal
-    stackView.distribution = .fillEqually
-    stackView.spacing = 2
-    stackView.alignment = .center
-    stackView.backgroundColor = .systemBackground.withAlphaComponent(0.8)
-    stackView.isLayoutMarginsRelativeArrangement = true
-    stackView.layoutMargins = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
-
-    stackView.layer.cornerRadius = previewHeight / 2
-    stackView.layer.masksToBounds = true
-
-    for emoji in emojis {
-      let button = UIButton()
-      button.setTitle(emoji, for: .normal)
-      button.titleLabel?.font = UIFont.systemFont(ofSize: 20)
-      button.backgroundColor = .clear
-      button.addTarget(self, action: #selector(handleEmojiTap(_:)), for: .touchUpInside)
-      stackView.addArrangedSubview(button)
-    }
-
-    let buttonCount = CGFloat(emojis.count)
-    let width = (buttonCount * 40) + ((buttonCount - 1) * stackView.spacing) + 12
-    stackView.frame = CGRect(x: 0, y: 0, width: width, height: previewHeight)
-
-    return stackView
-  }
-
-  @objc private func handleEmojiTap(_ sender: UIButton) {
-    guard let emoji = sender.titleLabel?.text else { return }
-
-    Self.contextMenuOpen = false
-    interaction?.dismissMenu()
-
-    Task {
-      do {
-        try await DataManager.shared.addReaction(messageId: message.messageId, chatId: message.chatId, emoji: emoji)
-        triggerMessageReload()
-      } catch {
-        Log.shared.error("Failed to add reaction", error: error)
-      }
-    }
-  }
-
-  private func triggerMessageReload() {
-    Task { @MainActor in
-      await MessagesPublisher.shared
-        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId)
-    }
-  }
 }
 
 extension NSLayoutConstraint {
   func withPriority(_ priority: UILayoutPriority) -> NSLayoutConstraint {
     self.priority = priority
     return self
-  }
-}
-
-private class ReactionCell: UICollectionViewCell {
-  private let stackView = UIStackView()
-  private let emojiLabel = UILabel()
-  private let countLabel = UILabel()
-
-  override init(frame: CGRect) {
-    super.init(frame: frame)
-    setupViews()
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  private func setupViews() {
-    contentView.layer.cornerRadius = 12
-
-    stackView.axis = .horizontal
-    stackView.spacing = 4
-    stackView.alignment = .center
-    stackView.layoutMargins = UIEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
-    stackView.isLayoutMarginsRelativeArrangement = true
-    stackView.translatesAutoresizingMaskIntoConstraints = false
-
-    emojiLabel.font = .systemFont(ofSize: 14)
-    countLabel.font = .systemFont(ofSize: 14)
-
-    contentView.addSubview(stackView)
-    stackView.addArrangedSubview(emojiLabel)
-    stackView.addArrangedSubview(countLabel)
-
-    NSLayoutConstraint.activate([
-      stackView.topAnchor.constraint(equalTo: contentView.topAnchor),
-      stackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-      stackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-      stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-      contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 28),
-      contentView.widthAnchor.constraint(greaterThanOrEqualToConstant: 40),
-    ])
-  }
-
-  func configure(emoji: String, count: Int, outgoing: Bool, reactedByUser: Bool) {
-    emojiLabel.text = emoji
-    countLabel.text = String(count)
-
-    if reactedByUser, outgoing {
-      contentView.backgroundColor = .white
-      countLabel.textColor = .black
-    } else if reactedByUser, !outgoing {
-      contentView.backgroundColor = ColorManager.shared.selectedColor
-      countLabel.textColor = .white
-    } else if !reactedByUser, outgoing {
-      contentView.backgroundColor = .white.withAlphaComponent(0.2)
-      countLabel.textColor = .white
-    } else {
-      contentView.backgroundColor = .systemGray6
-      countLabel.textColor = .label
-    }
-  }
-}
-
-private class ReactionDataSource: NSObject, UICollectionViewDataSource {
-  private let reactions: [String: [Reaction]]
-  private let outgoing: Bool
-
-  init(reactions: [String: [Reaction]], outgoing: Bool) {
-    self.reactions = reactions
-    self.outgoing = outgoing
-    super.init()
-  }
-
-  func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-    reactions.count
-  }
-
-  func collectionView(
-    _ collectionView: UICollectionView,
-    cellForItemAt indexPath: IndexPath
-  ) -> UICollectionViewCell {
-    let cell = collectionView.dequeueReusableCell(
-      withReuseIdentifier: "ReactionCell",
-      for: indexPath
-    ) as! ReactionCell
-
-    let emoji = Array(reactions.keys)[indexPath.item]
-    let reactionGroup = reactions[emoji]!
-
-    let reactedByUser = reactionGroup.contains { reaction in
-      reaction.userId == Auth.shared.getCurrentUserId()
-    }
-
-    cell.configure(emoji: emoji, count: reactionGroup.count, outgoing: outgoing, reactedByUser: reactedByUser)
-    return cell
   }
 }
