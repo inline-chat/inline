@@ -130,12 +130,13 @@ class MainWindowController: NSWindowController {
       self.switchTopLevel(route)
     }.store(in: &cancellables)
 
-    dependencies.nav.currentRoutePublisher.sink { [weak self] _ in
+    dependencies.nav.currentRoutePublisher.sink { [weak self] route in
       guard let self else { return }
       guard topLevelRoute == .main else { return }
 
       // Make sure this is called with the right route. Probably in sink we don't have latest value yet
       reloadToolbar()
+      setupWindowFor(route: route)
     }.store(in: &cancellables)
 
     dependencies.nav.canGoBackPublisher.sink { [weak self] value in
@@ -178,6 +179,16 @@ class MainWindowController: NSWindowController {
     // Close Settings
     if let window = NSApplication.shared.keyWindow {
       window.close()
+    }
+  }
+
+  private func setupWindowFor(route: NavEntry.Route) {
+    switch route {
+      case .chat:
+        window?.backgroundColor = .controlBackgroundColor
+
+      default:
+        window?.backgroundColor = .windowBackgroundColor
     }
   }
 
