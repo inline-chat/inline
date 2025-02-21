@@ -164,6 +164,12 @@ import {
   Response as CreateLinearIssueResponse,
 } from "@in/server/methods/createLinearIssue"
 
+import {
+  handler as getIntegrationsHandler,
+  Input as GetIntegrationsInput,
+  Response as GetIntegrationsResponse,
+} from "@in/server/methods/getIntegrations"
+
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
@@ -224,6 +230,7 @@ export const apiV1 = new Elysia({ name: "v1" })
         makeApiRoute("/createLinearIssue", CreateLinearIssueInput, CreateLinearIssueResponse, createLinearIssueHandler),
       )
       .use(makeApiRoute("/deleteMessage", DeleteMessageInput, DeleteMessageResponse, deleteMessageHandler))
+      .use(makeApiRoute("/getIntegrations", GetIntegrationsInput, GetIntegrationsResponse, getIntegrationsHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }
