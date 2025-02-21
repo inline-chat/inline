@@ -54,6 +54,7 @@ public enum Path: String {
   case updateProfilePhoto
   case deleteMessage
   case createLinearIssue
+  case getIntegrations
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -373,7 +374,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     text: String,
     messageId: Int64,
     chatId: Int64
-  ) async throws -> EmptyPayload {
+  ) async throws -> CreateLinearIssue {
     try await postRequest(
       .createLinearIssue,
       body: [
@@ -630,6 +631,16 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       includeToken: true
     )
   }
+
+  public func getIntegrations(userId: Int64) async throws -> GetIntegrations {
+    try await postRequest(
+      .getIntegrations,
+      body: [
+        "userId": userId,
+      ],
+      includeToken: true
+    )
+  }
 }
 
 /// Example
@@ -668,6 +679,14 @@ public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
       )
     }
   }
+}
+
+public struct GetIntegrations: Codable, Sendable {
+  public let hasLinearConnected: Bool
+}
+
+public struct CreateLinearIssue: Codable, Sendable {
+  public let link: String?
 }
 
 public struct VerifyCode: Codable, Sendable {
