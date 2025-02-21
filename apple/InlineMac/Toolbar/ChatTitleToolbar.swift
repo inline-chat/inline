@@ -29,6 +29,8 @@ class ChatTitleToolbar: NSToolbarItem {
     self.peer = peer
     self.dependencies = dependencies
     super.init(itemIdentifier: .chatTitle)
+    
+    visibilityPriority = .high
 
     setupView()
     setupConstraints()
@@ -102,6 +104,7 @@ final class ChatStatusView: NSView {
     super.init(frame: .zero)
     setupView()
     subscribeToUpdates()
+    updateLabel()
   }
 
   @available(*, unavailable)
