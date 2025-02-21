@@ -37,6 +37,7 @@ struct ContentView: View {
     .environmentObject(mainViewRouter)
     .environmentObject(home)
     .environmentObject(fileUploadViewModel)
+    .toastView()
   }
 }
 
