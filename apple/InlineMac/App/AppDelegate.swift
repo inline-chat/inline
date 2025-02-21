@@ -30,6 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ aNotification: Notification) {
     initializeServices()
     setupMainWindow()
+    setupMainMenu()
   }
 
   func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -116,6 +117,10 @@ extension AppDelegate {
     } else {
       nil
     }
+  }
+
+  private func setupMainMenu() {
+    AppMenu.shared.setupMainMenu()
   }
 }
 
