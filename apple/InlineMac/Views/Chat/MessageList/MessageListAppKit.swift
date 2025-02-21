@@ -26,7 +26,7 @@ class MessageListAppKit: NSViewController {
   // Testing
   private var feature_scrollsToBottomInDidLayout = true
   private var feature_maintainsScrollFromBottomOnResize = true
-  
+
   // Not needed
   private var feature_updatesHeightsOnOffsetChange = false
 
@@ -330,6 +330,17 @@ class MessageListAppKit: NSViewController {
   @objc private func liveResizeEnded() {
     guard feature_updatesHeightsOnLiveResizeEnd else { return }
 
+//    precalculateHeightsInBackground()
+//
+//    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+//      // Recalculate all height when user is done resizing
+//      self?.recalculateHeightsOnWidthChange(buffer: 400)
+//    }
+    fullWidthAsyncCalc()
+  }
+
+  /// Precalcs width in bg and does full recalc, only call in special cases, not super performant for realtime call
+  private func fullWidthAsyncCalc() {
     precalculateHeightsInBackground()
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
@@ -432,10 +443,11 @@ class MessageListAppKit: NSViewController {
 
     let viewportSize = scrollView.contentView.bounds.size
 
+    // DISABLED CHECK BECAUSE WIDTH CAN CHANGE THE MESSAGES
     // Only do this if frame height changed. Width is handled in another function
-    if abs(viewportSize.height - previousViewportHeight) < 0.1 {
-      return
-    }
+//    if abs(viewportSize.height - previousViewportHeight) < 0.1 {
+//      return
+//    }
 
     let scrollOffset = scrollView.contentView.bounds.origin
     let contentSize = scrollView.documentView?.frame.size ?? .zero
@@ -457,18 +469,18 @@ class MessageListAppKit: NSViewController {
     // Early return if no change needed
     if abs(nextScrollPosition - scrollOffset.y) < 0.5 { return }
 
-//    CATransaction.begin()
-//    CATransaction.setDisableActions(true)
-//    // Set new scroll position
-//    documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
-//    CATransaction.commit()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    // Set new scroll position
+    documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
+    CATransaction.commit()
 
     //    Looked a bit laggy to me
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0
-      context.allowsImplicitAnimation = false
-      documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
-    }
+//    NSAnimationContext.runAnimationGroup { context in
+//      context.duration = 0
+//      context.allowsImplicitAnimation = false
+//      documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
+//    }
   }
 
   private var lastKnownWidth: CGFloat = 0
@@ -488,20 +500,25 @@ class MessageListAppKit: NSViewController {
         // Note(@mo): I still don't know why this fixes it but as soon as I compare the widths for the change,
         // it no longer works. this needs to be called unconditionally.
         // this is needed to ensure the scroll is done after the initial layout and prevents cutting off last msg
-        let _ = recalculateHeightsOnWidthChange() // FIXME: optimize this or get rid of it
+        // EXPERIMENTAL: GETTING RID OF THIS FOR PERFORMANCE REASONS
+        // let _ = recalculateHeightsOnWidthChange()
       }
 
       scrollToBottom(animated: false)
 
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { // EXPERIMENTAL: DECREASED FROM 0.1
         // Finalize heights one last time to ensure no broken heights on initial load
         self.needsInitialScroll = false
+
+        // One last stabilizer (bc we disabled the recalc above, things above viewport might be stuck)
+        self.fullWidthAsyncCalc()
       }
     }
 
     if feature_scrollsToBottomInDidLayout {
       // Note(@mo): This is a hack to fix scroll jumping when user is resizing the window at bottom.
       if isAtAbsoluteBottom, !isPerformingUpdate {
+        // TODO: see how we can avoid this when user is sending message and we're resizing it's fucked up
         scrollToBottom(animated: false)
       }
     }
@@ -535,6 +552,8 @@ class MessageListAppKit: NSViewController {
     log.trace("viewWillLayout() called")
   }
 
+  private var wasLastResizeAboveLimit = false
+
   // Called on did layout
   func checkWidthChangeForHeights() {
     guard feature_updatesHeightsOnWidthChange else { return }
@@ -552,19 +571,25 @@ class MessageListAppKit: NSViewController {
     if abs(newWidth - lastKnownWidth) > magicWidthDiff {
       lastKnownWidth = newWidth
 
-      recalculateHeightsOnWidthChange(duringLiveResize: true)
-
       /// Below used to check if width is above max width to not calculate anything, but
       /// this results in very subtle bugs, eg. when window was smaller, then increased width beyond max (so the
       /// calculations are paused, then increases height. now the recalc doesn't happen for older messages.
 
-//      let availableWidth = sizeCalculator.getAvailableWidth(
-//        tableWidth: tableWidth()
-//      )
-//      // FIXME: it doesn't do one last calc at the exact limit
-//      if availableWidth < Theme.messageMaxWidth {
-//        recalculateHeightsOnWidthChange(duringLiveResize: true)
-//      }
+      let availableWidth = sizeCalculator.getAvailableWidth(
+        tableWidth: tableWidth()
+      )
+      if availableWidth < Theme.messageMaxWidth {
+        recalculateHeightsOnWidthChange(duringLiveResize: true)
+        wasLastResizeAboveLimit = false
+      } else {
+        if !wasLastResizeAboveLimit {
+          // One last time just before stopping at the limit. This is import so stuff don't get stuck
+          recalculateHeightsOnWidthChange(duringLiveResize: true)
+          wasLastResizeAboveLimit = true
+        } else {
+          log.trace("skipped width recalc")
+        }
+      }
     }
   }
 
