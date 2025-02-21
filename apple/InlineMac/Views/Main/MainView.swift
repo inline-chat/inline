@@ -26,7 +26,7 @@ struct MainView: View {
   init() {}
 
   var body: some View {
-    NavigationSplitView(columnVisibility: $window.columnVisibility) {
+    NavigationSplitView {
       sidebar
         .navigationSplitViewColumnWidth(
           min: Theme.minimumSidebarWidth,
@@ -66,7 +66,6 @@ struct MainView: View {
     .onAppear {
       Log.shared.info("MainView appeared • fetching root data")
       rootData.fetch()
-      setUpSidebarAutoCollapse()
 
       markAsOnline()
 
@@ -74,13 +73,6 @@ struct MainView: View {
     }
     .task {
       await requestNotifications()
-    }
-    // Disable auto collapse while user is modifying it to avoid jump
-    .onChange(of: window.columnVisibility) { _ in
-      disableAutoCollapse = true
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-        disableAutoCollapse = false
-      }
     }
     .onForeground {
       Task {
@@ -111,7 +103,7 @@ struct MainView: View {
       }
     }
 
-    if #available(macOS 14.0, *), window.columnVisibility != .detailOnly {
+    if #available(macOS 14.0, *) {
       sidebar.toolbar(removing: .sidebarToggle)
     } else {
       sidebar
@@ -200,30 +192,6 @@ struct MainView: View {
 //      200
 //    }
     Theme.chatViewMinWidth
-  }
-
-  private func setUpSidebarAutoCollapse() {
-    Task { @MainActor in
-      // delay
-      try await Task.sleep(for: .milliseconds(300))
-      // Listen to window size for collapsing sidebar
-      windowSizeCancellable = window.windowSize
-        .sink { size in
-          // Prevent conflict with default animation when user is uncollapsing the sidebar
-          if disableAutoCollapse { return }
-          if size.width < Theme.collapseSidebarAtWindowSize {
-            if window.columnVisibility != .detailOnly {
-              window.columnVisibility = .detailOnly
-              autoCollapsed = true
-            }
-          } else {
-            if autoCollapsed, window.columnVisibility == .detailOnly {
-              window.columnVisibility = .automatic
-              autoCollapsed = false
-            }
-          }
-        }
-    }
   }
 
   private func markAsOnline() {
