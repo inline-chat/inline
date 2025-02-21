@@ -843,6 +843,13 @@ struct SessionInfo: Codable, Sendable {
 
 public enum ApiComposeAction: String, Codable, Sendable {
   case typing
+
+  public func toHumanReadable() -> String {
+    switch self {
+      case .typing:
+        "typing..."
+    }
+  }
 }
 
 public struct LinearAuthUrl: Codable, Sendable {
