@@ -1,5 +1,9 @@
 import { IntegrationsModel } from "@in/server/db/models/integrations"
 import * as arctic from "arctic"
+import type { Issue, Organization, Team } from "@linear/sdk"
+import { LinearClient, LinearSdk } from "@linear/sdk"
+import { Log } from "@in/server/utils/log"
+import { error } from "elysia"
 
 // export const linearOauth = new arctic.Linear(
 //   process.env.LINEAR_CLIENT_ID,
@@ -97,7 +101,7 @@ const getLinearIssueStatuses = async ({ userId }: { userId: number }) => {
   }
 }
 
-const getLinearTeams = async ({ userId }: { userId: number }) => {
+const getLinearTeams = async ({ userId }: { userId: number }): Promise<Team | undefined> => {
   if (isNaN(userId)) {
     throw new Error("Invalid userId")
   }
@@ -105,7 +109,7 @@ const getLinearTeams = async ({ userId }: { userId: number }) => {
   const { accessToken } = await IntegrationsModel.getWithUserId(userId)
 
   const response = await queryLinear({
-    query: "{ teams { nodes { id name } } }",
+    query: "{ teams { nodes { id name key } } }",
     token: accessToken,
   })
 
@@ -115,9 +119,28 @@ const getLinearTeams = async ({ userId }: { userId: number }) => {
     throw new Error("Invalid response from Linear API")
   }
 
-  return {
-    teams: teamsData.data,
+  return teamsData.data.teams.nodes[0]
+}
+
+const getLinearOrg = async ({ userId }: { userId: number }): Promise<Organization | undefined> => {
+  if (isNaN(userId)) {
+    throw new Error("Invalid userId")
   }
+
+  const { accessToken } = await IntegrationsModel.getWithUserId(userId)
+
+  const response = await queryLinear({
+    query: "{ organization{ id name urlKey} }",
+    token: accessToken,
+  })
+
+  const orgData = await response.json()
+
+  if (!orgData.data) {
+    throw new Error("Invalid response from Linear API")
+  }
+
+  return orgData.data.organization
 }
 
 const getLinearUser = async ({ userId }: { userId: number }) => {
@@ -177,17 +200,13 @@ const createIssue = async ({
   title,
   description,
   teamId,
-  messageId,
-  chatId,
   labelIds = [],
   assigneeId,
   statusId,
-}: CreateIssueParams) => {
+}: CreateIssueParams): Promise<Issue | undefined> => {
   if (isNaN(userId)) {
-    return {
-      ok: false,
-      error: "Invalid userId",
-    }
+    Log.shared.error("Failed to create issue - userId is invalid")
+    throw new Error("Failed to create issue - userId is invalid")
   }
 
   const { accessToken } = await IntegrationsModel.getWithUserId(userId)
@@ -200,9 +219,9 @@ const createIssue = async ({
     },
     body: JSON.stringify({
       query: `mutation IssueCreate($title: String!, $description: String!, $teamId: String!, $labelIds: [String!], $assigneeId: String, $statusId: String) {
-          issueCreate(input: { 
-            title: $title, 
-            description: $description, 
+          issueCreate(input: {
+            title: $title,
+            description: $description,
             teamId: $teamId,
             labelIds: $labelIds,
             assigneeId: $assigneeId,
@@ -212,6 +231,7 @@ const createIssue = async ({
             issue {
               id
               title
+              identifier
             }
           }
         }`,
@@ -225,20 +245,29 @@ const createIssue = async ({
       },
     }),
   })
+  const result = await response.json()
 
-  const data = await response.json()
-
-  if (!data.data?.issueCreate) {
-    return {
-      ok: false,
-      error: "Failed to create Linear issue",
-    }
+  if (!result.data.issueCreate.success) {
+    Log.shared.error("Failed to create issue", error)
+    throw new Error("Failed to create issue")
   }
 
-  return {
-    ok: true,
-    issue: data.data.issueCreate.issue,
-  }
+  return result.data.issueCreate.issue
 }
 
-export { getLinearIssueLabels, getLinearIssueStatuses, getLinearTeams, getLinearUser, createIssue, getLinearUsers }
+const generateIssueLink = (identifier: string, organizations: string) => {
+  let link = `https://linear.app/${organizations}/issue/${identifier}`
+
+  return link
+}
+
+export {
+  getLinearIssueLabels,
+  getLinearIssueStatuses,
+  getLinearTeams,
+  getLinearOrg,
+  getLinearUser,
+  createIssue,
+  generateIssueLink,
+  getLinearUsers,
+}

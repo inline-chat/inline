@@ -1,12 +1,14 @@
-import { Type, type Static } from "@sinclair/typebox"
+import { Optional, Type, type Static } from "@sinclair/typebox"
 import { eq } from "drizzle-orm"
 import OpenAI from "openai"
-import { spaces } from "../db/schema"
+import { spaces, users } from "../db/schema"
 import { db } from "../db"
 import {
   createIssue,
+  generateIssueLink,
   getLinearIssueLabels,
   getLinearIssueStatuses,
+  getLinearOrg,
   getLinearTeams,
   getLinearUser,
   getLinearUsers,
@@ -24,7 +26,9 @@ export const Input = Type.Object({
   chatId: Type.Number(),
 })
 
-export const Response = Type.Undefined()
+export const Response = Type.Object({
+  link: Optional(Type.String()),
+})
 
 export const handler = async (
   input: Static<typeof Input>,
@@ -37,17 +41,38 @@ export const handler = async (
   const linearUsers = await getLinearUsers({ userId: currentUserId })
 
   const message = `
-You are an expert in creating task titles from messages in all languages. You make the best titles in the world, and your focus is on not using AI buzzwords. Here is the message text: ${text}. I use Linear for task management. Here are my issue labels:
-${JSON.stringify(labels.labels, null, 2)}
-Find the related ones to the message and return them. Find the assignee by considering who the issue or the task is reported to or who is mentioned with @ in the message and match them with Linear users, then return the matched userId. Linear users:
-${JSON.stringify(linearUsers.users, null, 2)}
-Please return a simple JSON like this with the results: 
+You are an expert linguist creating concise task titles from messages in any language. Follow these steps:
+
+1. TRANSLATION: If input is non-English, translate to English with maximum fidelity to:
+   - Original intent and nuanced meaning
+   - Cultural context and idiomatic expressions
+   - Industry-specific terminology preservation
+   Use professional translation standards (ISO 17100) for accuracy.
+
+2. TITLE CREATION:
+   a. Start with simple, human-action verb (e.g., "Fix", "Update", "Review")
+   b. Maintain original message's key detail density
+   c. Strictly avoid AI-related terms like "optimize", "leverage", "streamline"
+   d. Should be sentence case.
+
+3. LINEAR INTEGRATION:
+   Labels: ${JSON.stringify(labels.labels, null, 2)}
+   Users: ${JSON.stringify(linearUsers.users, null, 2)}
+   Match using semantic similarity thresholds >0.7
+
+Return JSON with this exact structure:
 {
-  "title": "<task title you made in sentence case>",
-  "description": "<the message I gave you as input>",
-  "labelIds": "<the ID of labels you matched with Linear labels>",
-  "assigneeId": "<The id you found for who the issue is reported to from Linear users>"
+  "title": "<Translated/Original Text as Natural Task Title>",
+  "description": "${text}", 
+  "labelIds": ["<Matching-Label-ID>"] || [],
+  "assigneeId": "<@Mention-Matched-ID>" || ""
 }
+
+Key Requirements:
+-  Description must remain verbatim original text
+-  Empty values allowed for missing matches
+-  Title verb must be everyday action word
+-  Never explain your reasoning
 `
 
   const response = await openaiClient?.chat.completions.create({
@@ -59,7 +84,6 @@ Please return a simple JSON like this with the results:
     Log.shared.error("Failed to create OpenAI response")
     throw new Error("Failed to create OpenAI response")
   }
-
   try {
     const content = response.choices[0]?.message?.content
 
@@ -76,8 +100,8 @@ Please return a simple JSON like this with the results:
       throw new Error("Invalid JSON response from OpenAI")
     }
 
-    await createIssueFunc({
-      assigneeId: jsonResponse.assigneeId,
+    const link = await createIssueFunc({
+      assigneeId: jsonResponse.assigneeId || undefined,
       title: jsonResponse.title,
       description: jsonResponse.description,
       messageId: messageId,
@@ -85,8 +109,11 @@ Please return a simple JSON like this with the results:
       labelIds: jsonResponse.labelIds,
       currentUserId: currentUserId,
     })
-  } catch {
+
+    return { link }
+  } catch (error) {
     Log.shared.error("Failed to create issue")
+    return { link: undefined }
   }
 }
 
@@ -100,25 +127,28 @@ type CreateIssueProps = {
   currentUserId: number
 }
 
-const createIssueFunc = async (props: CreateIssueProps) => {
-  const teamId = await getLinearTeams({ userId: props.currentUserId })
-  const teamIdValue = teamId.teams.teams.nodes[0].id
-
+const createIssueFunc = async (props: CreateIssueProps): Promise<string | undefined> => {
+  const team = await getLinearTeams({ userId: props.currentUserId })
+  const teamIdValue = team?.id
+  const organization = await getLinearOrg({ userId: props.currentUserId })
   const statuses = await getLinearIssueStatuses({ userId: props.currentUserId })
   const unstarded = statuses.workflowStates.filter((status: any) => status.type === "unstarted")
 
   try {
-    await createIssue({
+    let result = await createIssue({
       userId: props.currentUserId,
       title: props.title,
       description: props.description,
-      teamId: teamIdValue,
+      teamId: teamIdValue ?? "",
       messageId: props.messageId,
       chatId: props.chatId,
       labelIds: props.labelIds,
-      assigneeId: props.assigneeId,
+      assigneeId: props.assigneeId || undefined,
       statusId: unstarded[0].id,
     })
+
+    let link = generateIssueLink(result?.identifier ?? "", organization?.urlKey ?? "")
+    return link
   } catch (error) {
     Log.shared.error("Failed to create Linear issue", { error })
   }
