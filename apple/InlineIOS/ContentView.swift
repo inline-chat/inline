@@ -96,17 +96,17 @@ extension ContentView {
         .sheet(item: $nav.activeSheet) { destination in
           sheetContent(for: destination)
         }
-//        .onAppear {
-//          updateOnlineStatus()
-//        }
+        .onAppear {
+          markAsOnline()
+        }
         .onChange(of: scene) { _, newScene in
           switch newScene {
             case .active:
-              updateOnlineStatus()
+              markAsOnline()
             case .inactive:
-              break
+              markAsOffline()
             case .background:
-              break
+              markAsOffline()
             default:
               break
           }
@@ -117,9 +117,15 @@ extension ContentView {
     }
   }
 
-  func updateOnlineStatus() {
+  private func markAsOnline() {
     Task {
       try? await data.updateStatus(online: true)
+    }
+  }
+
+  private func markAsOffline() {
+    Task {
+      try? await data.updateStatus(online: false)
     }
   }
 }
