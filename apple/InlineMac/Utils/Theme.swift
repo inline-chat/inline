@@ -55,6 +55,7 @@ enum Theme {
 
   // MARK: - Chat View
 
+  static let chatToolbarIconSize: CGFloat = 32
   static let chatViewMinWidth: CGFloat = 315 // going below this makes media calcs mess up
   static let messageGroupSpacing: CGFloat = 8
   static let messageListTopInset: CGFloat = 14
