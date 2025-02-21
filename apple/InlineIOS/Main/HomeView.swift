@@ -18,7 +18,6 @@ struct HomeView: View {
   @EnvironmentObject private var home: HomeViewModel
 
   @Environment(\.appDatabase) private var database
-  @Environment(\.scenePhase) private var scene
   @Environment(\.auth) private var auth
   @Environment(\.scenePhase) var scenePhase
 
@@ -133,11 +132,6 @@ struct HomeView: View {
     }
     .toolbar {
       HomeToolbarContent(userInfo: root.currentUserInfo)
-    }
-    .onAppear {
-      Task {
-        await initalFetch()
-      }
     }
     .task {
       await initalFetch()
