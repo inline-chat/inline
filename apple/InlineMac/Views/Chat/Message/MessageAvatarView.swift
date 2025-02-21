@@ -10,16 +10,19 @@ class UserAvatarView: NSView {
     userInfo?.user
   }
 
+  private var size: CGFloat
+
   private var hostingView: NSHostingView<UserAvatar>?
 
-  init(userInfo: UserInfo) {
+  init(userInfo: UserInfo, size: CGFloat = Theme.messageAvatarSize) {
     self.userInfo = userInfo
+    self.size = size
 
     super.init(frame: NSRect(
       x: 0,
       y: 0,
-      width: Theme.messageAvatarSize,
-      height: Theme.messageAvatarSize
+      width: size,
+      height: size
     ))
 
     setupView()
@@ -40,9 +43,9 @@ class UserAvatarView: NSView {
     translatesAutoresizingMaskIntoConstraints = true
   }
 
+  @available(*, unavailable)
   required init?(coder: NSCoder) {
-    super.init(coder: coder)
-    setupView()
+    fatalError("init(coder:) has not been implemented")
   }
 
   private func updateAvatar() {
@@ -54,7 +57,7 @@ class UserAvatarView: NSView {
     // Create new SwiftUI view
     let swiftUIView = UserAvatar(
       userInfo: userInfo,
-      size: Theme.messageAvatarSize,
+      size: size,
       ignoresSafeArea: true
     )
     let newHostingView = NSHostingView(rootView: swiftUIView)
@@ -72,8 +75,8 @@ class UserAvatarView: NSView {
   override var intrinsicContentSize: NSSize {
     // 6. Provide intrinsic size
     NSSize(
-      width: Theme.messageAvatarSize,
-      height: Theme.messageAvatarSize
+      width: size,
+      height: size
     )
   }
 
