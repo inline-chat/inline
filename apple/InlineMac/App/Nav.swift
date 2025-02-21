@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import InlineKit
 import Logger
@@ -49,11 +50,17 @@ class Nav: ObservableObject {
 
   public var forwardHistory: [NavEntry] = []
 
+  // UI State Publishers For AppKit
+  var canGoBackPublisher: CurrentValueSubject<Bool, Never> = CurrentValueSubject(false)
+  var canGoForwardPublisher: CurrentValueSubject<Bool, Never> = CurrentValueSubject(false)
+  var currentRoutePublisher: CurrentValueSubject<NavEntry.Route, Never> = CurrentValueSubject(.empty)
+  var currentSpaceIdPublisher: CurrentValueSubject<Int64?, Never> = CurrentValueSubject(nil)
+
   // UI State
-  @Published var canGoBack: Bool = false
-  @Published var canGoForward: Bool = false
-  @Published var currentRoute: NavEntry.Route = .empty
-  @Published var currentSpaceId: Int64? = nil
+  @Published var canGoBack: Bool = false { didSet { canGoBackPublisher.send(canGoBack) } }
+  @Published var canGoForward: Bool = false { didSet { canGoForwardPublisher.send(canGoForward) } }
+  @Published var currentRoute: NavEntry.Route = .empty { didSet { currentRoutePublisher.send(currentRoute) } }
+  @Published var currentSpaceId: Int64? = nil { didSet { currentSpaceIdPublisher.send(currentSpaceId) } }
 
   private init() {
     loadState()
@@ -186,7 +193,7 @@ extension Nav {
       print("loaded nav state \(state)")
       // Update state
       history = if let navEntry = state.lastEntry { [navEntry] } else { [] }
-      
+
       reflectHistoryChange()
     } catch {
       Log.shared.error("Failed to load navigation state: \(error.localizedDescription)")

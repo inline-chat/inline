@@ -130,7 +130,7 @@ class MainWindowController: NSWindowController {
       self.switchTopLevel(route)
     }.store(in: &cancellables)
 
-    dependencies.nav.$currentRoute.sink { [weak self] _ in
+    dependencies.nav.currentRoutePublisher.sink { [weak self] _ in
       guard let self else { return }
       guard topLevelRoute == .main else { return }
 
@@ -138,11 +138,11 @@ class MainWindowController: NSWindowController {
       reloadToolbar()
     }.store(in: &cancellables)
 
-    dependencies.nav.$canGoBack.sink { [weak self] value in
+    dependencies.nav.canGoBackPublisher.sink { [weak self] value in
       self?.navBackButton?.isEnabled = value
     }.store(in: &cancellables)
 
-    dependencies.nav.$canGoForward.sink { [weak self] value in
+    dependencies.nav.canGoForwardPublisher.sink { [weak self] value in
       self?.navForwardButton?.isEnabled = value
     }.store(in: &cancellables)
   }
@@ -251,9 +251,20 @@ extension MainWindowController: NSToolbarDelegate {
       case .navGroup:
         return makeNavigationButtons()
 
+      case .chatTitle:
+        guard case let .chat(peer) = nav.currentRoute else { return nil }
+        return ChatTitleToolbar(
+          peer: peer,
+          dependencies: dependencies
+        )
+
       default:
         return nil
     }
+  }
+
+  var nav: Nav {
+    dependencies.nav
   }
 
   private func createAddMenu() -> NSMenu {
@@ -379,9 +390,8 @@ extension MainWindowController {
 
     // Route dependant items
     switch nav.currentRoute {
-      case let .chat(peer):
-        break
-        // items.append(.chatTitle)
+      case .chat:
+        items.append(.chatTitle)
 
       default:
         break
@@ -416,7 +426,7 @@ extension MainWindowController {
     forwardButton.target = self
     forwardButton.action = #selector(goForward)
     forwardButton.isEnabled = dependencies.nav.canGoForward
-    
+
     // Add buttons to container
     containerView.addSubview(backButton)
     containerView.addSubview(forwardButton)
@@ -433,7 +443,6 @@ extension MainWindowController {
       forwardButton.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
       forwardButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
 
-
       // Make sure the container sizes itself to fit the buttons
       containerView.heightAnchor.constraint(equalTo: backButton.heightAnchor),
     ])
@@ -443,79 +452,6 @@ extension MainWindowController {
     // Store references for state updates
     navBackButton = backButton
     navForwardButton = forwardButton
-
-    return item
-
-    // TG MULTI
-//    let item = NSToolbarItemGroup(itemIdentifier: .navGroup)
-//    item.isNavigational = true
-//
-//    let back = NSToolbarItem(itemIdentifier: .navBack)
-//
-//    back.label = "Go Back"
-//    back.image = NSImage(
-//      systemSymbolName: "chevron.left",
-//      accessibilityDescription: "Go Back"
-//    )
-//    back.action = #selector(goBack)
-//    back.isNavigational = true
-//    back.isBordered = true
-//    back.isEnabled = dependencies.nav.canGoBack
-//
-//    let forward = NSToolbarItem(itemIdentifier: .navForward)
-//    forward.label = "Go Forward"
-//    forward.isNavigational = true
-//    forward.isBordered = true
-//    forward.image = NSImage(
-//      systemSymbolName: "chevron.right",
-//      accessibilityDescription: "Go Forward"
-//    )
-//    forward.action = #selector(goForward)
-//    forward.isEnabled = dependencies.nav.canGoForward
-//
-//    navBackButton = back
-//    navForwardButton = forward
-//
-//    item.subitems = [back, forward]
-//    item.selectionMode = .momentary
-
-    // TG INS
-//    let item = NSToolbarItemGroup(
-//      itemIdentifier: .navGroup,
-//      images: [
-//        NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")!,
-//        NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward")!,
-//      ],
-//      selectionMode: .momentary,
-//      labels: ["Back", "Forward"],
-//      target: self,
-//      action: #selector(segmentedNavAction(_:))
-//    )
-//    item.isNavigational = true
-
-    // 3. SEG
-//    let segmented = NSSegmentedControl(
-//      images: [
-//        NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")!,
-//        NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward")!,
-//      ],
-//      trackingMode: .momentary,
-//      target: self,
-//      action: #selector(segmentedNavAction(_:))
-//    )
-//
-//    // Use a "textured-rounded," "automatic," or "segmented" style
-//    // if you want it to look more like Finder
-//    segmented.segmentStyle = .texturedRounded
-//
-//    // Initially enable/disable segments as needed
-//    segmented.setEnabled(dependencies.nav.canGoBack, forSegment: 0)
-//    segmented.setEnabled(dependencies.nav.canGoForward, forSegment: 1)
-//
-//    // Wrap it in an NSToolbarItem
-//    let item = NSToolbarItemGroup(itemIdentifier: .navGroup)
-//    item.view = segmented
-//    item.isNavigational = true
 
     return item
   }
