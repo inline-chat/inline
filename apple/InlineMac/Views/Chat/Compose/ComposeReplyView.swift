@@ -1,6 +1,8 @@
 import AppKit
 import InlineKit
 
+// TODO: Remove alpha animation
+
 class ComposeReplyView: NSView {
   // MARK: - Properties
 
@@ -8,6 +10,7 @@ class ComposeReplyView: NSView {
   private var kind: EmbeddedMessageView.Kind
   private var heightConstraint: NSLayoutConstraint!
   private let defaultHeight: CGFloat = Theme.embeddedMessageHeight
+  private let buttonSize: CGFloat = Theme.composeButtonSize
 
   // MARK: - Views
 
@@ -26,9 +29,9 @@ class ComposeReplyView: NSView {
 
   private lazy var closeButton: NSButton = {
     let button = NSButton(frame: .zero)
-    button.bezelStyle = .regularSquare
+    button.bezelStyle = .circular
     button.isBordered = false
-    button.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close")
+    button.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
     button.imagePosition = .imageOnly
     button.target = self
     button.action = #selector(handleClose)
@@ -65,9 +68,9 @@ class ComposeReplyView: NSView {
     heightConstraint = heightAnchor.constraint(equalToConstant: 0)
 
     NSLayoutConstraint.activate([
-      closeButton.widthAnchor.constraint(equalToConstant: 16),
-      closeButton.heightAnchor.constraint(equalToConstant: 16),
-      closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+      closeButton.widthAnchor.constraint(equalToConstant: buttonSize),
+      closeButton.heightAnchor.constraint(equalToConstant: buttonSize),
+      closeButton.trailingAnchor.constraint(equalTo: trailingAnchor),
 
       heightConstraint,
     ])

@@ -180,8 +180,7 @@ class ComposeAppKit: NSView {
 
       // reply (height handled internally)
       replyView.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
-      replyView.trailingAnchor.constraint(equalTo: textEditor.trailingAnchor),
-      // replyView.topAnchor.constraint(equalTo: topAnchor, constant: 0.0),
+      replyView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
 
       // attachments
       attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
