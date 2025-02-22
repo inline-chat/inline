@@ -10,6 +10,8 @@ import SwiftUI
 import Throttler
 
 class MessageViewAppKit: NSView {
+  private let feature_relayoutOnBoundsChange = true
+
   static let avatarSize: CGFloat = Theme.messageAvatarSize
   private var fullMessage: FullMessage
   private var props: MessageViewProps
@@ -195,6 +197,7 @@ class MessageViewAppKit: NSView {
   // which made it unsusable.
   // This approach still needs further testing.
   @objc private func handleBoundsChange(_ notification: Notification) {
+    guard feature_relayoutOnBoundsChange else { return }
     guard let scrollView = enclosingScrollView,
           let clipView = notification.object as? NSClipView else { return }
 
@@ -226,18 +229,18 @@ class MessageViewAppKit: NSView {
             // Important note:
             // Less performant, but fixes flicker during live resize for large messages that are beyound viewport height
             // and during width resize
-            Log.shared.debug("Layouting viewport for text view \(message.id)")
+            Log.shared.debug("Layouting viewport (1) for text view \(message.id) ")
             textLayoutManager.textViewportLayoutController.layoutViewport()
           } else {
-            // More performant
-            throttle(.milliseconds(100), identifier: "layoutMessageTextView", by: .mainActor, option: .default) { [
+            // More performant for single line messages
+            throttle(.milliseconds(200), identifier: "layoutMessageTextView", by: .mainActor, option: .default) { [
               weak self,
               weak textLayoutManager
             ] in
               guard let self else { return }
               guard let textLayoutManager else { return }
 
-              Log.shared.debug("Layouting viewport for text view \(message.id)")
+              Log.shared.debug("Layouting viewport (2) for text view \(message.id)")
               textLayoutManager.textViewportLayoutController.layoutViewport()
             }
           }
@@ -257,9 +260,12 @@ class MessageViewAppKit: NSView {
     self.fullMessage = fullMessage
     self.props = props
     super.init(frame: .zero)
-    addHoverTrackingArea()
-    setupScrollStateObserver()
     setupView()
+
+    DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
+      self?.addHoverTrackingArea()
+      self?.setupScrollStateObserver()
+    }
   }
 
   @available(*, unavailable)
@@ -509,6 +515,7 @@ class MessageViewAppKit: NSView {
     menu.addItem(idItem)
 
     let indexItem = NSMenuItem(
+      // TODO: debug why it's nil sometimes
       title: "Index: \(props.index?.description ?? "?")",
       action: nil,
       keyEquivalent: ""
@@ -569,7 +576,7 @@ class MessageViewAppKit: NSView {
 
   // MARK: - View Updates
 
-  private func updatePropsAndUpdateLayout(props: MessageViewProps) {
+  private func updatePropsAndUpdateLayout(props: MessageViewProps, disableTextRelayout: Bool = false) {
     // save for comparison
     let prevProps = self.props
 
@@ -605,7 +612,7 @@ class MessageViewAppKit: NSView {
 
       // very subtle fix:
       // ensure the change is reflected even if it was offscreen when live resize started
-      if useTextKit2 {
+      if useTextKit2, !disableTextRelayout {
         textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
         textView.layout()
         textView.display()
@@ -625,20 +632,23 @@ class MessageViewAppKit: NSView {
     // update internal props
     self.fullMessage = fullMessage
 
-    // update props and reflect changes
-    updatePropsAndUpdateLayout(props: props)
+    // Update props and reflect changes
+    updatePropsAndUpdateLayout(props: props, disableTextRelayout: true)
 
+    // Text
     setupMessageText()
 
-    // As the message changes here, we need to update everything related to that. Otherwise we get wrong context menu.
-    setupContextMenu()
-
-    // Update time and state
-    timeAndStateView.updateMessage(fullMessage)
-
-    // Update photo
+    // Photo
     if hasPhoto {
       photoView.update(with: fullMessage)
+    }
+
+    DispatchQueue.main.async(qos: .utility) { [weak self] in
+      // As the message changes here, we need to update everything related to that. Otherwise we get wrong context menu.
+      self?.setupContextMenu()
+
+      // Update time and state
+      self?.timeAndStateView.updateMessage(fullMessage)
     }
   }
 
