@@ -71,6 +71,7 @@ class ComposeReplyView: NSView {
       closeButton.widthAnchor.constraint(equalToConstant: buttonSize),
       closeButton.heightAnchor.constraint(equalToConstant: buttonSize),
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+      closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
 
       heightConstraint,
     ])
