@@ -377,6 +377,11 @@ private extension MessagesCollectionView {
             snapshot.appendItems(missingIds, toSection: .main)
           }
 
+          // Mark as read if we're at bottom or message is from current user
+          if shouldScroll {
+            updateUnreadIfNeeded()
+          }
+
           UIView.animate(withDuration: 0.2) {
             self.dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
               if shouldScroll {
@@ -406,6 +411,10 @@ private extension MessagesCollectionView {
         case .reload:
           setInitialData()
       }
+    }
+
+    func updateUnreadIfNeeded() {
+      UnreadManager.shared.readAll(peerId, chatId: chatId)
     }
 
     private var sizeCache: [FullMessage.ID: CGSize] = [:]
