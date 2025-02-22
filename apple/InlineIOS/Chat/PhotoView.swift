@@ -105,7 +105,6 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
     NSLayoutConstraint.activate(imageConstraints)
 
     // Placeholder
-    imageView.placeholderImage = generateThumbnail()
     imageView.priority = .high
     imageView.processors = [.resize(width: 300)]
     imageView.backgroundColor = .clear
@@ -147,29 +146,6 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
         }
       }
     }
-  }
-
-  private func generateThumbnail() -> UIImage? {
-    guard let file = fullMessage.file,
-          let width = file.width,
-          let height = file.height,
-          width > 0, height > 0
-    else {
-      return nil
-    }
-
-    // Match exact calculated dimensions from setupImage()
-    let dimensions = calculateImageDimensions(width: width, height: height)
-    let size = CGSize(width: dimensions.width, height: dimensions.height)
-
-    UIGraphicsBeginImageContextWithOptions(size, false, 0)
-    defer { UIGraphicsEndImageContext() }
-
-    // Solid background matching chat bubbles
-    UIColor.systemGray5.setFill()
-    UIRectFill(CGRect(origin: .zero, size: size))
-
-    return UIGraphicsGetImageFromCurrentImageContext()
   }
 
   private func triggerMessageReload() {
