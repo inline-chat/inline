@@ -82,6 +82,7 @@ class MainWindowController: NSWindowController {
     window?.isMovableByWindowBackground = true
     window?.titlebarAppearsTransparent = true
     window?.titleVisibility = .hidden
+    window?.backgroundColor = .windowBackgroundColor
 
     reloadToolbar()
   }
@@ -91,11 +92,19 @@ class MainWindowController: NSWindowController {
       to: MainSplitViewController(dependencies: dependencies)
     )
 
+    ensureToolbarIsSet()
+
     window?.titleVisibility = .hidden
     window?.isMovableByWindowBackground = false
     window?.titlebarAppearsTransparent = false // depends on inner route as well
+    // window background is set based on current route
 
     reloadToolbar()
+  }
+
+  private func ensureToolbarIsSet() {
+    window?.toolbar = toolbar
+    toolbar.isVisible = true
   }
 
   private func reloadToolbar() {
@@ -127,7 +136,9 @@ class MainWindowController: NSWindowController {
   private var cancellables: Set<AnyCancellable> = []
   private func subscribe() {
     dependencies.viewModel.$topLevelRoute.sink { route in
-      self.switchTopLevel(route)
+      DispatchQueue.main.async {
+        self.switchTopLevel(route)
+      }
     }.store(in: &cancellables)
 
     dependencies.nav.currentRoutePublisher.sink { [weak self] route in
@@ -155,31 +166,6 @@ class MainWindowController: NSWindowController {
 
   private func injectDependencies() {
     dependencies.rootData = RootData(db: dependencies.database, auth: dependencies.auth)
-    dependencies.logOut = logOut
-  }
-
-  private func logOut() async {
-    let _ = try? await ApiClient.shared.logout()
-
-    // Clear creds
-    Auth.shared.logOut()
-
-    // Stop WebSocket
-    dependencies.ws.loggedOut()
-
-    // Clear database
-    try? AppDatabase.loggedOut()
-
-    // Navigate outside of the app
-    dependencies.viewModel.navigate(.onboarding)
-
-    // Reset internal navigation
-    dependencies.navigation.reset()
-
-    // Close Settings
-    if let window = NSApplication.shared.keyWindow {
-      window.close()
-    }
   }
 
   private func setupWindowFor(route: NavEntry.Route) {
