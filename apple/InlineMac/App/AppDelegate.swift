@@ -12,7 +12,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var mainWindowController: MainWindowController?
 
   // Common Dependencies
-  @MainActor private let dependencies = AppDependencies()
+  @MainActor private var dependencies = AppDependencies()
 
   // --
   let notifications = NotificationsManager()
@@ -25,6 +25,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Setup Notifications Delegate
     setupNotifications()
+
+    dependencies.logOut = logOut
   }
 
   func applicationDidFinishLaunching(_ aNotification: Notification) {
@@ -51,7 +53,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
-  private func setupMainWindow() {
+  @MainActor private func setupMainWindow() {
     let controller = MainWindowController(dependencies: dependencies)
     controller.showWindow(nil)
     mainWindowController = controller
@@ -119,8 +121,37 @@ extension AppDelegate {
     }
   }
 
-  private func setupMainMenu() {
-    AppMenu.shared.setupMainMenu()
+  @MainActor private func setupMainMenu() {
+    AppMenu.shared.setupMainMenu(dependencies: dependencies)
+  }
+
+  private func logOut() async {
+    _ = try? await ApiClient.shared.logout()
+
+    // Clear creds
+    Auth.shared.logOut()
+
+    // Stop WebSocket
+    await dependencies.ws.loggedOut()
+
+    // Clear database
+    try? AppDatabase.loggedOut()
+
+    // Navigate outside of the app
+    DispatchQueue.main.async {
+      self.dependencies.viewModel.navigate(.onboarding)
+
+      // Reset internal navigation
+      self.dependencies.navigation.reset()
+      self.dependencies.nav.reset()
+    }
+
+    // Re-open windows
+//    if let mainWindowController {
+//      await mainWindowController.close()
+//      // re-open
+//      setupMainWindow()
+//    }
   }
 }
 
