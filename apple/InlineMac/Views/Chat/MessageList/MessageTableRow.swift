@@ -7,7 +7,7 @@ import SwiftUI
 class MessageTableCell: NSView {
   private var messageView: MessageViewAppKit?
   private var currentContent: (message: FullMessage, props: MessageViewProps)?
-  private let log = Log.scoped("MessageTableCell", enableTracing: false)
+  private let log = Log.scoped("MessageTableCell", enableTracing: true)
 
   override init(frame: NSRect) {
     super.init(frame: frame)
