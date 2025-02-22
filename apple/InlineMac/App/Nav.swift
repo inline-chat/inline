@@ -110,6 +110,11 @@ extension Nav {
   }
 
   public func open(_ route: NavEntry.Route) {
+    if let last = history.last, last.route == route, last.spaceId == currentSpaceId {
+      // Skip opening duplicate routes
+      return
+    }
+    
     let entry = NavEntry(route: route, spaceId: currentSpaceId)
     history.append(entry)
 
