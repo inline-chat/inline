@@ -73,7 +73,6 @@ struct OnboardingEnterCode: View {
       }
     }
     .padding()
-    .frame(minWidth: 500, minHeight: 400)
   }
 
   @ViewBuilder var emailField: some View {
