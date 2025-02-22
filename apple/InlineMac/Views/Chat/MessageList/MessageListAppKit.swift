@@ -11,7 +11,7 @@ class MessageListAppKit: NSViewController {
   private var viewModel: MessagesProgressiveViewModel
   private var messages: [FullMessage] { viewModel.messages }
 
-  private let log = Log.scoped("MessageListAppKit", enableTracing: true)
+  private let log = Log.scoped("MessageListAppKit", enableTracing: false)
   private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 24.0
 

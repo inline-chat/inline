@@ -16,7 +16,7 @@ public class ComposeActions: ObservableObject {
   @Published public var actions: [Peer: ComposeActionInfo] = [:]
 
   private var cancelTasks: [Peer: Task<Void, Never>] = [:]
-  private var log = Log.scoped("ComposeActions", enableTracing: true)
+  private var log = Log.scoped("ComposeActions", enableTracing: false)
 
   public init() {}
 
