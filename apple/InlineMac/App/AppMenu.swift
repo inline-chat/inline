@@ -1,12 +1,17 @@
 import AppKit
+import InlineKit
 
-final class AppMenu {
+final class AppMenu: NSObject {
   static let shared = AppMenu()
   private let mainMenu = NSMenu()
+  private var dependencies: AppDependencies?
 
-  private init() {}
+  override private init() {
+    super.init()
+  }
 
-  func setupMainMenu() {
+  func setupMainMenu(dependencies: AppDependencies) {
+    self.dependencies = dependencies
     NSApp.mainMenu = mainMenu
 
     setupApplicationMenu()
@@ -64,6 +69,24 @@ final class AppMenu {
       action: #selector(NSApplication.unhideAllApplications(_:)),
       keyEquivalent: ""
     )
+
+    appMenu.addItem(NSMenuItem.separator())
+
+    let logoutMenuItem = NSMenuItem(
+      title: "Log Out…",
+      action: #selector(logOut(_:)),
+      keyEquivalent: ""
+    )
+    logoutMenuItem.target = self
+    appMenu.addItem(logoutMenuItem)
+
+    let clearCacheMenuItem = NSMenuItem(
+      title: "Clear Cache…",
+      action: #selector(clearCache(_:)),
+      keyEquivalent: ""
+    )
+    clearCacheMenuItem.target = self
+    appMenu.addItem(clearCacheMenuItem)
 
     appMenu.addItem(NSMenuItem.separator())
 
@@ -310,5 +333,30 @@ final class AppMenu {
 
   @objc private func showPreferences(_ sender: Any?) {
     // Implement your preferences window display logic here
+  }
+
+  @objc private func logOut(_ sender: Any?) {
+    let alert = NSAlert()
+    alert.messageText = "Log Out"
+    alert.informativeText = "Are you sure you want to log out?"
+    alert.addButton(withTitle: "Cancel")
+    alert.alertStyle = .warning
+    let button = alert.addButton(withTitle: "Log Out")
+    button.hasDestructiveAction = true
+
+    if alert.runModal() == .alertSecondButtonReturn {
+      Task { @MainActor in
+        await self.dependencies?.logOut()
+      }
+    }
+  }
+
+  @objc private func clearCache(_ sender: Any?) {
+    Transactions.shared.clearAll()
+
+    // Clear database
+    try? AppDatabase.clearDB()
+
+    // TODO: re-open windows?
   }
 }

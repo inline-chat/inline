@@ -12,13 +12,14 @@ public class ObjectCache {
 
   private var log = Log.scoped("ObjectCache", enableTracing: true)
   private var db = AppDatabase.shared
+  private var observingUsers: Set<Int64> = []
   private var users: [Int64: UserInfo] = [:]
   private var chats: [Int64: Chat] = [:]
   private var cancellables: Set<AnyCancellable> = []
   private var userPublishers: [Int64: PassthroughSubject<UserInfo?, Never>] = [:]
 
   public func getUser(id userId: Int64) -> UserInfo? {
-    if users[userId] == nil {
+    if observingUsers.contains(userId) == false {
       // fill in the cache
       observeUser(id: userId)
     }
@@ -53,6 +54,7 @@ public class ObjectCache {
 public extension ObjectCache {
   func observeUser(id userId: Int64) {
     log.trace("Observing user \(userId)")
+    observingUsers.insert(userId)
     ValueObservation.tracking { db in
       try User
         .filter(id: userId)
