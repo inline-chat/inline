@@ -23,8 +23,12 @@ class OnboardingViewController: NSViewController {
       rootView: swiftUIView
     )
 
+    controller.sizingOptions = [
+      .minSize,
+    ]
+
     if #available(macOS 14.0, *) {
-      //controller.sceneBridgingOptions = []
+      // controller.sceneBridgingOptions = []
     }
 
     addChild(controller)

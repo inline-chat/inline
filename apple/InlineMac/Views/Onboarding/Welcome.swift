@@ -38,7 +38,6 @@ struct OnboardingWelcome: View {
       Footer()
     }
     .padding()
-    .frame(minWidth: 480, minHeight: 400)
   }
 
   struct Footer: View {
