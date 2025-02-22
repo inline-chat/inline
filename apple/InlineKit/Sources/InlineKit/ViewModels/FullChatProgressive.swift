@@ -28,7 +28,14 @@ public class MessagesProgressiveViewModel {
   private var maxDate: Date = .init()
 
   // internals
-  private let initialLimit = 80
+  // was 80
+  private lazy var initialLimit: Int = // divide window height by 25
+    if let height = ScreenMetrics.height {
+      (Int(height.rounded()) / 24) + 30
+    } else {
+      60
+    }
+
   private let log = Log.scoped("MessagesViewModel", enableTracing: true)
   private let db = AppDatabase.shared
   private var cancellable = Set<AnyCancellable>()
@@ -74,7 +81,7 @@ public class MessagesProgressiveViewModel {
     // top id as cursor?
     // firs try lets use date as cursor
     let cursor = direction == .older ? minDate : maxDate
-    let limit = messages.count > 300 ? 400 : messages.count > 200 ? 300 : 100
+    let limit = messages.count > 200 ? 200 : 100
     let prepend = direction == (reversed ? .newer : .older)
     //    log.debug("Loading next batch at \(direction) \(cursor)")
     loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend)
