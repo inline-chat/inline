@@ -6,10 +6,10 @@ class EmbeddedMessageView: NSView {
   // MARK: - Constants
 
   private enum Constants {
-    static let cornerRadius: CGFloat = 0
-    static let rectangleWidth: CGFloat = 3
+    static let cornerRadius: CGFloat = 4
+    static let rectangleWidth: CGFloat = 2
     static let contentSpacing: CGFloat = 6
-    static let verticalPadding: CGFloat = 2
+    static let verticalPadding: CGFloat = 4
     static let horizontalPadding: CGFloat = 6
     static let height: CGFloat = Theme.embeddedMessageHeight
   }
@@ -24,7 +24,7 @@ class EmbeddedMessageView: NSView {
   private var kind: Kind
 
   private var senderFont: NSFont {
-    .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+    .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
   }
 
   private var messageFont: NSFont {
@@ -37,10 +37,15 @@ class EmbeddedMessageView: NSView {
 
   // MARK: - Views
 
+  override var wantsUpdateLayer: Bool {
+    true
+  }
+
   private lazy var rectangleView: NSView = {
     let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
+    view.layer?.masksToBounds = true
     view.layer?.backgroundColor = NSColor.controlAccentColor.cgColor // use sender color
     return view
   }()
@@ -85,8 +90,6 @@ class EmbeddedMessageView: NSView {
     addSubview(rectangleView)
     addSubview(nameLabel)
     addSubview(messageLabel)
-    
-    
 
     NSLayoutConstraint.activate([
       // Rectangle view
@@ -125,7 +128,7 @@ class EmbeddedMessageView: NSView {
         "\(senderName)"
 
       case .replyingInCompose:
-        "Replying to \(senderName)"
+        "Reply to \(senderName)"
     }
     nameLabel.textColor = NSColor(InitialsCircle.ColorPalette.color(for: senderName))
     messageLabel.stringValue = message.text ?? ""
