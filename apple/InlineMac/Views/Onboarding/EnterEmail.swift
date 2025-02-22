@@ -1,6 +1,6 @@
 import InlineKit
-import SwiftUI
 import Logger
+import SwiftUI
 
 struct OnboardingEnterEmail: View {
   @EnvironmentObject var onboardingViewModel: OnboardingViewModel
@@ -50,7 +50,6 @@ struct OnboardingEnterEmail: View {
       }
     }
     .padding()
-    .frame(minWidth: 500, minHeight: 400)
   }
 
   @ViewBuilder var emailField: some View {
