@@ -293,7 +293,12 @@ struct ChatViewUIKit: UIViewRepresentable {
   @EnvironmentObject var data: DataManager
 
   func makeUIView(context: Context) -> ChatContainerView {
-    ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId)
+    let view = ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId)
+
+    // Mark messages as read when view appears
+    UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
+
+    return view
   }
 
   func updateUIView(_ uiView: ChatContainerView, context: Context) {}
