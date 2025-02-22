@@ -63,16 +63,16 @@ class MainWindowController: NSWindowController {
 
   /// Animate or switch to next VC
   private func switchViewController(to viewController: NSViewController) {
-    if let _ = window?.contentViewController {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.1
-        context.allowsImplicitAnimation = true
-
-        window?.contentViewController = viewController
-      }
-    } else {
-      window?.contentViewController = viewController
-    }
+//    if let _ = window?.contentViewController {
+//      NSAnimationContext.runAnimationGroup { context in
+//        context.duration = 0.1
+//        context.allowsImplicitAnimation = true
+//
+//        window?.contentViewController = viewController
+//      }
+//    } else {
+    window?.contentViewController = viewController
+//    }
   }
 
   private func setupOnboarding() {
@@ -83,6 +83,7 @@ class MainWindowController: NSWindowController {
     window?.titlebarAppearsTransparent = true
     window?.titleVisibility = .hidden
     window?.backgroundColor = .windowBackgroundColor
+    window?.setContentSize(NSSize(width: 780, height: 500))
 
     reloadToolbar()
   }

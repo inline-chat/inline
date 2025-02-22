@@ -60,7 +60,6 @@ struct OnboardingProfile: View {
       }
     }
     .padding()
-    .frame(minWidth: 500, minHeight: 400)
   }
 
   @ViewBuilder var nameField: some View {
