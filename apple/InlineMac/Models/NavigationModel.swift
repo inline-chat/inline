@@ -43,7 +43,7 @@ private struct NavigationState: Codable {
 class NavigationModel: ObservableObject {
   static let shared = NavigationModel()
 
-  private let log = Log.scoped("Navigation", enableTracing: true)
+  private let log = Log.scoped("Navigation", enableTracing: false)
 
   @Published var homePath: [NavigationRoute] = []
   @Published var homeSelection: NavigationRoute = .homeRoot

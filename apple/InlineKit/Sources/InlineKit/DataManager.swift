@@ -15,7 +15,7 @@ enum DataManagerError: Error {
 @MainActor
 public class DataManager: ObservableObject {
   private var database: AppDatabase
-  private var log = Log.scoped("DataManager", enableTracing: true)
+  private var log = Log.scoped("DataManager", enableTracing: false)
 
   public init(database: AppDatabase) {
     self.database = database

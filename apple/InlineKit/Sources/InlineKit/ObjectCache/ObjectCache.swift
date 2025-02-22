@@ -10,7 +10,7 @@ public class ObjectCache {
 
   private init() {}
 
-  private var log = Log.scoped("ObjectCache", enableTracing: true)
+  private var log = Log.scoped("ObjectCache", enableTracing: false)
   private var db = AppDatabase.shared
   private var observingUsers: Set<Int64> = []
   private var users: [Int64: UserInfo] = [:]
