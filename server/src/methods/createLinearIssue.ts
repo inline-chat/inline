@@ -49,7 +49,7 @@ the message is : ${text}.
    c. Strictly avoid AI-related terms like "optimize", "leverage", "streamline"
    d. Should be sentence case.
     e. Make sure you added the core issue (what is the issue) and how this issue was exactly created in title.
-      eg. Message: Dena please fix open DM chats on notification click, it’s working randomly for me.
+      eg. Message: Dena please fix open DM chats on notification click, it's working randomly for me.
       Title: Fix open DM on notifications click
       Message2: @Mo this message failed to translate. It was a long message from a zh user
       Title2: Fix translation failure on long zh messages
@@ -128,14 +128,17 @@ type CreateIssueProps = {
 }
 
 const createIssueFunc = async (props: CreateIssueProps): Promise<string | undefined> => {
-  const team = await getLinearTeams({ userId: props.currentUserId })
-  const teamIdValue = team?.id
-  const organization = await getLinearOrg({ userId: props.currentUserId })
-  const statuses = await getLinearIssueStatuses({ userId: props.currentUserId })
-  const unstarded = statuses.workflowStates.filter((status: any) => status.type === "unstarted")
-
   try {
-    let result = await createIssue({
+    const [team, organization, statuses] = await Promise.all([
+      getLinearTeams({ userId: props.currentUserId }),
+      getLinearOrg({ userId: props.currentUserId }),
+      getLinearIssueStatuses({ userId: props.currentUserId }),
+    ])
+
+    const teamIdValue = team?.id
+    const unstarded = statuses.workflowStates.filter((status: any) => status.type === "unstarted")
+
+    const result = await createIssue({
       userId: props.currentUserId,
       title: props.title,
       description: props.description,
@@ -147,9 +150,9 @@ const createIssueFunc = async (props: CreateIssueProps): Promise<string | undefi
       statusId: unstarded[0].id,
     })
 
-    let link = generateIssueLink(result?.identifier ?? "", organization?.urlKey ?? "")
-    return link
+    return generateIssueLink(result?.identifier ?? "", organization?.urlKey ?? "")
   } catch (error) {
     Log.shared.error("Failed to create Linear issue", { error })
+    return undefined
   }
 }
