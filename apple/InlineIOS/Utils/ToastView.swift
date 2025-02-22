@@ -9,19 +9,31 @@ struct ToastView: View {
         Image(systemName: systemImage)
           .foregroundColor(.secondary)
           .padding(.top, 2)
+          .transition(.asymmetric(
+            insertion: .scale.combined(with: .opacity),
+            removal: .scale.combined(with: .opacity)
+          ))
+          .id(systemImage)
       }
 
       Text(toast.message)
         .foregroundColor(.primary)
+        .transition(.opacity)
+        .id(toast.message)
+
       Spacer()
+
       if let actionTitle = toast.actionTitle {
         Button(actionTitle) {
           toast.action?()
         }
         .foregroundColor(.blue)
         .padding(.leading, 4)
+        .transition(.opacity)
+        .id(actionTitle)
       }
     }
+    .animation(.spring(response: 0.3), value: toast.id)
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 16)
     .padding(.vertical, 10)
@@ -45,7 +57,7 @@ struct ToastContainerModifier: ViewModifier {
           VStack {
             Spacer()
             ToastView(toast: toast)
-              .padding(.bottom, 115)
+              .padding(.bottom, 60)
           }
         }
       }
