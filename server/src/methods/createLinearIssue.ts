@@ -41,19 +41,18 @@ export const handler = async (
   const linearUsers = await getLinearUsers({ userId: currentUserId })
 
   const message = `
-You are an expert linguist creating concise task titles from messages in any language. Follow these steps:
-
-1. TRANSLATION: If input is non-English, translate to English with maximum fidelity to:
-   - Original intent and nuanced meaning
-   - Cultural context and idiomatic expressions
-   - Industry-specific terminology preservation
-   Use professional translation standards (ISO 17100) for accuracy.
-
+You are an expert linguist creating accurate task titles from messages in any language. Follow these steps:
+the message is : ${text}.
 2. TITLE CREATION:
    a. Start with simple, human-action verb (e.g., "Fix", "Update", "Review")
    b. Maintain original message's key detail density
    c. Strictly avoid AI-related terms like "optimize", "leverage", "streamline"
    d. Should be sentence case.
+    e. Make sure you added the core issue (what is the issue) and how this issue was exactly created in title.
+      eg. Message: Dena please fix open DM chats on notification click, it’s working randomly for me.
+      Title: Fix open DM on notifications click
+      Message2: @Mo this message failed to translate. It was a long message from a zh user
+      Title2: Fix translation failure on long zh messages
 
 3. LINEAR INTEGRATION:
    Labels: ${JSON.stringify(labels.labels, null, 2)}
@@ -77,7 +76,8 @@ Key Requirements:
 
   const response = await openaiClient?.chat.completions.create({
     messages: [{ role: "user", content: message }],
-    model: "gpt-4",
+    model: "gpt-4o",
+    response_format: { type: "json_object" },
   })
 
   if (!response) {
