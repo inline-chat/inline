@@ -36,7 +36,7 @@ public class MessagesProgressiveViewModel {
       60
     }
 
-  private let log = Log.scoped("MessagesViewModel", enableTracing: true)
+  private let log = Log.scoped("MessagesViewModel", enableTracing: false)
   private let db = AppDatabase.shared
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
