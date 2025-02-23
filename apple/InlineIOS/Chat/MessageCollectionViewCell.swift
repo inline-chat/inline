@@ -44,7 +44,7 @@ class MessageCollectionViewCell: UICollectionViewCell {
 
     resetCell()
 
-    setupOutcomingThreadMessage()
+    setupIncomingThreadMessage()
     setupBaseMessageConstraints()
 
     contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
@@ -88,16 +88,14 @@ extension MessageCollectionViewCell {
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     contentView.addSubview(newMessageView)
 
-    let topConstraint: NSLayoutConstraint = if isThread, fromOtherSender {
+    let topConstraint: NSLayoutConstraint = if isThread, fromOtherSender, !outgoing {
       newMessageView.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2)
     } else {
       newMessageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: fromOtherSender ? 12 : 2)
     }
 
-    let leadingConstraint: NSLayoutConstraint = if isThread {
-      if outgoing {
-        newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 32)
-      } else if fromOtherSender, let avatarView = avatarHostingController?.view {
+    let leadingConstraint: NSLayoutConstraint = if isThread, !outgoing {
+      if fromOtherSender, let avatarView = avatarHostingController?.view {
         newMessageView.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: -2)
       } else {
         newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 32)
@@ -106,12 +104,8 @@ extension MessageCollectionViewCell {
       newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
     }
 
-    let trailingConstraint: NSLayoutConstraint = if isThread {
-      if outgoing, let avatarView = avatarHostingController?.view {
-        newMessageView.trailingAnchor.constraint(equalTo: avatarView.leadingAnchor, constant: 2)
-      } else {
-        newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -32)
-      }
+    let trailingConstraint: NSLayoutConstraint = if isThread, !outgoing {
+      newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -32)
     } else {
       newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
     }
@@ -125,8 +119,8 @@ extension MessageCollectionViewCell {
     messageView = newMessageView
   }
 
-  func setupOutcomingThreadMessage() {
-    if isThread, fromOtherSender {
+  func setupIncomingThreadMessage() {
+    if isThread, fromOtherSender, !outgoing {
       contentView.addSubview(nameLabel)
 
       // Add avatar if we have user info
@@ -138,39 +132,22 @@ extension MessageCollectionViewCell {
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(hostingController.view)
 
-        var constraints = [
+        NSLayoutConstraint.activate([
           hostingController.view.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 34),
           hostingController.view.widthAnchor.constraint(equalToConstant: 32),
           hostingController.view.heightAnchor.constraint(equalToConstant: 32),
-        ]
-
-        if outgoing {
-          constraints.append(hostingController.view.trailingAnchor.constraint(
-            equalTo: contentView.trailingAnchor,
-            constant: -2
-          ))
-        } else {
-          constraints.append(hostingController.view.leadingAnchor.constraint(
+          hostingController.view.leadingAnchor.constraint(
             equalTo: contentView.leadingAnchor,
             constant: 2
-          ))
-        }
-
-        NSLayoutConstraint.activate(constraints)
+          ),
+        ])
       }
 
-      var constraints = [
+      NSLayoutConstraint.activate([
         nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
         nameLabel.heightAnchor.constraint(equalToConstant: 16),
-      ]
-
-      if outgoing {
-        constraints.append(nameLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -42))
-      } else {
-        constraints.append(nameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 42))
-      }
-
-      NSLayoutConstraint.activate(constraints)
+        nameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 42),
+      ])
     }
   }
 
