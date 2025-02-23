@@ -5,6 +5,15 @@ enum CombinedItem: Identifiable {
   case space(SpaceItem)
   case chat(HomeChatItem)
 
+  var stableId: String {
+    switch self {
+      case let .chat(chatItem):
+        "chat_\(chatItem.dialog.id)"
+      case let .space(spaceItem):
+        "space_\(spaceItem.space.id)"
+    }
+  }
+
   var id: Int64 {
     switch self {
       case let .space(space): space.id
