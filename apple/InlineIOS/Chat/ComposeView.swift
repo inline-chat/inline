@@ -100,7 +100,7 @@ class TextViewContainer: UIView {
 
 // MARK: - Main ComposeView Implementation
 
-class ComposeView: UIView {
+class ComposeView: UIView, NSTextLayoutManagerDelegate {
   // MARK: Configuration Constants
 
   static let minHeight: CGFloat = 42.0
@@ -222,7 +222,13 @@ class ComposeView: UIView {
       right: 0
     )
     textView.delegate = self
+    textView.textLayoutManager?.delegate = self
     textView.translatesAutoresizingMaskIntoConstraints = false
+
+    if #available(iOS 16.0, *) {
+      textView.usesStandardTextScaling = true
+    }
+
     return textView
   }
 
