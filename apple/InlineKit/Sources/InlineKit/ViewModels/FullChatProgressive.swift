@@ -30,11 +30,12 @@ public class MessagesProgressiveViewModel {
   // internals
   // was 80
   private lazy var initialLimit: Int = // divide window height by 25
-    if let height = ScreenMetrics.height {
-      (Int(height.rounded()) / 24) + 30
-    } else {
-      60
-    }
+    if let height = ScreenMetrics.height
+  {
+    (Int(height.rounded()) / 24) + 30
+  } else {
+    60
+  }
 
   private let log = Log.scoped("MessagesViewModel", enableTracing: false)
   private let db = AppDatabase.shared
@@ -365,7 +366,7 @@ public final class MessagesPublisher {
 
   // Static methods to publish update
   func messageAdded(message: Message, peer: Peer) async {
-    Log.shared.debug("Message added: \(message)")
+//    Log.shared.debug("Message added: \(message)")
     do {
       let fullMessage = try await db.reader.read { db in
         try FullMessage.queryRequest()
@@ -394,14 +395,15 @@ public final class MessagesPublisher {
     let fullMessage = try? await db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
-        if let messageGlobalId = message.globalId {
-          query
-            .filter(id: messageGlobalId)
-        } else {
-          query
-            .filter(Column("messageId") == message.messageId)
-            .filter(Column("chatId") == message.chatId)
-        }
+        if let messageGlobalId = message.globalId
+      {
+        query
+          .filter(id: messageGlobalId)
+      } else {
+        query
+          .filter(Column("messageId") == message.messageId)
+          .filter(Column("chatId") == message.chatId)
+      }
 
       return try base.fetchOne(db)
     }
