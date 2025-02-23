@@ -107,6 +107,32 @@ struct HomeView: View {
         .padding(.horizontal, 45)
       } else {
         List {
+          if !home.chats.filter({ $0.dialog.archived == true }).isEmpty {
+            Button {
+              nav.push(.archivedChats)
+            } label: {
+              HStack {
+                Spacer()
+
+                Text("Archived Chats")
+                  .font(.callout)
+                  .foregroundColor(.secondary)
+
+                Spacer()
+              }
+              .frame(height: 40)
+              .frame(maxWidth: .infinity)
+            }
+            .listRowInsets(.init(
+              top: 0,
+              leading: 0,
+              bottom: 0,
+              trailing: 0
+            ))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color(uiColor: .secondarySystemFill).opacity(0.5))
+          }
+
           ForEach(combinedItems, id: \.stableId) { item in
             chatOrSpaceView(for: item)
               .transaction { transaction in
