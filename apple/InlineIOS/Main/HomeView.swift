@@ -292,6 +292,16 @@ struct HomeView: View {
             }
             .tint(.indigo)
           }
+          .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+              Task {
+                UnreadManager.shared.readAll(chatItem.dialog.peerId, chatId: chatItem.chat?.id ?? 0)
+              }
+            } label: {
+              Image(systemName: "checkmark.message.fill")
+            }
+            .tint(.blue)
+          }
         } else {
           EmptyView()
         }
