@@ -107,8 +107,11 @@ struct HomeView: View {
         .padding(.horizontal, 45)
       } else {
         List {
-          ForEach(combinedItems, id: \.id) { item in
+          ForEach(combinedItems, id: \.stableId) { item in
             chatOrSpaceView(for: item)
+              .transaction { transaction in
+                transaction.animation = nil
+              }
               .listRowInsets(.init(
                 top: 9,
                 leading: 16,
