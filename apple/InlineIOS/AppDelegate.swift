@@ -48,7 +48,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     Task {
       // Mark offline
       try? await DataManager.shared.updateStatus(online: false)
-      UnreadManager.shared.updateAppIconBadge()
     }
   }
 
@@ -56,7 +55,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     Task {
       // Mark online
       try? await DataManager.shared.updateStatus(online: true)
-      UnreadManager.shared.updateAppIconBadge()
     }
   }
 
