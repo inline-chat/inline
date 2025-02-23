@@ -605,16 +605,16 @@ extension ComposeView: UITextViewDelegate {
     let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     textViewContainer.textView.showPlaceholder(isEmpty)
 
-    // Typing Indicators
+    // Typing Indicators - only for DMs
     if isEmpty {
       buttonDisappear()
-      if let peerId {
+      if let peerId, case .user = peerId {
         Task {
           await ComposeActions.shared.stoppedTyping(for: peerId)
         }
       }
     } else {
-      if let peerId {
+      if let peerId, case .user = peerId {
         Task {
           await ComposeActions.shared.startedTyping(for: peerId)
         }
