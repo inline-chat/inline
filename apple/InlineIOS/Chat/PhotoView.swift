@@ -73,7 +73,7 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
   }
 
   private func setupImage() {
-    guard let (_, url) = imageUrl() else { return }
+    guard let (isLocal, url) = imageUrl() else { return }
     backgroundColor = .clear
     addSubview(imageView)
 
@@ -135,13 +135,15 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
       if case let .success(response) = result {
         // Save to local storage if needed
         if var file = fullMessage.file {
-          Task {
-            let pathString = response.image.save(file: file)
-            file.localPath = pathString
-            try? await AppDatabase.shared.dbWriter.write { db in
-              try file.save(db)
+          if !isLocal {
+            Task {
+              let pathString = response.image.save(file: file)
+              file.localPath = pathString
+              try? await AppDatabase.shared.dbWriter.write { db in
+                try file.save(db)
+              }
+              self.triggerMessageReload()
             }
-            self.triggerMessageReload()
           }
         }
       }
