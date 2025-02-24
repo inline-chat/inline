@@ -93,7 +93,7 @@ class UIMessageView: UIView {
   }
 
   private var bubbleColor: UIColor {
-    outgoing ? ColorManager.shared.selectedColor : UIColor.systemGray5.withAlphaComponent(0.5)
+    outgoing ? ColorManager.shared.selectedColor : ColorManager.shared.secondaryColor
   }
 
   private var textColor: UIColor {
@@ -114,7 +114,7 @@ class UIMessageView: UIView {
     }
 
     guard let text = message.text else { return false }
-    return text.count > 24 || text.contains("\n") || !fullMessage.reactions.isEmpty
+    return text.count > 24 || text.contains("\n") || !fullMessage.reactions.isEmpty || text.containsEmoji
   }
 
   private let labelVerticalPadding: CGFloat = 9.0
@@ -333,8 +333,11 @@ class UIMessageView: UIView {
     var items: [String] = []
     let nsString = message as NSString
 
-    regex.enumerateMatches(in: message, options: [], range: NSRange(location: 0, length: message.utf16.count)) { match, _, _ in
-      guard let match = match, match.numberOfRanges > 1 else { return }
+    regex.enumerateMatches(in: message, options: [], range: NSRange(
+      location: 0,
+      length: message.utf16.count
+    )) { match, _, _ in
+      guard let match, match.numberOfRanges > 1 else { return }
 
       let contentRange = match.range(at: 1)
       if contentRange.location != NSNotFound {
@@ -551,5 +554,24 @@ extension NSLayoutConstraint {
   func withPriority(_ priority: UILayoutPriority) -> NSLayoutConstraint {
     self.priority = priority
     return self
+  }
+}
+
+extension Character {
+  /// A simple emoji is one scalar and presented to the user as an Emoji
+  var isSimpleEmoji: Bool {
+    guard let firstScalar = unicodeScalars.first else { return false }
+    return firstScalar.properties.isEmoji && firstScalar.value > 0x238C
+  }
+
+  /// Checks if the scalars will be merged into an emoji
+  var isCombinedIntoEmoji: Bool { unicodeScalars.count > 1 && unicodeScalars.first?.properties.isEmoji ?? false }
+
+  var isEmoji: Bool { isSimpleEmoji || isCombinedIntoEmoji }
+}
+
+extension String {
+  var containsEmoji: Bool {
+    contains { $0.isEmoji }
   }
 }

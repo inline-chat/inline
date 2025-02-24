@@ -74,11 +74,20 @@ class ColorManager {
   // Reset to default color
   func resetToDefault() {
     defaults.removeObject(forKey: colorKey)
-    defaults.removeObject(forKey: secondaryColorKey)
   }
 
   // Convert UIColor to Color for SwiftUI views
   var swiftUIColor: Color {
     Color(uiColor: selectedColor)
+  }
+
+  var secondaryColor: UIColor {
+    UIColor(dynamicProvider: { trait in
+      if trait.userInterfaceStyle == .dark {
+        UIColor(hex: "#27262B")!
+      } else {
+        UIColor(hex: "#F2F2F2")!
+      }
+    })
   }
 }
