@@ -31,7 +31,7 @@ class MessagesCollectionView: UICollectionView {
     backgroundColor = .clear
     delegate = coordinator
     autoresizingMask = [.flexibleHeight]
-
+    alwaysBounceVertical = true
     register(
       MessageCollectionViewCell.self,
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
@@ -505,7 +505,7 @@ private extension MessagesCollectionView {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
       let isAtBottom = scrollView.contentOffset.y > -60
-      if isAtBottom != wasPreviouslyAtBottom {
+      if isAtBottom != wasPreviouslyAtBottom, messages.count > 12 {
         NotificationCenter.default.post(
           name: .scrollToBottomChanged,
           object: nil,
