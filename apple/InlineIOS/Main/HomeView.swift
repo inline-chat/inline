@@ -147,6 +147,7 @@ struct HomeView: View {
           }
         }
         .listStyle(.plain)
+        .animation(.default, value: spaceList.fullSpaces.count)
       }
     }
     .navigationBarTitleDisplayMode(.inline)
@@ -341,6 +342,59 @@ struct HomeView: View {
             chats: spaceItem.chats
           ))
         }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+          Button {
+            setupAndPresentAlert(spaceId: spaceItem.space.id, isCreator: spaceItem.space.creator ?? false)
+          } label: {
+            Image(systemName: spaceItem.space.creator ?? false ? "trash.fill" : "rectangle.portrait.and.arrow.right")
+          }
+          .tint(.red)
+        }
     }
+  }
+
+  func setupAndPresentAlert(spaceId: Int64, isCreator: Bool) {
+    let title = isCreator ? "Delete Space" : "Leave Space"
+    let message = isCreator
+      ? "Are you sure you want to delete this space? This action cannot be undone."
+      : "Are you sure you want to leave this space?"
+
+    let alert = UIAlertController(
+      title: title,
+      message: message,
+      preferredStyle: .alert
+    )
+
+    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+    alert.addAction(UIAlertAction(title: title, style: .destructive) { _ in
+      Task {
+        do {
+          if isCreator {
+            try await dataManager.deleteSpace(spaceId: spaceId)
+
+          } else {
+            try await dataManager.leaveSpace(spaceId: spaceId)
+          }
+
+        } catch {
+          Log.shared.error("Failed to delete/leave space", error: error)
+        }
+      }
+    })
+
+    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+       let rootVC = windowScene.windows.first?.rootViewController
+    {
+      rootVC.topmostPresentedViewController.present(alert, animated: true)
+    }
+  }
+}
+
+extension UIViewController {
+  var topmostPresentedViewController: UIViewController {
+    if let presented = presentedViewController {
+      return presented.topmostPresentedViewController
+    }
+    return self
   }
 }
