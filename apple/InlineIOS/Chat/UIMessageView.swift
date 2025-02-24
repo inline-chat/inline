@@ -61,8 +61,7 @@ class UIMessageView: UIView {
     label.font = .systemFont(ofSize: 18)
     label.textColor = textColor
     label.numberOfLines = 0
-//    label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-//    label.setContentCompressionResistancePriority(.required, for: .horizontal)
+
     return label
   }()
 
@@ -105,11 +104,7 @@ class UIMessageView: UIView {
   }
 
   private var isMultiline: Bool {
-    if let file = fullMessage.file,
-       let width = file.width,
-       let height = file.height,
-       height > width && width < 250
-    {
+    if fullMessage.file != nil {
       return true
     }
 
@@ -181,21 +176,61 @@ class UIMessageView: UIView {
 
   private func setupMessageContainer() {
     if isMultiline {
-      multiLineContainer.addArrangedSubview(messageLabel)
+      setupMultilineMessage()
+    } else {
+      setupSingleLineMessage()
+    }
+  }
+
+  private func setupMultilineMessage() {
+    if message.hasFile, message.hasText {
+      let innerContainer = UIStackView()
+      innerContainer.axis = .vertical
+      innerContainer.translatesAutoresizingMaskIntoConstraints = false
+      innerContainer.layoutMargins = UIEdgeInsets(
+        top: 0,
+        left: StackPadding.leading,
+        bottom: 0,
+        right: StackPadding.trailing
+      )
+      innerContainer.spacing = 10
+      innerContainer.isLayoutMarginsRelativeArrangement = true
+      innerContainer.insetsLayoutMarginsFromSafeArea = false
+
+      innerContainer.addArrangedSubview(messageLabel)
 
       let metadataContainer = UIStackView()
       metadataContainer.axis = .horizontal
-      metadataContainer.addArrangedSubview(UIView()) // Spacer
+      metadataContainer.translatesAutoresizingMaskIntoConstraints = false
+      metadataContainer.addArrangedSubview(UIView())
       metadataContainer.addArrangedSubview(metadataView)
-      multiLineContainer.addArrangedSubview(metadataContainer)
+      innerContainer.addArrangedSubview(metadataContainer)
 
-      containerStack.addArrangedSubview(multiLineContainer)
+      multiLineContainer.addArrangedSubview(innerContainer)
+
+      containerStack.addArrangedSubview(innerContainer)
     } else {
-      singleLineContainer.addArrangedSubview(messageLabel)
-      singleLineContainer.addArrangedSubview(metadataView)
-
-      containerStack.addArrangedSubview(singleLineContainer)
+      multiLineContainer.addArrangedSubview(messageLabel)
+      if !message.hasFile || message.hasText {
+        setupMultilineMetadata()
+        containerStack.addArrangedSubview(multiLineContainer)
+        return
+      }
     }
+  }
+
+  private func setupMultilineMetadata() {
+    let metadataContainer = UIStackView()
+    metadataContainer.axis = .horizontal
+    metadataContainer.addArrangedSubview(UIView()) // Spacer
+    metadataContainer.addArrangedSubview(metadataView)
+    multiLineContainer.addArrangedSubview(metadataContainer)
+  }
+
+  private func setupSingleLineMessage() {
+    singleLineContainer.addArrangedSubview(messageLabel)
+    singleLineContainer.addArrangedSubview(metadataView)
+    containerStack.addArrangedSubview(singleLineContainer)
   }
 
   private func addGestureRecognizer() {
@@ -206,29 +241,98 @@ class UIMessageView: UIView {
     bubbleView.addGestureRecognizer(tapGesture)
   }
 
+  enum StackPadding {
+    static let top: CGFloat = 9
+    static let leading: CGFloat = 12
+    static let bottom: CGFloat = 9
+    static let trailing: CGFloat = 12
+  }
+
   private func setupConstraints() {
-    NSLayoutConstraint.activate([
+    let padding = NSDirectionalEdgeInsets(
+      top: StackPadding.top,
+      leading: StackPadding.leading,
+      bottom: isMultiline ? 14 : StackPadding.bottom,
+      trailing: StackPadding.trailing
+    )
+
+    let baseConstraints: [NSLayoutConstraint] = [
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
       bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
+    ]
 
+    let withoutFileConstraints: [NSLayoutConstraint] = [
       containerStack.topAnchor.constraint(
         equalTo: bubbleView.topAnchor,
-        constant: labelVerticalPadding
+        constant: padding.top
       ),
       containerStack.leadingAnchor.constraint(
         equalTo: bubbleView.leadingAnchor,
-        constant: labelHorizantalPadding
+        constant: padding.leading
       ),
       containerStack.trailingAnchor.constraint(
         equalTo: bubbleView.trailingAnchor,
-        constant: -labelHorizantalPadding
+        constant: -padding.trailing
       ),
       containerStack.bottomAnchor.constraint(
         equalTo: bubbleView.bottomAnchor,
-        constant: isMultiline ? -14 : -labelVerticalPadding
+        constant: -padding.bottom
       ).withPriority(.defaultHigh),
-    ])
+    ]
+
+    let withFileConstraints: [NSLayoutConstraint] = [
+      containerStack.topAnchor.constraint(
+        equalTo: bubbleView.topAnchor,
+        constant: 0
+      ),
+      containerStack.leadingAnchor.constraint(
+        equalTo: bubbleView.leadingAnchor,
+        constant: 0
+      ),
+      containerStack.trailingAnchor.constraint(
+        equalTo: bubbleView.trailingAnchor,
+        constant: 0
+      ),
+      containerStack.bottomAnchor.constraint(
+        equalTo: bubbleView.bottomAnchor,
+        constant: 0
+      ).withPriority(.defaultHigh),
+    ]
+
+    let withFileAndTextConstraints: [NSLayoutConstraint] = [
+      containerStack.topAnchor.constraint(
+        equalTo: bubbleView.topAnchor,
+        constant: 0
+      ),
+      containerStack.leadingAnchor.constraint(
+        equalTo: bubbleView.leadingAnchor,
+        constant: 0
+      ),
+      containerStack.trailingAnchor.constraint(
+        equalTo: bubbleView.trailingAnchor,
+        constant: 0
+      ),
+      containerStack.bottomAnchor.constraint(
+        equalTo: bubbleView.bottomAnchor,
+        constant: -padding.bottom
+      ).withPriority(.defaultHigh),
+    ]
+
+    let constraints: [NSLayoutConstraint] = switch (message.hasFile, message.hasText) {
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
+    }
+
+    NSLayoutConstraint.activate(baseConstraints + constraints)
+
     if outgoing {
       bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8).isActive = true
     } else {
@@ -573,5 +677,16 @@ extension Character {
 extension String {
   var containsEmoji: Bool {
     contains { $0.isEmoji }
+  }
+}
+
+extension Message {
+  var hasFile: Bool {
+    fileId != nil
+  }
+
+  var hasText: Bool {
+    guard let text else { return false }
+    return !text.isEmpty
   }
 }
