@@ -54,11 +54,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   @MainActor private func setupMainWindow() {
+    // If window controller exists but window is closed
+    if let windowController = mainWindowController {
+      windowController.showWindow(nil)
+      windowController.window?.makeKeyAndOrderFront(nil)
+      return
+    }
+
+    // Create new window controller if it doesn't exist
     let controller = MainWindowController(dependencies: dependencies)
     controller.showWindow(nil)
     mainWindowController = controller
   }
 
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    if !flag {
+      setupMainWindow()
+    }
+    return true
+  }
+  
   private func initializeServices() {
     // Setup Sentry
     SentrySDK.start { options in
