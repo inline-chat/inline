@@ -26,7 +26,7 @@ class BlurCircleButton: UIButton {
     backgroundView.translatesAutoresizingMaskIntoConstraints = false
     backgroundView.layer.cornerRadius = 22
     backgroundView.layer.borderWidth = 1
-    backgroundView.layer.borderColor = UIColor.separator.cgColor
+    backgroundView.layer.borderColor = UIColor.separator.withAlphaComponent(0.1).cgColor
     backgroundView.isUserInteractionEnabled = false
     blurEffect.isUserInteractionEnabled = false
     iconImageView.isUserInteractionEnabled = false
