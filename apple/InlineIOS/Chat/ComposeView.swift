@@ -1,6 +1,9 @@
+import AVFoundation
 import CoreServices
 import ImageIO
 import InlineKit
+import Logger
+import MobileCoreServices
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -100,7 +103,9 @@ class TextViewContainer: UIView {
 
 // MARK: - Main ComposeView Implementation
 
-class ComposeView: UIView, NSTextLayoutManagerDelegate {
+class ComposeView: UIView, NSTextLayoutManagerDelegate,
+  UIImagePickerControllerDelegate & UINavigationControllerDelegate
+{
   // MARK: Configuration Constants
 
   static let minHeight: CGFloat = 42.0
@@ -262,7 +267,26 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     button.configuration = config
     button.layer.cornerRadius = Self.minHeight / 2
     button.clipsToBounds = true
-    button.addTarget(self, action: #selector(plusTapped), for: .touchUpInside)
+
+    let libraryAction = UIAction(
+      title: "Photos",
+      image: UIImage(systemName: "photo"),
+      handler: { [weak self] _ in
+        self?.presentPicker()
+      }
+    )
+
+    let cameraAction = UIAction(
+      title: "Camera",
+      image: UIImage(systemName: "camera"),
+      handler: { _ in
+        self.presentCamera()
+      }
+    )
+
+    button.menu = UIMenu(children: [libraryAction, cameraAction])
+    button.showsMenuAsPrimaryAction = true
+
     return button
   }
 
@@ -273,8 +297,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           !text.isEmpty
     else { return }
     guard let chatId else { return }
-
-    let messageText = text
 
     let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
     let canSend = !text.isEmpty
@@ -303,7 +325,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
   }
 
-  @objc private func plusTapped() {
+  @objc private func presentPicker() {
     guard let windowScene = window?.windowScene else { return }
 
     var configuration = PHPickerConfiguration(photoLibrary: .shared())
@@ -507,11 +529,45 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let picker = topmostVC.presentingViewController as? PHPickerViewController
 
     topmostVC.dismiss(animated: true) { [weak self] in
-      // Dismiss the picker if it exists
       picker?.dismiss(animated: true)
       self?.selectedImage = nil
       self?.previewViewModel.caption = ""
       self?.previewViewModel.isPresented = false
+    }
+  }
+
+  // MARK: - Camera Handling
+
+  private func presentCamera() {
+    let status = AVCaptureDevice.authorizationStatus(for: .video)
+
+    switch status {
+      case .notDetermined:
+        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+          if granted {
+            DispatchQueue.main.async {
+              self?.showCameraPicker()
+            }
+          }
+        }
+      case .authorized:
+        showCameraPicker()
+      default:
+        Log.shared.error("Failed to presentCamera")
+    }
+  }
+
+  private func showCameraPicker() {
+    let picker = UIImagePickerController()
+    picker.sourceType = .camera
+    picker.delegate = self
+    picker.allowsEditing = false
+
+    if let windowScene = window?.windowScene,
+       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+       let rootVC = keyWindow.rootViewController
+    {
+      rootVC.present(picker, animated: true)
     }
   }
 
@@ -591,6 +647,24 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       }
       responder = nextResponder
     }
+  }
+
+  func imagePickerController(
+    _ picker: UIImagePickerController,
+    didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+  ) {
+    guard let image = info[.originalImage] as? UIImage else {
+      picker.dismiss(animated: true)
+      return
+    }
+
+    picker.dismiss(animated: true) { [weak self] in
+      self?.handleDroppedImage(image)
+    }
+  }
+
+  func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+    picker.dismiss(animated: true)
   }
 }
 
