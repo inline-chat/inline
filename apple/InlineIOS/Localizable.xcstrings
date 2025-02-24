@@ -29,6 +29,9 @@
     "%lld members" : {
 
     },
+    "💬" : {
+
+    },
     "Accent Color" : {
 
     },
@@ -39,6 +42,9 @@
 
     },
     "Add a caption..." : {
+
+    },
+    "Add a space or start a chat with someone to get started." : {
 
     },
     "Add Member" : {
@@ -401,6 +407,9 @@
 
     },
     "No archived chats" : {
+
+    },
+    "No chats or spaces" : {
 
     },
     "No messages yet" : {
