@@ -323,6 +323,32 @@ class UIMessageView: UIView {
 
     bubbleView.addInteraction(interaction)
   }
+
+  func extractListItems(from message: String) -> [String] {
+    let pattern = #"^\s*-\s+(.*)$"#
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines, .caseInsensitive]) else {
+      return []
+    }
+
+    var items: [String] = []
+    let nsString = message as NSString
+
+    regex.enumerateMatches(in: message, options: [], range: NSRange(location: 0, length: message.utf16.count)) { match, _, _ in
+      guard let match = match, match.numberOfRanges > 1 else { return }
+
+      let contentRange = match.range(at: 1)
+      if contentRange.location != NSNotFound {
+        let content = nsString.substring(with: contentRange)
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !content.isEmpty {
+          items.append(content)
+        }
+      }
+    }
+
+    return items
+  }
 }
 
 // MARK: - Context Menu
@@ -353,6 +379,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
 
       let createIssueAction = UIAction(title: "Create Linear issue") { _ in
 
+        let items = self.extractListItems(from: self.message.text ?? "")
         Task { @MainActor in
           do {
             let result = try await ApiClient.shared.getIntegrations(userId: Auth.shared.getCurrentUserId() ?? 0)
@@ -363,40 +390,74 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
                 systemImage: "link.circle"
               )
             } else {
-              ToastManager.shared.showToast(
-                "Creating Linear issue...",
-                type: .loading,
-                systemImage: "circle.dotted"
-              )
-
-              do {
-                let result = try await ApiClient.shared.createLinearIssue(
-                  text: self.message.text ?? "",
-                  messageId: self.message.messageId,
-                  chatId: self.message.chatId
+              if items.count > 1 {
+                ToastManager.shared.showToast(
+                  "Creating Linear issues...",
+                  type: .loading,
+                  systemImage: "circle.dotted"
                 )
 
+                for item in items {
+                  print("item is \(item)")
+                  do {
+                    let result = try await ApiClient.shared.createLinearIssue(
+                      text: item,
+                      messageId: self.message.messageId,
+                      chatId: self.message.chatId
+                    )
+                  } catch {
+                    print("FAILED to create issue \(error)")
+                    ToastManager.shared.hideToast()
+                    ToastManager.shared.showToast(
+                      "Failed to create issue",
+                      type: .info,
+                      systemImage: "xmark.circle.fill"
+                    )
+                  }
+                }
                 ToastManager.shared.showToast(
-                  "Issue created",
+                  "\(items.count) Issues created",
                   type: .success,
-                  systemImage: "checkmark.circle.fill",
-                  action: {
-                    if let url = URL(string: result.link ?? "") {
-                      UIApplication.shared.open(url)
-                    }
-                  },
-                  actionTitle: "Open"
+                  systemImage: "checkmark.circle.fill"
                 )
-              } catch {
-                print("FAILED to create issue \(error)")
+
+              } else {
                 ToastManager.shared.showToast(
-                  "Failed to create issue",
-                  type: .info,
-                  systemImage: "xmark.circle.fill"
+                  "Creating Linear issue...",
+                  type: .loading,
+                  systemImage: "circle.dotted"
                 )
+
+                do {
+                  let result = try await ApiClient.shared.createLinearIssue(
+                    text: self.message.text ?? "",
+                    messageId: self.message.messageId,
+                    chatId: self.message.chatId
+                  )
+                  ToastManager.shared.showToast(
+                    "Issue created",
+                    type: .success,
+                    systemImage: "checkmark.circle.fill",
+                    action: {
+                      if let url = URL(string: result.link ?? "") {
+                        UIApplication.shared.open(url)
+                      }
+                    },
+                    actionTitle: "Open"
+                  )
+                } catch {
+                  print("FAILED to create issue \(error)")
+                  ToastManager.shared.hideToast()
+                  ToastManager.shared.showToast(
+                    "Failed to create issue",
+                    type: .info,
+                    systemImage: "xmark.circle.fill"
+                  )
+                }
               }
             }
           } catch {
+            ToastManager.shared.hideToast()
             print("Failed to get integrations \(error)")
           }
         }
