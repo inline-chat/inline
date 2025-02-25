@@ -35,6 +35,9 @@ import { TInputId } from "@in/server/types/methods"
 import { isProd } from "@in/server/env"
 import { getFileByUniqueId } from "@in/server/db/models/files"
 import { debugDelay, delay } from "@in/server/utils/helpers/time"
+import { RealtimeUpdates } from "@in/server/realtime/message"
+import { Update } from "@in/server/protocol/core"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -267,21 +270,59 @@ const sendMessageUpdate = async ({
 
   if (updateGroup.type === "users") {
     updateGroup.userIds.forEach((userId) => {
+      let encodingForPeer: TPeerInfo = userId === currentUserId ? peerId : { userId: currentUserId }
       const update: TUpdateInfo = {
         newMessage: {
           message: encodeMessageInfo(message.message, {
             // must encode for the user we're sending to
             currentUserId: userId,
             //  customize this per user (e.g. threadId)
-            peerId: userId === currentUserId ? peerId : { userId: currentUserId },
+            peerId: encodingForPeer,
             files: message.file ? [message.file] : null,
           }),
         },
       }
 
+      // legacy updates
       const updates = userId === currentUserId ? [updateMessageId, update] : [update]
-
       connectionManager.sendToUser(userId, createMessage({ kind: ServerMessageKind.Message, payload: { updates } }))
+
+      // New updates
+      let messageIdUpdate: Update = {
+        update: {
+          oneofKind: "updateMessageId",
+          updateMessageId: {
+            messageId: BigInt(message.message.messageId),
+            randomId: message.message.randomId ?? 0n,
+          },
+        },
+      }
+
+      let newMessageUpdate: Update = {
+        update: {
+          oneofKind: "newMessage",
+          newMessage: {
+            message: Encoders.message({
+              message: message.message,
+              file: message.file,
+              encodingForUserId: userId,
+              encodingForPeer,
+            }),
+          },
+        },
+      }
+
+      if (userId === currentUserId) {
+        // current user gets the message id update and new message update
+        RealtimeUpdates.pushToUser(userId, [
+          // order matters here
+          messageIdUpdate,
+          newMessageUpdate,
+        ])
+      } else {
+        // other users get the message only
+        RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
+      }
     })
   } else if (updateGroup.type === "space") {
     const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
@@ -304,6 +345,43 @@ const sendMessageUpdate = async ({
         userId,
         createMessage({ kind: ServerMessageKind.Message, payload: { updates: updates } }),
       )
+
+      // New updates
+      let messageIdUpdate: Update = {
+        update: {
+          oneofKind: "updateMessageId",
+          updateMessageId: {
+            messageId: BigInt(message.message.messageId),
+            randomId: message.message.randomId ?? 0n,
+          },
+        },
+      }
+
+      let newMessageUpdate: Update = {
+        update: {
+          oneofKind: "newMessage",
+          newMessage: {
+            message: Encoders.message({
+              message: message.message,
+              file: message.file,
+              encodingForUserId: userId,
+              encodingForPeer: peerId,
+            }),
+          },
+        },
+      }
+
+      if (userId === currentUserId) {
+        // current user gets the message id update and new message update
+        RealtimeUpdates.pushToUser(userId, [
+          // order matters here
+          messageIdUpdate,
+          newMessageUpdate,
+        ])
+      } else {
+        // other users get the message only
+        RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
+      }
     })
   }
 }

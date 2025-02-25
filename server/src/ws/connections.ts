@@ -5,6 +5,8 @@
  */
 
 import { getSpaceIdsForUser } from "@in/server/db/models/spaces"
+import type { Update } from "@in/server/protocol/core"
+import { filterFalsy } from "@in/server/utils/filter"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { presenceManager } from "@in/server/ws/presence"
 import { ServerMessage, type ServerMessageType } from "@in/server/ws/protocol"
@@ -125,6 +127,11 @@ class ConnectionManager {
         }
       }
     }
+  }
+
+  getUserConnections(userId: number): Connection[] {
+    const userConnections = this.authenticatedUsers.get(userId) ?? new Set<string>()
+    return [...userConnections].map((conId) => this.connections.get(conId)).filter(filterFalsy)
   }
 
   // TODO: refactor to use publish

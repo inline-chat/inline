@@ -22,6 +22,9 @@ import { DialogsModel } from "@in/server/db/models/dialogs"
 import { getUpdateGroup } from "../modules/updates"
 import { createMessage, ServerMessageKind } from "../ws/protocol"
 import { connectionManager } from "../ws/connections"
+import type { Update } from "@in/server/protocol/core"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 
 export const Input = Type.Object({
   messageId: TInputId,
@@ -43,12 +46,12 @@ type Response = Static<typeof Response>
 export const handler = async (input: Input, context: Context): Promise<Response> => {
   const messageId = Number(input.messageId)
   if (isNaN(messageId)) {
-    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    throw new InlineError(InlineError.ApiError.MSG_ID_INVALID)
   }
 
   const chatId = Number(input.chatId)
   if (isNaN(chatId)) {
-    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    throw new InlineError(InlineError.ApiError.CHAT_ID_INVALID)
   }
 
   if ((input.peerUserId && input.peerThreadId) || (!input.peerUserId && !input.peerThreadId)) {
@@ -114,16 +117,30 @@ const deleteMessageUpdate = async ({
 
   if (updateGroup.type === "users") {
     updateGroup.userIds.forEach((userId) => {
+      let encodingForPeer: TPeerInfo = userId === currentUserId ? peerId : { userId: currentUserId }
       const update: TUpdateInfo = {
         deleteMessage: {
           messageId,
-          peerId: userId === currentUserId ? peerId : { userId: currentUserId },
+          peerId: encodingForPeer,
         },
       }
 
       const updates = [update]
 
       connectionManager.sendToUser(userId, createMessage({ kind: ServerMessageKind.Message, payload: { updates } }))
+
+      // New updates
+      let messageDeletedUpdate: Update = {
+        update: {
+          oneofKind: "deleteMessages",
+          deleteMessages: {
+            messageIds: [BigInt(messageId)],
+            peerId: Encoders.peer(encodingForPeer),
+          },
+        },
+      }
+
+      RealtimeUpdates.pushToUser(userId, [messageDeletedUpdate])
     })
   } else if (updateGroup.type === "space") {
     const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
@@ -142,6 +159,19 @@ const deleteMessageUpdate = async ({
         userId,
         createMessage({ kind: ServerMessageKind.Message, payload: { updates: updates } }),
       )
+
+      // New updates
+      let messageDeletedUpdate: Update = {
+        update: {
+          oneofKind: "deleteMessages",
+          deleteMessages: {
+            messageIds: [BigInt(messageId)],
+            peerId: Encoders.peer(peerId),
+          },
+        },
+      }
+
+      RealtimeUpdates.pushToUser(userId, [messageDeletedUpdate])
     })
   }
 }
