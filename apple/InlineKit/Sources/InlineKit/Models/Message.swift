@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 
 public struct ApiMessage: Codable, Hashable, Sendable {
   public var id: Int64
@@ -189,6 +190,25 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     )
   }
 
+  public init(from: InlineProtocol.Message) {
+    self.init(
+      messageId: from.id,
+      randomId: nil,
+      fromId: from.fromID,
+      date: Date(timeIntervalSince1970: TimeInterval(from.date)),
+      text: from.hasMessage ? from.message : nil,
+      peerUserId: from.peerID.toPeer().asUserId(),
+      peerThreadId: from.peerID.toPeer().asThreadId(),
+      chatId: from.chatID,
+      out: from.out,
+      mentioned: from.mentioned,
+      pinned: false,
+      editDate: from.hasEditDate ? Date(timeIntervalSince1970: TimeInterval(from.editDate)) : nil,
+      status: from.out == true ? MessageSendingStatus.sent : nil,
+      repliedToMessageId: from.hasReplyToMsgID ? from.replyToMsgID : nil
+    )
+  }
+
   public static let preview = Message(
     messageId: 1,
     fromId: 1,
@@ -291,13 +311,70 @@ public extension ApiMessage {
       // attach main photo
       // TODO: handle multiple files
       let file: File? =
-        if let photo = photo?.first
-      {
-        try? File.save(db, apiPhoto: photo)
-      } else {
-        nil
-      }
+        if let photo = photo?.first {
+          try? File.save(db, apiPhoto: photo)
+        } else {
+          nil
+        }
       message.fileId = file?.id
+
+      try message.saveMessage(db, publishChanges: false) // publish is below
+    }
+
+    if publishChanges {
+      // Publish changes when save is successful
+      if isUpdate {
+        db.afterNextTransaction { _ in
+          Task { @MainActor in
+            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+          }
+        }
+      } else {
+        db.afterNextTransaction { _ in
+          // This code runs after the transaction successfully commits
+          Task { @MainActor in
+            await MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+          }
+        }
+      }
+    }
+
+    return message
+  }
+}
+
+public extension Message {
+  static func save(
+    _ db: Database, protocolMessage: InlineProtocol.Message, publishChanges: Bool = false
+  )
+    throws -> Message
+  {
+    let id = protocolMessage.id
+    let chatId = protocolMessage.chatID
+    let existing = try? Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
+    let isUpdate = existing != nil
+    var message = Message(from: protocolMessage)
+
+    if let existing {
+      message.globalId = existing.globalId
+      message.status = existing.status
+      message.fileId = existing.fileId
+      // ... anything else?
+    } else {
+      // attach main photo
+      // TODO: handle multiple files
+      if protocolMessage.hasMedia {
+        var file: File? = nil
+
+        switch protocolMessage.media.media {
+          case let .photo(photo):
+            file = try? File.save(db, protocolPhoto: photo.photo)
+          default:
+            break
+        }
+
+        message.fileId = file?.id
+      }
 
       try message.saveMessage(db, publishChanges: false) // publish is below
     }
