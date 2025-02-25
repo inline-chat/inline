@@ -4,7 +4,7 @@ import Foundation
 import InlineProtocol
 import Logger
 
-actor RealtimeAPI {
+public actor RealtimeAPI {
   var transport: WebSocketTransport
   var msgQueue = MsgQueue()
   var log = Log.scoped("Realtime_Core")
@@ -13,13 +13,15 @@ actor RealtimeAPI {
   var stateChannel = AsyncChannel<Void>()
   var messageChannel = AsyncChannel<Void>()
   var started: Bool = false
+  var updatesEngine: RealtimeUpdatesProtocol
 
   /// Message IDs to continution handlers
   private var rpcCalls: [UInt64: CheckedContinuation<RpcResult.OneOf_Result?, any Error>] = [:]
 
-  init() {
+  public init(updatesEngine: RealtimeUpdatesProtocol) {
     log.debug("initilized realtime core")
     transport = WebSocketTransport()
+    self.updatesEngine = updatesEngine
   }
 
   enum RunState {
@@ -30,7 +32,7 @@ actor RealtimeAPI {
     case paused
   }
 
-  func start() async throws {
+  public func start() async throws {
     guard !started else { return }
 
     log.debug("starting realtime API")
@@ -130,7 +132,7 @@ actor RealtimeAPI {
 extension RealtimeAPI {
   // MARK: - RPC
 
-  func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> RpcResult
+  public func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> RpcResult
     .OneOf_Result?
   {
     let message = wrapMessage(body: .rpcCall(.with {
@@ -171,7 +173,7 @@ extension RealtimeAPI {
       )
   }
 
-  // Not used as we want to wait until things get resolved probably. 
+  // Not used as we want to wait until things get resolved probably.
   private func cancelPendingRpcCalls(reason: RealtimeAPIError) {
     for (id, continuation) in rpcCalls {
       continuation.resume(throwing: reason)
@@ -222,8 +224,23 @@ extension RealtimeAPI {
       case let .rpcError(error):
         handleRpcError(error)
 
+      case let .message(serverMessage):
+        switch serverMessage.payload {
+          case let .update(update):
+            handleUpdate(update)
+
+          default:
+            break
+        }
+
       default:
         break
+    }
+  }
+
+  private func handleUpdate(_ updatesPayload: UpdatesPayload) {
+    Task {
+      await updatesEngine.applyBatch(updates: updatesPayload.updates)
     }
   }
 }

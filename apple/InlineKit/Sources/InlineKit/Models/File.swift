@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 
 public struct ApiPhoto: Codable, Hashable, Sendable {
   public var fileUniqueId: String
@@ -135,17 +136,60 @@ public extension File {
     localPath = nil
 
     let ext =
-      switch photo.mimeType
-    {
-      case "image/jpeg":
-        ".jpg"
-      case "image/png":
-        ".png"
-      default:
-        ".jpg"
-    }
+      switch photo.mimeType {
+        case "image/jpeg":
+          ".jpg"
+        case "image/png":
+          ".png"
+        default:
+          ".jpg"
+      }
 
     mimeType = photo.mimeType
+    fileName = "\(id)\(ext)"
+  }
+}
+
+public extension File {
+  init(from photo: InlineProtocol.Photo) throws {
+    guard let photoSize = photo.sizes.first(where: { $0.type == "f" }) else {
+      throw FileError.noPhotoSize
+    }
+    guard let cdnURL = URL(string: photoSize.cdnURL) else {
+      throw FileError.invalidTemporaryUrl
+    }
+
+    id = UUID().uuidString
+    fileUniqueId = photo.fileUniqueID
+    fileType = .photo
+    uploading = false
+    fileSize = Int64(photoSize.size)
+    temporaryUrl = photoSize.cdnURL
+    temporaryUrlExpiresAt = Calendar.current.date(byAdding: .day, value: 7, to: .now)
+    width = Int(photoSize.w)
+    height = Int(photoSize.h)
+    localPath = nil
+
+    let ext =
+      switch photo.format {
+        case .jpeg:
+          ".jpg"
+        case .png:
+          ".png"
+        default:
+          ".jpg"
+      }
+
+    mimeType =
+      switch photo.format {
+        case .jpeg:
+          "image/jpeg"
+        case .png:
+          "image/png"
+        default:
+          "image/jpeg"
+      }
+
     fileName = "\(id)\(ext)"
   }
 }
@@ -201,9 +245,64 @@ public extension File {
   }
 }
 
+public extension File {
+  /// Returns the file local ID
+  static func save(
+    _ db: Database,
+    protocolPhoto photo: InlineProtocol.Photo,
+    forMessageLocalId: Int64? = nil,
+    forUserId: Int64? = nil
+  ) throws -> File {
+    // fetch
+    guard
+      var existing =
+      try File
+        .filter(Column("fileUniqueId") == photo.fileUniqueID)
+        .fetchOne(db)
+    else {
+      // ... create new
+      var file = try File(from: photo)
+
+      print("saving file \(file)")
+
+      // associate
+      if let forMessageLocalId {
+        // file.messageLocalId = forMessageLocalId
+      } else if let forUserId {
+        file.profileForUserId = forUserId
+      }
+
+      // insert
+      return try file.insertAndFetch(db)
+    }
+
+    // a new one to fill in existing one
+    var newFile = try File(from: photo)
+
+    // update
+    existing.temporaryUrl = newFile.temporaryUrl
+    existing.temporaryUrlExpiresAt = Calendar.current.date(byAdding: .day, value: 7, to: .now)
+
+    existing.uploading = false
+    existing.fileSize = newFile.fileSize
+    existing.width = newFile.width
+    existing.height = newFile.height
+
+    // associate
+    if let forMessageLocalId {
+      // existing.messageLocalId = forMessageLocalId
+    } else if let forUserId {
+      existing.profileForUserId = forUserId
+    }
+
+    return try existing.updateAndFetch(db)
+  }
+}
+
 // Add this error enum
 public enum FileError: Error {
   case invalidTemporaryUrl
+  case noPhotoSize
 }
 
 // Helpers
