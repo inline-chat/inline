@@ -38,7 +38,7 @@ export const files = pgTable("files", {
   bytesTag: bytea("bytes_tag"),
 
   // Thumbnails
-  thumbSize: text("thumb_size", { enum: ["i", "s", "m", "h"] }),
+  thumbSize: text("thumb_size"),
   thumbFor: integer("thumb_for").references((): AnyPgColumn => files.id),
 
   // Video specific
