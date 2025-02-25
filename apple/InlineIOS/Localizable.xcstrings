@@ -210,6 +210,9 @@
     "Integrations" : {
 
     },
+    "Invite Member" : {
+
+    },
     "It's an all new way to chat with your team." : {
       "localizations" : {
         "ar" : {
@@ -404,6 +407,9 @@
 
     },
     "Logout" : {
+
+    },
+    "New Chat" : {
 
     },
     "No archived chats" : {

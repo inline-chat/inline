@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import CoreServices
 import ImageIO
 import InlineKit
@@ -122,6 +123,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
   private let buttonSize: CGSize = .init(width: 36, height: 36)
   private var overlayView: UIView?
   private var isOverlayVisible = false
+  private var phaseObserver: AnyCancellable?
 
   // MARK: UI Components
 
@@ -160,8 +162,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-
     setupViews()
+    setupScenePhaseObserver()
   }
 
   @available(*, unavailable)
@@ -315,7 +317,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
       )
 
       UnreadManager.shared.readAll(peerId, chatId: chatId)
-
+      clearDraft()
       ChatState.shared.clearReplyingMessageId(peer: peerId)
       sendMessageHaptic()
       textViewContainer.textView.text = ""
@@ -427,16 +429,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
   }
 
   override func removeFromSuperview() {
-    if let text = textViewContainer.textView.text {
-      guard let peerId else { return }
-      Task {
-        do {
-          try await DataManager.shared.updateDialog(peerId: peerId, draft: text.isEmpty ? nil : text)
-        } catch {
-          print("Failed to save draft", error)
-        }
-      }
-    }
+    saveDraft()
     super.removeFromSuperview()
   }
 
@@ -665,6 +658,62 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
 
   func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
     picker.dismiss(animated: true)
+  }
+
+  private func setupScenePhaseObserver() {
+    // Save draft when app moves to background
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(saveCurrentDraft),
+      name: UIApplication.didEnterBackgroundNotification,
+      object: nil
+    )
+
+    // Save draft when force-quits the app from the app switcher
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(saveCurrentDraft),
+      name: UIApplication.willTerminateNotification,
+      object: nil
+    )
+
+    // Save draft when app becomes inactive
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(saveCurrentDraft),
+      name: UIApplication.willResignActiveNotification,
+      object: nil
+    )
+  }
+
+  @objc private func saveCurrentDraft() {
+    saveDraft()
+  }
+
+  private func saveDraft() {
+    guard let peerId else { return }
+
+    if let text = textViewContainer.textView.text, !text.isEmpty {
+      Task {
+        do {
+          try await DataManager.shared.updateDialog(peerId: peerId, draft: text)
+        } catch {
+          print("Failed to save draft", error)
+        }
+      }
+    }
+  }
+
+  private func clearDraft() {
+    guard let peerId else { return }
+
+    Task {
+      do {
+        try await DataManager.shared.updateDialog(peerId: peerId, draft: nil)
+      } catch {
+        print("Failed to clear draft", error)
+      }
+    }
   }
 }
 
