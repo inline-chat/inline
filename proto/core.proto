@@ -39,8 +39,12 @@ message ServerMessage {
   reserved 1,2,3;
 
   oneof payload {
-    Update update = 4;
+    UpdatesPayload update = 4;
   }
+}
+
+message UpdatesPayload {
+  repeated Update updates = 1;
 }
 
 message Ack {
@@ -101,25 +105,115 @@ message User {
   optional string first_name = 2;
   optional string last_name = 3;
   optional string username = 4;
-}
-
-
-message SelfUser {
-  int64 id = 1;
-  optional string first_name = 2;
-  optional string last_name = 3;
-  optional string username = 4;
   optional string phone_number = 5;
   optional string email = 6;
 }
 
+
+
 message Message {
   int64 id = 1;
+
+  // User ID of the sender
   int64 from_id = 2;
-  int64 date = 3;
-  optional string message = 4;
+
+  // Peer ID of the recipient
+  Peer peer_id = 3;
+
+  // The "chat ID" of the message, for messages in a chat
+  int64 chat_id = 4;
+
+  // Message text
+  optional string message = 5;
+
+  // Whether the message is outgoing
+  bool out = 6;
+
+  // Date of the message
+  int64 date = 7;
+
+  // Whether user is mentioned
+  optional bool mentioned = 8;
+
+  // Message ID of the message being replied to
+  optional int64 reply_to_msg_id = 9;
+
+  // Media of the message
+  optional MessageMedia media = 10;
+
+  // Date of the last edit if edited
+  optional int64 edit_date = 11;
+
+  // ID of the grouped message if it's part of an album
+  optional int64 grouped_id = 12;
 }
 
+message MessageMedia {
+  // WIP: add document, audio, video.
+
+  oneof media {
+    MessagePhoto photo = 1;
+  }
+}
+
+message MessagePhoto {
+  Photo photo = 1;
+}
+
+// Photo for message media, profile photo, space photo, or chat photo
+message Photo {
+  // ID
+  int64 id = 1;
+  
+  // Date of upload
+  int64 date = 2; 
+  
+  repeated PhotoSize sizes = 3;
+
+  enum Format {
+    FORMAT_UNSPECIFIED = 0;
+    FORMAT_JPEG = 1;
+    FORMAT_PNG = 2;
+  }
+
+  // Format of the photo
+  Format format = 4;
+  
+  // Unique identifier of the file
+  string file_unique_id = 100;
+}
+
+
+message PhotoSize {
+  /** Thumbnail type.
+  Currently supported: 
+  - "b" - small box 140x140
+  - "c" - medium box 320x320
+  - "d" - regular box 800x800
+  - "f" - large box 2560x2560
+  - "s" - stripped (tiny version embedded in bytes)
+  - "y" - ??
+  - "x" - small cropped ??
+  - "w" - medium cropped ??
+  - "v" - ??
+  */
+  string type = 1;
+
+  // Width in pixels
+  int32 w = 2;
+
+  // Height in pixels
+  int32 h = 3;
+
+  // File size
+  int32 size = 4;
+
+  // Bytes for stripped size used in blur thumbnails
+  optional bytes bytes = 5;
+
+  // CDN URL
+  optional string cdn_url = 6;
+}
 
 // --- Application RPC Functions ---
 
@@ -162,7 +256,7 @@ message GetMeInput {
 }
 
 message GetMeResult {
-  SelfUser user = 1;
+  User user = 1;
 }
 
 
@@ -171,21 +265,85 @@ message Update {
   reserved 1,2,3;
 
   oneof update {
-    NewMessage new_message = 4;
-    MessageEdited message_edited = 5;
-    MessageIdUpdate message_id_update = 6;
+    UpdateNewMessage new_message = 4;
+    UpdateEditMessage edit_message = 5;
+    UpdateMessageId update_message_id = 6;
+    UpdateDeleteMessages delete_messages = 7;
+    UpdateComposeAction update_compose_action = 8;
+    UpdateUserStatus update_user_status = 9;
   }
 }
 
-message NewMessage {
+message UpdateNewMessage {
   Message message = 1;
 }
 
-message MessageEdited {
+message UpdateEditMessage {
   Message message = 1;
 }
 
-message MessageIdUpdate {
+// Update when messages are deleted
+message UpdateDeleteMessages {
+  repeated int64 message_ids = 1;
+  Peer peer_id = 2;
+}
+
+// Update when a message ID is updated after sending
+message UpdateMessageId {
   int64 message_id = 1;
   int64 random_id = 2;
+}
+
+// Update when a user starts or stops composing a message for typing, uploading a photo, etc
+message UpdateComposeAction {
+  enum ComposeAction {
+    NONE = 0;
+    TYPING = 1;
+    UPLOADING_PHOTO = 2;
+    UPLOADING_DOCUMENT = 3;
+    UPLOADING_VIDEO = 4;
+  }
+
+  // User ID of the user who is composing the message
+  int64 user_id = 1;
+
+  // Peer ID of the peer user is composing the message to
+  Peer peer_id = 2; 
+
+  // Action of the user (typing, etc)
+  ComposeAction action = 3;
+}
+
+message UpdateUserStatus {
+  int64 user_id = 1;
+  UserStatus status = 2;
+}
+
+message UserStatus {
+  enum Status {
+    UNKNOWN = 0;
+    ONLINE = 1;
+    OFFLINE = 2;
+  }
+
+  Status online = 1;
+  LastOnline last_online = 2;
+}
+
+message LastOnline {
+  // Date of the last online if exact last online is permitted by the user
+  optional int64 date = 1;
+
+//   // Approximate date of the last online
+//   Approximate approximate = 2;
+
+
+// enum Approximate {
+//   UNSPECIFIED = 0;
+//   RECENTLY = 1;
+//   A_DAY_AGO = 2;
+//   A_WEEK_AGO = 3;
+//   A_MONTH_AGO = 4;
+//   LONG_TIME_AGO = 5;
+// }
 }
