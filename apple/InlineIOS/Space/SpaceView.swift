@@ -65,12 +65,12 @@ struct SpaceView: View {
             Button(action: {
               openCreateThreadSheet = true
             }) {
-              Text("Create Chat")
+              Label("New Chat", systemImage: "plus.message.fill")
             }
             Button(action: {
               openAddMemberSheet = true
             }) {
-              Text("Add Member")
+              Label("Invite Member", systemImage: "person.badge.plus.fill")
             }
           } label: {
             Image(systemName: "ellipsis")
