@@ -13,6 +13,9 @@ import { Log, LogLevel } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
 import { createMessage, ServerMessageKind } from "@in/server/ws/protocol"
 import { Value } from "@sinclair/typebox/value"
+import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@in/server/protocol/core"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 
 const log = new Log("Updates.sendUpdate", LogLevel.INFO)
 
@@ -43,6 +46,10 @@ export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTra
         },
       ]
       sendUpdatesToUser(targetUserId, updates)
+
+      // New Updates
+      const newUpdates = getNewUpdatesForUserPresenceUpdate(userId, online, lastOnline)
+      RealtimeUpdates.pushToUser(targetUserId, [newUpdates])
     }
     return
   }
@@ -50,11 +57,15 @@ export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTra
   if ("composeAction" in reason) {
     const { update, target } = reason.composeAction
     const updates = [{ updateComposeAction: update }]
+    const newUpdates = getNewUpdatesForComposeAction(update.userId, target, update)
+
     if ("userId" in target) {
       sendUpdatesToUser(target.userId, updates)
+      RealtimeUpdates.pushToUser(target.userId, [newUpdates])
     } else {
       // not supported for threads
-      throw new InlineError(ApiError.PEER_INVALID)
+      // throw new InlineError(ApiError.PEER_INVALID)
+      return
     }
     return
   }
@@ -69,4 +80,40 @@ const sendUpdatesToUser = (userId: number, updates: TUpdateInfo[]) => {
     payload: { updates },
   })
   connectionManager.sendToUser(userId, message)
+}
+
+const getNewUpdatesForComposeAction = (userId: number, peerId: TPeerInfo, action: TUpdateComposeAction) => {
+  const currentUserId = userId
+  // New update
+  const newAction: UpdateComposeAction_ComposeAction =
+    action.action == "typing" ? UpdateComposeAction_ComposeAction.TYPING : UpdateComposeAction_ComposeAction.NONE
+  const updateComposeAction: Update = {
+    update: {
+      oneofKind: "updateComposeAction",
+      updateComposeAction: {
+        userId: BigInt(currentUserId),
+        peerId: Encoders.peer(peerId),
+        action: newAction,
+      },
+    },
+  }
+
+  return updateComposeAction
+}
+
+const getNewUpdatesForUserPresenceUpdate = (userId: number, online: boolean, lastOnline: Date | null): Update => {
+  return {
+    update: {
+      oneofKind: "updateUserStatus",
+      updateUserStatus: {
+        userId: BigInt(userId),
+        status: {
+          online: online ? UserStatus_Status.ONLINE : UserStatus_Status.OFFLINE,
+          lastOnline: {
+            date: lastOnline ? BigInt(lastOnline.getTime()) : undefined,
+          },
+        },
+      },
+    },
+  }
 }
