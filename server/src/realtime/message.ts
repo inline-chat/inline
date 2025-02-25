@@ -5,9 +5,11 @@ import {
   RpcError,
   RpcError_Code,
   RpcResult,
+  ServerMessage,
   ServerProtocolMessage,
+  UpdatesPayload,
 } from "../protocol/core"
-import type { HandlerContext, RootContext } from "./types"
+import type { HandlerContext, RootContext, Ws } from "./types"
 import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionInit"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
@@ -108,4 +110,37 @@ const genId = (): bigint => {
   // Shift timestamp left by 22 bits (12 for sequence, 10 for machine/process id if needed)
   // Currently using only timestamp (42 bits) and sequence (12 bits)
   return (timestamp << 22n) | sequence
+}
+
+const sendRaw = (ws: Ws, message: ServerProtocolMessage) => {
+  ws.raw.sendBinary(ServerProtocolMessage.toBinary(message), true)
+}
+
+export const sendMessageToRealtimeUser = async (userId: number, payload: ServerMessage["payload"]) => {
+  const connections = connectionManager.getUserConnections(userId)
+
+  for (let conn of connections) {
+    // re-using id in different sockets should be fine, even beneficial as it avoid duplicate ones
+    let id = genId()
+    sendRaw(conn.ws, {
+      id: id,
+      body: {
+        oneofKind: "message",
+        message: {
+          payload,
+        },
+      },
+    })
+  }
+}
+
+export class RealtimeUpdates {
+  static pushToUser(userId: number, updates: UpdatesPayload["updates"]) {
+    sendMessageToRealtimeUser(userId, {
+      oneofKind: "update",
+      update: {
+        updates: updates,
+      },
+    })
+  }
 }
