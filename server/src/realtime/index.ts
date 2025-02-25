@@ -33,6 +33,7 @@ export const realtime = new Elysia().state("connectionId", undefined as string |
 
   close(ws) {
     log.trace("connection closed")
+    connectionManager.closeConnection(ws.data.store.connectionId ?? "")
   },
 
   async message(ws, message) {
