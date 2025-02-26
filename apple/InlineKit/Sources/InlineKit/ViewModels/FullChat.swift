@@ -1,7 +1,7 @@
 import Combine
 import GRDB
-import SwiftUI
 import Logger
+import SwiftUI
 
 public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
@@ -149,6 +149,28 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             }
           }
         )
+  }
+
+  public func refetchChatView() {
+    Log.shared.debug("Refetching chat view for peer \(peer)")
+    Task {
+      do {
+        return try await DataManager.shared.getChatHistory(peerUserId: nil, peerThreadId: nil, peerId: peer)
+      } catch {
+        Log.shared.error("Failed to refetch chat view \(error)")
+      }
+    }
+    
+    // Refetch user info (online, lastSeen)
+    Task {
+      do {
+        if let user = peerUser {
+          return try await DataManager.shared.getUser(id: user.id)
+        }
+      } catch {
+        Log.shared.error("Failed to refetch user info \(error)")
+      }
+    }
   }
 }
 
