@@ -418,7 +418,9 @@ const sendPushNotificationToUser = async ({
           ? isProd
             ? "chat.inline.InlineMac"
             : "chat.inline.InlineMac.debug"
-          : "chat.inline.InlineIOS"
+          : isProd
+          ? "chat.inline.InlineIOS"
+          : "chat.inline.InlineIOS.debug"
 
       // Configure notification
       const notification = new APN.Notification()
