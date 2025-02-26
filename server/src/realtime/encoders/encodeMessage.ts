@@ -1,7 +1,7 @@
 import type { TPeerInfo } from "@in/server/api-types"
 import type { DbFile, DbMessage } from "@in/server/db/schema"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
-import type { Message } from "@in/server/protocol/core"
+import type { Message } from "@in/protocol/core"
 import { encodePeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodePhoto } from "@in/server/realtime/encoders/encodePhoto"
 

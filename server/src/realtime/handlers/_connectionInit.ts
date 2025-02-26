@@ -1,4 +1,4 @@
-import type { ConnectionInit, ConnectionOpen } from "@in/server/protocol/core"
+import type { ConnectionInit, ConnectionOpen } from "@in/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { getUserIdFromToken } from "@in/server/controllers/plugins"
 import { connectionManager } from "@in/server/ws/connections"

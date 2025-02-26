@@ -1,31 +1,15 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "strict": true,
-    "esModuleInterop": true,
-    "exactOptionalPropertyTypes": false, // had to disable this because of annoying issues
-    "target": "ESNext",
-    "module": "ESNext",
-    "skipLibCheck": true,
-
-    // Bundler mode
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "noEmit": true,
-
-    "moduleDetection": "force",
-
-    // Best practices
-    "noFallthroughCasesInSwitch": true,
-
-    // Some stricter flags
-    "noPropertyAccessFromIndexSignature": true,
-    "noUncheckedIndexedAccess": true,
-
-    "paths": {
-      "@in/server": ["./src"],
-      "@in/server/*": ["./src/*"]
-    }
+    "rootDir": ".",
+    "declarationDir": "dist"
   },
-  "include": ["src"]
+
+  "references": [
+    {
+      "path": "./packages/protocol"
+    }
+  ],
+
+  "include": ["src", "scripts"]
 }

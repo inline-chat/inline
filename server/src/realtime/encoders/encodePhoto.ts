@@ -1,7 +1,7 @@
 import type { DbFile } from "@in/server/db/schema"
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import { getSignedUrl } from "@in/server/modules/files/path"
-import type { Photo } from "@in/server/protocol/core"
+import { Photo_Format, type Photo } from "@in/protocol/core"
 
 export const encodePhoto = ({ file }: { file: DbFile }) => {
   const path =
@@ -14,6 +14,8 @@ export const encodePhoto = ({ file }: { file: DbFile }) => {
   let proto: Photo = {
     id: BigInt(file.id),
     date: BigInt(file.date.getTime() / 1000),
+    fileUniqueId: file.fileUniqueId,
+    format: file.mimeType === "image/png" ? Photo_Format.PNG : Photo_Format.JPEG,
     sizes: [
       {
         type: "f",

@@ -1,11 +1,9 @@
-import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { DATABASE_URL } from "../src/env"
-import { resolve } from "path"
 import { sql } from "drizzle-orm"
 
-if (process.env.NODE_ENV === "production" || process.env.CI) {
+if (process.env.NODE_ENV === "production" || process.env["CI"]) {
   console.error("Not for production")
   process.exit(1)
 }

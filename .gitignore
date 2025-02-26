@@ -101,3 +101,9 @@ buildServer.json
 apple/Local.xcconfig
 
 .eslintcache
+
+# Ignore the dist directory
+dist/
+
+# Ignore TypeScript build info files
+*.tsbuildinfo

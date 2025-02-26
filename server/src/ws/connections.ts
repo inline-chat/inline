@@ -5,7 +5,7 @@
  */
 
 import { getSpaceIdsForUser } from "@in/server/db/models/spaces"
-import type { Update } from "@in/server/protocol/core"
+import type { Update } from "@in/protocol/core"
 import { filterFalsy } from "@in/server/utils/filter"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { presenceManager } from "@in/server/ws/presence"
