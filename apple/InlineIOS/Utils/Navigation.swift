@@ -95,15 +95,16 @@ class Navigation: ObservableObject, @unchecked Sendable {
   // MARK: - Navigation Actions (updated to use pathComponents)
 
   func push(_ destination: Destination) {
+    // TODO: Handle sheets in aother func
     switch destination {
-      case .chat:
-        activeDestination = destination
-        pathComponents.append(destination)
       case .createSpace, .createThread, .profile:
         activeSheet = destination
       default:
-        activeDestination = destination
-        pathComponents.append(destination)
+        if pathComponents.last == destination {
+          break
+        } else {
+          pathComponents.append(destination)
+        }
     }
   }
 
