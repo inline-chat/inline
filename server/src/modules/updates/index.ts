@@ -21,6 +21,11 @@ export const getUpdateGroup = async (peerId: TPeerInfo, context: { currentUserId
 
   if (chat.type === "private") {
     invariant(chat.minUserId && chat.maxUserId, "Private chat must have minUserId and maxUserId")
+    if (chat.minUserId === chat.maxUserId) {
+      // Saved message
+      return { type: "users", userIds: [chat.minUserId] }
+    }
+    // DMs
     return { type: "users", userIds: [chat.minUserId, chat.maxUserId] }
   } else if (chat.type === "thread") {
     if (!chat.spaceId) {
