@@ -3,7 +3,11 @@ import InlineUI
 import SwiftUI
 import UIKit
 
-class MessageCollectionViewCell: UICollectionViewCell {
+protocol MessageCellDelegate: AnyObject {
+  func didSwipeToReply(for message: FullMessage)
+}
+
+class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelegate {
   static let reuseIdentifier = "MessageCell"
 
   var messageView: UIMessageView?
@@ -14,6 +18,13 @@ class MessageCollectionViewCell: UICollectionViewCell {
   var fromOtherSender: Bool = false
   var message: FullMessage!
   var spaceId: Int64 = 0
+
+  private var panGesture: UIPanGestureRecognizer!
+  private let replyIndicator = ReplyIndicatorView()
+  private var swipeActive = false
+  private var initialTranslation: CGFloat = 0
+
+  weak var delegate: MessageCellDelegate?
 
   lazy var nameLabel: UILabel = {
     var label = UILabel()
@@ -27,6 +38,8 @@ class MessageCollectionViewCell: UICollectionViewCell {
   override init(frame: CGRect) {
     super.init(frame: frame)
     setupContentSize()
+    setupSwipeGestures()
+    setupReplyIndicator()
   }
 
   @available(*, unavailable)
@@ -78,6 +91,125 @@ class MessageCollectionViewCell: UICollectionViewCell {
 }
 
 extension MessageCollectionViewCell {
+  override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    guard gestureRecognizer == panGesture else { return true }
+
+    let velocity = panGesture.velocity(in: contentView)
+
+    // Calculate angle and only allow nearly horizontal swipes
+    // An 16 degree angle corresponds to tan(16°) ≈ 0.287
+    // This means vertical component should be at most 0.287 times the horizontal component
+    let maxAngleTangent: CGFloat = 0.287 // tan(16°)
+    let isHorizontalEnough = abs(velocity.y) <= abs(velocity.x) * maxAngleTangent
+
+    return abs(velocity.x) > abs(velocity.y) && isHorizontalEnough // Must be predominantly horizontal
+  }
+
+  @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+    let translation = gesture.translation(in: contentView)
+    let velocity = gesture.velocity(in: contentView)
+
+    switch gesture.state {
+      case .began:
+        initialTranslation = translation.x
+        replyIndicator.isHidden = false
+        replyIndicator.alpha = 1
+        replyIndicator.reset()
+      case .changed:
+        handleSwipeProgress(translation: translation, velocity: velocity)
+      case .ended, .cancelled:
+        finalizeSwipe(translation: translation, velocity: velocity)
+      default:
+        resetSwipeState()
+    }
+  }
+
+  private func handleSwipeProgress(translation: CGPoint, velocity: CGPoint) {
+    let adjustedTranslation = translation.x - initialTranslation
+    let isTrailingSwipe = adjustedTranslation < 0
+
+    guard isTrailingSwipe else {
+      resetSwipeState()
+      return
+    }
+
+    let maxTranslation: CGFloat = 80
+    let progress = min(abs(adjustedTranslation) / maxTranslation, 1)
+    let boundedTranslation = -maxTranslation * progress
+
+    messageView?.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
+    nameLabel.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
+    avatarHostingController?.view.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
+
+    replyIndicator.isHidden = false
+    replyIndicator.updateProgress(progress)
+
+    if progress > 0.7 {
+      // Play haptic feedback when swipe crosses the activation threshold
+      if !swipeActive {
+        let feedbackGenerator = UIImpactFeedbackGenerator(style: .medium)
+        feedbackGenerator.prepare()
+        feedbackGenerator.impactOccurred()
+      }
+      swipeActive = true
+    } else {
+      swipeActive = false
+    }
+  }
+
+  private func finalizeSwipe(translation: CGPoint, velocity: CGPoint) {
+    let progress = min(abs(translation.x) / 80, 1)
+    let shouldTrigger = progress > 0.7 || abs(velocity.x) > 600
+
+    if shouldTrigger {
+      ChatState.shared.setReplyingMessageId(peer: message.message.peerId, id: message.message.messageId)
+    }
+
+    UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5) {
+      self.messageView?.transform = .identity
+      self.nameLabel.transform = .identity
+      self.avatarHostingController?.view.transform = .identity
+      self.replyIndicator.alpha = 0
+    } completion: { _ in
+      if shouldTrigger {
+        self.delegate?.didSwipeToReply(for: self.message)
+      }
+      self.resetSwipeState()
+    }
+  }
+
+  private func resetSwipeState() {
+    replyIndicator.isHidden = true
+    replyIndicator.alpha = 1
+    replyIndicator.reset()
+    initialTranslation = 0
+    swipeActive = false
+
+    messageView?.transform = .identity
+    nameLabel.transform = .identity
+    avatarHostingController?.view.transform = .identity
+  }
+
+  func setupReplyIndicator() {
+    replyIndicator.translatesAutoresizingMaskIntoConstraints = false
+    contentView.insertSubview(replyIndicator, belowSubview: messageView ?? UIView())
+    replyIndicator.isHidden = true
+    replyIndicator.alpha = 1
+
+    NSLayoutConstraint.activate([
+      replyIndicator.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+      replyIndicator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5),
+      replyIndicator.widthAnchor.constraint(equalToConstant: 40),
+      replyIndicator.heightAnchor.constraint(equalToConstant: 40),
+    ])
+  }
+
+  func setupSwipeGestures() {
+    panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+    panGesture.delegate = self
+    contentView.addGestureRecognizer(panGesture)
+  }
+
   func setupContentSize() {
     contentView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     contentView.setContentHuggingPriority(.defaultLow, for: .horizontal)
