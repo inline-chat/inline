@@ -43,7 +43,7 @@ actor WebSocketTransport: NSObject, Sendable {
   // Configuration
   private let urlString: String = {
     if ProjectConfig.useProductionApi {
-      return "wss://api.inline.chat/ws"
+      return "wss://api.inline.chat/realtime"
     }
 
     #if targetEnvironment(simulator)
@@ -177,6 +177,7 @@ actor WebSocketTransport: NSObject, Sendable {
 
     setupConnectionTimeout()
     let url = URL(string: urlString)!
+    log.debug("connecting to \(urlString)")
     webSocketTask = session!.webSocketTask(with: url)
     webSocketTask?.resume()
     log.debug("connecting to \(urlString)")
