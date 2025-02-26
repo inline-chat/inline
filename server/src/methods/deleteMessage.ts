@@ -22,7 +22,7 @@ import { DialogsModel } from "@in/server/db/models/dialogs"
 import { getUpdateGroup } from "../modules/updates"
 import { createMessage, ServerMessageKind } from "../ws/protocol"
 import { connectionManager } from "../ws/connections"
-import type { Update } from "@in/server/protocol/core"
+import type { Update } from "@in/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 

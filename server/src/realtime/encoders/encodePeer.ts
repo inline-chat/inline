@@ -1,5 +1,5 @@
 import type { TPeerInfo } from "@in/server/api-types"
-import type { Peer } from "@in/server/protocol/core"
+import type { Peer } from "@in/protocol/core"
 
 export const encodePeer = (peer: TPeerInfo): Peer => {
   if ("userId" in peer) {

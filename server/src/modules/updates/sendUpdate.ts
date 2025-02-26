@@ -13,7 +13,7 @@ import { Log, LogLevel } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
 import { createMessage, ServerMessageKind } from "@in/server/ws/protocol"
 import { Value } from "@sinclair/typebox/value"
-import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@in/server/protocol/core"
+import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@in/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 
