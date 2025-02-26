@@ -1,10 +1,22 @@
 import AsyncAlgorithms
 import Auth
+import Combine
 import Foundation
 import InlineProtocol
 import Logger
 
-public actor RealtimeAPI {
+public enum RealtimeAPIState: Sendable {
+  case waitingForNetwork
+  case connecting
+  case updating
+  case connected
+}
+
+public enum RealtimeAPIEvent: Sendable {
+  case stateUpdate(state: RealtimeAPIState)
+}
+
+public actor RealtimeAPI: Sendable {
   var transport: WebSocketTransport
   var msgQueue = MsgQueue()
   var log = Log.scoped("Realtime_Core")
@@ -14,6 +26,9 @@ public actor RealtimeAPI {
   var messageChannel = AsyncChannel<Void>()
   var started: Bool = false
   var updatesEngine: RealtimeUpdatesProtocol
+
+  // publishers
+  public let eventsChannel = AsyncChannel<RealtimeAPIEvent>()
 
   /// Message IDs to continution handlers
   private var rpcCalls: [UInt64: CheckedContinuation<RpcResult.OneOf_Result?, any Error>] = [:]
@@ -175,7 +190,7 @@ extension RealtimeAPI {
 
   // Not used as we want to wait until things get resolved probably.
   private func cancelPendingRpcCalls(reason: RealtimeAPIError) {
-    for (id, continuation) in rpcCalls {
+    for (_, continuation) in rpcCalls {
       continuation.resume(throwing: reason)
     }
     rpcCalls.removeAll()
@@ -187,9 +202,9 @@ extension RealtimeAPI {
 extension RealtimeAPI {
   private func setUpTransport() async {
     log.debug("setting up transport")
-    await transport.addStateObserver { state in
-      Task {
-        await self.transportStateChanged(state: state)
+    await transport.addStateObserver { [weak self] state, networkAvailable in
+      Task { [weak self] in
+        await self?.transportStateChanged(state: state, networkAvailable: networkAvailable)
       }
     }
 
@@ -200,7 +215,16 @@ extension RealtimeAPI {
     }
   }
 
-  private func transportStateChanged(state: TransportConnectionState) async {
+  private func transportStateChanged(state: TransportConnectionState, networkAvailable: Bool) async {
+    // TODO: make this more accurate by taking authenticating step into account
+    let apiState: RealtimeAPIState = switch state {
+      case .connected:
+        .connected
+      case .disconnected, .connecting:
+        if networkAvailable { .connecting } else { .waitingForNetwork }
+    }
+    await eventsChannel.send(.stateUpdate(state: apiState))
+
     switch state {
       case .connected:
         await authenticate()

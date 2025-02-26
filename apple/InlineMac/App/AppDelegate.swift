@@ -147,7 +147,7 @@ extension AppDelegate {
     Auth.shared.logOut()
 
     // Stop WebSocket
-    await dependencies.ws.loggedOut()
+    await dependencies.realtime.loggedOut()
 
     // Clear database
     try? AppDatabase.loggedOut()
@@ -175,7 +175,6 @@ extension AppDelegate {
 @MainActor
 struct AppDependencies {
   let auth = Auth.shared
-  let ws = WebSocketManager()
   let viewModel = MainWindowViewModel()
   let overlay = OverlayManager()
   let navigation = NavigationModel.shared
@@ -197,7 +196,6 @@ struct AppDependencies {
 extension View {
   func environment(dependencies deps: AppDependencies) -> AnyView {
     var result = environment(\.auth, deps.auth)
-      .environmentObject(deps.ws)
       .environmentObject(deps.viewModel)
       .environmentObject(deps.overlay)
       .environmentObject(deps.navigation)
