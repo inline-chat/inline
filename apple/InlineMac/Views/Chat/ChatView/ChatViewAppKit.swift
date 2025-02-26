@@ -8,7 +8,16 @@ class ChatViewAppKit: NSView {
 
   private var messageList: MessageListAppKit
   private var compose: ComposeAppKit
-  private var viewModel: FullChatViewModel?
+  private var didInitialRefetch = false
+  private var viewModel: FullChatViewModel? {
+    didSet {
+      guard !didInitialRefetch else { return }
+      // Update message list
+      viewModel?.refetchChatView()
+      didInitialRefetch = true
+    }
+  }
+
   private var chat: Chat? // TODO: get rid of ?
 
   override var acceptsFirstResponder: Bool {
