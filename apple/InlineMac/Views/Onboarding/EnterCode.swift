@@ -4,7 +4,6 @@ import Logger
 
 struct OnboardingEnterCode: View {
   @EnvironmentObject var onboardingViewModel: OnboardingViewModel
-  @EnvironmentObject var ws: WebSocketManager
   @FormState var formState
   @State var code = ""
 
@@ -105,9 +104,6 @@ struct OnboardingEnterCode: View {
 
         // Change passphrase of database
         try await AppDatabase.authenticated()
-
-        // Establish WebSocket connection
-        ws.authenticated()
 
         DispatchQueue.main.async {
           // Navigate

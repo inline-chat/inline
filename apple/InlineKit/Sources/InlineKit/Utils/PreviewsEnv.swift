@@ -22,7 +22,6 @@ public extension View {
       environment(\.transactions, Transactions.shared)
         .environment(\.appDatabase, appDatabase)
         .databaseContext(.readWrite { appDatabase.dbWriter })
-        .environmentObject(WebSocketManager(token: nil, userId: nil))
         .environmentObject(RootData(db: appDatabase, auth: auth))
         .environmentObject(DataManager(database: appDatabase))
         .environment(\.auth, auth)

@@ -3,7 +3,6 @@ import InlineUI
 import SwiftUI
 
 struct SpaceSidebar: View {
-  @EnvironmentObject var ws: WebSocketManager
   @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
 
