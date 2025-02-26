@@ -1,10 +1,4 @@
-import {
-  Method,
-  type ConnectionInit,
-  type ConnectionOpen,
-  type RpcCall,
-  type RpcResult,
-} from "@in/server/protocol/core"
+import { Method, type ConnectionInit, type ConnectionOpen, type RpcCall, type RpcResult } from "@in/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { getUserIdFromToken } from "@in/server/controllers/plugins"
 import { connectionManager } from "@in/server/ws/connections"

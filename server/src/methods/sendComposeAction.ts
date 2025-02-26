@@ -6,7 +6,7 @@ import { Log } from "@in/server/utils/log"
 import { peerFromInput, reversePeerId, TApiInputPeer, type HandlerContext } from "@in/server/controllers/helpers"
 import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
 import { ApiError, InlineError } from "@in/server/types/errors"
-import { UpdateComposeAction_ComposeAction, type Update } from "@in/server/protocol/core"
+import { UpdateComposeAction_ComposeAction, type Update } from "@in/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 

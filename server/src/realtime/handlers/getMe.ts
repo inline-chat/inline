@@ -1,5 +1,5 @@
 import { UsersModel } from "@in/server/db/models/users"
-import type { GetMeInput, GetMeResult } from "@in/server/protocol/core"
+import type { GetMeInput, GetMeResult } from "@in/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 
 export const getMe = async (input: GetMeInput, handlerContext: HandlerContext): Promise<GetMeResult> => {

@@ -36,7 +36,7 @@ import { isProd } from "@in/server/env"
 import { getFileByUniqueId } from "@in/server/db/models/files"
 import { debugDelay, delay } from "@in/server/utils/helpers/time"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { Update } from "@in/server/protocol/core"
+import { Update } from "@in/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 
 export const Input = Type.Object({

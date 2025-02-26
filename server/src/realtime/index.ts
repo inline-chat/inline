@@ -4,7 +4,7 @@ import Elysia, { t } from "elysia"
 
 import { Log } from "@in/server/utils/log"
 import { getUserIdFromToken } from "@in/server/controllers/plugins"
-import { ClientMessage } from "../protocol/core"
+import { ClientMessage } from "../../packages/protocol/src/core"
 import { handleMessage } from "@in/server/realtime/message"
 import { BinaryReader } from "@bufbuild/protobuf/wire"
 import type { ServerWebSocket } from "bun"
