@@ -19,18 +19,13 @@ struct HomeToolbarContent: ToolbarContent {
   }
 
   var body: some ToolbarContent {
-    Group {
-      ToolbarItem(id: "UserAvatar", placement: .topBarLeading) {
-        userAvatarView
-      }
+    ToolbarItem(id: "UserAvatar", placement: .topBarLeading) {
+      userAvatarView
+    }
 
-      ToolbarItem(id: "status", placement: .principal) {
-        ConnectionStateIndicator(state: ws.connectionState)
-      }
-
-      ToolbarItem(id: "MainToolbarTrailing", placement: .topBarTrailing) {
-        trailingButtons
-      }
+    ToolbarItemGroup(placement: .topBarTrailing) {
+      createSpaceButton
+      settingsButton
     }
   }
 
@@ -45,7 +40,16 @@ struct HomeToolbarContent: ToolbarContent {
         UserAvatar(user: user, size: 26)
       }
 
-      userNameView
+      VStack(alignment: .leading, spacing: 0) {
+        userNameView
+        if ws.connectionState == .connecting {
+          Text("connecting...")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .transition(.opacity)
+            .animation(.easeInOut, value: ws.connectionState)
+        }
+      }
     }
 
     .onTapGesture {
@@ -68,12 +72,12 @@ struct HomeToolbarContent: ToolbarContent {
     }
   }
 
-  private var trailingButtons: some View {
-    HStack(spacing: 2) {
-      createSpaceButton
-      settingsButton
-    }
-  }
+//  private var trailingButtons: some View {
+//    HStack(spacing: 2) {
+//      createSpaceButton
+//      settingsButton
+//    }
+//  }
 
   private var createSpaceButton: some View {
     Button {
