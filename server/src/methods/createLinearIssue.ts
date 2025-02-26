@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm"
 import OpenAI from "openai"
 import { spaces, users } from "../db/schema"
 import { db } from "../db"
+import { z } from "zod"
 import {
   createIssue,
   generateIssueLink,
@@ -15,6 +16,7 @@ import {
 } from "@in/server/libs/linear"
 import { openaiClient } from "../libs/openAI"
 import { Log } from "../utils/log"
+import { zodResponseFormat } from "openai/helpers/zod.mjs"
 
 type Context = {
   currentUserId: number
@@ -41,32 +43,29 @@ export const handler = async (
   const linearUsers = await getLinearUsers({ userId: currentUserId })
 
   const message = `
-  You are an expert linguist creating accurate task titles from messages in any language. Follow these steps:
+  You are a product manager creating tasks for engineers, designers, and other startup roles from messages in their Slack messages. Follow these steps:
   
   1. INPUT MESSAGE: "${text}"
   
   2. TITLE CREATION RULES:
-     a. Make sure to start with an everyday action verb (e.g., "Fix", "Update", "Add", "Remove")
-     b. Use sentence case (First word capitalized)
-     c. Include specific issue reproduction steps or feature context
-     d. Maintain key information density from original message
-     e. PROHIBITED: AI jargon ("optimize", "leverage", "streamline", "capability")
-     f. IGNORE time annotations: "-2h", "(2h)", etc.
-     g.Be careful to not count everything as issue.
-     t. Make sure you do not add any of these words in sentences : "feature" or "functionality" but you can count them as label. eg. this is wrong: Add SMS sign in **feature**
-  s. Make sure you are not returning the sentence with it's own verb without making it task title and adding the action verb in the beginning of the title eg.
-  Message: edit message 
-  title should be "Add edit message" no "Edit message" 
+     a. Use common task title verbs like "Fix", "Update", "Add", "Remove"
+     b. Use sentence case
+     c. Keep it concise and to the point explaining the task/feature/fix mentioned in the message.
+     d. PROHIBITED: AI jargon ("optimize", "leverage", "streamline", "capability") use simple and decriptive words often used in project management software or tasks in a software company. Match their tone, no need to formalize it. Keep technical jargon user mentioned.
+     g. Be careful to not count every word as a task.
+     h. Make sure you are not returning the sentence with it's own verb without making it task title and adding the action verb in the beginning of the title eg.
+     Message: edit message 
+     title should be "Add edit message" no "Edit message" 
 
      TITLE FORMAT EXAMPLES:
      Message: "Dena please fix open DM chats on notification click, it's working randomly for me."
-     Title: "Fix random DM opening behavior on notification clicks"
+     Title: "Fix random DM open on notification click"
   
      Message: "@Mo this message failed to translate. It was a long message from a zh user"
-     Title: "Fix translation failures for long Chinese messages"
+     Title: "Fix translation bug for long ZH messages"
   
-     Message: "video sending"
-     Title: "Add video"
+     Message: "todo: - video upload"
+     Title: "Add video upload"
   
   3. ASSIGNEE DETECTION:
      - Trigger on exact @ mentions
@@ -80,17 +79,10 @@ export const handler = async (
   
   OUTPUT FORMAT:
   {
-    "title": "<Action Verb + Specific Context>",
-    "description": "${text}",
+    "title": "<Task Title>",
     "labelIds": ["<Matching-Label-ID>"] || [],
     "assigneeId": "<Mentioned-User-ID>" || ""
   }
-  
-  REQUIREMENTS:
-  - Description must be exact original text
-  - Empty arrays/strings allowed for unmatched fields
-  - Title must use concrete action verbs
-  - No explanations in output
   `
 
   // const message = `
@@ -120,7 +112,7 @@ export const handler = async (
   //   "title": "<Translated/Original Text as Natural Task Title>",
   //   "description": "${text}",
   //   "labelIds": ["<Matching-Label-ID>"] || [],
-  //   "assigneeId": "<@Mention-Matched-ID>" || ""
+  //   "assigneeId": "<@Mention-Matched-ID>" || null
   // }
 
   // Key Requirements:
@@ -130,15 +122,21 @@ export const handler = async (
   // -  Never explain your reasoning
   // `
 
+  const ResponseSchema = z.object({
+    title: z.string(),
+    labelIds: z.array(z.string()),
+    assigneeId: z.string().optional(),
+  })
+
   const response = await openaiClient?.chat.completions.create({
     messages: [
       {
         role: "user",
-        content: message + "\n\nRespond with valid JSON using the required format.",
+        content: message,
       },
     ],
-    model: "gpt-4o",
-    response_format: { type: "json_object" },
+    model: "gpt-4o-2024-11-20",
+    response_format: zodResponseFormat(ResponseSchema, "task"),
   })
 
   if (!response) {
