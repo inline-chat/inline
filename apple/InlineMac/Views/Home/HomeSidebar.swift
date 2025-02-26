@@ -3,7 +3,6 @@ import Logger
 import SwiftUI
 
 struct HomeSidebar: View {
-  @EnvironmentObject var ws: WebSocketManager
   @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager

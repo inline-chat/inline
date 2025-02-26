@@ -17,16 +17,37 @@ public final class Realtime: Sendable {
   public static let shared = Realtime(updatesEngine: UpdatesEngine.shared)
 
   private let api: RealtimeAPI
+  private let log = Log.scoped("RealtimeWrapper")
 
-  public init(updatesEngine: RealtimeUpdatesProtocol) {
+  @MainActor public let apiStatePublisher = CurrentValueSubject<RealtimeAPIState, Never>(
+    .connecting
+  )
+  @MainActor public var apiState: RealtimeAPIState {
+    apiStatePublisher.value
+  }
+
+  private init(updatesEngine: RealtimeUpdatesProtocol) {
     api = .init(updatesEngine: updatesEngine)
+
+    Task { [weak self] in
+      guard let self else { return }
+      for await event in await api.eventsChannel {
+        log.debug("Received api event: \(event)")
+        switch event {
+          case let .stateUpdate(state):
+            Task { @MainActor in
+              apiStatePublisher.send(state)
+            }
+        }
+      }
+    }
 
     if Auth.shared.isLoggedIn {
       start()
     }
 
     // not ever cancelled for now
-    let _ = Auth.shared.$isLoggedIn.sink { [weak self] isLoggedIn in
+    _ = Auth.shared.$isLoggedIn.sink { [weak self] isLoggedIn in
       guard let self else { return }
       if isLoggedIn {
         ensureStarted()
@@ -53,5 +74,9 @@ public final class Realtime: Sendable {
     -> RpcResult.OneOf_Result?
   {
     try await api.invoke(method, input: input)
+  }
+  
+  public func loggedOut() {
+    // todo
   }
 }

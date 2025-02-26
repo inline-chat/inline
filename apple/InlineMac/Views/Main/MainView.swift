@@ -66,30 +66,10 @@ struct MainView: View {
     .onAppear {
       Log.shared.info("MainView appeared • fetching root data")
       rootData.fetch()
-
-      markAsOnline()
-
       fetchMe()
     }
     .task {
       await requestNotifications()
-    }
-    .onForeground {
-      Task {
-        ws.ensureConnected()
-        markAsOnline()
-      }
-    }
-    .onChange(of: scenePhase) { phase in
-      if phase == .active {
-        Task {
-          ws.ensureConnected()
-          markAsOnline()
-        }
-
-      } else if phase == .inactive {
-        // Evaluate offline?
-      }
     }
   }
 

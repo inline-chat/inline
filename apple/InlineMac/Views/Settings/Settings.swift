@@ -64,7 +64,6 @@ struct AppearanceView: View {
 
 struct AccountSettingsView: View {
   @EnvironmentObject private var mainWindowViewModel: MainWindowViewModel
-  @EnvironmentObject private var ws: WebSocketManager
   @EnvironmentStateObject private var root: RootData
   @Environment(\.logOut) private var logOut
 

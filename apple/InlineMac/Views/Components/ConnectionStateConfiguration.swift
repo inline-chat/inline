@@ -1,17 +1,19 @@
 import InlineKit
+import RealtimeAPI
 import SwiftUI
 
 struct ConnectionStateConfiguration {
-  let state: ConnectionState
+  let state: RealtimeAPIState
   let shouldShow: Bool
   let humanReadable: String
 }
 
 struct ConnectionStateProvider<Content: View>: View {
-  @EnvironmentObject var ws: WebSocketManager
+  @Environment(\.realtime) var realtime
   let content: (ConnectionStateConfiguration) -> Content
 
   @State var shouldShow = false
+  @State var apiState: RealtimeAPIState = .connecting
 
   init(@ViewBuilder content: @escaping (ConnectionStateConfiguration) -> Content) {
     self.content = content
@@ -19,22 +21,27 @@ struct ConnectionStateProvider<Content: View>: View {
 
   var body: some View {
     let configuration = ConnectionStateConfiguration(
-      state: ws.connectionState,
+      state: apiState,
       shouldShow: shouldShow,
-      humanReadable: getStatusText(ws.connectionState)
+      humanReadable: getStatusText(apiState)
     )
 
     content(configuration)
       .task {
-        if ws.connectionState != .normal {
+        if apiState != .connected {
           shouldShow = true
         }
       }
-      .onChange(of: ws.connectionState) { newValue in
-        if newValue == .normal {
+      .onAppear {
+        apiState = realtime.apiState
+      }
+      .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
+        apiState = nextApiState
+
+        if nextApiState == .connected {
           Task { @MainActor in
             try await Task.sleep(for: .seconds(1))
-            if ws.connectionState == .normal {
+            if nextApiState == .connected {
               // second check
               shouldShow = false
             }
@@ -42,17 +49,19 @@ struct ConnectionStateProvider<Content: View>: View {
         } else {
           shouldShow = true
         }
-      }
+      })
   }
 
-  private func getStatusText(_ state: ConnectionState) -> String {
+  private func getStatusText(_ state: RealtimeAPIState) -> String {
     switch state {
-      case .normal:
+      case .connected:
         "connected"
       case .connecting:
         "connecting..."
       case .updating:
         "updating..."
+      case .waitingForNetwork:
+        "waiting for network..."
     }
   }
 }

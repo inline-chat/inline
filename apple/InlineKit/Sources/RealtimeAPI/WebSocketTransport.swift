@@ -1,9 +1,9 @@
 import Atomics
 import Foundation
 import InlineConfig
+import InlineProtocol
 import Logger
 import Network
-import InlineProtocol
 
 #if canImport(UIKit)
 import UIKit
@@ -59,8 +59,10 @@ actor WebSocketTransport: NSObject, Sendable {
 
   private var session: URLSession?
 
+  typealias StateObserverFn = (_ state: TransportConnectionState, _ networkAvailable: Bool) -> Void
+
   // Internals
-  private var stateObservers: [(TransportConnectionState) -> Void] = []
+  private var stateObservers: [StateObserverFn] = []
   private var messageHandler: ((ServerProtocolMessage) -> Void)? = nil
   private var log = Log.scoped("Realtime_TransportWS")
   private var pathMonitor: NWPathMonitor?
@@ -193,11 +195,11 @@ actor WebSocketTransport: NSObject, Sendable {
   // MARK: - State Management
 
   func addStateObserver(
-    _ observer: @escaping @Sendable (TransportConnectionState) -> Void
+    _ observer: @escaping @Sendable StateObserverFn
   ) {
     stateObservers.append(observer)
     // Immediately notify of current state
-    observer(connectionState)
+    observer(connectionState, networkAvailable)
   }
 
   func addMessageHandler(
@@ -211,7 +213,7 @@ actor WebSocketTransport: NSObject, Sendable {
     let stateObservers = stateObservers
     // Notify observers on the main thread
     for stateObserver in stateObservers {
-      stateObserver(currentState)
+      stateObserver(currentState, networkAvailable)
     }
   }
 
@@ -345,14 +347,14 @@ actor WebSocketTransport: NSObject, Sendable {
         let message = try await webSocketTask.receive()
         log.debug("got message")
         switch message {
-          case let .string(text):
+          case .string:
             // unsupported
             break
           case let .data(data):
             log.debug("got data message \(data.count) bytes")
 
             let message = try ServerProtocolMessage(serializedBytes: data)
-          log.debug("decoded message \(message.id)")
+            log.debug("decoded message \(message.id)")
             notifyMessageReceived(message)
           @unknown default:
             // unsupported
