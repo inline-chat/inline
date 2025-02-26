@@ -8,7 +8,7 @@
     "build": "NODE_ENV=production bun scripts/build.ts",
     "start": "NODE_ENV=production bun dist/index.js",
     "test": "bun test",
-    "typecheck": "tsc",
+    "typecheck": "tsc --build",
     "db:migrate": "bun scripts/migrate.ts",
     "db:dangerously-reset-db": "bun scripts/reset-db.ts",
     "db:generate": "drizzle-kit generate --schema src/db/schema/index.ts --out drizzle --dialect postgresql --name",
