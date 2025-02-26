@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "declarationDir": "dist",
+    "noUncheckedIndexedAccess": false
+  },
+  "references": [],
+  "include": ["src"]
+}

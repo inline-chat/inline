@@ -86,7 +86,6 @@ Temporary Items
 .apdisk
 
 .DS_Store
-/Packages
 xcuserdata/
 DerivedData/
 **/.build
