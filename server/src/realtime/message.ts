@@ -8,7 +8,7 @@ import {
   ServerMessage,
   ServerProtocolMessage,
   UpdatesPayload,
-} from "../../packages/protocol/src/core"
+} from "@in/protocol/core"
 import type { HandlerContext, RootContext, Ws } from "./types"
 import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionInit"
 import { Log, LogLevel } from "@in/server/utils/log"
