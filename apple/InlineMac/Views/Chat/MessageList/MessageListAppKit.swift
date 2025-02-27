@@ -235,30 +235,29 @@ class MessageListAppKit: NSViewController {
     isProgrammaticScroll = true
     defer { isProgrammaticScroll = false }
 
-    scrollView.withoutScrollerFlash {
-      if animated {
-        // Causes clipping at the top
-        NSAnimationContext.runAnimationGroup { context in
-          context.duration = debug_slowAnimation ? 1.5 : 0.2
-          context.allowsImplicitAnimation = true
+    // scrollView.withoutScrollerFlash {
+    if animated {
+      // Causes clipping at the top
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = debug_slowAnimation ? 1.5 : 0.2
+        context.allowsImplicitAnimation = true
 
-          tableView.scrollToBottomWithInset()
-          //        tableView.scrollRowToVisible(lastRow)
-        }
-      } else {
-        //      CATransaction.begin()
-        //      CATransaction.setDisableActions(true)
         tableView.scrollToBottomWithInset()
-        //      tableView.scrollRowToVisible(lastRow)
-        //      CATransaction.commit()
-
-        // Test if this gives better performance than above solution
-        NSAnimationContext.runAnimationGroup { context in
-          context.duration = 0
-          context.allowsImplicitAnimation = false
-          tableView.scrollToBottomWithInset()
-        }
+        //        tableView.scrollRowToVisible(lastRow)
       }
+    } else {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      tableView.scrollToBottomWithInset()
+      CATransaction.commit()
+
+      // Test if this gives better performance than above solution
+//        NSAnimationContext.runAnimationGroup { context in
+//          context.duration = 0
+//          context.allowsImplicitAnimation = false
+//          tableView.scrollToBottomWithInset()
+//        }
+      // }
     }
   }
 
@@ -431,6 +430,10 @@ class MessageListAppKit: NSViewController {
     if feature_scrollsToBottomInDidLayout, isAtAbsoluteBottom {
       return
     }
+    
+    if needsInitialScroll {
+      return
+    }
 
     guard let documentView = scrollView.documentView else { return }
 
@@ -502,16 +505,15 @@ class MessageListAppKit: NSViewController {
         // this is needed to ensure the scroll is done after the initial layout and prevents cutting off last msg
         // EXPERIMENTAL: GETTING RID OF THIS FOR PERFORMANCE REASONS
         // let _ = recalculateHeightsOnWidthChange()
+
+        // fullWidthAsyncCalc()
       }
 
       scrollToBottom(animated: false)
 
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { // EXPERIMENTAL: DECREASED FROM 0.1
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { // EXPERIMENTAL: DECREASED FROM 0.1
         // Finalize heights one last time to ensure no broken heights on initial load
         self.needsInitialScroll = false
-
-        // One last stabilizer (bc we disabled the recalc above, things above viewport might be stuck)
-        self.fullWidthAsyncCalc()
       }
     }
 
@@ -574,6 +576,11 @@ class MessageListAppKit: NSViewController {
       /// Below used to check if width is above max width to not calculate anything, but
       /// this results in very subtle bugs, eg. when window was smaller, then increased width beyond max (so the
       /// calculations are paused, then increases height. now the recalc doesn't happen for older messages.
+
+      if needsInitialScroll {
+        recalculateHeightsOnWidthChange(duringLiveResize: true)
+        return
+      }
 
       let availableWidth = sizeCalculator.getAvailableWidth(
         tableWidth: tableWidth()
