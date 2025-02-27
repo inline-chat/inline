@@ -6,7 +6,6 @@ import Logger
 /// A root content view controller that manages the display of different content based on current route
 class ContentViewController: NSViewController {
   private var dependencies: AppDependencies
-
   private var log = Log.scoped("ContentView")
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
@@ -55,7 +54,7 @@ class ContentViewController: NSViewController {
         break
 
       case let .chat(peer):
-        let chatView = ChatViewAppKit(peerId: peer)
+        let chatView = ChatViewAppKit(peerId: peer, dependencies: dependencies)
         chatView
           .update(viewModel: FullChatViewModel(db: dependencies.database, peer: peer))
         addRouteSubview(chatView)

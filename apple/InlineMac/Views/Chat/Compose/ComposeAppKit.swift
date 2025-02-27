@@ -8,6 +8,7 @@ class ComposeAppKit: NSView {
   private var peerId: Peer
   private var chat: Chat?
   private var chatId: Int64? { chat?.id }
+  private var dependencies: AppDependencies
 
   // State
   private weak var messageList: MessageListAppKit?
@@ -110,14 +111,16 @@ class ComposeAppKit: NSView {
 
   // MARK: Initialization
 
-  init(peerId: Peer, messageList: MessageListAppKit, chat: Chat?) {
+  init(peerId: Peer, messageList: MessageListAppKit, chat: Chat?, dependencies: AppDependencies) {
     self.peerId = peerId
     self.messageList = messageList
     self.chat = chat
+    self.dependencies = dependencies
 
     super.init(frame: .zero)
     setupView()
     setupObservers()
+    setupKeyDownHandler()
   }
 
   @available(*, unavailable)
@@ -448,6 +451,32 @@ class ComposeAppKit: NSView {
 
   func focus() {
     textEditor.focus()
+  }
+
+  private var keyMonitorUnsubscribe: (() -> Void)?
+
+  private func setupKeyDownHandler() {
+    keyMonitorUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .textInputCatchAll,
+      key: "compose\(peerId)",
+      handler: { [weak self] event in
+        guard let self = self else { return }
+
+        self.focus()
+        
+        self.textEditor.textView.insertText(event.characters ?? "", replacementRange: NSRange(location: NSNotFound, length: 0))
+      }
+    )
+  }
+  
+  override func viewDidHide() {
+    keyMonitorUnsubscribe?()
+    keyMonitorUnsubscribe = nil
+  }
+
+  deinit {
+    keyMonitorUnsubscribe?()
+    keyMonitorUnsubscribe = nil
   }
 }
 

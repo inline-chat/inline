@@ -4,7 +4,7 @@ import Logger
 
 class ComposeTextEditor: NSView {
   public let scrollView: ComposeScrollView
-  private let textView: ComposeNSTextView
+  public let textView: ComposeNSTextView
   private let font: NSFont = .preferredFont(forTextStyle: .body)
   private let log = Log.scoped("ComposeTextEditor", enableTracing: false)
   let minHeight: CGFloat = Theme.composeMinHeight

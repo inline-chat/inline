@@ -6,6 +6,7 @@ import Logger
 
 class MainWindowController: NSWindowController {
   private var dependencies: AppDependencies
+  private var keyMonitor: KeyMonitor
   private var log = Log.scoped("MainWindowController")
 
   private var topLevelRoute: TopLevelRoute {
@@ -32,6 +33,9 @@ class MainWindowController: NSWindowController {
       backing: .buffered,
       defer: false
     )
+
+    keyMonitor = KeyMonitor(window: window)
+    self.dependencies.keyMonitor = keyMonitor
 
     super.init(window: window)
 
