@@ -2,6 +2,7 @@ import AppKit
 import Charts
 import CoreVideo
 import SwiftUI
+import SwiftUIIntrospect
 
 struct FPSMeasurement: Identifiable, Equatable {
   let id: Int
