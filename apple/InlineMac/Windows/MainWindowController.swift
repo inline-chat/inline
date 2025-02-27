@@ -2,9 +2,11 @@ import AppKit
 import Combine
 import InlineKit
 import SwiftUI
+import Logger
 
 class MainWindowController: NSWindowController {
   private var dependencies: AppDependencies
+  private var log = Log.scoped("MainWindowController")
 
   private var topLevelRoute: TopLevelRoute {
     dependencies.viewModel.topLevelRoute
@@ -89,6 +91,7 @@ class MainWindowController: NSWindowController {
   }
 
   private func setupMainSplitView() {
+    log.debug("Setting up main split view")
     switchViewController(
       to: MainSplitViewController(dependencies: dependencies)
     )
@@ -137,6 +140,13 @@ class MainWindowController: NSWindowController {
   private var cancellables: Set<AnyCancellable> = []
   private func subscribe() {
     dependencies.viewModel.$topLevelRoute.sink { route in
+      self.log.debug("Top level route changed: \(route)")
+      
+      // Prevent re-open
+      if route == self.topLevelRoute {
+        self.log.debug("Skipped top level change")
+        return
+      }
       DispatchQueue.main.async {
         self.switchTopLevel(route)
       }

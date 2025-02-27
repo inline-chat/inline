@@ -1,16 +1,19 @@
 import AppKit
 import Combine
 import InlineKit
+import Logger
 
 /// A root content view controller that manages the display of different content based on current route
 class ContentViewController: NSViewController {
   private var dependencies: AppDependencies
 
+  private var log = Log.scoped("ContentView")
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
     super.init(nibName: nil, bundle: nil)
   }
 
+  private var currentlyRenderedRoute: NavEntry.Route?
   private var cancellables = Set<AnyCancellable>()
 
   override func loadView() {
@@ -35,6 +38,16 @@ class ContentViewController: NSViewController {
   }
 
   private func switchToRoute(_ route: NavEntry.Route) {
+    log.debug("Switching to route: \(route)")
+
+    // Skip if duplicate
+    if route == currentlyRenderedRoute {
+      log.debug("Skipped")
+      return
+    }
+
+    currentlyRenderedRoute = route
+
     removePreviousRoute()
 
     switch route {
