@@ -113,6 +113,8 @@ class ChatTitleToolbar: NSToolbarItem {
 // MARK: Status / Subtitle
 
 final class ChatStatusView: NSView {
+  private var timer: Timer?
+
   private let label: NSTextField = {
     let tf = NSTextField(labelWithString: "")
     tf.font = .systemFont(ofSize: 11)
@@ -127,6 +129,11 @@ final class ChatStatusView: NSView {
     setupView()
     subscribeToUpdates()
     updateLabel()
+    startTimer()
+  }
+
+  deinit {
+    stopTimer()
   }
 
   @available(*, unavailable)
@@ -228,6 +235,20 @@ final class ChatStatusView: NSView {
 
     Self.formatter.dateTimeStyle = .named
     return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
+  }
+
+  // Render view every minute to ensure correct last online text
+  private func startTimer() {
+    timer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+      self?.updateLabel()
+    }
+
+    RunLoop.current.add(timer!, forMode: .default)
+  }
+
+  private func stopTimer() {
+    timer?.invalidate()
+    timer = nil
   }
 }
 
