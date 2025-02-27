@@ -5,6 +5,7 @@ import SwiftUI
 
 class ChatViewAppKit: NSView {
   var peerId: Peer
+  var dependencies: AppDependencies
 
   private var messageList: MessageListAppKit
   private var compose: ComposeAppKit
@@ -28,13 +29,14 @@ class ChatViewAppKit: NSView {
     setupView()
   }
 
-  init(peerId: Peer) {
+  init(peerId: Peer, dependencies: AppDependencies) {
     self.peerId = peerId
+    self.dependencies = dependencies
 
     chat = try? Chat.getByPeerId(peerId: peerId)
 
     messageList = MessageListAppKit(peerId: peerId, chat: chat)
-    compose = ComposeAppKit(peerId: peerId, messageList: messageList, chat: chat)
+    compose = ComposeAppKit(peerId: peerId, messageList: messageList, chat: chat, dependencies: dependencies)
 
     super.init(frame: .zero)
     setupView()
@@ -85,6 +87,7 @@ class ChatViewAppKit: NSView {
     ])
   }
 
+  // @deprecated
   func update(messages: [FullMessage]) {}
 
   func update(viewModel: FullChatViewModel) {
