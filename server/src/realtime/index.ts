@@ -3,7 +3,6 @@
 import Elysia, { t } from "elysia"
 
 import { Log } from "@in/server/utils/log"
-import { getUserIdFromToken } from "@in/server/controllers/plugins"
 import { ClientMessage } from "@in/protocol/core"
 import { handleMessage } from "@in/server/realtime/message"
 import type { ServerWebSocket } from "bun"

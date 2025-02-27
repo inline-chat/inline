@@ -8,7 +8,6 @@ export const handleConnectionInit = async (
   handlerContext: HandlerContext,
 ): Promise<ConnectionOpen> => {
   // user still unauthenticated here.
-  console.log("connection init token=", init.token)
 
   let { token } = init
   let userIdFromToken = await getUserIdFromToken(token)
