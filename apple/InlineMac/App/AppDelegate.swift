@@ -185,6 +185,7 @@ struct AppDependencies {
 
   // Per window
   let nav: Nav = .main
+  var keyMonitor: KeyMonitor?
 
   // Optional
   var rootData: RootData?
