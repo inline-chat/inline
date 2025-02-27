@@ -123,7 +123,7 @@ class MessageViewAppKit: NSView {
     let view = EmbeddedMessageView(kind: .replyInMessage)
     view.translatesAutoresizingMaskIntoConstraints = false
     if let message = fullMessage.repliedToMessage, let from = fullMessage.replyToMessageSender {
-      view.update(with: message, from: from)
+      view.update(with: message, from: from, file: fullMessage.replyToMessageFile)
     }
     return view
   }()

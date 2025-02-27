@@ -19,6 +19,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var reactions: [Reaction]
   public var repliedToMessage: Message?
   public var replyToMessageSender: User?
+  public var replyToMessageFile: File?
 
   // stable id
   public var id: Int64 {
@@ -77,6 +78,7 @@ public extension FullMessage {
       .including(
         optional: Message.repliedToMessage.forKey("repliedToMessage")
           .including(optional: Message.from.forKey("replyToMessageSender"))
+          .including(optional: Message.file.forKey("replyToMessageFile"))
       )
       .asRequest(of: FullMessage.self)
   }
@@ -160,7 +162,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         Log.shared.error("Failed to refetch chat view \(error)")
       }
     }
-    
+
     // Refetch user info (online, lastSeen)
     Task {
       do {

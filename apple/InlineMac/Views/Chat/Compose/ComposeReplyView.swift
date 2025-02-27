@@ -101,7 +101,12 @@ class ComposeReplyView: NSView {
   // MARK: - Public Methods
 
   func update(with fullMessage: FullMessage) {
-    messageView.update(with: fullMessage.message, from: fullMessage.from!)
+    messageView
+      .update(
+        with: fullMessage.message,
+        from: fullMessage.from!,
+        file: fullMessage.file
+      )
   }
 
   func open(animated: Bool = true) {
