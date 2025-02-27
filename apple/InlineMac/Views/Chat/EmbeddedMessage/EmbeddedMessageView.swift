@@ -66,6 +66,7 @@ class EmbeddedMessageView: NSView {
     label.font = messageFont
     label.lineBreakMode = .byTruncatingTail
     label.textColor = textColor
+    label.maximumNumberOfLines = 1
     return label
   }()
 
@@ -121,7 +122,7 @@ class EmbeddedMessageView: NSView {
     ])
   }
 
-  func update(with message: Message, from: User) {
+  func update(with message: Message, from: User, file: File?) {
     let senderName = from.fullName
     nameLabel.stringValue = switch kind {
       case .replyInMessage:
@@ -131,6 +132,13 @@ class EmbeddedMessageView: NSView {
         "Reply to \(senderName)"
     }
     nameLabel.textColor = NSColor(InitialsCircle.ColorPalette.color(for: senderName))
-    messageLabel.stringValue = message.text ?? ""
+    
+    if let text = message.text, !text.isEmpty {
+      messageLabel.stringValue = text
+    } else if let file {
+      messageLabel.stringValue = file.fileType == .photo ? "🖼️ Photo" : "📄 File"
+    } else {
+      messageLabel.stringValue = "Empty message"
+    }
   }
 }
