@@ -780,6 +780,7 @@ export interface GetMeResult {
      */
     user?: User;
 }
+
 /**
  * @generated from protobuf message GetPeerPhotoInput
  */
@@ -1000,6 +1001,7 @@ export interface UserStatus {
 /**
  * @generated from protobuf enum UserStatus.Status
  */
+
 export enum UserStatus_Status {
     /**
      * @generated from protobuf enum value: UNKNOWN = 0;

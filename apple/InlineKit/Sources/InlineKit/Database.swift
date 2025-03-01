@@ -1,8 +1,8 @@
 import Foundation
 import GRDB
-import Logger
 import InlineConfig
 import Auth
+import Logger
 
 // MARK: - DB main class
 
@@ -237,6 +237,26 @@ public extension AppDatabase {
     migrator.registerMigration("chat emoji") { db in
       try db.alter(table: "chat") { t in
         t.add(column: "emoji", .text)
+      }
+    }
+
+    migrator.registerMigration("attachments") { db in
+      try db.create(table: "externalTask") { t in
+        t.primaryKey("id", .integer).notNull().unique()
+        t.column("application", .text).notNull()
+        t.column("taskId", .text)
+        t.column("status", .text)
+        t.column("assignedUserId", .integer).references("user", column: "id", onDelete: .setNull)
+        t.column("url", .text)
+        t.column("title", .text)
+        t.column("date", .datetime)
+        t.column("creating", .boolean).notNull().defaults(to: false)
+      }
+
+      try db.create(table: "attachment") { t in
+        t.primaryKey("id", .integer).notNull().unique()
+        t.column("messageId", .integer).references("message", column: "globalId", onDelete: .cascade)
+        t.column("externalTaskId", .integer).references("externalTask", column: "id", onDelete: .cascade)
       }
     }
 
