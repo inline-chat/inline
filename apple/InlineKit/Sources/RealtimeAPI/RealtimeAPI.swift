@@ -25,7 +25,7 @@ public actor RealtimeAPI: Sendable {
   var stateChannel = AsyncChannel<Void>()
   var messageChannel = AsyncChannel<Void>()
   var started: Bool = false
-  var updatesEngine: RealtimeUpdatesProtocol
+  public var updatesEngine: RealtimeUpdatesProtocol
 
   // publishers
   public let eventsChannel = AsyncChannel<RealtimeAPIEvent>()

@@ -286,6 +286,8 @@ message RpcError {
     UNAUTHENTICATED = 2;    
     RATE_LIMIT = 3;
     INTERNAL_ERROR = 4;
+    PEER_ID_INVALID = 5;
+    MESSAGE_ID_INVALID = 6;
   }
 }
 
@@ -294,6 +296,7 @@ enum Method {
   GET_ME = 1;
   SEND_MESSAGE = 2;
   GET_PEER_PHOTO = 3;
+  DELETE_MESSAGES = 4;
 }
 
 message RpcCall {
@@ -301,6 +304,7 @@ message RpcCall {
   oneof input {
     GetMeInput getMe = 2;
     GetPeerPhotoInput getPeerPhoto = 3;
+    DeleteMessagesInput deleteMessages = 4;
   }
 }
 
@@ -310,10 +314,9 @@ message RpcResult {
   oneof result {
     GetMeResult getMe = 2;
     GetPeerPhotoResult getPeerPhoto = 3;
+    DeleteMessagesResult deleteMessages = 4;
   }
 }
-
-
 
 message GetMeInput {}
 message GetMeResult {
@@ -324,9 +327,16 @@ message GetPeerPhotoInput {
   InputPeer peer_id = 1;
   int64 photo_id = 2;
 }
-
 message GetPeerPhotoResult {
   Photo photo = 1;
+}
+
+message DeleteMessagesInput {
+  repeated int64 message_ids = 1;
+  InputPeer peer_id = 2;
+}
+message DeleteMessagesResult {
+  repeated Update updates = 1;
 }
 
 //  Updates Subsystem

@@ -92,6 +92,10 @@ public extension Realtime {
         switch response {
           case let .getMe(result):
             try self.handleResult_getMe(result)
+
+          case let .deleteMessages(result):
+            try self.handleResult_deleteMessages(result)
+          
           default:
             break
         }
@@ -108,7 +112,15 @@ public extension Realtime {
     _ = try db.dbWriter.write { db in
       try User.save(db, user: result.user)
     }
-    
+
     log.trace("getMe saved")
+  }
+
+  private func handleResult_deleteMessages(_ result: DeleteMessagesResult) throws {
+    log.trace("deleteMessages result: \(result)")
+
+    Task {
+      await api.updatesEngine.applyBatch(updates: result.updates)
+    }
   }
 }

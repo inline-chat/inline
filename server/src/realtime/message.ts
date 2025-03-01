@@ -145,9 +145,27 @@ export const sendMessageToRealtimeUser = async (userId: number, payload: ServerM
   }
 }
 
+/** Sends a message to all users in a space that are connected to the server */
+export const sendMessageToRealtimeSpace = async (spaceId: number, payload: ServerMessage["payload"]) => {
+  const userIds = connectionManager.getSpaceUserIds(spaceId)
+
+  for (let userId of userIds) {
+    sendMessageToRealtimeUser(userId, payload)
+  }
+}
+
 export class RealtimeUpdates {
   static pushToUser(userId: number, updates: UpdatesPayload["updates"]) {
     sendMessageToRealtimeUser(userId, {
+      oneofKind: "update",
+      update: {
+        updates: updates,
+      },
+    })
+  }
+
+  static pushToSpace(spaceId: number, updates: UpdatesPayload["updates"]) {
+    sendMessageToRealtimeSpace(spaceId, {
       oneofKind: "update",
       update: {
         updates: updates,

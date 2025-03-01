@@ -402,6 +402,111 @@ export interface Message {
      * @generated from protobuf field: optional int64 grouped_id = 12;
      */
     groupedId?: bigint;
+    /**
+     * Attachments of the message
+     *
+     * @generated from protobuf field: repeated MessageAttachment attachments = 13;
+     */
+    attachments: MessageAttachment[];
+}
+/**
+ * @generated from protobuf message MessageAttachment
+ */
+export interface MessageAttachment {
+    /**
+     * @generated from protobuf oneof: attachment
+     */
+    attachment: {
+        oneofKind: "externalTask";
+        /**
+         * @generated from protobuf field: MessageAttachmentExternalTask external_task = 1;
+         */
+        externalTask: MessageAttachmentExternalTask;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message MessageAttachmentExternalTask
+ */
+export interface MessageAttachmentExternalTask {
+    /**
+     * ID of the task in the external application
+     *
+     * @generated from protobuf field: string task_id = 1;
+     */
+    taskId: string;
+    /**
+     * Application name
+     *
+     * @generated from protobuf field: string application = 2;
+     */
+    application: string;
+    /**
+     * Title of the task/issue
+     *
+     * @generated from protobuf field: string title = 3;
+     */
+    title: string;
+    /**
+     * Status of the task
+     *
+     * @generated from protobuf field: MessageAttachmentExternalTask.Status status = 4;
+     */
+    status: MessageAttachmentExternalTask_Status;
+    /**
+     * Assigned user ID in Inline
+     *
+     * @generated from protobuf field: int64 assigned_user_id = 5;
+     */
+    assignedUserId: bigint;
+    /**
+     * URL of the task/issue in the external application
+     *
+     * @generated from protobuf field: string url = 6;
+     */
+    url: string;
+    /**
+     * Number/code of the task/issue in the external application
+     *
+     * @generated from protobuf field: string number = 7;
+     */
+    number: string;
+    /**
+     * Date of creation/addition in Inline
+     *
+     * @generated from protobuf field: int64 date = 8;
+     */
+    date: bigint;
+}
+/**
+ * @generated from protobuf enum MessageAttachmentExternalTask.Status
+ */
+export enum MessageAttachmentExternalTask_Status {
+    /**
+     * @generated from protobuf enum value: STATUS_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: STATUS_BACKLOG = 1;
+     */
+    BACKLOG = 1,
+    /**
+     * @generated from protobuf enum value: STATUS_TODO = 2;
+     */
+    TODO = 2,
+    /**
+     * @generated from protobuf enum value: STATUS_IN_PROGRESS = 3;
+     */
+    IN_PROGRESS = 3,
+    /**
+     * @generated from protobuf enum value: STATUS_DONE = 4;
+     */
+    DONE = 4,
+    /**
+     * @generated from protobuf enum value: STATUS_CANCELLED = 5;
+     */
+    CANCELLED = 5
 }
 /**
  * WIP: add document, audio, video.
@@ -576,7 +681,15 @@ export enum RpcError_Code {
     /**
      * @generated from protobuf enum value: INTERNAL_ERROR = 4;
      */
-    INTERNAL_ERROR = 4
+    INTERNAL_ERROR = 4,
+    /**
+     * @generated from protobuf enum value: PEER_ID_INVALID = 5;
+     */
+    PEER_ID_INVALID = 5,
+    /**
+     * @generated from protobuf enum value: MESSAGE_ID_INVALID = 6;
+     */
+    MESSAGE_ID_INVALID = 6
 }
 /**
  * @generated from protobuf message RpcCall
@@ -601,6 +714,12 @@ export interface RpcCall {
          * @generated from protobuf field: GetPeerPhotoInput getPeerPhoto = 3;
          */
         getPeerPhoto: GetPeerPhotoInput;
+    } | {
+        oneofKind: "deleteMessages";
+        /**
+         * @generated from protobuf field: DeleteMessagesInput deleteMessages = 4;
+         */
+        deleteMessages: DeleteMessagesInput;
     } | {
         oneofKind: undefined;
     };
@@ -628,6 +747,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetPeerPhotoResult getPeerPhoto = 3;
          */
         getPeerPhoto: GetPeerPhotoResult;
+    } | {
+        oneofKind: "deleteMessages";
+        /**
+         * @generated from protobuf field: DeleteMessagesResult deleteMessages = 4;
+         */
+        deleteMessages: DeleteMessagesResult;
     } | {
         oneofKind: undefined;
     };
@@ -667,6 +792,28 @@ export interface GetPeerPhotoResult {
      * @generated from protobuf field: Photo photo = 1;
      */
     photo?: Photo;
+}
+/**
+ * @generated from protobuf message DeleteMessagesInput
+ */
+export interface DeleteMessagesInput {
+    /**
+     * @generated from protobuf field: repeated int64 message_ids = 1;
+     */
+    messageIds: bigint[];
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 2;
+     */
+    peerId?: InputPeer;
+}
+/**
+ * @generated from protobuf message DeleteMessagesResult
+ */
+export interface DeleteMessagesResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
 }
 /**
  *  Updates Subsystem
@@ -888,7 +1035,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_PEER_PHOTO = 3;
      */
-    GET_PEER_PHOTO = 3
+    GET_PEER_PHOTO = 3,
+    /**
+     * @generated from protobuf enum value: DELETE_MESSAGES = 4;
+     */
+    DELETE_MESSAGES = 4
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -1920,7 +2071,8 @@ class Message$Type extends MessageType<Message> {
             { no: 9, name: "reply_to_msg_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 10, name: "media", kind: "message", T: () => MessageMedia },
             { no: 11, name: "edit_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 12, name: "grouped_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 12, name: "grouped_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 13, name: "attachments", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => MessageAttachment }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -1930,6 +2082,7 @@ class Message$Type extends MessageType<Message> {
         message.chatId = 0n;
         message.out = false;
         message.date = 0n;
+        message.attachments = [];
         if (value !== undefined)
             reflectionMergePartial<Message>(this, message, value);
         return message;
@@ -1974,6 +2127,9 @@ class Message$Type extends MessageType<Message> {
                     break;
                 case /* optional int64 grouped_id */ 12:
                     message.groupedId = reader.int64().toBigInt();
+                    break;
+                case /* repeated MessageAttachment attachments */ 13:
+                    message.attachments.push(MessageAttachment.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2023,6 +2179,9 @@ class Message$Type extends MessageType<Message> {
         /* optional int64 grouped_id = 12; */
         if (message.groupedId !== undefined)
             writer.tag(12, WireType.Varint).int64(message.groupedId);
+        /* repeated MessageAttachment attachments = 13; */
+        for (let i = 0; i < message.attachments.length; i++)
+            MessageAttachment.internalBinaryWrite(message.attachments[i], writer.tag(13, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2033,6 +2192,159 @@ class Message$Type extends MessageType<Message> {
  * @generated MessageType for protobuf message Message
  */
 export const Message = new Message$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageAttachment$Type extends MessageType<MessageAttachment> {
+    constructor() {
+        super("MessageAttachment", [
+            { no: 1, name: "external_task", kind: "message", oneof: "attachment", T: () => MessageAttachmentExternalTask }
+        ]);
+    }
+    create(value?: PartialMessage<MessageAttachment>): MessageAttachment {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.attachment = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<MessageAttachment>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageAttachment): MessageAttachment {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* MessageAttachmentExternalTask external_task */ 1:
+                    message.attachment = {
+                        oneofKind: "externalTask",
+                        externalTask: MessageAttachmentExternalTask.internalBinaryRead(reader, reader.uint32(), options, (message.attachment as any).externalTask)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageAttachment, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* MessageAttachmentExternalTask external_task = 1; */
+        if (message.attachment.oneofKind === "externalTask")
+            MessageAttachmentExternalTask.internalBinaryWrite(message.attachment.externalTask, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageAttachment
+ */
+export const MessageAttachment = new MessageAttachment$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageAttachmentExternalTask$Type extends MessageType<MessageAttachmentExternalTask> {
+    constructor() {
+        super("MessageAttachmentExternalTask", [
+            { no: 1, name: "task_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "application", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "status", kind: "enum", T: () => ["MessageAttachmentExternalTask.Status", MessageAttachmentExternalTask_Status, "STATUS_"] },
+            { no: 5, name: "assigned_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "number", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageAttachmentExternalTask>): MessageAttachmentExternalTask {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.taskId = "";
+        message.application = "";
+        message.title = "";
+        message.status = 0;
+        message.assignedUserId = 0n;
+        message.url = "";
+        message.number = "";
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<MessageAttachmentExternalTask>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageAttachmentExternalTask): MessageAttachmentExternalTask {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string task_id */ 1:
+                    message.taskId = reader.string();
+                    break;
+                case /* string application */ 2:
+                    message.application = reader.string();
+                    break;
+                case /* string title */ 3:
+                    message.title = reader.string();
+                    break;
+                case /* MessageAttachmentExternalTask.Status status */ 4:
+                    message.status = reader.int32();
+                    break;
+                case /* int64 assigned_user_id */ 5:
+                    message.assignedUserId = reader.int64().toBigInt();
+                    break;
+                case /* string url */ 6:
+                    message.url = reader.string();
+                    break;
+                case /* string number */ 7:
+                    message.number = reader.string();
+                    break;
+                case /* int64 date */ 8:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageAttachmentExternalTask, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string task_id = 1; */
+        if (message.taskId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.taskId);
+        /* string application = 2; */
+        if (message.application !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.application);
+        /* string title = 3; */
+        if (message.title !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.title);
+        /* MessageAttachmentExternalTask.Status status = 4; */
+        if (message.status !== 0)
+            writer.tag(4, WireType.Varint).int32(message.status);
+        /* int64 assigned_user_id = 5; */
+        if (message.assignedUserId !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.assignedUserId);
+        /* string url = 6; */
+        if (message.url !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.url);
+        /* string number = 7; */
+        if (message.number !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.number);
+        /* int64 date = 8; */
+        if (message.date !== 0n)
+            writer.tag(8, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageAttachmentExternalTask
+ */
+export const MessageAttachmentExternalTask = new MessageAttachmentExternalTask$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageMedia$Type extends MessageType<MessageMedia> {
     constructor() {
@@ -2362,7 +2674,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
         super("RpcCall", [
             { no: 1, name: "method", kind: "enum", T: () => ["Method", Method] },
             { no: 2, name: "getMe", kind: "message", oneof: "input", T: () => GetMeInput },
-            { no: 3, name: "getPeerPhoto", kind: "message", oneof: "input", T: () => GetPeerPhotoInput }
+            { no: 3, name: "getPeerPhoto", kind: "message", oneof: "input", T: () => GetPeerPhotoInput },
+            { no: 4, name: "deleteMessages", kind: "message", oneof: "input", T: () => DeleteMessagesInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -2393,6 +2706,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getPeerPhoto: GetPeerPhotoInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getPeerPhoto)
                     };
                     break;
+                case /* DeleteMessagesInput deleteMessages */ 4:
+                    message.input = {
+                        oneofKind: "deleteMessages",
+                        deleteMessages: DeleteMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2414,6 +2733,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetPeerPhotoInput getPeerPhoto = 3; */
         if (message.input.oneofKind === "getPeerPhoto")
             GetPeerPhotoInput.internalBinaryWrite(message.input.getPeerPhoto, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteMessagesInput deleteMessages = 4; */
+        if (message.input.oneofKind === "deleteMessages")
+            DeleteMessagesInput.internalBinaryWrite(message.input.deleteMessages, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2430,7 +2752,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
         super("RpcResult", [
             { no: 1, name: "req_msg_id", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "getMe", kind: "message", oneof: "result", T: () => GetMeResult },
-            { no: 3, name: "getPeerPhoto", kind: "message", oneof: "result", T: () => GetPeerPhotoResult }
+            { no: 3, name: "getPeerPhoto", kind: "message", oneof: "result", T: () => GetPeerPhotoResult },
+            { no: 4, name: "deleteMessages", kind: "message", oneof: "result", T: () => DeleteMessagesResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -2461,6 +2784,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getPeerPhoto: GetPeerPhotoResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getPeerPhoto)
                     };
                     break;
+                case /* DeleteMessagesResult deleteMessages */ 4:
+                    message.result = {
+                        oneofKind: "deleteMessages",
+                        deleteMessages: DeleteMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2482,6 +2811,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetPeerPhotoResult getPeerPhoto = 3; */
         if (message.result.oneofKind === "getPeerPhoto")
             GetPeerPhotoResult.internalBinaryWrite(message.result.getPeerPhoto, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteMessagesResult deleteMessages = 4; */
+        if (message.result.oneofKind === "deleteMessages")
+            DeleteMessagesResult.internalBinaryWrite(message.result.deleteMessages, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2663,6 +2995,115 @@ class GetPeerPhotoResult$Type extends MessageType<GetPeerPhotoResult> {
  * @generated MessageType for protobuf message GetPeerPhotoResult
  */
 export const GetPeerPhotoResult = new GetPeerPhotoResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteMessagesInput$Type extends MessageType<DeleteMessagesInput> {
+    constructor() {
+        super("DeleteMessagesInput", [
+            { no: 1, name: "message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "peer_id", kind: "message", T: () => InputPeer }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteMessagesInput>): DeleteMessagesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<DeleteMessagesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteMessagesInput): DeleteMessagesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated int64 message_ids */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.messageIds.push(reader.int64().toBigInt());
+                    else
+                        message.messageIds.push(reader.int64().toBigInt());
+                    break;
+                case /* InputPeer peer_id */ 2:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteMessagesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated int64 message_ids = 1; */
+        if (message.messageIds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.messageIds.length; i++)
+                writer.int64(message.messageIds[i]);
+            writer.join();
+        }
+        /* InputPeer peer_id = 2; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteMessagesInput
+ */
+export const DeleteMessagesInput = new DeleteMessagesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteMessagesResult$Type extends MessageType<DeleteMessagesResult> {
+    constructor() {
+        super("DeleteMessagesResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteMessagesResult>): DeleteMessagesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<DeleteMessagesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteMessagesResult): DeleteMessagesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteMessagesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteMessagesResult
+ */
+export const DeleteMessagesResult = new DeleteMessagesResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Update$Type extends MessageType<Update> {
     constructor() {

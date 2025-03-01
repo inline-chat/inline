@@ -544,6 +544,11 @@ class MessageViewAppKit: NSView {
       menu.addItem(copyItem)
     }
 
+    let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "i")
+    deleteItem.target = self
+    deleteItem.isEnabled = true
+    menu.addItem(deleteItem)
+
     menu.delegate = self
     self.menu = menu
   }
@@ -551,6 +556,17 @@ class MessageViewAppKit: NSView {
   @objc private func copyMessage() {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(message.text ?? "", forType: .string)
+  }
+
+  @objc private func deleteMessage() {
+    Realtime.shared
+      .invokeWithHandler(
+        .deleteMessages,
+        input: .deleteMessages(.with { input in
+          input.messageIds = [message.id]
+          input.peerID = self.message.peerId.toInputPeer()
+        })
+      )
   }
 
   @objc private func reply() {
