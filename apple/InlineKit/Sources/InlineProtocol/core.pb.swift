@@ -640,16 +640,32 @@ public struct Message: @unchecked Sendable {
   public mutating func clearGroupedID() {_uniqueStorage()._groupedID = nil}
 
   /// Attachments of the message
-  public var attachments: [MessageAttachment] {
-    get {return _storage._attachments}
+  public var attachments: MessageAttachments {
+    get {return _storage._attachments ?? MessageAttachments()}
     set {_uniqueStorage()._attachments = newValue}
   }
+  /// Returns true if `attachments` has been explicitly set.
+  public var hasAttachments: Bool {return _storage._attachments != nil}
+  /// Clears the value of `attachments`. Subsequent reads from it will return its default value.
+  public mutating func clearAttachments() {_uniqueStorage()._attachments = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct MessageAttachments: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var attachments: [MessageAttachment] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public struct MessageAttachment: Sendable {
@@ -2492,7 +2508,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _media: MessageMedia? = nil
     var _editDate: Int64? = nil
     var _groupedID: Int64? = nil
-    var _attachments: [MessageAttachment] = []
+    var _attachments: MessageAttachments? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -2550,7 +2566,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 10: try { try decoder.decodeSingularMessageField(value: &_storage._media) }()
         case 11: try { try decoder.decodeSingularInt64Field(value: &_storage._editDate) }()
         case 12: try { try decoder.decodeSingularInt64Field(value: &_storage._groupedID) }()
-        case 13: try { try decoder.decodeRepeatedMessageField(value: &_storage._attachments) }()
+        case 13: try { try decoder.decodeSingularMessageField(value: &_storage._attachments) }()
         default: break
         }
       }
@@ -2599,9 +2615,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._groupedID {
         try visitor.visitSingularInt64Field(value: v, fieldNumber: 12)
       } }()
-      if !_storage._attachments.isEmpty {
-        try visitor.visitRepeatedMessageField(value: _storage._attachments, fieldNumber: 13)
-      }
+      try { if let v = _storage._attachments {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -2628,6 +2644,38 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageAttachments"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "attachments"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.attachments) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.attachments.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.attachments, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageAttachments, rhs: MessageAttachments) -> Bool {
+    if lhs.attachments != rhs.attachments {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

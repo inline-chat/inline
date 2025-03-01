@@ -10,7 +10,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm"
 import { reactions } from "./reactions"
 import { files } from "@in/server/db/schema/files"
-import { documents, messageMedia, photos, videos } from "@in/server/db/schema/media"
+import { documents, photos, videos } from "@in/server/db/schema/media"
 
 export const messages = pgTable(
   "messages",
