@@ -176,6 +176,13 @@
       "when": 1739718465209,
       "tag": "0024_add_linear_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1740844719827,
+      "tag": "0025_new_media_and_attachments",
+      "breakpoints": true
     }
   ]
 }
