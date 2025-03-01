@@ -405,7 +405,16 @@ export interface Message {
     /**
      * Attachments of the message
      *
-     * @generated from protobuf field: repeated MessageAttachment attachments = 13;
+     * @generated from protobuf field: optional MessageAttachments attachments = 13;
+     */
+    attachments?: MessageAttachments;
+}
+/**
+ * @generated from protobuf message MessageAttachments
+ */
+export interface MessageAttachments {
+    /**
+     * @generated from protobuf field: repeated MessageAttachment attachments = 1;
      */
     attachments: MessageAttachment[];
 }
@@ -2072,7 +2081,7 @@ class Message$Type extends MessageType<Message> {
             { no: 10, name: "media", kind: "message", T: () => MessageMedia },
             { no: 11, name: "edit_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 12, name: "grouped_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 13, name: "attachments", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => MessageAttachment }
+            { no: 13, name: "attachments", kind: "message", T: () => MessageAttachments }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -2082,7 +2091,6 @@ class Message$Type extends MessageType<Message> {
         message.chatId = 0n;
         message.out = false;
         message.date = 0n;
-        message.attachments = [];
         if (value !== undefined)
             reflectionMergePartial<Message>(this, message, value);
         return message;
@@ -2128,8 +2136,8 @@ class Message$Type extends MessageType<Message> {
                 case /* optional int64 grouped_id */ 12:
                     message.groupedId = reader.int64().toBigInt();
                     break;
-                case /* repeated MessageAttachment attachments */ 13:
-                    message.attachments.push(MessageAttachment.internalBinaryRead(reader, reader.uint32(), options));
+                case /* optional MessageAttachments attachments */ 13:
+                    message.attachments = MessageAttachments.internalBinaryRead(reader, reader.uint32(), options, message.attachments);
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2179,9 +2187,9 @@ class Message$Type extends MessageType<Message> {
         /* optional int64 grouped_id = 12; */
         if (message.groupedId !== undefined)
             writer.tag(12, WireType.Varint).int64(message.groupedId);
-        /* repeated MessageAttachment attachments = 13; */
-        for (let i = 0; i < message.attachments.length; i++)
-            MessageAttachment.internalBinaryWrite(message.attachments[i], writer.tag(13, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageAttachments attachments = 13; */
+        if (message.attachments)
+            MessageAttachments.internalBinaryWrite(message.attachments, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2192,6 +2200,53 @@ class Message$Type extends MessageType<Message> {
  * @generated MessageType for protobuf message Message
  */
 export const Message = new Message$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageAttachments$Type extends MessageType<MessageAttachments> {
+    constructor() {
+        super("MessageAttachments", [
+            { no: 1, name: "attachments", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => MessageAttachment }
+        ]);
+    }
+    create(value?: PartialMessage<MessageAttachments>): MessageAttachments {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.attachments = [];
+        if (value !== undefined)
+            reflectionMergePartial<MessageAttachments>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageAttachments): MessageAttachments {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated MessageAttachment attachments */ 1:
+                    message.attachments.push(MessageAttachment.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageAttachments, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated MessageAttachment attachments = 1; */
+        for (let i = 0; i < message.attachments.length; i++)
+            MessageAttachment.internalBinaryWrite(message.attachments[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageAttachments
+ */
+export const MessageAttachments = new MessageAttachments$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageAttachment$Type extends MessageType<MessageAttachment> {
     constructor() {
