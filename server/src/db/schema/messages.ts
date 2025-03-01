@@ -10,6 +10,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm"
 import { reactions } from "./reactions"
 import { files } from "@in/server/db/schema/files"
+import { documents, messageMedia, photos, videos } from "@in/server/db/schema/media"
 
 export const messages = pgTable(
   "messages",
@@ -27,9 +28,6 @@ export const messages = pgTable(
     textEncrypted: bytea("text_encrypted"),
     textIv: bytea("text_iv"),
     textTag: bytea("text_tag"),
-
-    // Media if present
-    fileId: integer("file_id").references(() => files.id),
 
     /** required, chat it belongs to */
     chatId: integer("chat_id")
@@ -50,6 +48,20 @@ export const messages = pgTable(
 
     /** optional, message it is replying to */
     replyToMsgId: integer("reply_to_msg_id"),
+
+    /** if this message is part of a grouped message */
+    groupedId: bigint("grouped_id", { mode: "bigint" }),
+
+    /** media id, photo, video, document, etc */
+    mediaType: text("media_type", { enum: ["photo", "video", "document"] }),
+    photoId: bigint("photo_id", { mode: "bigint" }).references(() => photos.id),
+    videoId: bigint("video_id", { mode: "bigint" }).references(() => videos.id),
+    documentId: bigint("document_id", { mode: "bigint" }).references(() => documents.id),
+
+    // --------------------------------------------------------
+    // Deprecated fields
+    // --------------------------------------------------------
+    fileId: integer("file_id").references(() => files.id),
   },
   (table) => ({
     messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(table.messageId, table.chatId),

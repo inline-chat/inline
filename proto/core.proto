@@ -65,7 +65,6 @@ message Pong {
 // --- Application Types ---
 
 message InputPeer {
-  reserved  1;
   reserved 1;
   oneof type {
     InputPeerSelf self = 2;
@@ -155,12 +154,56 @@ message Message {
 
   // Media of the message
   optional MessageMedia media = 10;
-
+  
   // Date of the last edit if edited
   optional int64 edit_date = 11;
-
+  
   // ID of the grouped message if it's part of an album
   optional int64 grouped_id = 12;
+
+  // Attachments of the message
+  repeated MessageAttachment attachments = 13;
+}
+
+message MessageAttachment {
+  oneof attachment {
+    MessageAttachmentExternalTask external_task = 1;
+  }
+}
+
+message MessageAttachmentExternalTask {
+  // ID of the task in the external application
+  string task_id = 1;
+
+  // Application name 
+  string application = 2;
+
+  // Title of the task/issue
+  string title = 3;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_BACKLOG = 1;
+    STATUS_TODO = 2;
+    STATUS_IN_PROGRESS = 3;
+    STATUS_DONE = 4;
+    STATUS_CANCELLED = 5;
+  }
+
+  // Status of the task
+  Status status = 4;
+
+  // Assigned user ID in Inline
+  int64 assigned_user_id = 5;
+
+  // URL of the task/issue in the external application
+  string url = 6;
+
+  // Number/code of the task/issue in the external application
+  string number = 7;
+
+  // Date of creation/addition in Inline
+  int64 date = 8;
 }
 
 message MessageMedia {
@@ -270,14 +313,7 @@ message RpcResult {
   }
 }
 
-enum Method {
-  UNSPECIFIED = 0;
-  GET_ME = 1;
-  SEND_MESSAGE = 2;
-}
 
-message GetMeInput {
-}
 
 message GetMeInput {}
 message GetMeResult {
