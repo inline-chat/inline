@@ -162,7 +162,11 @@ message Message {
   optional int64 grouped_id = 12;
 
   // Attachments of the message
-  repeated MessageAttachment attachments = 13;
+  optional MessageAttachments attachments = 13;
+}
+
+message MessageAttachments {
+  repeated MessageAttachment attachments = 1;
 }
 
 message MessageAttachment {

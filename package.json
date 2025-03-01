@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "generate:proto": "cd scripts && bun run generate",
-    "dev:server": "cd server && bun run dev"
+    "dev:server": "cd server && bun run dev",
+    "typecheck": "cd server && bun run typecheck"
   }
 }
