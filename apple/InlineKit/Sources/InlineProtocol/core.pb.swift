@@ -26,6 +26,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case unspecified // = 0
   case getMe // = 1
   case sendMessage // = 2
+  case getPeerPhoto // = 3
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -37,6 +38,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 0: self = .unspecified
     case 1: self = .getMe
     case 2: self = .sendMessage
+    case 3: self = .getPeerPhoto
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -46,6 +48,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .unspecified: return 0
     case .getMe: return 1
     case .sendMessage: return 2
+    case .getPeerPhoto: return 3
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -55,6 +58,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .unspecified,
     .getMe,
     .sendMessage,
+    .getPeerPhoto,
   ]
 
 }
@@ -469,6 +473,34 @@ public struct User: Sendable {
   /// Clears the value of `email`. Subsequent reads from it will return its default value.
   public mutating func clearEmail() {self._email = nil}
 
+  /// If true, certain fields such as email or phone_number will be missing
+  public var min: Bool {
+    get {return _min ?? false}
+    set {_min = newValue}
+  }
+  /// Returns true if `min` has been explicitly set.
+  public var hasMin: Bool {return self._min != nil}
+  /// Clears the value of `min`. Subsequent reads from it will return its default value.
+  public mutating func clearMin() {self._min = nil}
+
+  public var status: UserStatus {
+    get {return _status ?? UserStatus()}
+    set {_status = newValue}
+  }
+  /// Returns true if `status` has been explicitly set.
+  public var hasStatus: Bool {return self._status != nil}
+  /// Clears the value of `status`. Subsequent reads from it will return its default value.
+  public mutating func clearStatus() {self._status = nil}
+
+  public var profilePhoto: UserProfilePhoto {
+    get {return _profilePhoto ?? UserProfilePhoto()}
+    set {_profilePhoto = newValue}
+  }
+  /// Returns true if `profilePhoto` has been explicitly set.
+  public var hasProfilePhoto: Bool {return self._profilePhoto != nil}
+  /// Clears the value of `profilePhoto`. Subsequent reads from it will return its default value.
+  public mutating func clearProfilePhoto() {self._profilePhoto = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -478,6 +510,25 @@ public struct User: Sendable {
   fileprivate var _username: String? = nil
   fileprivate var _phoneNumber: String? = nil
   fileprivate var _email: String? = nil
+  fileprivate var _min: Bool? = nil
+  fileprivate var _status: UserStatus? = nil
+  fileprivate var _profilePhoto: UserProfilePhoto? = nil
+}
+
+public struct UserProfilePhoto: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// ID of the photo
+  public var photoID: Int64 = 0
+
+  /// Stripped thumbnail of the photo
+  public var strippedThumb: Data = Data()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public struct Message: Sendable {
@@ -826,10 +877,19 @@ public struct RpcCall: Sendable {
     set {input = .getMe(newValue)}
   }
 
+  public var getPeerPhoto: GetPeerPhotoInput {
+    get {
+      if case .getPeerPhoto(let v)? = input {return v}
+      return GetPeerPhotoInput()
+    }
+    set {input = .getPeerPhoto(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
     case getMe(GetMeInput)
+    case getPeerPhoto(GetPeerPhotoInput)
 
   }
 
@@ -853,10 +913,19 @@ public struct RpcResult: Sendable {
     set {result = .getMe(newValue)}
   }
 
+  public var getPeerPhoto: GetPeerPhotoResult {
+    get {
+      if case .getPeerPhoto(let v)? = result {return v}
+      return GetPeerPhotoResult()
+    }
+    set {result = .getPeerPhoto(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
     case getMe(GetMeResult)
+    case getPeerPhoto(GetPeerPhotoResult)
 
   }
 
@@ -892,6 +961,50 @@ public struct GetMeResult: Sendable {
   public init() {}
 
   fileprivate var _user: User? = nil
+}
+
+public struct GetPeerPhotoInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var photoID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public struct GetPeerPhotoResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var photo: Photo {
+    get {return _photo ?? Photo()}
+    set {_photo = newValue}
+  }
+  /// Returns true if `photo` has been explicitly set.
+  public var hasPhoto: Bool {return self._photo != nil}
+  /// Clears the value of `photo`. Subsequent reads from it will return its default value.
+  public mutating func clearPhoto() {self._photo = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _photo: Photo? = nil
 }
 
 ///  Updates Subsystem
@@ -1234,6 +1347,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     0: .same(proto: "UNSPECIFIED"),
     1: .same(proto: "GET_ME"),
     2: .same(proto: "SEND_MESSAGE"),
+    3: .same(proto: "GET_PEER_PHOTO"),
   ]
 }
 
@@ -2044,6 +2158,9 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     4: .same(proto: "username"),
     5: .standard(proto: "phone_number"),
     6: .same(proto: "email"),
+    7: .same(proto: "min"),
+    8: .same(proto: "status"),
+    9: .standard(proto: "profile_photo"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -2058,6 +2175,9 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       case 4: try { try decoder.decodeSingularStringField(value: &self._username) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self._phoneNumber) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self._email) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self._min) }()
+      case 8: try { try decoder.decodeSingularMessageField(value: &self._status) }()
+      case 9: try { try decoder.decodeSingularMessageField(value: &self._profilePhoto) }()
       default: break
       }
     }
@@ -2086,6 +2206,15 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     try { if let v = self._email {
       try visitor.visitSingularStringField(value: v, fieldNumber: 6)
     } }()
+    try { if let v = self._min {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._status {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    } }()
+    try { if let v = self._profilePhoto {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2096,6 +2225,47 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     if lhs._username != rhs._username {return false}
     if lhs._phoneNumber != rhs._phoneNumber {return false}
     if lhs._email != rhs._email {return false}
+    if lhs._min != rhs._min {return false}
+    if lhs._status != rhs._status {return false}
+    if lhs._profilePhoto != rhs._profilePhoto {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UserProfilePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UserProfilePhoto"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "photo_id"),
+    2: .standard(proto: "stripped_thumb"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.photoID) }()
+      case 2: try { try decoder.decodeSingularBytesField(value: &self.strippedThumb) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.photoID != 0 {
+      try visitor.visitSingularInt64Field(value: self.photoID, fieldNumber: 1)
+    }
+    if !self.strippedThumb.isEmpty {
+      try visitor.visitSingularBytesField(value: self.strippedThumb, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UserProfilePhoto, rhs: UserProfilePhoto) -> Bool {
+    if lhs.photoID != rhs.photoID {return false}
+    if lhs.strippedThumb != rhs.strippedThumb {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2476,6 +2646,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "method"),
     2: .same(proto: "getMe"),
+    3: .same(proto: "getPeerPhoto"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -2498,6 +2669,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .getMe(v)
         }
       }()
+      case 3: try {
+        var v: GetPeerPhotoInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getPeerPhoto(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getPeerPhoto(v)
+        }
+      }()
       default: break
       }
     }
@@ -2511,9 +2695,17 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     if self.method != .unspecified {
       try visitor.visitSingularEnumField(value: self.method, fieldNumber: 1)
     }
-    try { if case .getMe(let v)? = self.input {
+    switch self.input {
+    case .getMe?: try {
+      guard case .getMe(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    } }()
+    }()
+    case .getPeerPhoto?: try {
+      guard case .getPeerPhoto(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2530,6 +2722,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "req_msg_id"),
     2: .same(proto: "getMe"),
+    3: .same(proto: "getPeerPhoto"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -2552,6 +2745,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
           self.result = .getMe(v)
         }
       }()
+      case 3: try {
+        var v: GetPeerPhotoResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .getPeerPhoto(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .getPeerPhoto(v)
+        }
+      }()
       default: break
       }
     }
@@ -2565,9 +2771,17 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     if self.reqMsgID != 0 {
       try visitor.visitSingularUInt64Field(value: self.reqMsgID, fieldNumber: 1)
     }
-    try { if case .getMe(let v)? = self.result {
+    switch self.result {
+    case .getMe?: try {
+      guard case .getMe(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    } }()
+    }()
+    case .getPeerPhoto?: try {
+      guard case .getPeerPhoto(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2629,6 +2843,84 @@ extension GetMeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementati
 
   public static func ==(lhs: GetMeResult, rhs: GetMeResult) -> Bool {
     if lhs._user != rhs._user {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetPeerPhotoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetPeerPhotoInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .standard(proto: "photo_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.photoID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.photoID != 0 {
+      try visitor.visitSingularInt64Field(value: self.photoID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetPeerPhotoInput, rhs: GetPeerPhotoInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.photoID != rhs.photoID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetPeerPhotoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetPeerPhotoResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "photo"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._photo) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._photo {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetPeerPhotoResult, rhs: GetPeerPhotoResult) -> Bool {
+    if lhs._photo != rhs._photo {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

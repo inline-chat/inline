@@ -15,6 +15,8 @@ class MainSplitViewController: NSSplitViewController {
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
     super.init(nibName: nil, bundle: nil)
+
+    fetchData()
   }
 
   @available(*, unavailable)
@@ -29,6 +31,14 @@ class MainSplitViewController: NSSplitViewController {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+  }
+}
+
+// MARK: - Data Fetcher
+
+extension MainSplitViewController {
+  private func fetchData() {
+    dependencies.realtime.invokeWithHandler(.getMe, input: .getMe(.init()))
   }
 }
 

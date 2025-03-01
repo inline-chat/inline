@@ -3,6 +3,8 @@ import type { HandlerContext } from "@in/server/realtime/types"
 import { getUserIdFromToken } from "@in/server/controllers/plugins"
 import { connectionManager } from "@in/server/ws/connections"
 import { getMe } from "@in/server/realtime/handlers/getMe"
+import { Log } from "@in/server/utils/log"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -15,6 +17,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
     }
 
     default:
-      throw new Error(`Unknown method: ${call.method}`) // todo: make rpc error
+      Log.shared.error(`Unknown method: ${call.method}`)
+      throw RealtimeRpcError.BadRequest
   }
 }

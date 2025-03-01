@@ -13,6 +13,8 @@ import type { HandlerContext, RootContext, Ws } from "./types"
 import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionInit"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { InlineError } from "@in/server/types/errors"
 
 const log = new Log("realtime", LogLevel.DEBUG)
 
@@ -77,14 +79,23 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
     if (message.body.oneofKind === "connectionInit") {
       ws.close()
     } else {
+      let rpcError: RealtimeRpcError
+      if (e instanceof RealtimeRpcError) {
+        rpcError = e
+      } else if (e instanceof InlineError) {
+        rpcError = RealtimeRpcError.fromInlineError(e)
+      } else {
+        rpcError = RealtimeRpcError.InternalError
+      }
+
       sendRaw({
         id: message.id,
         body: {
           oneofKind: "rpcError",
           rpcError: {
             reqMsgId: message.id,
-            errorCode: RpcError_Code.UNKNOWN,
-            message: "Internal server error",
+            errorCode: rpcError.code,
+            message: rpcError.message,
           },
         },
       })

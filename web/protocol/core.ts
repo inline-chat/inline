@@ -296,6 +296,37 @@ export interface User {
      * @generated from protobuf field: optional string email = 6;
      */
     email?: string;
+    /**
+     * If true, certain fields such as email or phone_number will be missing
+     *
+     * @generated from protobuf field: optional bool min = 7;
+     */
+    min?: boolean;
+    /**
+     * @generated from protobuf field: optional UserStatus status = 8;
+     */
+    status?: UserStatus;
+    /**
+     * @generated from protobuf field: optional UserProfilePhoto profile_photo = 9;
+     */
+    profilePhoto?: UserProfilePhoto;
+}
+/**
+ * @generated from protobuf message UserProfilePhoto
+ */
+export interface UserProfilePhoto {
+    /**
+     * ID of the photo
+     *
+     * @generated from protobuf field: int64 photo_id = 1;
+     */
+    photoId: bigint;
+    /**
+     * Stripped thumbnail of the photo
+     *
+     * @generated from protobuf field: bytes stripped_thumb = 2;
+     */
+    strippedThumb: Uint8Array;
 }
 /**
  * @generated from protobuf message Message
@@ -565,6 +596,12 @@ export interface RpcCall {
          */
         getMe: GetMeInput;
     } | {
+        oneofKind: "getPeerPhoto";
+        /**
+         * @generated from protobuf field: GetPeerPhotoInput getPeerPhoto = 3;
+         */
+        getPeerPhoto: GetPeerPhotoInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -586,6 +623,12 @@ export interface RpcResult {
          */
         getMe: GetMeResult;
     } | {
+        oneofKind: "getPeerPhoto";
+        /**
+         * @generated from protobuf field: GetPeerPhotoResult getPeerPhoto = 3;
+         */
+        getPeerPhoto: GetPeerPhotoResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -602,6 +645,28 @@ export interface GetMeResult {
      * @generated from protobuf field: User user = 1;
      */
     user?: User;
+}
+/**
+ * @generated from protobuf message GetPeerPhotoInput
+ */
+export interface GetPeerPhotoInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: int64 photo_id = 2;
+     */
+    photoId: bigint;
+}
+/**
+ * @generated from protobuf message GetPeerPhotoResult
+ */
+export interface GetPeerPhotoResult {
+    /**
+     * @generated from protobuf field: Photo photo = 1;
+     */
+    photo?: Photo;
 }
 /**
  *  Updates Subsystem
@@ -819,7 +884,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: SEND_MESSAGE = 2;
      */
-    SEND_MESSAGE = 2
+    SEND_MESSAGE = 2,
+    /**
+     * @generated from protobuf enum value: GET_PEER_PHOTO = 3;
+     */
+    GET_PEER_PHOTO = 3
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -1687,7 +1756,10 @@ class User$Type extends MessageType<User> {
             { no: 3, name: "last_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "username", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "phone_number", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 6, name: "email", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 6, name: "email", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "min", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 8, name: "status", kind: "message", T: () => UserStatus },
+            { no: 9, name: "profile_photo", kind: "message", T: () => UserProfilePhoto }
         ]);
     }
     create(value?: PartialMessage<User>): User {
@@ -1720,6 +1792,15 @@ class User$Type extends MessageType<User> {
                 case /* optional string email */ 6:
                     message.email = reader.string();
                     break;
+                case /* optional bool min */ 7:
+                    message.min = reader.bool();
+                    break;
+                case /* optional UserStatus status */ 8:
+                    message.status = UserStatus.internalBinaryRead(reader, reader.uint32(), options, message.status);
+                    break;
+                case /* optional UserProfilePhoto profile_photo */ 9:
+                    message.profilePhoto = UserProfilePhoto.internalBinaryRead(reader, reader.uint32(), options, message.profilePhoto);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1750,6 +1831,15 @@ class User$Type extends MessageType<User> {
         /* optional string email = 6; */
         if (message.email !== undefined)
             writer.tag(6, WireType.LengthDelimited).string(message.email);
+        /* optional bool min = 7; */
+        if (message.min !== undefined)
+            writer.tag(7, WireType.Varint).bool(message.min);
+        /* optional UserStatus status = 8; */
+        if (message.status)
+            UserStatus.internalBinaryWrite(message.status, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* optional UserProfilePhoto profile_photo = 9; */
+        if (message.profilePhoto)
+            UserProfilePhoto.internalBinaryWrite(message.profilePhoto, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1760,6 +1850,61 @@ class User$Type extends MessageType<User> {
  * @generated MessageType for protobuf message User
  */
 export const User = new User$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UserProfilePhoto$Type extends MessageType<UserProfilePhoto> {
+    constructor() {
+        super("UserProfilePhoto", [
+            { no: 1, name: "photo_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "stripped_thumb", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UserProfilePhoto>): UserProfilePhoto {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.photoId = 0n;
+        message.strippedThumb = new Uint8Array(0);
+        if (value !== undefined)
+            reflectionMergePartial<UserProfilePhoto>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UserProfilePhoto): UserProfilePhoto {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 photo_id */ 1:
+                    message.photoId = reader.int64().toBigInt();
+                    break;
+                case /* bytes stripped_thumb */ 2:
+                    message.strippedThumb = reader.bytes();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UserProfilePhoto, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 photo_id = 1; */
+        if (message.photoId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.photoId);
+        /* bytes stripped_thumb = 2; */
+        if (message.strippedThumb.length)
+            writer.tag(2, WireType.LengthDelimited).bytes(message.strippedThumb);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UserProfilePhoto
+ */
+export const UserProfilePhoto = new UserProfilePhoto$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Message$Type extends MessageType<Message> {
     constructor() {
@@ -2216,7 +2361,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
     constructor() {
         super("RpcCall", [
             { no: 1, name: "method", kind: "enum", T: () => ["Method", Method] },
-            { no: 2, name: "getMe", kind: "message", oneof: "input", T: () => GetMeInput }
+            { no: 2, name: "getMe", kind: "message", oneof: "input", T: () => GetMeInput },
+            { no: 3, name: "getPeerPhoto", kind: "message", oneof: "input", T: () => GetPeerPhotoInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -2241,6 +2387,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getMe: GetMeInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getMe)
                     };
                     break;
+                case /* GetPeerPhotoInput getPeerPhoto */ 3:
+                    message.input = {
+                        oneofKind: "getPeerPhoto",
+                        getPeerPhoto: GetPeerPhotoInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getPeerPhoto)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2259,6 +2411,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetMeInput getMe = 2; */
         if (message.input.oneofKind === "getMe")
             GetMeInput.internalBinaryWrite(message.input.getMe, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* GetPeerPhotoInput getPeerPhoto = 3; */
+        if (message.input.oneofKind === "getPeerPhoto")
+            GetPeerPhotoInput.internalBinaryWrite(message.input.getPeerPhoto, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2274,7 +2429,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
     constructor() {
         super("RpcResult", [
             { no: 1, name: "req_msg_id", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "getMe", kind: "message", oneof: "result", T: () => GetMeResult }
+            { no: 2, name: "getMe", kind: "message", oneof: "result", T: () => GetMeResult },
+            { no: 3, name: "getPeerPhoto", kind: "message", oneof: "result", T: () => GetPeerPhotoResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -2299,6 +2455,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getMe: GetMeResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getMe)
                     };
                     break;
+                case /* GetPeerPhotoResult getPeerPhoto */ 3:
+                    message.result = {
+                        oneofKind: "getPeerPhoto",
+                        getPeerPhoto: GetPeerPhotoResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getPeerPhoto)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2317,6 +2479,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetMeResult getMe = 2; */
         if (message.result.oneofKind === "getMe")
             GetMeResult.internalBinaryWrite(message.result.getMe, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* GetPeerPhotoResult getPeerPhoto = 3; */
+        if (message.result.oneofKind === "getPeerPhoto")
+            GetPeerPhotoResult.internalBinaryWrite(message.result.getPeerPhoto, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2398,6 +2563,106 @@ class GetMeResult$Type extends MessageType<GetMeResult> {
  * @generated MessageType for protobuf message GetMeResult
  */
 export const GetMeResult = new GetMeResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetPeerPhotoInput$Type extends MessageType<GetPeerPhotoInput> {
+    constructor() {
+        super("GetPeerPhotoInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "photo_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetPeerPhotoInput>): GetPeerPhotoInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.photoId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetPeerPhotoInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetPeerPhotoInput): GetPeerPhotoInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 photo_id */ 2:
+                    message.photoId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetPeerPhotoInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 photo_id = 2; */
+        if (message.photoId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.photoId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetPeerPhotoInput
+ */
+export const GetPeerPhotoInput = new GetPeerPhotoInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetPeerPhotoResult$Type extends MessageType<GetPeerPhotoResult> {
+    constructor() {
+        super("GetPeerPhotoResult", [
+            { no: 1, name: "photo", kind: "message", T: () => Photo }
+        ]);
+    }
+    create(value?: PartialMessage<GetPeerPhotoResult>): GetPeerPhotoResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetPeerPhotoResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetPeerPhotoResult): GetPeerPhotoResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Photo photo */ 1:
+                    message.photo = Photo.internalBinaryRead(reader, reader.uint32(), options, message.photo);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetPeerPhotoResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Photo photo = 1; */
+        if (message.photo)
+            Photo.internalBinaryWrite(message.photo, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetPeerPhotoResult
+ */
+export const GetPeerPhotoResult = new GetPeerPhotoResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Update$Type extends MessageType<Update> {
     constructor() {
