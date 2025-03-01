@@ -424,6 +424,17 @@ class UIMessageView: UIView {
       contextMenuInteraction: interaction,
       menuTargetView: self
     )
+    contextMenuManager?.delegate = self
+    contextMenuManager?.auxiliaryPreviewConfig = AuxiliaryPreviewConfig(
+      verticalAnchorPosition: .automatic,
+      horizontalAlignment: outgoing ? .targetTrailing : .targetLeading,
+      preferredWidth: .none,
+      preferredHeight: .none,
+      marginInner: 10,
+      marginOuter: 10,
+      transitionConfigEntrance: .syncedToMenuEntranceTransition(),
+      transitionExitPreset: .fade
+    )
 
     bubbleView.addInteraction(interaction)
   }
@@ -456,11 +467,96 @@ class UIMessageView: UIView {
 
     return items
   }
+
+  func createIssueFunc() {
+    let items = extractListItems(from: message.text ?? "")
+    Task { @MainActor in
+      do {
+        let result = try await ApiClient.shared.getIntegrations(userId: Auth.shared.getCurrentUserId() ?? 0)
+        if !result.hasLinearConnected {
+          ToastManager.shared.showToast(
+            "Please connect Linear integration from Settings > Integrations",
+            type: .info,
+            systemImage: "link.circle"
+          )
+        } else {
+          if items.count > 1 {
+            ToastManager.shared.showToast(
+              "Creating Linear issues...",
+              type: .loading,
+              systemImage: "circle.dotted"
+            )
+
+            for item in items {
+              print("item is \(item)")
+              do {
+                let result = try await ApiClient.shared.createLinearIssue(
+                  text: item,
+                  messageId: self.message.messageId,
+                  chatId: self.message.chatId
+                )
+              } catch {
+                print("FAILED to create issue \(error)")
+                ToastManager.shared.hideToast()
+                ToastManager.shared.showToast(
+                  "Failed to create issue",
+                  type: .info,
+                  systemImage: "xmark.circle.fill"
+                )
+              }
+            }
+            ToastManager.shared.showToast(
+              "\(items.count) Issues created",
+              type: .success,
+              systemImage: "checkmark.circle.fill"
+            )
+
+          } else {
+            ToastManager.shared.showToast(
+              "Creating Linear issue...",
+              type: .loading,
+              systemImage: "circle.dotted"
+            )
+
+            do {
+              let result = try await ApiClient.shared.createLinearIssue(
+                text: self.message.text ?? "",
+                messageId: self.message.messageId,
+                chatId: self.message.chatId
+              )
+              ToastManager.shared.showToast(
+                "Issue created",
+                type: .success,
+                systemImage: "checkmark.circle.fill",
+                action: {
+                  if let url = URL(string: result.link ?? "") {
+                    UIApplication.shared.open(url)
+                  }
+                },
+                actionTitle: "Open"
+              )
+            } catch {
+              print("FAILED to create issue \(error)")
+              ToastManager.shared.hideToast()
+              ToastManager.shared.showToast(
+                "Failed to create issue",
+                type: .info,
+                systemImage: "xmark.circle.fill"
+              )
+            }
+          }
+        }
+      } catch {
+        ToastManager.shared.hideToast()
+        print("Failed to get integrations \(error)")
+      }
+    }
+  }
 }
 
 // MARK: - Context Menu
 
-extension UIMessageView: UIContextMenuInteractionDelegate {
+extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDelegate {
   func contextMenuInteraction(
     _ interaction: UIContextMenuInteraction,
     configurationForMenuAtLocation location: CGPoint
@@ -485,89 +581,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       actions.append(replyAction)
 
       let createIssueAction = UIAction(title: "Create Linear issue") { _ in
-
-        let items = self.extractListItems(from: self.message.text ?? "")
-        Task { @MainActor in
-          do {
-            let result = try await ApiClient.shared.getIntegrations(userId: Auth.shared.getCurrentUserId() ?? 0)
-            if !result.hasLinearConnected {
-              ToastManager.shared.showToast(
-                "Please connect Linear integration from Settings > Integrations",
-                type: .info,
-                systemImage: "link.circle"
-              )
-            } else {
-              if items.count > 1 {
-                ToastManager.shared.showToast(
-                  "Creating Linear issues...",
-                  type: .loading,
-                  systemImage: "circle.dotted"
-                )
-
-                for item in items {
-                  print("item is \(item)")
-                  do {
-                    let result = try await ApiClient.shared.createLinearIssue(
-                      text: item,
-                      messageId: self.message.messageId,
-                      chatId: self.message.chatId
-                    )
-                  } catch {
-                    print("FAILED to create issue \(error)")
-                    ToastManager.shared.hideToast()
-                    ToastManager.shared.showToast(
-                      "Failed to create issue",
-                      type: .info,
-                      systemImage: "xmark.circle.fill"
-                    )
-                  }
-                }
-                ToastManager.shared.showToast(
-                  "\(items.count) Issues created",
-                  type: .success,
-                  systemImage: "checkmark.circle.fill"
-                )
-
-              } else {
-                ToastManager.shared.showToast(
-                  "Creating Linear issue...",
-                  type: .loading,
-                  systemImage: "circle.dotted"
-                )
-
-                do {
-                  let result = try await ApiClient.shared.createLinearIssue(
-                    text: self.message.text ?? "",
-                    messageId: self.message.messageId,
-                    chatId: self.message.chatId
-                  )
-                  ToastManager.shared.showToast(
-                    "Issue created",
-                    type: .success,
-                    systemImage: "checkmark.circle.fill",
-                    action: {
-                      if let url = URL(string: result.link ?? "") {
-                        UIApplication.shared.open(url)
-                      }
-                    },
-                    actionTitle: "Open"
-                  )
-                } catch {
-                  print("FAILED to create issue \(error)")
-                  ToastManager.shared.hideToast()
-                  ToastManager.shared.showToast(
-                    "Failed to create issue",
-                    type: .info,
-                    systemImage: "xmark.circle.fill"
-                  )
-                }
-              }
-            }
-          } catch {
-            ToastManager.shared.hideToast()
-            print("Failed to get integrations \(error)")
-          }
-        }
+        self.createIssueFunc()
       }
       actions.append(createIssueAction)
 
@@ -651,6 +665,59 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       animator: animator
     )
     Self.contextMenuOpen = false
+  }
+
+  func onRequestMenuAuxiliaryPreview(sender: ContextMenuManager) -> UIView? {
+    let previewHeight: CGFloat = 45
+    let width: CGFloat = 100
+
+    let stackView = UIStackView()
+    stackView.axis = .horizontal
+    stackView.distribution = .fill
+    stackView.spacing = 0
+    stackView.alignment = .fill
+    stackView.backgroundColor = .clear
+
+    stackView.frame = CGRect(x: 0, y: 0, width: width, height: previewHeight)
+
+    let button = UIButton(type: .custom)
+    button.isUserInteractionEnabled = true
+    button.setTitle("Will Do", for: .normal)
+    button.setTitleColor(.systemBlue, for: .normal)
+    button.backgroundColor = .systemGray6
+    button.layer.cornerRadius = 22
+    button.layer.masksToBounds = true
+
+    button.addTarget(self, action: #selector(handleWillDoTap(_:)), for: .touchUpInside)
+
+    stackView.addArrangedSubview(button)
+
+    return stackView
+  }
+
+  @objc private func handleWillDoTap(_ sender: UIButton) {
+    Self.contextMenuOpen = false
+    interaction?.dismissMenu()
+
+    Task { @MainActor in
+      // Mark message as "Will Do"
+      ToastManager.shared.showToast(
+        "Marked as Will Do",
+        type: .success,
+        systemImage: "checkmark.circle.fill"
+      )
+
+      triggerMessageReload()
+    }
+
+    print("Will Do tapped")
+  }
+
+  private func triggerMessageReload() {
+    Task { @MainActor in
+      await MessagesPublisher.shared
+        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId)
+    }
   }
 }
 
