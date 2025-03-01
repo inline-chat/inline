@@ -57,9 +57,17 @@ class Nav: ObservableObject {
   var currentSpaceIdPublisher: CurrentValueSubject<Int64?, Never> = CurrentValueSubject(nil)
 
   // UI State
+  @Published var upcomingRoute: NavEntry.Route = .empty
   @Published var canGoBack: Bool = false { didSet { canGoBackPublisher.send(canGoBack) } }
   @Published var canGoForward: Bool = false { didSet { canGoForwardPublisher.send(canGoForward) } }
-  @Published var currentRoute: NavEntry.Route = .empty { didSet { currentRoutePublisher.send(currentRoute) } }
+  @Published var currentRoute: NavEntry.Route = .empty {
+    didSet {
+      currentRoutePublisher.send(currentRoute)
+      // ensure correctness
+      upcomingRoute = currentRoute
+    }
+  }
+
   @Published var currentSpaceId: Int64? = nil { didSet { currentSpaceIdPublisher.send(currentSpaceId) } }
 
   private init() {
@@ -110,23 +118,29 @@ extension Nav {
   }
 
   public func open(_ route: NavEntry.Route) {
-    if let last = history.last, last.route == route, last.spaceId == currentSpaceId {
-      // Skip opening duplicate routes
-      return
+    // optimistic
+    upcomingRoute = route
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      if let last = history.last, last.route == route, last.spaceId == currentSpaceId {
+        // Skip opening duplicate routes
+        return
+      }
+
+      let entry = NavEntry(route: route, spaceId: currentSpaceId)
+      history.append(entry)
+
+      // limit history
+      if history.count > maxHistoryLength {
+        history.removeFirst()
+      }
+
+      // forward history is cleared on open
+      forwardHistory.removeAll()
+
+      reflectHistoryChange()
     }
-    
-    let entry = NavEntry(route: route, spaceId: currentSpaceId)
-    history.append(entry)
-
-    // limit history
-    if history.count > maxHistoryLength {
-      history.removeFirst()
-    }
-
-    // forward history is cleared on open
-    forwardHistory.removeAll()
-
-    reflectHistoryChange()
   }
 
   public func goBack() {

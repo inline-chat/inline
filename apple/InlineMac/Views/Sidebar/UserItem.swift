@@ -177,8 +177,6 @@ struct UserItemButtonStyle: ButtonStyle {
       .onHover { isHovered = $0 }
       // Optional: Add subtle scale effect when pressed
 //      .scaleEffect(!selected && configuration.isPressed ? 0.98 : 1.0)
-      // Optional: Add smooth animation for press state
-      .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
       .animation(.easeOut(duration: 0.04), value: isHovered)
       .padding(.vertical, Theme.sidebarItemSpacing)
   }
@@ -187,9 +185,9 @@ struct UserItemButtonStyle: ButtonStyle {
     if selected {
       .primary.opacity(0.1)
     } else if configuration.isPressed {
-      .primary.opacity(0.08)
-    } else if isFocused {
       .primary.opacity(0.1)
+    } else if isFocused {
+      .primary.opacity(0.08)
     } else if isHovered {
       .primary.opacity(0.04)
     } else {
