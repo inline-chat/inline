@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 
 public struct ApiUser: Codable, Hashable, Sendable {
   public var id: Int64
@@ -192,6 +193,50 @@ public extension ApiUser {
       // attach main photo
       user.profileFileId = file?.id
       // TODO: handle multiple files
+      try user.save(db)
+    }
+
+    return user
+  }
+}
+
+// Inline Protocol
+public extension User {
+  init(from user: InlineProtocol.User) {
+    let min = user.hasMin && user.min == true
+
+    id = user.id
+    firstName = user.firstName
+    lastName = user.lastName
+    username = user.username
+
+    if !min {
+      email = user.email
+      // phoneNumber = user.phoneNumber
+
+      if user.hasStatus {
+        online = user.status.online == .online
+        lastOnline = Date(timeIntervalSince1970: Double(user.status.lastOnline.date))
+      }
+    }
+  }
+
+  static func save(
+    _ db: Database, user protocolUser: InlineProtocol.User
+  )
+    throws -> User
+  {
+    let existing = try? User.fetchOne(db, id: protocolUser.id)
+    var user = User(from: protocolUser)
+
+    if let existing {
+      // keep exitsing values
+      user.profileFileId = existing.profileFileId
+      user.date = existing.date
+      try user.save(db)
+    } else {
+      // Backward compat as the new API doesn't send date for users
+      user.date = Date()
       try user.save(db)
     }
 
