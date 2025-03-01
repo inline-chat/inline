@@ -131,6 +131,15 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.reactions)
   }
 
+  public static let attachments = hasMany(
+    Attachment.self,
+    using: ForeignKey(["messageId"], to: ["globalId"])
+  )
+
+  public var attachments: QueryInterfaceRequest<Attachment> {
+    request(for: Message.attachments)
+  }
+
   public init(
     messageId: Int64,
     randomId: Int64? = nil,
