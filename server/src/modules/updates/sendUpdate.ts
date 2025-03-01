@@ -73,7 +73,7 @@ export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTra
   throw new Error("Invalid reason")
 }
 
-/** Sends an array of updates to a connected user */
+/** Sends an array of updates to a connected user to old WS API */
 const sendUpdatesToUser = (userId: number, updates: TUpdateInfo[]) => {
   const message = createMessage({
     kind: ServerMessageKind.Message,
