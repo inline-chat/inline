@@ -144,7 +144,8 @@ struct HomeSidebar: View {
       commandPress: {
         openInWindow(Peer.user(id: user.id))
       },
-      selected: nav.currentRoute == .chat(peer: .user(id: user.id)),
+      // selected: nav.currentRoute == .chat(peer: .user(id: user.id)),
+      selected: nav.upcomingRoute == .chat(peer: .user(id: user.id)),
       rendersSavedMsg: true
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
