@@ -17,7 +17,8 @@ public final class Realtime: Sendable {
   public static let shared = Realtime(updatesEngine: UpdatesEngine.shared)
 
   private let api: RealtimeAPI
-  private let log = Log.scoped("RealtimeWrapper")
+  private let db = AppDatabase.shared
+  private let log = Log.scoped("RealtimeWrapper", enableTracing: true)
 
   @MainActor public let apiStatePublisher = CurrentValueSubject<RealtimeAPIState, Never>(
     .connecting
@@ -75,8 +76,39 @@ public final class Realtime: Sendable {
   {
     try await api.invoke(method, input: input)
   }
-  
+
   public func loggedOut() {
     // todo
+  }
+}
+
+public extension Realtime {
+  func invokeWithHandler(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) {
+    Task {
+      do {
+        log.trace("calling \(method)")
+        let response = try await invoke(method, input: input)
+
+        switch response {
+          case let .getMe(result):
+            try self.handleResult_getMe(result)
+          default:
+            break
+        }
+      } catch {
+        log.error("Failed to invoke \(method) with handler", error: error)
+      }
+    }
+  }
+
+  private func handleResult_getMe(_ result: GetMeResult) throws {
+    log.trace("getMe result: \(result)")
+    guard result.hasUser else { return }
+
+    _ = try db.dbWriter.write { db in
+      try User.save(db, user: result.user)
+    }
+    
+    log.trace("getMe saved")
   }
 }
