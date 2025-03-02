@@ -85,7 +85,7 @@ class ConnectionManager {
     }
   }
 
-  closeConnection(id: string) {
+  closeConnection(id: string, context: { loggedOut?: boolean } = {}) {
     log.debug(`Closing connection ${id}`)
     const connection = this.connections.get(id)
     if (connection) {
@@ -94,11 +94,15 @@ class ConnectionManager {
       } catch (error) {
         log.error(error)
       }
-      this.removeConnection(id)
+      this.removeConnection(id, context)
     }
   }
 
-  closeConnectionForSession(userId: number, sessionId: number) {
+  sessionLoggedOut(userId: number, sessionId: number) {
+    this.closeConnectionForSession(userId, sessionId, { loggedOut: true })
+  }
+
+  closeConnectionForSession(userId: number, sessionId: number, context: { loggedOut?: boolean } = {}) {
     const connectionIdsForUser = this.authenticatedUsers.get(userId)
     if (!connectionIdsForUser) {
       return
@@ -107,18 +111,21 @@ class ConnectionManager {
     connectionIdsForUser.forEach((id) => {
       const connection = this.connections.get(id)
       if (connection?.sessionId === sessionId) {
-        this.closeConnection(id)
+        this.closeConnection(id, context)
       }
     })
   }
 
-  removeConnection(id: string) {
+  removeConnection(id: string, context: { loggedOut?: boolean } = {}) {
     log.debug(`Removing connection ${id}`)
     const connection = this.connections.get(id)
     if (connection) {
       this.connections.delete(id)
       if (connection.userId && connection.sessionId) {
-        presenceManager.handleConnectionClose({ userId: connection.userId, sessionId: connection.sessionId })
+        // if logged out there is no point in calling presenceManager.handleConnectionClose
+        if (!context.loggedOut) {
+          presenceManager.handleConnectionClose({ userId: connection.userId, sessionId: connection.sessionId })
+        }
 
         const userConnections = this.authenticatedUsers.get(connection.userId)
         userConnections?.delete(id)

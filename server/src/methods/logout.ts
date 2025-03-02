@@ -19,7 +19,7 @@ export const handler = async (
     await db.delete(sessions).where(eq(sessions.id, context.currentSessionId))
 
     setTimeout(() => {
-      connectionManager.closeConnectionForSession(context.currentUserId, context.currentSessionId)
+      connectionManager.sessionLoggedOut(context.currentUserId, context.currentSessionId)
     }, 50)
 
     return undefined
