@@ -44,7 +44,18 @@ class MainSplitViewController: NSSplitViewController {
 
 extension MainSplitViewController {
   private func fetchData() {
-    dependencies.realtime.invokeWithHandler(.getMe, input: .getMe(.init()))
+    Task {
+      await dependencies.realtime.invokeWithHandler(.getMe, input: .getMe(.init()))
+      
+      // wait for our own user to finish fetching
+      // todo: dedup from home sidebar
+      Task {
+        try? await dependencies.data.getSpaces()
+      }
+      Task {
+        try? await dependencies.data.getPrivateChats()
+      }
+    }
   }
 }
 
