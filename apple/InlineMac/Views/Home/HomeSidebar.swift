@@ -67,21 +67,6 @@ struct HomeSidebar: View {
         .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
       }
     )
-    // For now
-    .onAppear {
-      Task {
-        do {
-          let _ = try await data.getSpaces()
-        } catch {
-          // TODO: handle error? keep on loading? retry? (@mo)
-        }
-        do {
-          let _ = try await data.getPrivateChats()
-        } catch {
-          // TODO: handle error? keep on loading? retry? (@mo)
-        }
-      }
-    }
   }
 
   var searchBar: some View {
