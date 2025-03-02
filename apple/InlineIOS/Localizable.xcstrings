@@ -23,9 +23,6 @@
     "%@..." : {
 
     },
-    "%lld chats" : {
-
-    },
     "%lld members" : {
 
     },
@@ -75,9 +72,6 @@
 
     },
     "Connecting" : {
-
-    },
-    "connecting..." : {
 
     },
     "Connecting..." : {
@@ -443,9 +437,6 @@
 
     },
     "Search by username" : {
-
-    },
-    "Search in users" : {
 
     },
     "Searching..." : {

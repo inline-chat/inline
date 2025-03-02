@@ -1,6 +1,8 @@
 import Foundation
 import InlineKit
 import SwiftUI
+import Auth
+
 
 public enum MainRoutes {
   case main
