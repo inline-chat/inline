@@ -61,8 +61,12 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
   try {
     switch (message.body.oneofKind) {
       case "connectionInit":
-        let _ = await handleConnectionInit(message.body.connectionInit, handlerContext)
-        sendConnectionOpen()
+        if (!conn?.userId) {
+          let _ = await handleConnectionInit(message.body.connectionInit, handlerContext)
+          sendConnectionOpen()
+        } else {
+          log.error("connectionInit received after already authenticated")
+        }
         break
 
       case "rpcCall":
@@ -77,6 +81,8 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
   } catch (e) {
     log.error("error handling message", e)
     if (message.body.oneofKind === "connectionInit") {
+      // TODO: handle this better
+      log.error("error handling message in connectionInit")
       ws.close()
     } else {
       let rpcError: RealtimeRpcError
