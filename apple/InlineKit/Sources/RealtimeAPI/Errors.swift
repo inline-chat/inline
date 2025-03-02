@@ -14,4 +14,5 @@ public enum RealtimeAPIError: Error {
   case rpcError(errorCode: RpcError.Code, message: String?)
   case unknown(Error)
   case notAuthorized
+  case stopped
 }

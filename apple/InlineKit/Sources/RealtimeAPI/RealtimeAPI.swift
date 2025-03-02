@@ -35,7 +35,7 @@ public actor RealtimeAPI: Sendable {
 
   public init(updatesEngine: RealtimeUpdatesProtocol) {
     log.debug("initilized realtime core")
-    transport = WebSocketTransport()
+    self.transport = WebSocketTransport()
     self.updatesEngine = updatesEngine
   }
 
@@ -46,6 +46,8 @@ public actor RealtimeAPI: Sendable {
     /// while paused, we queue messages
     case paused
   }
+
+  // MARK: - Start
 
   public func start() async throws {
     guard !started else { return }
@@ -65,6 +67,49 @@ public actor RealtimeAPI: Sendable {
 
     // Start the run loop
     startRunLoop()
+  }
+
+  // MARK: - Stop (used for logout)
+
+  public func stopAndReset() async {
+    guard started else { return }
+    log.debug("stopping and clearing realtime API")
+    started = false
+
+    // Clear message queue and pending RPC calls
+    msgQueue.removeAll()
+
+    // Cancel all pending RPC calls with a specific error
+    for (_, continuation) in rpcCalls {
+      continuation.resume(throwing: RealtimeAPIError.stopped)
+    }
+    rpcCalls.removeAll()
+
+    // Stop the transport
+    await transport.stopAndReset()
+    
+    // Make a fresh one ready for next start
+    transport = WebSocketTransport()
+
+    // Reset state
+    state = .paused
+
+    runTask?.cancel()
+    runTask = nil
+
+    // Reset sequence counters
+    seq = 0
+    sequence = 0
+    lastTimestamp = 0
+
+    // Create new channels to ensure clean state
+    stateChannel = AsyncChannel<Void>()
+    messageChannel = AsyncChannel<Void>()
+
+    // Wait a moment to ensure all tasks have settled
+    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+
+    log.debug("stopped realtime API")
   }
 
   // MARK: - Runloop
@@ -126,6 +171,7 @@ public actor RealtimeAPI: Sendable {
     // Send connection init
     do {
       let token = Auth.shared.getToken() ?? ""
+      log.debug("sending connection init with token \(token)")
       let msg = wrapMessage(body: .connectionInit(.with {
         $0.token = token
       }))

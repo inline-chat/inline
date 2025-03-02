@@ -1,4 +1,5 @@
 import AppKit
+import Auth
 import InlineConfig
 import InlineKit
 import Logger
@@ -41,15 +42,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidResignActive(_ notification: Notification) {
     Task {
-      // Mark offline
-      try? await DataManager.shared.updateStatus(online: false)
+      if Auth.shared.isLoggedIn {
+        // Mark offline
+        try? await DataManager.shared.updateStatus(online: false)
+      }
     }
   }
 
   func applicationDidBecomeActive(_ notification: Notification) {
     Task {
-      // Mark online
-      try? await DataManager.shared.updateStatus(online: true)
+      if Auth.shared.isLoggedIn {
+        // Mark online
+        try? await DataManager.shared.updateStatus(online: true)
+      }
     }
   }
 
@@ -73,7 +78,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     return true
   }
-  
+
   private func initializeServices() {
     // Setup Sentry
     SentrySDK.start { options in
@@ -141,17 +146,6 @@ extension AppDelegate {
   }
 
   private func logOut() async {
-    _ = try? await ApiClient.shared.logout()
-
-    // Clear creds
-    Auth.shared.logOut()
-
-    // Stop WebSocket
-    await dependencies.realtime.loggedOut()
-
-    // Clear database
-    try? AppDatabase.loggedOut()
-
     // Navigate outside of the app
     DispatchQueue.main.async {
       self.dependencies.viewModel.navigate(.onboarding)
@@ -161,12 +155,21 @@ extension AppDelegate {
       self.dependencies.nav.reset()
     }
 
-    // Re-open windows
-//    if let mainWindowController {
-//      await mainWindowController.close()
-//      // re-open
-//      setupMainWindow()
-//    }
+    Task {
+      _ = try? await ApiClient.shared.logout()
+
+      // Clear database
+      try? AppDatabase.loggedOut()
+
+      // Clear creds
+      await Auth.shared.logOut()
+
+      // Clear transactions
+      Transactions.shared.clearAll()
+
+      // Stop WebSocket
+      await dependencies.realtime.loggedOut()
+    }
   }
 }
 
