@@ -2,6 +2,7 @@ import Foundation
 import GRDB
 import Logger
 import InlineConfig
+import Auth
 
 // MARK: - DB main class
 

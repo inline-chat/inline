@@ -1,5 +1,6 @@
 import GRDB
 import SwiftUI
+import Auth
 
 public enum PreviewsEnvironemntPreset {
   case empty
