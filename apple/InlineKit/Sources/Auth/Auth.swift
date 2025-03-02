@@ -1,64 +1,149 @@
+import AsyncAlgorithms
 import Combine
 import Foundation
-import KeychainSwift
-import SwiftUI
 import InlineConfig
+import KeychainSwift
 import Logger
+import SwiftUI
 
-// Store userId and token and check is logged in
-// TODO: Remove @unchecked
 public final class Auth: ObservableObject, @unchecked Sendable {
-  let log = Log.scoped("Auth")
   public static let shared = Auth()
-  private var cachedToken: String?
-  var cachedUserId: Int64?
-  private let keychain: KeychainSwift
-  private var accessGroup: String
-  private var keyChainPrefix: String
-  private let userDefaultsPrefix: String
 
-  @Published public var isLoggedIn: Bool
+  // internals
+  private let log = Log.scoped("Auth")
+  private let authManager: AuthManager
+  private let lock = NSLock()
 
-  public func saveToken(_ token: String) {
-    keychain.set(token, forKey: "token")
-    cachedToken = token
-    evaluateIsLoggedIn()
+  // state
+  @Published public private(set) var isLoggedIn: Bool
+  @Published public private(set) var currentUserId: Int64?
+  @Published public private(set) var token: String?
+
+  private init() {
+    authManager = AuthManager.shared
+
+    // Initialize isLoggedIn synchronously
+    isLoggedIn = authManager.initialIsLoggedIn
+    currentUserId = authManager.initialUserId
+    token = authManager.initialToken
+
+    // Listen to changes
+    Task { [weak self] in
+      guard let self else { return }
+
+      for await isLoggedIn in await authManager.isLoggedIn {
+        let newCUID = await authManager.getCurrentUserId()
+        let newToken = await authManager.getToken()
+
+        Task { @MainActor in
+          self.lock.withLock {
+            self.isLoggedIn = isLoggedIn
+            self.currentUserId = newCUID
+            self.token = newToken
+          }
+        }
+      }
+    }
   }
 
-  private func evaluateIsLoggedIn() {
-    isLoggedIn =
-      cachedToken != nil && cachedUserId != nil
+  init(mockAuthenticated: Bool) {
+    authManager = AuthManager(mockAuthenticated: mockAuthenticated)
+
+    isLoggedIn = authManager.initialIsLoggedIn
+    currentUserId = authManager.initialUserId
+    token = authManager.initialToken
   }
 
   public func getToken() -> String? {
-    if cachedToken == nil {
-      cachedToken = keychain.get("token")
+    lock.withLock {
+      token
     }
-
-    return cachedToken
   }
 
-  private init() {
+  public func getCurrentUserId() -> Int64? {
+    lock.withLock {
+      currentUserId
+    }
+  }
+
+  public func getTokenAsync() async -> String? {
+    await authManager.getToken()
+  }
+
+  public func getCurrentUserIdAsync() async -> Int64? {
+    await authManager.getCurrentUserId()
+  }
+
+  public func saveCredentials(token: String, userId: Int64) async {
+    await authManager.saveCredentials(token: token, userId: userId)
+    await update()
+  }
+
+  public func logOut() async {
+    await authManager.logOut()
+    await update()
+  }
+
+  private func update() async {
+    let newCUID = await authManager.getCurrentUserId()
+    let newToken = await authManager.getToken()
+
+    let task = Task { @MainActor in
+      self.lock.withLock {
+        self.currentUserId = newCUID
+        self.token = newToken
+        self.isLoggedIn = newToken != nil && newCUID != nil
+      }
+    }
+    await task.value
+  }
+
+  /// Used in previews
+  public static func mocked(authenticated: Bool) -> Auth {
+    Auth(mockAuthenticated: authenticated)
+  }
+}
+
+actor AuthManager: Sendable {
+  public static var shared = AuthManager()
+
+  nonisolated let initialUserId: Int64?
+  nonisolated let initialToken: String?
+  nonisolated let initialIsLoggedIn: Bool
+
+  // cache
+  private var cachedUserId: Int64?
+  private var cachedToken: String?
+
+  // config
+  private var accessGroup: String
+  private var userDefaultsPrefix: String
+
+  // internals
+  private let keychain: KeychainSwift
+
+  // public
+  public var isLoggedIn = AsyncChannel<Bool>()
+
+  init() {
+    // Initialization logic from original Auth class
     #if os(macOS)
     accessGroup = "2487AN8AL4.chat.inline.InlineMac"
     #if DEBUG
-    keyChainPrefix = "inline_dev_"
+    let keyChainPrefix = "inline_dev_"
     #else
-    keyChainPrefix = "inline_"
+    let keyChainPrefix = "inline_"
     #endif
     #elseif os(iOS)
     accessGroup = "2487AN8AL4.keychainGroup"
     #if DEBUG
-    keyChainPrefix = "inline_dev_"
+    let keyChainPrefix = "inline_dev_"
     #else
-    keyChainPrefix = ""
+    let keyChainPrefix = ""
     #endif
     #endif
 
-    // Check if user profile is set so we need to log in to another account
     if let userProfile = ProjectConfig.userProfile {
-      log.debug("Using user profile \(userProfile)")
-      keyChainPrefix = "\(keyChainPrefix)\(userProfile)_"
       userDefaultsPrefix = "\(userProfile)_"
     } else {
       userDefaultsPrefix = ""
@@ -66,17 +151,25 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 
     keychain = KeychainSwift(keyPrefix: keyChainPrefix)
     keychain.accessGroup = accessGroup
+
+    // load
     cachedToken = keychain.get("token")
-    // temp so it doesn't error out
-    isLoggedIn = false
-    cachedUserId = getCurrentUserId()
-    isLoggedIn = cachedToken != nil && cachedUserId != nil
+    cachedUserId = UserDefaults.standard.value(forKey: "\(userDefaultsPrefix)userId") as? Int64
+
+    // set initial values
+    initialToken = cachedToken
+    initialUserId = cachedUserId
+    initialIsLoggedIn = initialToken != nil && initialUserId != nil
+
+    Task {
+      await self.updateLoginStatus()
+    }
   }
 
-  private init(mockAuthenticated: Bool) {
-    keychain = KeychainSwift()
+  // Mock for testing/previews
+  init(mockAuthenticated: Bool) {
+    keychain = KeychainSwift(keyPrefix: "mock")
     accessGroup = "2487AN8AL4.keychainGroup"
-    keyChainPrefix = "mock"
     userDefaultsPrefix = "mock"
 
     if mockAuthenticated {
@@ -88,54 +181,52 @@ public final class Auth: ObservableObject, @unchecked Sendable {
       keychain.clear()
     }
 
-    isLoggedIn = mockAuthenticated
-  }
+    // set initial values
+    initialToken = cachedToken
+    initialUserId = cachedUserId
+    initialIsLoggedIn = initialToken != nil && initialUserId != nil
 
-  var userIdKey: String {
-    "\(userDefaultsPrefix)userId"
-  }
-
-  public func saveCurrentUserId(userId: Int64) {
-    UserDefaults.standard.set(userId, forKey: userIdKey)
-    cachedUserId = userId
-    evaluateIsLoggedIn()
-  }
-
-  public func getCurrentUserId() -> Int64? {
-    if let userId = cachedUserId {
-      return userId
-    } else {
-      if UserDefaults.standard.object(forKey: userIdKey) != nil {
-        let cachedUserId = Int64(UserDefaults.standard.integer(forKey: userIdKey))
-        return cachedUserId
-      }
+    Task {
+      await self.updateLoginStatus()
     }
-    return nil
   }
 
-  //  public func getCurrentUserId() -> Int64? {
-  //    if let userId = cachedUserId {
-  //      return userId
-  //    } else {
-  //      let userId = Self.getCurrentUserId()
-  //      cachedUserId = userId
-  //      return userId
-  //    }
-  //  }
+  func saveCredentials(token: String, userId: Int64) async {
+    // persist
+    keychain.set(token, forKey: "token")
+    UserDefaults.standard.set(userId, forKey: "\(userDefaultsPrefix)userId")
 
-  public func logOut() {
-    // clear userId
-    UserDefaults.standard.removeObject(forKey: userIdKey)
+    // cache
+    cachedToken = token
+    cachedUserId = userId
 
+    // publish
+    await updateLoginStatus()
+  }
+
+  func getToken() -> String? {
+    cachedToken
+  }
+
+  func getCurrentUserId() -> Int64? {
+    cachedUserId
+  }
+
+  func logOut() async {
+    // persist
     keychain.delete("token")
+    UserDefaults.standard.removeObject(forKey: "\(userDefaultsPrefix)userId")
 
+    // cache
     cachedToken = nil
     cachedUserId = nil
-    isLoggedIn = false
+
+    // publish
+    await updateLoginStatus()
   }
 
-  /// Used in previews
-  public static func mocked(authenticated: Bool) -> Auth {
-    Auth(mockAuthenticated: authenticated)
+  private func updateLoginStatus() async {
+    let loggedIn = cachedToken != nil && cachedUserId != nil
+    await isLoggedIn.send(loggedIn)
   }
 }

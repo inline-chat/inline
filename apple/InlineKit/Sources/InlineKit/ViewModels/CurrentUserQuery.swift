@@ -1,6 +1,7 @@
 import Combine
 import GRDB
 import GRDBQuery
+import Auth
 
 /// Fetches current user from the database.
 public struct CurrentUser: ValueObservationQueryable {

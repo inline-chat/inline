@@ -1,6 +1,7 @@
+import Auth
 import InlineKit
-import SwiftUI
 import Logger
+import SwiftUI
 
 struct OnboardingEnterCode: View {
   @EnvironmentObject var onboardingViewModel: OnboardingViewModel
@@ -97,13 +98,20 @@ struct OnboardingEnterCode: View {
           email: onboardingViewModel.email
         )
 
-        // TODO: Extract to toplevel
         // Save creds
-        Auth.shared.saveToken(result.token)
-        Auth.shared.saveCurrentUserId(userId: result.userId)
+        await Auth.shared.saveCredentials(token: result.token, userId: result.userId)
 
         // Change passphrase of database
         try await AppDatabase.authenticated()
+
+        // Save user
+        do {
+          let _ = try await AppDatabase.shared.dbWriter.write { db in
+            try result.user.saveFull(db)
+          }
+        } catch {
+          Log.shared.error("Failed to save user", error: error)
+        }
 
         DispatchQueue.main.async {
           // Navigate

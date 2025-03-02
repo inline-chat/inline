@@ -13,13 +13,17 @@ import Logger
 import RealtimeAPI
 import SwiftUI
 
-public final class Realtime: Sendable {
-  public static let shared = Realtime(updatesEngine: UpdatesEngine.shared)
+public final actor Realtime: Sendable {
+  public static let shared = Realtime()
 
-  private let api: RealtimeAPI
   private let db = AppDatabase.shared
   private let log = Log.scoped("RealtimeWrapper", enableTracing: true)
+  private var updates: UpdatesEngine?
+  private var api: RealtimeAPI?
+  private var eventsTask: Task<Void, Never>?
+  private var started = false
 
+  @MainActor private var cancellable: AnyCancellable? = nil
   @MainActor public let apiStatePublisher = CurrentValueSubject<RealtimeAPIState, Never>(
     .connecting
   )
@@ -27,12 +31,55 @@ public final class Realtime: Sendable {
     apiStatePublisher.value
   }
 
-  private init(updatesEngine: RealtimeUpdatesProtocol) {
-    api = .init(updatesEngine: updatesEngine)
+  private init() {
+    updates = UpdatesEngine()
+    api = RealtimeAPI(updatesEngine: updates!)
 
-    Task { [weak self] in
+    Task {
+      if Auth.shared.isLoggedIn {
+        await ensureStarted()
+      }
+    }
+
+    Task { @MainActor in
+      cancellable = Auth.shared.$isLoggedIn.sink { [weak self] isLoggedIn in
+        guard let self else { return }
+        if isLoggedIn {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            Task {
+              self?.log.debug("user logged in, starting realtime")
+              await self?.ensureStarted()
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func ensureStarted() {
+    if started {
+      return
+    }
+    started = true
+    start()
+  }
+
+  public func start() {
+    log.debug("Starting realtime connection")
+
+    // Init
+    // updates = UpdatesEngine()
+    // self.api = RealtimeAPI(updatesEngine: updates!)
+
+    guard let api else {
+      return
+    }
+
+    // Setup listener
+    eventsTask = Task { [weak self] in
       guard let self else { return }
       for await event in await api.eventsChannel {
+        guard !Task.isCancelled else { break }
         log.debug("Received api event: \(event)")
         switch event {
           case let .stateUpdate(state):
@@ -43,30 +90,31 @@ public final class Realtime: Sendable {
       }
     }
 
-    if Auth.shared.isLoggedIn {
-      start()
+    // Reset state first
+    Task { @MainActor in
+      apiStatePublisher.send(.connecting)
     }
 
-    // not ever cancelled for now
-    _ = Auth.shared.$isLoggedIn.sink { [weak self] isLoggedIn in
-      guard let self else { return }
-      if isLoggedIn {
-        ensureStarted()
-      }
-    }
-  }
-
-  private func ensureStarted() {
-    start()
-  }
-
-  public func start() {
     // Start the connection
     Task {
       do {
-        try await self.api.start()
+        try await api.start()
+        log.debug("Realtime API started successfully")
       } catch {
-        Log.shared.error("Error starting realtime", error: error)
+        log.error("Error starting realtime", error: error)
+
+        // Update state on failure
+        Task { @MainActor in
+          apiStatePublisher.send(.waitingForNetwork)
+        }
+
+        // Retry after delay if still logged in
+        if Auth.shared.isLoggedIn {
+          try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+          if Auth.shared.isLoggedIn {
+            self.start()
+          }
+        }
       }
     }
   }
@@ -74,11 +122,27 @@ public final class Realtime: Sendable {
   public func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws
     -> RpcResult.OneOf_Result?
   {
-    try await api.invoke(method, input: input)
+    try await api?.invoke(method, input: input)
   }
 
   public func loggedOut() {
-    // todo
+    log.debug("User logged out, stopping realtime")
+
+    // Reset state on main actor first
+    Task { @MainActor in
+      apiStatePublisher.send(.waitingForNetwork)
+    }
+
+    started = false
+
+    // Then stop the API completely
+    eventsTask?.cancel()
+    eventsTask = nil
+
+    Task {
+      await api?.stopAndReset()
+    }
+    log.debug("Realtime API stopped after logout")
   }
 }
 
@@ -95,7 +159,7 @@ public extension Realtime {
 
           case let .deleteMessages(result):
             try self.handleResult_deleteMessages(result)
-          
+
           default:
             break
         }
@@ -120,7 +184,7 @@ public extension Realtime {
     log.trace("deleteMessages result: \(result)")
 
     Task {
-      await api.updatesEngine.applyBatch(updates: result.updates)
+      await api?.updatesEngine.applyBatch(updates: result.updates)
     }
   }
 }
