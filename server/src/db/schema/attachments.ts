@@ -2,15 +2,8 @@ import { bytea, creationDate } from "@in/server/db/schema/common"
 import { files } from "@in/server/db/schema/files"
 import { messages } from "@in/server/db/schema/messages"
 import { users } from "@in/server/db/schema/users"
+import { relations } from "drizzle-orm"
 import { pgTable, serial, integer, text, bigint } from "drizzle-orm/pg-core"
-
-export const messageAttachments = pgTable("message_attachments", {
-  id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
-  messageId: bigint("message_id", { mode: "bigint" }).references(() => messages.globalId),
-
-  /** external task id */
-  externalTaskId: bigint("external_task_id", { mode: "bigint" }).references(() => externalTasks.id),
-})
 
 export const externalTasks = pgTable("external_tasks", {
   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
@@ -28,3 +21,22 @@ export const externalTasks = pgTable("external_tasks", {
 
   date: creationDate,
 })
+
+export const messageAttachments = pgTable("message_attachments", {
+  id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
+  messageId: bigint("message_id", { mode: "bigint" }).references(() => messages.globalId),
+
+  /** external task id */
+  externalTaskId: bigint("external_task_id", { mode: "bigint" }).references(() => externalTasks.id),
+})
+
+export const messageAttachmentsRelations = relations(messageAttachments, ({ one }) => ({
+  externalTask: one(externalTasks, {
+    fields: [messageAttachments.externalTaskId],
+    references: [externalTasks.id],
+  }),
+  message: one(messages, {
+    fields: [messageAttachments.messageId],
+    references: [messages.globalId],
+  }),
+}))
