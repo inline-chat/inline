@@ -17,6 +17,7 @@ class MainSplitViewController: NSSplitViewController {
     super.init(nibName: nil, bundle: nil)
 
     fetchData()
+    setup()
   }
 
   @available(*, unavailable)
@@ -27,6 +28,11 @@ class MainSplitViewController: NSSplitViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     configureHierarchy()
+  }
+
+  func setup() {
+    NotificationCenter.default
+      .post(name: .requestNotificationPermission, object: nil)
   }
 
   deinit {
