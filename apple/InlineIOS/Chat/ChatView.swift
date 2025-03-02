@@ -2,6 +2,7 @@ import Combine
 import InlineKit
 import InlineUI
 import Logger
+import RealtimeAPI
 import SwiftUI
 
 struct ChatView: View {
@@ -14,10 +15,11 @@ struct ChatView: View {
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var data: DataManager
-  @EnvironmentObject var ws: WebSocketManager
 
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
+
+  @Environment(\.realtime) var realtime
 
   @ObservedObject var composeActions: ComposeActions = .shared
 
@@ -26,6 +28,8 @@ struct ChatView: View {
   }
 
   @State var currentTime = Date()
+
+  @State var apiState: RealtimeAPIState = .connecting
 
   let timer = Timer.publish(
     every: 60, // 1 minute
@@ -56,8 +60,8 @@ struct ChatView: View {
 
   var subtitle: String {
     // TODO: support threads
-    if ws.connectionState == .connecting {
-      "connecting..."
+    if realtime.apiState != .connected {
+      getStatusText(realtime.apiState)
     } else if let composeAction = currentComposeAction() {
       composeAction.rawValue
     } else if let online = fullChatViewModel.peerUser?.online {
@@ -144,6 +148,12 @@ struct ChatView: View {
           .foregroundStyle(.secondary)
       }
     }
+    .onAppear {
+      apiState = realtime.apiState
+    }
+    .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
+      apiState = nextApiState
+    })
   }
 
   func fetch() async {

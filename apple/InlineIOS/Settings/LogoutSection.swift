@@ -1,5 +1,6 @@
 import InlineKit
 import SwiftUI
+import Auth
 
 struct LogoutSection: View {
   @EnvironmentObject private var webSocket: WebSocketManager
@@ -17,7 +18,7 @@ struct LogoutSection: View {
 
   private func performLogout() async {
     _ = try? await ApiClient.shared.logout()
-    Auth.shared.logOut()
+    await Auth.shared.logOut()
     webSocket.loggedOut()
     try? AppDatabase.loggedOut()
     mainRouter.setRoute(route: .onboarding)

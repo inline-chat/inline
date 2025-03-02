@@ -1,6 +1,7 @@
 import InlineKit
 import InlineUI
 import SwiftUI
+import Auth
 
 struct Props {
   let dialog: Dialog

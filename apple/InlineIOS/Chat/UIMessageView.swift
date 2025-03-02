@@ -1,3 +1,4 @@
+import Auth
 import ContextMenuAuxiliaryPreview
 import InlineKit
 import Logger
@@ -320,15 +321,15 @@ class UIMessageView: UIView {
     ]
 
     let constraints: [NSLayoutConstraint] = switch (message.hasFile, message.hasText) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -475,7 +476,7 @@ class UIMessageView: UIView {
         let result = try await ApiClient.shared.getIntegrations(userId: Auth.shared.getCurrentUserId() ?? 0)
         if !result.hasLinearConnected {
           ToastManager.shared.showToast(
-            "Please connect Linear integration from Settings > Integrations",
+            "Please connect Linear from Settings > Integrations",
             type: .info,
             systemImage: "link.circle"
           )
