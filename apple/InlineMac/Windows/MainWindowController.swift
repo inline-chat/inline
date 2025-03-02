@@ -263,6 +263,9 @@ extension MainWindowController: NSToolbarDelegate {
           dividerIndex: 0
         )
 
+      case .backToHome:
+        return makeBackToHome()
+
       case .flexibleSpace:
         return NSToolbarItem(itemIdentifier: .flexibleSpace)
 
@@ -296,6 +299,19 @@ extension MainWindowController: NSToolbarDelegate {
     return menu
   }
 
+  private func makeBackToHome() -> NSToolbarItem {
+    let item = NSToolbarItem(itemIdentifier: .backToHome)
+    item.isBordered = true
+    item.label = "Back to Home"
+    item.image = NSImage(
+      systemSymbolName: "house",
+      accessibilityDescription: "Home"
+    )
+    item.action = #selector(goBackToHome)
+    item.target = self
+    return item
+  }
+
   @objc private func createNewSpace() {
     dependencies.nav.open(.createSpace)
   }
@@ -306,6 +322,10 @@ extension MainWindowController: NSToolbarDelegate {
 
   @objc private func goForward() {
     dependencies.nav.goForward()
+  }
+
+  @objc private func goBackToHome() {
+    dependencies.nav.openHome()
   }
 }
 
@@ -391,9 +411,9 @@ extension MainWindowController {
     items.append(.toggleSidebar)
 
     // Sidebar items
-    if nav.currentSpaceId != nil {
+    if nav.history.last?.spaceId != nil {
       items.append(.flexibleSpace)
-      // items.append(.backToHome)
+      items.append(.backToHome)
     } else {
       items.append(.flexibleSpace)
       items.append(.homePlus)
