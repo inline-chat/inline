@@ -140,6 +140,7 @@ public class DataManager: ObservableObject {
         try spaces.forEach { space in
           try space.save(db)
         }
+
         for member in result.members {
           let member = Member(from: member)
           try member.save(db)

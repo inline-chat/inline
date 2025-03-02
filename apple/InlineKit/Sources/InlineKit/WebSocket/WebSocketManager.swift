@@ -2,6 +2,7 @@ import Foundation
 import InlineConfig
 import Network
 import Logger
+import Auth
 
 // WebSocketClient implementation stays the same as before...
 

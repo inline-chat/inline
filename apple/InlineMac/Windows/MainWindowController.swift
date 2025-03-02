@@ -1,4 +1,5 @@
 import AppKit
+import Auth
 import Combine
 import InlineKit
 import SwiftUI
