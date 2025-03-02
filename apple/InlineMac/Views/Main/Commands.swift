@@ -1,5 +1,6 @@
 import InlineKit
 import SwiftUI
+import Auth
 
 struct MainWindowCommands: Commands {
   @Environment(\.openWindow) var openWindow
