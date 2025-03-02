@@ -160,7 +160,6 @@ async function refreshLastMessageId(chatId: number) {
     .where(eq(messages.chatId, chatId))
     .orderBy(desc(messages.messageId))
     .limit(1)
-    .offset(1)
 
   const newLastMsgId = message?.messageId ?? null
   await db.update(chats).set({ lastMsgId: newLastMsgId }).where(eq(chats.id, chatId))

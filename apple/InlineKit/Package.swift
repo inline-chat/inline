@@ -86,6 +86,7 @@ let package = Package(
       name: "Auth",
       dependencies: [
         .product(name: "KeychainSwift", package: "keychain-swift"),
+        .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
         "InlineConfig",
         "Logger",
       ]
