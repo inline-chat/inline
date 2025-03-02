@@ -8,7 +8,7 @@ import OrderedCollections
 @MainActor
 class KeyMonitor: Sendable {
   private let ESCAPE_KEY_CODE: UInt16 = 53
-  private let log = Log.scoped("KeyMonitor", enableTracing: true)
+  private let log = Log.scoped("KeyMonitor", enableTracing: false)
   private var escapeHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var textInputCatchAllHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
 
