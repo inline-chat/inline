@@ -67,6 +67,8 @@ class EmbeddedMessageView: NSView {
     label.lineBreakMode = .byTruncatingTail
     label.textColor = textColor
     label.maximumNumberOfLines = 1
+    label.cell?.usesSingleLineMode = true
+
     return label
   }()
 
@@ -87,12 +89,18 @@ class EmbeddedMessageView: NSView {
     wantsLayer = true
     layer?.cornerRadius = Constants.cornerRadius
     layer?.masksToBounds = true
+    
+    translatesAutoresizingMaskIntoConstraints = false
+
 
     addSubview(rectangleView)
     addSubview(nameLabel)
     addSubview(messageLabel)
 
     NSLayoutConstraint.activate([
+      // Height
+      heightAnchor.constraint(equalToConstant: Constants.height),
+      
       // Rectangle view
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
       rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth),
@@ -132,7 +140,7 @@ class EmbeddedMessageView: NSView {
         "Reply to \(senderName)"
     }
     nameLabel.textColor = NSColor(InitialsCircle.ColorPalette.color(for: senderName))
-    
+
     if let text = message.text, !text.isEmpty {
       messageLabel.stringValue = text
     } else if let file {
