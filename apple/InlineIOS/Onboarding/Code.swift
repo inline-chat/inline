@@ -1,7 +1,8 @@
+import Auth
 import GRDBQuery
 import InlineKit
-import SwiftUI
 import Logger
+import SwiftUI
 
 struct Code: View {
   var email: String
@@ -59,8 +60,7 @@ extension Code {
         formState.startLoading()
         let result = try await api.verifyCode(code: code, email: email)
 
-        auth.saveToken(result.token)
-        auth.saveCurrentUserId(userId: result.userId)
+        await auth.saveCredentials(token: result.token, userId: result.userId)
 
         do {
           try await AppDatabase.authenticated()

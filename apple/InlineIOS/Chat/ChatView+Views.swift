@@ -2,6 +2,7 @@ import Combine
 import InlineKit
 import InlineUI
 import SwiftUI
+import Auth
 
 extension ChatView {
   var isCurrentUser: Bool {

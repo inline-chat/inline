@@ -1,9 +1,9 @@
+import Auth
 import Combine
 import Foundation
 import InlineConfig
 import Logger
 import MultipartFormDataKit
-import Auth
 
 #if canImport(UIKit)
 import UIKit
