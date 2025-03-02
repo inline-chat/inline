@@ -112,9 +112,20 @@ struct SpaceSidebar: View {
       }
     )
     .task {
-      do {
-        try await data.getDialogs(spaceId: spaceId)
-      } catch {}
+      Task {
+        do {
+          try await data.getDialogs(spaceId: spaceId)
+        } catch {}
+      }
+      
+      Task {
+        do {
+          // this one gets members
+          try await data.getSpace(spaceId: spaceId)
+        }
+      }
+      
+      
     }
   }
 }
