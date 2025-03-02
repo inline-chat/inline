@@ -2,8 +2,8 @@ import AppKit
 import Auth
 import Combine
 import InlineKit
-import SwiftUI
 import Logger
+import SwiftUI
 
 class MainWindowController: NSWindowController {
   private var dependencies: AppDependencies
@@ -97,6 +97,11 @@ class MainWindowController: NSWindowController {
 
   private func setupMainSplitView() {
     log.debug("Setting up main split view")
+
+    // re-add rootData so it has fresh user ID
+    dependencies.rootData = RootData(db: dependencies.database, auth: dependencies.auth)
+
+    // set main view
     switchViewController(
       to: MainSplitViewController(dependencies: dependencies)
     )
@@ -146,7 +151,7 @@ class MainWindowController: NSWindowController {
   private func subscribe() {
     dependencies.viewModel.$topLevelRoute.sink { route in
       self.log.debug("Top level route changed: \(route)")
-      
+
       // Prevent re-open
       if route == self.topLevelRoute {
         self.log.debug("Skipped top level change")
