@@ -291,7 +291,7 @@ extension MainWindowController: NSToolbarDelegate {
   }
 
   @objc private func createNewSpace() {
-    // Implement your space creation logic here
+    dependencies.nav.open(.createSpace)
   }
 
   @objc private func goBack() {
@@ -299,7 +299,6 @@ extension MainWindowController: NSToolbarDelegate {
   }
 
   @objc private func goForward() {
-    print("go forward")
     dependencies.nav.goForward()
   }
 }
