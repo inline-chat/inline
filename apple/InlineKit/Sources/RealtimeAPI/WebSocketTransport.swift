@@ -64,9 +64,10 @@ actor WebSocketTransport: NSObject, Sendable {
   // Internals
   private var stateObservers: [StateObserverFn] = []
   private var messageHandler: ((ServerProtocolMessage) -> Void)? = nil
-  private var log = Log.scoped("Realtime_TransportWS")
+  private var log = Log.scoped("Realtime_TransportWS", enableTracing: true)
   private var pathMonitor: NWPathMonitor?
-
+  private let reconnectionInProgress = ManagedAtomic<Bool>(false)
+  
   override init() {
     log.debug("Initializing WebSocketTransport")
     // Create session configuration
@@ -132,10 +133,20 @@ actor WebSocketTransport: NSObject, Sendable {
   #endif
 
   deinit {
-    webSocketTask?.cancel()
+    // Remove notification observers
+    #if os(iOS)
+    NotificationCenter.default.removeObserver(self)
 
-    Task { @MainActor [self] in
-      await self.stop()
+    // End background task if active
+    if backgroundTask != .invalid {
+      UIApplication.shared.endBackgroundTask(backgroundTask)
+      backgroundTask = .invalid
+    }
+    #endif
+
+    // Create a detached task to ensure stop() is called
+    Task.detached { [self] in
+      await self.stopAndReset()
     }
   }
 
@@ -155,7 +166,12 @@ actor WebSocketTransport: NSObject, Sendable {
   }
 
   func start() async {
-    log.debug("starting")
+    guard !running else {
+      log.trace("Already running")
+      return
+    }
+    
+    log.debug("Starting to run")
     running = true
     setupNetworkMonitoring()
     startBackgroundObservers()
@@ -183,14 +199,39 @@ actor WebSocketTransport: NSObject, Sendable {
     log.debug("connecting to \(urlString)")
   }
 
-  func stop() async {
+  func stopAndReset() async {
     log.trace("Disconnecting and stopping (manual)")
+    
+    // Set running to false first to prevent reconnection attempts
+    running = false
+
+    // Cancel all tasks
+    await cancelTasks()
+
+    // Clear reconnection state
+    reconnectionInProgress.store(false, ordering: .releasing)
+    
+    // Cancel the connection timeout task
+    connectionTimeoutTask?.cancel()
+    connectionTimeoutTask = nil
+
+    // Close WebSocket connection if active
     webSocketTask?.cancel(with: .normalClosure, reason: nil)
     webSocketTask = nil
 
+    // Stop network monitoring
+    pathMonitor?.cancel()
+    pathMonitor = nil
+
+    // Clear state
     connectionState = .disconnected
+    stateObservers = []
+    messageHandler = nil
+
+    // Notify state change as final action
     notifyStateChange()
-    running = false
+
+    log.debug("Transport stopped completely")
   }
 
   // MARK: - State Management
@@ -406,7 +447,7 @@ actor WebSocketTransport: NSObject, Sendable {
     }
   }
 
-  private let reconnectionInProgress = ManagedAtomic<Bool>(false)
+  
 
   private func attemptReconnection() {
     guard running else { return }
