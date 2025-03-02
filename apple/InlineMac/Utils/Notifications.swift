@@ -7,6 +7,10 @@ extension EnvironmentValues {
   @Entry var requestNotifications: () async -> Void = {}
 }
 
+extension Notification.Name {
+  static let requestNotificationPermission = Notification.Name("requestNotificationPermission")
+}
+
 class NotificationsManager: NSObject {
   var log = Log.scoped("Notifications")
 
@@ -15,12 +19,22 @@ class NotificationsManager: NSObject {
   override init() {
     center = UNUserNotificationCenter.current()
     super.init()
+    startListening()
   }
 
   // Call in app delegate
   func setup() {
     center.delegate = self
     log.debug("Notifications manager setup completed.")
+  }
+  
+  func startListening() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(requestNotificationsSel),
+      name: .requestNotificationPermission,
+      object: nil
+    )
   }
 
   var onNotificationReceivedAction: ((_ response: UNNotificationResponse) -> Void)?
@@ -73,6 +87,12 @@ extension NotificationsManager {
     } catch {
       // Handle the error here.
       log.error("Failed to request notifications permissions", error: error)
+    }
+  }
+  
+  @objc func requestNotificationsSel() {
+    Task {
+      await requestNotifications()
     }
   }
 
