@@ -183,6 +183,13 @@
       "when": 1740844719827,
       "tag": "0025_new_media_and_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1740904279931,
+      "tag": "0026_attachments",
+      "breakpoints": true
     }
   ]
 }
