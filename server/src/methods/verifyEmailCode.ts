@@ -108,6 +108,10 @@ export const handler = async (
 
 const verifyCode = async (email: string, code: string): Promise<true> => {
   if (email && code && email === process.env["DEMO_EMAIL"] && code === process.env["DEMO_CODE"]) {
+    try {
+      sendTelegramEventForDemoAccount()
+    } catch (error) {}
+
     return true
   }
 
@@ -179,6 +183,23 @@ async function sendTelegramEvent(email: string) {
   const telegramToken = process.env["TELEGRAM_TOKEN"]
   const chatId = "-1002262866594"
   const message = `New user verified email: \n${email}\n\n🍓🫡☕️`
+
+  await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: message,
+    }),
+  })
+}
+
+async function sendTelegramEventForDemoAccount() {
+  const telegramToken = process.env["TELEGRAM_TOKEN"]
+  const chatId = "-1002262866594"
+  const message = `🤐 Someone logged in with demo account`
 
   await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
     method: "POST",
