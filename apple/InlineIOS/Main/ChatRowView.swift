@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 import UIKit
+import Auth
 
 struct ChatRowView: View {
   let item: ChatRowItem

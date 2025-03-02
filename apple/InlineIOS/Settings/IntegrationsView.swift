@@ -2,6 +2,7 @@ import AuthenticationServices
 import InlineConfig
 import InlineKit
 import SwiftUI
+import Auth
 
 struct IntegrationsView: View {
   @State private var isConnectingLinear = false

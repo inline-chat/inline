@@ -1,8 +1,8 @@
+import Auth
 import Foundation
 import GRDB
-import MultipartFormDataKit
 import Logger
-import Auth
+import MultipartFormDataKit
 
 public struct SendMessageAttachment: Codable, Sendable {
   public enum ImageFormat: Codable, Sendable {
