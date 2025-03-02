@@ -99,11 +99,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
       ),
     ),
     with: {
-      photo: {
-        with: {
-          thumbs: true,
-        },
-      },
+      photo: true,
     },
   })
   // const peerUsers = await db

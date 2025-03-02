@@ -40,7 +40,5 @@ export const files = pgTable("files", {
   // --------------------------------------------------------
 })
 
-export const filesRelations = relations(files, ({ many, one }) => ({}))
-
 export type DbFile = typeof files.$inferSelect
 export type DbNewFile = typeof files.$inferInsert

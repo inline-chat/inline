@@ -60,11 +60,7 @@ export class UsersModel {
     const user = await db.query.users.findFirst({
       where: eq(users.id, userId),
       with: {
-        photo: {
-          with: {
-            thumbs: true,
-          },
-        },
+        photo: true,
       },
     })
 

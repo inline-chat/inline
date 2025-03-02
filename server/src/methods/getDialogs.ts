@@ -161,11 +161,7 @@ export const handler = async (
           with: {
             user: {
               with: {
-                photo: {
-                  with: {
-                    thumbs: true,
-                  },
-                },
+                photo: true,
               },
             },
           },
