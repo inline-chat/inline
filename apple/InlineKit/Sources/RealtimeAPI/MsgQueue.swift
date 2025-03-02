@@ -50,4 +50,11 @@ package final class MsgQueue: @unchecked Sendable {
   public var isEmpty: Bool {
     lock.withLock { _queue.isEmpty }
   }
+  
+  public func removeAll() {
+    lock.withLock {
+      _queue.removeAll()
+      _inFlight.removeAll()
+    }
+  }
 }
