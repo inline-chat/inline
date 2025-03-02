@@ -59,14 +59,36 @@ class ContentViewController: NSViewController {
           .update(viewModel: FullChatViewModel(db: dependencies.database, peer: peer))
         addRouteSubview(chatView)
 
+      case .createSpace:
+        let createSpaceVC = CreateSpaceViewController(dependencies: dependencies)
+        addRouteSubview(createSpaceVC.view, createSpaceVC)
+
       default:
         break
     }
   }
 
-  private func addRouteSubview(_ subview: NSView) {
+  var currentRouteSubview: NSView? = nil
+  var currentRouteViewController: NSViewController? = nil
+
+  private func addRouteSubview(_ subview: NSView, _ viewController: NSViewController? = nil) {
+    if let currentRouteSubview {
+      currentRouteSubview.removeFromSuperview()
+    }
+    if let currentRouteViewController {
+      currentRouteViewController.removeFromParent()
+    }
+
+    currentRouteSubview = subview
+    currentRouteViewController = viewController
+
     subview.translatesAutoresizingMaskIntoConstraints = false
+
     view.addSubview(subview)
+    if let viewController {
+      addChild(viewController)
+    }
+
     NSLayoutConstraint.activate([
       subview.topAnchor.constraint(equalTo: view.topAnchor),
       subview.bottomAnchor.constraint(equalTo: view.bottomAnchor),
