@@ -160,6 +160,9 @@ public extension Realtime {
           case let .deleteMessages(result):
             try self.handleResult_deleteMessages(result)
 
+          case let .getChatHistory(result):
+            try self.handleResult_getChatHistory(input!, result)
+
           default:
             break
         }
@@ -185,6 +188,29 @@ public extension Realtime {
 
     Task {
       await api?.updatesEngine.applyBatch(updates: result.updates)
+    }
+  }
+
+  private func handleResult_getChatHistory(_ input: RpcCall.OneOf_Input, _ result: GetChatHistoryResult) throws {
+    log.trace("saving getChatHistory result")
+
+    // need to extract peer id from input
+    guard case let .getChatHistory(getChatHistoryInput) = input else {
+      log.error("could not infer peerId")
+      return
+    }
+
+    let peerId = getChatHistoryInput.peerID.toPeer()
+
+    _ = try db.dbWriter.write { db in
+      for message in result.messages {
+        _ = try Message.save(db, protocolMessage: message)
+      }
+    }
+
+    // Publish and reload messages
+    Task { @MainActor in
+      MessagesPublisher.shared.messagesReload(peer: peerId)
     }
   }
 }

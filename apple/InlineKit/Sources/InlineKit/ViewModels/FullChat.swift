@@ -183,12 +183,19 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   public func refetchChatView() {
     Log.shared.debug("Refetching chat view for peer \(peer)")
+//    Task {
+//      do {
+//        return try await DataManager.shared.getChatHistory(peerUserId: nil, peerThreadId: nil, peerId: peer)
+//      } catch {
+//        Log.shared.error("Failed to refetch chat view \(error)")
+//      }
+//    }
+
     Task {
-      do {
-        return try await DataManager.shared.getChatHistory(peerUserId: nil, peerThreadId: nil, peerId: peer)
-      } catch {
-        Log.shared.error("Failed to refetch chat view \(error)")
-      }
+      await Realtime.shared
+        .invokeWithHandler(.getChatHistory, input: .getChatHistory(.with { input in
+          input.peerID = peer.toInputPeer()
+        }))
     }
 
     // Refetch user info (online, lastSeen)

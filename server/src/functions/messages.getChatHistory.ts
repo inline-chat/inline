@@ -22,7 +22,11 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
   const inputPeer = input.peerId
 
   // get messages
-  const messages = await MessageModel.getMessages(inputPeer, { currentUserId: context.currentUserId })
+  const messages = await MessageModel.getMessages(inputPeer, {
+    offsetId: input.offsetId,
+    limit: input.limit,
+    currentUserId: context.currentUserId,
+  })
 
   // encode messages
   const encodedMessages = messages.map((message) =>
