@@ -5,7 +5,9 @@ import { connectionManager } from "@in/server/ws/connections"
 import { getMe } from "@in/server/realtime/handlers/getMe"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { deleteMessage } from "@in/server/realtime/handlers/deleteMessage"
+import { deleteMessage } from "@in/server/realtime/handlers/messages.deleteMessage"
+import { sendMessage } from "@in/server/realtime/handlers/messages.sendMessage"
+import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHistory"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -26,6 +28,22 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await deleteMessage(call.input.deleteMessages, handlerContext)
       return { oneofKind: "deleteMessages", deleteMessages: result }
+    }
+
+    case Method.SEND_MESSAGE: {
+      if (call.input.oneofKind !== "sendMessage") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await sendMessage(call.input.sendMessage, handlerContext)
+      return { oneofKind: "sendMessage", sendMessage: result }
+    }
+
+    case Method.GET_CHAT_HISTORY: {
+      if (call.input.oneofKind !== "getChatHistory") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await getChatHistory(call.input.getChatHistory, handlerContext)
+      return { oneofKind: "getChatHistory", getChatHistory: result }
     }
 
     default:

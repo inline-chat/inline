@@ -32,6 +32,10 @@ export const ApiError = {
   FILE_NOT_FOUND: ["FILE_NOT_FOUND", 400, "The file does not exist or you don't have access to it"],
   MSG_ID_INVALID: ["MSG_ID_INVALID", 400, "The message id is invalid"],
   CHAT_ID_INVALID: ["CHAT_ID_INVALID", 400, "The chat id is invalid"],
+  VIDEO_INVALID_EXTENSION: ["VIDEO_INVALID_EXTENSION", 400, "The video extension is not supported or invalid"],
+  VIDEO_INVALID_DIMENSIONS: ["VIDEO_INVALID_DIMENSIONS", 400, "The video dimensions are invalid"],
+  VIDEO_INVALID_TYPE: ["VIDEO_INVALID_TYPE", 400, "The video type is not supported or invalid"],
+  DOCUMENT_INVALID_EXTENSION: ["DOCUMENT_INVALID_EXTENSION", 400, "The document extension is not supported or invalid"],
 
   // 404 NOT_FOUND
   METHOD_NOT_FOUND: ["METHOD_NOT_FOUND", 404, "Method not found"],
