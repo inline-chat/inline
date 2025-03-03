@@ -414,7 +414,7 @@ export interface Message {
  */
 export interface MessageAttachments {
     /**
-     * @generated from protobuf field: repeated MessageAttachment attachments = 4;
+     * @generated from protobuf field: repeated MessageAttachment attachments = 1;
      */
     attachments: MessageAttachment[];
 }
@@ -423,20 +423,16 @@ export interface MessageAttachments {
  */
 export interface MessageAttachment {
     /**
-     * @generated from protobuf field: int64 message_id = 2;
+     * @generated from protobuf field: int64 message_id = 1;
      */
     messageId: bigint;
-    /**
-     * @generated from protobuf field: int64 external_task_id = 3;
-     */
-    externalTaskId: bigint;
     /**
      * @generated from protobuf oneof: attachment
      */
     attachment: {
         oneofKind: "externalTask";
         /**
-         * @generated from protobuf field: MessageAttachmentExternalTask external_task = 4;
+         * @generated from protobuf field: MessageAttachmentExternalTask external_task = 2;
          */
         externalTask: MessageAttachmentExternalTask;
     } | {
@@ -448,6 +444,8 @@ export interface MessageAttachment {
  */
 export interface MessageAttachmentExternalTask {
     /**
+     * ID of external task in our database
+     *
      * @generated from protobuf field: int64 id = 1;
      */
     id: bigint;
@@ -2231,7 +2229,7 @@ export const Message = new Message$Type();
 class MessageAttachments$Type extends MessageType<MessageAttachments> {
     constructor() {
         super("MessageAttachments", [
-            { no: 4, name: "attachments", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => MessageAttachment }
+            { no: 1, name: "attachments", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => MessageAttachment }
         ]);
     }
     create(value?: PartialMessage<MessageAttachments>): MessageAttachments {
@@ -2246,7 +2244,7 @@ class MessageAttachments$Type extends MessageType<MessageAttachments> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* repeated MessageAttachment attachments */ 4:
+                case /* repeated MessageAttachment attachments */ 1:
                     message.attachments.push(MessageAttachment.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
@@ -2261,9 +2259,9 @@ class MessageAttachments$Type extends MessageType<MessageAttachments> {
         return message;
     }
     internalBinaryWrite(message: MessageAttachments, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* repeated MessageAttachment attachments = 4; */
+        /* repeated MessageAttachment attachments = 1; */
         for (let i = 0; i < message.attachments.length; i++)
-            MessageAttachment.internalBinaryWrite(message.attachments[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+            MessageAttachment.internalBinaryWrite(message.attachments[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2278,15 +2276,13 @@ export const MessageAttachments = new MessageAttachments$Type();
 class MessageAttachment$Type extends MessageType<MessageAttachment> {
     constructor() {
         super("MessageAttachment", [
-            { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "external_task_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 4, name: "external_task", kind: "message", oneof: "attachment", T: () => MessageAttachmentExternalTask }
+            { no: 1, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "external_task", kind: "message", oneof: "attachment", T: () => MessageAttachmentExternalTask }
         ]);
     }
     create(value?: PartialMessage<MessageAttachment>): MessageAttachment {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.messageId = 0n;
-        message.externalTaskId = 0n;
         message.attachment = { oneofKind: undefined };
         if (value !== undefined)
             reflectionMergePartial<MessageAttachment>(this, message, value);
@@ -2297,13 +2293,10 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* int64 message_id */ 2:
+                case /* int64 message_id */ 1:
                     message.messageId = reader.int64().toBigInt();
                     break;
-                case /* int64 external_task_id */ 3:
-                    message.externalTaskId = reader.int64().toBigInt();
-                    break;
-                case /* MessageAttachmentExternalTask external_task */ 4:
+                case /* MessageAttachmentExternalTask external_task */ 2:
                     message.attachment = {
                         oneofKind: "externalTask",
                         externalTask: MessageAttachmentExternalTask.internalBinaryRead(reader, reader.uint32(), options, (message.attachment as any).externalTask)
@@ -2321,15 +2314,12 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
         return message;
     }
     internalBinaryWrite(message: MessageAttachment, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* int64 message_id = 2; */
+        /* int64 message_id = 1; */
         if (message.messageId !== 0n)
-            writer.tag(2, WireType.Varint).int64(message.messageId);
-        /* int64 external_task_id = 3; */
-        if (message.externalTaskId !== 0n)
-            writer.tag(3, WireType.Varint).int64(message.externalTaskId);
-        /* MessageAttachmentExternalTask external_task = 4; */
+            writer.tag(1, WireType.Varint).int64(message.messageId);
+        /* MessageAttachmentExternalTask external_task = 2; */
         if (message.attachment.oneofKind === "externalTask")
-            MessageAttachmentExternalTask.internalBinaryWrite(message.attachment.externalTask, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+            MessageAttachmentExternalTask.internalBinaryWrite(message.attachment.externalTask, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

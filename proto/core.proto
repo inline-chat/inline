@@ -166,19 +166,21 @@ message Message {
 }
 
 message MessageAttachments {
-  repeated MessageAttachment attachments = 4;
+  repeated MessageAttachment attachments = 1;
 }
 
 message MessageAttachment {
-  int64 message_id = 2;
-  int64 external_task_id = 3;
+  int64 message_id = 1;
+
   oneof attachment {
-    MessageAttachmentExternalTask external_task = 4;
+    MessageAttachmentExternalTask external_task = 2;
   }
 }
 
 message MessageAttachmentExternalTask {
+  // ID of external task in our database
   int64 id = 1;
+
   // ID of the task in the external application
   string task_id = 2;
 
