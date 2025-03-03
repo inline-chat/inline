@@ -23,7 +23,7 @@ import {
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { and, desc, eq, inArray } from "drizzle-orm"
+import { and, desc, eq, gt, inArray, lt } from "drizzle-orm"
 
 const log = new Log("MessageModel", LogLevel.TRACE)
 
@@ -53,7 +53,7 @@ export type DbFullMessage = Omit<DbMessage, "textEncrypted" | "textIv" | "textTa
 
 async function getMessages(
   inputPeer: InputPeer,
-  { currentUserId }: { currentUserId: number },
+  { currentUserId, offsetId, limit }: { currentUserId: number; offsetId?: bigint; limit?: number },
 ): Promise<DbFullMessage[]> {
   let chatId = await ChatModel.getChatIdFromInputPeer(inputPeer, { currentUserId })
 
@@ -61,9 +61,14 @@ async function getMessages(
     throw ModelError.ChatInvalid
   }
 
+  const offsetIdNumber = offsetId ? Number(offsetId) : undefined
+
   let result = await db.query.messages.findMany({
-    where: eq(messages.chatId, chatId),
+    where: offsetIdNumber
+      ? and(eq(messages.chatId, chatId), lt(messages.messageId, offsetIdNumber))
+      : eq(messages.chatId, chatId),
     orderBy: desc(messages.messageId),
+    limit: limit ?? 60,
     with: {
       from: true,
       reactions: true,
