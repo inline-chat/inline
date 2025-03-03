@@ -585,7 +585,8 @@ class UIMessageView: UIView {
         userName: userName,
         outgoing: outgoing,
         url: URL(string: fullAttachment.externalTask?.url ?? ""),
-        issueIdentifier: fullAttachment.externalTask?.number
+        issueIdentifier: fullAttachment.externalTask?.number,
+        title: fullAttachment.externalTask?.title
       )
     }
   }
