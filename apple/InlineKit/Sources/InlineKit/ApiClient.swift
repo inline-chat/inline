@@ -374,15 +374,28 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public func createLinearIssue(
     text: String,
     messageId: Int64,
-    chatId: Int64
+    peerId: Peer
   ) async throws -> CreateLinearIssue {
-    try await postRequest(
+    var body: [String: Any] = [
+      "text": text,
+      "messageId": messageId,
+    ]
+
+    // Create a proper peerId object structure as expected by the server
+    var peerIdObject: [String: Any] = [:]
+
+    if let userId = peerId.asUserId() {
+      peerIdObject["userId"] = userId
+    } else if let threadId = peerId.asThreadId() {
+      peerIdObject["threadId"] = threadId
+    }
+
+    // Add the peerId object to the body
+    body["peerId"] = peerIdObject
+
+    return try await postRequest(
       .createLinearIssue,
-      body: [
-        "text": text,
-        "messageId": messageId,
-        "chatId": chatId,
-      ],
+      body: body,
       includeToken: true
     )
   }

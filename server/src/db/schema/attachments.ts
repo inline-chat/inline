@@ -40,3 +40,9 @@ export const messageAttachmentsRelations = relations(messageAttachments, ({ one 
     references: [messages.globalId],
   }),
 }))
+
+export type DbMessageAttachment = typeof messageAttachments.$inferSelect
+export type DbNewMessageAttachment = typeof messageAttachments.$inferInsert
+
+export type DbExternalTask = typeof externalTasks.$inferSelect
+export type DbNewExternalTask = typeof externalTasks.$inferInsert
