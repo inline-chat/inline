@@ -543,6 +543,18 @@ export interface MessageMedia {
          */
         photo: MessagePhoto;
     } | {
+        oneofKind: "video";
+        /**
+         * @generated from protobuf field: MessageVideo video = 2;
+         */
+        video: MessageVideo;
+    } | {
+        oneofKind: "document";
+        /**
+         * @generated from protobuf field: MessageDocument document = 3;
+         */
+        document: MessageDocument;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -554,6 +566,114 @@ export interface MessagePhoto {
      * @generated from protobuf field: Photo photo = 1;
      */
     photo?: Photo;
+}
+/**
+ * @generated from protobuf message MessageVideo
+ */
+export interface MessageVideo {
+    /**
+     * @generated from protobuf field: Video video = 1;
+     */
+    video?: Video;
+}
+/**
+ * @generated from protobuf message MessageDocument
+ */
+export interface MessageDocument {
+    /**
+     * @generated from protobuf field: Document document = 1;
+     */
+    document?: Document;
+}
+/**
+ * @generated from protobuf message Video
+ */
+export interface Video {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * Date of upload
+     *
+     * @generated from protobuf field: int64 date = 2;
+     */
+    date: bigint;
+    /**
+     * Width of the video
+     *
+     * @generated from protobuf field: int32 w = 3;
+     */
+    w: number;
+    /**
+     * Height of the video
+     *
+     * @generated from protobuf field: int32 h = 4;
+     */
+    h: number;
+    /**
+     * Duration of the video in seconds
+     *
+     * @generated from protobuf field: int32 duration = 5;
+     */
+    duration: number;
+    /**
+     * File size
+     *
+     * @generated from protobuf field: int32 size = 6;
+     */
+    size: number;
+    /**
+     * Thumbnail of the video
+     *
+     * @generated from protobuf field: optional Photo photo = 7;
+     */
+    photo?: Photo;
+    /**
+     * CDN URL
+     *
+     * @generated from protobuf field: optional string cdn_url = 8;
+     */
+    cdnUrl?: string;
+}
+/**
+ * @generated from protobuf message Document
+ */
+export interface Document {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * Original file name
+     *
+     * @generated from protobuf field: string file_name = 2;
+     */
+    fileName: string;
+    /**
+     * MIME type of the file
+     *
+     * @generated from protobuf field: string mime_type = 3;
+     */
+    mimeType: string;
+    /**
+     * File size
+     *
+     * @generated from protobuf field: int32 size = 4;
+     */
+    size: number;
+    /**
+     * CDN URL
+     *
+     * @generated from protobuf field: optional string cdn_url = 5;
+     */
+    cdnUrl?: string;
+    /**
+     * Date of upload
+     *
+     * @generated from protobuf field: int64 date = 6;
+     */
+    date: bigint;
 }
 /**
  * Photo for message media, profile photo, space photo, or chat photo
@@ -586,9 +706,9 @@ export interface Photo {
     /**
      * Unique identifier of the file
      *
-     * @generated from protobuf field: string file_unique_id = 100;
+     * @generated from protobuf field: optional string file_unique_id = 100;
      */
-    fileUniqueId: string;
+    fileUniqueId?: string;
 }
 /**
  * @generated from protobuf enum Photo.Format
@@ -740,6 +860,18 @@ export interface RpcCall {
          */
         deleteMessages: DeleteMessagesInput;
     } | {
+        oneofKind: "sendMessage";
+        /**
+         * @generated from protobuf field: SendMessageInput sendMessage = 5;
+         */
+        sendMessage: SendMessageInput;
+    } | {
+        oneofKind: "getChatHistory";
+        /**
+         * @generated from protobuf field: GetChatHistoryInput getChatHistory = 6;
+         */
+        getChatHistory: GetChatHistoryInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -772,6 +904,18 @@ export interface RpcResult {
          * @generated from protobuf field: DeleteMessagesResult deleteMessages = 4;
          */
         deleteMessages: DeleteMessagesResult;
+    } | {
+        oneofKind: "sendMessage";
+        /**
+         * @generated from protobuf field: SendMessageResult sendMessage = 5;
+         */
+        sendMessage: SendMessageResult;
+    } | {
+        oneofKind: "getChatHistory";
+        /**
+         * @generated from protobuf field: GetChatHistoryResult getChatHistory = 6;
+         */
+        getChatHistory: GetChatHistoryResult;
     } | {
         oneofKind: undefined;
     };
@@ -833,6 +977,140 @@ export interface DeleteMessagesResult {
      * @generated from protobuf field: repeated Update updates = 1;
      */
     updates: Update[];
+}
+/**
+ * @generated from protobuf message InputMedia
+ */
+export interface InputMedia {
+    /**
+     * @generated from protobuf oneof: media
+     */
+    media: {
+        oneofKind: "photo";
+        /**
+         * @generated from protobuf field: InputMediaPhoto photo = 1;
+         */
+        photo: InputMediaPhoto;
+    } | {
+        oneofKind: "video";
+        /**
+         * @generated from protobuf field: InputMediaVideo video = 2;
+         */
+        video: InputMediaVideo;
+    } | {
+        oneofKind: "document";
+        /**
+         * @generated from protobuf field: InputMediaDocument document = 3;
+         */
+        document: InputMediaDocument;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message InputMediaPhoto
+ */
+export interface InputMediaPhoto {
+    /**
+     * ID of the photo that we have uploaded
+     *
+     * @generated from protobuf field: int64 photo_id = 1;
+     */
+    photoId: bigint;
+}
+/**
+ * @generated from protobuf message InputMediaVideo
+ */
+export interface InputMediaVideo {
+    /**
+     * ID of the video that we have uploaded
+     *
+     * @generated from protobuf field: int64 video_id = 1;
+     */
+    videoId: bigint;
+}
+/**
+ * @generated from protobuf message InputMediaDocument
+ */
+export interface InputMediaDocument {
+    /**
+     * ID of the document that we have uploaded
+     *
+     * @generated from protobuf field: int64 document_id = 1;
+     */
+    documentId: bigint;
+}
+/**
+ * @generated from protobuf message SendMessageInput
+ */
+export interface SendMessageInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Message text or caption
+     *
+     * @generated from protobuf field: optional string message = 2;
+     */
+    message?: string;
+    /**
+     * Message ID of the message being replied to
+     *
+     * @generated from protobuf field: optional int64 reply_to_msg_id = 3;
+     */
+    replyToMsgId?: bigint;
+    /**
+     * Random ID to prevent duplicate messages
+     *
+     * @generated from protobuf field: optional int64 random_id = 4;
+     */
+    randomId?: bigint;
+    /**
+     * Media to send
+     *
+     * @generated from protobuf field: optional InputMedia media = 5;
+     */
+    media?: InputMedia;
+}
+/**
+ * @generated from protobuf message SendMessageResult
+ */
+export interface SendMessageResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 2;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message GetChatHistoryInput
+ */
+export interface GetChatHistoryInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * ID of the message to start from
+     *
+     * @generated from protobuf field: optional int64 offset_id = 2;
+     */
+    offsetId?: bigint;
+    /**
+     * Number of messages to return
+     *
+     * @generated from protobuf field: optional int32 limit = 3;
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf message GetChatHistoryResult
+ */
+export interface GetChatHistoryResult {
+    /**
+     * @generated from protobuf field: repeated Message messages = 1;
+     */
+    messages: Message[];
 }
 /**
  *  Updates Subsystem
@@ -1073,7 +1351,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: DELETE_MESSAGES = 4;
      */
-    DELETE_MESSAGES = 4
+    DELETE_MESSAGES = 4,
+    /**
+     * @generated from protobuf enum value: GET_CHAT_HISTORY = 5;
+     */
+    GET_CHAT_HISTORY = 5
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -2445,7 +2727,9 @@ export const MessageAttachmentExternalTask = new MessageAttachmentExternalTask$T
 class MessageMedia$Type extends MessageType<MessageMedia> {
     constructor() {
         super("MessageMedia", [
-            { no: 1, name: "photo", kind: "message", oneof: "media", T: () => MessagePhoto }
+            { no: 1, name: "photo", kind: "message", oneof: "media", T: () => MessagePhoto },
+            { no: 2, name: "video", kind: "message", oneof: "media", T: () => MessageVideo },
+            { no: 3, name: "document", kind: "message", oneof: "media", T: () => MessageDocument }
         ]);
     }
     create(value?: PartialMessage<MessageMedia>): MessageMedia {
@@ -2466,6 +2750,18 @@ class MessageMedia$Type extends MessageType<MessageMedia> {
                         photo: MessagePhoto.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).photo)
                     };
                     break;
+                case /* MessageVideo video */ 2:
+                    message.media = {
+                        oneofKind: "video",
+                        video: MessageVideo.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).video)
+                    };
+                    break;
+                case /* MessageDocument document */ 3:
+                    message.media = {
+                        oneofKind: "document",
+                        document: MessageDocument.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).document)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2481,6 +2777,12 @@ class MessageMedia$Type extends MessageType<MessageMedia> {
         /* MessagePhoto photo = 1; */
         if (message.media.oneofKind === "photo")
             MessagePhoto.internalBinaryWrite(message.media.photo, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* MessageVideo video = 2; */
+        if (message.media.oneofKind === "video")
+            MessageVideo.internalBinaryWrite(message.media.video, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* MessageDocument document = 3; */
+        if (message.media.oneofKind === "document")
+            MessageDocument.internalBinaryWrite(message.media.document, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2538,6 +2840,285 @@ class MessagePhoto$Type extends MessageType<MessagePhoto> {
  */
 export const MessagePhoto = new MessagePhoto$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class MessageVideo$Type extends MessageType<MessageVideo> {
+    constructor() {
+        super("MessageVideo", [
+            { no: 1, name: "video", kind: "message", T: () => Video }
+        ]);
+    }
+    create(value?: PartialMessage<MessageVideo>): MessageVideo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MessageVideo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageVideo): MessageVideo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Video video */ 1:
+                    message.video = Video.internalBinaryRead(reader, reader.uint32(), options, message.video);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageVideo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Video video = 1; */
+        if (message.video)
+            Video.internalBinaryWrite(message.video, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageVideo
+ */
+export const MessageVideo = new MessageVideo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageDocument$Type extends MessageType<MessageDocument> {
+    constructor() {
+        super("MessageDocument", [
+            { no: 1, name: "document", kind: "message", T: () => Document }
+        ]);
+    }
+    create(value?: PartialMessage<MessageDocument>): MessageDocument {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MessageDocument>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageDocument): MessageDocument {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Document document */ 1:
+                    message.document = Document.internalBinaryRead(reader, reader.uint32(), options, message.document);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageDocument, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Document document = 1; */
+        if (message.document)
+            Document.internalBinaryWrite(message.document, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageDocument
+ */
+export const MessageDocument = new MessageDocument$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Video$Type extends MessageType<Video> {
+    constructor() {
+        super("Video", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "w", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "h", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "duration", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 6, name: "size", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 7, name: "photo", kind: "message", T: () => Photo },
+            { no: 8, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Video>): Video {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.date = 0n;
+        message.w = 0;
+        message.h = 0;
+        message.duration = 0;
+        message.size = 0;
+        if (value !== undefined)
+            reflectionMergePartial<Video>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Video): Video {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* int64 date */ 2:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                case /* int32 w */ 3:
+                    message.w = reader.int32();
+                    break;
+                case /* int32 h */ 4:
+                    message.h = reader.int32();
+                    break;
+                case /* int32 duration */ 5:
+                    message.duration = reader.int32();
+                    break;
+                case /* int32 size */ 6:
+                    message.size = reader.int32();
+                    break;
+                case /* optional Photo photo */ 7:
+                    message.photo = Photo.internalBinaryRead(reader, reader.uint32(), options, message.photo);
+                    break;
+                case /* optional string cdn_url */ 8:
+                    message.cdnUrl = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Video, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* int64 date = 2; */
+        if (message.date !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.date);
+        /* int32 w = 3; */
+        if (message.w !== 0)
+            writer.tag(3, WireType.Varint).int32(message.w);
+        /* int32 h = 4; */
+        if (message.h !== 0)
+            writer.tag(4, WireType.Varint).int32(message.h);
+        /* int32 duration = 5; */
+        if (message.duration !== 0)
+            writer.tag(5, WireType.Varint).int32(message.duration);
+        /* int32 size = 6; */
+        if (message.size !== 0)
+            writer.tag(6, WireType.Varint).int32(message.size);
+        /* optional Photo photo = 7; */
+        if (message.photo)
+            Photo.internalBinaryWrite(message.photo, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional string cdn_url = 8; */
+        if (message.cdnUrl !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.cdnUrl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Video
+ */
+export const Video = new Video$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Document$Type extends MessageType<Document> {
+    constructor() {
+        super("Document", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "file_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "size", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Document>): Document {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.fileName = "";
+        message.mimeType = "";
+        message.size = 0;
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<Document>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Document): Document {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* string file_name */ 2:
+                    message.fileName = reader.string();
+                    break;
+                case /* string mime_type */ 3:
+                    message.mimeType = reader.string();
+                    break;
+                case /* int32 size */ 4:
+                    message.size = reader.int32();
+                    break;
+                case /* optional string cdn_url */ 5:
+                    message.cdnUrl = reader.string();
+                    break;
+                case /* int64 date */ 6:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Document, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* string file_name = 2; */
+        if (message.fileName !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.fileName);
+        /* string mime_type = 3; */
+        if (message.mimeType !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.mimeType);
+        /* int32 size = 4; */
+        if (message.size !== 0)
+            writer.tag(4, WireType.Varint).int32(message.size);
+        /* optional string cdn_url = 5; */
+        if (message.cdnUrl !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.cdnUrl);
+        /* int64 date = 6; */
+        if (message.date !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Document
+ */
+export const Document = new Document$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class Photo$Type extends MessageType<Photo> {
     constructor() {
         super("Photo", [
@@ -2545,7 +3126,7 @@ class Photo$Type extends MessageType<Photo> {
             { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "sizes", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => PhotoSize },
             { no: 4, name: "format", kind: "enum", T: () => ["Photo.Format", Photo_Format, "FORMAT_"] },
-            { no: 100, name: "file_unique_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Photo>): Photo {
@@ -2554,7 +3135,6 @@ class Photo$Type extends MessageType<Photo> {
         message.date = 0n;
         message.sizes = [];
         message.format = 0;
-        message.fileUniqueId = "";
         if (value !== undefined)
             reflectionMergePartial<Photo>(this, message, value);
         return message;
@@ -2576,7 +3156,7 @@ class Photo$Type extends MessageType<Photo> {
                 case /* Photo.Format format */ 4:
                     message.format = reader.int32();
                     break;
-                case /* string file_unique_id */ 100:
+                case /* optional string file_unique_id */ 100:
                     message.fileUniqueId = reader.string();
                     break;
                 default:
@@ -2603,8 +3183,8 @@ class Photo$Type extends MessageType<Photo> {
         /* Photo.Format format = 4; */
         if (message.format !== 0)
             writer.tag(4, WireType.Varint).int32(message.format);
-        /* string file_unique_id = 100; */
-        if (message.fileUniqueId !== "")
+        /* optional string file_unique_id = 100; */
+        if (message.fileUniqueId !== undefined)
             writer.tag(100, WireType.LengthDelimited).string(message.fileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
@@ -2771,7 +3351,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 1, name: "method", kind: "enum", T: () => ["Method", Method] },
             { no: 2, name: "getMe", kind: "message", oneof: "input", T: () => GetMeInput },
             { no: 3, name: "getPeerPhoto", kind: "message", oneof: "input", T: () => GetPeerPhotoInput },
-            { no: 4, name: "deleteMessages", kind: "message", oneof: "input", T: () => DeleteMessagesInput }
+            { no: 4, name: "deleteMessages", kind: "message", oneof: "input", T: () => DeleteMessagesInput },
+            { no: 5, name: "sendMessage", kind: "message", oneof: "input", T: () => SendMessageInput },
+            { no: 6, name: "getChatHistory", kind: "message", oneof: "input", T: () => GetChatHistoryInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -2808,6 +3390,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         deleteMessages: DeleteMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteMessages)
                     };
                     break;
+                case /* SendMessageInput sendMessage */ 5:
+                    message.input = {
+                        oneofKind: "sendMessage",
+                        sendMessage: SendMessageInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).sendMessage)
+                    };
+                    break;
+                case /* GetChatHistoryInput getChatHistory */ 6:
+                    message.input = {
+                        oneofKind: "getChatHistory",
+                        getChatHistory: GetChatHistoryInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getChatHistory)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2832,6 +3426,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DeleteMessagesInput deleteMessages = 4; */
         if (message.input.oneofKind === "deleteMessages")
             DeleteMessagesInput.internalBinaryWrite(message.input.deleteMessages, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* SendMessageInput sendMessage = 5; */
+        if (message.input.oneofKind === "sendMessage")
+            SendMessageInput.internalBinaryWrite(message.input.sendMessage, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* GetChatHistoryInput getChatHistory = 6; */
+        if (message.input.oneofKind === "getChatHistory")
+            GetChatHistoryInput.internalBinaryWrite(message.input.getChatHistory, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2849,7 +3449,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 1, name: "req_msg_id", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "getMe", kind: "message", oneof: "result", T: () => GetMeResult },
             { no: 3, name: "getPeerPhoto", kind: "message", oneof: "result", T: () => GetPeerPhotoResult },
-            { no: 4, name: "deleteMessages", kind: "message", oneof: "result", T: () => DeleteMessagesResult }
+            { no: 4, name: "deleteMessages", kind: "message", oneof: "result", T: () => DeleteMessagesResult },
+            { no: 5, name: "sendMessage", kind: "message", oneof: "result", T: () => SendMessageResult },
+            { no: 6, name: "getChatHistory", kind: "message", oneof: "result", T: () => GetChatHistoryResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -2886,6 +3488,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         deleteMessages: DeleteMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteMessages)
                     };
                     break;
+                case /* SendMessageResult sendMessage */ 5:
+                    message.result = {
+                        oneofKind: "sendMessage",
+                        sendMessage: SendMessageResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).sendMessage)
+                    };
+                    break;
+                case /* GetChatHistoryResult getChatHistory */ 6:
+                    message.result = {
+                        oneofKind: "getChatHistory",
+                        getChatHistory: GetChatHistoryResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getChatHistory)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2910,6 +3524,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DeleteMessagesResult deleteMessages = 4; */
         if (message.result.oneofKind === "deleteMessages")
             DeleteMessagesResult.internalBinaryWrite(message.result.deleteMessages, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* SendMessageResult sendMessage = 5; */
+        if (message.result.oneofKind === "sendMessage")
+            SendMessageResult.internalBinaryWrite(message.result.sendMessage, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* GetChatHistoryResult getChatHistory = 6; */
+        if (message.result.oneofKind === "getChatHistory")
+            GetChatHistoryResult.internalBinaryWrite(message.result.getChatHistory, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3200,6 +3820,445 @@ class DeleteMessagesResult$Type extends MessageType<DeleteMessagesResult> {
  * @generated MessageType for protobuf message DeleteMessagesResult
  */
 export const DeleteMessagesResult = new DeleteMessagesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputMedia$Type extends MessageType<InputMedia> {
+    constructor() {
+        super("InputMedia", [
+            { no: 1, name: "photo", kind: "message", oneof: "media", T: () => InputMediaPhoto },
+            { no: 2, name: "video", kind: "message", oneof: "media", T: () => InputMediaVideo },
+            { no: 3, name: "document", kind: "message", oneof: "media", T: () => InputMediaDocument }
+        ]);
+    }
+    create(value?: PartialMessage<InputMedia>): InputMedia {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.media = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<InputMedia>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputMedia): InputMedia {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputMediaPhoto photo */ 1:
+                    message.media = {
+                        oneofKind: "photo",
+                        photo: InputMediaPhoto.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).photo)
+                    };
+                    break;
+                case /* InputMediaVideo video */ 2:
+                    message.media = {
+                        oneofKind: "video",
+                        video: InputMediaVideo.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).video)
+                    };
+                    break;
+                case /* InputMediaDocument document */ 3:
+                    message.media = {
+                        oneofKind: "document",
+                        document: InputMediaDocument.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).document)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputMedia, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputMediaPhoto photo = 1; */
+        if (message.media.oneofKind === "photo")
+            InputMediaPhoto.internalBinaryWrite(message.media.photo, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* InputMediaVideo video = 2; */
+        if (message.media.oneofKind === "video")
+            InputMediaVideo.internalBinaryWrite(message.media.video, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* InputMediaDocument document = 3; */
+        if (message.media.oneofKind === "document")
+            InputMediaDocument.internalBinaryWrite(message.media.document, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputMedia
+ */
+export const InputMedia = new InputMedia$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputMediaPhoto$Type extends MessageType<InputMediaPhoto> {
+    constructor() {
+        super("InputMediaPhoto", [
+            { no: 1, name: "photo_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InputMediaPhoto>): InputMediaPhoto {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.photoId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<InputMediaPhoto>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputMediaPhoto): InputMediaPhoto {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 photo_id */ 1:
+                    message.photoId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputMediaPhoto, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 photo_id = 1; */
+        if (message.photoId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.photoId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputMediaPhoto
+ */
+export const InputMediaPhoto = new InputMediaPhoto$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputMediaVideo$Type extends MessageType<InputMediaVideo> {
+    constructor() {
+        super("InputMediaVideo", [
+            { no: 1, name: "video_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InputMediaVideo>): InputMediaVideo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.videoId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<InputMediaVideo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputMediaVideo): InputMediaVideo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 video_id */ 1:
+                    message.videoId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputMediaVideo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 video_id = 1; */
+        if (message.videoId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.videoId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputMediaVideo
+ */
+export const InputMediaVideo = new InputMediaVideo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputMediaDocument$Type extends MessageType<InputMediaDocument> {
+    constructor() {
+        super("InputMediaDocument", [
+            { no: 1, name: "document_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InputMediaDocument>): InputMediaDocument {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.documentId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<InputMediaDocument>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputMediaDocument): InputMediaDocument {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 document_id */ 1:
+                    message.documentId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputMediaDocument, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 document_id = 1; */
+        if (message.documentId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.documentId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputMediaDocument
+ */
+export const InputMediaDocument = new InputMediaDocument$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SendMessageInput$Type extends MessageType<SendMessageInput> {
+    constructor() {
+        super("SendMessageInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "reply_to_msg_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "random_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "media", kind: "message", T: () => InputMedia }
+        ]);
+    }
+    create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SendMessageInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SendMessageInput): SendMessageInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional string message */ 2:
+                    message.message = reader.string();
+                    break;
+                case /* optional int64 reply_to_msg_id */ 3:
+                    message.replyToMsgId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 random_id */ 4:
+                    message.randomId = reader.int64().toBigInt();
+                    break;
+                case /* optional InputMedia media */ 5:
+                    message.media = InputMedia.internalBinaryRead(reader, reader.uint32(), options, message.media);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SendMessageInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional string message = 2; */
+        if (message.message !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.message);
+        /* optional int64 reply_to_msg_id = 3; */
+        if (message.replyToMsgId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.replyToMsgId);
+        /* optional int64 random_id = 4; */
+        if (message.randomId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.randomId);
+        /* optional InputMedia media = 5; */
+        if (message.media)
+            InputMedia.internalBinaryWrite(message.media, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SendMessageInput
+ */
+export const SendMessageInput = new SendMessageInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SendMessageResult$Type extends MessageType<SendMessageResult> {
+    constructor() {
+        super("SendMessageResult", [
+            { no: 2, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<SendMessageResult>): SendMessageResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<SendMessageResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SendMessageResult): SendMessageResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 2:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SendMessageResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 2; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SendMessageResult
+ */
+export const SendMessageResult = new SendMessageResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetChatHistoryInput$Type extends MessageType<GetChatHistoryInput> {
+    constructor() {
+        super("GetChatHistoryInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "offset_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetChatHistoryInput>): GetChatHistoryInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetChatHistoryInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetChatHistoryInput): GetChatHistoryInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional int64 offset_id */ 2:
+                    message.offsetId = reader.int64().toBigInt();
+                    break;
+                case /* optional int32 limit */ 3:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetChatHistoryInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 offset_id = 2; */
+        if (message.offsetId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.offsetId);
+        /* optional int32 limit = 3; */
+        if (message.limit !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetChatHistoryInput
+ */
+export const GetChatHistoryInput = new GetChatHistoryInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
+    constructor() {
+        super("GetChatHistoryResult", [
+            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
+        ]);
+    }
+    create(value?: PartialMessage<GetChatHistoryResult>): GetChatHistoryResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messages = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetChatHistoryResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetChatHistoryResult): GetChatHistoryResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Message messages */ 1:
+                    message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetChatHistoryResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Message messages = 1; */
+        for (let i = 0; i < message.messages.length; i++)
+            Message.internalBinaryWrite(message.messages[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetChatHistoryResult
+ */
+export const GetChatHistoryResult = new GetChatHistoryResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Update$Type extends MessageType<Update> {
     constructor() {
