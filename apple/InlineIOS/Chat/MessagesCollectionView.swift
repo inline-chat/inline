@@ -400,14 +400,14 @@ private extension MessagesCollectionView {
           snapshot.deleteItems(ids)
           dataSource.apply(snapshot, animatingDifferences: true)
 
-        case let .updated(newMessages, _):
+        case let .updated(newMessages, _, animated):
 
           var snapshot = dataSource.snapshot()
           let ids = newMessages.map(\.id)
 
           snapshot.reconfigureItems(ids)
 
-          dataSource.apply(snapshot, animatingDifferences: true)
+          dataSource.apply(snapshot, animatingDifferences: animated ?? false)
 
         case .reload:
           setInitialData()
