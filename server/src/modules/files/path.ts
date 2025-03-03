@@ -1,7 +1,6 @@
 import { getR2 } from "@in/server/libs/r2"
 
 export { FILES_PATH_PREFIX } from "@in/server/config"
-import { FILES_PATH_PREFIX } from "@in/server/config"
 
 export const getSignedUrl = (path: string) => {
   let r2 = getR2()
