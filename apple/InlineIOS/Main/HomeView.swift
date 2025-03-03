@@ -1,16 +1,15 @@
+import Auth
 import GRDB
 import InlineKit
 import InlineUI
 import Logger
 import SwiftUI
-
 struct HomeView: View {
   // MARK: - Environment
 
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var onboardingNav: OnboardingNavigation
   @EnvironmentObject private var api: ApiClient
-  @EnvironmentObject private var ws: WebSocketManager
   @EnvironmentObject private var dataManager: DataManager
   @EnvironmentObject private var userData: UserData
   @EnvironmentObject private var notificationHandler: NotificationHandler
