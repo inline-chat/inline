@@ -158,7 +158,21 @@ extension MessageCollectionViewCell {
   }
 
   private func finalizeSwipe(translation: CGPoint, velocity: CGPoint) {
-    let progress = min(abs(translation.x) / 80, 1)
+    let adjustedTranslation = translation.x - initialTranslation
+    let isTrailingSwipe = adjustedTranslation < 0
+
+    // Only trigger for trailing swipes (left direction)
+    guard isTrailingSwipe else {
+      UIView.animate(withDuration: 0.4) {
+        self.messageView?.transform = .identity
+        self.nameLabel.transform = .identity
+        self.avatarHostingController?.view.transform = .identity
+      }
+      resetSwipeState()
+      return
+    }
+
+    let progress = min(abs(adjustedTranslation) / 80, 1)
     let shouldTrigger = progress > 0.7 || abs(velocity.x) > 600
 
     if shouldTrigger {
