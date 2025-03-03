@@ -171,8 +171,6 @@ public class DataManager: ObservableObject {
   public func deleteSpace(spaceId: Int64) async throws {
     log.debug("deleteSpace")
     do {
-      let _ = try await ApiClient.shared.deleteSpace(spaceId: spaceId)
-
       try await database.dbWriter.write { db in
         try Space.deleteOne(db, id: spaceId)
 
@@ -184,6 +182,9 @@ public class DataManager: ObservableObject {
           .filter(Column("spaceId") == spaceId)
           .deleteAll(db)
       }
+
+      let _ = try await ApiClient.shared.deleteSpace(spaceId: spaceId)
+
     } catch {
       Log.shared.error("Failed to delete space", error: error)
       throw error
@@ -193,8 +194,6 @@ public class DataManager: ObservableObject {
   public func leaveSpace(spaceId: Int64) async throws {
     log.debug("leaveSpace")
     do {
-      let _ = try await ApiClient.shared.leaveSpace(spaceId: spaceId)
-
       try await database.dbWriter.write { db in
         try Space.deleteOne(db, id: spaceId)
 
@@ -206,6 +205,8 @@ public class DataManager: ObservableObject {
           .filter(Column("spaceId") == spaceId)
           .deleteAll(db)
       }
+
+      let _ = try await ApiClient.shared.leaveSpace(spaceId: spaceId)
     } catch {
       Log.shared.error("Failed to leave space", error: error)
       throw error

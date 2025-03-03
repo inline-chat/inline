@@ -248,6 +248,7 @@ public extension AppDatabase {
         t.column("status", .text)
         t.column("assignedUserId", .integer).references("user", column: "id", onDelete: .setNull)
         t.column("url", .text)
+        t.column("number", .text)
         t.column("title", .text)
         t.column("date", .datetime)
         t.column("creating", .boolean).notNull().defaults(to: false)
@@ -399,11 +400,12 @@ public extension AppDatabase {
       )
 
       let directory =
-        if let userProfile = ProjectConfig.userProfile {
-          "Database_\(userProfile)"
-        } else {
-          "Database"
-        }
+        if let userProfile = ProjectConfig.userProfile
+      {
+        "Database_\(userProfile)"
+      } else {
+        "Database"
+      }
 
       let directoryURL = appSupportURL.appendingPathComponent(directory, isDirectory: true)
       try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)

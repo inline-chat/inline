@@ -38,7 +38,8 @@ public struct ExternalTask: FetchableRecord, Identifiable, Codable, Hashable, Pe
     url: String?,
     title: String?,
     date: Date?,
-    creating: Bool = false
+    creating: Bool = false,
+    number: String?
   ) {
     self.application = application
     self.taskId = taskId
@@ -48,5 +49,46 @@ public struct ExternalTask: FetchableRecord, Identifiable, Codable, Hashable, Pe
     self.title = title
     self.date = date
     self.creating = creating
+    self.number = number
+  }
+}
+
+// Inline Protocol
+public extension ExternalTask {
+  init(from externalTask: InlineProtocol.MessageAttachmentExternalTask) {
+    id = externalTask.id
+    application = externalTask.application
+    taskId = externalTask.taskID
+    status = .todo
+    assignedUserId = externalTask.assignedUserID
+    url = externalTask.url
+    title = externalTask.title
+    number = externalTask.number
+    creating = false
+  }
+
+  static func save(
+    _ db: Database, externalTask protocolExternalTask: InlineProtocol.MessageAttachmentExternalTask
+  )
+    throws -> ExternalTask
+  {
+    let existing = try? ExternalTask.fetchOne(db, id: protocolExternalTask.id)
+    var externalTask = ExternalTask(from: protocolExternalTask)
+
+    if let existing {
+      externalTask.application = existing.application
+      externalTask.taskId = existing.taskId
+      externalTask.status = existing.status
+      externalTask.assignedUserId = existing.assignedUserId
+      externalTask.url = existing.url
+      externalTask.title = existing.title
+      externalTask.date = existing.date
+      externalTask.number = existing.number
+      try externalTask.save(db)
+    } else {
+      try externalTask.save(db)
+    }
+
+    return externalTask
   }
 }
