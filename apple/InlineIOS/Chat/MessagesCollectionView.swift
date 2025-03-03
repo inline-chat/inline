@@ -407,7 +407,7 @@ private extension MessagesCollectionView {
 
           snapshot.reconfigureItems(ids)
 
-          dataSource.apply(snapshot, animatingDifferences: false)
+          dataSource.apply(snapshot, animatingDifferences: true)
 
         case .reload:
           setInitialData()
