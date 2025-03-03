@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import Sentry
 import SwiftUI
@@ -5,12 +6,10 @@ import SwiftUI
 @main
 struct InlineApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-  @StateObject var ws = WebSocketManager()
 
   var body: some Scene {
     WindowGroup {
       ContentView()
-        .environmentObject(ws)
         .environment(\.auth, Auth.shared)
         .environment(\.realtime, Realtime.shared)
         .environment(\.transactions, Transactions.shared)

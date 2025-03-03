@@ -67,7 +67,7 @@ actor WebSocketTransport: NSObject, Sendable {
   private var log = Log.scoped("Realtime_TransportWS", enableTracing: true)
   private var pathMonitor: NWPathMonitor?
   private let reconnectionInProgress = ManagedAtomic<Bool>(false)
-  
+
   override init() {
     log.debug("Initializing WebSocketTransport")
     // Create session configuration
@@ -108,7 +108,6 @@ actor WebSocketTransport: NSObject, Sendable {
   // Add background handling methods
   #if os(iOS)
   // Add these properties at the top with other properties
-  private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
   private var isInBackground = false
 
   private func setIsInBackground(_ isInBackground: Bool) {
@@ -136,12 +135,6 @@ actor WebSocketTransport: NSObject, Sendable {
     // Remove notification observers
     #if os(iOS)
     NotificationCenter.default.removeObserver(self)
-
-    // End background task if active
-    if backgroundTask != .invalid {
-      UIApplication.shared.endBackgroundTask(backgroundTask)
-      backgroundTask = .invalid
-    }
     #endif
 
     // Create a detached task to ensure stop() is called
@@ -170,7 +163,7 @@ actor WebSocketTransport: NSObject, Sendable {
       log.trace("Already running")
       return
     }
-    
+
     log.debug("Starting to run")
     running = true
     setupNetworkMonitoring()
@@ -201,7 +194,7 @@ actor WebSocketTransport: NSObject, Sendable {
 
   func stopAndReset() async {
     log.trace("Disconnecting and stopping (manual)")
-    
+
     // Set running to false first to prevent reconnection attempts
     running = false
 
@@ -210,7 +203,7 @@ actor WebSocketTransport: NSObject, Sendable {
 
     // Clear reconnection state
     reconnectionInProgress.store(false, ordering: .releasing)
-    
+
     // Cancel the connection timeout task
     connectionTimeoutTask?.cancel()
     connectionTimeoutTask = nil
@@ -446,8 +439,6 @@ actor WebSocketTransport: NSObject, Sendable {
       attemptReconnection()
     }
   }
-
-  
 
   private func attemptReconnection() {
     guard running else { return }
