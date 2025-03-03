@@ -4,8 +4,10 @@ import Elysia, { t } from "elysia"
 import type { Static } from "elysia"
 import { MAX_FILE_SIZE } from "@in/server/config"
 import { authenticate } from "@in/server/controllers/plugins"
-import { FileTypes } from "@in/server/modules/files/types"
+import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
 import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
+import { uploadDocument } from "@in/server/modules/files/uploadDocument"
+import { uploadVideo } from "@in/server/modules/files/uploadVideo"
 
 export const Input = Type.Object({
   type: Type.Enum(FileTypes),
@@ -21,26 +23,52 @@ export const Input = Type.Object({
       description: "Thumbnail image for video or uncompressed photo (optional)",
     }),
   ),
+
+  // For videos
+  width: Optional(Type.Number()),
+  height: Optional(Type.Number()),
+  duration: Optional(Type.Number()),
+
+  // For documents
+  // photoId: Optional(Type.Number()),
 })
 
 export const Response = Type.Object({
   fileUniqueId: Type.String(),
+  photoId: Type.Optional(Type.Number()),
+  videoId: Type.Optional(Type.Number()),
+  documentId: Type.Optional(Type.Number()),
 })
 
 const handler = async (input: Static<typeof Input>, context: HandlerContext): Promise<Static<typeof Response>> => {
-  let fileUniqueId: string
+  let result: UploadFileResult
 
   switch (input.type) {
     case FileTypes.PHOTO:
-      fileUniqueId = (await uploadPhoto(input.file, { userId: context.currentUserId }))?.fileUniqueId
+      result = await uploadPhoto(input.file, { userId: context.currentUserId })
       break
     case FileTypes.VIDEO:
-      throw new Error("Not implemented")
+      result = await uploadVideo(
+        input.file,
+        {
+          width: input.width ?? 1280,
+          height: input.height ?? 720,
+          duration: input.duration ?? 0,
+        },
+        { userId: context.currentUserId },
+      )
+      break
     case FileTypes.DOCUMENT:
-      throw new Error("Not implemented")
+      result = await uploadDocument(input.file, undefined, { userId: context.currentUserId })
+      break
   }
 
-  return { fileUniqueId }
+  return {
+    fileUniqueId: result.fileUniqueId,
+    photoId: result.photoId,
+    videoId: result.videoId,
+    documentId: result.documentId,
+  }
 }
 
 // Route
