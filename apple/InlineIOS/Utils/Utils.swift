@@ -1,4 +1,5 @@
 import Foundation
+import RealtimeAPI
 
 public extension Date {
   func formatted() -> String {
@@ -26,5 +27,18 @@ public extension Date {
       formatter.dateFormat = "dd/MM/yy"
       return formatter.string(from: self)
     }
+  }
+}
+
+public func getStatusText(_ state: RealtimeAPIState) -> String {
+  switch state {
+    case .connected:
+      "connected"
+    case .connecting:
+      "connecting..."
+    case .updating:
+      "updating..."
+    case .waitingForNetwork:
+      "waiting for network..."
   }
 }
