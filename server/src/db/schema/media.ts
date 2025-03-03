@@ -1,6 +1,7 @@
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import { files } from "@in/server/db/schema/files"
 import { messages } from "@in/server/db/schema/messages"
+import { relations } from "drizzle-orm"
 import { pgTable, serial, integer, text, bigint } from "drizzle-orm/pg-core"
 
 // export const messageMedia = pgTable("message_media", {
@@ -28,14 +29,36 @@ export const photos = pgTable("photos", {
   date: creationDate,
 })
 
+export type DbPhoto = typeof photos.$inferSelect
+export type DBNewPhoto = typeof photos.$inferInsert
+
 export const photoSizes = pgTable("photo_sizes", {
   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
   fileId: integer("file_id").references(() => files.id),
-  photoId: bigint("photo_id", { mode: "bigint" }).references(() => photos.id),
+  photoId: bigint("photo_id", { mode: "number" }).references(() => photos.id),
   size: text("size", { enum: ["b", "c", "d", "e", "f", "y", "x", "w", "v"] }),
   width: integer("width"),
   height: integer("height"),
 })
+
+export type DbPhotoSize = typeof photoSizes.$inferSelect
+export type DBNewPhotoSize = typeof photoSizes.$inferInsert
+
+export const photoRelations = relations(photos, ({ many }) => ({
+  photoSizes: many(photoSizes),
+}))
+
+export const photoSizeRelations = relations(photoSizes, ({ one }) => ({
+  photo: one(photos, {
+    fields: [photoSizes.photoId],
+    references: [photos.id],
+  }),
+
+  file: one(files, {
+    fields: [photoSizes.fileId],
+    references: [files.id],
+  }),
+}))
 
 export const documents = pgTable("documents", {
   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
@@ -51,6 +74,21 @@ export const documents = pgTable("documents", {
   photoId: bigint("photo_id", { mode: "bigint" }).references(() => photos.id),
 })
 
+export type DbDocument = typeof documents.$inferSelect
+export type DBNewDocument = typeof documents.$inferInsert
+
+export const documentRelations = relations(documents, ({ one }) => ({
+  file: one(files, {
+    fields: [documents.fileId],
+    references: [files.id],
+  }),
+
+  photo: one(photos, {
+    fields: [documents.photoId],
+    references: [photos.id],
+  }),
+}))
+
 export const videos = pgTable("videos", {
   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
   fileId: integer("file_id").references(() => files.id),
@@ -63,3 +101,18 @@ export const videos = pgTable("videos", {
   // thumbnail for the video
   photoId: bigint("photo_id", { mode: "bigint" }).references(() => photos.id),
 })
+
+export type DbVideo = typeof videos.$inferSelect
+export type DBNewVideo = typeof videos.$inferInsert
+
+export const videoRelations = relations(videos, ({ one }) => ({
+  file: one(files, {
+    fields: [videos.fileId],
+    references: [files.id],
+  }),
+
+  photo: one(photos, {
+    fields: [videos.photoId],
+    references: [photos.id],
+  }),
+}))

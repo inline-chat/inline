@@ -54,9 +54,9 @@ export const messages = pgTable(
 
     /** media id, photo, video, document, etc */
     mediaType: text("media_type", { enum: ["photo", "video", "document"] }),
-    photoId: bigint("photo_id", { mode: "bigint" }).references(() => photos.id),
-    videoId: bigint("video_id", { mode: "bigint" }).references(() => videos.id),
-    documentId: bigint("document_id", { mode: "bigint" }).references(() => documents.id),
+    photoId: bigint("photo_id", { mode: "number" }).references(() => photos.id),
+    videoId: bigint("video_id", { mode: "number" }).references(() => videos.id),
+    documentId: bigint("document_id", { mode: "number" }).references(() => documents.id),
 
     // --------------------------------------------------------
     // Deprecated fields
@@ -75,6 +75,10 @@ export const messageRelations = relations(messages, ({ one, many }) => ({
   from: one(users, { fields: [messages.fromId], references: [users.id] }),
   file: one(files, { fields: [messages.fileId], references: [files.id] }),
   reactions: many(reactions),
+
+  photo: one(photos, { fields: [messages.photoId], references: [photos.id] }),
+  video: one(videos, { fields: [messages.videoId], references: [videos.id] }),
+  document: one(documents, { fields: [messages.documentId], references: [documents.id] }),
 }))
 
 export type DbMessage = typeof messages.$inferSelect
