@@ -220,11 +220,65 @@ message MessageMedia {
 
   oneof media {
     MessagePhoto photo = 1;
+    MessageVideo video = 2;
+    MessageDocument document = 3;
   }
 }
 
 message MessagePhoto {
   Photo photo = 1;
+}
+
+message MessageVideo {
+  Video video = 1;
+}
+
+message MessageDocument {
+  Document document = 1;
+}
+
+message Video {
+  int64 id = 1;
+  
+  // Date of upload
+  int64 date = 2;
+
+  // Width of the video
+  int32 w = 3;
+
+  // Height of the video
+  int32 h = 4;
+
+  // Duration of the video in seconds
+  int32 duration = 5;
+
+  // File size
+  int32 size = 6;
+
+  // Thumbnail of the video
+  optional Photo photo = 7;
+
+  // CDN URL
+  optional string cdn_url = 8;
+}
+
+message Document {
+  int64 id = 1;
+
+  // Original file name
+  string file_name = 2;
+
+  // MIME type of the file
+  string mime_type = 3;
+
+  // File size
+  int32 size = 4;
+
+  // CDN URL
+  optional string cdn_url = 5;
+
+  // Date of upload
+  int64 date = 6;
 }
 
 // Photo for message media, profile photo, space photo, or chat photo
@@ -247,7 +301,7 @@ message Photo {
   Format format = 4;
   
   // Unique identifier of the file
-  string file_unique_id = 100;
+  optional string file_unique_id = 100;
 }
 
 
@@ -306,6 +360,7 @@ enum Method {
   SEND_MESSAGE = 2;
   GET_PEER_PHOTO = 3;
   DELETE_MESSAGES = 4;
+  GET_CHAT_HISTORY = 5;
 }
 
 message RpcCall {
@@ -314,6 +369,8 @@ message RpcCall {
     GetMeInput getMe = 2;
     GetPeerPhotoInput getPeerPhoto = 3;
     DeleteMessagesInput deleteMessages = 4;
+    SendMessageInput sendMessage = 5;
+    GetChatHistoryInput getChatHistory = 6;
   }
 }
 
@@ -324,6 +381,8 @@ message RpcResult {
     GetMeResult getMe = 2;
     GetPeerPhotoResult getPeerPhoto = 3;
     DeleteMessagesResult deleteMessages = 4;
+    SendMessageResult sendMessage = 5;
+    GetChatHistoryResult getChatHistory = 6;
   }
 }
 
@@ -346,6 +405,64 @@ message DeleteMessagesInput {
 }
 message DeleteMessagesResult {
   repeated Update updates = 1;
+}
+
+
+message InputMedia {
+  oneof media {
+    InputMediaPhoto photo = 1;
+    InputMediaVideo video = 2;
+    InputMediaDocument document = 3;
+  }
+}
+
+message InputMediaPhoto {
+  // ID of the photo that we have uploaded
+  int64 photo_id = 1;
+}
+
+message InputMediaVideo {
+  // ID of the video that we have uploaded
+  int64 video_id = 1;
+}
+
+message InputMediaDocument {
+  // ID of the document that we have uploaded
+  int64 document_id = 1;
+}
+
+message SendMessageInput {
+  InputPeer peer_id = 1;
+
+  // Message text or caption
+  optional string message = 2;
+
+  // Message ID of the message being replied to
+  optional int64 reply_to_msg_id = 3;
+
+  // Random ID to prevent duplicate messages
+  optional int64 random_id = 4;
+
+  // Media to send
+  optional InputMedia media = 5;
+}
+
+message SendMessageResult {
+  repeated Update updates = 2;
+}
+
+message GetChatHistoryInput {
+  InputPeer peer_id = 1;
+
+  // ID of the message to start from
+  optional int64 offset_id = 2;
+
+  // Number of messages to return
+  optional int32 limit = 3;
+}
+
+message GetChatHistoryResult {
+  repeated Message messages = 1;
 }
 
 //  Updates Subsystem
