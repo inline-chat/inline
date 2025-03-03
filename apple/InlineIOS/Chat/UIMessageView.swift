@@ -581,7 +581,12 @@ class UIMessageView: UIView {
     if let fullAttachment = fullMessage.attachments.first {
       let userName = Auth.shared.getCurrentUserId() == fullAttachment.user?.id ?
         "You" : fullAttachment.user?.firstName ?? ""
-      attachmentView.configure(userName: userName, outgoing: outgoing)
+      attachmentView.configure(
+        userName: userName,
+        outgoing: outgoing,
+        url: URL(string: fullAttachment.externalTask?.url ?? ""),
+        issueIdentifier: fullAttachment.externalTask?.number
+      )
     }
   }
 }
