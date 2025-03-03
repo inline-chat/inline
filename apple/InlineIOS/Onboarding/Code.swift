@@ -24,6 +24,7 @@ struct Code: View {
   @EnvironmentObject var ws: WebSocketManager
   @Environment(\.appDatabase) var database
   @Environment(\.auth) private var auth
+  @Environment(\.realtime) private var realtime
 
   init(email: String) {
     self.email = email
@@ -65,8 +66,6 @@ extension Code {
         do {
           try await AppDatabase.authenticated()
 
-          // Establish WebSocket connection
-          ws.authenticated()
         } catch {
           Log.shared.error("Failed to setup database or save user", error: error)
         }
