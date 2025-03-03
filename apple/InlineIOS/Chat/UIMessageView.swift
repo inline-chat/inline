@@ -529,9 +529,9 @@ class UIMessageView: UIView {
               type: .success,
               systemImage: "checkmark.circle.fill"
             )
-            UIView.animate(withDuration: 0.1) {
-              self.triggerMessageReload()
-            }
+
+            self.triggerMessageReload()
+
           } else {
             ToastManager.shared.showToast(
               "Creating Linear issue...",
@@ -556,9 +556,9 @@ class UIMessageView: UIView {
                 },
                 actionTitle: "Open"
               )
-              UIView.animate(withDuration: 0.1) {
-                self.triggerMessageReload()
-              }
+
+              self.triggerMessageReload()
+
             } catch {
               print("FAILED to create issue \(error)")
               ToastManager.shared.hideToast()
@@ -745,7 +745,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
   private func triggerMessageReload() {
     Task { @MainActor in
       await MessagesPublisher.shared
-        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId)
+        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId, animated: true)
     }
   }
 }
