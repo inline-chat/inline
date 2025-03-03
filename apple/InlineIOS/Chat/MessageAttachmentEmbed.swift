@@ -2,7 +2,7 @@ import InlineKit
 import SafariServices
 import UIKit
 
-class MessageAttachmentEmbed: UIView {
+class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate {
   private enum Constants {
     static let cornerRadius: CGFloat = 12
     static let rectangleWidth: CGFloat = 4
@@ -14,6 +14,8 @@ class MessageAttachmentEmbed: UIView {
   static let height = 28.0
   private var outgoing: Bool = false
   private var url: URL?
+  private var title: String?
+  private var issueIdentifier: String?
 
   private lazy var circleImageView: UIImageView = {
     let imageView = UIImageView()
@@ -45,23 +47,87 @@ class MessageAttachmentEmbed: UIView {
     super.init(frame: frame)
     setupViews()
     setupLayer()
-    setupTapGesture()
+    setupInteractions()
   }
 
   required init?(coder: NSCoder) {
     super.init(coder: coder)
     setupViews()
     setupLayer()
-    setupTapGesture()
+    setupInteractions()
   }
 
-  func configure(userName: String, outgoing: Bool, url: URL? = nil, issueIdentifier: String? = nil) {
+  func configure(
+    userName: String,
+    outgoing: Bool,
+    url: URL? = nil,
+    issueIdentifier: String? = nil,
+    title: String? = nil
+  ) {
     self.outgoing = outgoing
     self.url = url
+    self.title = title
+    self.issueIdentifier = issueIdentifier
     messageLabel.text = "\(userName) will do"
     issueIdentifierLabel.text = issueIdentifier
     updateColors()
   }
+
+  private func setupInteractions() {
+    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+    addGestureRecognizer(tapGesture)
+
+    let interaction = UIContextMenuInteraction(delegate: self)
+    addInteraction(interaction)
+    isUserInteractionEnabled = true
+  }
+
+  // MARK: - Context Menu
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configurationForMenuAtLocation location: CGPoint
+  ) -> UIContextMenuConfiguration? {
+    guard let url else { return nil }
+
+    return UIContextMenuConfiguration(
+      identifier: nil,
+      previewProvider: nil
+    ) { [weak self] _ in
+      let openAction = UIAction(
+        title: "Open Link",
+        image: UIImage(systemName: "safari")
+      ) { _ in
+        self?.handleTap()
+      }
+
+      let copyTitleAction = UIAction(
+        title: "Copy Title",
+        image: UIImage(systemName: "doc.on.doc")
+      ) { _ in
+        UIPasteboard.general.string = self?.title
+      }
+
+      let copyIssueIdentifierAction = UIAction(
+        title: "Copy Issue Identifier",
+        image: UIImage(systemName: "doc.on.doc")
+      ) { _ in
+        UIPasteboard.general.string = self?.issueIdentifier
+      }
+      return UIMenu(title: "", children: [openAction, copyTitleAction, copyIssueIdentifierAction])
+    }
+  }
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+  ) -> UITargetedPreview? {
+    let parameters = UIPreviewParameters()
+    parameters.backgroundColor = .clear
+    return UITargetedPreview(view: self, parameters: parameters)
+  }
+
+  // MARK: - Actions
 
   @objc private func handleTap() {
     guard let url else { return }
@@ -72,6 +138,8 @@ class MessageAttachmentEmbed: UIView {
       UIApplication.shared.open(url)
     }
   }
+
+  // MARK: - Private Helpers
 
   private func findViewController() -> UIViewController? {
     var responder: UIResponder? = self
@@ -84,6 +152,8 @@ class MessageAttachmentEmbed: UIView {
     return nil
   }
 }
+
+// MARK: - Layout
 
 private extension MessageAttachmentEmbed {
   func setupViews() {
@@ -118,12 +188,6 @@ private extension MessageAttachmentEmbed {
 
       heightAnchor.constraint(equalToConstant: MessageAttachmentEmbed.height),
     ])
-  }
-
-  func setupTapGesture() {
-    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-    addGestureRecognizer(tapGesture)
-    isUserInteractionEnabled = true
   }
 
   func setupLayer() {
