@@ -14,6 +14,7 @@ public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, Pers
     ExternalTask.self,
     using: ForeignKey(["externalTaskId"], to: ["id"])
   )
+
   public var externalTask: QueryInterfaceRequest<ExternalTask> {
     request(for: Attachment.externalTask)
   }
@@ -34,31 +35,18 @@ public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, Pers
 
 public extension Attachment {
   init(from messageAttachment: InlineProtocol.MessageAttachment) {
-    id = Int64.random(in: 0 ... Int64.max)
     messageId = messageAttachment.messageID
-    externalTaskId = messageAttachment.externalTaskID
+    externalTaskId = messageAttachment.externalTask.id
   }
 
+  @discardableResult
   static func save(
     _ db: Database, messageAttachment: InlineProtocol.MessageAttachment
   )
     throws -> Attachment
   {
-    let existing = try? Attachment.filter(
-      Column("messageId") == messageAttachment.messageID && Column("externalTaskId") == messageAttachment.externalTaskID
-    )
-    .fetchOne(db)
-
     var attachment = Attachment(from: messageAttachment)
-
-    if let existing {
-      // Keep the existing ID and update the record
-      attachment.id = existing.id
-      try attachment.save(db)
-    } else {
-      try attachment.save(db)
-    }
-
+    try attachment.save(db)
     return attachment
   }
 }

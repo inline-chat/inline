@@ -3,6 +3,19 @@ import GRDB
 import Logger
 import SwiftUI
 
+public struct FullAttachment: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
+  TableRecord,
+  Sendable, Equatable
+{
+  public var id: Int64 {
+    attachment.id ?? 0
+  }
+
+  public var attachment: Attachment
+  public var externalTask: ExternalTask?
+  public var user: User?
+}
+
 public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
   Sendable, Equatable
@@ -20,7 +33,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var repliedToMessage: Message?
   public var replyToMessageSender: User?
   public var replyToMessageFile: File?
-
+  public var attachments: [FullAttachment]
   // stable id
   public var id: Int64 {
     message.globalId ?? message.id
@@ -28,11 +41,18 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   }
 
   //  public static let preview = FullMessage(user: User, message: Message)
-  public init(senderInfo: UserInfo?, message: Message, reactions: [Reaction], repliedToMessage: Message?) {
+  public init(
+    senderInfo: UserInfo?,
+    message: Message,
+    reactions: [Reaction],
+    repliedToMessage: Message?,
+    attachments: [FullAttachment]
+  ) {
     self.senderInfo = senderInfo
     self.message = message
     self.reactions = reactions
     self.repliedToMessage = repliedToMessage
+    self.attachments = attachments
   }
 }
 
@@ -46,7 +66,8 @@ public extension FullMessage {
         message: \(message),
         reactions: \(reactions),
         repliedToMessage: \(String(describing: repliedToMessage)),
-        replyToMessageSender: \(String(describing: replyToMessageSender))
+        replyToMessageSender: \(String(describing: replyToMessageSender)),
+        attachments: \(attachments)
     )
     """
   }
@@ -79,6 +100,13 @@ public extension FullMessage {
         optional: Message.repliedToMessage.forKey("repliedToMessage")
           .including(optional: Message.from.forKey("replyToMessageSender"))
           .including(optional: Message.file.forKey("replyToMessageFile"))
+      )
+      .including(
+        all: Message.attachments
+          .including(
+            optional: Attachment.externalTask
+              .including(optional: ExternalTask.assignedUser)
+          )
       )
       .asRequest(of: FullMessage.self)
   }
