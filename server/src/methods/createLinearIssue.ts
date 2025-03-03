@@ -1,7 +1,7 @@
 import { Optional, Type, type Static } from "@sinclair/typebox"
-import { eq } from "drizzle-orm"
+import { eq, count } from "drizzle-orm"
 import OpenAI from "openai"
-import { spaces, users } from "../db/schema"
+import { spaces, users, messages } from "../db/schema"
 import { db } from "../db"
 import { z } from "zod"
 import {
@@ -18,6 +18,20 @@ import { openaiClient } from "../libs/openAI"
 import { Log } from "../utils/log"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import { anthropic } from "../libs/anthropic"
+import {
+  messageAttachments,
+  externalTasks,
+  type DbNewMessageAttachment,
+  type DbExternalTask,
+} from "../db/schema/attachments"
+import { decrypt, encrypt } from "../modules/encryption/encryption"
+import { TInputPeerInfo, TPeerInfo, type TUpdateInfo } from "../api-types"
+import { getUpdateGroup } from "../modules/updates"
+import { connectionManager } from "../ws/connections"
+import { createMessage, ServerMessageKind } from "../ws/protocol"
+import { MessageAttachmentExternalTask_Status, type Update } from "@in/protocol/core"
+import { RealtimeUpdates } from "../realtime/message"
+import { examples, prompt } from "../libs/linear/prompt"
 
 type Context = {
   currentUserId: number
@@ -26,7 +40,7 @@ type Context = {
 export const Input = Type.Object({
   text: Type.String(),
   messageId: Type.Number(),
-  chatId: Type.Number(),
+  peerId: TInputPeerInfo,
 })
 
 export const Response = Type.Object({
@@ -37,114 +51,15 @@ export const handler = async (
   input: Static<typeof Input>,
   { currentUserId }: Context,
 ): Promise<Static<typeof Response>> => {
-  let { text, messageId, chatId } = input
+  let { text, messageId, peerId } = input
 
-  const labels = await getLinearIssueLabels({ userId: currentUserId })
+  const [labels, [user], linearUsers] = await Promise.all([
+    getLinearIssueLabels({ userId: currentUserId }),
+    db.select().from(users).where(eq(users.id, currentUserId)),
+    getLinearUsers({ userId: currentUserId }),
+  ])
 
-  const linearUsers = await getLinearUsers({ userId: currentUserId })
-
-  // const message = `
-  // You are a product manager creating tasks for engineers, designers, and other startup roles from messages in their Slack messages. Follow these steps:
-
-  // 1. INPUT MESSAGE: "${text}"
-
-  // 2. TITLE CREATION RULES:
-  //    a. Use common task title verbs like "Fix", "Update", "Add", "Remove"
-  //    b. Use sentence case
-  //    c. Keep it concise and to the point explaining the task/feature/fix mentioned in the message.
-  //    d. PROHIBITED: AI jargon ("optimize", "leverage", "streamline", "capability") use simple and decriptive words often used in project management software or tasks in a software company. Match their tone, no need to formalize it. Keep technical jargon user mentioned.
-  //    g. Be careful to not count every word as a task.
-  //    h. Make sure you are not returning the sentence with it's own verb without making it task title and adding the action verb in the beginning of the title eg.
-  //    Message: edit message
-  //    title should be "Add edit message" no "Edit message"
-
-  //    TITLE FORMAT EXAMPLES:
-  //    Message: "Dena please fix open DM chats on notification click, it's working randomly for me."
-  //    Title: "Fix random DM open on notification click"
-
-  //    Message: "@Mo this message failed to translate. It was a long message from a zh user"
-  //    Title: "Fix translation bug for long ZH messages"
-
-  //    Message: "todo: - video upload"
-  //    Title: "Add video upload"
-
-  // 3. ASSIGNEE DETECTION:
-  //    - Trigger on exact @ mentions
-  //    - Match against provided user list
-  //    Users: ${JSON.stringify(linearUsers.users, null, 2)}
-
-  // 4. LABEL MATCHING:
-  //    - Use semantic similarity (threshold >0.7)
-  //    - Match against provided labels
-  //    Labels: ${JSON.stringify(labels.labels, null, 2)}
-
-  // OUTPUT FORMAT:
-  // {
-  //   "title": "<Task Title>",
-  //   "labelIds": ["<Matching-Label-ID>"] || [],
-  //   "assigneeId": "<Mentioned-User-ID>" || ""
-  // }
-  // `
-
-  const ResponseSchema = z.object({
-    title: z.string(),
-    labelIds: z.array(z.string()),
-    assigneeId: z.string().optional(),
-  })
-
-  // const response = await openaiClient?.chat.completions.create({
-  //   messages: [
-  //     {
-  //       role: "user",
-  //       content: message,
-  //     },
-  //   ],
-  //   model: "gpt-4o-2024-11-20",
-  //   response_format: zodResponseFormat(ResponseSchema, "task"),
-  // })
-
-  // if (!response) {
-  //   Log.shared.error("Failed to create OpenAI response")
-  //   throw new Error("Failed to create OpenAI response")
-  // }
-
-  const message = `You are a task creation assistant for a startup. Your job is to create tasks from Slack messages, following specific rules for title creation, assignee detection, and label matching. Here's how to proceed:
-  First, here's the message you'll be working with:
-  <message>
-  ${text}
-  </message>
-  Here are the available users and labels:
-  <users>
-  ${JSON.stringify(linearUsers.users, null, 2)}
-  </users>
-  <labels>
-  ${JSON.stringify(labels.labels, null, 2)}
-  </labels>
-  Now, follow these steps to create a task:
-  1. Create a task title:
-     a. Use common task title verbs like "Fix", "Update", "Add", "Remove" at the beginning.
-     b. Use sentence case.
-     c. Keep it concise and to the point, explaining the task/feature/fix mentioned in the message.
-     d. Avoid AI jargon like "optimize", "leverage", "streamline", "capability". Use simple and descriptive words often used in project management software or tasks in a software company. Match the tone of the original message without formalizing it. Keep any technical jargon the user mentioned.
-     e. Be careful not to count every word as a task.
-     f. Make sure you're not returning the sentence with its own verb without making it a task title. For example, if the message is "edit message", the title should be "Add edit message" not "Edit message".
-  2. Detect the assignee:
-     - Look for exact @ mentions in the message.
-     - Match the mentioned name against the provided user list.
-     - If a match is found, use the corresponding user ID.
-  3. Match labels:
-     - Use semantic similarity with a threshold greater than 0.7.
-     - Compare the content of the message with the provided labels.
-     - If a match is found, use the corresponding label ID.
-  4. Generate the output in the following JSON format:
-     {
-       "title": "<Task Title>",
-       "labelIds": ["<Matching-Label-ID>"] || [],
-       "assigneeId": "<Mentioned-User-ID>" || ""
-     }
-  Please just return the JSON and avoid returning your reasoning. Avoid returning <scratchpad> and what are between them just return <output> and remove <output> tag around the json output.
-  Now, process the given message and generate the task output. First, think through your approach in a <scratchpad> section. Then, provide your final output in an <output> section.
-  `
+  const assigneeId = linearUsers.users.find((u: any) => u.email === user?.email)?.id
 
   const msg = await anthropic.messages.create({
     model: "claude-3-7-sonnet-20250219",
@@ -156,11 +71,11 @@ export const handler = async (
         content: [
           {
             type: "text",
-            text: '<examples>\n<example>\n<MESSAGE>\n@Mo this message failed to translate. It was a long message from a zh user\n</MESSAGE>\n<USERS>\nMo - Dena\n</USERS>\n<LABELS>\nBug, Feature, iOS, macOS\n</LABELS>\n<ideal_output>\n{\n  "title": "Fix translation bug for long zh message",\n  "labelIds": ["Bug"],\n  "assigneeId": "Dena"\n}\n</ideal_output>\n</example>\n<example>\n<MESSAGE>\n@Mo  mobile app is crashing whenever I open direct messages with Vlad. I think this started once he sent a video. Can you assist pls \n</MESSAGE>\n<USERS>\nMo - Dena\n</USERS>\n<LABELS>\nBug, Feature, iOS, macOS\n</LABELS>\n<ideal_output>\n{\n  "title": "Fix mobile app crash when opening direct messages with videos",\n  "labelIds": ["Bug"],\n  "assigneeId": "Mo"\n}\n</ideal_output>\n</example>\n<example>\n<MESSAGE>\n@Mo  mobile app is crashing whenever I open direct messages with Vlad. I think this started once he sent a video. Can you assist pls \n</MESSAGE>\n<USERS>\nMo - Dena\n</USERS>\n<LABELS>\nBug, Feature, iOS, macOS\n</LABELS>\n<ideal_output>\n{\n  "title": "Fix mobile app crash when opening direct messages with videos",\n  "labelIds": ["Bug"],\n  "assigneeId": "Mo"\n}\n</ideal_output>\n</example>\n<example>\n<MESSAGE>\n@Mo this message failed to translate. It was a long message from a zh user\n</MESSAGE>\n<USERS>\nMo - Dena\n</USERS>\n<LABELS>\nBug, Feature, iOS, macOS\n</LABELS>\n<ideal_output>\n{\n  "title": "Fix translation bug for long zh message",\n  "labelIds": ["Bug"],\n  "assigneeId": "Mo"\n}\n</ideal_output>\n</example>\n</examples>',
+            text: examples,
           },
           {
             type: "text",
-            text: message,
+            text: prompt(text, labels),
           },
         ],
       },
@@ -168,33 +83,74 @@ export const handler = async (
   })
 
   try {
-    if (!msg.content[0] || msg.content[0].type !== "text") {
-      Log.shared.error("Unexpected response format from Anthropic")
-      throw new Error("Invalid response format from Anthropic")
-    }
+    let response = parseResponse(msg)
 
-    const responseText = (msg.content[0] as { type: "text"; text: string }).text
-
-    const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/)
-
-    if (!jsonMatch || !jsonMatch[1]) {
-      Log.shared.error("Failed to extract JSON from Anthropic response")
-      throw new Error("Invalid response format from Anthropic")
-    }
-
-    const jsonResponse = JSON.parse(jsonMatch[1])
-
-    const link = await createIssueFunc({
-      assigneeId: jsonResponse.assigneeId || undefined,
-      title: jsonResponse.title,
+    const result = await createIssueFunc({
+      assigneeId: assigneeId,
+      title: response.title,
       description: text,
       messageId: messageId,
-      chatId: chatId,
-      labelIds: jsonResponse.labelIds,
+      peerId: peerId,
+      labelIds: response.labelIds,
       currentUserId: currentUserId,
     })
 
-    return { link }
+    const encryptedTitle = await encrypt(response.title)
+
+    const externalTaskResult = await db
+      .insert(externalTasks)
+      .values({
+        application: "linear",
+        taskId: result?.taskId ?? "",
+        status: "todo",
+        assignedUserId: BigInt(currentUserId),
+        number: result?.identifier ?? "",
+        url: result?.link ?? "",
+        title: encryptedTitle.encrypted,
+        titleIv: encryptedTitle.iv,
+        titleTag: encryptedTitle.authTag,
+        date: new Date(),
+      })
+      .returning()
+
+    if (externalTaskResult.length > 0 && externalTaskResult[0]?.id) {
+      try {
+        const messageExists = await db
+          .select({ count: count() })
+          .from(messages)
+          .where(eq(messages.globalId, BigInt(messageId)))
+          .then((result) => result[0]!.count > 0)
+
+        if (messageExists) {
+          await db
+            .insert(messageAttachments)
+            .values({
+              messageId: BigInt(messageId),
+              externalTaskId: BigInt(externalTaskResult[0].id),
+            })
+            .returning()
+        } else {
+          Log.shared.error("Message does not exist, skipping message attachment creation", { messageId })
+        }
+      } catch (error) {
+        Log.shared.error("Failed to create message attachment", { error, messageId })
+      }
+    }
+
+    if (externalTaskResult.length > 0 && externalTaskResult[0]) {
+      try {
+        await messageAttachmentUpdate({
+          messageId,
+          peerId,
+          currentUserId,
+          externalTask: externalTaskResult[0],
+        })
+      } catch (error) {
+        Log.shared.error("Failed to update message attachment", { error })
+      }
+    }
+
+    return { link: result?.link }
   } catch (error) {
     Log.shared.error("Failed to create issue", { error })
     return { link: undefined }
@@ -206,37 +162,213 @@ type CreateIssueProps = {
   title: string
   description: string
   messageId: number
-  chatId: number
+  peerId: TPeerInfo
   labelIds: string[]
   currentUserId: number
 }
 
-const createIssueFunc = async (props: CreateIssueProps): Promise<string | undefined> => {
+type CreateIssueResult = {
+  link: string
+  identifier: string
+  taskId: string
+}
+const createIssueFunc = async (props: CreateIssueProps): Promise<CreateIssueResult | undefined> => {
   try {
-    const [team, organization, statuses] = await Promise.all([
+    const [teamData, orgData, statusesData] = await Promise.all([
       getLinearTeams({ userId: props.currentUserId }),
       getLinearOrg({ userId: props.currentUserId }),
       getLinearIssueStatuses({ userId: props.currentUserId }),
     ])
 
-    const teamIdValue = team?.id
-    const unstarded = statuses.workflowStates.filter((status: any) => status.type === "unstarted")
+    const teamId = teamData?.id ?? ""
+    const unstartedStatus = statusesData.workflowStates.find((status: any) => status.type === "unstarted")?.id
+
+    const chatId = "threadId" in props.peerId ? props.peerId.threadId : undefined
 
     const result = await createIssue({
       userId: props.currentUserId,
       title: props.title,
       description: props.description,
-      teamId: teamIdValue ?? "",
+      teamId,
       messageId: props.messageId,
-      chatId: props.chatId,
+      chatId: chatId ?? 0,
       labelIds: props.labelIds,
       assigneeId: props.assigneeId || undefined,
-      statusId: unstarded[0].id,
+      statusId: unstartedStatus,
     })
 
-    return generateIssueLink(result?.identifier ?? "", organization?.urlKey ?? "")
+    return result
+      ? {
+          link: generateIssueLink(result.identifier ?? "", orgData?.urlKey ?? ""),
+          identifier: result.identifier ?? "",
+          taskId: result.id ?? "",
+        }
+      : undefined
   } catch (error) {
     Log.shared.error("Failed to create Linear issue", { error })
     return undefined
   }
+}
+
+const messageAttachmentUpdate = async ({
+  messageId,
+  peerId,
+  currentUserId,
+  externalTask,
+}: {
+  messageId: number
+  peerId: TPeerInfo
+  currentUserId: number
+  externalTask: DbExternalTask
+}): Promise<void> => {
+  try {
+    // decrypt title
+    if (!externalTask.titleTag || !externalTask.title || !externalTask.titleIv) {
+      Log.shared.error("Missing title tag, title, or title iv", { externalTask })
+      return
+    }
+
+    const decryptedTitle = await decrypt({
+      authTag: externalTask.titleTag,
+      encrypted: externalTask.title,
+      iv: externalTask.titleIv,
+    })
+
+    // Check if the message exists before trying to update it
+    const messageExists = await db
+      .select({ count: count() })
+      .from(messages)
+      .where(eq(messages.globalId, BigInt(messageId)))
+      .then((result) => result[0]!.count > 0)
+
+    if (!messageExists) {
+      Log.shared.error("Message does not exist, skipping message attachment update", { messageId })
+      return
+    }
+
+    const updateGroup = await getUpdateGroup(peerId, { currentUserId })
+
+    if (updateGroup.type === "users") {
+      updateGroup.userIds.forEach((userId: number) => {
+        let encodingForPeer: TPeerInfo = userId === currentUserId ? peerId : { userId: currentUserId }
+        const update: TUpdateInfo = {
+          deleteMessage: {
+            messageId,
+            peerId: encodingForPeer,
+          },
+        }
+
+        const updates = [update]
+
+        connectionManager.sendToUser(userId, createMessage({ kind: ServerMessageKind.Message, payload: { updates } }))
+
+        // New updates
+        let messageDeletedUpdate: Update = {
+          update: {
+            oneofKind: "messageAttachment",
+            messageAttachment: {
+              attachment: {
+                messageId: BigInt(messageId),
+                externalTaskId: BigInt(externalTask.id),
+                attachment: {
+                  oneofKind: "externalTask",
+                  externalTask: {
+                    id: BigInt(externalTask.id),
+                    application: "linear",
+                    taskId: externalTask.taskId,
+                    title: decryptedTitle,
+                    status: MessageAttachmentExternalTask_Status.TODO,
+                    assignedUserId: BigInt(currentUserId),
+                    number: externalTask.number ?? "",
+                    url: externalTask.url ?? "",
+                    date: BigInt(Date.now().toString()),
+                  },
+                },
+              },
+            },
+          },
+        }
+        RealtimeUpdates.pushToUser(userId, [messageDeletedUpdate])
+      })
+    } else if (updateGroup.type === "space") {
+      const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
+
+      userIds.forEach((userId) => {
+        const update: TUpdateInfo = {
+          deleteMessage: {
+            messageId,
+            peerId,
+          },
+        }
+
+        const updates = [update]
+
+        connectionManager.sendToUser(
+          userId,
+          createMessage({ kind: ServerMessageKind.Message, payload: { updates: updates } }),
+        )
+
+        let messageDeletedUpdate: Update = {
+          update: {
+            oneofKind: "messageAttachment",
+            messageAttachment: {
+              attachment: {
+                messageId: BigInt(messageId),
+                externalTaskId: BigInt(externalTask.id),
+                attachment: {
+                  oneofKind: "externalTask",
+                  externalTask: {
+                    id: BigInt(externalTask.id),
+                    application: "linear",
+                    taskId: externalTask.taskId,
+                    title: decryptedTitle,
+                    status: MessageAttachmentExternalTask_Status.TODO,
+                    assignedUserId: BigInt(currentUserId),
+                    number: externalTask.number ?? "",
+                    url: externalTask.url ?? "",
+                    date: BigInt(Date.now().toString()),
+                  },
+                },
+              },
+            },
+          },
+        }
+
+        RealtimeUpdates.pushToUser(userId, [messageDeletedUpdate])
+      })
+    }
+  } catch (error) {
+    Log.shared.error("Failed to update message attachment", { error })
+  }
+}
+
+function parseResponse(msg: any): any {
+  if (!msg.content[0] || msg.content[0].type !== "text") {
+    Log.shared.error("Unexpected response format from Anthropic")
+    throw new Error("Invalid response format from Anthropic")
+  }
+
+  const responseText = (msg.content[0] as { type: "text"; text: string }).text
+
+  let jsonMatch =
+    responseText.match(/```json\n([\s\S]*?)\n```/) ||
+    responseText.match(/<o>([\s\S]*?)<\/o>/) ||
+    responseText.match(/<output>([\s\S]*?)<\/output>/) ||
+    responseText.match(/<ideal_output>([\s\S]*?)<\/ideal_output>/) ||
+    responseText.match(/```([\s\S]*?)```/) ||
+    responseText.match(/\{[\s\S]*"title"[\s\S]*"labelIds"[\s\S]*\}/)
+
+  if (!jsonMatch) {
+    Log.shared.error("Failed to extract JSON from Anthropic response", { responseText })
+    throw new Error("Invalid response format from Anthropic")
+  }
+
+  // If we matched the full JSON object pattern directly
+  let jsonString = jsonMatch[1] || jsonMatch[0]
+
+  // Clean up the JSON string
+  jsonString = jsonString.trim()
+
+  const jsonResponse = JSON.parse(jsonString)
+  return jsonResponse
 }

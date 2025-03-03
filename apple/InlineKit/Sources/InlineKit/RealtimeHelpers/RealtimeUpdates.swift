@@ -30,6 +30,9 @@ actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
         case let .deleteMessages(deleteMessages):
           try deleteMessages.apply(db)
 
+        case let .messageAttachment(updateMessageAttachment):
+          try updateMessageAttachment.apply(db)
+
         default:
           break
       }
@@ -175,5 +178,23 @@ extension InlineProtocol.UpdateDeleteMessages {
     Task { @MainActor in
       MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
     }
+  }
+}
+
+extension InlineProtocol.UpdateMessageAttachment {
+  func apply(_ db: Database) throws {
+    guard let messageAttachment = attachment.attachment else {
+      Log.shared.error("Message attachment is nil")
+      return
+    }
+
+    guard case let .externalTask(externalTaskAttachment) = messageAttachment else {
+      Log.shared.error("Unsupported attachment type")
+      return
+    }
+
+    let externalTask = try ExternalTask.save(db, externalTask: externalTaskAttachment)
+
+    let attachment = try Attachment.save(db, messageAttachment: attachment)
   }
 }

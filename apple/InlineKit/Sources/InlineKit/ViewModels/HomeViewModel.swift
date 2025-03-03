@@ -1,6 +1,7 @@
 import Combine
 import GRDB
 import Logger
+
 public struct UserInfo: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable, Identifiable {
   public var user: User
   public var profilePhoto: [File]?
@@ -41,7 +42,6 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   // Add a static method to create the request
   static func all() -> QueryInterfaceRequest<HomeChatItem> {
     Dialog
-      .filter(Column("peerUserId") != nil)
       .including(
         required: Dialog.peerUser
           .forKey(CodingKeys.user)
@@ -89,8 +89,10 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
 
 public final class HomeViewModel: ObservableObject {
   @Published public private(set) var chats: [HomeChatItem] = []
+  @Published public private(set) var spaces: [Space] = []
 
-  private var cancellable: AnyCancellable?
+  private var chatsCancellable: AnyCancellable?
+  private var spacesCancellable: AnyCancellable?
   private var db: AppDatabase
 
   public init(db: AppDatabase) {
@@ -98,23 +100,43 @@ public final class HomeViewModel: ObservableObject {
     start()
   }
 
-  func start() {
-    cancellable =
-      ValueObservation
-        .tracking { db in
-          try HomeChatItem
+  public func start() {
+    fetchChats()
+    fetchSpaces()
+  }
 
-            .all()
-            .fetchAll(db)
+  private func fetchChats() {
+    chatsCancellable = ValueObservation
+      .tracking { db in
+        try HomeChatItem
+          .all()
+          .fetchAll(db)
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .sink(
+        receiveCompletion: { error in
+          Log.shared.error("Failed to get home chats \(error)")
+        },
+        receiveValue: { [weak self] chats in
+          self?.chats = chats
         }
-        .publisher(in: db.dbWriter, scheduling: .immediate)
-        .sink(
-          receiveCompletion: { error in
-            Log.shared.error("Failed to get home chats \(error)")
-          },
-          receiveValue: { [weak self] chats in
-            self?.chats = chats
-          }
-        )
+      )
+  }
+
+  private func fetchSpaces() {
+    spacesCancellable = ValueObservation
+      .tracking { db in
+        try Space
+          .fetchAll(db)
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .sink(
+        receiveCompletion: { error in
+          Log.shared.error("Failed to get home spaces \(error)")
+        },
+        receiveValue: { [weak self] spaces in
+          self?.spaces = spaces
+        }
+      )
   }
 }

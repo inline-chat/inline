@@ -673,6 +673,10 @@ public struct MessageAttachment: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  public var messageID: Int64 = 0
+
+  public var externalTaskID: Int64 = 0
+
   public var attachment: MessageAttachment.OneOf_Attachment? = nil
 
   public var externalTask: MessageAttachmentExternalTask {
@@ -697,6 +701,8 @@ public struct MessageAttachmentExternalTask: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
+
+  public var id: Int64 = 0
 
   /// ID of the task in the external application
   public var taskID: String = String()
@@ -1268,6 +1274,14 @@ public struct Update: Sendable {
     set {update = .updateUserStatus(newValue)}
   }
 
+  public var messageAttachment: UpdateMessageAttachment {
+    get {
+      if case .messageAttachment(let v)? = update {return v}
+      return UpdateMessageAttachment()
+    }
+    set {update = .messageAttachment(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -1277,6 +1291,7 @@ public struct Update: Sendable {
     case deleteMessages(UpdateDeleteMessages)
     case updateComposeAction(UpdateComposeAction)
     case updateUserStatus(UpdateUserStatus)
+    case messageAttachment(UpdateMessageAttachment)
 
   }
 
@@ -1437,6 +1452,27 @@ public struct UpdateComposeAction: Sendable {
   public init() {}
 
   fileprivate var _peerID: Peer? = nil
+}
+
+public struct UpdateMessageAttachment: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var attachment: MessageAttachment {
+    get {return _attachment ?? MessageAttachment()}
+    set {_attachment = newValue}
+  }
+  /// Returns true if `attachment` has been explicitly set.
+  public var hasAttachment: Bool {return self._attachment != nil}
+  /// Clears the value of `attachment`. Subsequent reads from it will return its default value.
+  public mutating func clearAttachment() {self._attachment = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _attachment: MessageAttachment? = nil
 }
 
 public struct UpdateUserStatus: Sendable {
@@ -2652,7 +2688,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
 extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAttachments"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "attachments"),
+    4: .same(proto: "attachments"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -2661,7 +2697,7 @@ extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.attachments) }()
+      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.attachments) }()
       default: break
       }
     }
@@ -2669,7 +2705,7 @@ extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.attachments.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.attachments, fieldNumber: 1)
+      try visitor.visitRepeatedMessageField(value: self.attachments, fieldNumber: 4)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -2684,7 +2720,9 @@ extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAttachment"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "external_task"),
+    2: .standard(proto: "message_id"),
+    3: .standard(proto: "external_task_id"),
+    4: .standard(proto: "external_task"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -2693,7 +2731,9 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try {
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.externalTaskID) }()
+      case 4: try {
         var v: MessageAttachmentExternalTask?
         var hadOneofValue = false
         if let current = self.attachment {
@@ -2716,13 +2756,21 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
+    if self.messageID != 0 {
+      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 2)
+    }
+    if self.externalTaskID != 0 {
+      try visitor.visitSingularInt64Field(value: self.externalTaskID, fieldNumber: 3)
+    }
     try { if case .externalTask(let v)? = self.attachment {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
     } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: MessageAttachment, rhs: MessageAttachment) -> Bool {
+    if lhs.messageID != rhs.messageID {return false}
+    if lhs.externalTaskID != rhs.externalTaskID {return false}
     if lhs.attachment != rhs.attachment {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -2732,14 +2780,15 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
 extension MessageAttachmentExternalTask: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAttachmentExternalTask"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "task_id"),
-    2: .same(proto: "application"),
-    3: .same(proto: "title"),
-    4: .same(proto: "status"),
-    5: .standard(proto: "assigned_user_id"),
-    6: .same(proto: "url"),
-    7: .same(proto: "number"),
-    8: .same(proto: "date"),
+    1: .same(proto: "id"),
+    2: .standard(proto: "task_id"),
+    3: .same(proto: "application"),
+    4: .same(proto: "title"),
+    5: .same(proto: "status"),
+    6: .standard(proto: "assigned_user_id"),
+    7: .same(proto: "url"),
+    8: .same(proto: "number"),
+    9: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -2748,48 +2797,53 @@ extension MessageAttachmentExternalTask: SwiftProtobuf.Message, SwiftProtobuf._M
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.taskID) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.application) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.title) }()
-      case 4: try { try decoder.decodeSingularEnumField(value: &self.status) }()
-      case 5: try { try decoder.decodeSingularInt64Field(value: &self.assignedUserID) }()
-      case 6: try { try decoder.decodeSingularStringField(value: &self.url) }()
-      case 7: try { try decoder.decodeSingularStringField(value: &self.number) }()
-      case 8: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.taskID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.application) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.title) }()
+      case 5: try { try decoder.decodeSingularEnumField(value: &self.status) }()
+      case 6: try { try decoder.decodeSingularInt64Field(value: &self.assignedUserID) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.url) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.number) }()
+      case 9: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    }
     if !self.taskID.isEmpty {
-      try visitor.visitSingularStringField(value: self.taskID, fieldNumber: 1)
+      try visitor.visitSingularStringField(value: self.taskID, fieldNumber: 2)
     }
     if !self.application.isEmpty {
-      try visitor.visitSingularStringField(value: self.application, fieldNumber: 2)
+      try visitor.visitSingularStringField(value: self.application, fieldNumber: 3)
     }
     if !self.title.isEmpty {
-      try visitor.visitSingularStringField(value: self.title, fieldNumber: 3)
+      try visitor.visitSingularStringField(value: self.title, fieldNumber: 4)
     }
     if self.status != .unspecified {
-      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 4)
+      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 5)
     }
     if self.assignedUserID != 0 {
-      try visitor.visitSingularInt64Field(value: self.assignedUserID, fieldNumber: 5)
+      try visitor.visitSingularInt64Field(value: self.assignedUserID, fieldNumber: 6)
     }
     if !self.url.isEmpty {
-      try visitor.visitSingularStringField(value: self.url, fieldNumber: 6)
+      try visitor.visitSingularStringField(value: self.url, fieldNumber: 7)
     }
     if !self.number.isEmpty {
-      try visitor.visitSingularStringField(value: self.number, fieldNumber: 7)
+      try visitor.visitSingularStringField(value: self.number, fieldNumber: 8)
     }
     if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 8)
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 9)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: MessageAttachmentExternalTask, rhs: MessageAttachmentExternalTask) -> Bool {
+    if lhs.id != rhs.id {return false}
     if lhs.taskID != rhs.taskID {return false}
     if lhs.application != rhs.application {return false}
     if lhs.title != rhs.title {return false}
@@ -3488,6 +3542,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     7: .standard(proto: "delete_messages"),
     8: .standard(proto: "update_compose_action"),
     9: .standard(proto: "update_user_status"),
+    10: .standard(proto: "message_attachment"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -3574,6 +3629,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
           self.update = .updateUserStatus(v)
         }
       }()
+      case 10: try {
+        var v: UpdateMessageAttachment?
+        var hadOneofValue = false
+        if let current = self.update {
+          hadOneofValue = true
+          if case .messageAttachment(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.update = .messageAttachment(v)
+        }
+      }()
       default: break
       }
     }
@@ -3608,6 +3676,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     case .updateUserStatus?: try {
       guard case .updateUserStatus(let v)? = self.update else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case .messageAttachment?: try {
+      guard case .messageAttachment(let v)? = self.update else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
     }()
     case nil: break
     }
@@ -3829,6 +3901,42 @@ extension UpdateComposeAction.ComposeAction: SwiftProtobuf._ProtoNameProviding {
     3: .same(proto: "UPLOADING_DOCUMENT"),
     4: .same(proto: "UPLOADING_VIDEO"),
   ]
+}
+
+extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateMessageAttachment"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "attachment"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._attachment) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._attachment {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateMessageAttachment, rhs: UpdateMessageAttachment) -> Bool {
+    if lhs._attachment != rhs._attachment {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
 }
 
 extension UpdateUserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

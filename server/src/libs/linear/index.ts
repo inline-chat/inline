@@ -232,6 +232,7 @@ const createIssue = async ({
               id
               title
               identifier
+              number
             }
           }
         }`,
