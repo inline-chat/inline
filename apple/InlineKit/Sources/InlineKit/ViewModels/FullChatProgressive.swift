@@ -95,7 +95,7 @@ public class MessagesProgressiveViewModel {
   public enum MessagesChangeSet {
     // TODO: case prepend...
     case added([FullMessage], indexSet: [Int])
-    case updated([FullMessage], indexSet: [Int])
+    case updated([FullMessage], indexSet: [Int], animated: Bool?)
     // Global IDs for list identity
     case deleted([Int64], indexSet: [Int])
     case reload
@@ -158,7 +158,7 @@ public class MessagesProgressiveViewModel {
 
           messages[index] = messageUpdate.message
           updateRange() // ??
-          return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index])
+          return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
 
       case let .reload(peer):
@@ -338,6 +338,7 @@ public final class MessagesPublisher {
 
   public struct MessageUpdate {
     public let message: FullMessage
+    public let animated: Bool?
     let peer: Peer
   }
 
@@ -389,7 +390,7 @@ public final class MessagesPublisher {
     publisher.send(.delete(MessageDelete(messageIds: messageIds, peer: peer)))
   }
 
-  public func messageUpdated(message: Message, peer: Peer) async {
+  public func messageUpdated(message: Message, peer: Peer, animated: Bool?) async {
     //    Log.shared.debug("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? await db.reader.read { db in
@@ -411,7 +412,7 @@ public final class MessagesPublisher {
       Log.shared.error("Failed to get full message")
       return
     }
-    publisher.send(.update(MessageUpdate(message: fullMessage, peer: peer)))
+    publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
   }
 
   func messagesReload(peer: Peer) {

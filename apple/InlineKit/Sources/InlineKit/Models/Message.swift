@@ -265,7 +265,7 @@ public extension Message {
       db.afterNextTransaction { _ in
         Task { @MainActor in
           if isExisting {
-            await MessagesPublisher.shared.messageUpdated(message: message, peer: peer)
+            await MessagesPublisher.shared.messageUpdated(message: message, peer: peer, animated: false)
           } else {
             await MessagesPublisher.shared.messageAdded(message: message, peer: peer)
           }
@@ -320,11 +320,12 @@ public extension ApiMessage {
       // attach main photo
       // TODO: handle multiple files
       let file: File? =
-        if let photo = photo?.first {
-          try? File.save(db, apiPhoto: photo)
-        } else {
-          nil
-        }
+        if let photo = photo?.first
+      {
+        try? File.save(db, apiPhoto: photo)
+      } else {
+        nil
+      }
       message.fileId = file?.id
 
       try message.saveMessage(db, publishChanges: false) // publish is below
@@ -335,7 +336,7 @@ public extension ApiMessage {
       if isUpdate {
         db.afterNextTransaction { _ in
           Task { @MainActor in
-            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId, animated: false)
           }
         }
       } else {
@@ -393,7 +394,7 @@ public extension Message {
       if isUpdate {
         db.afterNextTransaction { _ in
           Task { @MainActor in
-            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId)
+            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId, animated: false)
           }
         }
       } else {

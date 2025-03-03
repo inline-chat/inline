@@ -153,7 +153,7 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
   private func triggerMessageReload() {
     Task { @MainActor in
       await MessagesPublisher.shared
-        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId)
+        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId, animated: false)
     }
   }
 
