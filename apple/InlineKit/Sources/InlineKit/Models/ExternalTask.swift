@@ -23,7 +23,6 @@ public struct ExternalTask: FetchableRecord, Identifiable, Codable, Hashable, Pe
   public var url: String?
   public var title: String?
   public var date: Date?
-  public var creating: Bool
 
   static let assignedUser = belongsTo(User.self, using: ForeignKey(["assignedUserId"], to: ["id"]))
   var assignedUser: QueryInterfaceRequest<User> {
@@ -38,7 +37,6 @@ public struct ExternalTask: FetchableRecord, Identifiable, Codable, Hashable, Pe
     url: String?,
     title: String?,
     date: Date?,
-    creating: Bool = false,
     number: String?
   ) {
     self.application = application
@@ -48,7 +46,6 @@ public struct ExternalTask: FetchableRecord, Identifiable, Codable, Hashable, Pe
     self.url = url
     self.title = title
     self.date = date
-    self.creating = creating
     self.number = number
   }
 }
@@ -64,30 +61,16 @@ public extension ExternalTask {
     url = externalTask.url
     title = externalTask.title
     number = externalTask.number
-    creating = false
   }
 
+  @discardableResult
   static func save(
     _ db: Database, externalTask protocolExternalTask: InlineProtocol.MessageAttachmentExternalTask
   )
     throws -> ExternalTask
   {
-    let existing = try? ExternalTask.fetchOne(db, id: protocolExternalTask.id)
-    var externalTask = ExternalTask(from: protocolExternalTask)
-
-    if let existing {
-      externalTask.application = existing.application
-      externalTask.taskId = existing.taskId
-      externalTask.status = existing.status
-      externalTask.assignedUserId = existing.assignedUserId
-      externalTask.url = existing.url
-      externalTask.title = existing.title
-      externalTask.date = existing.date
-      externalTask.number = existing.number
-      try externalTask.save(db)
-    } else {
-      try externalTask.save(db)
-    }
+    let externalTask = ExternalTask(from: protocolExternalTask)
+    try externalTask.save(db)
 
     return externalTask
   }
