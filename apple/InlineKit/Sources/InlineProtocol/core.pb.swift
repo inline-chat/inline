@@ -675,8 +675,6 @@ public struct MessageAttachment: Sendable {
 
   public var messageID: Int64 = 0
 
-  public var externalTaskID: Int64 = 0
-
   public var attachment: MessageAttachment.OneOf_Attachment? = nil
 
   public var externalTask: MessageAttachmentExternalTask {
@@ -702,6 +700,7 @@ public struct MessageAttachmentExternalTask: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// ID of external task in our database
   public var id: Int64 = 0
 
   /// ID of the task in the external application
@@ -2688,7 +2687,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
 extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAttachments"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    4: .same(proto: "attachments"),
+    1: .same(proto: "attachments"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -2697,7 +2696,7 @@ extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.attachments) }()
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.attachments) }()
       default: break
       }
     }
@@ -2705,7 +2704,7 @@ extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.attachments.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.attachments, fieldNumber: 4)
+      try visitor.visitRepeatedMessageField(value: self.attachments, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -2720,9 +2719,8 @@ extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAttachment"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    2: .standard(proto: "message_id"),
-    3: .standard(proto: "external_task_id"),
-    4: .standard(proto: "external_task"),
+    1: .standard(proto: "message_id"),
+    2: .standard(proto: "external_task"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -2731,9 +2729,8 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.externalTaskID) }()
-      case 4: try {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 2: try {
         var v: MessageAttachmentExternalTask?
         var hadOneofValue = false
         if let current = self.attachment {
@@ -2757,20 +2754,16 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
     if self.messageID != 0 {
-      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 2)
-    }
-    if self.externalTaskID != 0 {
-      try visitor.visitSingularInt64Field(value: self.externalTaskID, fieldNumber: 3)
+      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 1)
     }
     try { if case .externalTask(let v)? = self.attachment {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: MessageAttachment, rhs: MessageAttachment) -> Bool {
     if lhs.messageID != rhs.messageID {return false}
-    if lhs.externalTaskID != rhs.externalTaskID {return false}
     if lhs.attachment != rhs.attachment {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

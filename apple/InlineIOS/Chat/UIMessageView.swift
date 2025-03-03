@@ -78,6 +78,11 @@ class UIMessageView: UIView {
     return view
   }()
 
+  lazy var attachmentView: MessageAttachmentEmbed = {
+    let view = MessageAttachmentEmbed()
+    return view
+  }()
+
   private lazy var photoView: PhotoView = {
     let view = PhotoView(fullMessage)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -109,6 +114,9 @@ class UIMessageView: UIView {
       return true
     }
 
+    if !fullMessage.attachments.isEmpty {
+      return true
+    }
     guard let text = message.text else { return false }
     return text.count > 24 || text.contains("\n") || !fullMessage.reactions.isEmpty || text.containsEmoji
   }
@@ -200,6 +208,11 @@ class UIMessageView: UIView {
 
       innerContainer.addArrangedSubview(messageLabel)
 
+      if !fullMessage.attachments.isEmpty {
+        setupAttachmentView()
+        innerContainer.addArrangedSubview(attachmentView)
+      }
+
       let metadataContainer = UIStackView()
       metadataContainer.axis = .horizontal
       metadataContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -207,11 +220,15 @@ class UIMessageView: UIView {
       metadataContainer.addArrangedSubview(metadataView)
       innerContainer.addArrangedSubview(metadataContainer)
 
-      multiLineContainer.addArrangedSubview(innerContainer)
-
       containerStack.addArrangedSubview(innerContainer)
     } else {
       multiLineContainer.addArrangedSubview(messageLabel)
+
+      if !fullMessage.attachments.isEmpty {
+        setupAttachmentView()
+        multiLineContainer.addArrangedSubview(attachmentView)
+      }
+
       if !message.hasFile || message.hasText {
         setupMultilineMetadata()
         containerStack.addArrangedSubview(multiLineContainer)
@@ -343,6 +360,7 @@ class UIMessageView: UIView {
 
   private func setupAppearance() {
     bubbleView.backgroundColor = bubbleColor
+
     guard let text = message.text else { return }
 
     if let cachedString = Self.attributedCache.object(forKey: NSString(string: "\(message.globalId ?? 0)")) {
@@ -511,7 +529,9 @@ class UIMessageView: UIView {
               type: .success,
               systemImage: "checkmark.circle.fill"
             )
-
+            UIView.animate(withDuration: 0.1) {
+              self.triggerMessageReload()
+            }
           } else {
             ToastManager.shared.showToast(
               "Creating Linear issue...",
@@ -536,6 +556,9 @@ class UIMessageView: UIView {
                 },
                 actionTitle: "Open"
               )
+              UIView.animate(withDuration: 0.1) {
+                self.triggerMessageReload()
+              }
             } catch {
               print("FAILED to create issue \(error)")
               ToastManager.shared.hideToast()
@@ -551,6 +574,14 @@ class UIMessageView: UIView {
         ToastManager.shared.hideToast()
         print("Failed to get integrations \(error)")
       }
+    }
+  }
+
+  private func setupAttachmentView() {
+    if let fullAttachment = fullMessage.attachments.first {
+      let userName = Auth.shared.getCurrentUserId() == fullAttachment.user?.id ?
+        "You" : fullAttachment.user?.firstName ?? ""
+      attachmentView.configure(userName: userName, outgoing: outgoing)
     }
   }
 }
@@ -701,17 +732,8 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
     interaction?.dismissMenu()
 
     Task { @MainActor in
-      // Mark message as "Will Do"
-      ToastManager.shared.showToast(
-        "Marked as Will Do",
-        type: .success,
-        systemImage: "checkmark.circle.fill"
-      )
-
-      triggerMessageReload()
+      createIssueFunc()
     }
-
-    print("Will Do tapped")
   }
 
   private func triggerMessageReload() {

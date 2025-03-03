@@ -1,7 +1,7 @@
 import Combine
 import GRDB
-import SwiftUI
 import Logger
+import SwiftUI
 
 public final class FullMessageViewModel: ObservableObject, @unchecked Sendable {
   var messageId: Int64

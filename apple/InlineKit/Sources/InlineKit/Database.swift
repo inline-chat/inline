@@ -242,8 +242,8 @@ public extension AppDatabase {
 
     migrator.registerMigration("attachments") { db in
       try db.create(table: "externalTask") { t in
-        t.primaryKey("id", .integer).notNull().unique()
-        t.column("application", .text).notNull()
+        t.primaryKey("id", .integer)
+        t.column("application", .text)
         t.column("taskId", .text)
         t.column("status", .text)
         t.column("assignedUserId", .integer).references("user", column: "id", onDelete: .setNull)
@@ -251,13 +251,12 @@ public extension AppDatabase {
         t.column("number", .text)
         t.column("title", .text)
         t.column("date", .datetime)
-        t.column("creating", .boolean).notNull().defaults(to: false)
       }
 
       try db.create(table: "attachment") { t in
-        t.primaryKey("id", .integer).notNull().unique()
+        t.autoIncrementedPrimaryKey("id")
         t.column("messageId", .integer).references("message", column: "globalId", onDelete: .cascade)
-        t.column("externalTaskId", .integer).references("externalTask", column: "id", onDelete: .cascade)
+        t.column("externalTaskId", .integer).unique().references("externalTask", column: "id", onDelete: .cascade)
       }
     }
 

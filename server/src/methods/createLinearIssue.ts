@@ -269,7 +269,6 @@ const messageAttachmentUpdate = async ({
             messageAttachment: {
               attachment: {
                 messageId: BigInt(messageId),
-                externalTaskId: BigInt(externalTask.id),
                 attachment: {
                   oneofKind: "externalTask",
                   externalTask: {
@@ -314,7 +313,6 @@ const messageAttachmentUpdate = async ({
             messageAttachment: {
               attachment: {
                 messageId: BigInt(messageId),
-                externalTaskId: BigInt(externalTask.id),
                 attachment: {
                   oneofKind: "externalTask",
                   externalTask: {

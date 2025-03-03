@@ -8,8 +8,8 @@ enum ToastType {
   
   var duration: Double {
     switch self {
-      case .success: return 6.0
-      case .info: return 6.0
+      case .success: return 4.0
+      case .info: return 4.0
       case .loading: return .infinity
     }
   }

@@ -193,8 +193,8 @@ extension InlineProtocol.UpdateMessageAttachment {
       return
     }
 
-    let externalTask = try ExternalTask.save(db, externalTask: externalTaskAttachment)
+    _ = try ExternalTask.save(db, externalTask: externalTaskAttachment)
 
-    let attachment = try Attachment.save(db, messageAttachment: attachment)
+    _ = try Attachment.save(db, messageAttachment: attachment)
   }
 }
