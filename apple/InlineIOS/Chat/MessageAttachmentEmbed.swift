@@ -201,7 +201,7 @@ private extension MessageAttachmentEmbed {
     backgroundColor = outgoing ? .white.withAlphaComponent(bgAlpha) : .systemGray.withAlphaComponent(bgAlpha)
 
     messageLabel.textColor = textColor
-    issueIdentifierLabel.textColor = textColor.withAlphaComponent(0.8)
+    issueIdentifierLabel.textColor = outgoing ? .white : .secondaryLabel
     circleImageView.tintColor = textColor
   }
 }
