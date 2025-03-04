@@ -1,6 +1,7 @@
 import Combine
 import GRDB
 import Logger
+
 public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendable, Hashable,
   Identifiable
 {
@@ -47,6 +48,7 @@ public final class FullSpaceViewModel: ObservableObject {
   @Published public private(set) var space: Space?
   @Published public private(set) var memberChats: [SpaceChatItem] = []
   @Published public private(set) var chats: [SpaceChatItem] = []
+  @Published public private(set) var members: [Member] = []
 
   private var spaceSancellable: AnyCancellable?
   private var membersSancellable: AnyCancellable?
@@ -58,8 +60,9 @@ public final class FullSpaceViewModel: ObservableObject {
     self.db = db
     self.spaceId = spaceId
     fetchSpace()
-    fetchMembers()
+    fetchMembersChats()
     fetchChats()
+    fetchMembers()
   }
 
   func fetchSpace() {
@@ -78,7 +81,7 @@ public final class FullSpaceViewModel: ObservableObject {
         )
   }
 
-  func fetchMembers() {
+  func fetchMembersChats() {
     let spaceId = spaceId
     membersSancellable =
       ValueObservation
@@ -95,6 +98,24 @@ public final class FullSpaceViewModel: ObservableObject {
           },
           receiveValue: { [weak self] members in
             self?.memberChats = members
+          }
+        )
+  }
+
+  func fetchMembers() {
+    let spaceId = spaceId
+    membersSancellable =
+      ValueObservation
+        .tracking { db in
+          try Member
+            .filter(Column("spaceId") == spaceId)
+            .fetchAll(db)
+        }
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { _ in /* ignore error */ },
+          receiveValue: { [weak self] members in
+            self?.members = members
           }
         )
   }

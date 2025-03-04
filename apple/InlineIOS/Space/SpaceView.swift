@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import InlineUI
 import Logger
@@ -7,9 +8,10 @@ struct SpaceView: View {
   var spaceId: Int64
 
   @Environment(\.appDatabase) var database
+  @Environment(\.realtime) var realtime
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var data: DataManager
-  @EnvironmentObject var ws: WebSocketManager
+
   @EnvironmentStateObject var fullSpaceViewModel: FullSpaceViewModel
 
   init(spaceId: Int64) {
@@ -21,6 +23,18 @@ struct SpaceView: View {
 
   @State var openCreateThreadSheet = false
   @State var openAddMemberSheet = false
+
+  var currentUserMember: Member? {
+    fullSpaceViewModel.members.first(where: { $0.userId == Auth.shared.getCurrentUserId() })
+  }
+
+  var isCreator: Bool {
+    if currentUserMember?.role == .owner || currentUserMember?.role == .admin {
+      true
+    } else {
+      false
+    }
+  }
 
   var body: some View {
     VStack {
@@ -72,6 +86,17 @@ struct SpaceView: View {
             }) {
               Label("Invite Member", systemImage: "person.badge.plus.fill")
             }
+            Divider()
+            Button(role: .destructive, action: {
+              setupAndPresentAlert(spaceId: spaceId, isCreator: isCreator)
+            }) {
+              if isCreator {
+                Label("Delete Space", systemImage: "trash.fill")
+
+              } else {
+                Label("Leave Space", systemImage: "rectangle.portrait.and.arrow.right.fill")
+              }
+            }
           } label: {
             Image(systemName: "ellipsis")
               .tint(Color.secondary)
@@ -105,6 +130,42 @@ struct SpaceView: View {
   }
 
   // MARK: - Helper Methods
+
+  func setupAndPresentAlert(spaceId: Int64, isCreator: Bool) {
+    let title = isCreator ? "Delete Space" : "Leave Space"
+    let message = isCreator
+      ? "Are you sure you want to delete this space? This action cannot be undone."
+      : "Are you sure you want to leave this space?"
+
+    let alert = UIAlertController(
+      title: title,
+      message: message,
+      preferredStyle: .alert
+    )
+
+    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+    alert.addAction(UIAlertAction(title: title, style: .destructive) { _ in
+      Task {
+        do {
+          if isCreator {
+            try await data.deleteSpace(spaceId: spaceId)
+            nav.pop()
+          } else {
+            try await data.leaveSpace(spaceId: spaceId)
+            nav.pop()
+          }
+        } catch {
+          print("Error: \(error)")
+        }
+      }
+    })
+
+    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+       let rootVC = windowScene.windows.first?.rootViewController
+    {
+      rootVC.topmostPresentedViewController.present(alert, animated: true)
+    }
+  }
 
   private func getCombinedItems() -> [SpaceCombinedItem] {
     let memberItems = fullSpaceViewModel.memberChats.map { SpaceCombinedItem.member($0) }
@@ -201,7 +262,7 @@ struct SpaceView: View {
             .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
             .environmentObject(nav)
             .environmentObject(data)
-            .environmentObject(ws)
+            .environment(\.realtime, realtime)
             .environment(\.appDatabase, database)
         }
         .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)

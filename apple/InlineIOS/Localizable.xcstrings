@@ -95,6 +95,9 @@
     "Creating..." : {
 
     },
+    "Delete Space" : {
+
+    },
     "Double tap to change profile photo" : {
 
     },
@@ -202,6 +205,9 @@
       }
     },
     "Hey there! This is how your messages will look" : {
+
+    },
+    "Home" : {
 
     },
     "Integrations" : {
@@ -400,6 +406,9 @@
         }
       }
     },
+    "Leave Space" : {
+
+    },
     "Linear" : {
 
     },
@@ -412,7 +421,7 @@
     "No archived chats" : {
 
     },
-    "No chats or spaces" : {
+    "No chats" : {
 
     },
     "No messages yet" : {
