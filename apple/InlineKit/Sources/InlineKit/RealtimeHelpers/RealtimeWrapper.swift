@@ -210,7 +210,7 @@ public extension Realtime {
 
     // Publish and reload messages
     Task { @MainActor in
-      MessagesPublisher.shared.messagesReload(peer: peerId)
+      MessagesPublisher.shared.messagesReload(peer: peerId, animated: false)
     }
   }
 }
