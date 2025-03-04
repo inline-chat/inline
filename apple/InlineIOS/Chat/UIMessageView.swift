@@ -68,7 +68,9 @@ class UIMessageView: UIView {
 
   private let bubbleView: UIView = {
     let view = UIView()
-    view.layer.cornerRadius = 19
+    UIView.performWithoutAnimation {
+      view.layer.cornerRadius = 19
+    }
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
