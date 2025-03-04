@@ -344,7 +344,7 @@ private extension MessagesCollectionView {
       return currentMessage.message.fromId != previousMessage.message.fromId
     }
 
-    private func setInitialData() {
+    private func setInitialData(animated: Bool? = false) {
       var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
 
       // Only one section in this collection view, identified by Section.main
@@ -355,7 +355,7 @@ private extension MessagesCollectionView {
 
       snapshot.appendItems(itemIdentifiers, toSection: .main)
 
-      dataSource.apply(snapshot, animatingDifferences: false)
+      dataSource.apply(snapshot, animatingDifferences: animated ?? false)
     }
 
     func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
@@ -409,8 +409,8 @@ private extension MessagesCollectionView {
 
           dataSource.apply(snapshot, animatingDifferences: animated ?? false)
 
-        case .reload:
-          setInitialData()
+        case let .reload(animated):
+          setInitialData(animated: animated)
       }
     }
 
