@@ -821,6 +821,9 @@ public struct AddMember: Codable, Sendable {
 
 public struct UploadFileResult: Codable, Sendable {
   public let fileUniqueId: String
+  public let photoId: Int64?
+  public let videoId: Int64?
+  public let documentId: Int64?
 }
 
 public struct GetSpace: Codable, Sendable {
