@@ -8,6 +8,7 @@ import type { DbFullDocument, DbFullPhoto, DbFullVideo } from "@in/server/db/mod
 import { encodeVideo } from "@in/server/realtime/encoders/encodeVideo"
 import { encodeDocument } from "@in/server/realtime/encoders/encodeDocument"
 import type { DbFullMessage } from "@in/server/db/models/messages"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 export const encodeMessage = ({
   message,
@@ -90,7 +91,7 @@ export const encodeMessage = ({
     chatId: BigInt(message.chatId),
     message: text,
     out: encodingForUserId === message.fromId,
-    date: BigInt(Math.round(message.date.getTime() / 1000)),
+    date: encodeDateStrict(message.date),
     mentioned: false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
@@ -153,7 +154,7 @@ export const encodeFullMessage = ({
     chatId: BigInt(message.chatId),
     message: message.text ?? undefined,
     out: encodingForUserId === message.fromId,
-    date: BigInt(Math.round(message.date.getTime() / 1000)),
+    date: encodeDateStrict(message.date),
     mentioned: false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
