@@ -6,16 +6,30 @@ import Nuke
 import NukeUI
 import Quartz
 
-final class PhotoView: NSView {
+final class NewPhotoView: NSView {
   private let imageView: NSImageView = {
     let view = NSImageView()
+    view.wantsLayer = true
     view.imageScaling = .scaleProportionallyUpOrDown
     view.translatesAutoresizingMaskIntoConstraints = false
+
+    // Set a clear background initially
+    view.layer?.backgroundColor = NSColor.clear.cgColor
 
     // Disable the built-in drag behavior so chat view's drop handler works
     view.unregisterDraggedTypes()
     view.isEditable = false // Prevents drag-to-change-image behavior
 
+    return view
+  }()
+
+  // Add a separate background view for more reliable background coloring
+  private let backgroundView: BasicView = {
+    let view = BasicView()
+    view.wantsLayer = true  
+    view.layer?.masksToBounds = true
+    view.backgroundColor = .gray.withAlphaComponent(0.05)
+    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -40,11 +54,24 @@ final class PhotoView: NSView {
   let bottomRightRadius: CGFloat = 8.0
 
   private func setupView() {
-    setupImage()
+    wantsLayer = true
+    translatesAutoresizingMaskIntoConstraints = false
 
-    setupMask()
+    // Add background view first (below image view)
+    addSubview(backgroundView)
+    NSLayoutConstraint.activate([
+      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      backgroundView.topAnchor.constraint(equalTo: topAnchor),
+      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+
+    setupImage()
+    setupMasks()
     setupDragSource()
     setupClickGesture()
+
+     showLoadingView()
   }
 
   private var imageConstraints: [NSLayoutConstraint] = []
@@ -67,13 +94,11 @@ final class PhotoView: NSView {
     let prev = self.fullMessage
     self.fullMessage = fullMessage
 
-    let wasLocal = prev.file?.localPath != nil
-    let isLocal = fullMessage.file?.localPath != nil
-
     // Only reload if file id or image source has changed
-    if wasLocal == isLocal,
-       // and same file
-       prev.file?.id == fullMessage.file?.id
+    if
+      prev.photoInfo?.id == fullMessage.photoInfo?.id,
+      // and it wasn't downloaded to cache
+      prev.photoInfo?.bestPhotoSize()?.localPath == fullMessage.photoInfo?.bestPhotoSize()?.localPath
     {
       Log.shared.debug("not reloading image view")
       return
@@ -82,63 +107,90 @@ final class PhotoView: NSView {
     updateImage()
   }
 
+  private var wasLoadedWithPlaceholder = false
+
   private func updateImage() {
-    guard let (isLocal, url) = imageUrl() else { return }
+    if let url = imageLocalUrl() {
+      // Set URL
+      guard let image = NSImage(contentsOf: url) else { return }
 
-    if isLocal {
-      guard let image = NSImage(contentsOf: url) else {
-        return
-      }
-      imageView.image = image
-    } else {
-      // remote
-      let request = ImageRequest(url: url)
-      if let image = ImagePipeline.shared.cache.cachedImage(for: request) {
-        // if image.isPreview
-        imageView.image = image.image
-      }
+      if wasLoadedWithPlaceholder {
+        print("wasLoadedWithPlaceholder")
+        // With animation
+        imageView.alphaValue = 0.0
+        imageView.image = image
 
-      Task { @MainActor in
-        if let image = try? await ImagePipeline.shared.image(for: request) {
-          imageView.image = image
+        // Perform layout before animation
+        needsLayout = true
+        layoutSubtreeIfNeeded()
 
-          if var file = fullMessage.file {
-            // Save to local cache
-            let pathString = image.save(file: file)
-            file.localPath = pathString
-            try? await AppDatabase.shared.dbWriter.write { db in
-              try file.save(db)
-            }
-            // reload message view to show local image
-            triggerMessageReload()
+        DispatchQueue.main.async {
+          NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.allowsImplicitAnimation = true
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            self.imageView.animator().alphaValue = 1.0
+          } completionHandler: {
+            self.hideLoadingView()
           }
         }
+      } else {
+        // Without animation
+        imageView.image = image
+        hideLoadingView()
       }
+
+    } else {
+      // If no URL, trigger download and show loading
+      if let photoInfo = fullMessage.photoInfo {
+        Task {
+          await FileCache.shared.download(photo: photoInfo, for: fullMessage.message)
+        }
+      }
+
+      showLoadingView()
+      return
     }
   }
 
-  private func triggerMessageReload() {
-    Task { @MainActor in
-      await MessagesPublisher.shared
-        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId, animated: true)
-    }
+  private func showLoadingView() {
+    print("showLoadingView")
+    wasLoadedWithPlaceholder = true
+    backgroundView.alphaValue = 1.0
+  }
+
+  private func hideLoadingView() {
+    // Don't hide the background view, just make it transparent if needed
+    backgroundView.alphaValue = 0.0
   }
 
   override func layout() {
     super.layout()
-    updateMask()
+    updateMasks()
   }
 
-  private func setupMask() {
-    maskLayer.fillColor = NSColor.black.cgColor
+  private func setupMasks() {
     wantsLayer = true
+    maskLayer.fillColor = NSColor.black.cgColor
     layer?.mask = maskLayer
+
+    // Initial update of mask paths
+    updateMasks()
   }
 
-  private func updateMask() {
+  private func updateMasks() {
+    maskLayer.path = createRoundedRectPath(for: bounds)
+  }
+
+  private func createRoundedRectPath(for rect: CGRect) -> CGPath {
     let path = CGMutablePath()
-    let width = bounds.width
-    let height = bounds.height
+    let width = rect.width
+    let height = rect.height
+
+    // Skip if dimensions are zero
+    if width <= 0 || height <= 0 {
+      return path
+    }
 
     // Top-left corner
     path.move(to: CGPoint(x: topLeftRadius, y: 0))
@@ -187,7 +239,7 @@ final class PhotoView: NSView {
     )
 
     path.closeSubpath()
-    maskLayer.path = path
+    return path
   }
 
   private func setupDragSource() {
@@ -211,19 +263,22 @@ final class PhotoView: NSView {
     return super.hitTest(point)
   }
 
-  private func imageUrl() -> (isLocal: Bool, url: URL)? {
-    guard let file = fullMessage.file else { return nil }
+  private func imageLocalUrl() -> URL? {
+    guard let photoSize = fullMessage.photoInfo?.bestPhotoSize() else { return nil }
 
-    // prioritise local
-    if let localFile = file.getLocalURL() {
-      return (isLocal: true, url: localFile)
-    } else if let tempUrl = file.temporaryUrl,
-              let url = URL(string: tempUrl)
-    {
-      return (isLocal: false, url: url)
-    } else {
-      return nil
+    if let localPath = photoSize.localPath {
+      let url = FileCache.getUrl(for: .photos, localPath: localPath)
+      return url
     }
+
+    return nil
+  }
+
+  private func imageCdnUrl() -> URL? {
+    guard let photoSize = fullMessage.photoInfo?.bestPhotoSize(),
+          let cdnUrl = photoSize.cdnUrl else { return nil }
+
+    return URL(string: cdnUrl)
   }
 
   // MARK: - Drag Source
@@ -232,7 +287,7 @@ final class PhotoView: NSView {
   private let dragThreshold: CGFloat = 10.0
 
   @objc private func handleDragGesture(_ gesture: NSPanGestureRecognizer) {
-    guard let (_, url) = imageUrl() else { return }
+    guard let url = imageLocalUrl() else { return }
 
     switch gesture.state {
       case .began:
@@ -315,7 +370,7 @@ final class PhotoView: NSView {
 
 // MARK: - QLPreviewPanel
 
-extension PhotoView {
+extension NewPhotoView {
   // Required for proper panel management
   override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
     true
@@ -335,7 +390,7 @@ extension PhotoView {
 
 // MARK: - QLPreviewPanelDataSource
 
-extension PhotoView: QLPreviewPanelDataSource {
+extension NewPhotoView: QLPreviewPanelDataSource {
   func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
     1
   }
@@ -347,7 +402,7 @@ extension PhotoView: QLPreviewPanelDataSource {
 
 // MARK: - QLPreviewPanelDelegate
 
-extension PhotoView: QLPreviewPanelDelegate {
+extension NewPhotoView: QLPreviewPanelDelegate {
   func previewPanel(_ panel: QLPreviewPanel!, sourceFrameOnScreenFor item: QLPreviewItem!) -> NSRect {
     window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
   }
@@ -377,9 +432,9 @@ extension PhotoView: QLPreviewPanelDelegate {
 
 // MARK: - QLPreviewItem
 
-extension PhotoView: QLPreviewItem {
+extension NewPhotoView: QLPreviewItem {
   var previewItemURL: URL! {
-    imageUrl()?.1
+    imageLocalUrl() ?? imageCdnUrl()
   }
 
   var previewItemTitle: String! {
@@ -389,7 +444,7 @@ extension PhotoView: QLPreviewItem {
 
 // MARK: - NSDraggingSource
 
-extension PhotoView: NSDraggingSource {
+extension NewPhotoView: NSDraggingSource {
   func draggingSession(
     _ session: NSDraggingSession,
     sourceOperationMaskFor context: NSDraggingContext
@@ -408,7 +463,7 @@ extension PhotoView: NSDraggingSource {
 
 // MARK: - External Interface
 
-extension PhotoView {
+extension NewPhotoView {
   @objc func copyImage() {
     guard let image = imageView.image else { return }
     let pasteboard = NSPasteboard.general
@@ -425,7 +480,7 @@ extension PhotoView {
       guard response == .OK, let url = savePanel.url else { return }
 
       // copy it from local url
-      guard let (_, localUrl) = self.imageUrl() else { return }
+      guard let localUrl = self.imageLocalUrl() else { return }
       do {
         try FileManager.default.copyItem(at: localUrl, to: url)
       } catch {
