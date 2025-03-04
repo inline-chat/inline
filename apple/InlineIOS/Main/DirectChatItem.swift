@@ -1,7 +1,7 @@
+import Auth
 import InlineKit
 import InlineUI
 import SwiftUI
-import Auth
 
 struct Props {
   let dialog: Dialog
@@ -44,7 +44,7 @@ struct DirectChatItem: View {
 
   var body: some View {
     VStack {
-      HStack(alignment: .top, spacing: 9) {
+      HStack(alignment: .top, spacing: 14) {
         unreadAndProfileView
         titleAndLastMessageView
         Spacer()
@@ -59,7 +59,7 @@ struct DirectChatItem: View {
   @ViewBuilder
   var userProfile: some View {
     if let userInfo = userInfo {
-      UserAvatar(userInfo: userInfo, size: 38)
+      UserAvatar(userInfo: userInfo, size: 58)
     }
   }
 
