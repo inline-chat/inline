@@ -166,7 +166,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
 
   sendMessageUpdate({
     message: { message: newMessage, file },
-    peerId,
+    peerId: input.peerId ?? peerId,
     currentUserId: context.currentUserId,
   })
 
