@@ -7,7 +7,7 @@ struct ToastView: View {
     HStack(alignment: .top, spacing: 8) {
       if let systemImage = toast.systemImage {
         Image(systemName: systemImage)
-          .foregroundColor(.secondary)
+          .foregroundColor(toast.type == .success ? .green : .secondary)
           .padding(.top, 2)
           .transition(.asymmetric(
             insertion: .scale.combined(with: .opacity),
@@ -27,7 +27,7 @@ struct ToastView: View {
         Button(actionTitle) {
           toast.action?()
         }
-        .foregroundColor(.blue)
+        .foregroundColor(toast.type == .success ? .green : .blue)
         .padding(.leading, 4)
         .transition(.opacity)
         .id(actionTitle)
@@ -38,9 +38,21 @@ struct ToastView: View {
     .padding(.horizontal, 16)
     .padding(.vertical, 10)
     .background(
-      RoundedRectangle(cornerRadius: 20)
-        .fill(.thinMaterial)
-        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+      ZStack {
+        RoundedRectangle(cornerRadius: 20)
+          .fill(.thinMaterial)
+        RoundedRectangle(cornerRadius: 20)
+          .fill(
+            toast.type == .success ?
+              Color.green.opacity(0.1) : Color(uiColor: .systemGray6)
+          )
+          .strokeBorder(
+            toast.type == .success ?
+              Color.green.opacity(0.2) : Color.primary.opacity(0.08),
+
+            lineWidth: 1
+          )
+      }
     )
     .padding(.horizontal, 20)
     .transition(.move(edge: .top).combined(with: .opacity))
