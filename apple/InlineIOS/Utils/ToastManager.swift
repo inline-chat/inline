@@ -39,7 +39,7 @@ class ToastManager: ObservableObject {
     action: (() -> Void)? = nil,
     actionTitle: String? = nil
   ) {
-    withAnimation {
+    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
       currentToast = ToastData(
         message: message,
         type: type,
@@ -55,7 +55,7 @@ class ToastManager: ObservableObject {
   }
   
   func hideToast() {
-    withAnimation {
+    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
       currentToast = nil
     }
     timer?.invalidate()
@@ -65,7 +65,7 @@ class ToastManager: ObservableObject {
   private func setupTimer(duration: Double) {
     timer?.invalidate()
     timer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
-      withAnimation {
+      withAnimation(.linear(duration: 0.2)) {
         self?.hideToast()
       }
     }
