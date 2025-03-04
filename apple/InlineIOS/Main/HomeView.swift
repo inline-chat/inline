@@ -15,7 +15,9 @@ struct HomeView: View {
   @EnvironmentObject private var notificationHandler: NotificationHandler
   @EnvironmentObject private var mainViewRouter: MainViewRouter
   @EnvironmentObject private var home: HomeViewModel
+  @EnvironmentObject var data: DataManager
 
+  @Environment(\.realtime) var realtime
   @Environment(\.appDatabase) private var database
   @Environment(\.auth) private var auth
   @Environment(\.scenePhase) var scenePhase
@@ -110,6 +112,20 @@ struct HomeView: View {
                 bottom: 2,
                 trailing: 0
               ))
+              .contextMenu {
+                Button {
+                  nav.push(.chat(peer: .user(id: item.user.id)))
+                } label: {
+                  Label("Open Chat", systemImage: "bubble.left")
+                }
+              } preview: {
+                ChatView(peer: .user(id: item.user.id), preview: true)
+                  .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+                  .environmentObject(nav)
+                  .environmentObject(data)
+                  .environment(\.realtime, realtime)
+                  .environment(\.appDatabase, database)
+              }
           }
         }
         .listStyle(.plain)
