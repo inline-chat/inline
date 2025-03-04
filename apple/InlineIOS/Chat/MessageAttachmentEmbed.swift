@@ -95,11 +95,14 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate {
       previewProvider: nil
     ) { [weak self] _ in
       let openAction = UIAction(
-        title: "Open Link",
+        title: "Open in Safari",
         image: UIImage(systemName: "safari")
       ) { _ in
-        self?.handleTap()
+        guard let url = self?.url else { return }
+        UIApplication.shared.open(url)
       }
+
+      var actions: [UIAction] = [openAction]
 
       let copyTitleAction = UIAction(
         title: "Copy Title",
@@ -114,7 +117,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate {
       ) { _ in
         UIPasteboard.general.string = self?.issueIdentifier
       }
-      return UIMenu(title: "", children: [openAction, copyTitleAction, copyIssueIdentifierAction])
+      return UIMenu(title: "", children: actions + [copyTitleAction, copyIssueIdentifierAction])
     }
   }
 
@@ -131,12 +134,8 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate {
 
   @objc private func handleTap() {
     guard let url else { return }
-    if let viewController = findViewController() {
-      let safariVC = SFSafariViewController(url: url)
-      viewController.present(safariVC, animated: true)
-    } else {
-      UIApplication.shared.open(url)
-    }
+    // Open URL directly in Safari instead of in-app
+    UIApplication.shared.open(url)
   }
 
   // MARK: - Private Helpers
