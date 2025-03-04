@@ -85,7 +85,7 @@ struct HomeView: View {
                       .foregroundColor(.secondary)
                   }
 
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 1) {
                   Text("Archived Chats")
                     .font(.customTitle())
                     .foregroundColor(.primary)
@@ -94,8 +94,6 @@ struct HomeView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(2)
                     .truncationMode(.tail)
-                    .padding(.top, 1)
-
                     .contentTransition(.numericText())
                 }
                 .animation(.default, value: home.chats.filter { $0.dialog.archived == true }.count)
@@ -106,7 +104,7 @@ struct HomeView: View {
             }
             .listRowInsets(.init(
               top: 9,
-              leading: 16,
+              leading: 18,
               bottom: 2,
               trailing: 0
             ))
