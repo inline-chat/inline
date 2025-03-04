@@ -240,7 +240,7 @@ class MessagesCollectionView: UICollectionView {
 
   @objc private func replyStateChanged(_ notification: Notification) {
     DispatchQueue.main.async {
-      UIView.animate(withDuration: 0.2) {
+      UIView.animate(withDuration: 0.2, delay: 0) {
         self.updateContentInsets()
         if self.shouldScrollToBottom, !self.itemsEmpty {
           self.scrollToItem(
