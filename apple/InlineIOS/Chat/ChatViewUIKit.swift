@@ -258,8 +258,7 @@ class ChatContainerView: UIView {
 
     UIView.animate(
       withDuration: 0.2,
-      delay: 0.1,
-      options: .curveEaseOut
+      delay: 0.1
     ) {
       self.layoutIfNeeded()
       self.becomeFirstResponder()
