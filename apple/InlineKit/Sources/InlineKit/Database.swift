@@ -1,7 +1,7 @@
+import Auth
 import Foundation
 import GRDB
 import InlineConfig
-import Auth
 import Logger
 
 // MARK: - DB main class
@@ -256,7 +256,7 @@ public extension AppDatabase {
       try db.create(table: "attachment") { t in
         t.autoIncrementedPrimaryKey("id")
         t.column("messageId", .integer).references("message", column: "globalId", onDelete: .cascade)
-        t.column("externalTaskId", .integer).unique().references("externalTask", column: "id", onDelete: .cascade)
+        t.column("externalTaskId", .integer).references("externalTask", column: "id", onDelete: .cascade)
       }
     }
 

@@ -34,19 +34,18 @@ public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, Pers
 }
 
 public extension Attachment {
-  init(from messageAttachment: InlineProtocol.MessageAttachment) {
-    messageId = messageAttachment.messageID
-    externalTaskId = messageAttachment.externalTask.id
-  }
-
   @discardableResult
   static func save(
     _ db: Database, messageAttachment: InlineProtocol.MessageAttachment
   )
     throws -> Attachment
   {
-    var attachment = Attachment(from: messageAttachment)
+    let message = try Message.filter(Column("messageId") == messageAttachment.messageID).fetchOne(db)
+
+    let attachment = Attachment(messageId: message?.globalId, externalTaskId: messageAttachment.externalTask.id)
+
     try attachment.save(db)
+
     return attachment
   }
 }
