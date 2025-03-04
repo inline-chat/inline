@@ -2,6 +2,23 @@ import Combine
 import GRDB
 import Logger
 
+public struct HomeSpaceItem: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
+  TableRecord,
+  Sendable, Equatable
+{
+  public var space: Space
+  public var members: [Member]
+
+  public var id: Int64 {
+    space.id
+  }
+
+  public init(space: Space, members: [Member]) {
+    self.space = space
+    self.members = members
+  }
+}
+
 public struct UserInfo: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable, Identifiable {
   public var user: User
   public var profilePhoto: [File]?
@@ -89,7 +106,7 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
 
 public final class HomeViewModel: ObservableObject {
   @Published public private(set) var chats: [HomeChatItem] = []
-  @Published public private(set) var spaces: [Space] = []
+  @Published public private(set) var spaces: [HomeSpaceItem] = []
 
   private var chatsCancellable: AnyCancellable?
   private var spacesCancellable: AnyCancellable?
@@ -127,6 +144,8 @@ public final class HomeViewModel: ObservableObject {
     spacesCancellable = ValueObservation
       .tracking { db in
         try Space
+          .including(all: Space.members)
+          .asRequest(of: HomeSpaceItem.self)
           .fetchAll(db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
