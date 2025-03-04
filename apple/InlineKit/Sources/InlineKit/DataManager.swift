@@ -387,7 +387,7 @@ public class DataManager: ObservableObject {
     // Publish
     // Reload messages
     Task { @MainActor in
-      MessagesPublisher.shared.messagesReload(peer: peerId_)
+      MessagesPublisher.shared.messagesReload(peer: peerId_, animated: true)
     }
   }
 

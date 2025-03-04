@@ -98,7 +98,7 @@ public class MessagesProgressiveViewModel {
     case updated([FullMessage], indexSet: [Int], animated: Bool?)
     // Global IDs for list identity
     case deleted([Int64], indexSet: [Int])
-    case reload
+    case reload(animated: Bool?)
   }
 
   private func applyChanges(update: MessagesPublisher.UpdateType) -> MessagesChangeSet? {
@@ -161,7 +161,7 @@ public class MessagesProgressiveViewModel {
           return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
 
-      case let .reload(peer):
+      case let .reload(peer, animated):
         if peer == self.peer {
           if atBottom {
             log.trace("Reloading messages at bottom")
@@ -174,7 +174,7 @@ public class MessagesProgressiveViewModel {
             refetchCurrentRange()
           }
 
-          return MessagesChangeSet.reload
+          return MessagesChangeSet.reload(animated: animated)
         }
     }
 
@@ -357,7 +357,7 @@ public final class MessagesPublisher {
     case add(MessageAdd)
     case update(MessageUpdate)
     case delete(MessageDelete)
-    case reload(peer: Peer)
+    case reload(peer: Peer, animated: Bool?)
   }
 
   private init() {}
@@ -415,7 +415,7 @@ public final class MessagesPublisher {
     publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
   }
 
-  func messagesReload(peer: Peer) {
-    publisher.send(.reload(peer: peer))
+  func messagesReload(peer: Peer, animated: Bool?) {
+    publisher.send(.reload(peer: peer, animated: animated))
   }
 }
