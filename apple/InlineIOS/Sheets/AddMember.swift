@@ -7,7 +7,7 @@ import SwiftUI
 struct AddMember: View {
   @State private var animate: Bool = false
   @State private var text = ""
-  @State private var searchResults: [User] = []
+  @State private var searchResults: [UserInfo] = []
   @State private var isSearching = false
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
   @FormState var formState
@@ -24,9 +24,8 @@ struct AddMember: View {
   var body: some View {
     NavigationView {
       VStack(alignment: .leading, spacing: 6) {
-        if !text.isEmpty {
-          searchSection
-        }
+        searchSection
+
         Spacer()
       }
       .searchable(text: $text, prompt: "Search by username")
@@ -56,7 +55,7 @@ struct AddMember: View {
 
   @ViewBuilder
   private var searchSection: some View {
-    VStack(alignment: .leading) {
+    Group {
       if isSearching {
         searchLoadingView
       } else if searchResults.isEmpty {
@@ -78,40 +77,22 @@ struct AddMember: View {
   }
 
   private var searchResultsList: some View {
-    ScrollView {
-      LazyVStack {
-        ForEach(searchResults) { user in
-          searchResultRow(for: user)
-        }
-      }
+    List(searchResults) { userInfo in
+      searchResultRow(for: userInfo)
+        .listRowInsets(EdgeInsets(top: 9, leading: 2, bottom: 2, trailing: 0))
     }
+    .listStyle(.plain)
   }
 
-  private func searchResultRow(for user: User) -> some View {
+  private func searchResultRow(for userInfo: UserInfo) -> some View {
     Button {
-      addMember(user)
+      addMember(userInfo.user)
     } label: {
-      HStack(alignment: .top) {
-        UserAvatar(user: user, size: 36)
-          .padding(.trailing, 6)
-          .overlay(alignment: .bottomTrailing) {
-            Circle()
-              .fill(.green)
-              .frame(width: 12, height: 12)
-              .padding(.leading, -14)
-          }
-
-        VStack(alignment: .leading) {
-          Text(user.firstName ?? "User")
-            .fontWeight(.medium)
-            .foregroundColor(.primary)
-          if let username = user.username {
-            Text("@\(username)")
-              .font(.callout)
-              .foregroundColor(.secondary)
-          }
-        }
-        .padding(.top, -4)
+      HStack(spacing: 9) {
+        UserAvatar(userInfo: userInfo, size: 28)
+        Text((userInfo.user.firstName ?? "") + " " + (userInfo.user.lastName ?? ""))
+          .fontWeight(.medium)
+          .foregroundColor(.primary)
         Spacer()
       }
       .frame(maxWidth: .infinity)
@@ -140,6 +121,8 @@ struct AddMember: View {
           searchResults =
             try User
               .filter(Column("username").like("%\(query.lowercased())%"))
+              .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+              .asRequest(of: UserInfo.self)
               .fetchAll(db)
         }
 
