@@ -134,11 +134,11 @@ struct SpaceView: View {
       Task {
         do {
           if isCreator {
+            nav.pop()
             try await data.deleteSpace(spaceId: spaceId)
-            nav.pop()
           } else {
-            try await data.leaveSpace(spaceId: spaceId)
             nav.pop()
+            try await data.leaveSpace(spaceId: spaceId)
           }
         } catch {
           print("Error: \(error)")
