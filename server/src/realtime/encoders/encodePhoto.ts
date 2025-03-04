@@ -3,6 +3,7 @@ import { decrypt } from "@in/server/modules/encryption/encryption"
 import { getSignedUrl } from "@in/server/modules/files/path"
 import { Photo_Format, PhotoSize, type Photo } from "@in/protocol/core"
 import type { DbFullPhoto, DbFullPhotoSize } from "@in/server/db/models/files"
+import { encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 const encodePhotoSize = (size: DbFullPhotoSize): PhotoSize | null => {
   let file = size.file
@@ -27,7 +28,7 @@ const encodePhotoSize = (size: DbFullPhotoSize): PhotoSize | null => {
 export const encodePhoto = ({ photo }: { photo: DbFullPhoto }) => {
   let proto: Photo = {
     id: BigInt(photo.id),
-    date: BigInt(photo.date.getTime() / 1000),
+    date: encodeDateStrict(photo.date),
     format: photo.format === "png" ? Photo_Format.PNG : Photo_Format.JPEG,
     sizes: photo.photoSizes?.map(encodePhotoSize).filter((size) => size !== null) ?? [],
   }
@@ -45,7 +46,7 @@ export const encodePhotoLegacy = ({ file }: { file: DbFile }) => {
 
   let proto: Photo = {
     id: BigInt(file.id),
-    date: BigInt(file.date.getTime() / 1000),
+    date: encodeDateStrict(file.date),
     fileUniqueId: file.fileUniqueId,
     format: file.mimeType === "image/png" ? Photo_Format.PNG : Photo_Format.JPEG,
     sizes: [
