@@ -18,8 +18,8 @@ public final actor Realtime: Sendable {
 
   private let db = AppDatabase.shared
   private let log = Log.scoped("RealtimeWrapper", enableTracing: true)
-  private var updates: UpdatesEngine?
-  private var api: RealtimeAPI?
+  public var updates: UpdatesEngine
+  private var api: RealtimeAPI
   private var eventsTask: Task<Void, Never>?
   private var started = false
 
@@ -33,7 +33,7 @@ public final actor Realtime: Sendable {
 
   private init() {
     updates = UpdatesEngine()
-    api = RealtimeAPI(updatesEngine: updates!)
+    api = RealtimeAPI(updatesEngine: updates)
 
     Task {
       if Auth.shared.isLoggedIn {
@@ -71,9 +71,9 @@ public final actor Realtime: Sendable {
     // updates = UpdatesEngine()
     // self.api = RealtimeAPI(updatesEngine: updates!)
 
-    guard let api else {
-      return
-    }
+//    guard let api else {
+//      return
+//    }
 
     // Setup listener
     eventsTask = Task { [weak self] in
@@ -122,7 +122,7 @@ public final actor Realtime: Sendable {
   public func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws
     -> RpcResult.OneOf_Result?
   {
-    try await api?.invoke(method, input: input)
+    try await api.invoke(method, input: input)
   }
 
   public func loggedOut() {
@@ -140,7 +140,7 @@ public final actor Realtime: Sendable {
     eventsTask = nil
 
     Task {
-      await api?.stopAndReset()
+      await api.stopAndReset()
     }
     log.debug("Realtime API stopped after logout")
   }
@@ -187,7 +187,7 @@ public extension Realtime {
     log.trace("deleteMessages result: \(result)")
 
     Task {
-      await api?.updatesEngine.applyBatch(updates: result.updates)
+      await api.updatesEngine.applyBatch(updates: result.updates)
     }
   }
 

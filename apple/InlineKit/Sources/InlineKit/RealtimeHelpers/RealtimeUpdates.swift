@@ -4,13 +4,13 @@ import InlineProtocol
 import Logger
 import RealtimeAPI
 
-actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
+public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
   public static let shared = UpdatesEngine()
 
   private let database: AppDatabase = .shared
   private let log = Log.scoped("RealtimeUpdates")
 
-  func apply(update: InlineProtocol.Update, db: Database) {
+  public func apply(update: InlineProtocol.Update, db: Database) {
     log.trace("apply realtime update")
 
     do {
@@ -41,7 +41,7 @@ actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
     }
   }
 
-  func applyBatch(updates: [InlineProtocol.Update]) {
+  public func applyBatch(updates: [InlineProtocol.Update]) {
     log.debug("applying \(updates.count) updates")
     do {
       try database.dbWriter.write { db in

@@ -88,6 +88,14 @@ final class AppMenu: NSObject {
     clearCacheMenuItem.target = self
     appMenu.addItem(clearCacheMenuItem)
 
+    let clearMediaCacheMenuItem = NSMenuItem(
+      title: "Clear Media Cache…",
+      action: #selector(clearMediaCache(_:)),
+      keyEquivalent: ""
+    )
+    clearMediaCacheMenuItem.target = self
+    appMenu.addItem(clearMediaCacheMenuItem)
+
     appMenu.addItem(NSMenuItem.separator())
 
     appMenu.addItem(
@@ -358,5 +366,11 @@ final class AppMenu: NSObject {
     try? AppDatabase.clearDB()
 
     // TODO: re-open windows?
+  }
+
+  @objc private func clearMediaCache(_ sender: Any?) {
+    Task {
+      try await FileCache.shared.clearCache()
+    }
   }
 }

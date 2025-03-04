@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import InlineKit
 import SwiftUI
+import Logger
 
 class ComposeAppKit: NSView {
   // Props
@@ -15,7 +16,7 @@ class ComposeAppKit: NSView {
   private var viewModel: FullChatViewModel?
 
   // for now we use NSImage as ID until we have proper state management
-  private var attachmentItems: [NSImage: SendMessageAttachment] = [:]
+  private var attachmentItems: [NSImage: FileMediaItem] = [:]
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
@@ -342,8 +343,11 @@ class ComposeAppKit: NSView {
 
     // Update state
     Task {
-      if let attachment = image.prepareForUpload() {
-        attachmentItems[image] = attachment
+      do {
+        let photoInfo = try FileCache.shared.savePhoto(image: image)
+        attachmentItems[image] = .photo(photoInfo)
+      } catch {
+        Log.shared.error("Failed to save photo in attachments", error: error)
       }
     }
   }
@@ -416,7 +420,7 @@ class ComposeAppKit: NSView {
               text: text,
               peerId: self.peerId,
               chatId: self.chatId ?? 0, // FIXME: chatId fallback
-              attachments: [],
+              mediaItems: [],
               replyToMsgId: replyToMsgId
             )
           )
@@ -432,7 +436,7 @@ class ComposeAppKit: NSView {
                 text: isFirst ? text : nil,
                 peerId: self.peerId,
                 chatId: self.chatId ?? 0, // FIXME: chatId fallback
-                attachments: [attachment],
+                mediaItems: [attachment],
                 replyToMsgId: isFirst ? replyToMsgId : nil
               )
             )
@@ -460,15 +464,18 @@ class ComposeAppKit: NSView {
       for: .textInputCatchAll,
       key: "compose\(peerId)",
       handler: { [weak self] event in
-        guard let self = self else { return }
+        guard let self else { return }
 
-        self.focus()
-        
-        self.textEditor.textView.insertText(event.characters ?? "", replacementRange: NSRange(location: NSNotFound, length: 0))
+        focus()
+
+        textEditor.textView.insertText(
+          event.characters ?? "",
+          replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
       }
     )
   }
-  
+
   override func viewDidHide() {
     keyMonitorUnsubscribe?()
     keyMonitorUnsubscribe = nil

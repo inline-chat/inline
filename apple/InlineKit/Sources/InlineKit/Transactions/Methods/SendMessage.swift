@@ -1,84 +1,16 @@
 import Auth
 import Foundation
 import GRDB
+import InlineProtocol
 import Logger
 import MultipartFormDataKit
 
 public struct SendMessageAttachment: Codable, Sendable {
-  public enum ImageFormat: Codable, Sendable {
-    case jpeg
-    case png
-
-    public func toExt() -> String {
-      switch self {
-        case .jpeg: ".jpg"
-        case .png: ".png"
-      }
-    }
-
-    public func toMimeType() -> String {
-      switch self {
-        case .jpeg: "image/jpeg"
-        case .png: "image/png"
-      }
-    }
-  }
-
-  enum AttachmentType: Codable, Sendable {
-    case photo(ImageFormat, width: Int, height: Int)
-    case file
-  }
-
-  public static func photo(
-    format: ImageFormat,
-    width: Int,
-    height: Int,
-    path: String,
-    fileSize: Int,
-    fileName: String? = nil
-  ) -> SendMessageAttachment {
-    let fileName = fileName ?? UUID().uuidString + (format == .jpeg ? ".jpg" : ".png")
-
-    return .init(
-      type: .photo(.jpeg, width: width, height: height),
-      filePath: path,
-      fileName: fileName,
-      fileSize: Int64(fileSize)
-    )
-  }
-
-  let type: AttachmentType
-  let filePath: String
-  let fileName: String?
-  let fileSize: Int64
-
-  public func getFilename() -> String {
-    let ext = if case .photo(.jpeg, _, _) = type { ".jpg" } else { ".png" }
-    return fileName ?? UUID().uuidString + ext
-  }
+  let media: FileMediaItem
 
   // internal state
-  package var id = UUID().uuidString // local file ID
-  fileprivate var fileId: Int64? // when uploaded this gets filled
+  fileprivate var uploaded: Bool = false
   fileprivate var randomId: Int64?
-}
-
-public struct SendMessageImageData: Codable, Sendable, Equatable, Hashable {
-  /// <user temp dir>/path/to/image.jpeg
-  let temporaryPath: String
-  let format: ImageFormat
-  let fileName: String
-
-  public init(temporaryPath: String, format: ImageFormat, fileName: String = UUID().uuidString) {
-    self.temporaryPath = temporaryPath
-    self.format = format
-    self.fileName = fileName
-  }
-
-  public enum ImageFormat: Codable, Sendable {
-    case jpeg
-    case png
-  }
 }
 
 public struct TransactionSendMessage: Transaction {
@@ -104,13 +36,13 @@ public struct TransactionSendMessage: Transaction {
     text: String?,
     peerId: Peer,
     chatId: Int64,
-    attachments: [SendMessageAttachment] = [],
+    mediaItems: [FileMediaItem] = [],
     replyToMsgId: Int64? = nil
   ) {
     self.text = text
     self.peerId = peerId
     self.chatId = chatId
-    self.attachments = attachments
+    attachments = mediaItems.map { SendMessageAttachment(media: $0) }
     self.replyToMsgId = replyToMsgId
     randomId = Int64.random(in: Int64.min ... Int64.max)
     peerUserId = if case let .user(id) = peerId { id } else { nil }
@@ -121,7 +53,7 @@ public struct TransactionSendMessage: Transaction {
       // iterate over attachments and attach random id to all
       for i in 0 ..< attachments.count {
         if i == 0 {
-          self.attachments[0].randomId = randomId
+          attachments[0].randomId = randomId
         } else {
           Log.shared.warning("Multiple attachments in send message transaction not supported yet")
           // self.attachments[i].randomId = Int64.random(in: Int64.min ... Int64.max)
@@ -132,7 +64,8 @@ public struct TransactionSendMessage: Transaction {
 
   // Methods
   func optimistic() {
-    let fileId = attachments.first?.id
+    let media = attachments.first?.media
+    Log.shared.debug("Optimistic send message \(media)")
     let message = Message(
       messageId: temporaryMessageId,
       randomId: randomId,
@@ -145,28 +78,23 @@ public struct TransactionSendMessage: Transaction {
       out: true,
       status: .sending,
       repliedToMessageId: replyToMsgId,
-      fileId: fileId
+      fileId: nil,
+      photoId: media?.asPhotoId(),
+      videoId: media?.asVideoId(),
+      documentId: media?.asDocumentId()
     )
 
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
     Task { @MainActor in
-      let newMessage = try? await (AppDatabase.shared.dbWriter.write { db in
-        if let attachment = attachments.first {
-          let file = File(fromAttachment: attachment)
 
-          do {
-            try file.save(db)
-          } catch {
-            Log.shared.error("Failed to save file", error: error)
-          }
-        }
+      let newMessage = try? await AppDatabase.shared.dbWriter.write { db in
         do {
           return try message.saveAndFetch(db)
         } catch {
           Log.shared.error("Failed to save and fetch message", error: error)
           return nil
         }
-      })
+      }
 
       if let message = newMessage {
         await MessagesPublisher.shared.messageAdded(message: message, peer: peerId)
@@ -174,55 +102,60 @@ public struct TransactionSendMessage: Transaction {
     } //
   }
 
-  func execute() async throws -> SendMessage {
-    var fileUniqueId: String? = nil
+  func execute() async throws -> [InlineProtocol.Update] {
+    var inputMedia: InputMedia? = nil
 
+    // upload attachments and construct input media
     if let attachment = attachments.first {
-      fileUniqueId = try await upload(attachment: attachment)
+      switch attachment.media {
+        case let .photo(photoInfo):
+          // start
+          let localPhotoId = try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
+          // wait
+          if let photoServerId = await FileUploader.shared.waitForUpload(photoLocalId: localPhotoId)?.photoId {
+            inputMedia = .fromPhotoId(photoServerId)
+          }
+
+        case let .video(videoInfo):
+          let localVideoId = try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
+          if let videoServerId = await FileUploader.shared.waitForUpload(videoLocalId: localVideoId)?.videoId {
+            inputMedia = .fromVideoId(videoServerId)
+          }
+
+        case let .document(documentInfo):
+          let localDocumentId = try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
+          if let documentServerId = await FileUploader.shared.waitForUpload(documentLocalId: localDocumentId)?
+            .documentId
+          {
+            inputMedia = .fromDocumentId(documentServerId)
+          }
+      }
     }
 
-    let result = try await ApiClient.shared.sendMessage(
-      peerUserId: peerUserId,
-      peerThreadId: peerThreadId,
-      text: text,
-      randomId: randomId,
-      repliedToMessageId: replyToMsgId,
-      date: date.timeIntervalSince1970,
-      fileUniqueId: fileUniqueId
+    // input for send message
+    let input: SendMessageInput = .with {
+      $0.peerID = peerId.toInputPeer()
+      $0.randomID = randomId
+
+      if let text { $0.message = text }
+      if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
+      if let inputMedia { $0.media = inputMedia }
+    }
+
+    let result_ = try await Realtime.shared.invoke(
+      .sendMessage,
+      input: .sendMessage(input)
     )
 
-    return result
-  }
-
-  // Private upload function
-  private func upload(attachment: SendMessageAttachment) async throws -> String {
-    let fileId = attachment.id
-    let path = attachment.filePath
-    let filename = attachment.fileName
-    let mimeType: String = if case let .photo(format, _, _) = attachment.type {
-      format == .jpeg ? "image/jpeg" : "image/png"
-    } else {
-      fatalError("Unsupported attachment type")
+    guard case let .sendMessage(result) = result_ else {
+      throw SendMessageError.failed
     }
 
-    let result = try await FileUploader.shared
-      .upload(
-        localId: fileId,
-        type: .photo,
-        path: path,
-        filename: filename ?? UUID().uuidString + ".jpg",
-        mimeType: mimeType
-      )
-
-    return result.fileUniqueId
+    return result.updates
   }
 
-  func didSucceed(result: SendMessage) async {
-    if let updates = result.updates {
-      await UpdatesManager.shared.applyBatch(updates: updates)
-    } else {
-      Log.shared.error("No updates in send message response")
-    }
+  func didSucceed(result: [InlineProtocol.Update]) async {
+    await Realtime.shared.updates.applyBatch(updates: result)
   }
 
   func didFail(error: Error?) async {
@@ -252,5 +185,9 @@ public struct TransactionSendMessage: Transaction {
     // Remove from cache
     await MessagesPublisher.shared
       .messagesDeleted(messageIds: [temporaryMessageId], peer: peerId)
+  }
+
+  enum SendMessageError: Error {
+    case failed
   }
 }
