@@ -56,21 +56,17 @@ struct SpaceView: View {
       .animation(.default, value: fullSpaceViewModel.memberChats)
     }
     .frame(maxWidth: .infinity)
-    .navigationBarTitleDisplayMode(.inline)
+    .navigationBarTitleDisplayMode(.large)
+    .navigationTitle(fullSpaceViewModel.space?.name ?? "")
+    .navigationBarBackButtonHidden()
     .toolbar {
       Group {
-        ToolbarItem(id: "Space", placement: .topBarLeading) {
-          HStack {
-            if let space = fullSpaceViewModel.space {
-              SpaceAvatar(space: space, size: 28)
-                .padding(.trailing, 4)
-
-              VStack(alignment: .leading) {
-                Text(space.name)
-                  .font(.title3)
-                  .fontWeight(.semibold)
-              }
-            }
+        ToolbarItem(placement: .navigationBarLeading) {
+          Button {
+            nav.pop()
+          } label: {
+            Image(systemName: "house.fill")
+              .foregroundColor(.secondary)
           }
         }
 
@@ -104,7 +100,6 @@ struct SpaceView: View {
         }
       }
     }
-    .toolbarRole(.editor)
     .sheet(isPresented: $openCreateThreadSheet) {
       CreateThread(spaceId: spaceId)
         .presentationBackground(.thinMaterial)
