@@ -68,16 +68,16 @@ struct ChatItemView: View {
           endPoint: .bottom
         )
       )
-      .frame(width: 38, height: 38)
+      .frame(width: 58, height: 58)
       .overlay {
         Group {
           if let emoji = chat?.emoji {
             Text(String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "").replacingOccurrences(of: "\")", with: ""))
-              .font(.customTitle())
+              .font(.largeTitle)
           } else {
-            Image(systemName: "message.fill")
-              .foregroundColor(.secondary)
-              .font(.callout)
+            Text("💬")
+              .font(.largeTitle)
+
           }
         }
       }
