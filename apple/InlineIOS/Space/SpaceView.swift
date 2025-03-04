@@ -196,20 +196,20 @@ struct SpaceView: View {
             from: memberChat.from?.user
           ))
         }
-//        .contextMenu {
-//          Button {
-//            nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
-//          } label: {
-//            Label("Open Chat", systemImage: "bubble.left")
-//          }
-//        } preview: {
-//          ChatView(peer: .user(id: memberChat.user?.id ?? 0), preview: true)
-//            .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-//            .environmentObject(nav)
-//            .environmentObject(data)
-//            .environmentObject(ws)
-//            .environment(\.appDatabase, database)
-//        }
+        .contextMenu {
+          Button {
+            nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
+          } label: {
+            Label("Open Chat", systemImage: "bubble.left")
+          }
+        } preview: {
+          ChatView(peer: .user(id: memberChat.user?.id ?? 0), preview: true)
+            .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+            .environmentObject(nav)
+            .environmentObject(data)
+            .environment(\.realtime, realtime)
+            .environment(\.appDatabase, database)
+        }
 
       case let .chat(chat):
         Button {
