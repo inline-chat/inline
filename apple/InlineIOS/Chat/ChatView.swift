@@ -116,7 +116,6 @@ struct ChatView: View {
         }
       }
       .navigationBarHidden(false)
-      .toolbarRole(.editor)
       .toolbarBackground(.visible, for: .navigationBar)
       .toolbarTitleDisplayMode(.inline)
       .onAppear {

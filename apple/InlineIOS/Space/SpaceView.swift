@@ -58,18 +58,9 @@ struct SpaceView: View {
     .frame(maxWidth: .infinity)
     .navigationBarTitleDisplayMode(.large)
     .navigationTitle(fullSpaceViewModel.space?.name ?? "")
-    .navigationBarBackButtonHidden()
+    .toolbarRole(.editor)
     .toolbar {
       Group {
-        ToolbarItem(placement: .navigationBarLeading) {
-          Button {
-            nav.pop()
-          } label: {
-            Image(systemName: "house.fill")
-              .foregroundColor(.secondary)
-          }
-        }
-
         ToolbarItem(placement: .navigationBarTrailing) {
           Menu {
             Button(action: {
