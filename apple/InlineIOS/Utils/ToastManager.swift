@@ -39,13 +39,15 @@ class ToastManager: ObservableObject {
     action: (() -> Void)? = nil,
     actionTitle: String? = nil
   ) {
-    currentToast = ToastData(
-      message: message,
-      type: type,
-      action: action,
-      actionTitle: actionTitle,
-      systemImage: systemImage
-    )
+    withAnimation {
+      currentToast = ToastData(
+        message: message,
+        type: type,
+        action: action,
+        actionTitle: actionTitle,
+        systemImage: systemImage
+      )
+    }
     
     if type != .loading {
       setupTimer(duration: type.duration)
