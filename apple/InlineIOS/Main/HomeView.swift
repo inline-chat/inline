@@ -112,9 +112,7 @@ struct HomeView: View {
 
           ForEach(chatItems, id: \.id) { item in
             chatView(for: item)
-              .transaction { transaction in
-                transaction.animation = nil
-              }
+
               .listRowInsets(.init(
                 top: 9,
                 leading: 16,

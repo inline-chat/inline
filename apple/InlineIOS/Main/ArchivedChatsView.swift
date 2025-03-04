@@ -4,7 +4,10 @@ import SwiftUI
 struct ArchivedChatsView: View {
   @EnvironmentObject private var home: HomeViewModel
   @EnvironmentObject private var nav: Navigation
-  @EnvironmentObject private var dataManager: DataManager
+
+  @EnvironmentObject var data: DataManager
+  @Environment(\.realtime) var realtime
+  @Environment(\.appDatabase) private var database
 
   var body: some View {
     Group {
@@ -34,12 +37,24 @@ struct ArchivedChatsView: View {
             Button {
               nav.push(.chat(peer: .user(id: chat.user.id)))
             } label: {
-              ChatRowView(item: .home(chat))
+              DirectChatItem(props: Props(
+                dialog: chat.dialog,
+                user: chat.user,
+                chat: chat.chat,
+                message: chat.message,
+                from: chat.from
+              ))
             }
+            .listRowInsets(.init(
+              top: 9,
+              leading: 16,
+              bottom: 2,
+              trailing: 0
+            ))
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
               Button(role: .destructive) {
                 Task {
-                  try await dataManager.updateDialog(
+                  try await data.updateDialog(
                     peerId: .user(id: chat.user.id),
                     archived: false
                   )
@@ -48,6 +63,20 @@ struct ArchivedChatsView: View {
                 Image(systemName: "tray.and.arrow.up.fill")
               }
               .tint(Color(.systemGray2))
+            }
+            .contextMenu {
+              Button {
+                nav.push(.chat(peer: .user(id: chat.user.id)))
+              } label: {
+                Label("Open Chat", systemImage: "bubble.left")
+              }
+            } preview: {
+              ChatView(peer: .user(id: chat.user.id), preview: true)
+                .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+                .environmentObject(nav)
+                .environmentObject(data)
+                .environment(\.realtime, realtime)
+                .environment(\.appDatabase, database)
             }
           }
         }
