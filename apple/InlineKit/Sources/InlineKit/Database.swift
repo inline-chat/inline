@@ -259,6 +259,67 @@ public extension AppDatabase {
         t.column("externalTaskId", .integer).references("externalTask", column: "id", onDelete: .cascade)
       }
     }
+    
+    migrator.registerMigration("media tables") { db in
+      // Photo table
+      try db.create(table: "photo") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("photoId", .integer).unique().indexed()
+        t.column("date", .datetime).notNull()
+        t.column("format", .text).notNull() // "jpeg", "png"
+      }
+      
+      // PhotoSize table
+      try db.create(table: "photoSize") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("photoId", .integer)
+          .references("photo", column: "id", onDelete: .cascade)
+          .notNull()
+        t.column("type", .text).notNull() // "b", "c", "d", "f", "s", etc.
+        t.column("width", .integer)
+        t.column("height", .integer)
+        t.column("size", .integer)
+        t.column("bytes", .blob) // For stripped thumbnails
+        t.column("cdnUrl", .text)
+        t.column("localPath", .text)
+      }
+      
+      // Video table
+      try db.create(table: "video") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("videoId", .integer).unique().indexed()
+        t.column("date", .datetime).notNull()
+        t.column("width", .integer)
+        t.column("height", .integer)
+        t.column("duration", .integer)
+        t.column("size", .integer)
+        t.column("thumbnailPhotoId", .integer)
+          .references("photo", column: "id", onDelete: .setNull)
+        t.column("cdnUrl", .text)
+        t.column("localPath", .text)
+      }
+      
+      // Document table
+      try db.create(table: "document") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("documentId", .integer).unique().indexed()
+        t.column("date", .datetime).notNull()
+        t.column("fileName", .text)
+        t.column("mimeType", .text)
+        t.column("size", .integer)
+        t.column("cdnUrl", .text)
+        t.column("localPath", .text)
+        t.column("thumbnailPhotoId", .integer)
+          .references("photo", column: "id", onDelete: .setNull)
+      }
+      
+      // Update message table to reference media
+      try db.alter(table: "message") { t in
+        t.add(column: "photoId", .integer).references("photo", column: "photoId", onDelete: .setNull)
+        t.add(column: "videoId", .integer).references("video", column: "videoId", onDelete: .setNull)
+        t.add(column: "documentId", .integer).references("document", column: "documentId", onDelete: .setNull)
+      }
+    }
 
     /// TODOs:
     /// - Add indexes for performance
