@@ -25,8 +25,8 @@ struct HomeView: View {
   // MARK: - State
 
   @State private var text = ""
-  @State private var searchResults: [User] = []
-  @State private var isSearching = false
+  @State private var searchResults: [UserInfo] = []
+  @State private var isSearchingState = false
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
 
   var chatItems: [HomeChatItem] {
@@ -131,6 +131,10 @@ struct HomeView: View {
         .listStyle(.plain)
       }
     }
+    .overlay {
+      SearchedView(text: $text, isSearchResultsEmpty: searchResults.isEmpty)
+    }
+
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
     .toolbar {
@@ -152,11 +156,11 @@ struct HomeView: View {
   private func searchUsers(query: String) {
     guard !query.isEmpty else {
       searchResults = []
-      isSearching = false
+      isSearchingState = false
       return
     }
 
-    isSearching = true
+    isSearchingState = true
     Task {
       do {
         let result = try await api.searchContacts(query: query)
@@ -171,17 +175,19 @@ struct HomeView: View {
           searchResults =
             try User
               .filter(Column("username").like("%\(query.lowercased())%"))
+              .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+              .asRequest(of: UserInfo.self)
               .fetchAll(db)
         }
 
         await MainActor.run {
-          isSearching = false
+          isSearchingState = false
         }
       } catch {
         Log.shared.error("Error searching users", error: error)
         await MainActor.run {
           searchResults = []
-          isSearching = false
+          isSearchingState = false
         }
       }
     }
@@ -205,30 +211,15 @@ struct HomeView: View {
   }
 
   private var searchResultsView: some View {
-    List(searchResults) { user in
-      HStack(spacing: 9) {
-        UserAvatar(user: user, size: 38)
-
-        VStack(alignment: .leading, spacing: 0) {
-          Text((user.firstName ?? "") + " " + (user.lastName ?? ""))
+    List(searchResults) { userInfo in
+      Button(action: {
+        navigateToUser(userInfo.user)
+      }) {
+        HStack(spacing: 9) {
+          UserAvatar(userInfo: userInfo, size: 28)
+          Text((userInfo.user.firstName ?? "") + " " + (userInfo.user.lastName ?? ""))
             .fontWeight(.medium)
             .foregroundColor(.primary)
-
-          Text(user.username ?? "")
-            .foregroundColor(.secondary)
-        }
-
-        Spacer()
-        Button {
-          navigateToUser(user)
-        } label: {
-          Circle()
-            .fill(Color(.systemGray5))
-            .frame(width: 36, height: 36)
-            .overlay {
-              Image(systemName: "message.fill")
-                .foregroundColor(ColorManager.shared.swiftUIColor)
-            }
         }
       }
     }
@@ -307,5 +298,32 @@ extension UIViewController {
       return presented.topmostPresentedViewController
     }
     return self
+  }
+}
+
+struct SearchedView: View {
+  @Environment(\.isSearching) private var isSearching
+  @Binding var text: String
+  var isSearchResultsEmpty: Bool
+
+  var body: some View {
+    if isSearching, text.isEmpty || isSearching, isSearchResultsEmpty {
+      VStack(spacing: 4) {
+        Text("🔍")
+          .font(.system(size: 48))
+          .foregroundColor(.primary)
+          .padding(.bottom, 14)
+        Text("Search for people")
+          .font(.headline)
+          .foregroundColor(.primary)
+        Text("Type a username to find someone to chat with. eg. dena, mo")
+          .foregroundColor(.secondary)
+          .multilineTextAlignment(.center)
+      }
+      .padding(.horizontal, 45)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(Color(.systemBackground))
+      .transition(.opacity)
+    }
   }
 }

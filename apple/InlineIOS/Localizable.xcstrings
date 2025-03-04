@@ -29,6 +29,9 @@
     "💬" : {
 
     },
+    "🔍" : {
+
+    },
     "Accent Color" : {
 
     },
@@ -448,6 +451,9 @@
     "Search by username" : {
 
     },
+    "Search for people" : {
+
+    },
     "Searching..." : {
 
     },
@@ -464,6 +470,9 @@
 
     },
     "This is a reply message" : {
+
+    },
+    "Type a username to find someone to chat with. eg. dena, mo" : {
 
     },
     "Unpin" : {
