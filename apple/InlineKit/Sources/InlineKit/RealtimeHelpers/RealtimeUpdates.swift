@@ -196,5 +196,14 @@ extension InlineProtocol.UpdateMessageAttachment {
     _ = try ExternalTask.save(db, externalTask: externalTaskAttachment)
 
     _ = try Attachment.save(db, messageAttachment: attachment)
+
+    let message = try Message.filter(Column("messageId") == attachment.messageID).fetchOne(db)
+
+    if let message {
+      Task { @MainActor in
+        await MessagesPublisher.shared
+          .messageUpdated(message: message, peer: message.peerId, animated: true)
+      }
+    }
   }
 }

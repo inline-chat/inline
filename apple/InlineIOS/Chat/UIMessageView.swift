@@ -511,8 +511,9 @@ class UIMessageView: UIView {
               do {
                 let result = try await ApiClient.shared.createLinearIssue(
                   text: item,
-                  messageId: self.message.stableId,
-                  peerId: self.fullMessage.peerId
+                  messageId: self.message.messageId,
+                  peerId: self.fullMessage.peerId,
+                  chatId: self.message.chatId
                 )
               } catch {
                 print("FAILED to create issue \(error)")
@@ -530,7 +531,7 @@ class UIMessageView: UIView {
               systemImage: "checkmark.circle.fill"
             )
 
-            self.triggerMessageReload()
+//            self.triggerMessageReload()
 
           } else {
             ToastManager.shared.showToast(
@@ -542,8 +543,9 @@ class UIMessageView: UIView {
             do {
               let result = try await ApiClient.shared.createLinearIssue(
                 text: self.message.text ?? "",
-                messageId: self.message.stableId,
-                peerId: self.fullMessage.peerId
+                messageId: self.message.messageId,
+                peerId: self.fullMessage.peerId,
+                chatId: self.message.chatId
               )
               ToastManager.shared.showToast(
                 "Issue created",
@@ -557,7 +559,7 @@ class UIMessageView: UIView {
                 actionTitle: "Open"
               )
 
-              self.triggerMessageReload()
+//              self.triggerMessageReload()
 
             } catch {
               print("FAILED to create issue \(error)")

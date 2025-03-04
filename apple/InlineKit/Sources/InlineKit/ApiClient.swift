@@ -374,11 +374,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public func createLinearIssue(
     text: String,
     messageId: Int64,
-    peerId: Peer
+    peerId: Peer,
+    chatId: Int64
   ) async throws -> CreateLinearIssue {
     var body: [String: Any] = [
       "text": text,
       "messageId": messageId,
+      "chatId": chatId,
     ]
 
     // Create a proper peerId object structure as expected by the server

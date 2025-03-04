@@ -1,5 +1,5 @@
 import { Optional, Type, type Static } from "@sinclair/typebox"
-import { eq, count } from "drizzle-orm"
+import { eq, count, and } from "drizzle-orm"
 import OpenAI from "openai"
 import { spaces, users, messages } from "../db/schema"
 import { db } from "../db"
@@ -40,6 +40,7 @@ type Context = {
 export const Input = Type.Object({
   text: Type.String(),
   messageId: Type.Number(),
+  chatId: Type.Number(),
   peerId: TInputPeerInfo,
 })
 
@@ -51,7 +52,7 @@ export const handler = async (
   input: Static<typeof Input>,
   { currentUserId }: Context,
 ): Promise<Static<typeof Response>> => {
-  let { text, messageId, peerId } = input
+  let { text, messageId, peerId, chatId } = input
 
   const [labels, [user], linearUsers] = await Promise.all([
     getLinearIssueLabels({ userId: currentUserId }),
@@ -118,7 +119,7 @@ export const handler = async (
         const messageExists = await db
           .select({ count: count() })
           .from(messages)
-          .where(eq(messages.globalId, BigInt(messageId)))
+          .where(and(eq(messages.messageId, messageId), eq(messages.chatId, chatId)))
           .then((result) => result[0]!.count > 0)
 
         if (messageExists) {
@@ -144,6 +145,7 @@ export const handler = async (
           peerId,
           currentUserId,
           externalTask: externalTaskResult[0],
+          chatId,
         })
       } catch (error) {
         Log.shared.error("Failed to update message attachment", { error })
@@ -215,11 +217,13 @@ const messageAttachmentUpdate = async ({
   peerId,
   currentUserId,
   externalTask,
+  chatId,
 }: {
   messageId: number
   peerId: TPeerInfo
   currentUserId: number
   externalTask: DbExternalTask
+  chatId: number
 }): Promise<void> => {
   try {
     // decrypt title
@@ -238,7 +242,7 @@ const messageAttachmentUpdate = async ({
     const messageExists = await db
       .select({ count: count() })
       .from(messages)
-      .where(eq(messages.globalId, BigInt(messageId)))
+      .where(and(eq(messages.messageId, messageId), eq(messages.chatId, chatId)))
       .then((result) => result[0]!.count > 0)
 
     if (!messageExists) {
@@ -247,23 +251,13 @@ const messageAttachmentUpdate = async ({
     }
 
     const updateGroup = await getUpdateGroup(peerId, { currentUserId })
+    console.log("updateGroup", updateGroup)
 
     if (updateGroup.type === "users") {
       updateGroup.userIds.forEach((userId: number) => {
-        let encodingForPeer: TPeerInfo = userId === currentUserId ? peerId : { userId: currentUserId }
-        const update: TUpdateInfo = {
-          deleteMessage: {
-            messageId,
-            peerId: encodingForPeer,
-          },
-        }
-
-        const updates = [update]
-
-        connectionManager.sendToUser(userId, createMessage({ kind: ServerMessageKind.Message, payload: { updates } }))
-
+        console.log("pushing update to user", userId)
         // New updates
-        let messageDeletedUpdate: Update = {
+        let messageAttachmentUpdate: Update = {
           update: {
             oneofKind: "messageAttachment",
             messageAttachment: {
@@ -287,27 +281,13 @@ const messageAttachmentUpdate = async ({
             },
           },
         }
-        RealtimeUpdates.pushToUser(userId, [messageDeletedUpdate])
+        RealtimeUpdates.pushToUser(userId, [messageAttachmentUpdate])
       })
     } else if (updateGroup.type === "space") {
       const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
 
       userIds.forEach((userId) => {
-        const update: TUpdateInfo = {
-          deleteMessage: {
-            messageId,
-            peerId,
-          },
-        }
-
-        const updates = [update]
-
-        connectionManager.sendToUser(
-          userId,
-          createMessage({ kind: ServerMessageKind.Message, payload: { updates: updates } }),
-        )
-
-        let messageDeletedUpdate: Update = {
+        let messageAttachmentUpdate: Update = {
           update: {
             oneofKind: "messageAttachment",
             messageAttachment: {
@@ -332,7 +312,7 @@ const messageAttachmentUpdate = async ({
           },
         }
 
-        RealtimeUpdates.pushToUser(userId, [messageDeletedUpdate])
+        RealtimeUpdates.pushToUser(userId, [messageAttachmentUpdate])
       })
     }
   } catch (error) {
