@@ -55,7 +55,15 @@ struct ToastView: View {
       }
     )
     .padding(.horizontal, 20)
-    .transition(.move(edge: .top).combined(with: .opacity))
+    .shadow(color: Color.primary.opacity(0.06), radius: 8, x: 0, y: 3)
+    .transition(
+      .asymmetric(
+        insertion: .opacity.combined(with: .move(edge: .top)),
+        removal: .opacity.combined(with: .move(edge: .top))
+      )
+    )
+    .scaleEffect(1)
+    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: toast.id)
   }
 }
 
