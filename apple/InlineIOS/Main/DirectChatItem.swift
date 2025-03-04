@@ -58,7 +58,7 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var userProfile: some View {
-    if let userInfo = userInfo {
+    if let userInfo {
       UserAvatar(userInfo: userInfo, size: 58)
     }
   }

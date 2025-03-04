@@ -44,20 +44,6 @@ struct HomeView: View {
     Group {
       if !searchResults.isEmpty {
         searchResultsView
-      } else if chatItems.isEmpty {
-        VStack(spacing: 4) {
-          Text("💬")
-            .font(.system(size: 48))
-            .foregroundColor(.primary)
-            .padding(.bottom, 14)
-          Text("No chats")
-            .font(.headline)
-            .foregroundColor(.primary)
-          Text("Add a space or start a chat with someone to get started.")
-            .foregroundColor(.secondary)
-            .multilineTextAlignment(.center)
-        }
-        .padding(.horizontal, 45)
       } else {
         List {
           ScrollView(.horizontal) {
@@ -67,6 +53,7 @@ struct HomeView: View {
               }
             }
           }
+          .scrollIndicators(.hidden)
           .contentMargins(.horizontal, 16, for: .scrollContent)
           .listRowInsets(.init(
             top: 0,
@@ -79,26 +66,50 @@ struct HomeView: View {
             Button {
               nav.push(.archivedChats)
             } label: {
-              HStack {
-                Spacer()
+              HStack(alignment: .top, spacing: 14) {
+                Circle()
+                  .fill(
+                    LinearGradient(
+                      colors: [
+                        Color(.systemGray3).adjustLuminosity(by: 0.2),
+                        Color(.systemGray5).adjustLuminosity(by: 0),
+                      ],
+                      startPoint: .top,
+                      endPoint: .bottom
+                    )
+                  )
+                  .frame(width: 58, height: 58)
+                  .overlay {
+                    Image(systemName: "tray.full.fill")
+                      .font(.title)
+                      .foregroundColor(.secondary)
+                  }
 
-                Text("Archived Chats")
-                  .font(.callout)
-                  .foregroundColor(.secondary)
+                VStack(alignment: .leading) {
+                  Text("Archived Chats")
+                    .font(.customTitle())
+                    .foregroundColor(.primary)
+                  Text("\(home.chats.filter { $0.dialog.archived == true }.count) chats")
+                    .font(.customCaption())
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .padding(.top, 1)
 
+                    .contentTransition(.numericText())
+                }
+                .animation(.default, value: home.chats.filter { $0.dialog.archived == true }.count)
                 Spacer()
               }
-              .frame(height: 40)
+              .frame(height: 70)
               .frame(maxWidth: .infinity)
             }
             .listRowInsets(.init(
-              top: 0,
-              leading: 0,
-              bottom: 0,
+              top: 9,
+              leading: 16,
+              bottom: 2,
               trailing: 0
             ))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color(uiColor: .secondarySystemFill).opacity(0.5))
           }
 
           ForEach(chatItems, id: \.id) { item in
@@ -129,6 +140,8 @@ struct HomeView: View {
           }
         }
         .listStyle(.plain)
+        .animation(.default, value: home.chats)
+        .animation(.default, value: home.spaces)
       }
     }
     .overlay {
@@ -307,23 +320,25 @@ struct SearchedView: View {
   var isSearchResultsEmpty: Bool
 
   var body: some View {
-    if isSearching, text.isEmpty || isSearching, isSearchResultsEmpty {
-      VStack(spacing: 4) {
-        Text("🔍")
-          .font(.system(size: 48))
-          .foregroundColor(.primary)
-          .padding(.bottom, 14)
-        Text("Search for people")
-          .font(.headline)
-          .foregroundColor(.primary)
-        Text("Type a username to find someone to chat with. eg. dena, mo")
-          .foregroundColor(.secondary)
-          .multilineTextAlignment(.center)
+    if isSearching {
+      if text.isEmpty || isSearchResultsEmpty {
+        VStack(spacing: 4) {
+          Text("🔍")
+            .font(.system(size: 48))
+            .foregroundColor(.primary)
+            .padding(.bottom, 14)
+          Text("Search for people")
+            .font(.headline)
+            .foregroundColor(.primary)
+          Text("Type a username to find someone to chat with. eg. dena, mo")
+            .foregroundColor(.secondary)
+            .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 45)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+        .transition(.opacity)
       }
-      .padding(.horizontal, 45)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .background(Color(.systemBackground))
-      .transition(.opacity)
     }
   }
 }
