@@ -430,7 +430,7 @@ class MessageListAppKit: NSViewController {
     if feature_scrollsToBottomInDidLayout, isAtAbsoluteBottom {
       return
     }
-    
+
     if needsInitialScroll {
       return
     }
@@ -669,19 +669,22 @@ class MessageListAppKit: NSViewController {
           self.isPerformingUpdate = false
         }
 
-      case let .updated(_, indexSet):
-        tableView
-          .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
-        if shouldScroll { scrollToBottom(animated: true) }
-        isPerformingUpdate = false
-      //      NSAnimationContext.runAnimationGroup { context in
-      //        context.duration = animationDuration
-      //        self.tableView
-      //          .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
-      //        if shouldScroll { self.scrollToBottom(animated: true) } // ??
-      //      } completionHandler: {
-      //        self.isPerformingUpdate = false
-      //      }
+      case let .updated(_, indexSet, animated):
+        if animated == true {
+          NSAnimationContext.runAnimationGroup { context in
+            context.duration = animationDuration
+            self.tableView
+              .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
+            if shouldScroll { self.scrollToBottom(animated: true) } // ??
+          } completionHandler: {
+            self.isPerformingUpdate = false
+          }
+        } else {
+          tableView
+            .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
+          if shouldScroll { scrollToBottom(animated: true) }
+          isPerformingUpdate = false
+        }
 
       case .reload:
         log.trace("reloading data")

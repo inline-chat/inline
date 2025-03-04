@@ -99,40 +99,40 @@ extension NSImage {
 }
 
 extension NSImage {
-  func prepareForUpload() -> SendMessageAttachment? {
-    let maxSize = 5_024 * 1_024 * 1_024 // 5 MB
-
-    // Step 1: Create a proper image source from our NSImage
-    guard let tiffData = tiffRepresentation else {
-      return nil
-    }
-
-    let hasAlpha = alphaComponent > 0
-
-    // Step 3: Prepare destination format and options
-    let (format, fileType) = hasAlpha ?
-      (SendMessageAttachment.ImageFormat.png, NSBitmapImageRep.FileType.png) :
-      (SendMessageAttachment.ImageFormat.jpeg, NSBitmapImageRep.FileType.jpeg)
-
-    let fileName = UUID().uuidString + (format == .png ? ".png" : ".jpg")
-    let temporaryDirectory = FileHelpers.getDocumentsDirectory()
-    let temporaryFileURL = temporaryDirectory.appendingPathComponent(fileName)
-    let fileSize = tiffData.count
-    _ = saveImage(
-      to: temporaryFileURL,
-      fileType: fileType,
-      properties: [.compressionFactor: 1.0]
-    )
-
-    return SendMessageAttachment.photo(
-      format: format,
-      width: Int(size.width),
-      height: Int(size.height),
-      path: fileName,
-      fileSize: fileSize,
-      fileName: fileName
-    )
-  }
+//  func prepareForUpload() -> SendMessageAttachment? {
+//    let maxSize = 5_024 * 1_024 * 1_024 // 5 MB
+//
+//    // Step 1: Create a proper image source from our NSImage
+//    guard let tiffData = tiffRepresentation else {
+//      return nil
+//    }
+//
+//    let hasAlpha = alphaComponent > 0
+//
+//    // Step 3: Prepare destination format and options
+//    let (format, fileType) = hasAlpha ?
+//      (SendMessageAttachment.ImageFormat.png, NSBitmapImageRep.FileType.png) :
+//      (SendMessageAttachment.ImageFormat.jpeg, NSBitmapImageRep.FileType.jpeg)
+//
+//    let fileName = UUID().uuidString + (format == .png ? ".png" : ".jpg")
+//    let temporaryDirectory = FileHelpers.getDocumentsDirectory()
+//    let temporaryFileURL = temporaryDirectory.appendingPathComponent(fileName)
+//    let fileSize = tiffData.count
+//    _ = saveImage(
+//      to: temporaryFileURL,
+//      fileType: fileType,
+//      properties: [.compressionFactor: 1.0]
+//    )
+//
+//    return SendMessageAttachment.photo(
+//      format: format,
+//      width: Int(size.width),
+//      height: Int(size.height),
+//      path: fileName,
+//      fileSize: fileSize,
+//      fileName: fileName
+//    )
+//  }
 
   // Optional: Resize image if needed
   func resized(to newSize: NSSize) -> NSImage {

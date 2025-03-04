@@ -29,11 +29,23 @@ class MessageViewAppKit: NSView {
     message.out == true
   }
 
-  private var hasPhoto: Bool {
+  private var hasLegacyPhoto: Bool {
     if let file = fullMessage.file, file.fileType == .photo {
       return true
     }
     return false
+  }
+
+  private var hasPhoto: Bool {
+    fullMessage.photoInfo != nil
+  }
+
+  private var hasVideo: Bool {
+    fullMessage.videoInfo != nil
+  }
+
+  private var hasDocument: Bool {
+    fullMessage.documentInfo != nil
   }
 
   private var hasReply: Bool {
@@ -115,6 +127,13 @@ class MessageViewAppKit: NSView {
 
   private lazy var photoView: PhotoView = {
     let view = PhotoView(fullMessage)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private lazy var newPhotoView: NewPhotoView = {
+    let view = NewPhotoView(fullMessage)
+    Log.shared.debug("new photo view init \(fullMessage.photoInfo)")
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -324,8 +343,12 @@ class MessageViewAppKit: NSView {
       contentView.addArrangedSubview(replyView)
     }
 
-    if hasPhoto {
+    if hasLegacyPhoto {
       contentView.addArrangedSubview(photoView)
+    }
+
+    if hasPhoto {
+      contentView.addArrangedSubview(newPhotoView)
     }
 
     if hasText {
@@ -425,8 +448,16 @@ class MessageViewAppKit: NSView {
 
     ])
 
-    if hasPhoto, let photoHeight = props.photoHeight {
+    if hasLegacyPhoto, let photoHeight = props.photoHeight {
       photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photoHeight)
+      NSLayoutConstraint.activate(
+        [
+          photoViewHeightConstraint!,
+        ]
+      )
+    }
+    if hasPhoto, let photoHeight = props.photoHeight {
+      photoViewHeightConstraint = newPhotoView.heightAnchor.constraint(equalToConstant: photoHeight)
       NSLayoutConstraint.activate(
         [
           photoViewHeightConstraint!,
@@ -532,13 +563,25 @@ class MessageViewAppKit: NSView {
       menu.addItem(copyItem)
     }
 
-    if hasPhoto {
+    if hasLegacyPhoto {
       let saveItem = NSMenuItem(title: "Save Image", action: #selector(photoView.saveImage), keyEquivalent: "m")
       saveItem.target = photoView
       saveItem.isEnabled = true
       menu.addItem(saveItem)
 
       let copyItem = NSMenuItem(title: "Copy Image", action: #selector(photoView.copyImage), keyEquivalent: "i")
+      copyItem.target = photoView
+      copyItem.isEnabled = true
+      menu.addItem(copyItem)
+    }
+
+    if hasPhoto {
+      let saveItem = NSMenuItem(title: "Save Image", action: #selector(newPhotoView.saveImage), keyEquivalent: "m")
+      saveItem.target = photoView
+      saveItem.isEnabled = true
+      menu.addItem(saveItem)
+
+      let copyItem = NSMenuItem(title: "Copy Image", action: #selector(newPhotoView.copyImage), keyEquivalent: "i")
       copyItem.target = photoView
       copyItem.isEnabled = true
       menu.addItem(copyItem)
@@ -655,8 +698,11 @@ class MessageViewAppKit: NSView {
     setupMessageText()
 
     // Photo
-    if hasPhoto {
+    if hasLegacyPhoto {
       photoView.update(with: fullMessage)
+    }
+    if hasPhoto {
+      newPhotoView.update(with: fullMessage)
     }
 
     DispatchQueue.main.async(qos: .utility) { [weak self] in

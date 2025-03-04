@@ -59,7 +59,7 @@ class MessageSizeCalculator {
   func getTextWidthIfSingleLine(_ fullMessage: FullMessage, availableWidth: CGFloat) -> CGFloat? {
     // Bypass single line cache for media messages (unless when we have a max width and available width > maxWidth so we
     // know we don't need to recalc. since this function is used in message list to bypass unneccessary calcs.
-    guard fullMessage.file == nil else { return nil }
+    guard !fullMessage.hasMedia else { return nil }
 
     let text = fullMessage.message.text ?? emptyFallback
     let minTextSize = minTextWidthForSingleLine.object(forKey: text as NSString) as? CGSize
@@ -83,7 +83,7 @@ class MessageSizeCalculator {
   ) -> (NSSize, NSSize, NSSize?) {
     let hasText = message.message.text != nil
     let text = message.message.text ?? emptyFallback
-    let hasMedia = message.file != nil
+    let hasMedia = message.hasMedia
     let hasReply = message.message.repliedToMessageId != nil
 
     // If text is empty, height is always 1 line
@@ -111,10 +111,23 @@ class MessageSizeCalculator {
         height: 310.0
       ) // prevent too big media
       let minMediaSize = CGSize(width: 180.0, height: 20.0) // prevent too narrow media
+
+      var width: CGFloat = 0
+      var height: CGFloat = 0
+
+      if let file = message.file {
+        width = CGFloat(file.width ?? 0)
+        height = CGFloat(file.height ?? 0)
+      } else if let photoInfo = message.photoInfo {
+        let photo = photoInfo.bestPhotoSize()
+        width = CGFloat(photo?.width ?? 0)
+        height = CGFloat(photo?.height ?? 0)
+      }
+
       // /start photo
-      if let file = message.file, file.fileType == .photo {
+      if message.file?.fileType == .photo || message.photoInfo != nil {
         // do we have width/height?
-        if let width = file.width, let height = file.height, width > 0, height > 0 {
+        if width > 0, height > 0 {
           let aspectRatio = CGFloat(width) / CGFloat(height)
           var mediaWidth: CGFloat
           var mediaHeight: CGFloat
@@ -153,6 +166,9 @@ class MessageSizeCalculator {
         // /end photo
       } else {
         // Unsupported
+        
+        // todo video
+        // todo file
       }
     }
 
@@ -167,7 +183,7 @@ class MessageSizeCalculator {
     // Highly Experimental:
     // So we get smooth bubble resize but less lag
     // Make available width divisible by 4 to do one fourth of layouting per text
-    //availableWidth = floor(availableWidth / 3) * 3
+    // availableWidth = floor(availableWidth / 3) * 3
 
     log.trace("availableWidth \(availableWidth) for text \(text)")
     var textSize: CGSize?

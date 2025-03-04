@@ -68,32 +68,30 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var peerUserId: Int64?
   public var peerThreadId: Int64?
   public var chatId: Int64
-
-  // Sent from user
   public var fromId: Int64
-
-  // Are we mentioned in this message?
   public var mentioned: Bool?
-
-  // Is this message outgoing?
   public var out: Bool?
-
-  // is this message pinned?
   public var pinned: Bool?
-
-  // If message was edited
   public var editDate: Date?
-
+  public var fileId: String?
   public var status: MessageSendingStatus?
-
   public var repliedToMessageId: Int64?
+  public var photoId: Int64?
+  public var videoId: Int64?
+  public var documentId: Int64?
+
+  enum Columns {
+    static let messageId = Column(CodingKeys.messageId)
+    static let photoId = Column(CodingKeys.photoId)
+    static let videoId = Column(CodingKeys.videoId)
+    static let documentId = Column(CodingKeys.documentId)
+  }
 
   public static let chat = belongsTo(Chat.self)
   public var chat: QueryInterfaceRequest<Chat> {
     request(for: Message.chat)
   }
 
-  public var fileId: String?
   public static let file = belongsTo(File.self)
   public var file: QueryInterfaceRequest<File> {
     request(for: Message.file)
@@ -106,6 +104,27 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   )
   public var files: QueryInterfaceRequest<File> {
     request(for: Message.files)
+  }
+
+  // Relationship to photo using photoId (server ID)
+  static let photo = belongsTo(Photo.self, using: ForeignKey(["photoId"], to: ["photoId"]))
+
+  var photo: QueryInterfaceRequest<Photo> {
+    request(for: Message.photo)
+  }
+
+  // Relationship to video using videoId (server ID)
+  static let video = belongsTo(Video.self, using: ForeignKey(["videoId"], to: ["videoId"]))
+
+  var video: QueryInterfaceRequest<Video> {
+    request(for: Message.video)
+  }
+
+  // Relationship to document using documentId (server ID)
+  static let document = belongsTo(Document.self, using: ForeignKey(["documentId"], to: ["documentId"]))
+
+  var document: QueryInterfaceRequest<Document> {
+    request(for: Message.document)
   }
 
   public static let from = belongsTo(User.self, using: ForeignKey(["fromId"], to: ["id"]))
@@ -155,7 +174,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     editDate: Date? = nil,
     status: MessageSendingStatus? = nil,
     repliedToMessageId: Int64? = nil,
-    fileId: String? = nil
+    fileId: String? = nil,
+    photoId: Int64? = nil,
+    videoId: Int64? = nil,
+    documentId: Int64? = nil
   ) {
     self.messageId = messageId
     self.randomId = randomId
@@ -172,6 +194,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.status = status
     self.repliedToMessageId = repliedToMessageId
     self.fileId = fileId
+    self.photoId = photoId
+    self.videoId = videoId
+    self.documentId = documentId
 
     if peerUserId == nil, peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
@@ -214,7 +239,11 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       pinned: false,
       editDate: from.hasEditDate ? Date(timeIntervalSince1970: TimeInterval(from.editDate)) : nil,
       status: from.out == true ? MessageSendingStatus.sent : nil,
-      repliedToMessageId: from.hasReplyToMsgID ? from.replyToMsgID : nil
+      repliedToMessageId: from.hasReplyToMsgID ? from.replyToMsgID : nil,
+      fileId: nil,
+      photoId: from.media.photo.hasPhoto ? from.media.photo.photo.id : nil,
+      videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
+      documentId: from.media.document.hasDocument ? from.media.document.document.id : nil
     )
   }
 
@@ -320,12 +349,11 @@ public extension ApiMessage {
       // attach main photo
       // TODO: handle multiple files
       let file: File? =
-        if let photo = photo?.first
-      {
-        try? File.save(db, apiPhoto: photo)
-      } else {
-        nil
-      }
+        if let photo = photo?.first {
+          try? File.save(db, apiPhoto: photo)
+        } else {
+          nil
+        }
       message.fileId = file?.id
 
       try message.saveMessage(db, publishChanges: false) // publish is below
@@ -356,9 +384,7 @@ public extension ApiMessage {
 public extension Message {
   static func save(
     _ db: Database, protocolMessage: InlineProtocol.Message, publishChanges: Bool = false
-  )
-    throws -> Message
-  {
+  ) throws -> Message {
     let id = protocolMessage.id
     let chatId = protocolMessage.chatID
     let existing = try? Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
@@ -369,21 +395,13 @@ public extension Message {
       message.globalId = existing.globalId
       message.status = existing.status
       message.fileId = existing.fileId
-      // ... anything else?
+      message.photoId = message.photoId ?? existing.photoId
+      message.videoId = message.videoId ?? existing.videoId
+      message.documentId = message.documentId ?? existing.documentId
     } else {
-      // attach main photo
-      // TODO: handle multiple files
+      // Process media attachments if present
       if protocolMessage.hasMedia {
-        var file: File? = nil
-
-        switch protocolMessage.media.media {
-          case let .photo(photo):
-            file = try? File.save(db, protocolPhoto: photo.photo)
-          default:
-            break
-        }
-
-        message.fileId = file?.id
+        try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
       }
 
       try message.saveMessage(db, publishChanges: false) // publish is below
@@ -408,5 +426,85 @@ public extension Message {
     }
 
     return message
+  }
+
+  private static func processMediaAttachments(
+    _ db: Database,
+    protocolMessage: InlineProtocol.Message,
+    message: inout Message
+  ) throws {
+    switch protocolMessage.media.media {
+      case let .photo(photoMessage):
+        try processPhotoAttachment(db, photoMessage: photoMessage.photo, message: &message)
+
+      case let .video(videoMessage):
+        try processVideoAttachment(db, videoMessage: videoMessage.video, message: &message)
+
+      case let .document(documentMessage):
+        try processDocumentAttachment(db, documentMessage: documentMessage.document, message: &message)
+
+      default:
+        break
+    }
+  }
+
+  private static func processPhotoAttachment(
+    _ db: Database,
+    photoMessage: InlineProtocol.Photo,
+    message: inout Message
+  ) throws {
+    // 1. Save the photo using the from method
+    let photo_ = Photo.from(proto: photoMessage)
+    let photo = try photo_.saveAndFetch(db)
+
+    // 2. Save all photo sizes
+    for protoSize in photoMessage.sizes {
+      let photoSize = PhotoSize.from(proto: protoSize, photoId: photo.id!)
+      try photoSize.save(db)
+    }
+
+    // 3. Update message with photo reference
+    message.photoId = photo.photoId
+  }
+
+  private static func processVideoAttachment(
+    _ db: Database,
+    videoMessage: InlineProtocol.Video,
+    message: inout Message
+  ) throws {
+    // 1. Save the video using the from method
+    let video = Video.from(proto: videoMessage, localPhotoId: nil)
+
+    // 2. If video has thumbnail photo, save it
+    if videoMessage.hasPhoto {
+      try processPhotoAttachment(db, photoMessage: videoMessage.photo, message: &message)
+      // Note: The video already has the thumbnailPhotoId from the from method
+    }
+
+    try video.save(db)
+
+    // 3. Update message with video reference
+    message.videoId = video.videoId
+  }
+
+  private static func processDocumentAttachment(
+    _ db: Database,
+    documentMessage: InlineProtocol.Document,
+    message: inout Message
+  ) throws {
+    // 1. Create the document
+    let document = Document(
+      documentId: documentMessage.id,
+      date: Date(timeIntervalSince1970: TimeInterval(documentMessage.date)),
+      fileName: documentMessage.fileName,
+      mimeType: documentMessage.mimeType,
+      size: documentMessage.size > 0 ? Int(documentMessage.size) : nil,
+      cdnUrl: documentMessage.hasCdnURL ? documentMessage.cdnURL : nil
+    )
+
+    try document.save(db)
+
+    // 2. Update message with document reference
+    message.documentId = document.documentId
   }
 }

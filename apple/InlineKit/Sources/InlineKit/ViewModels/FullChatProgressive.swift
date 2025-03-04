@@ -379,6 +379,7 @@ public final class MessagesPublisher {
         Log.shared.error("Failed to get full message")
         return
       }
+      print("optimsitic add fullMessage: \(fullMessage)")
       publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
     } catch {
       Log.shared.error("Failed to get full message", error: error)

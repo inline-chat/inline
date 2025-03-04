@@ -21,23 +21,29 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   Sendable, Equatable
 {
   public var file: File?
-
   public var senderInfo: UserInfo?
-
-  public var from: User? {
-    senderInfo?.user
-  }
-
   public var message: Message
   public var reactions: [Reaction]
   public var repliedToMessage: Message?
   public var replyToMessageSender: User?
   public var replyToMessageFile: File?
   public var attachments: [FullAttachment]
+  public var photoInfo: PhotoInfo?
+  public var videoInfo: VideoInfo?
+  public var documentInfo: DocumentInfo?
+
+  public var from: User? {
+    senderInfo?.user
+  }
+
   // stable id
   public var id: Int64 {
     message.globalId ?? message.id
     //    message.id
+  }
+  
+  public var hasMedia: Bool {
+    self.photoInfo != nil || self.videoInfo != nil || self.documentInfo != nil || self.file != nil
   }
 
   //  public static let preview = FullMessage(user: User, message: Message)
@@ -106,6 +112,29 @@ public extension FullMessage {
           .including(
             optional: Attachment.externalTask
               .including(optional: ExternalTask.assignedUser)
+          )
+      )
+      // Include photo info with sizes
+      .including(
+        optional: Message.photo.forKey(CodingKeys.photoInfo)
+          .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+      )
+      // Include video info with thumbnail
+      .including(
+        optional: Message.video.forKey(CodingKeys.videoInfo)
+          .including(
+            optional: Video.thumbnail
+              .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+              .forKey(VideoInfo.CodingKeys.thumbnail)
+          )
+      )
+      // Include document info with thumbnail
+      .including(
+        optional: Message.document.forKey(CodingKeys.documentInfo)
+          .including(
+            optional: Document.thumbnail
+              .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+              .forKey(DocumentInfo.CodingKeys.thumbnail)
           )
       )
       .asRequest(of: FullMessage.self)

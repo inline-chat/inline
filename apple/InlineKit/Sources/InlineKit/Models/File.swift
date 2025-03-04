@@ -94,28 +94,28 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.mimeType = mimeType
   }
 
-  public init(fromAttachment attachment: SendMessageAttachment) {
-    id = attachment.id
-    uploading = true
-    fileSize = attachment.fileSize
-    localPath = attachment.filePath
-    switch attachment.type {
-      case let .photo(format, width, height):
-        fileName = "\(id)\(format.toExt())"
-        mimeType = format.toMimeType()
-        self.width = width
-        self.height = height
-        fileType = .photo
-      default:
-        fileName = "\(id).file" // DA DUCK .file TODO: change this
-        fileType = .file // for now until we support more
-    }
-
-    // waiting for remote response to fill out
-    fileUniqueId = nil
-    temporaryUrl = nil
-    temporaryUrlExpiresAt = nil
-  }
+//  public init(fromAttachment attachment: SendMessageAttachment) {
+//    id = attachment.id
+//    uploading = true
+//    fileSize = attachment.fileSize
+//    localPath = attachment.filePath
+//    switch attachment.type {
+//      case let .photo(format, width, height):
+//        fileName = "\(id)\(format.toExt())"
+//        mimeType = format.toMimeType()
+//        self.width = width
+//        self.height = height
+//        fileType = .photo
+//      default:
+//        fileName = "\(id).file" // DA DUCK .file TODO: change this
+//        fileType = .file // for now until we support more
+//    }
+//
+//    // waiting for remote response to fill out
+//    fileUniqueId = nil
+//    temporaryUrl = nil
+//    temporaryUrlExpiresAt = nil
+//  }
 }
 
 public extension File {
