@@ -158,7 +158,6 @@ class ComposeEmbedView: UIView {
     if let message = viewModel.fullMessage?.message {
       let hasFile = viewModel.fullMessage?.message.fileId != nil
       let hasText = message.text?.isEmpty == false
-      print("I fucking have file is \(hasFile)")
       if hasFile {
         imageIconView.isHidden = false
         if hasText {
