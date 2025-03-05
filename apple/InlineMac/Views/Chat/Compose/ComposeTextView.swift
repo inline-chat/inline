@@ -6,6 +6,8 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool
   // Add new delegate method for image paste
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage)
+  func textView(_ textView: NSTextView, didReceiveFile url: URL)
+  func textView(_ textView: NSTextView, didReceiveVideo url: URL)
 }
 
 class ComposeNSTextView: NSTextView {
@@ -107,10 +109,27 @@ class ComposeNSTextView: NSTextView {
           if let image = NSImage(contentsOf: file) {
             // Notify delegate about image paste
             notifyDelegateAboutImage(image)
-            return true
+            continue
           }
         }
+
+        // TODO: Video and other
+        if ["mp4"].contains(fileType) {
+          // Handle URL as file
+          let _ = file.startAccessingSecurityScopedResource()
+          notifyDelegateAboutVideo(file)
+          file.stopAccessingSecurityScopedResource()
+          continue
+        }
+
+        // Handle URL as file
+        let _ = file.startAccessingSecurityScopedResource()
+        notifyDelegateAboutFile(file)
+        file.stopAccessingSecurityScopedResource()
+        continue
       }
+
+      return true
     }
 
     // 2. Handle direct image data
@@ -131,6 +150,14 @@ class ComposeNSTextView: NSTextView {
 
   private func notifyDelegateAboutImage(_ image: NSImage) {
     (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveImage: image)
+  }
+
+  private func notifyDelegateAboutFile(_ file: URL) {
+    (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveFile: file)
+  }
+
+  private func notifyDelegateAboutVideo(_ url: URL) {
+    (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveVideo: url)
   }
 
   // MARK: - Paste Handling

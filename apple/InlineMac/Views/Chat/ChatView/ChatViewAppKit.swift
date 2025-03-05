@@ -106,7 +106,6 @@ extension ChatViewAppKit {
       .fileURL,
       .tiff,
       .png,
-//      .jpeg,
       NSPasteboard.PasteboardType("public.image"), // Generic image type
       NSPasteboard.PasteboardType("public.file-url"), // Generic file URL
     ])
@@ -139,12 +138,15 @@ extension ChatViewAppKit {
       for url in urls {
         if let image = NSImage(contentsOf: url) {
           handleDroppedImage(image)
-          return true
+          continue
         }
+
         // Handle file drop
         handleDroppedFile(url)
-        return true
+        continue
       }
+
+      return true
     }
 
     // Try to get image data
@@ -176,9 +178,7 @@ extension ChatViewAppKit {
 
   // FILE DROPPED
   private func handleDroppedFile(_ url: URL) {
-    if let image = NSImage(contentsOf: url) {
-      compose.handleImageDropOrPaste(image)
-    }
+    compose.handleFileDrop([url])
   }
 
   // IMAGE DROPPED
