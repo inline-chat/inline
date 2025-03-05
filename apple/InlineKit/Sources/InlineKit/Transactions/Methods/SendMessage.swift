@@ -85,21 +85,24 @@ public struct TransactionSendMessage: Transaction {
     )
 
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
-    Task { @MainActor in
+    // (mo a few months later) TRADE OFFS BABY
+    // Task { @MainActor in
 
-      let newMessage = try? await AppDatabase.shared.dbWriter.write { db in
-        do {
-          return try message.saveAndFetch(db)
-        } catch {
-          Log.shared.error("Failed to save and fetch message", error: error)
-          return nil
-        }
+    let newMessage = try? AppDatabase.shared.dbWriter.write { db in
+      do {
+        return try message.saveAndFetch(db)
+      } catch {
+        Log.shared.error("Failed to save and fetch message", error: error)
+        return nil
       }
+    }
 
-      if let message = newMessage {
-        await MessagesPublisher.shared.messageAdded(message: message, peer: peerId)
+    DispatchQueue.main.async {
+      if let newMessage {
+        MessagesPublisher.shared.messageAddedSync(message: newMessage, peer: peerId)
       }
-    } //
+    }
+    // }
   }
 
   func execute() async throws -> [InlineProtocol.Update] {
