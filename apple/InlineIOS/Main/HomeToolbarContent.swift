@@ -16,6 +16,22 @@ struct HomeToolbarContent: ToolbarContent {
     }
 
     ToolbarItemGroup(placement: .topBarTrailing) {
+      Button(action: {
+        nav.push(.alphaSheet)
+      }, label: {
+        Text("ALPHA")
+          .monospaced()
+          .foregroundStyle(Color(.systemBackground))
+          .font(.caption)
+          .fontWeight(.bold)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 3)
+          .background(
+            Capsule()
+              .fill(.primary)
+          )
+      })
+      .buttonStyle(.plain)
       settingsButton
       createSpaceButton
     }
@@ -81,7 +97,6 @@ struct HomeToolbarContent: ToolbarContent {
     } label: {
       Image(systemName: "gearshape")
         .tint(Color.secondary)
-
         .contentShape(Rectangle())
     }
   }

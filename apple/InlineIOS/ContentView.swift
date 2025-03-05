@@ -61,6 +61,8 @@ extension ContentView {
         EmptyView()
       case .profile:
         EmptyView()
+      case .alphaSheet:
+        EmptyView()
     }
   }
 
@@ -77,6 +79,9 @@ extension ContentView {
 
       case let .profile(userInfo):
         ProfilePage(userInfo: userInfo)
+
+      case .alphaSheet:
+        AlphaSheet()
 
       default:
         EmptyView()
@@ -95,6 +100,7 @@ extension ContentView {
         }
         .sheet(item: $nav.activeSheet) { destination in
           sheetContent(for: destination)
+            .presentationDetents([destination == .alphaSheet ? .medium : .large])
         }
         .onAppear {
           markAsOnline()

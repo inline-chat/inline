@@ -19,6 +19,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case createThread(spaceId: Int64)
     case archivedChats
     case profile(userInfo: UserInfo)
+    case alphaSheet
 
     // MARK: - Identifiable Conformance
 
@@ -32,6 +33,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
         case let .createThread(spaceId): "createThread-\(spaceId)"
         case .archivedChats: "archivedChats"
         case let .profile(userInfo): "profile-\(userInfo.id)"
+        case .alphaSheet: "alphaSheet"
       }
     }
   }
@@ -97,7 +99,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
   func push(_ destination: Destination) {
     // TODO: Handle sheets in aother func
     switch destination {
-      case .createSpace, .createThread, .profile:
+      case .createSpace, .createThread, .profile, .alphaSheet:
         activeSheet = destination
       default:
         if pathComponents.last == destination {

@@ -56,6 +56,7 @@ public enum Path: String {
   case deleteMessage
   case createLinearIssue
   case getIntegrations
+  case getAlphaText
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -656,6 +657,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       ],
       includeToken: true
     )
+  }
+
+  public func getAlphaText() async throws -> String {
+    try await request(.getAlphaText, includeToken: true)
   }
 }
 

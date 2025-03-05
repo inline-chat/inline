@@ -170,6 +170,12 @@ import {
   Response as GetIntegrationsResponse,
 } from "@in/server/methods/getIntegrations"
 
+import {
+  handler as getAlphaTextHandler,
+  Input as GetAlphaTextInput,
+  Response as GetAlphaTextResponse,
+} from "@in/server/methods/getAlphaText"
+
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
@@ -231,6 +237,7 @@ export const apiV1 = new Elysia({ name: "v1" })
       )
       .use(makeApiRoute("/deleteMessage", DeleteMessageInput, DeleteMessageResponse, deleteMessageHandler))
       .use(makeApiRoute("/getIntegrations", GetIntegrationsInput, GetIntegrationsResponse, getIntegrationsHandler))
+      .use(makeApiRoute("/getAlphaText", GetAlphaTextInput, GetAlphaTextResponse, getAlphaTextHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }

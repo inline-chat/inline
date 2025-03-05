@@ -50,11 +50,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   func configure(with message: FullMessage, fromOtherSender: Bool, spaceId: Int64) {
     if self.message != nil {
       if self.message == message {
-        print("Messages are eq \(self.message.id) == \(message.id)")
         return
       }
-
-      print("Messages are not eq \(self.message.id) == \(message.id)")
     }
 
     isThread = message.peerId.isThread
