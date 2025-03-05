@@ -59,8 +59,7 @@ struct ChatView: View {
   }
 
   var subtitle: String {
-    // TODO: support threads
-    if realtime.apiState != .connected {
+    if apiState != .connected {
       getStatusText(realtime.apiState)
     } else if let composeAction = currentComposeAction() {
       composeAction.rawValue
