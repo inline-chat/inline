@@ -11,6 +11,10 @@ struct SettingsView: View {
   @EnvironmentObject private var onboardingNavigation: OnboardingNavigation
   @EnvironmentObject private var mainRouter: MainViewRouter
   @EnvironmentObject private var fileUploadViewModel: FileUploadViewModel
+  @State private var isClearing = false
+  @State private var showClearCacheAlert = false
+  @State private var clearCacheError: Error?
+  @State private var showClearCacheError = false
 
   var body: some View {
     List {
@@ -24,7 +28,7 @@ struct SettingsView: View {
               .font(.callout)
               .foregroundColor(.white)
               .frame(width: 25, height: 25)
-              .background(Color.pink)
+              .background(Color.orange)
               .clipShape(RoundedRectangle(cornerRadius: 6))
             Text("Change Profile Photo")
               .foregroundColor(.primary)
@@ -64,6 +68,30 @@ struct SettingsView: View {
         .padding(.vertical, 2)
       }
 
+      Section {
+        Button {
+          showClearCacheAlert = true
+        } label: {
+          HStack {
+            Image(systemName: "eraser.fill")
+              .foregroundColor(.white)
+              .frame(width: 25, height: 25)
+              .background(Color.red)
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            Text("Clear Cache")
+              .foregroundColor(.primary)
+              .padding(.leading, 4)
+            Spacer()
+            if isClearing {
+              ProgressView()
+                .padding(.trailing, 8)
+            }
+          }
+          .padding(.vertical, 2)
+        }
+        .disabled(isClearing)
+      }
+
       LogoutSection()
     }
     .navigationBarTitleDisplayMode(.inline)
@@ -91,6 +119,41 @@ struct SettingsView: View {
           } else if let jpegData = image.jpegData(compressionQuality: 0.8) {
             await fileUploadViewModel.uploadImage(jpegData, fileType: .jpeg)
           }
+        }
+      }
+    }
+    .alert("Clear Cache", isPresented: $showClearCacheAlert) {
+      Button("Cancel", role: .cancel) {}
+      Button("Clear", role: .destructive) {
+        clearCache()
+      }
+    } message: {
+      Text("This will clear all locally cached images. Downloaded content will need to be re-downloaded.")
+    }
+    .alert("Error Clearing Cache", isPresented: $showClearCacheError) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(clearCacheError?.localizedDescription ?? "An unknown error occurred")
+    }
+  }
+
+  private func clearCache() {
+    isClearing = true
+
+    Task {
+      do {
+        navigation.pop()
+        try await FileCache.shared.clearCache()
+        Transactions.shared.clearAll()
+        try? AppDatabase.clearDB()
+        await MainActor.run {
+          isClearing = false
+        }
+      } catch {
+        await MainActor.run {
+          clearCacheError = error
+          showClearCacheError = true
+          isClearing = false
         }
       }
     }
