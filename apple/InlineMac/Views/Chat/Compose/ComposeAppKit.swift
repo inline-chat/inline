@@ -1,8 +1,8 @@
 import AppKit
 import Combine
 import InlineKit
-import SwiftUI
 import Logger
+import SwiftUI
 
 class ComposeAppKit: NSView {
   // Props
@@ -15,8 +15,8 @@ class ComposeAppKit: NSView {
   private weak var messageList: MessageListAppKit?
   private var viewModel: FullChatViewModel?
 
-  // for now we use NSImage as ID until we have proper state management
-  private var attachmentItems: [NSImage: FileMediaItem] = [:]
+  // [uniqueId: FileMediaItem]
+  private var attachmentItems: [String: FileMediaItem] = [:]
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
@@ -337,29 +337,60 @@ class ComposeAppKit: NSView {
   // MARK: - Actions
 
   func addImage(_ image: NSImage) {
-    // Update UI
-    attachments.addImageView(image)
-    updateHeight(animate: true)
+    do {
+      // Save
+      let photoInfo = try FileCache.savePhoto(image: image)
+      let mediaItem = FileMediaItem.photo(photoInfo)
+      let uniqueId = mediaItem.getItemUniqueId()
 
-    // Update state
-    Task {
-      do {
-        let photoInfo = try FileCache.shared.savePhoto(image: image)
-        attachmentItems[image] = .photo(photoInfo)
-      } catch {
-        Log.shared.error("Failed to save photo in attachments", error: error)
-      }
+      // Update UI
+      attachments.addImageView(image, id: uniqueId)
+      updateHeight(animate: true)
+
+      // Update State
+      attachmentItems[uniqueId] = mediaItem
+    } catch {
+      Log.shared.error("Failed to save photo in attachments", error: error)
     }
   }
 
-  func removeImage(_ image: NSImage) {
+  func removeImage(_ id: String) {
+    // TODO: Delete from cache as well
+
     // Update UI
-    attachments.removeImageView(image)
+    attachments.removeImageView(id: id)
     updateHeight(animate: true)
 
     // Update state
-    attachmentItems
-      .removeValue(forKey: image)
+    attachmentItems.removeValue(forKey: id)
+  }
+
+  func addFile(_ url: URL) {
+    do {
+      let documentInfo = try FileCache.saveDocument(url: url)
+      let mediaItem = FileMediaItem.document(documentInfo)
+      let uniqueId = mediaItem.getItemUniqueId()
+
+      // Update UI
+      attachments.addDocumentView(documentInfo, id: uniqueId)
+      updateHeight(animate: true)
+
+      // Update State
+      attachmentItems[uniqueId] = mediaItem
+    } catch {
+      Log.shared.error("Failed to save document", error: error)
+    }
+  }
+
+  func removeFile(_ id: String) {
+    // TODO: Delete from file cache as well
+    
+    // Update UI
+    attachments.removeDocumentView(id: id)
+    updateHeight(animate: true)
+    
+    // Update state
+    attachmentItems.removeValue(forKey: id)
   }
 
   func clearAttachments(updateHeights: Bool = false) {
@@ -427,7 +458,7 @@ class ComposeAppKit: NSView {
         )
       } else {
         // With image/file/video
-        for (index, (image, attachment)) in attachmentItems.enumerated() {
+        for (index, (_, attachment)) in attachmentItems.enumerated() {
           let isFirst = index == 0
           let _ = Transactions.shared.mutate(
             transaction:
@@ -490,7 +521,11 @@ class ComposeAppKit: NSView {
 // MARK: External Interface for file drop
 
 extension ComposeAppKit {
-  func handleFileDrop(_ urls: [URL]) {}
+  func handleFileDrop(_ urls: [URL]) {
+    for url in urls {
+      addFile(url)
+    }
+  }
 
   func handleImageDropOrPaste(_ image: NSImage) {
     addImage(image)
@@ -515,6 +550,14 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage) {
     handleImageDropOrPaste(image)
+  }
+
+  func textView(_ textView: NSTextView, didReceiveFile url: URL) {
+    handleFileDrop([url])
+  }
+
+  func textView(_ textView: NSTextView, didReceiveVideo url: URL) {
+    // TODO:
   }
 
   func textDidChange(_ notification: Notification) {
