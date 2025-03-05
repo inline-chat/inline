@@ -81,7 +81,7 @@ public final class FullSpaceViewModel: ObservableObject {
         )
   }
 
-  func fetchMembersChats() {
+  public func fetchMembersChats() {
     let spaceId = spaceId
     membersSancellable =
       ValueObservation
@@ -102,7 +102,7 @@ public final class FullSpaceViewModel: ObservableObject {
         )
   }
 
-  func fetchMembers() {
+  public func fetchMembers() {
     let spaceId = spaceId
     membersSancellable =
       ValueObservation
