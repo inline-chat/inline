@@ -1,4 +1,5 @@
 import { ApiError, InlineError } from "@in/server/types/errors"
+import { Log } from "@in/server/utils/log"
 import sharp from "sharp"
 
 const validPhotoMimeTypes = ["image/jpeg", "image/png", "image/gif"]
@@ -119,7 +120,9 @@ const maxDocumentFileSize = 200_000_000 // 200MB
 export const getDocumentMetadataAndValidate = async (
   file: File,
 ): Promise<{ mimeType: string; fileName: string; extension: string }> => {
-  let fileName = file.name
+  // it contains %20 stuff so we need to decode it
+  let fileName = file.name ? decodeURIComponent(file.name) : "document"
+
   let size = file.size
   let mimeType = file.type
   let extension = fileName.split(".").pop()?.toLowerCase()
