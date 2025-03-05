@@ -154,7 +154,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
   var showingPhotoPreview: Bool = false
   var imageCaption: String = ""
   let previewViewModel = PhotoPreviewViewModel()
-  var attachmentItems: [UIImage: SendMessageAttachment] = [:]
+  var attachmentItems: [UIImage: FileMediaItem] = [:]
 
   var onHeightChange: ((CGFloat) -> Void)?
   var peerId: Peer?
@@ -566,30 +566,36 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
 
   private func sendImage(_ image: UIImage, caption: String) {
     guard let peerId else { return }
-
+    print("Sending image", image)
     DispatchQueue.main.async {
       self.sendButton.configuration?.showsActivityIndicator = true
 
       Task {
-        // Clear previous attachments before adding new ones
         self.attachmentItems.removeAll()
 
-        // Prepare image for upload
-        if let attachment = image.prepareForUpload() {
-          self.attachmentItems[image] = attachment
+        do {
+          let photoInfo = try FileCache.shared.savePhoto(image: image)
+          self.attachmentItems[image] = .photo(photoInfo)
+        } catch {
+          Log.shared.error("Failed to save photo", error: error)
         }
+        print("Attachment items", self.attachmentItems)
 
-        let _ = Transactions.shared.mutate(
-          transaction: .sendMessage(
-            .init(
-              text: caption,
-              peerId: self.peerId!,
-              chatId: self.chatId ?? 0,
-              attachments: self.attachmentItems.values.map { $0 },
-              replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
+        for (index, (_, attachment)) in self.attachmentItems.enumerated() {
+          _ = index == 0
+          let _ = Transactions.shared.mutate(
+            transaction: .sendMessage(
+              .init(
+                text: caption,
+                peerId: self.peerId!,
+                chatId: self.chatId ?? 0,
+                mediaItems: [attachment],
+                replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
+              )
             )
           )
-        )
+          print("Sent attachment", attachment)
+        }
 
         DispatchQueue.main.async { [weak self] in
           guard let self else { return }
