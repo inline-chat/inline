@@ -46,22 +46,24 @@ struct HomeView: View {
         searchResultsView
       } else {
         List {
-          ScrollView(.horizontal) {
-            LazyHStack {
-              ForEach(home.spaces, id: \.id) { space in
-                RectangleSpaceItem(spaceItem: space)
+          if !home.spaces.isEmpty {
+            ScrollView(.horizontal) {
+              LazyHStack {
+                ForEach(home.spaces, id: \.id) { space in
+                  RectangleSpaceItem(spaceItem: space)
+                }
               }
             }
+            .scrollIndicators(.hidden)
+            .contentMargins(.horizontal, 16, for: .scrollContent)
+            .listRowInsets(.init(
+              top: 0,
+              leading: 0,
+              bottom: 16,
+              trailing: 0
+            ))
+            .listRowSeparator(.hidden)
           }
-          .scrollIndicators(.hidden)
-          .contentMargins(.horizontal, 16, for: .scrollContent)
-          .listRowInsets(.init(
-            top: 0,
-            leading: 0,
-            bottom: 16,
-            trailing: 0
-          ))
-          .listRowSeparator(.hidden)
           if !home.chats.filter({ $0.dialog.archived == true }).isEmpty {
             Button {
               nav.push(.archivedChats)
@@ -141,7 +143,7 @@ struct HomeView: View {
       }
     }
     .overlay {
-      SearchedView(text: $text, isSearchResultsEmpty: searchResults.isEmpty)
+      SearchedView(textIsEmpty: text.isEmpty, isSearchResultsEmpty: searchResults.isEmpty)
     }
 
     .navigationBarTitleDisplayMode(.inline)
@@ -318,12 +320,12 @@ extension UIViewController {
 
 struct SearchedView: View {
   @Environment(\.isSearching) private var isSearching
-  @Binding var text: String
+  var textIsEmpty: Bool
   var isSearchResultsEmpty: Bool
 
   var body: some View {
     if isSearching {
-      if text.isEmpty || isSearchResultsEmpty {
+      if textIsEmpty || isSearchResultsEmpty {
         VStack(spacing: 4) {
           Text("🔍")
             .font(.system(size: 48))
