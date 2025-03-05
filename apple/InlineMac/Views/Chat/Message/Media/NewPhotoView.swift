@@ -26,7 +26,7 @@ final class NewPhotoView: NSView {
   // Add a separate background view for more reliable background coloring
   private let backgroundView: BasicView = {
     let view = BasicView()
-    view.wantsLayer = true  
+    view.wantsLayer = true
     view.layer?.masksToBounds = true
     view.backgroundColor = .gray.withAlphaComponent(0.05)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -53,6 +53,8 @@ final class NewPhotoView: NSView {
   let bottomLeftRadius: CGFloat = 8.0
   let bottomRightRadius: CGFloat = 8.0
 
+  var haveAddedImageView = false
+
   private func setupView() {
     wantsLayer = true
     translatesAutoresizingMaskIntoConstraints = false
@@ -66,17 +68,20 @@ final class NewPhotoView: NSView {
       backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
-    setupImage()
+    // setupImage()
+    updateImage()
     setupMasks()
     setupDragSource()
     setupClickGesture()
 
-     showLoadingView()
+    showLoadingView()
   }
 
   private var imageConstraints: [NSLayoutConstraint] = []
 
-  private func setupImage() {
+  private func addImageView() {
+    guard !haveAddedImageView else { return }
+    haveAddedImageView = true
     addSubview(imageView)
     imageConstraints = [
       imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -85,8 +90,6 @@ final class NewPhotoView: NSView {
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ]
     NSLayoutConstraint.activate(imageConstraints)
-
-    updateImage()
   }
 
   // Call for updating image when the message is updated
@@ -113,9 +116,13 @@ final class NewPhotoView: NSView {
     if let url = imageLocalUrl() {
       // Set URL
       guard let image = NSImage(contentsOf: url) else { return }
+      
+      // Add image view
+      addImageView()
 
       if wasLoadedWithPlaceholder {
         print("wasLoadedWithPlaceholder")
+        
         // With animation
         imageView.alphaValue = 0.0
         imageView.image = image
