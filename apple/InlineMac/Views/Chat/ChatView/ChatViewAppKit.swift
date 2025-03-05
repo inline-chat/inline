@@ -136,6 +136,12 @@ extension ChatViewAppKit {
     // Try to get URLs first
     if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
       for url in urls {
+        // if PDF, handle as file
+        if url.pathExtension == "pdf" {
+          handleDroppedFile(url)
+          continue
+        }
+        
         if let image = NSImage(contentsOf: url) {
           handleDroppedImage(image)
           continue
