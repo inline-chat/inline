@@ -292,8 +292,10 @@ public extension Message {
     if publishChanges {
       let message = self // Create an immutable copy
       let peer = peerId // Capture the peer value
+
       db.afterNextTransaction { _ in
         Task { @MainActor in
+          // HACKY WAY
           if isExisting {
             await MessagesPublisher.shared.messageUpdated(message: message, peer: peer, animated: false)
           } else {
@@ -350,11 +352,12 @@ public extension ApiMessage {
       // attach main photo
       // TODO: handle multiple files
       let file: File? =
-        if let photo = photo?.first {
-          try? File.save(db, apiPhoto: photo)
-        } else {
-          nil
-        }
+        if let photo = photo?.first
+      {
+        try? File.save(db, apiPhoto: photo)
+      } else {
+        nil
+      }
       message.fileId = file?.id
 
       try message.saveMessage(db, publishChanges: false) // publish is below
@@ -404,7 +407,7 @@ public extension Message {
       if protocolMessage.hasMedia {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
       }
-      
+
       try message.saveMessage(db, publishChanges: false) // publish is below
     } else {
       // Process media attachments if present
