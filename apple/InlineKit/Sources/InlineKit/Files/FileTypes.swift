@@ -59,29 +59,45 @@ public enum FileMediaItem: Codable, Sendable {
     let localPath = getLocalPath()
     return localPath?.components(separatedBy: "/").last
   }
-  
-  
+
+  // Helpers
+  public func getItemUniqueId() -> String {
+    switch self {
+      case let .photo(photo):
+        "photo_\(photo.id)"
+      case let .document(document):
+        "document_\(document.id)"
+      case let .video(video):
+        "video_\(video.id)"
+    }
+  }
+
   // ID helpers
   public func asPhotoLocalId() -> Int64? {
     guard case let .photo(photo) = self else { return nil }
     return photo.photo.id
   }
+
   public func asVideoLocalId() -> Int64? {
     guard case let .video(video) = self else { return nil }
     return video.video.id
   }
+
   public func asDocumentLocalId() -> Int64? {
     guard case let .document(document) = self else { return nil }
     return document.document.id
   }
+
   public func asPhotoId() -> Int64? {
     guard case let .photo(photo) = self else { return nil }
     return photo.photo.photoId
   }
+
   public func asVideoId() -> Int64? {
     guard case let .video(video) = self else { return nil }
     return video.video.videoId
   }
+
   public func asDocumentId() -> Int64? {
     guard case let .document(document) = self else { return nil }
     return document.document.documentId

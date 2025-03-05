@@ -65,7 +65,7 @@ public struct TransactionSendMessage: Transaction {
   // Methods
   func optimistic() {
     let media = attachments.first?.media
-    Log.shared.debug("Optimistic send message \(media)")
+    Log.shared.debug("Optimistic send message \(media.debugDescription)")
     let message = Message(
       messageId: temporaryMessageId,
       randomId: randomId,

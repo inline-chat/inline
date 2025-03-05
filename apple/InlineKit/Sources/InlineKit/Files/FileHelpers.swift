@@ -1,5 +1,6 @@
 import Foundation
 import Logger
+import UniformTypeIdentifiers
 
 public enum FileLocalCacheDirectory {
   case photos
@@ -122,4 +123,45 @@ public enum FileHelpers {
     byteCountFormatter.countStyle = .file
     return byteCountFormatter.string(fromByteCount: Int64(bytes))
   }
+  
+  public static func getMimeType(for url: URL) -> String {
+    // Try to get the file extension
+    let fileExtension = url.pathExtension.lowercased()
+    
+    // Check if we have a file URL with a path on disk
+    if url.isFileURL, let uti = UTType(filenameExtension: fileExtension) {
+      // Get MIME type from the UTType
+      return uti.preferredMIMEType ?? "application/octet-stream"
+    }
+    
+    // For non-file URLs or if UTType doesn't work, use a dictionary of common MIME types
+    let mimeTypes = [
+      "html": "text/html",
+      "htm": "text/html",
+      "css": "text/css",
+      "js": "text/javascript",
+      "txt": "text/plain",
+      "pdf": "application/pdf",
+      "jpg": "image/jpeg",
+      "jpeg": "image/jpeg",
+      "png": "image/png",
+      "gif": "image/gif",
+      "svg": "image/svg+xml",
+      "xml": "application/xml",
+      "json": "application/json",
+      "zip": "application/zip",
+      "mp3": "audio/mpeg",
+      "mp4": "video/mp4",
+      "mov": "video/quicktime",
+      "doc": "application/msword",
+      "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "xls": "application/vnd.ms-excel",
+      "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "ppt": "application/vnd.ms-powerpoint",
+      "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    ]
+    
+    return mimeTypes[fileExtension] ?? "application/octet-stream"
+  }
+
 }

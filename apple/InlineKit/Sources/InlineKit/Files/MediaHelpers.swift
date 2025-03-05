@@ -362,7 +362,6 @@ final class MediaHelpers: Sendable {
       // Update the document
       var updatedDocument = document
       updatedDocument.documentId = serverId
-      updatedDocument.fileUniqueId = fileUniqueId
       if let cdnUrl {
         updatedDocument.cdnUrl = cdnUrl
       }

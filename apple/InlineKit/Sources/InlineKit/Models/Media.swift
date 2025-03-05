@@ -97,7 +97,6 @@ public struct Document: Codable, Sendable, Equatable, Hashable, Identifiable, Fe
   public var cdnUrl: String?
   public var localPath: String?
   public var thumbnailPhotoId: Int64?
-  public var fileUniqueId: String?
 
   enum Columns {
     static let id = Column(CodingKeys.id)
@@ -109,7 +108,6 @@ public struct Document: Codable, Sendable, Equatable, Hashable, Identifiable, Fe
     static let cdnUrl = Column(CodingKeys.cdnUrl)
     static let localPath = Column(CodingKeys.localPath)
     static let thumbnailPhotoId = Column(CodingKeys.thumbnailPhotoId)
-    static let fileUniqueId = Column(CodingKeys.fileUniqueId)
   }
 }
 
@@ -377,5 +375,42 @@ public extension Photo {
     let photoSize = try photoSize_.insertAndFetch(db)
 
     return PhotoInfo(photo: photo, sizes: [photoSize])
+  }
+}
+
+extension Document {
+  /// Creates a local document with a temporary ID
+  /// - Parameters:
+  ///   - fileName: Document file name
+  ///   - mimeType: Document MIME type
+  ///   - size: File size in bytes
+  ///   - thumbnail: Optional thumbnail photo
+  /// - Returns: The created document
+  static func createLocalDocument(
+    _ db: Database,
+    fileName: String? = nil,
+    mimeType: String? = nil,
+    size: Int? = nil,
+    localPath: String? = nil,
+    thumbnail: Photo? = nil
+  ) throws -> DocumentInfo {
+    // Create a temporary negative ID
+    let tempId = Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
+
+    // Create and save the document
+    let document_ = Document(
+      documentId: tempId,
+      date: Date(),
+      fileName: fileName,
+      mimeType: mimeType,
+      size: size,
+      cdnUrl: nil,
+      localPath: localPath,
+      thumbnailPhotoId: thumbnail?.id
+    )
+    let document = try document_.saveAndFetch(db)
+    
+    // todo: support thumbnails
+    return DocumentInfo(document: document)
   }
 }

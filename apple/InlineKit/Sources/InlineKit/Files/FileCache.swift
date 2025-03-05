@@ -93,7 +93,7 @@ public actor FileCache: Sendable {
 
   // MARK: - Local Saves
 
-  public func savePhoto(image: PlatformImage) throws -> InlineKit.PhotoInfo {
+  public static func savePhoto(image: PlatformImage) throws -> InlineKit.PhotoInfo {
     // Info
     let w = Int(image.size.width)
     let h = Int(image.size.height)
@@ -113,7 +113,7 @@ public actor FileCache: Sendable {
     let fileSize = FileHelpers.getFileSize(at: fileURL)
 
     // Save in DB
-    let photoInfo = try database.dbWriter.write { db in
+    let photoInfo = try AppDatabase.shared.dbWriter.write { db in
       try Photo.createLocalPhoto(
         db,
         format: format,
@@ -127,12 +127,41 @@ public actor FileCache: Sendable {
     return photoInfo
   }
 
-  public func saveVideo() throws -> InlineKit.VideoInfo {
+  public static func saveVideo() throws -> InlineKit.VideoInfo {
     fatalError("Not implemented")
   }
 
-  public func saveDocument() throws -> InlineKit.VideoInfo {
-    fatalError("Not implemented")
+  public static func saveDocument(url: URL) throws -> InlineKit.DocumentInfo {
+    // Info
+    let fileName = url.lastPathComponent
+
+    // Save in files
+    let fileManager = FileManager.default
+    let directory = FileHelpers.getLocalCacheDirectory(for: .documents)
+    let localPath = UUID().uuidString + "-" + fileName
+    let localUrl = directory.appendingPathComponent(localPath)
+
+    // Start accessing the security-scoped resource
+    let hasAccess = url.startAccessingSecurityScopedResource()
+
+    // Ensure we stop accessing the resource when we're done
+    defer {
+      if hasAccess {
+        url.stopAccessingSecurityScopedResource()
+      }
+    }
+
+    try fileManager.copyItem(at: url, to: localUrl)
+
+    let fileSize = FileHelpers.getFileSize(at: url)
+    let mimeType = FileHelpers.getMimeType(for: url)
+
+    // Save in DB
+    let documentInfo = try AppDatabase.shared.dbWriter.write { db in
+      try Document.createLocalDocument(db, fileName: fileName, mimeType: mimeType, size: fileSize, localPath: localPath)
+    }
+
+    return documentInfo
   }
 }
 
