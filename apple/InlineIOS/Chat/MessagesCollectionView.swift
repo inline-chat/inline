@@ -9,7 +9,7 @@ class MessagesCollectionView: UICollectionView {
   private var chatId: Int64
   private var spaceId: Int64
   private var coordinator: Coordinator
-  private var imagePrefetchDataSource: ImagePrefetchDataSource?
+//  private var imagePrefetchDataSource: ImagePrefetchDataSource?
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
     self.peerId = peerId
@@ -52,10 +52,10 @@ class MessagesCollectionView: UICollectionView {
       object: nil
     )
 
-    let prefetchDS = ImagePrefetchDataSource(coordinator: coordinator)
-    imagePrefetchDataSource = prefetchDS
-    prefetchDataSource = prefetchDS
-    prefetchDS.prefetchIfNeeded()
+//    let prefetchDS = ImagePrefetchDataSource(coordinator: coordinator)
+//    imagePrefetchDataSource = prefetchDS
+//    prefetchDataSource = prefetchDS
+//    prefetchDS.prefetchIfNeeded()
   }
 
   override func didMoveToWindow() {
@@ -401,11 +401,23 @@ private extension MessagesCollectionView {
           dataSource.apply(snapshot, animatingDifferences: true)
 
         case let .updated(newMessages, _, animated):
+          let changedMessageIds = newMessages.compactMap { newMessage -> FullMessage.ID? in
+            if let existingMessage = viewModel.messagesByID[newMessage.id],
+               existingMessage.isVisuallyEquivalent(to: newMessage)
+            {
+              return nil
+            }
+            return newMessage.id
+          }
 
+          // Only proceed if we have messages that actually changed
+          guard !changedMessageIds.isEmpty else { return }
+
+          // Get current snapshot
           var snapshot = dataSource.snapshot()
-          let ids = newMessages.map(\.id)
 
-          snapshot.reconfigureItems(ids)
+          // Reconfigure only the changed items
+          snapshot.reconfigureItems(changedMessageIds)
 
           dataSource.apply(snapshot, animatingDifferences: animated ?? false)
 
@@ -560,64 +572,101 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
     -> UICollectionViewLayoutAttributes?
   {
-    guard
-      let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-      as? UICollectionViewLayoutAttributes
-    else {
-      return nil
-    }
-
-    attributes.transform = CGAffineTransform(translationX: 0, y: -50)
-    return attributes
-  }
-}
-
-// Add new ImagePrefetchDataSource class
-private class ImagePrefetchDataSource: NSObject, UICollectionViewDataSourcePrefetching {
-  private weak var coordinator: MessagesCollectionView.Coordinator?
-  private let pipeline = ImagePipeline {
-    $0.imageCache = ImageCache.shared
-    $0.dataCache = try? DataCache(name: "com.inline.messages.images")
-    $0.isProgressiveDecodingEnabled = true
-    $0.isRateLimiterEnabled = true
-  }
-
-  init(coordinator: MessagesCollectionView.Coordinator) {
-    self.coordinator = coordinator
-    super.init()
-  }
-
-  func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-    guard let coordinator else { return }
-
-    for indexPath in indexPaths {
-      guard indexPath.item < coordinator.messages.count else { continue }
-      let message = coordinator.messages[indexPath.item]
-
-      if let file = message.file,
-         let tempUrl = file.temporaryUrl,
-         let url = URL(string: tempUrl)
-      {
-        let request = ImageRequest(
-          url: url,
-          processors: [.resize(width: 300)],
-          priority: .high
-        )
-
-        if ImageCache.shared[ImageCacheKey(request: request)] == nil {
-          pipeline.loadImage(with: request) { _ in }
-        }
+    // Only animate new items at the beginning (recent messages)
+    if itemIndexPath.item < 5 {
+      guard
+        let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
+        as? UICollectionViewLayoutAttributes
+      else {
+        return nil
       }
+
+      attributes.transform = CGAffineTransform(translationX: 0, y: -50)
+      return attributes
     }
-  }
 
-  func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
-    // Cancel any in-progress prefetch requests if needed
+    return super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)
   }
-
-  func prefetchIfNeeded() {}
 }
+
+//// Add new ImagePrefetchDataSource class
+// private class ImagePrefetchDataSource: NSObject, UICollectionViewDataSourcePrefetching {
+//  private weak var coordinator: MessagesCollectionView.Coordinator?
+//  private let pipeline = ImagePipeline {
+//    $0.imageCache = ImageCache.shared
+//    $0.dataCache = try? DataCache(name: "com.inline.messages.images")
+//    $0.isProgressiveDecodingEnabled = true
+//    $0.isRateLimiterEnabled = true
+//  }
+//
+//  private var pendingPrefetchRequests = Set<ImageRequest.ID>()
+//
+//  init(coordinator: MessagesCollectionView.Coordinator) {
+//    self.coordinator = coordinator
+//    super.init()
+//  }
+//
+//  func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+//    guard let coordinator else { return }
+//
+//    // Limit the number of concurrent prefetch operations
+//    let maxConcurrentPrefetches = 5
+//    var prefetchCount = 0
+//
+//    for indexPath in indexPaths {
+//      guard indexPath.item < coordinator.messages.count, prefetchCount < maxConcurrentPrefetches else { continue }
+//      let message = coordinator.messages[indexPath.item]
+//
+//      if let file = message.file,
+//         let tempUrl = file.temporaryUrl,
+//         let url = URL(string: tempUrl)
+//      {
+//        let request = ImageRequest(
+//          url: url,
+//          processors: [.resize(width: 300)],
+//          priority: .normal // Lower priority for prefetching
+//        )
+//
+//        if ImageCache.shared[ImageCacheKey(request: request)] == nil &&
+//          !pendingPrefetchRequests.contains(request.id)
+//        {
+//          pendingPrefetchRequests.insert(request.id)
+//          prefetchCount += 1
+//
+//          pipeline.loadImage(with: request) { [weak self] _ in
+//            self?.pendingPrefetchRequests.remove(request.id)
+//          }
+//        }
+//      }
+//    }
+//  }
+
+//  func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+//    // Cancel any in-progress prefetch requests if needed
+//  }
+//
+//  func prefetchIfNeeded() {}
+// }
 
 extension Notification.Name {
   static let scrollToBottomChanged = Notification.Name("scrollToBottomChanged")
+}
+
+extension FullMessage {
+  func isVisuallyEquivalent(to other: FullMessage) -> Bool {
+    // Check all properties that affect visual appearance
+    message.text == other.message.text &&
+      message.status == other.message.status &&
+      message.date == other.message.date &&
+      file?.id == other.file?.id &&
+      photoInfo?.id == other.photoInfo?.id &&
+      reactions == other.reactions &&
+      message.repliedToMessageId == other.message.repliedToMessageId &&
+      videoInfo?.id == other.videoInfo?.id &&
+      documentInfo?.id == other.documentInfo?.id &&
+      attachments.count == other.attachments.count &&
+      (repliedToMessage?.text == other.repliedToMessage?.text) &&
+      (replyToMessageSender?.id == other.replyToMessageSender?.id) &&
+      (replyToMessageFile?.id == other.replyToMessageFile?.id)
+  }
 }
