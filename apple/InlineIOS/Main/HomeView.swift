@@ -330,7 +330,7 @@ struct SearchedView: View {
       if textIsEmpty || isSearchResultsEmpty {
         VStack(spacing: 4) {
           Text("🔍")
-            .font(.system(size: 48))
+            .font(.largeTitle)
             .foregroundColor(.primary)
             .padding(.bottom, 14)
           Text("Search for people")
