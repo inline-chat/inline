@@ -91,6 +91,12 @@ class UIMessageView: UIView {
     return view
   }()
 
+  private lazy var newPhotoView: NewPhotoView = {
+    let view = NewPhotoView(fullMessage)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
   var fullMessage: FullMessage
   let spaceId: Int64
   private let metadataView: MessageTimeAndStatus
@@ -113,6 +119,10 @@ class UIMessageView: UIView {
 
   private var isMultiline: Bool {
     if fullMessage.file != nil {
+      return true
+    }
+
+    if fullMessage.photoInfo != nil {
       return true
     }
 
@@ -155,6 +165,7 @@ class UIMessageView: UIView {
 
     setupReplyViewIfNeeded()
     setupFileViewIfNeeded()
+    setupPhotoViewIfNeeded()
     setupMessageContainer()
 
     addGestureRecognizer()
@@ -183,6 +194,12 @@ class UIMessageView: UIView {
     guard fullMessage.file != nil else { return }
 
     containerStack.addArrangedSubview(photoView)
+  }
+
+  private func setupPhotoViewIfNeeded() {
+    guard fullMessage.photoInfo != nil else { return }
+
+    containerStack.addArrangedSubview(newPhotoView)
   }
 
   private func setupMessageContainer() {
@@ -782,7 +799,7 @@ extension String {
 
 extension Message {
   var hasFile: Bool {
-    fileId != nil
+    fileId != nil || photoId != nil
   }
 
   var hasText: Bool {

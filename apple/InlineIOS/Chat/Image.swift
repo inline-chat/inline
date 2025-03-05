@@ -1,6 +1,7 @@
 import CoreServices
 import ImageIO
 import InlineKit
+import InlineProtocol
 import UIKit
 import UniformTypeIdentifiers
 
@@ -27,12 +28,12 @@ extension UIImage {
   /// Returns locally stored path
   func save(file: InlineKit.File) -> String? {
     let ext = switch file.mimeType {
-      case "image/png":
-        ".png"
-      case "image/jpeg":
-        ".jpg"
-      default:
-        ".jpg"
+    case "image/png":
+      ".png"
+    case "image/jpeg":
+      ".jpg"
+    default:
+      ".jpg"
     }
 
     let dir = FileHelpers.getDocumentsDirectory()
@@ -40,12 +41,12 @@ extension UIImage {
     let fileUrl = dir.appendingPathComponent(path)
 
     guard let imageData = switch file.mimeType {
-      case "image/png":
-        png
-      case "image/jpeg":
-        jpeg
-      default:
-        jpeg
+    case "image/png":
+      png
+    case "image/jpeg":
+      jpeg
+    default:
+      jpeg
     } else { return nil }
 
     do {
@@ -58,34 +59,34 @@ extension UIImage {
 }
 
 extension UIImage {
-  func prepareForUpload() -> SendMessageAttachment? {
-    let maxSize = 5_024 * 1_024
-
-    guard let imageData = hasAlpha ? png : jpeg else {
-      return nil
-    }
-
-    let format: SendMessageAttachment.ImageFormat = hasAlpha ? .png : .jpeg
-    let fileName = UUID().uuidString + (format == .png ? ".png" : ".jpg")
-    let temporaryDirectory = FileHelpers.getDocumentsDirectory()
-    let temporaryFileURL = temporaryDirectory.appendingPathComponent(fileName)
-    let fileSize = imageData.count
-
-    do {
-      try imageData.write(to: temporaryFileURL)
-    } catch {
-      return nil
-    }
-
-    return SendMessageAttachment.photo(
-      format: format,
-      width: Int(size.width),
-      height: Int(size.height),
-      path: fileName,
-      fileSize: fileSize,
-      fileName: fileName
-    )
-  }
+//  func prepareForUpload() -> SendMessageAttachment? {
+//    let maxSize = 5_024 * 1_024
+//
+//    guard let imageData = hasAlpha ? png : jpeg else {
+//      return nil
+//    }
+//
+//    let format: SendMessageAttachment.ImageFormat = hasAlpha ? .png : .jpeg
+//    let fileName = UUID().uuidString + (format == .png ? ".png" : ".jpg")
+//    let temporaryDirectory = FileHelpers.getDocumentsDirectory()
+//    let temporaryFileURL = temporaryDirectory.appendingPathComponent(fileName)
+//    let fileSize = imageData.count
+//
+//    do {
+//      try imageData.write(to: temporaryFileURL)
+//    } catch {
+//      return nil
+//    }
+//
+//    return SendMessageAttachment.photo(
+//      format: format,
+//      width: Int(size.width),
+//      height: Int(size.height),
+//      path: fileName,
+//      fileSize: fileSize,
+//      fileName: fileName
+//    )
+//  }
 
   // Optional: Resize image if needed
   func resized(to newSize: CGSize) -> UIImage? {
@@ -99,7 +100,7 @@ extension UIImage {
 extension UIImage {
   func saveImage(
     to url: URL,
-    format: SendMessageAttachment.ImageFormat,
+    format: InlineProtocol.Photo.Format,
     compressionQuality: CGFloat = 0.9
   ) -> Bool {
     guard let imageData = format == .png ? png : jpeg else {
