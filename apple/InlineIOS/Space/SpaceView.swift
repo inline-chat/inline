@@ -102,6 +102,7 @@ struct SpaceView: View {
     }
     .task {
       do {
+        try await data.getSpace(spaceId: spaceId)
         try await data.getDialogs(spaceId: spaceId)
 
       } catch {
@@ -111,6 +112,7 @@ struct SpaceView: View {
     .onAppear {
       Task {
         try await data.getSpace(spaceId: spaceId)
+        fullSpaceViewModel.fetchMembersChats()
       }
     }
   }
