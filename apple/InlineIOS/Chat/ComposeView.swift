@@ -316,14 +316,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
         )
       )
 
-      UnreadManager.shared.readAll(peerId, chatId: chatId)
-      clearDraft()
       ChatState.shared.clearReplyingMessageId(peer: peerId)
-      sendMessageHaptic()
       textViewContainer.textView.text = ""
       resetHeight()
       textViewContainer.textView.showPlaceholder(true)
       buttonDisappear()
+      sendMessageHaptic()
+      clearDraft()
     }
   }
 
@@ -423,9 +422,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
   }
 
   func sendMessageHaptic() {
-    let generator = UIImpactFeedbackGenerator(style: .medium)
-    generator.prepare()
-    generator.impactOccurred()
+    Task { @MainActor in
+      let generator = UIImpactFeedbackGenerator(style: .medium)
+      generator.prepare()
+      generator.impactOccurred()
+    }
   }
 
   override func removeFromSuperview() {

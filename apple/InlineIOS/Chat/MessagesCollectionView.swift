@@ -383,7 +383,7 @@ private extension MessagesCollectionView {
             updateUnreadIfNeeded()
           }
 
-          UIView.animate(withDuration: 0.2) {
+          UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .curveEaseInOut]) {
             self.dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
               if shouldScroll {
                 self?.currentCollectionView?.scrollToItem(
@@ -400,25 +400,10 @@ private extension MessagesCollectionView {
           snapshot.deleteItems(ids)
           dataSource.apply(snapshot, animatingDifferences: true)
 
-        case let .updated(newMessages, _, animated):
-          let changedMessageIds = newMessages.compactMap { newMessage -> FullMessage.ID? in
-            if let existingMessage = viewModel.messagesByID[newMessage.id],
-               existingMessage.isVisuallyEquivalent(to: newMessage)
-            {
-              return nil
-            }
-            return newMessage.id
-          }
-
-          // Only proceed if we have messages that actually changed
-          guard !changedMessageIds.isEmpty else { return }
-
-          // Get current snapshot
+        case let .updated(newMessages, what, animated):
           var snapshot = dataSource.snapshot()
-
-          // Reconfigure only the changed items
-          snapshot.reconfigureItems(changedMessageIds)
-
+          let ids = newMessages.map(\.id)
+          snapshot.reconfigureItems(ids)
           dataSource.apply(snapshot, animatingDifferences: animated ?? false)
 
         case let .reload(animated):
@@ -572,20 +557,15 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
     -> UICollectionViewLayoutAttributes?
   {
-    // Only animate new items at the beginning (recent messages)
-    if itemIndexPath.item < 5 {
-      guard
-        let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-        as? UICollectionViewLayoutAttributes
-      else {
-        return nil
-      }
-
-      attributes.transform = CGAffineTransform(translationX: 0, y: -50)
-      return attributes
+    guard
+      let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
+      as? UICollectionViewLayoutAttributes
+    else {
+      return nil
     }
 
-    return super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)
+    attributes.transform = CGAffineTransform(translationX: 0, y: -30)
+    return attributes
   }
 }
 
@@ -654,9 +634,11 @@ extension Notification.Name {
 
 extension FullMessage {
   func isVisuallyEquivalent(to other: FullMessage) -> Bool {
-    // Check all properties that affect visual appearance
-    message.text == other.message.text &&
-      message.status == other.message.status &&
+    guard message.status == other.message.status else {
+      return false
+    }
+
+    return message.text == other.message.text &&
       message.date == other.message.date &&
       file?.id == other.file?.id &&
       photoInfo?.id == other.photoInfo?.id &&
