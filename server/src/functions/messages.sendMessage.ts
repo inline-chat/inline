@@ -1,4 +1,4 @@
-import type { InputPeer, Update } from "@in/protocol/core"
+import { InputPeer, Update } from "@in/protocol/core"
 import type { TPeerInfo } from "@in/server/api-types"
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -155,9 +155,9 @@ const pushUpdates = async ({
       }
 
       Log.shared.info(
-        `encodingForInputPeer: ${JSON.stringify(
+        `encodingForInputPeer: ${InputPeer.toJson(
           encodingForInputPeer,
-        )}, encodingForUserId: ${encodingForUserId}, and update is ${JSON.stringify(newMessageUpdate)}`,
+        )}, encodingForUserId: ${encodingForUserId}, and update is ${Update.toJson(newMessageUpdate)}`,
       )
 
       if (userId === currentUserId) {
