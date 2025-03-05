@@ -64,6 +64,8 @@ class MessageViewAppKit: NSView {
   private var contentWidth: CGFloat {
     if let photoWidth = props.photoWidth {
       photoWidth
+    } else if hasDocument {
+      240.0 // some width for the document
     } else if hasReply {
       max(textWidth, 220.0) // some width for the reply
     } else {
@@ -134,6 +136,17 @@ class MessageViewAppKit: NSView {
   private lazy var newPhotoView: NewPhotoView = {
     let view = NewPhotoView(fullMessage)
     Log.shared.debug("new photo view init \(fullMessage.photoInfo)")
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private lazy var documentView: DocumentView? = {
+    guard let documentInfo = fullMessage.documentInfo else { return nil }
+
+    let view = DocumentView(
+      documentInfo: documentInfo,
+      fullMessage: self.fullMessage
+    )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -349,6 +362,10 @@ class MessageViewAppKit: NSView {
 
     if hasPhoto {
       contentView.addArrangedSubview(newPhotoView)
+    }
+
+    if hasDocument, let documentView {
+      contentView.addArrangedSubview(documentView)
     }
 
     if hasText {
@@ -587,6 +604,12 @@ class MessageViewAppKit: NSView {
       menu.addItem(copyItem)
     }
 
+    // Add document-related menu items
+    if hasDocument {
+      let saveDocumentItem = NSMenuItem(title: "Save Document", action: #selector(saveDocument), keyEquivalent: "s")
+      menu.addItem(saveDocumentItem)
+    }
+
     let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "i")
     deleteItem.target = self
     deleteItem.isEnabled = true
@@ -620,6 +643,39 @@ class MessageViewAppKit: NSView {
       )
 
     state.setReplyingToMsgId(fullMessage.message.messageId)
+  }
+
+  @objc private func saveDocument() {
+    guard let documentInfo = fullMessage.documentInfo else { return }
+
+    // Get the source file URL
+    let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
+    guard let localPath = documentInfo.document.localPath else { return }
+    let sourceURL = cacheDirectory.appendingPathComponent(localPath)
+
+    // Get the Downloads directory
+    let fileManager = FileManager.default
+    let downloadsURL = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+
+    // Get the filename
+    let fileName = documentInfo.document.fileName ?? "Unknown File"
+
+    // Create a save panel
+    let savePanel = NSSavePanel()
+    savePanel.nameFieldStringValue = fileName
+    savePanel.directoryURL = downloadsURL
+    savePanel.canCreateDirectories = true
+
+    savePanel.beginSheetModal(for: window!) { response in
+      if response == .OK, let destinationURL = savePanel.url {
+        do {
+          try fileManager.copyItem(at: sourceURL, to: destinationURL)
+          NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
+        } catch {
+          print("Error saving document: \(error)")
+        }
+      }
+    }
   }
 
   override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
@@ -703,6 +759,13 @@ class MessageViewAppKit: NSView {
     }
     if hasPhoto {
       newPhotoView.update(with: fullMessage)
+    }
+
+    // Document
+    if hasDocument, let documentView {
+      if let documentInfo = fullMessage.documentInfo {
+        documentView.update(with: documentInfo)
+      }
     }
 
     DispatchQueue.main.async(qos: .utility) { [weak self] in

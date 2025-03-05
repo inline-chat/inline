@@ -284,6 +284,7 @@ public extension Message {
 
     // Handle unarchiving for incoming messages
     if !isExisting, out != true {
+      // TODO: move this out of here
       try unarchiveIncomingMessagesChat(db, peerId: peerId)
     }
 
@@ -398,6 +399,13 @@ public extension Message {
       message.photoId = message.photoId ?? existing.photoId
       message.videoId = message.videoId ?? existing.videoId
       message.documentId = message.documentId ?? existing.documentId
+
+      // Update media selectively if needed
+      if protocolMessage.hasMedia {
+        try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
+      }
+      
+      try message.saveMessage(db, publishChanges: false) // publish is below
     } else {
       // Process media attachments if present
       if protocolMessage.hasMedia {
@@ -453,17 +461,10 @@ public extension Message {
     photoMessage: InlineProtocol.Photo,
     message: inout Message
   ) throws {
-    // 1. Save the photo using the from method
-    let photo_ = Photo.from(proto: photoMessage)
-    let photo = try photo_.saveAndFetch(db)
+    // Use the new update method that preserves local paths
+    let photo = try Photo.updateFromProtocol(db, protoPhoto: photoMessage)
 
-    // 2. Save all photo sizes
-    for protoSize in photoMessage.sizes {
-      let photoSize = PhotoSize.from(proto: protoSize, photoId: photo.id!)
-      try photoSize.save(db)
-    }
-
-    // 3. Update message with photo reference
+    // Update message with photo reference
     message.photoId = photo.photoId
   }
 
@@ -472,18 +473,17 @@ public extension Message {
     videoMessage: InlineProtocol.Video,
     message: inout Message
   ) throws {
-    // 1. Save the video using the from method
-    let video = Video.from(proto: videoMessage, localPhotoId: nil)
-
-    // 2. If video has thumbnail photo, save it
+    // Process thumbnail photo if present
+    var thumbnailPhotoId: Int64?
     if videoMessage.hasPhoto {
-      try processPhotoAttachment(db, photoMessage: videoMessage.photo, message: &message)
-      // Note: The video already has the thumbnailPhotoId from the from method
+      let photo = try Photo.updateFromProtocol(db, protoPhoto: videoMessage.photo)
+      thumbnailPhotoId = photo.id
     }
 
-    try video.save(db)
+    // Use the new update method that preserves local path
+    let video = try Video.updateFromProtocol(db, protoVideo: videoMessage, thumbnailPhotoId: thumbnailPhotoId)
 
-    // 3. Update message with video reference
+    // Update message with video reference
     message.videoId = video.videoId
   }
 
@@ -492,19 +492,10 @@ public extension Message {
     documentMessage: InlineProtocol.Document,
     message: inout Message
   ) throws {
-    // 1. Create the document
-    let document = Document(
-      documentId: documentMessage.id,
-      date: Date(timeIntervalSince1970: TimeInterval(documentMessage.date)),
-      fileName: documentMessage.fileName,
-      mimeType: documentMessage.mimeType,
-      size: documentMessage.size > 0 ? Int(documentMessage.size) : nil,
-      cdnUrl: documentMessage.hasCdnURL ? documentMessage.cdnURL : nil
-    )
+    // Use the new update method that preserves local path
+    let document = try Document.updateFromProtocol(db, protoDocument: documentMessage)
 
-    try document.save(db)
-
-    // 2. Update message with document reference
+    // Update message with document reference
     message.documentId = document.documentId
   }
 }

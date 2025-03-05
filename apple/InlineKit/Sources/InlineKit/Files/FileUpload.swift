@@ -102,8 +102,24 @@ public actor FileUploader {
   public func uploadDocument(
     documentInfo: DocumentInfo
   ) async throws -> Int64 {
-    // todo
-    0
+    guard let localPath = documentInfo.document.localPath else {
+      Log.shared.error("Document did not have a local path")
+      throw FileUploadError.invalidDocument
+    }
+    let localUrl = FileHelpers.getLocalCacheDirectory(for: .documents).appendingPathComponent(
+      localPath
+    )
+    let fileName = documentInfo.document.fileName ?? "document"
+    let mimeType = documentInfo.document.mimeType ?? "application/octet-stream"
+    try startUpload(
+      media: .document(documentInfo),
+      localUrl: localUrl,
+      mimeType: mimeType,
+      fileName: fileName
+    )
+
+    guard let localId = documentInfo.document.id else { throw FileUploadError.invalidDocumentId }
+    return localId
   }
 
 //  private func uploadFile() async throws -> UploadResult {
@@ -130,7 +146,7 @@ public actor FileUploader {
         type = .video
       case let .document(documentInfo):
         uploadId = getUploadId(documentId: documentInfo.document.id!)
-        type = .file
+        type = .document
     }
 
     let task = Task<UploadResult, Never> {
@@ -227,4 +243,6 @@ public enum FileUploadError: Error {
   case invalidVideo
   case invalidDocument
   case invalidPhotoId
+  case invalidDocumentId
+  case invalidVideoId
 }

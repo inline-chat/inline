@@ -84,6 +84,7 @@ class MessageSizeCalculator {
     let hasText = message.message.text != nil
     let text = message.message.text ?? emptyFallback
     let hasMedia = message.hasMedia
+    let hasDocument = message.documentInfo != nil
     let hasReply = message.message.repliedToMessageId != nil
 
     // If text is empty, height is always 1 line
@@ -103,6 +104,7 @@ class MessageSizeCalculator {
 
     // Need it here to cap text size
     var photoSize: CGSize?
+    var documentSize: CGSize?
 
     // Add file/photo/video sizes
     if hasMedia {
@@ -165,10 +167,13 @@ class MessageSizeCalculator {
         }
         // /end photo
       } else {
-        // Unsupported
+
+        // todo file
+        if hasDocument {
+          documentSize = CGSize(width: 200, height: Theme.documentViewHeight)
+        }
         
         // todo video
-        // todo file
       }
     }
 
@@ -179,6 +184,7 @@ class MessageSizeCalculator {
       // if we have photo, min available width is the photo width
       availableWidth = max(availableWidth, photoSize.width)
     }
+    
 
     // Highly Experimental:
     // So we get smooth bubble resize but less lag
@@ -265,6 +271,10 @@ class MessageSizeCalculator {
     if hasMedia {
       if let photoSize {
         totalHeight += photoSize.height
+      }
+      
+      if let documentSize {
+        totalHeight += documentSize.height
       }
 
       // Add some padding
