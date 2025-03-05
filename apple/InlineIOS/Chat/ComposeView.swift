@@ -304,7 +304,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
     let canSend = !text.isEmpty
 
     if canSend {
-      let _ = Transactions.shared.mutate(
+      Transactions.shared.mutate(
         transaction:
         .sendMessage(
           .init(
@@ -316,13 +316,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
         )
       )
 
+      clearDraft()
       ChatState.shared.clearReplyingMessageId(peer: peerId)
       textViewContainer.textView.text = ""
       resetHeight()
       textViewContainer.textView.showPlaceholder(true)
       buttonDisappear()
       sendMessageHaptic()
-      clearDraft()
     }
   }
 
