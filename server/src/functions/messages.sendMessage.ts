@@ -98,6 +98,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   sendNotifications({
     updateGroup,
     messageInfo,
+    currentUserId,
   })
 
   // return new updates
@@ -138,7 +139,7 @@ const pushUpdates = async ({
     updateGroup.userIds.forEach((userId) => {
       const encodingForUserId = userId
       const encodingForInputPeer: InputPeer =
-        userId === currentUserId ? inputPeer : { type: { oneofKind: "user", user: { userId: BigInt(userId) } } }
+        userId === currentUserId ? inputPeer : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
 
       let newMessageUpdate: Update = {
         update: {
@@ -217,14 +218,20 @@ const pushUpdates = async ({
 type SendPushForMsgInput = {
   updateGroup: UpdateGroup
   messageInfo: EncodeMessageInput
+  currentUserId: number
 }
 
 /** Send push notifications for this message */
 async function sendNotifications(input: SendPushForMsgInput) {
-  const { updateGroup, messageInfo } = input
+  const { updateGroup, messageInfo, currentUserId } = input
 
   if (updateGroup.type === "users") {
     for (let userId of updateGroup.userIds) {
+      if (userId === currentUserId) {
+        // Don't send push notifications to yourself
+        continue
+      }
+
       sendNotificationToUser({ userId, messageInfo })
     }
   }
