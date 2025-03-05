@@ -49,7 +49,9 @@ struct HomeView: View {
           if !home.spaces.isEmpty {
             ScrollView(.horizontal) {
               LazyHStack {
-                ForEach(home.spaces, id: \.id) { space in
+                ForEach(home.spaces.sorted(by: { s1, s2 in
+                  s1.space.date > s2.space.date
+                }), id: \.id) { space in
                   RectangleSpaceItem(spaceItem: space)
                 }
               }
