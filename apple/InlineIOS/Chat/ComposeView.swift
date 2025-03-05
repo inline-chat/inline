@@ -574,7 +574,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
         self.attachmentItems.removeAll()
 
         do {
-          let photoInfo = try FileCache.shared.savePhoto(image: image)
+          let photoInfo = try FileCache.savePhoto(image: image)
           self.attachmentItems[image] = .photo(photoInfo)
         } catch {
           Log.shared.error("Failed to save photo", error: error)
