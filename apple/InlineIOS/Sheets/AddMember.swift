@@ -56,9 +56,19 @@ struct AddMember: View {
   @ViewBuilder
   private var searchSection: some View {
     Group {
-      if isSearching {
+      if text.isEmpty, !isSearching {
+        VStack(alignment: .center, spacing: 6) {
+          Text("🔎")
+            .font(.largeTitle)
+          Text("Please enter a username to search for")
+            .foregroundColor(.secondary)
+            .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(.horizontal, 48)
+      } else if isSearching {
         searchLoadingView
-      } else if searchResults.isEmpty {
+      } else if searchResults.isEmpty, !text.isEmpty {
         Text("No users found")
           .foregroundColor(.secondary)
       } else {
