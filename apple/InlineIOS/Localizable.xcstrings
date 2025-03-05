@@ -56,10 +56,22 @@
     "Archived Chats" : {
 
     },
+    "Cancel" : {
+
+    },
     "Change Profile Photo" : {
 
     },
     "Chat Title" : {
+
+    },
+    "Clear" : {
+
+    },
+    "Clear Cache" : {
+
+    },
+    "Clear Media Cache" : {
 
     },
     "Code sent to %@." : {
@@ -108,6 +120,9 @@
 
     },
     "Email" : {
+
+    },
+    "Error Clearing Cache" : {
 
     },
     "Find" : {
@@ -467,6 +482,9 @@
 
     },
     "This is a reply message" : {
+
+    },
+    "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
 
     },
     "Type a username to find someone to chat with. eg. dena, mo" : {
