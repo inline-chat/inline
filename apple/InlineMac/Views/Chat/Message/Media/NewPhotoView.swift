@@ -57,7 +57,7 @@ final class NewPhotoView: NSView {
 
   private func setupView() {
     wantsLayer = true
-    translatesAutoresizingMaskIntoConstraints = false
+    //translatesAutoresizingMaskIntoConstraints = false
 
     // Add background view first (below image view)
     addSubview(backgroundView)

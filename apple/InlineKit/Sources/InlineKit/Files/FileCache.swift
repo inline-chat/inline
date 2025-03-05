@@ -91,6 +91,28 @@ public actor FileCache: Sendable {
     }
   }
 
+  // MARK: - Download Helpers
+
+  /// Save a downloaded document to the cache and update the database
+  public func saveDocumentDownload(document: DocumentInfo, localPath: String, message: Message) async throws {
+    try await database.dbWriter.write { db in
+      try Document.filter(id: document.id).updateAll(db, [Document.Columns.localPath.set(to: localPath)])
+      self.log.debug("Updated document \(document.id) with local path \(localPath)")
+    }
+
+    triggerMessageReload(message: message)
+  }
+
+  /// Save a downloaded video to the cache and update the database
+  public func saveVideoDownload(video: VideoInfo, localPath: String, message: Message) async throws {
+    try await database.dbWriter.write { db in
+      try Video.filter(id: video.id).updateAll(db, [Video.Columns.localPath.set(to: localPath)])
+      self.log.debug("Updated video \(video.id) with local path \(localPath)")
+    }
+
+    triggerMessageReload(message: message)
+  }
+
   // MARK: - Local Saves
 
   public static func savePhoto(image: PlatformImage) throws -> InlineKit.PhotoInfo {
@@ -179,6 +201,12 @@ extension FileCache {
 
     // Clear photos
     try await clearPhotoCache()
+
+    // Clear documents
+    try await clearDocumentCache()
+
+    // Clear videos
+    try await clearVideoCache()
   }
 
   private func clearPhotoCache() async throws {
@@ -220,6 +248,86 @@ extension FileCache {
 
     // Step 4: Clear the photos directory to catch any orphaned files
     try clearOrphanedFiles(in: .photos)
+  }
+
+  private func clearDocumentCache() async throws {
+    // Step 1: Get all documents with local paths from database
+    let documentsWithLocalPaths = try await database.dbWriter.read { db in
+      try Document.filter(sql: "localPath IS NOT NULL").fetchAll(db)
+    }
+
+    log.debug("Found \(documentsWithLocalPaths.count) cached documents to clear")
+
+    // Step 2: Delete the actual files
+    var deletedCount = 0
+    var failedDeletions = 0
+
+    for document in documentsWithLocalPaths {
+      guard let localPath = document.localPath else { continue }
+
+      let fileURL = FileCache.getUrl(for: .documents, localPath: localPath)
+
+      do {
+        // Check if file exists before attempting to delete
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+          try FileManager.default.removeItem(at: fileURL)
+          deletedCount += 1
+        }
+      } catch {
+        failedDeletions += 1
+        log.error("Failed to delete cached document at \(fileURL): \(error)")
+      }
+    }
+
+    // Step 3: Clear local paths in database
+    _ = try await database.dbWriter.write { db in
+      try Document.updateAll(db, [Document.Columns.localPath.set(to: nil)])
+    }
+
+    log.info("Document cache cleared: \(deletedCount) files deleted, \(failedDeletions) deletions failed")
+
+    // Step 4: Clear the documents directory to catch any orphaned files
+    try clearOrphanedFiles(in: .documents)
+  }
+
+  private func clearVideoCache() async throws {
+    // Step 1: Get all videos with local paths from database
+    let videosWithLocalPaths = try await database.dbWriter.read { db in
+      try Video.filter(sql: "localPath IS NOT NULL").fetchAll(db)
+    }
+
+    log.debug("Found \(videosWithLocalPaths.count) cached videos to clear")
+
+    // Step 2: Delete the actual files
+    var deletedCount = 0
+    var failedDeletions = 0
+
+    for video in videosWithLocalPaths {
+      guard let localPath = video.localPath else { continue }
+
+      let fileURL = FileCache.getUrl(for: .videos, localPath: localPath)
+
+      do {
+        // Check if file exists before attempting to delete
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+          try FileManager.default.removeItem(at: fileURL)
+          deletedCount += 1
+        }
+      } catch {
+        failedDeletions += 1
+        log.error("Failed to delete cached video at \(fileURL): \(error)")
+      }
+    }
+
+    // Step 3: Clear local paths in database
+    _ = try await database.dbWriter.write { db in
+      try Video.updateAll(db, [Video.Columns.localPath.set(to: nil)])
+    }
+
+    log.info("Video cache cleared: \(deletedCount) files deleted, \(failedDeletions) deletions failed")
+
+    // Step 4: Clear the videos directory to catch any orphaned files
+    try clearOrphanedFiles(in: .videos)
   }
 
   private func clearOrphanedFiles(in directory: FileLocalCacheDirectory) throws {

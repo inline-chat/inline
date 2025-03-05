@@ -1,7 +1,9 @@
 import AppKit
 import Cocoa
+import Combine
 import Foundation
 import InlineKit
+import Logger
 
 class DocumentView: NSView {
   private var height = Theme.documentViewHeight
@@ -9,10 +11,14 @@ class DocumentView: NSView {
   private static var iconSpacing: CGFloat = 8
   private static var textsSpacing: CGFloat = 2
 
-  enum DocumentState {
+  enum DocumentState: Equatable {
     case locallyAvailable
     case needsDownload
+    case downloading(bytesReceived: Int64, totalBytes: Int64)
   }
+
+  private var progressSubscription: AnyCancellable?
+  private var isDownloading = false
 
   // MARK: - UI Elements
 
@@ -35,6 +41,20 @@ class DocumentView: NSView {
     let config = NSImage.SymbolConfiguration(pointSize: 21, weight: .regular)
     imageView.symbolConfiguration = config
 
+    return imageView
+  }()
+
+  private let cancelIcon: NSImageView = {
+    let imageView = NSImageView()
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    imageView.wantsLayer = true
+    imageView.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Cancel")
+    imageView.contentTintColor = NSColor.systemBlue
+
+    let config = NSImage.SymbolConfiguration(pointSize: 21, weight: .regular)
+    imageView.symbolConfiguration = config
+
+    imageView.isHidden = true
     return imageView
   }()
 
@@ -109,6 +129,7 @@ class DocumentView: NSView {
   // MARK: - Properties
 
   var documentInfo: DocumentInfo
+  var fullMessage: FullMessage?
   var removeAction: (() -> Void)?
 
   var documentState: DocumentState = .needsDownload {
@@ -121,17 +142,27 @@ class DocumentView: NSView {
 
   init(
     documentInfo: DocumentInfo,
+    fullMessage: FullMessage? = nil,
     /// Set when rendering in compose and it renders a close button
     removeAction: (() -> Void)? = nil
   ) {
     self.documentInfo = documentInfo
     self.removeAction = removeAction
-    documentState = documentInfo.document.localPath != nil ? .locallyAvailable : .needsDownload
+    self.fullMessage = fullMessage
 
     super.init(frame: NSRect(x: 0, y: 0, width: 300, height: Theme.documentViewHeight))
+
+    // Determine initial state
+    documentState = determineDocumentState(documentInfo)
+
     setupView()
     updateUI()
     updateButtonState()
+
+    // Start monitoring progress if download is active
+    if case .downloading = documentState {
+      startMonitoringProgress()
+    }
   }
 
   @available(*, unavailable)
@@ -162,6 +193,7 @@ class DocumentView: NSView {
 
     // Add icon to container first
     iconContainer.addSubview(iconView)
+    iconContainer.addSubview(cancelIcon)
     iconContainer.setContentHuggingPriority(.defaultHigh, for: .horizontal)
     iconContainer.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
@@ -201,6 +233,12 @@ class DocumentView: NSView {
       iconView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
       iconView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
 
+      // Cancel
+      cancelIcon.widthAnchor.constraint(equalToConstant: Self.iconCircleSize),
+      cancelIcon.heightAnchor.constraint(equalToConstant: Self.iconCircleSize),
+      cancelIcon.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+      cancelIcon.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+
       // Make sure the download button doesn't grow too much
       actionButton.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
     ])
@@ -215,6 +253,11 @@ class DocumentView: NSView {
         closeButton.heightAnchor.constraint(equalToConstant: 24),
       ])
     }
+
+    // Add gesture recognizer to cancel icon
+    let tapGesture = NSClickGestureRecognizer(target: self, action: #selector(cancelDownload))
+    cancelIcon.addGestureRecognizer(tapGesture)
+    cancelIcon.isEnabled = true
   }
 
   private func updateUI() {
@@ -273,19 +316,86 @@ class DocumentView: NSView {
   private func updateButtonState() {
     switch documentState {
       case .locallyAvailable:
+        // Show normal document view
+        iconView.isHidden = false
+        cancelIcon.isHidden = true
+        actionButton.isHidden = false
+        fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Show in Finder"
-        // Optionally change button appearance for this state
         actionButton.contentTintColor = NSColor.systemBlue
+
       case .needsDownload:
+        // Show download button
+        iconView.isHidden = false
+        cancelIcon.isHidden = true
+        actionButton.isHidden = false
+        fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Download"
         actionButton.contentTintColor = NSColor.controlAccentColor
+
+      case let .downloading(bytesReceived, totalBytes):
+        // Show download progress
+        iconView.isHidden = true
+        cancelIcon.isHidden = false
+        actionButton.isHidden = true
+
+        // Format the progress text
+        let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
+        let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
+        fileSizeLabel.stringValue = "\(downloadedStr) / \(totalStr)"
     }
   }
 
   // MARK: - Actions
 
+  @objc private func cancelDownload() {
+    // Only cancel if we're in downloading state
+    if case .downloading = documentState {
+      // Cancel the download
+      FileDownloader.shared.cancelDocumentDownload(documentId: documentInfo.document.documentId)
+
+      // Reset state
+      documentState = .needsDownload
+
+      // Clean up subscription
+      progressSubscription = nil
+    }
+  }
+
   private func downloadAction() {
-    // TODO:
+    guard let fullMessage else {
+      Log.shared.warning("Cannot download document without a message")
+      return
+    }
+
+    // Check if download is already in progress by subscribing to progress
+    let documentId = documentInfo.document.documentId
+
+    // If we're already downloading, don't start a new download
+    if case .downloading = documentState {
+      return
+    }
+
+    // Set initial downloading state
+    documentState = .downloading(bytesReceived: 0, totalBytes: Int64(documentInfo.document.size ?? 0))
+
+    // Start monitoring progress
+    startMonitoringProgress()
+
+    // Start the download
+    FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { [weak self] result in
+      guard let self else { return }
+
+      switch result {
+        case .success:
+          break
+        // Success - refresh document info
+        // refreshDocumentInfo()
+        case let .failure(error):
+          Log.shared.error("Document download failed: \(error)")
+          documentState = .needsDownload
+      }
+    }
   }
 
   @objc private func actionButtonTapped() {
@@ -294,7 +404,16 @@ class DocumentView: NSView {
         showInFinder()
       case .needsDownload:
         downloadAction()
+
+      default:
+        break
     }
+  }
+
+  deinit {
+    // Only cancel the subscription, not the download
+    progressSubscription?.cancel()
+    progressSubscription = nil
   }
 
   @objc private func handleClose() {
@@ -302,14 +421,106 @@ class DocumentView: NSView {
   }
 
   func update(with documentInfo: DocumentInfo) {
+    // Update document info
     self.documentInfo = documentInfo
-    documentState = documentInfo.document.localPath != nil ? .locallyAvailable : .needsDownload
+
+    // Check if the document is already downloaded
+    if documentInfo.document.localPath != nil {
+      documentState = .locallyAvailable
+      updateUI()
+      return
+    }
+
+    // Set initial state
+    documentState = determineDocumentState(documentInfo)
     updateUI()
+
+    // Start monitoring if downloading
+    if case .downloading = documentState {
+      startMonitoringProgress()
+    } else {
+      // Cancel subscription if not downloading
+      progressSubscription?.cancel()
+      progressSubscription = nil
+    }
   }
 
   // Method to manually set the state
   func setState(_ state: DocumentState) {
     documentState = state
+  }
+
+  // MARK: - Document State Management
+
+  private func determineDocumentState(_ documentInfo: DocumentInfo) -> DocumentState {
+    // First check if the file exists locally
+    if isDocumentAvailableLocally() {
+      return .locallyAvailable
+    }
+
+    // Then check if a download is in progress
+    let documentId = documentInfo.document.documentId
+    if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
+      // A download is active, start with 0 progress
+      return .downloading(bytesReceived: 0, totalBytes: Int64(documentInfo.document.size ?? 0))
+    }
+
+    // Otherwise, the document needs to be downloaded
+    return .needsDownload
+  }
+
+  private func isDocumentAvailableLocally() -> Bool {
+    guard let localPath = documentInfo.document.localPath else {
+      return false
+    }
+
+    return true
+
+    // Too agressive
+    // Check if the file actually exists
+//    let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
+//    let fileURL = cacheDirectory.appendingPathComponent(localPath)
+//    return FileManager.default.fileExists(atPath: fileURL.path)
+  }
+
+  // MARK: - Progress Monitoring
+
+  private func startMonitoringProgress() {
+    // Cancel any existing subscription
+    progressSubscription?.cancel()
+
+    Log.shared.info("Starting progress subscription for document \(documentInfo.document.documentId)")
+
+    // Start a new subscription
+    let documentId = documentInfo.id
+    progressSubscription = FileDownloader.shared.documentProgressPublisher(documentId: documentId)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] progress in
+        guard let self else { return }
+
+        Log.shared.info("Document \(documentId) progress: \(progress)")
+
+        if progress.isComplete {
+          // Download completed - refresh document info
+          // self.refreshDocumentInfo()
+        } else if let error = progress.error {
+          // Download failed
+          Log.shared.error("Document download failed: \(error)")
+          documentState = .needsDownload
+        } else if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
+          // Download is active - update progress
+          documentState = .downloading(
+            bytesReceived: progress.bytesReceived,
+            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(documentInfo.document.size ?? 0)
+          )
+        } else if progress.bytesReceived > 0 {
+          // We have progress but no active task - might be completing
+          documentState = .downloading(
+            bytesReceived: progress.bytesReceived,
+            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(documentInfo.document.size ?? 0)
+          )
+        }
+      }
   }
 }
 

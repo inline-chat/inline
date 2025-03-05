@@ -215,17 +215,26 @@ public extension AppDatabase {
     // Get the old photoId
     let oldPhotoId = localPhoto.photoId
 
+    // Nil first to avoid constraint violation
+    var msg = try Message.filter(
+      Column("photoId") == oldPhotoId
+    ).fetchOne(db)
+    msg?.photoId = nil
+    try msg?.save(db)
+
     // Update the photo with the server ID
     var updatedPhoto = localPhoto
     updatedPhoto.photoId = serverId
     try updatedPhoto.update(db)
 
     // Update any messages that reference the old temporary ID
-    try db.execute(sql: """
-        UPDATE message
-        SET photoId = ?
-        WHERE photoId = ?
-    """, arguments: [serverId, oldPhotoId])
+//    try db.execute(sql: """
+//        UPDATE message
+//        SET photoId = ?
+//        WHERE photoId = ?
+//    """, arguments: [serverId, oldPhotoId])
+    msg?.photoId = serverId
+    try msg?.save(db)
   }
 
   // Update a video with the server-provided ID
@@ -233,17 +242,27 @@ public extension AppDatabase {
     // Get the old videoId
     let oldVideoId = localVideo.videoId
 
+    // Nil first to avoid constraint violation
+    var msg = try Message.filter(
+      Column("videoId") == oldVideoId
+    ).fetchOne(db)
+    msg?.videoId = nil
+    try msg?.save(db)
+
     // Update the video with the server ID
     var updatedVideo = localVideo
     updatedVideo.videoId = serverId
     try updatedVideo.update(db)
 
     // Update any messages that reference the old temporary ID
-    try db.execute(sql: """
-        UPDATE message
-        SET videoId = ?
-        WHERE videoId = ?
-    """, arguments: [serverId, oldVideoId])
+//    try db.execute(sql: """
+//        UPDATE message
+//        SET videoId = ?
+//        WHERE videoId = ?
+//    """, arguments: [serverId, oldVideoId])
+
+    msg?.videoId = serverId
+    try msg?.save(db)
   }
 
   // Update a document with the server-provided ID
@@ -251,17 +270,29 @@ public extension AppDatabase {
     // Get the old documentId
     let oldDocumentId = localDocument.documentId
 
+    // Nil first to avoid constraint violation
+    var msg = try Message.filter(
+      Column("documentId") == oldDocumentId
+    ).fetchOne(db)
+    msg?.documentId = nil
+    try msg?.save(db)
+
     // Update the document with the server ID
     var updatedDocument = localDocument
     updatedDocument.documentId = serverId
     try updatedDocument.update(db)
 
     // Update any messages that reference the old temporary ID
-    try db.execute(sql: """
-        UPDATE message
-        SET documentId = ?
-        WHERE documentId = ?
-    """, arguments: [serverId, oldDocumentId])
+//    try db.execute(sql: """
+//        UPDATE message
+//        SET documentId = ?
+//        WHERE documentId = ?
+//    """, arguments: [serverId, oldDocumentId])
+
+    msg?.documentId = serverId
+    try msg?.save(db)
+
+    Log.shared.debug("Updated document with server ID \(serverId) \(updatedDocument)")
   }
 
   // Find a photo by its server ID
@@ -409,8 +440,152 @@ extension Document {
       thumbnailPhotoId: thumbnail?.id
     )
     let document = try document_.saveAndFetch(db)
-    
-    // todo: support thumbnails
+
+    // TODO: support thumbnails
     return DocumentInfo(document: document)
+  }
+}
+
+// MARK: - Update from protocol
+
+public extension Document {
+  // Add this method to update from protocol while preserving local path
+  static func updateFromProtocol(_ db: Database, protoDocument: InlineProtocol.Document) throws -> Document {
+    // Try to find existing document
+    if let existingDocument = try Document.filter(Column("documentId") == protoDocument.id).fetchOne(db) {
+      // Create updated document with preserved local path
+      var updatedDocument = Document(
+        id: existingDocument.id,
+        documentId: protoDocument.id,
+        date: Date(timeIntervalSince1970: TimeInterval(protoDocument.date)),
+        fileName: protoDocument.fileName,
+        mimeType: protoDocument.mimeType,
+        size: protoDocument.size > 0 ? Int(protoDocument.size) : nil,
+        cdnUrl: protoDocument.hasCdnURL ? protoDocument.cdnURL : nil,
+        localPath: existingDocument.localPath // Preserve local path
+      )
+      Log.shared.debug("Updating document with ID \(protoDocument.id) \(protoDocument.fileName) \(updatedDocument)")
+
+      // Save the updated document
+      try updatedDocument.save(db, onConflict: .replace)
+      return updatedDocument
+    } else {
+      // Create new document if it doesn't exist
+      let newDocument = Document(
+        documentId: protoDocument.id,
+        date: Date(timeIntervalSince1970: TimeInterval(protoDocument.date)),
+        fileName: protoDocument.fileName,
+        mimeType: protoDocument.mimeType,
+        size: protoDocument.size > 0 ? Int(protoDocument.size) : nil,
+        cdnUrl: protoDocument.hasCdnURL ? protoDocument.cdnURL : nil,
+        localPath: nil
+      )
+
+      let document = try newDocument.saveAndFetch(db)
+      return document
+    }
+  }
+}
+
+public extension Video {
+  // Add this method to update from protocol while preserving local path
+  static func updateFromProtocol(
+    _ db: Database,
+    protoVideo: InlineProtocol.Video,
+    thumbnailPhotoId: Int64?
+  ) throws -> Video {
+    // Try to find existing video
+    if let existingVideo = try Video.filter(Column("videoId") == protoVideo.id).fetchOne(db) {
+      // Create updated video with preserved local path
+      var updatedVideo = Video(
+        id: existingVideo.id,
+        videoId: protoVideo.id,
+        date: Date(timeIntervalSince1970: TimeInterval(protoVideo.date)),
+        width: Int(protoVideo.w),
+        height: Int(protoVideo.h),
+        duration: Int(protoVideo.duration),
+        size: protoVideo.size > 0 ? Int(protoVideo.size) : nil,
+        thumbnailPhotoId: thumbnailPhotoId ?? existingVideo.thumbnailPhotoId,
+        cdnUrl: protoVideo.hasCdnURL ? protoVideo.cdnURL : nil,
+        localPath: existingVideo.localPath // Preserve local path
+      )
+
+      // Save the updated video
+      try updatedVideo.save(db, onConflict: .replace)
+      return updatedVideo
+    } else {
+      // Create new video if it doesn't exist
+      let newVideo = Video.from(proto: protoVideo, localPhotoId: thumbnailPhotoId)
+      let video = try newVideo.saveAndFetch(db)
+      return video
+    }
+  }
+}
+
+public extension Photo {
+  // Add this method to update from protocol while preserving local paths in photo sizes
+  static func updateFromProtocol(_ db: Database, protoPhoto: InlineProtocol.Photo) throws -> Photo {
+    // Try to find existing photo
+    if let existingPhoto = try Photo.filter(Column("photoId") == protoPhoto.id).fetchOne(db) {
+      // Create updated photo
+      var updatedPhoto = Photo(
+        id: existingPhoto.id,
+        photoId: protoPhoto.id,
+        date: Date(timeIntervalSince1970: TimeInterval(protoPhoto.date)),
+        format: protoPhoto.format.toImageFormat()
+      )
+
+      // Save the updated photo
+      try updatedPhoto.save(db, onConflict: .replace)
+
+      // Update photo sizes while preserving local paths
+      for protoSize in protoPhoto.sizes {
+        try PhotoSize.updateFromProtocol(db, protoSize: protoSize, photoId: updatedPhoto.id!)
+      }
+
+      return updatedPhoto
+    } else {
+      // Create new photo if it doesn't exist
+      let newPhoto = Photo.from(proto: protoPhoto)
+      let photo = try newPhoto.saveAndFetch(db)
+
+      // Save all photo sizes
+      for protoSize in protoPhoto.sizes {
+        let photoSize = PhotoSize.from(proto: protoSize, photoId: photo.id!)
+        try photoSize.save(db)
+      }
+
+      return photo
+    }
+  }
+}
+
+public extension PhotoSize {
+  // Add this method to update from protocol while preserving local path
+  static func updateFromProtocol(_ db: Database, protoSize: InlineProtocol.PhotoSize, photoId: Int64) throws {
+    // Try to find existing photo size
+    if let existingSize = try PhotoSize.filter(Column("photoId") == photoId)
+      .filter(Column("type") == protoSize.type)
+      .fetchOne(db)
+    {
+      // Create updated photo size with preserved local path
+      var updatedSize = PhotoSize(
+        id: existingSize.id,
+        photoId: photoId,
+        type: protoSize.type,
+        width: Int(protoSize.w),
+        height: Int(protoSize.h),
+        size: Int(protoSize.size),
+        cdnUrl: protoSize.hasCdnURL ? protoSize.cdnURL : nil,
+        localPath: existingSize.localPath // Preserve local path
+      )
+
+      // Save the updated photo size
+      try updatedSize.save(db, onConflict: .replace)
+    } else {
+      // Create new photo size if it doesn't exist
+      let newSize = PhotoSize.from(proto: protoSize, photoId: photoId)
+      try newSize.save(db) // Is saveAndInsert needed?
+    }
   }
 }

@@ -119,8 +119,9 @@ public enum FileHelpers {
   /// - Returns: A formatted string representing the file size (e.g., "1.5 MB")
   public static func formatFileSize(_ bytes: UInt64) -> String {
     let byteCountFormatter = ByteCountFormatter()
-    byteCountFormatter.allowedUnits = [.useAll]
+    byteCountFormatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
     byteCountFormatter.countStyle = .file
+    byteCountFormatter.allowsNonnumericFormatting = false
     return byteCountFormatter.string(fromByteCount: Int64(bytes))
   }
   

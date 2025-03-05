@@ -13,7 +13,7 @@ public struct ApiPhoto: Codable, Hashable, Sendable {
 
 public enum MessageFileType: String, Codable, DatabaseValueConvertible, Sendable {
   case photo
-  case file
+  case document
   case video
 }
 
