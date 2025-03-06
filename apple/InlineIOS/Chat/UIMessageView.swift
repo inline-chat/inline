@@ -172,7 +172,7 @@ class UIMessageView: UIView {
     setupPhotoViewIfNeeded()
     setupMessageContainer()
 
-    if message.hasFile && !message.hasText {
+    if message.hasFile, !message.hasText {
       addFloatingMetadata()
     }
 
@@ -653,6 +653,21 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
 
       var actions: [UIAction] = [copyAction]
 
+      if fullMessage.photoInfo != nil {
+        let copyPhotoAction = UIAction(title: "Copy Photo") { [weak self] _ in
+          guard let self else { return }
+          if let image = newPhotoView.getCurrentImage() {
+            UIPasteboard.general.image = image
+            ToastManager.shared.showToast(
+              "Photo copied to clipboard",
+              type: .success,
+              systemImage: "doc.on.clipboard"
+            )
+          }
+        }
+        actions.append(copyPhotoAction)
+      }
+
       let replyAction = UIAction(title: "Reply") { _ in
         ChatState.shared.setReplyingMessageId(peer: self.message.peerId, id: self.message.id)
       }
@@ -824,5 +839,12 @@ extension Message {
   var hasText: Bool {
     guard let text else { return false }
     return !text.isEmpty
+  }
+}
+
+// Add extension for NewPhotoView to access current image
+extension NewPhotoView {
+  func getCurrentImage() -> UIImage? {
+    imageView.image
   }
 }
