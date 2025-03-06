@@ -23,12 +23,6 @@ export const sendPushNotificationToUser = async ({
   body,
 }: SendPushNotificationToUserInput) => {
   try {
-    const userName = await getCachedUserName(userId)
-    if (!userName) {
-      Log.shared.debug("No user name found for user", { userId })
-      return
-    }
-
     // Get all sessions for the user
     const userSessions = await SessionsModel.getValidSessionsByUserId(userId)
 
@@ -46,6 +40,8 @@ export const sendPushNotificationToUser = async ({
       const notification = new Notification()
       notification.payload = {
         userId,
+
+        // from?
       }
       notification.contentAvailable = true
       notification.mutableContent = true
