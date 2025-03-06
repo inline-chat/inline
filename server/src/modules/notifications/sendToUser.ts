@@ -7,6 +7,7 @@ import { Notification } from "apn"
 
 type SendPushNotificationToUserInput = {
   userId: number
+  senderUserId: number
   threadId: string
   title: string
   body: string
@@ -18,6 +19,7 @@ const iOSTopic = isProd ? "chat.inline.InlineIOS" : "chat.inline.InlineIOS.debug
 
 export const sendPushNotificationToUser = async ({
   userId,
+  senderUserId,
   threadId,
   title,
   body,
@@ -39,7 +41,7 @@ export const sendPushNotificationToUser = async ({
       // Configure notification
       const notification = new Notification()
       notification.payload = {
-        userId,
+        userId: senderUserId,
 
         // from?
       }
