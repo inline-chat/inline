@@ -154,9 +154,9 @@ class ConnectionManager {
 
   // TODO: refactor to use publish
   sendToUser(userId: number, message: ServerMessageType) {
-    log.debug(`Sending message to user ${userId}`)
     const userConnections = this.authenticatedUsers.get(userId)
     if (userConnections) {
+      log.debug(`Sending message to user ${userId}`)
       userConnections.forEach((connectionId) => {
         const connection = this.connections.get(connectionId)
         if (connection?.version === ConnVersion.BASIC_V1) {
