@@ -44,7 +44,8 @@ export const getPhotoMetadataAndValidate = async (
     throw new InlineError(ApiError.PHOTO_INVALID_DIMENSIONS)
   }
 
-  if (width + height > 10000) {
+  if (width + height > 15000) {
+    // TODO: Reduce
     throw new InlineError(InlineError.ApiError.PHOTO_INVALID_DIMENSIONS)
   }
 
