@@ -283,5 +283,11 @@ async function sendNotificationToUser({
     body = "📄 File"
   }
 
-  Notifications.sendToUser({ userId, threadId: `chat_${messageInfo.message.chatId}`, title, body })
+  Notifications.sendToUser({
+    userId,
+    senderUserId: messageInfo.message.fromId,
+    threadId: `chat_${messageInfo.message.chatId}`,
+    title,
+    body,
+  })
 }
