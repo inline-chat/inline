@@ -102,6 +102,8 @@ class ComposeNSTextView: NSTextView {
   private func handleImageInput(from pasteboard: NSPasteboard) -> Bool {
     // First check for files that are images
     if let files = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+      var handled = false
+
       for file in files {
         let fileType = file.pathExtension.lowercased()
         // Check if the file is an image
@@ -109,6 +111,7 @@ class ComposeNSTextView: NSTextView {
           if let image = NSImage(contentsOf: file) {
             // Notify delegate about image paste
             notifyDelegateAboutImage(image)
+            handled = true
             continue
           }
         }
@@ -119,22 +122,26 @@ class ComposeNSTextView: NSTextView {
           let _ = file.startAccessingSecurityScopedResource()
           notifyDelegateAboutVideo(file)
           file.stopAccessingSecurityScopedResource()
+          handled = true
           continue
         }
 
-        // Handle URL as file
-        let _ = file.startAccessingSecurityScopedResource()
-        notifyDelegateAboutFile(file)
-        file.stopAccessingSecurityScopedResource()
-        continue
+        if file.isFileURL {
+          // Handle URL as file
+          let _ = file.startAccessingSecurityScopedResource()
+          notifyDelegateAboutFile(file)
+          file.stopAccessingSecurityScopedResource()
+          handled = true
+          continue
+        }
       }
 
-      return true
+      return handled
     }
 
     // 2. Handle direct image data
     let imageTypes: [NSPasteboard.PasteboardType] = [
-      .tiff, .png,
+      .tiff, .png, NSPasteboard.PasteboardType("public.image"),
     ]
 
     if let bestType = pasteboard.availableType(from: imageTypes),
