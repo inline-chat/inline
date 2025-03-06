@@ -11,7 +11,7 @@ import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHis
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
-  console.log("rpc call", call.method)
+  Log.shared.debug("rpc call", call.method)
 
   switch (call.method) {
     case Method.GET_ME: {
