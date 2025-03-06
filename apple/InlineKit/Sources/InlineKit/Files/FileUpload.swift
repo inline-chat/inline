@@ -24,7 +24,7 @@ public actor FileUploader {
   private init() {}
 
   // [uploadId: Task]
-  private var uploadTasks: [String: Task<UploadResult, Never>] = [:]
+  private var uploadTasks: [String: Task<UploadResult, any Error>] = [:]
 
   // [uploadId: UploadResult] cached results if task was finished
   private var finishedUploads: [String: UploadResult] = [:]
@@ -34,22 +34,22 @@ public actor FileUploader {
 
   // MARK: - Wait for Upload
 
-  public func waitForUpload(photoLocalId id: Int64) async -> UploadResult? {
-    await waitForUpload(uploadId: getUploadId(photoId: id))
+  public func waitForUpload(photoLocalId id: Int64) async throws -> UploadResult? {
+    try await waitForUpload(uploadId: getUploadId(photoId: id))
   }
 
-  public func waitForUpload(videoLocalId id: Int64) async -> UploadResult? {
-    await waitForUpload(uploadId: getUploadId(videoId: id))
+  public func waitForUpload(videoLocalId id: Int64) async throws -> UploadResult? {
+    try await waitForUpload(uploadId: getUploadId(videoId: id))
   }
 
-  public func waitForUpload(documentLocalId id: Int64) async -> UploadResult? {
-    await waitForUpload(uploadId: getUploadId(documentId: id))
+  public func waitForUpload(documentLocalId id: Int64) async throws -> UploadResult? {
+    try await waitForUpload(uploadId: getUploadId(documentId: id))
   }
 
-  private func waitForUpload(uploadId: String) async -> UploadResult? {
+  private func waitForUpload(uploadId: String) async throws -> UploadResult? {
     if let task = uploadTasks[uploadId] {
       // still in progress
-      return await task.value
+      return try await task.value
     } else if let result = finishedUploads[uploadId] {
       // finished
       return result
@@ -149,77 +149,80 @@ public actor FileUploader {
         type = .document
     }
 
-    let task = Task<UploadResult, Never> {
-      do {
-        // get data from file
-        let data = try Data(contentsOf: localUrl)
-
-        // upload file
-        let result = try await ApiClient.shared
-          .uploadFile(
-            type: type,
-            data: data,
-            filename: fileName,
-            mimeType: MIMEType(text: mimeType)
-          ) { _ in
-            // TODO: progresss
-          }
-
-        // return IDs
-        let result_ = UploadResult(
-          photoId: result.photoId,
-          videoId: result.videoId,
-          documentId: result.documentId
-        )
-
-        // Store
-        finishedUploads[uploadId] = result_
-
-        // Update database with new ID
-        do {
-          switch media {
-            case let .photo(photoInfo):
-              if let serverId = result.photoId {
-                try await AppDatabase.shared.dbWriter.write { db in
-                  try AppDatabase.updatePhotoWithServerId(db, localPhoto: photoInfo.photo, serverId: serverId)
-                }
-              }
-            case let .video(videoInfo):
-              if let serverId = result.videoId {
-                try await AppDatabase.shared.dbWriter.write { db in
-                  try AppDatabase.updateVideoWithServerId(db, localVideo: videoInfo.video, serverId: serverId)
-                }
-              }
-
-            case let .document(documentInfo):
-              if let serverId = result.documentId {
-                try await AppDatabase.shared.dbWriter.write { db in
-                  try AppDatabase.updateDocumentWithServerId(
-                    db,
-                    localDocument: documentInfo.document,
-                    serverId: serverId
-                  )
-                }
-              }
-          }
-        } catch {
-          Log.shared.error("Failed to update database with new server ID", error: error)
-        }
-
+    let task = Task<UploadResult, any Error> {
+      defer {
         // Remove from tasks
         Task {
           self.uploadTasks.removeValue(forKey: uploadId)
         }
-
-        return result_
-      } catch {
-        return UploadResult(photoId: nil, videoId: nil, documentId: nil)
       }
+
+      // get data from file
+      let data = try Data(contentsOf: localUrl)
+
+      // upload file
+      let result = try await ApiClient.shared
+        .uploadFile(
+          type: type,
+          data: data,
+          filename: fileName,
+          mimeType: MIMEType(text: mimeType)
+        ) { _ in
+          // TODO: progresss
+        }
+
+      // return IDs
+      let result_ = UploadResult(
+        photoId: result.photoId,
+        videoId: result.videoId,
+        documentId: result.documentId
+      )
+
+      // Store
+      finishedUploads[uploadId] = result_
+
+      // Update database with new ID
+      do {
+        try await updateDatabaseWithServerIds(media: media, result: result)
+      } catch {
+        Log.shared.error("Failed to update database with new server ID", error: error)
+        throw FileUploadError.failedToSave
+      }
+
+      return result_
     }
 
     // store task
     uploadTasks[uploadId] = task
   }
+  
+  private func updateDatabaseWithServerIds(media: FileMediaItem, result: UploadFileResult) async throws {
+    switch media {
+    case let .photo(photoInfo):
+      if let serverId = result.photoId {
+        try await AppDatabase.shared.dbWriter.write { db in
+          try AppDatabase.updatePhotoWithServerId(db, localPhoto: photoInfo.photo, serverId: serverId)
+        }
+      }
+    case let .video(videoInfo):
+      if let serverId = result.videoId {
+        try await AppDatabase.shared.dbWriter.write { db in
+          try AppDatabase.updateVideoWithServerId(db, localVideo: videoInfo.video, serverId: serverId)
+        }
+      }
+    case let .document(documentInfo):
+      if let serverId = result.documentId {
+        try await AppDatabase.shared.dbWriter.write { db in
+          try AppDatabase.updateDocumentWithServerId(
+            db,
+            localDocument: documentInfo.document,
+            serverId: serverId
+          )
+        }
+      }
+    }
+  }
+
 
   private func cancel(uploadId: String) {
     // todo
@@ -239,6 +242,8 @@ public actor FileUploader {
 }
 
 public enum FileUploadError: Error {
+  case failedToUpload
+  case failedToSave
   case invalidPhoto
   case invalidVideo
   case invalidDocument
