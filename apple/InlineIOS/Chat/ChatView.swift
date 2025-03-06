@@ -140,10 +140,18 @@ struct ChatView: View {
     VStack(spacing: 0) {
       Text(title)
         .fontWeight(.semibold)
+
       if !isCurrentUser, isPrivateChat {
-        Text(subtitle)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        HStack {
+          if let composeAction = currentComposeAction() {
+            AnimatedDots(dotSize: 3)
+          }
+
+          Text(subtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.top, -2)
       }
     }
     .onAppear {
