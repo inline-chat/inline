@@ -150,15 +150,15 @@ final class ChatStatusView: NSView {
 
   private func subscribeToUpdates() {
     // typing... updates
-    ComposeActions.shared.$actions.sink { [weak self] actions in
+    ComposeActions.shared.$actions.sink { [weak self] _ in
       guard let self else { return }
 
       // If changed
-      if actions[peer]?.action != currentComposeAction {
-        DispatchQueue.main.async {
-          self.updateLabel()
-        }
+      // if actions[peer]?.action != currentComposeAction {
+      DispatchQueue.main.async {
+        self.updateLabel()
       }
+      // }
     }.store(in: &cancellables)
 
     // user online updates

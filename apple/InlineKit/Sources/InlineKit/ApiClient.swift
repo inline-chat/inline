@@ -884,11 +884,23 @@ struct SessionInfo: Codable, Sendable {
 
 public enum ApiComposeAction: String, Codable, Sendable {
   case typing
+  case uploadingPhoto
+  case uploadingDocument
+  case uploadingVideo
 
   public func toHumanReadable() -> String {
     switch self {
       case .typing:
         "typing..."
+      
+      case .uploadingPhoto:
+        "uploading photo..."
+      
+      case .uploadingDocument:
+        "uploading document..."
+      
+      case .uploadingVideo:
+        "uploading video..."
     }
   }
 }

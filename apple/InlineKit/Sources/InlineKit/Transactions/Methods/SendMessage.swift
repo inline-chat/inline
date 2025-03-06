@@ -112,25 +112,45 @@ public struct TransactionSendMessage: Transaction {
     if let attachment = attachments.first {
       switch attachment.media {
         case let .photo(photoInfo):
-          // start
           let localPhotoId = try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
-          // wait
+
+          // start
+          let clearUploadState = await ComposeActions.shared.startPhotoUpload(for: peerId)
           if let photoServerId = await FileUploader.shared.waitForUpload(photoLocalId: localPhotoId)?.photoId {
             inputMedia = .fromPhotoId(photoServerId)
           }
 
+          Task { @MainActor in
+            clearUploadState()
+          }
+
         case let .video(videoInfo):
+          // Start video upload status
+          let clearUploadState = await ComposeActions.shared.startVideoUpload(for: peerId)
+
           let localVideoId = try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
           if let videoServerId = await FileUploader.shared.waitForUpload(videoLocalId: localVideoId)?.videoId {
             inputMedia = .fromVideoId(videoServerId)
           }
 
+          Task { @MainActor in
+            clearUploadState()
+          }
+
         case let .document(documentInfo):
+          // Start document upload status
+          let clearUploadState = await ComposeActions.shared.startDocumentUpload(for: peerId)
+
           let localDocumentId = try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
           if let documentServerId = await FileUploader.shared.waitForUpload(documentLocalId: localDocumentId)?
             .documentId
           {
             inputMedia = .fromDocumentId(documentServerId)
+          }
+
+          // Clear the upload status
+          Task { @MainActor in
+            clearUploadState()
           }
       }
     }

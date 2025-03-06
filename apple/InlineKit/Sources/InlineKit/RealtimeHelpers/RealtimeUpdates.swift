@@ -131,9 +131,17 @@ extension InlineProtocol.UpdateComposeAction {
     let action: ApiComposeAction? = switch self.action {
       case .typing:
         .typing
+      case .uploadingDocument:
+        .uploadingDocument
+      case .uploadingPhoto:
+        .uploadingPhoto
+      case .uploadingVideo:
+        .uploadingVideo
       default:
         nil
     }
+    
+    print("action: \(action)")
 
     if let action {
       Task { await ComposeActions.shared.addComposeAction(for: peerID.toPeer(), action: action, userId: userID) }
