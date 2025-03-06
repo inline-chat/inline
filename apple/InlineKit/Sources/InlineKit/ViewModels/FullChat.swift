@@ -41,9 +41,9 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     message.globalId ?? message.id
     //    message.id
   }
-  
+
   public var hasMedia: Bool {
-    self.photoInfo != nil || self.videoInfo != nil || self.documentInfo != nil || self.file != nil
+    photoInfo != nil || videoInfo != nil || documentInfo != nil || file != nil
   }
 
   //  public static let preview = FullMessage(user: User, message: Message)
@@ -221,6 +221,17 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 //    }
 
     Task {
+      // Fetch user before hand
+      if peerUser == nil {
+        do {
+          if let userId = peer.asUserId() {
+            return try await DataManager.shared.getUser(id: userId)
+          }
+        } catch {
+          Log.shared.error("Failed to refetch user info \(error)")
+        }
+      }
+
       await Realtime.shared
         .invokeWithHandler(.getChatHistory, input: .getChatHistory(.with { input in
           input.peerID = peer.toInputPeer()
@@ -230,8 +241,8 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     // Refetch user info (online, lastSeen)
     Task {
       do {
-        if let user = peerUser {
-          return try await DataManager.shared.getUser(id: user.id)
+        if let userId = peer.asUserId() {
+          return try await DataManager.shared.getUser(id: userId)
         }
       } catch {
         Log.shared.error("Failed to refetch user info \(error)")
