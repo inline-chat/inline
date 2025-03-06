@@ -100,6 +100,7 @@ class UIMessageView: UIView {
   var fullMessage: FullMessage
   let spaceId: Int64
   private let metadataView: MessageTimeAndStatus
+//  private let floutingMetadataView: FloutingMetadata
 
   var outgoing: Bool {
     fullMessage.message.out == true
