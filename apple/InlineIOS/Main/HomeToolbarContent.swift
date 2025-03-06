@@ -40,20 +40,21 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var header: some View {
     HStack(spacing: 8) {
-      Image(systemName: "house.fill")
-        .font(.caption)
+      if apiState != .connected {
+        AnimatedDots(dotSize: 6)
+      } else {
+        Image(systemName: "house.fill")
+          .font(.caption)
+      }
 
       VStack(alignment: .leading, spacing: 0) {
-        Text("Home")
+        Text(shouldShow ? getStatusText(apiState) : "Home")
           .font(.title3)
           .fontWeight(.semibold)
-        if shouldShow {
-          Text(getStatusText(apiState))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .transition(.opacity)
-        }
+          .contentTransition(.numericText())
       }
+      .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+      .animation(.spring(duration: 0.5), value: shouldShow)
     }
 
     .onAppear {

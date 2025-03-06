@@ -35,10 +35,10 @@ public func getStatusText(_ state: RealtimeAPIState) -> String {
     case .connected:
       "connected"
     case .connecting:
-      "connecting..."
+      "connecting"
     case .updating:
-      "updating..."
+      "updating"
     case .waitingForNetwork:
-      "waiting for network..."
+      "waiting for network"
   }
 }
