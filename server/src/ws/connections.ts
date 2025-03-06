@@ -15,8 +15,10 @@ import { Value } from "@sinclair/typebox/value"
 import { type Server, type ServerWebSocket } from "bun"
 import type { ElysiaWS } from "elysia/ws"
 import { nanoid } from "nanoid"
+import invariant from "tiny-invariant"
+import type { Context } from "elysia"
 
-const log = new Log("ws-connections", LogLevel.INFO)
+const log = new Log("ws-connections", LogLevel.DEBUG)
 
 const CLOSE_UNAUTHENTICATED_TIMEOUT = 20_000
 
@@ -25,8 +27,10 @@ export enum ConnVersion {
   REALTIME_V1 = 2,
 }
 
+type WS = ElysiaWS<any, any, any>
+
 interface Connection {
-  ws: ElysiaWS<ServerWebSocket<any>>
+  ws: WS
 
   version: ConnVersion
 
@@ -50,9 +54,16 @@ class ConnectionManager {
     return this.connections.get(id)
   }
 
-  addConnection(ws: ElysiaWS<ServerWebSocket<any>, any, any>, version: ConnVersion): string {
+  getConnectionIdFromWs(ws: WS): string {
+    let id = ws.id
+    invariant(id, "ID is not available on WS")
+    return id
+  }
+
+  addConnection(ws: WS, version: ConnVersion): string {
     log.debug("Adding new connection")
-    const id = nanoid()
+    //const id = nanoid()
+    const id = this.getConnectionIdFromWs(ws)
     this.connections.set(id, { ws, version })
 
     // Start timeout, if not authenticated in 20 seconds, close the connection

@@ -16,7 +16,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 
 type Input = {
   peerId: InputPeer
@@ -81,10 +81,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   // encode message info
   const messageInfo: EncodeMessageInput = {
-    encodingForPeer: {
-      inputPeer: input.peerId,
-    },
-    encodingForUserId: context.currentUserId,
+  const messageInfo: MessageInfo = {
     message: newMessage,
     photo: dbFullPhoto,
     video: dbFullVideo,
@@ -106,6 +103,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 }
 
 type EncodeMessageInput = Parameters<typeof Encoders.message>[0]
+type MessageInfo = Omit<EncodeMessageInput, "encodingForUserId" | "encodingForPeer">
 
 // ------------------------------------------------------------
 // Updates
@@ -118,7 +116,7 @@ const pushUpdates = async ({
   currentUserId,
 }: {
   inputPeer: InputPeer
-  messageInfo: EncodeMessageInput
+  messageInfo: MessageInfo
   currentUserId: number
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
@@ -155,9 +153,9 @@ const pushUpdates = async ({
       }
 
       Log.shared.info(
-        `encodingForInputPeer: ${InputPeer.toJson(
-          encodingForInputPeer,
-        )}, encodingForUserId: ${encodingForUserId}, and update is ${Update.toJson(newMessageUpdate)}`,
+        `encodingForInputPeer: ${JSON.stringify(
+          InputPeer.toJson(encodingForInputPeer),
+        )}, encodingForUserId: ${encodingForUserId}, and update is ${JSON.stringify(Update.toJson(newMessageUpdate))}`,
       )
 
       if (userId === currentUserId) {
@@ -223,7 +221,7 @@ const pushUpdates = async ({
 
 type SendPushForMsgInput = {
   updateGroup: UpdateGroup
-  messageInfo: EncodeMessageInput
+  messageInfo: MessageInfo
   currentUserId: number
 }
 
@@ -244,7 +242,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
 }
 
 /** Send push notifications for this message */
-async function sendNotificationToUser({ userId, messageInfo }: { userId: number; messageInfo: EncodeMessageInput }) {
+async function sendNotificationToUser({ userId, messageInfo }: { userId: number; messageInfo: MessageInfo }) {
   const userName = await getCachedUserName(userId)
 
   if (!userName) {
