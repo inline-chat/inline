@@ -2,6 +2,7 @@ import AppKit
 import InlineKit
 import InlineUI
 import SwiftUI
+import Logger
 
 /// if outgoing message: [ [symbol] [time] ]
 /// if incoming message: [          [time] ]
@@ -51,6 +52,10 @@ class MessageTimeAndState: NSView {
 
   private var hasSymbol: Bool {
     fullMessage.message.out == true
+  }
+
+  private var isFailedMessage: Bool {
+    fullMessage.message.status == .failed
   }
 
   private func setupView() {
@@ -115,11 +120,17 @@ class MessageTimeAndState: NSView {
   }()
 
   private func setupContent() {
-    let time = Self.formatter.string(from: fullMessage.message.date)
-    timeLabel.stringValue = time
+    Log.shared.debug("updating time and state")
+    if isFailedMessage {
+      timeLabel.stringValue = "Failed"
+    } else {
+      let time = Self.formatter.string(from: fullMessage.message.date)
+      timeLabel.stringValue = time
+    }
 
     if hasSymbol, currentState != fullMessage.message.status {
       currentState = fullMessage.message.status ?? .sent
+
       if #available(macOS 14.0, *) {
         imageView
           .setSymbolImage(
@@ -131,6 +142,7 @@ class MessageTimeAndState: NSView {
         imageView.image = getSymbolImage()
       }
     }
+    updateImageTintColor()
   }
 
   private func getSymbolImage() -> NSImage {
@@ -138,20 +150,24 @@ class MessageTimeAndState: NSView {
     let image = switch status {
       case .sent:
         NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Sent")!.withSymbolConfiguration(
-          .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
+          .init(pointSize: 9, weight: .medium).applying(.preferringMonochrome())
         )!
       case .sending:
         NSImage(systemSymbolName: "clock", accessibilityDescription: "Sending")!.withSymbolConfiguration(
-          .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
+          .init(pointSize: 9, weight: .medium).applying(.preferringMonochrome())
         )!
       case .failed:
         NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Failed")!
           .withSymbolConfiguration(
-            .init(pointSize: 8, weight: .medium).applying(.preferringMonochrome())
+            .init(pointSize: 9, weight: .medium).applying(.preferringMonochrome())
           )!
     }
 
     return image
+  }
+
+  private func updateImageTintColor() {
+    imageView.contentTintColor = isFailedMessage ? .systemRed : .tertiaryLabelColor
   }
 
   // MARK: - Public
