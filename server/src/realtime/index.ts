@@ -2,16 +2,16 @@
 
 import Elysia, { t } from "elysia"
 
-import { Log } from "@in/server/utils/log"
+import { Log, LogLevel } from "@in/server/utils/log"
 import { ClientMessage } from "@in/protocol/core"
 import { handleMessage } from "@in/server/realtime/message"
 import type { ServerWebSocket } from "bun"
 import type { ElysiaWS } from "elysia/ws"
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
 
-const log = new Log("ApiV2")
+const log = new Log("ApiV2", LogLevel.INFO)
 
-export const realtime = new Elysia().state("connectionId", undefined as string | undefined).ws("/realtime", {
+export const realtime = new Elysia().ws("/realtime", {
   // CONFIG
   perMessageDeflate: {
     compress: "32KB",
@@ -26,12 +26,13 @@ export const realtime = new Elysia().state("connectionId", undefined as string |
   // HANDLERS
   open(ws) {
     const connectionId = connectionManager.addConnection(ws, ConnVersion.REALTIME_V1)
-    ws.data.store.connectionId = connectionId
+    log.debug("connection opened", connectionId)
   },
 
   close(ws) {
-    log.trace("connection closed")
-    connectionManager.closeConnection(ws.data.store.connectionId ?? "")
+    const connectionId = connectionManager.getConnectionIdFromWs(ws)
+    log.debug("connection closed", connectionId)
+    connectionManager.closeConnection(connectionId)
   },
 
   async message(ws, message) {
@@ -41,12 +42,14 @@ export const realtime = new Elysia().state("connectionId", undefined as string |
       return
     }
 
-    const connectionId = ws.data.store.connectionId
+    const connectionId = connectionManager.getConnectionIdFromWs(ws)
     if (!connectionId) {
       log.error("no connection id found")
       ws.close()
       return
     }
+
+    log.debug("ws connectionId", connectionId)
 
     const parsed = ClientMessage.fromBinary(message as Uint8Array)
     handleMessage(parsed, { ws: ws as unknown as ElysiaWS<ServerWebSocket<any>>, connectionId })

@@ -204,7 +204,11 @@ public extension Realtime {
 
     _ = try db.dbWriter.write { db in
       for message in result.messages {
-        _ = try Message.save(db, protocolMessage: message)
+        do {
+          _ = try Message.save(db, protocolMessage: message, publishChanges: false) // we reload below
+        } catch {
+          log.error("Failed to save message", error: error)
+        }
       }
     }
 
