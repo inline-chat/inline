@@ -76,6 +76,10 @@ public struct MockMessageTransaction: Transaction, Codable, Sendable {
     }
   }
 
+  func shouldRetryOnFail(error: Error) -> Bool {
+    true
+  }
+  
   func didSucceed(result: Void) async {
     MockMessageCache.shared.update(id: id, status: .sent)
   }

@@ -243,7 +243,7 @@ extension RealtimeAPI {
     continuation?
       .resume(
         throwing: RealtimeAPIError
-          .rpcError(errorCode: error.errorCode, message: error.message)
+          .rpcError(errorCode: error.errorCode, message: error.message, code: Int(error.code))
       )
   }
 

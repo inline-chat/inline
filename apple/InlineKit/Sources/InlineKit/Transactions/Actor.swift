@@ -44,9 +44,9 @@ actor TransactionsActor {
       await processQueue()
     }
   }
-  
 
   // MARK: - Public Methods
+
   public func clearAll() {
     queue.removeAll()
   }
@@ -92,6 +92,7 @@ actor TransactionsActor {
 
     } catch {
       await transaction.didFail(error: error)
+      completionHandler?(transaction)
     }
   }
 
@@ -102,9 +103,13 @@ actor TransactionsActor {
       do {
         return try await transaction.execute()
       } catch {
-        attempts += 1
-        if attempts < transaction.config.maxRetries {
-          try await Task.sleep(nanoseconds: UInt64(transaction.config.retryDelay * 1_000_000_000))
+        if transaction.shouldRetryOnFail(error: error) {
+          attempts += 1
+          if attempts < transaction.config.maxRetries {
+            try await Task.sleep(nanoseconds: UInt64(transaction.config.retryDelay * 1_000_000_000))
+          } else {
+            throw error
+          }
         } else {
           throw error
         }
