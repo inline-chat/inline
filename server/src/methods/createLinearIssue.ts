@@ -251,11 +251,11 @@ const messageAttachmentUpdate = async ({
     }
 
     const updateGroup = await getUpdateGroup(peerId, { currentUserId })
-    console.log("updateGroup", updateGroup)
+    Log.shared.debug("updateGroup", updateGroup)
 
     if (updateGroup.type === "users") {
       updateGroup.userIds.forEach((userId: number) => {
-        console.log("pushing update to user", userId)
+        Log.shared.debug("pushing update to user", userId)
         // New updates
         let messageAttachmentUpdate: Update = {
           update: {
