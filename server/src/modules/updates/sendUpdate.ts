@@ -24,7 +24,7 @@ export type SendUpdateTransientReason =
       userPresenceUpdate: { userId: number; online: boolean; lastOnline: Date | null }
     }
   | {
-      composeAction: { update: TUpdateComposeAction; target: TPeerInfo }
+      composeAction: { update: TUpdateComposeAction; target: TPeerInfo; otherPeerId: TPeerInfo }
     }
 
 /** Sends an array of updates to a group of users tailored based on the reason, context, and user id */
@@ -55,9 +55,9 @@ export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTra
   }
 
   if ("composeAction" in reason) {
-    const { update, target } = reason.composeAction
+    const { update, target, otherPeerId } = reason.composeAction
     const updates = [{ updateComposeAction: update }]
-    const newUpdates = getNewUpdatesForComposeAction(update.userId, target, update)
+    const newUpdates = getNewUpdatesForComposeAction(update.userId, target, otherPeerId, update)
 
     if ("userId" in target) {
       sendUpdatesToUser(target.userId, updates)
@@ -82,17 +82,31 @@ const sendUpdatesToUser = (userId: number, updates: TUpdateInfo[]) => {
   connectionManager.sendToUser(userId, message)
 }
 
-const getNewUpdatesForComposeAction = (userId: number, peerId: TPeerInfo, action: TUpdateComposeAction) => {
+const getNewUpdatesForComposeAction = (
+  userId: number,
+  peerId: TPeerInfo,
+  otherPeerId: TPeerInfo,
+  action: TUpdateComposeAction,
+) => {
   const currentUserId = userId
   // New update
-  const newAction: UpdateComposeAction_ComposeAction =
-    action.action == "typing" ? UpdateComposeAction_ComposeAction.TYPING : UpdateComposeAction_ComposeAction.NONE
+  let newAction: UpdateComposeAction_ComposeAction = UpdateComposeAction_ComposeAction.NONE
+  if (action.action === "typing") {
+    newAction = UpdateComposeAction_ComposeAction.TYPING
+  } else if (action.action === "uploadingDocument") {
+    newAction = UpdateComposeAction_ComposeAction.UPLOADING_DOCUMENT
+  } else if (action.action === "uploadingPhoto") {
+    newAction = UpdateComposeAction_ComposeAction.UPLOADING_PHOTO
+  } else if (action.action === "uploadingVideo") {
+    newAction = UpdateComposeAction_ComposeAction.UPLOADING_VIDEO
+  }
+
   const updateComposeAction: Update = {
     update: {
       oneofKind: "updateComposeAction",
       updateComposeAction: {
         userId: BigInt(currentUserId),
-        peerId: Encoders.peer(peerId),
+        peerId: Encoders.peer(otherPeerId),
         action: newAction,
       },
     },

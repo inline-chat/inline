@@ -44,6 +44,7 @@ export const handler = async (
 
         // Who should receive the event
         target: peerId,
+        otherPeerId,
       },
     },
   })
