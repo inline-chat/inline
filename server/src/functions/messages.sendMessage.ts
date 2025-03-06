@@ -262,7 +262,7 @@ async function sendNotificationToUser({
   messageInfo: MessageInfo
   messageText: string
 }) {
-  const userName = await getCachedUserName(userId)
+  const userName = await getCachedUserName(messageInfo.message.fromId)
 
   if (!userName) {
     Log.shared.debug("No user name found for user", { userId })
