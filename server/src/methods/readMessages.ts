@@ -45,8 +45,9 @@ export const handler = async (
   }
 
   if (maxId === undefined) {
-    // no maxId to mark as read
-    throw new InlineError(InlineError.ApiError.INTERNAL)
+    // chat is empty or last message is nil
+    //throw new InlineError(InlineError.ApiError.INTERNAL)
+    return {}
   }
 
   const _ = await db
