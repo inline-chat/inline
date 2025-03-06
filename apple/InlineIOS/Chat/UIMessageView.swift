@@ -100,7 +100,8 @@ class UIMessageView: UIView {
   var fullMessage: FullMessage
   let spaceId: Int64
   private let metadataView: MessageTimeAndStatus
-//  private let floutingMetadataView: FloutingMetadata
+
+  private let floatingMetadataView: FloatingMetadataView
 
   var outgoing: Bool {
     fullMessage.message.out == true
@@ -143,6 +144,8 @@ class UIMessageView: UIView {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
     metadataView = MessageTimeAndStatus(fullMessage)
+    floatingMetadataView = FloatingMetadataView(fullMessage: fullMessage)
+    floatingMetadataView.translatesAutoresizingMaskIntoConstraints = false
     super.init(frame: .zero)
 
     handleLinkTap()
@@ -169,10 +172,25 @@ class UIMessageView: UIView {
     setupPhotoViewIfNeeded()
     setupMessageContainer()
 
+    if message.hasFile && !message.hasText {
+      addFloatingMetadata()
+    }
+
     addGestureRecognizer()
     setupAppearance()
     setupConstraints()
     setupContextMenu()
+  }
+
+  private func addFloatingMetadata() {
+    bubbleView.addSubview(floatingMetadataView)
+
+    let padding: CGFloat = 12
+
+    NSLayoutConstraint.activate([
+      floatingMetadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -padding),
+      floatingMetadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -padding),
+    ])
   }
 
   private func setupReplyViewIfNeeded() {
@@ -383,7 +401,7 @@ class UIMessageView: UIView {
 
     guard let text = message.text else { return }
 
-    if let cachedString = Self.attributedCache.object(forKey: NSString(string: "\(message.globalId ?? 0)")) {
+    if let cachedString = Self.attributedCache.object(forKey: NSString(string: "\(message.messageId)")) {
       messageLabel.attributedText = cachedString
 
       return
@@ -529,7 +547,7 @@ class UIMessageView: UIView {
             for item in items {
               print("item is \(item)")
               do {
-                let result = try await ApiClient.shared.createLinearIssue(
+                _ = try await ApiClient.shared.createLinearIssue(
                   text: item,
                   messageId: self.message.messageId,
                   peerId: self.fullMessage.peerId,
