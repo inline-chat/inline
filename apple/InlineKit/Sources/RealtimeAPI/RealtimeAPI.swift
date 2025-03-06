@@ -10,6 +10,19 @@ public enum RealtimeAPIState: Sendable {
   case connecting
   case updating
   case connected
+
+  public func toHumanReadable() -> String {
+    switch self {
+      case .connected:
+        "connected"
+      case .connecting:
+        "connecting..."
+      case .updating:
+        "updating..."
+      case .waitingForNetwork:
+        "waiting for network..."
+    }
+  }
 }
 
 public enum RealtimeAPIEvent: Sendable {
@@ -35,7 +48,7 @@ public actor RealtimeAPI: Sendable {
 
   public init(updatesEngine: RealtimeUpdatesProtocol) {
     log.debug("initilized realtime core")
-    self.transport = WebSocketTransport()
+    transport = WebSocketTransport()
     self.updatesEngine = updatesEngine
   }
 
@@ -87,7 +100,7 @@ public actor RealtimeAPI: Sendable {
 
     // Stop the transport
     await transport.stopAndReset()
-    
+
     // Make a fresh one ready for next start
     transport = WebSocketTransport()
 

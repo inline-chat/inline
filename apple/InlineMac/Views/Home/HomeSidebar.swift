@@ -246,7 +246,6 @@ struct AlphaCapsule: View {
   }
 }
 
-// Create a view for your sheet content
 struct AlphaInfoSheet: View {
   @Environment(\.dismiss) private var dismiss
   @AppStorage("alphaText") private var text: String = ""
