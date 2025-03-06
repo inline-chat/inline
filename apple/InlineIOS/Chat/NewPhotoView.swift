@@ -31,7 +31,7 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
     let height: CGFloat
   }
 
-  private let imageView: UIImageView = {
+   let imageView: UIImageView = {
     let view = UIImageView()
     view.contentMode = .scaleAspectFit
     view.clipsToBounds = true
@@ -152,9 +152,6 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
   private func setupGestures() {
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
     addGestureRecognizer(tapGesture)
-
-    let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
-    addGestureRecognizer(longPressGesture)
   }
 
   private func setupMask() {
@@ -295,36 +292,6 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
     if let viewController = findViewController() {
       viewController.present(previewController, animated: true)
     }
-  }
-
-  @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-    guard gesture.state == .began else { return }
-
-    let menu = UIMenuController.shared
-
-    // Create menu items
-    let copyItem = UIMenuItem(title: "Copy", action: #selector(copyImage))
-    let saveItem = UIMenuItem(title: "Save", action: #selector(saveImage))
-
-    menu.menuItems = [copyItem, saveItem]
-
-    // Make this view the first responder to receive the action
-    if !isFirstResponder {
-      becomeFirstResponder()
-    }
-
-    // Show menu
-    menu.showMenu(from: self, rect: bounds)
-  }
-
-  @objc func copyImage() {
-    guard let image = imageView.image else { return }
-    UIPasteboard.general.image = image
-  }
-
-  @objc func saveImage() {
-    guard let image = imageView.image else { return }
-    UIImageWriteToSavedPhotosAlbum(image, self, #selector(image(_:didFinishSavingWithError:contextInfo:)), nil)
   }
 
   @objc func image(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer) {
