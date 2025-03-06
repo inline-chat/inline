@@ -35,18 +35,20 @@ public extension InlineProtocol.InputPeer {
 
 public extension Peer {
   func toInputPeer() -> InlineProtocol.InputPeer {
-    .with { inputPeer in
-      switch self {
-        case let .user(id):
+    switch self {
+      case let .user(id):
+        InlineProtocol.InputPeer.with { inputPeer in
           inputPeer.type = .user(.with { user in
             user.userID = id
           })
+        }
 
-        case let .thread(id):
+      case let .thread(id):
+        InlineProtocol.InputPeer.with { inputPeer in
           inputPeer.type = .chat(.with { chat in
             chat.chatID = id
           })
-      }
+        }
     }
   }
 }

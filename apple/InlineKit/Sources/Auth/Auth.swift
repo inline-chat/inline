@@ -106,6 +106,8 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 
 actor AuthManager: Sendable {
   public static var shared = AuthManager()
+  
+  private let log = Log.scoped("AuthManager")
 
   nonisolated let initialUserId: Int64?
   nonisolated let initialToken: String?
@@ -130,21 +132,23 @@ actor AuthManager: Sendable {
     #if os(macOS)
     accessGroup = "2487AN8AL4.chat.inline.InlineMac"
     #if DEBUG
-    let keyChainPrefix = "inline_dev_"
+    var keyChainPrefix = "inline_dev_"
     #else
-    let keyChainPrefix = "inline_"
+    var keyChainPrefix = "inline_"
     #endif
     #elseif os(iOS)
     accessGroup = "2487AN8AL4.keychainGroup"
     #if DEBUG
-    let keyChainPrefix = "inline_dev_"
+    var keyChainPrefix = "inline_dev_"
     #else
-    let keyChainPrefix = ""
+    var keyChainPrefix = ""
     #endif
     #endif
 
     if let userProfile = ProjectConfig.userProfile {
+      log.debug("Using user profile \(userProfile)")
       userDefaultsPrefix = "\(userProfile)_"
+      keyChainPrefix = "\(keyChainPrefix)\(userProfile)_"
     } else {
       userDefaultsPrefix = ""
     }
