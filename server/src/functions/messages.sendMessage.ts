@@ -80,7 +80,6 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   })
 
   // encode message info
-  const messageInfo: EncodeMessageInput = {
   const messageInfo: MessageInfo = {
     message: newMessage,
     photo: dbFullPhoto,
