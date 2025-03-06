@@ -100,7 +100,7 @@ extension ContentView {
         }
         .sheet(item: $nav.activeSheet) { destination in
           sheetContent(for: destination)
-            .presentationDetents([destination == .alphaSheet ? .medium : .large])
+            .presentationDetents(destination == .alphaSheet ?[.medium, .large] : [.large])
         }
         .onAppear {
           markAsOnline()

@@ -2,7 +2,8 @@ import InlineKit
 import SwiftUI
 
 struct AlphaSheet: View {
-  @State private var text: String = ""
+  @AppStorage("alphaText") private var text: String = ""
+
   var body: some View {
     ScrollView {
       LazyVStack {
@@ -13,7 +14,11 @@ struct AlphaSheet: View {
 
     .onAppear {
       Task {
-        text = try await ApiClient.shared.getAlphaText()
+        if text.isEmpty {
+          if let newText = try? await ApiClient.shared.getAlphaText() {
+            text = newText
+          }
+        }
       }
     }
   }
