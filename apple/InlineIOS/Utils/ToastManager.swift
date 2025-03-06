@@ -5,12 +5,14 @@ enum ToastType {
   case info
   case success
   case loading
+  case error
   
   var duration: Double {
     switch self {
       case .success: return 4.0
       case .info: return 4.0
       case .loading: return .infinity
+      case .error: return 4.0
     }
   }
 }

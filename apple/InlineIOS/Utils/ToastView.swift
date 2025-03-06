@@ -27,7 +27,7 @@ struct ToastView: View {
         Button(actionTitle) {
           toast.action?()
         }
-        .foregroundColor(toast.type == .success ? .green : .blue)
+        .foregroundColor(toast.type == .success ? .green : toast.type == .error ? .red : .blue)
         .padding(.leading, 4)
         .transition(.opacity)
         .id(actionTitle)
@@ -44,11 +44,11 @@ struct ToastView: View {
         RoundedRectangle(cornerRadius: 20)
           .fill(
             toast.type == .success ?
-              Color.green.opacity(0.1) : Color(uiColor: .systemGray6)
+              Color.green.opacity(0.1) : toast.type == .error ? Color.red.opacity(0.1) : Color(uiColor: .systemGray6)
           )
           .strokeBorder(
             toast.type == .success ?
-              Color.green.opacity(0.2) : Color.primary.opacity(0.08),
+              Color.green.opacity(0.2) : toast.type == .error ? Color.red.opacity(0.1) : Color.primary.opacity(0.08),
 
             lineWidth: 1
           )
