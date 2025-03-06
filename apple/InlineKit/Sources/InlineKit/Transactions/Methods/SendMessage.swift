@@ -4,6 +4,7 @@ import GRDB
 import InlineProtocol
 import Logger
 import MultipartFormDataKit
+import RealtimeAPI
 
 public struct SendMessageAttachment: Codable, Sendable {
   let media: FileMediaItem
@@ -112,45 +113,47 @@ public struct TransactionSendMessage: Transaction {
     if let attachment = attachments.first {
       switch attachment.media {
         case let .photo(photoInfo):
-          let localPhotoId = try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
-
-          // start
           let clearUploadState = await ComposeActions.shared.startPhotoUpload(for: peerId)
-          if let photoServerId = await FileUploader.shared.waitForUpload(photoLocalId: localPhotoId)?.photoId {
-            inputMedia = .fromPhotoId(photoServerId)
+          defer {
+            Task { @MainActor in
+              clearUploadState()
+            }
           }
 
-          Task { @MainActor in
-            clearUploadState()
+          let localPhotoId = try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
+          if let photoServerId = try await FileUploader.shared.waitForUpload(photoLocalId: localPhotoId)?.photoId {
+            inputMedia = .fromPhotoId(photoServerId)
           }
 
         case let .video(videoInfo):
           // Start video upload status
           let clearUploadState = await ComposeActions.shared.startVideoUpload(for: peerId)
-
-          let localVideoId = try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
-          if let videoServerId = await FileUploader.shared.waitForUpload(videoLocalId: localVideoId)?.videoId {
-            inputMedia = .fromVideoId(videoServerId)
+          defer {
+            Task { @MainActor in
+              clearUploadState()
+            }
           }
 
-          Task { @MainActor in
-            clearUploadState()
+          let localVideoId = try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
+          if let videoServerId = try await FileUploader.shared.waitForUpload(videoLocalId: localVideoId)?.videoId {
+            inputMedia = .fromVideoId(videoServerId)
           }
 
         case let .document(documentInfo):
           // Start document upload status
           let clearUploadState = await ComposeActions.shared.startDocumentUpload(for: peerId)
+          defer {
+            // Clear the upload status
+            Task { @MainActor in
+              clearUploadState()
+            }
+          }
 
           let localDocumentId = try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
-          if let documentServerId = await FileUploader.shared.waitForUpload(documentLocalId: localDocumentId)?
+          if let documentServerId = try await FileUploader.shared.waitForUpload(documentLocalId: localDocumentId)?
             .documentId
           {
             inputMedia = .fromDocumentId(documentServerId)
-          }
-
-          // Clear the upload status
-          Task { @MainActor in
-            clearUploadState()
           }
       }
     }
@@ -177,6 +180,25 @@ public struct TransactionSendMessage: Transaction {
     return result.updates
   }
 
+  func shouldRetryOnFail(error: Error) -> Bool {
+    if let error = error as? RealtimeAPIError {
+      switch error {
+        case let .rpcError(_, _, code):
+          switch code {
+            case 400, 401:
+              return false
+
+            default:
+              return true
+          }
+        default:
+          return true
+      }
+    }
+
+    return true
+  }
+
   func didSucceed(result: [InlineProtocol.Update]) async {
     await Realtime.shared.updates.applyBatch(updates: result)
   }
@@ -185,14 +207,26 @@ public struct TransactionSendMessage: Transaction {
     Log.shared.error("Failed to send message", error: error)
 
     // Mark as failed
+    do {
+      let message = try await AppDatabase.shared.dbWriter.write { db in
+        try Message
+          .filter(Column("randomId") == randomId && Column("fromId") == Auth.shared.getCurrentUserId()!)
+          .updateAll(
+            db,
+            Column("status").set(to: MessageSendingStatus.failed.rawValue)
+          )
+        return try Message.fetchOne(db, key: ["messageId": temporaryMessageId, "chatId": chatId])
+      }
 
-    let _ = try? await AppDatabase.shared.dbWriter.write { db in
-      try Message
-        .filter(Column("randomId") == randomId && Column("fromId") == Auth.shared.getCurrentUserId()!)
-        .updateAll(
-          db,
-          Column("status").set(to: MessageSendingStatus.failed.rawValue)
-        )
+      // Update UI
+      if let message {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+          MessagesPublisher.shared
+            .messageUpdatedSync(message: message, peer: peerId, animated: true)
+        }
+      }
+    } catch {
+      Log.shared.error("Failed to update message status on failure", error: error)
     }
   }
 
