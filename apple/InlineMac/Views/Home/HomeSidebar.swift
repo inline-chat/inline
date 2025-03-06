@@ -55,9 +55,13 @@ struct HomeSidebar: View {
       edge: .top,
       content: {
         VStack(alignment: .leading, spacing: 0) {
-          SelfUser()
-            .padding(.top, 0)
-            .padding(.bottom, 8)
+          HStack(alignment: .center, spacing: 0) {
+            SelfUser()
+
+            AlphaCapsule()
+          }
+          .padding(.top, 0)
+          .padding(.bottom, 8)
 
           searchBar
             .padding(.bottom, 2)
@@ -214,6 +218,62 @@ private enum SideItem: Identifiable {
       case let .user(chat):
         chat.user.id
     }
+  }
+}
+
+struct AlphaCapsule: View {
+  @State private var showingSheet = false
+
+  var body: some View {
+    Text("ALPHA")
+      .monospaced()
+      .foregroundStyle(.primary)
+      .font(.caption)
+      .fontWeight(.semibold)
+      .padding(.horizontal, 6)
+      .padding(.vertical, 1)
+      .background(
+        Capsule()
+          .strokeBorder(.primary, lineWidth: 1.0)
+      )
+      .opacity(0.5)
+      .onTapGesture {
+        showingSheet = true
+      }
+      .sheet(isPresented: $showingSheet) {
+        AlphaInfoSheet()
+      }
+  }
+}
+
+// Create a view for your sheet content
+struct AlphaInfoSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  @AppStorage("alphaText") private var text: String = ""
+
+  var body: some View {
+    NavigationStack {
+      VStack(alignment: .leading, spacing: 16) {
+        Text(.init(text))
+          .font(.body)
+      }
+      .padding()
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .frame(height: 320)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") {
+            dismiss()
+          }
+        }
+      }
+      .task {
+        do {
+          text = try await ApiClient.shared.getAlphaText()
+        } catch {}
+      }
+    }
+    .presentationDetents([.medium])
   }
 }
 
