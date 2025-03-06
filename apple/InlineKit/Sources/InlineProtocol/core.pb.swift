@@ -1117,8 +1117,11 @@ public struct RpcError: Sendable {
 
   public var message: String = String()
 
+  public var code: Int32 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
+  /// Type of error
   public enum Code: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unknown // = 0
@@ -3751,6 +3754,7 @@ extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
     1: .standard(proto: "req_msg_id"),
     2: .standard(proto: "error_code"),
     3: .same(proto: "message"),
+    4: .same(proto: "code"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -3762,6 +3766,7 @@ extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
       case 1: try { try decoder.decodeSingularUInt64Field(value: &self.reqMsgID) }()
       case 2: try { try decoder.decodeSingularEnumField(value: &self.errorCode) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.code) }()
       default: break
       }
     }
@@ -3777,6 +3782,9 @@ extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
     if !self.message.isEmpty {
       try visitor.visitSingularStringField(value: self.message, fieldNumber: 3)
     }
+    if self.code != 0 {
+      try visitor.visitSingularInt32Field(value: self.code, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3784,6 +3792,7 @@ extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
     if lhs.reqMsgID != rhs.reqMsgID {return false}
     if lhs.errorCode != rhs.errorCode {return false}
     if lhs.message != rhs.message {return false}
+    if lhs.code != rhs.code {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

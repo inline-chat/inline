@@ -342,7 +342,9 @@ message RpcError {
   uint64 req_msg_id = 1;
   Code error_code = 2;
   string message = 3;
+  int32 code = 4;
    
+  // Type of error
   enum Code {
     UNKNOWN = 0;
     BAD_REQUEST = 1;

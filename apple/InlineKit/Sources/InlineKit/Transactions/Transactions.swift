@@ -189,6 +189,8 @@ protocol Transaction: Codable, Sendable, Identifiable {
   func optimistic()
   /// Optionally apply additional changes in cache after success. For example mark an status as completed.
   func didSucceed(result: R) async
+  
+  func shouldRetryOnFail(error: Error) -> Bool
 
   /// If execute fails, apply appropriate logic. By default it calls `rollback()` method
   func didFail(error: Error?) async
