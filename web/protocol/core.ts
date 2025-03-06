@@ -796,8 +796,14 @@ export interface RpcError {
      * @generated from protobuf field: string message = 3;
      */
     message: string;
+    /**
+     * @generated from protobuf field: int32 code = 4;
+     */
+    code: number;
 }
 /**
+ * Type of error
+ *
  * @generated from protobuf enum RpcError.Code
  */
 export enum RpcError_Code {
@@ -3287,7 +3293,8 @@ class RpcError$Type extends MessageType<RpcError> {
         super("RpcError", [
             { no: 1, name: "req_msg_id", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "error_code", kind: "enum", T: () => ["RpcError.Code", RpcError_Code] },
-            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "code", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<RpcError>): RpcError {
@@ -3295,6 +3302,7 @@ class RpcError$Type extends MessageType<RpcError> {
         message.reqMsgId = 0n;
         message.errorCode = 0;
         message.message = "";
+        message.code = 0;
         if (value !== undefined)
             reflectionMergePartial<RpcError>(this, message, value);
         return message;
@@ -3312,6 +3320,9 @@ class RpcError$Type extends MessageType<RpcError> {
                     break;
                 case /* string message */ 3:
                     message.message = reader.string();
+                    break;
+                case /* int32 code */ 4:
+                    message.code = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3334,6 +3345,9 @@ class RpcError$Type extends MessageType<RpcError> {
         /* string message = 3; */
         if (message.message !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* int32 code = 4; */
+        if (message.code !== 0)
+            writer.tag(4, WireType.Varint).int32(message.code);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

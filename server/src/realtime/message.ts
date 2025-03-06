@@ -102,6 +102,7 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
             reqMsgId: message.id,
             errorCode: rpcError.code,
             message: rpcError.message,
+            code: rpcError.codeNumber,
           },
         },
       })

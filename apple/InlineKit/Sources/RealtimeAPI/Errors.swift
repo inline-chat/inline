@@ -11,7 +11,7 @@ enum TransportError: Error {
 }
 
 public enum RealtimeAPIError: Error {
-  case rpcError(errorCode: RpcError.Code, message: String?)
+  case rpcError(errorCode: RpcError.Code, message: String?, code: Int)
   case unknown(Error)
   case notAuthorized
   case stopped
