@@ -8,7 +8,7 @@ import { MessageModel } from "@in/server/db/models/messages"
 import { users, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
-import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Updates } from "@in/server/modules/updates/updates"
@@ -228,6 +228,16 @@ type SendPushForMsgInput = {
 async function sendNotifications(input: SendPushForMsgInput) {
   const { updateGroup, messageInfo, currentUserId } = input
 
+  // decrypt message text
+  let messageText = ""
+  if (messageInfo.message.textEncrypted && messageInfo.message.textIv && messageInfo.message.textTag) {
+    messageText = decryptMessage({
+      encrypted: messageInfo.message.textEncrypted,
+      iv: messageInfo.message.textIv,
+      authTag: messageInfo.message.textTag,
+    })
+  }
+
   if (updateGroup.type === "users") {
     for (let userId of updateGroup.userIds) {
       if (userId === currentUserId) {
@@ -235,13 +245,23 @@ async function sendNotifications(input: SendPushForMsgInput) {
         continue
       }
 
-      sendNotificationToUser({ userId, messageInfo })
+      sendNotificationToUser({ userId, messageInfo, messageText })
     }
   }
+
+  // TODO: handle update for space
 }
 
 /** Send push notifications for this message */
-async function sendNotificationToUser({ userId, messageInfo }: { userId: number; messageInfo: MessageInfo }) {
+async function sendNotificationToUser({
+  userId,
+  messageInfo,
+  messageText,
+}: {
+  userId: number
+  messageInfo: MessageInfo
+  messageText: string
+}) {
   const userName = await getCachedUserName(userId)
 
   if (!userName) {
@@ -249,10 +269,13 @@ async function sendNotificationToUser({ userId, messageInfo }: { userId: number;
     return
   }
 
-  const title = userName.firstName ? `${userName.firstName} ${userName.lastName ?? ""}` : userName.username ?? "Message"
-  let body = messageInfo.message.text?.substring(0, 200) ?? "New message"
+  const title = userName.firstName ? `${userName.firstName}` : userName.username ?? "Message"
+  let body = "New message" // default
 
-  if (messageInfo.message.mediaType === "photo") {
+  if (messageText) {
+    // if has text, use text
+    body = messageText.substring(0, 240)
+  } else if (messageInfo.message.mediaType === "photo") {
     body = "🖼️ Photo"
   } else if (messageInfo.message.mediaType === "video") {
     body = "🎥 Video"
