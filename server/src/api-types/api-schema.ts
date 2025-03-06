@@ -359,7 +359,12 @@ export const encodeMessageInfo = (
   )
 }
 
-export const TComposeAction = Type.Union([Type.Literal("typing")])
+export const TComposeAction = Type.Union([
+  Type.Literal("typing"),
+  Type.Literal("uploadingDocument"),
+  Type.Literal("uploadingPhoto"),
+  Type.Literal("uploadingVideo"),
+])
 export type TComposeAction = StaticEncode<typeof TComposeAction>
 
 // # Updates
