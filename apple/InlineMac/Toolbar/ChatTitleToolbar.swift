@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InlineKit
+import RealtimeAPI
 
 class ChatTitleToolbar: NSToolbarItem {
   private var peer: Peer
@@ -8,7 +9,7 @@ class ChatTitleToolbar: NSToolbarItem {
   private var iconSize: CGFloat = Theme.chatToolbarIconSize
 
   private lazy var iconView = ChatIconView(peer: peer, iconSize: iconSize)
-  private lazy var statusView = ChatStatusView(peer: peer)
+  private lazy var statusView = ChatStatusView(peer: peer, dependencies: self.dependencies)
 
   private var user: UserInfo? {
     if case let .user(id) = peer {
@@ -114,6 +115,11 @@ class ChatTitleToolbar: NSToolbarItem {
 
 final class ChatStatusView: NSView {
   private var timer: Timer?
+  private var dependencies: AppDependencies
+
+  // Connection state tracking
+  private var connectionState: RealtimeAPIState = .connected
+  private var connectionStateSubscription: AnyCancellable?
 
   private let label: NSTextField = {
     let tf = NSTextField(labelWithString: "")
@@ -123,8 +129,9 @@ final class ChatStatusView: NSView {
     return tf
   }()
 
-  init(peer: Peer) {
+  init(peer: Peer, dependencies: AppDependencies) {
     self.peer = peer
+    self.dependencies = dependencies
     super.init(frame: .zero)
     setupView()
     subscribeToUpdates()
@@ -162,6 +169,15 @@ final class ChatStatusView: NSView {
         }
       }.store(in: &cancellables)
     }
+
+    // connection state updates
+    connectionStateSubscription = dependencies.realtime.apiStatePublisher
+      .sink { [weak self] state in
+        self?.connectionState = state
+        DispatchQueue.main.async {
+          self?.updateLabel()
+        }
+      }
   }
 
   private var cancellables: Set<AnyCancellable> = []
@@ -187,6 +203,11 @@ final class ChatStatusView: NSView {
   }
 
   private var currentLabel: String {
+    // connecting... or waiting for network
+    if connectionState != .connected {
+      return connectionState.toHumanReadable()
+    }
+
     if chat != nil {
       return "public"
     }
