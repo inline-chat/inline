@@ -1,3 +1,4 @@
+import Auth
 import Combine
 import GRDB
 import Logger
@@ -59,6 +60,8 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   // Add a static method to create the request
   static func all() -> QueryInterfaceRequest<HomeChatItem> {
     Dialog
+      // filter saved message
+      .filter(Column("peerUserId") != Auth.shared.getCurrentUserId())
       .including(
         required: Dialog.peerUser
           .forKey(CodingKeys.user)

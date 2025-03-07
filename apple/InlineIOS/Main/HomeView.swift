@@ -7,7 +7,7 @@ import SwiftUI
 
 struct HomeView: View {
   // MARK: - Environment
-
+  
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var onboardingNav: OnboardingNavigation
   @EnvironmentObject private var api: ApiClient
@@ -16,19 +16,19 @@ struct HomeView: View {
   @EnvironmentObject private var mainViewRouter: MainViewRouter
   @EnvironmentObject private var home: HomeViewModel
   @EnvironmentObject var data: DataManager
-
+  
   @Environment(\.realtime) var realtime
   @Environment(\.appDatabase) private var database
   @Environment(\.auth) private var auth
   @Environment(\.scenePhase) var scenePhase
-
+  
   // MARK: - State
-
+  
   @State private var text = ""
   @State private var searchResults: [UserInfo] = []
   @State private var isSearchingState = false
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
-
+  
   var chatItems: [HomeChatItem] {
     home.chats.filter {
       $0.dialog.archived == nil || $0.dialog.archived == false
@@ -39,11 +39,13 @@ struct HomeView: View {
       return item1.message?.date ?? item1.chat?.date ?? Date.now > item2.message?.date ?? item2.chat?.date ?? Date.now
     }
   }
-
+  
   var body: some View {
     Group {
       if !searchResults.isEmpty {
         searchResultsView
+      } else if home.chats.isEmpty {
+       EmptyHomeView()
       } else {
         List {
           if !home.spaces.isEmpty {
@@ -88,7 +90,7 @@ struct HomeView: View {
                       .font(.title)
                       .foregroundColor(.secondary)
                   }
-
+                
                 VStack(alignment: .leading, spacing: 1) {
                   Text("Archived Chats")
                     .font(.customTitle())
@@ -113,10 +115,10 @@ struct HomeView: View {
               trailing: 0
             ))
           }
-
+          
           ForEach(chatItems, id: \.id) { item in
             chatView(for: item)
-
+            
               .listRowInsets(.init(
                 top: 9,
                 leading: 16,
@@ -147,7 +149,7 @@ struct HomeView: View {
     .overlay {
       SearchedView(textIsEmpty: text.isEmpty, isSearchResultsEmpty: searchResults.isEmpty)
     }
-
+    
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
     .toolbar {
@@ -165,25 +167,25 @@ struct HomeView: View {
       await initalFetch()
     }
   }
-
+  
   private func searchUsers(query: String) {
     guard !query.isEmpty else {
       searchResults = []
       isSearchingState = false
       return
     }
-
+    
     isSearchingState = true
     Task {
       do {
         let result = try await api.searchContacts(query: query)
-
+        
         try await database.dbWriter.write { db in
           for apiUser in result.users {
             try apiUser.saveFull(db)
           }
         }
-
+        
         try await database.reader.read { db in
           searchResults =
             try User
@@ -192,7 +194,7 @@ struct HomeView: View {
               .asRequest(of: UserInfo.self)
               .fetchAll(db)
         }
-
+        
         await MainActor.run {
           isSearchingState = false
         }
@@ -205,7 +207,7 @@ struct HomeView: View {
       }
     }
   }
-
+  
   private func initalFetch() async {
     notificationHandler.setAuthenticated(value: true)
     do {
@@ -214,28 +216,28 @@ struct HomeView: View {
       Log.shared.error("Failed to getMe", error: error)
       return
     }
-
+    
     // Continue with existing tasks if user exists
     do {
       try await dataManager.getPrivateChats()
     } catch {
       Log.shared.error("Failed to getPrivateChats", error: error)
     }
-
+    
     do {
       try await dataManager.getSpaces()
     } catch {
       Log.shared.error("Failed to getSpaces", error: error)
     }
   }
-
+  
   private var searchResultsView: some View {
     List(searchResults) { userInfo in
       Button(action: {
-        navigateToUser(userInfo.user)
+        navigateToUser(userInfo.user.id)
       }) {
         HStack(spacing: 9) {
-          UserAvatar(userInfo: userInfo, size: 28)
+          UserAvatar(userInfo: userInfo, size: 32)
           Text((userInfo.user.firstName ?? "") + " " + (userInfo.user.lastName ?? ""))
             .fontWeight(.medium)
             .foregroundColor(.primary)
@@ -244,18 +246,18 @@ struct HomeView: View {
     }
     .listStyle(.plain)
   }
-
-  private func navigateToUser(_ user: User) {
+  
+  private func navigateToUser(_ userId: Int64) {
     Task {
       do {
-        let peer = try await dataManager.createPrivateChat(userId: user.id)
+        let peer = try await dataManager.createPrivateChat(userId: userId)
         nav.push(.chat(peer: peer))
       } catch {
         Log.shared.error("Failed to create chat", error: error)
       }
     }
   }
-
+  
   @ViewBuilder
   func chatView(for item: HomeChatItem) -> some View {
     if item.chat?.peerUserId != nil {
@@ -282,7 +284,7 @@ struct HomeView: View {
           Image(systemName: "tray.and.arrow.down.fill")
         }
         .tint(Color(.systemGray2))
-
+        
         Button {
           Task {
             try await dataManager.updateDialog(

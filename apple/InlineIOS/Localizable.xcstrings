@@ -7,6 +7,12 @@
     "@%@" : {
 
     },
+    "@dena" : {
+
+    },
+    "@mo" : {
+
+    },
     "%@:" : {
 
     },
@@ -36,6 +42,9 @@
 
     },
     "🔎" : {
+
+    },
+    "🫙" : {
 
     },
     "Accent Color" : {
@@ -439,6 +448,9 @@
     "No archived chats" : {
 
     },
+    "No chats or spaces yet" : {
+
+    },
     "No messages yet" : {
 
     },
@@ -451,10 +463,16 @@
     "Open Chat" : {
 
     },
+    "or" : {
+
+    },
     "Pin" : {
 
     },
     "Please enter a username to search for" : {
+
+    },
+    "Please search a username or start a new chat or message                               , or create a new space by clicking the + button" : {
 
     },
     "Profile" : {
