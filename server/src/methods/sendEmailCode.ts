@@ -36,7 +36,7 @@ export const handler = async (
     let { code, existingUser, firstName } = await getLoginCode(email)
 
     // send code to email
-    await sendEmailCode(email, code, firstName)
+    await sendEmailCode(email, code, firstName, existingUser)
 
     return { existingUser }
   } catch (error) {
@@ -92,6 +92,16 @@ const getLoginCode = async (
   return { code, existingUser, firstName }
 }
 
-const sendEmailCode = async (email: string, code: string, firstName: string | undefined) => {
-  await sendEmail({ to: email, content: { template: "code", variables: { code, firstName } } })
+const sendEmailCode = async (email: string, code: string, firstName: string | undefined, existingUser: boolean) => {
+  await sendEmail({
+    to: email,
+    content: {
+      template: "code",
+      variables: {
+        code,
+        firstName,
+        isExistingUser: existingUser,
+      },
+    },
+  })
 }
