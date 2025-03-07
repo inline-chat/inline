@@ -45,7 +45,7 @@ struct HomeView: View {
       if !searchResults.isEmpty {
         searchResultsView
       } else if home.chats.isEmpty {
-       EmptyHomeView()
+        EmptyHomeView()
       } else {
         List {
           if !home.spaces.isEmpty {
