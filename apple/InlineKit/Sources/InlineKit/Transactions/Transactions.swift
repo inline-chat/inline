@@ -84,7 +84,7 @@ public class Transactions: @unchecked Sendable {
       await actor.cancel(transactionId: transactionId)
     }
   }
-  
+
   public func clearAll() {
     Task {
       await actor.clearAll()
@@ -96,6 +96,7 @@ public class Transactions: @unchecked Sendable {
 public enum TransactionType: Codable {
   case sendMessage(TransactionSendMessage)
   case mockMessage(MockMessageTransaction)
+  case deleteMessage(TransactionDeleteMessage)
 
   var id: String {
     transaction.id
@@ -110,6 +111,8 @@ public enum TransactionType: Codable {
       case let .sendMessage(t):
         t
       case let .mockMessage(t):
+        t
+      case let .deleteMessage(t):
         t
     }
   }
@@ -140,6 +143,9 @@ public enum TransactionType: Codable {
       case let .mockMessage(transaction):
         try container.encode("mockMessage", forKey: .type)
         try container.encode(transaction, forKey: .transaction)
+      case let .deleteMessage(transaction):
+        try container.encode("deleteMessage", forKey: .type)
+        try container.encode(transaction, forKey: .transaction)
     }
   }
 
@@ -154,6 +160,9 @@ public enum TransactionType: Codable {
       case "mockMessage":
         let transaction = try container.decode(MockMessageTransaction.self, forKey: .transaction)
         self = .mockMessage(transaction)
+      case "deleteMessage":
+        let transaction = try container.decode(TransactionDeleteMessage.self, forKey: .transaction)
+        self = .deleteMessage(transaction)
       default:
         throw DecodingError.dataCorruptedError(
           forKey: .type,
@@ -189,7 +198,7 @@ protocol Transaction: Codable, Sendable, Identifiable {
   func optimistic()
   /// Optionally apply additional changes in cache after success. For example mark an status as completed.
   func didSucceed(result: R) async
-  
+
   func shouldRetryOnFail(error: Error) -> Bool
 
   /// If execute fails, apply appropriate logic. By default it calls `rollback()` method

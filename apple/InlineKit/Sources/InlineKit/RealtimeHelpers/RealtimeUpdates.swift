@@ -140,7 +140,7 @@ extension InlineProtocol.UpdateComposeAction {
       default:
         nil
     }
-    
+
     print("action: \(action)")
 
     if let action {
@@ -161,10 +161,11 @@ extension InlineProtocol.UpdateDeleteMessages {
 
     let prevChatLastMsgId = chat.lastMsgId
 
-    try Message
-      .filter(ids: messageIds)
-      .filter(Column("chatId") == chat.id)
-      .deleteAll(db)
+    for messageId in messageIds {
+      try Message
+        .filter(Column("messageId") == messageId && Column("chatId") == chat.id)
+        .deleteAll(db)
+    }
 
     // Update last message
     for messageId in messageIds {
