@@ -86,14 +86,19 @@ const getTemplate = (content: SendEmailContent): TextTemplate => {
 
 interface CodeTemplateInput extends TemplateInput {
   template: "code"
-  variables: { code: string; firstName: string | undefined }
+  variables: { 
+    code: string; 
+    firstName: string | undefined;
+    isExistingUser: boolean;
+  }
 }
-function CodeTemplate({ code, firstName }: CodeTemplateInput["variables"]): TextTemplate {
-  const subject = `Your Inline code: ${code}`
+function CodeTemplate({ code, firstName, isExistingUser }: CodeTemplateInput["variables"]): TextTemplate {
+  const codeType = isExistingUser ? "login" : "signup"
+  const subject = `Your Inline ${codeType} code: ${code}`
   const text = `
 Hey ${firstName ? `${firstName},` : "–"}
 
-Here's your verification code for Inline: ${code}
+Here's your verification code for Inline ${codeType}: ${code}
 
 Inline Team
   `.trim()
