@@ -569,8 +569,6 @@ class UIMessageView: UIView {
               systemImage: "checkmark.circle.fill"
             )
 
-//            self.triggerMessageReload()
-
           } else {
             ToastManager.shared.showToast(
               "Creating Linear issue...",
@@ -596,8 +594,6 @@ class UIMessageView: UIView {
                 },
                 actionTitle: "Open"
               )
-
-//              self.triggerMessageReload()
 
             } catch {
               print("FAILED to create issue \(error)")
