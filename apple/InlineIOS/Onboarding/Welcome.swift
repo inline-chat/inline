@@ -2,7 +2,6 @@ import CoreHaptics
 import SwiftUI
 
 struct Welcome: View {
-  //
   let fullText = NSLocalizedString("Key", comment: "Welcome to Inline")
   let typingSpeed: TimeInterval = 0.08
 
@@ -10,6 +9,8 @@ struct Welcome: View {
   @State private var displayedText = ""
   @State private var showCaret = false
   @State private var animationCompleted = false
+  @State private var viewIsVisible = false
+  @State private var hasRunAnimation = false
 
   @EnvironmentObject var nav: OnboardingNavigation
 
@@ -19,10 +20,20 @@ struct Welcome: View {
       subheading
     }
     .onAppear {
-      prepareHaptics()
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-        animateText()
+      viewIsVisible = true
+
+      if !hasRunAnimation {
+        prepareHaptics()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+          if viewIsVisible {
+            animateText()
+          }
+        }
       }
+    }
+    .onDisappear {
+      viewIsVisible = false
+      stopHapticEngine()
     }
     .padding(.horizontal, OnboardingUtils.shared.hPadding)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -48,7 +59,6 @@ extension Welcome {
         .fontWeight(.bold)
         .opacity(0)
 
-      // Animated text with caret
       HStack(alignment: .center, spacing: 2) {
         Text(animationCompleted ? fullText : displayedText)
           .font(.largeTitle)
@@ -98,27 +108,37 @@ extension Welcome {
 
 extension Welcome {
   private func submit() {
+    hasRunAnimation = true
+
+    stopHapticEngine()
+
     displayedText = ""
     nav.push(.email())
   }
 
   private func animateText() {
-    guard !animationCompleted else { return }
+    guard !animationCompleted, viewIsVisible else { return }
 
     withAnimation(.bouncy) {
       showCaret = true
     }
 
+    hasRunAnimation = true
+
     for (index, character) in fullText.enumerated() {
       DispatchQueue.main.asyncAfter(deadline: .now() + typingSpeed * Double(index)) {
+        guard viewIsVisible else { return }
+
         displayedText += String(character)
 
-        if !animationCompleted {
+        if !animationCompleted, viewIsVisible {
           playHapticFeedback()
         }
 
         if index == fullText.count - 1 {
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            guard viewIsVisible else { return }
+
             withAnimation(.bouncy) {
               showCaret = false
               animationCompleted = true
@@ -135,16 +155,43 @@ extension Welcome {
 extension Welcome {
   private func prepareHaptics() {
     guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
+
     do {
       engine = try CHHapticEngine()
+
+      // Add engine reset handler
+      engine?.resetHandler = { [self] in
+        do {
+          try self.engine?.start()
+        } catch {
+          print("Failed to restart the engine: \(error.localizedDescription)")
+        }
+      }
+
+      // Add engine stopped handler
+      engine?.stoppedHandler = { reason in
+        print("The engine stopped: \(reason)")
+      }
+
       try engine?.start()
     } catch {
       print("There was an error creating the engine: \(error.localizedDescription)")
     }
   }
 
+  private func stopHapticEngine() {
+    engine?.stop(completionHandler: { error in
+      if let error = error {
+        print("Error stopping haptic engine: \(error.localizedDescription)")
+      }
+    })
+  }
+
   private func playHapticFeedback() {
-    guard CHHapticEngine.capabilitiesForHardware().supportsHaptics, !animationCompleted else {
+    guard CHHapticEngine.capabilitiesForHardware().supportsHaptics,
+          !animationCompleted,
+          viewIsVisible
+    else {
       return
     }
 
