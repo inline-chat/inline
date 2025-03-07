@@ -32,6 +32,7 @@ import { createMessage, ServerMessageKind } from "../ws/protocol"
 import { MessageAttachmentExternalTask_Status, type Update } from "@in/protocol/core"
 import { RealtimeUpdates } from "../realtime/message"
 import { examples, prompt } from "../libs/linear/prompt"
+import { Notifications } from "../modules/notifications/notifications"
 
 type Context = {
   currentUserId: number
@@ -42,6 +43,7 @@ export const Input = Type.Object({
   messageId: Type.Number(),
   chatId: Type.Number(),
   peerId: TInputPeerInfo,
+  fromId: Type.Number(),
 })
 
 export const Response = Type.Object({
@@ -52,7 +54,7 @@ export const handler = async (
   input: Static<typeof Input>,
   { currentUserId }: Context,
 ): Promise<Static<typeof Response>> => {
-  let { text, messageId, peerId, chatId } = input
+  let { text, messageId, peerId, chatId, fromId } = input
 
   const [labels, [user], linearUsers] = await Promise.all([
     getLinearIssueLabels({ userId: currentUserId }),
@@ -152,6 +154,18 @@ export const handler = async (
       }
     }
 
+    let [senderUser] = await db.select().from(users).where(eq(users.id, fromId))
+
+    if (senderUser && fromId !== currentUserId) {
+      console.log("sending notification to user", fromId)
+      sendNotificationToUser({
+        userId: fromId,
+        userName: senderUser.firstName ?? "User",
+        issueTitle: response.title,
+        currentUserId,
+        chatId,
+      })
+    }
     return { link: result?.link }
   } catch (error) {
     Log.shared.error("Failed to create issue", { error })
@@ -349,4 +363,30 @@ function parseResponse(msg: any): any {
 
   const jsonResponse = JSON.parse(jsonString)
   return jsonResponse
+}
+
+/** Send push notifications for this message */
+async function sendNotificationToUser({
+  userId,
+  userName,
+  issueTitle,
+  currentUserId,
+  chatId,
+}: {
+  userId: number
+  userName: string
+  issueTitle: string
+  currentUserId: number
+  chatId: number
+}) {
+  const title = `${userName} marked as will do`
+  let body = `"${issueTitle}"`
+
+  Notifications.sendToUser({
+    userId,
+    senderUserId: currentUserId,
+    threadId: `chat_${chatId}`,
+    title,
+    body,
+  })
 }
