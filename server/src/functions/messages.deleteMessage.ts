@@ -18,12 +18,17 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
   await MessageModel.deleteMessages(input.messageIds, chatId)
 
+  const encodingForInputPeer: InputPeer =
+    input.peer.type.oneofKind === "user" && BigInt(context.currentUserId) === input.peer.type.user.userId
+      ? input.peer
+      : { type: { oneofKind: "user", user: { userId: BigInt(context.currentUserId) } } }
+
   const update: Update = {
     update: {
       oneofKind: "deleteMessages",
       deleteMessages: {
         messageIds: input.messageIds.map((id) => BigInt(id)),
-        peerId: Encoders.peerFromInputPeer({ inputPeer: input.peer, currentUserId: context.currentUserId }),
+        peerId: Encoders.peerFromInputPeer({ inputPeer: encodingForInputPeer, currentUserId: context.currentUserId }),
       },
     },
   }

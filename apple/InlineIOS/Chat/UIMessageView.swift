@@ -1,5 +1,6 @@
 import Auth
 import ContextMenuAuxiliaryPreview
+import GRDB
 import InlineKit
 import Logger
 import Nuke
@@ -683,10 +684,14 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
         attributes: .destructive
       ) { _ in
         Task {
-          try? await DataManager.shared.deleteMessage(
-            messageId: self.message.messageId,
-            chatId: self.message.chatId,
-            peerId: self.message.peerId
+          let _ = Transactions.shared.mutate(
+            transaction: .deleteMessage(
+              .init(
+                messageIds: [self.message.messageId],
+                peerId: self.message.peerId,
+                chatId: self.message.chatId
+              )
+            )
           )
         }
       }

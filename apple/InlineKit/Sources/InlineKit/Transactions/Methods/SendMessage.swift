@@ -183,7 +183,7 @@ public struct TransactionSendMessage: Transaction {
   func shouldRetryOnFail(error: Error) -> Bool {
     if let error = error as? RealtimeAPIError {
       switch error {
-        case let .rpcError(_, _, code):
+        case let .rpcError(ec, msg, code):
           switch code {
             case 400, 401:
               return false

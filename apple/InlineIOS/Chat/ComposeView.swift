@@ -580,7 +580,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
         } catch {
           Log.shared.error("Failed to save photo", error: error)
         }
-        print("Attachment items", self.attachmentItems)
 
         for (index, (_, attachment)) in self.attachmentItems.enumerated() {
           _ = index == 0
@@ -595,7 +594,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
               )
             )
           )
-          print("Sent attachment", attachment)
         }
 
         DispatchQueue.main.async { [weak self] in
