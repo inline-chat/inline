@@ -52,9 +52,9 @@ struct HomeToolbarContent: ToolbarContent {
           .font(.title3)
           .fontWeight(.semibold)
           .contentTransition(.numericText())
+          .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+          .animation(.spring(duration: 0.5), value: shouldShow)
       }
-      .animation(.spring(duration: 0.5), value: getStatusText(apiState))
-      .animation(.spring(duration: 0.5), value: shouldShow)
     }
 
     .onAppear {
