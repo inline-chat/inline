@@ -151,12 +151,6 @@ const pushUpdates = async ({
         },
       }
 
-      Log.shared.info(
-        `encodingForInputPeer: ${JSON.stringify(
-          InputPeer.toJson(encodingForInputPeer),
-        )}, encodingForUserId: ${encodingForUserId}, and update is ${JSON.stringify(Update.toJson(newMessageUpdate))}`,
-      )
-
       if (userId === currentUserId) {
         // current user gets the message id update and new message update
         RealtimeUpdates.pushToUser(userId, [
