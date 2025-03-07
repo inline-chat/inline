@@ -42,3 +42,24 @@ public func getStatusText(_ state: RealtimeAPIState) -> String {
       "waiting for network"
   }
 }
+
+public func getDenaOrMoUserId(username: String) -> Int64 {
+  #if DEBUG
+  if username == "mo" {
+    return 1_300
+  } else if username == "dena" {
+    return 1_000
+  } else {
+    return 0
+  }
+  #else
+  // Production environment
+  if username == "mo" {
+    return 1_600
+  } else if username == "dena" {
+    return 4_000
+  } else {
+    return 0
+  }
+  #endif
+}
