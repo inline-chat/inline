@@ -669,11 +669,6 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
       }
       actions.append(replyAction)
 
-      let createIssueAction = UIAction(title: "Create Linear issue") { _ in
-        self.createIssueFunc()
-      }
-      actions.append(createIssueAction)
-
       let openLinkAction = UIAction(title: "Open Link") { _ in
         if let url = self.getURLAtLocation(location) {
           self.linkTapHandler?(url)
