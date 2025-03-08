@@ -469,6 +469,9 @@
     "or" : {
 
     },
+    "Photo" : {
+
+    },
     "Pin" : {
 
     },
@@ -515,6 +518,9 @@
 
     },
     "Unpin" : {
+
+    },
+    "Unsupported message" : {
 
     },
     "Username" : {
