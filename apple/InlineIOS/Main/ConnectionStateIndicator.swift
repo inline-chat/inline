@@ -60,7 +60,7 @@ struct ConnectionStateIndicator: View {
       stateTextOpacity()
     }
   }
-
+ 
   private func animateCircle() {
     withAnimation(
       .easeInOut(duration: 0.8)
