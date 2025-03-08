@@ -42,6 +42,16 @@ struct DirectChatItem: View {
     (dialog.unreadCount ?? 0) > 0
   }
 
+  @ObservedObject var composeActions: ComposeActions = .shared
+
+  private func currentComposeAction() -> ApiComposeAction? {
+    composeActions.getComposeAction(for: Peer(userId: userInfo?.user.id ?? 0))?.action
+  }
+
+  private var showTypingIndicator: Bool {
+    currentComposeAction()?.rawValue.isEmpty == false
+  }
+
   var body: some View {
     VStack {
       HStack(alignment: .top, spacing: 14) {
@@ -91,12 +101,24 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var lastMessage: some View {
-    Text(lastMsg?.text ?? "")
-      .font(.customCaption())
-      .foregroundColor(.secondary)
-      .lineLimit(2)
-      .truncationMode(.tail)
-      .padding(.top, 1)
+    if showTypingIndicator {
+      HStack {
+        AnimatedDots(dotSize: 4)
+        Text("\(currentComposeAction()?.rawValue ?? "")")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+          .lineLimit(2)
+          .truncationMode(.tail)
+          .padding(.top, 1)
+      }
+    } else {
+      Text(lastMsg?.text ?? "")
+        .font(.customCaption())
+        .foregroundColor(.secondary)
+        .lineLimit(2)
+        .truncationMode(.tail)
+        .padding(.top, 1)
+    }
   }
 
   @ViewBuilder
