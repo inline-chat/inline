@@ -399,6 +399,7 @@ public extension Message {
       message.globalId = existing.globalId
       message.status = existing.status
       message.fileId = existing.fileId
+      message.date = existing.date // keep optimistic date for now until we fix message reordering
       message.photoId = message.photoId ?? existing.photoId
       message.videoId = message.videoId ?? existing.videoId
       message.documentId = message.documentId ?? existing.documentId
