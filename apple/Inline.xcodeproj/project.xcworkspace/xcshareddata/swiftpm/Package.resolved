@@ -1,5 +1,5 @@
 {
-  "originHash" : "8c4d5adb8675007b82f51858400428d361df9e5dab7d5bf3b32fa49ddfaad6ba",
+  "originHash" : "a0f0e206da6794af9f4e13316c1db2d98e39e909a1b570fedaa167c32059476e",
   "pins" : [
     {
       "identity" : "contextmenuauxiliarypreview",
@@ -17,15 +17,6 @@
       "state" : {
         "revision" : "1e37402c7ef2c16990d846cc479c74aa044b0d71",
         "version" : "0.37.0"
-      }
-    },
-    {
-      "identity" : "emojipicker",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/htmlprogrammist/EmojiPicker",
-      "state" : {
-        "revision" : "6018bd985b01d2355a635569cc702e8a337ed0a1",
-        "version" : "3.0.9"
       }
     },
     {
