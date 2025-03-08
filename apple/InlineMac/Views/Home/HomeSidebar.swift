@@ -69,6 +69,7 @@ struct HomeSidebar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal) // default side padding
         .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
+        
       }
     )
   }

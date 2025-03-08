@@ -12,18 +12,40 @@ struct SidebarContent: View {
   @EnvironmentObject var rootData: RootData
   @EnvironmentObject var dataManager: DataManager
 
+  @State private var animatingSpaceId: Int64? = nil
+
   init() {}
 
   var body: some View {
-    sidebar
-  }
-
-  @ViewBuilder
-  var sidebar: some View {
-    if let spaceId = nav.currentSpaceId {
-      SpaceSidebar(spaceId: spaceId)
-    } else {
-      HomeSidebar()
+    ZStack {
+      if animatingSpaceId == nil {
+        HomeSidebar()
+          .transition(.move(edge: .leading))
+          .id("home")
+          .zIndex(1)
+      } else if let spaceId = animatingSpaceId {
+        SpaceSidebar(spaceId: spaceId)
+          .transition(.move(edge: .trailing))
+          .id("space-\(spaceId)")
+          .zIndex(1)
+      }
+    }
+    .onChange(of: nav.currentSpaceId) { newValue in
+      if let newSpaceId = newValue {
+        // Going to a space
+        withAnimation(.smoothSnappy) {
+          animatingSpaceId = newSpaceId
+        }
+      } else {
+        // Going back to home
+        withAnimation(.smoothSnappy) {
+          animatingSpaceId = nil
+        }
+      }
+    }
+    .onAppear {
+      // Initialize without animation
+      animatingSpaceId = nav.currentSpaceId
     }
   }
 }
