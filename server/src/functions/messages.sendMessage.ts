@@ -26,6 +26,7 @@ type Input = {
   photoId?: bigint
   videoId?: bigint
   documentId?: bigint
+  sendDate?: number
 }
 
 type Output = {
@@ -36,7 +37,7 @@ const log = new Log("functions.sendMessage")
 
 export const sendMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   // input data
-  const date = new Date()
+  const date = input.sendDate ? new Date(input.sendDate * 1000) : new Date()
   const fromId = context.currentUserId
   const inputPeer = input.peerId
   const currentUserId = context.currentUserId

@@ -1551,6 +1551,16 @@ public struct SendMessageInput: Sendable {
   /// Clears the value of `media`. Subsequent reads from it will return its default value.
   public mutating func clearMedia() {self._media = nil}
 
+  /// Date of sending (until we fix the client reordering)
+  public var temporarySendDate: Int64 {
+    get {return _temporarySendDate ?? 0}
+    set {_temporarySendDate = newValue}
+  }
+  /// Returns true if `temporarySendDate` has been explicitly set.
+  public var hasTemporarySendDate: Bool {return self._temporarySendDate != nil}
+  /// Clears the value of `temporarySendDate`. Subsequent reads from it will return its default value.
+  public mutating func clearTemporarySendDate() {self._temporarySendDate = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1560,6 +1570,7 @@ public struct SendMessageInput: Sendable {
   fileprivate var _replyToMsgID: Int64? = nil
   fileprivate var _randomID: Int64? = nil
   fileprivate var _media: InputMedia? = nil
+  fileprivate var _temporarySendDate: Int64? = nil
 }
 
 public struct SendMessageResult: Sendable {
@@ -4469,6 +4480,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     3: .standard(proto: "reply_to_msg_id"),
     4: .standard(proto: "random_id"),
     5: .same(proto: "media"),
+    1000: .standard(proto: "temporary_send_date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4482,6 +4494,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 3: try { try decoder.decodeSingularInt64Field(value: &self._replyToMsgID) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self._randomID) }()
       case 5: try { try decoder.decodeSingularMessageField(value: &self._media) }()
+      case 1000: try { try decoder.decodeSingularInt64Field(value: &self._temporarySendDate) }()
       default: break
       }
     }
@@ -4507,6 +4520,9 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     try { if let v = self._media {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
     } }()
+    try { if let v = self._temporarySendDate {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 1000)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -4516,6 +4532,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs._replyToMsgID != rhs._replyToMsgID {return false}
     if lhs._randomID != rhs._randomID {return false}
     if lhs._media != rhs._media {return false}
+    if lhs._temporarySendDate != rhs._temporarySendDate {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

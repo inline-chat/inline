@@ -45,10 +45,10 @@ public struct TransactionSendMessage: Transaction {
     self.chatId = chatId
     attachments = mediaItems.map { SendMessageAttachment(media: $0) }
     self.replyToMsgId = replyToMsgId
-    randomId = Int64.random(in: Int64.min ... Int64.max)
+    randomId = Int64.random(in: 0 ... Int64.max)
     peerUserId = if case let .user(id) = peerId { id } else { nil }
     peerThreadId = if case let .thread(id) = peerId { id } else { nil }
-    temporaryMessageId = randomId
+    temporaryMessageId = -1 * randomId
 
     if !attachments.isEmpty {
       // iterate over attachments and attach random id to all
@@ -107,6 +107,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   func execute() async throws -> [InlineProtocol.Update] {
+    var date = Date()
     var inputMedia: InputMedia? = nil
 
     // upload attachments and construct input media
@@ -162,6 +163,7 @@ public struct TransactionSendMessage: Transaction {
     let input: SendMessageInput = .with {
       $0.peerID = peerId.toInputPeer()
       $0.randomID = randomId
+      $0.temporarySendDate = Int64(date.timeIntervalSince1970.rounded())
 
       if let text { $0.message = text }
       if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
@@ -200,7 +202,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   func didSucceed(result: [InlineProtocol.Update]) async {
-    await Realtime.shared.updates.applyBatch(updates: result)
+    // await Realtime.shared.updates.applyBatch(updates: result)
   }
 
   func didFail(error: Error?) async {
