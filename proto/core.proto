@@ -447,6 +447,9 @@ message SendMessageInput {
 
   // Media to send
   optional InputMedia media = 5;
+
+  // Date of sending (until we fix the client reordering)
+  optional int64 temporary_send_date = 1000;
 }
 
 message SendMessageResult {

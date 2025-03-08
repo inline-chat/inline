@@ -1078,6 +1078,12 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional InputMedia media = 5;
      */
     media?: InputMedia;
+    /**
+     * Date of sending (until we fix the client reordering)
+     *
+     * @generated from protobuf field: optional int64 temporary_send_date = 1000;
+     */
+    temporarySendDate?: bigint;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -4053,7 +4059,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 2, name: "message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "reply_to_msg_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "random_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "media", kind: "message", T: () => InputMedia }
+            { no: 5, name: "media", kind: "message", T: () => InputMedia },
+            { no: 1000, name: "temporary_send_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -4082,6 +4089,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional InputMedia media */ 5:
                     message.media = InputMedia.internalBinaryRead(reader, reader.uint32(), options, message.media);
                     break;
+                case /* optional int64 temporary_send_date */ 1000:
+                    message.temporarySendDate = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4109,6 +4119,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional InputMedia media = 5; */
         if (message.media)
             InputMedia.internalBinaryWrite(message.media, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 temporary_send_date = 1000; */
+        if (message.temporarySendDate !== undefined)
+            writer.tag(1000, WireType.Varint).int64(message.temporarySendDate);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
