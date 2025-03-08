@@ -38,21 +38,28 @@ final class ChatState: ObservableObject {
     var state = getState(peer: peer)
     state.replyingMessageId = id
     states[peer] = state
-    persistStates()
 
     NotificationCenter.default.post(
       name: .init("ChatStateSetReplyCalled"),
       object: nil,
       userInfo: ["messageId": id]
     )
+
+    // Persist in BG
+    Task(priority: .background) {
+      persistStates()
+    }
   }
 
   func clearReplyingMessageId(peer: Peer) {
     var state = getState(peer: peer)
     state.replyingMessageId = nil
     states[peer] = state
-    persistStates()
     NotificationCenter.default.post(name: .init("ChatStateClearReplyCalled"), object: nil)
+    // Persist in BG
+    Task(priority: .background) {
+      persistStates()
+    }
   }
 
   private func persistStates() {
