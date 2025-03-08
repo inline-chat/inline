@@ -163,9 +163,7 @@ struct ChatView: View {
   }
 
   func fetch() async {
-    await Realtime.shared.invokeWithHandler(.getChatHistory, input: .getChatHistory(.with { input in
-      input.peerID = peerId.toInputPeer()
-    }))
+    fullChatViewModel.refetchChatView()
   }
 }
 
