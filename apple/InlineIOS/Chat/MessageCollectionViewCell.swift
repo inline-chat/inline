@@ -49,19 +49,22 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   func configure(with message: FullMessage, fromOtherSender: Bool, spaceId: Int64) {
     if self.message != nil {
-      if self.message == message {
+      if self.message == message, self.fromOtherSender == fromOtherSender, self.spaceId == spaceId {
+        // skip only if everything is exact match
         return
       }
     }
 
-    isThread = message.peerId.isThread
-    outgoing = message.message.out == true
+    // update it first
     self.message = message
     self.fromOtherSender = fromOtherSender
     self.spaceId = spaceId
-    nameLabel.text = message.from?.firstName ?? "USER"
+    isThread = message.peerId.isThread
+    outgoing = message.message.out == true
 
     resetCell()
+
+    nameLabel.text = message.from?.firstName ?? "USER"
 
     setupIncomingThreadMessage()
     setupBaseMessageConstraints()
