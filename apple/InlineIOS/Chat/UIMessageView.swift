@@ -396,15 +396,15 @@ class UIMessageView: UIView {
     ]
 
     let constraints: [NSLayoutConstraint] = switch (message.hasFile, message.hasText) {
-      case (true, false):
-        // File only
-        withFileConstraints
-      case (true, true):
-        // File with text
-        withFileAndTextConstraints
-      default:
-        // Text only
-        withoutFileConstraints
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -571,7 +571,8 @@ class UIMessageView: UIView {
                   text: item,
                   messageId: self.message.messageId,
                   peerId: self.fullMessage.peerId,
-                  chatId: self.message.chatId
+                  chatId: self.message.chatId,
+                  fromId: self.message.fromId
                 )
               } catch {
                 print("FAILED to create issue \(error)")
@@ -601,7 +602,8 @@ class UIMessageView: UIView {
                 text: self.message.text ?? "",
                 messageId: self.message.messageId,
                 peerId: self.fullMessage.peerId,
-                chatId: self.message.chatId
+                chatId: self.message.chatId,
+                fromId: self.message.fromId
               )
               ToastManager.shared.showToast(
                 "Issue created",
