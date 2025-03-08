@@ -387,24 +387,8 @@ public final class MessagesPublisher {
   }
 
   // Static methods to publish update
-  func messageAddedSync(message: Message, peer: Peer) {
-//    Log.shared.debug("Message added: \(message)")
-    do {
-      let fullMessage = try db.reader.read { db in
-        try FullMessage.queryRequest()
-          .filter(Column("messageId") == message.messageId)
-          .filter(Column("chatId") == message.chatId)
-          .fetchOne(db)
-      }
-      guard let fullMessage else {
-        Log.shared.error("Failed to get full message")
-        return
-      }
-      print("optimsitic add fullMessage: \(fullMessage)")
-      publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
-    } catch {
-      Log.shared.error("Failed to get full message", error: error)
-    }
+  func messageAddedSync(fullMessage: FullMessage, peer: Peer) {
+    publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
   }
 
   // Message IDs not Global IDs
