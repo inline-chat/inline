@@ -242,12 +242,20 @@ export const handler = async (
 import type { StaticEncode } from "@sinclair/typebox/type"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 
+/**
+ * For private chats, we need the peer that represents the other user and not the current user
+ * For thread chats, we need the threadId
+ */
 function peerIdFromChat(chat: schema.DbChat, context: { currentUserId: number }): StaticEncode<typeof TPeerInfo> {
   if (chat.type === "private") {
+    if (chat.minUserId === null || chat.maxUserId === null) {
+      Log.shared.error("Private chat has no minUserId or maxUserId", { chatId: chat.id })
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
     if (chat.minUserId === context.currentUserId) {
-      return { userId: chat.minUserId }
-    } else if (chat.maxUserId === context.currentUserId) {
       return { userId: chat.maxUserId }
+    } else if (chat.maxUserId === context.currentUserId) {
+      return { userId: chat.minUserId }
     } else {
       Log.shared.error("Unknown peerId", { chatId: chat.id, currentUserId: context.currentUserId })
       throw new InlineError(InlineError.ApiError.INTERNAL)
