@@ -567,44 +567,45 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
 
   private func sendImage(_ image: UIImage, caption: String) {
     guard let peerId else { return }
-    print("Sending image", image)
-    DispatchQueue.main.async {
-      self.sendButton.configuration?.showsActivityIndicator = true
+    // print("Sending image", image)
+    // DispatchQueue.main.async {
+    sendButton.configuration?.showsActivityIndicator = true
 
-      Task {
-        self.attachmentItems.removeAll()
+    // Task {
+    attachmentItems.removeAll()
 
-        do {
-          let photoInfo = try FileCache.savePhoto(image: image)
-          self.attachmentItems[image] = .photo(photoInfo)
-        } catch {
-          Log.shared.error("Failed to save photo", error: error)
-        }
-
-        for (index, (_, attachment)) in self.attachmentItems.enumerated() {
-          _ = index == 0
-          let _ = Transactions.shared.mutate(
-            transaction: .sendMessage(
-              .init(
-                text: caption,
-                peerId: self.peerId!,
-                chatId: self.chatId ?? 0,
-                mediaItems: [attachment],
-                replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
-              )
-            )
-          )
-        }
-
-        DispatchQueue.main.async { [weak self] in
-          guard let self else { return }
-          sendMessageHaptic()
-          dismissPreview()
-          sendButton.configuration?.showsActivityIndicator = false
-          attachmentItems.removeAll()
-        }
-      }
+    do {
+      let photoInfo = try FileCache.savePhoto(image: image)
+      attachmentItems[image] = .photo(photoInfo)
+    } catch {
+      // TODO: show a toast
+      Log.shared.error("Failed to save photo", error: error)
     }
+
+    for (index, (_, attachment)) in attachmentItems.enumerated() {
+      _ = index == 0
+      let _ = Transactions.shared.mutate(
+        transaction: .sendMessage(
+          .init(
+            text: caption,
+            peerId: self.peerId!,
+            chatId: chatId ?? 0,
+            mediaItems: [attachment],
+            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
+          )
+        )
+      )
+    }
+
+    // DispatchQueue.main.async { [weak self] in
+    // guard let self else { return }
+    dismissPreview()
+    sendButton.configuration?.showsActivityIndicator = false
+    attachmentItems.removeAll()
+    sendMessageHaptic()
+    // }
+    // }
+    // }
   }
 
   func handlePastedImage() {
