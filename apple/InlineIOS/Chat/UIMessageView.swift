@@ -67,6 +67,18 @@ class UIMessageView: UIView {
     return label
   }()
 
+  private lazy var unsupportedLabel: UILabel = {
+    let label = UILabel()
+    label.text = "Unsupported message"
+    label.backgroundColor = .clear
+    label.textAlignment = .natural
+    label.font = .italicSystemFont(ofSize: 18)
+    label.textColor = textColor.withAlphaComponent(0.9)
+    label.numberOfLines = 0
+
+    return label
+  }()
+
   private let bubbleView: UIView = {
     let view = UIView()
     UIView.performWithoutAnimation {
@@ -121,6 +133,9 @@ class UIMessageView: UIView {
   }
 
   private var isMultiline: Bool {
+    if message.hasUnsupportedTypes {
+      return false
+    }
     if fullMessage.file != nil {
       return true
     }
@@ -285,7 +300,11 @@ class UIMessageView: UIView {
   }
 
   private func setupSingleLineMessage() {
-    singleLineContainer.addArrangedSubview(messageLabel)
+    if message.hasUnsupportedTypes {
+      singleLineContainer.addArrangedSubview(unsupportedLabel)
+    } else {
+      singleLineContainer.addArrangedSubview(messageLabel)
+    }
     singleLineContainer.addArrangedSubview(metadataView)
     containerStack.addArrangedSubview(singleLineContainer)
   }
@@ -627,6 +646,46 @@ class UIMessageView: UIView {
       )
     }
   }
+
+  private func showDeleteConfirmation() {
+    guard let viewController = findViewController() else { return }
+
+    let alert = UIAlertController(
+      title: "Delete Message",
+      message: "Are you sure you want to delete this message?",
+      preferredStyle: .alert
+    )
+
+    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+    alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+      guard let self else { return }
+      Task {
+        let _ = Transactions.shared.mutate(
+          transaction: .deleteMessage(
+            .init(
+              messageIds: [self.message.messageId],
+              peerId: self.message.peerId,
+              chatId: self.message.chatId
+            )
+          )
+        )
+      }
+    })
+
+    viewController.present(alert, animated: true)
+  }
+
+  private func findViewController() -> UIViewController? {
+    var responder: UIResponder? = self
+    while let nextResponder = responder?.next {
+      responder = nextResponder
+      if let viewController = responder as? UIViewController {
+        return viewController
+      }
+    }
+    return nil
+  }
 }
 
 // MARK: - Context Menu
@@ -683,15 +742,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
         title: "Delete",
         attributes: .destructive
       ) { _ in
-        let _ = Transactions.shared.mutate(
-          transaction: .deleteMessage(
-            .init(
-              messageIds: [self.message.messageId],
-              peerId: self.message.peerId,
-              chatId: self.message.chatId
-            )
-          )
-        )
+        self.showDeleteConfirmation()
       }
 
       actions.append(deleteAction)
