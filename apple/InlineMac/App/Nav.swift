@@ -124,7 +124,7 @@ extension Nav {
     // optimistic
     upcomingRoute = route
 
-    DispatchQueue.main.async { [weak self] in
+    Task(priority: .userInitiated) { [weak self] in
       guard let self else { return }
       if let last = history.last, last.route == route, last.spaceId == currentSpaceId {
         // Skip opening duplicate routes
