@@ -27,8 +27,9 @@ struct SelfUser: View {
     Button(action: openSelfProfile) {
       HStack(spacing: 0) {
         UserAvatar(userInfo: currentUserInfo, size: Theme.sidebarIconSize)
+          .id("user-avatar-in-sidebar")
           .padding(.trailing, Theme.sidebarIconSpacing)
-
+        
         ConnectionStateProvider { connection in
           // TODO: Extract to a separate view
           VStack(alignment: .leading, spacing: 0) {
@@ -58,6 +59,7 @@ struct SelfUser: View {
     .buttonStyle(.plain)
     .frame(height: Theme.sidebarTopItemHeight)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .id("user-avatar-in-sidebar")
 //    .onTapGesture {
 //      openSelfProfile()
 //    }

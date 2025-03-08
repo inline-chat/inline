@@ -91,9 +91,11 @@ struct SpaceSidebar: View {
       content: {
         VStack(alignment: .leading, spacing: 0) {
           HStack(spacing: 0) {
-            if let space = fullSpace.space {
-              SpaceAvatar(space: space, size: Theme.sidebarIconSize)
-                .padding(.trailing, Theme.sidebarIconSpacing)
+            ZStack {
+              if let space = fullSpace.space {
+                SpaceAvatar(space: space, size: Theme.sidebarIconSize)
+                  .padding(.trailing, Theme.sidebarIconSpacing)
+              }
             }
 
             Text(fullSpace.space?.name ?? "Loading...")
@@ -106,6 +108,7 @@ struct SpaceSidebar: View {
           // .frame(maxWidth: .infinity, alignment: .leading)
           // .padding(.horizontal)
         }
+        .id("space-in-sidebar")
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
         .padding(.leading, Theme.sidebarItemLeadingGutter)
@@ -117,15 +120,13 @@ struct SpaceSidebar: View {
           try await data.getDialogs(spaceId: spaceId)
         } catch {}
       }
-      
+
       Task {
         do {
           // this one gets members
           try await data.getSpace(spaceId: spaceId)
         }
       }
-      
-      
     }
   }
 }
