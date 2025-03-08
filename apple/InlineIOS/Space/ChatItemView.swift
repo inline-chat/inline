@@ -121,9 +121,27 @@ struct ChatItemView: View {
 
   @ViewBuilder
   var lastMessageView: some View {
-    Text(message?.text ?? "")
-      .font(.customCaption())
-      .foregroundColor(.secondary)
+    if message?.photoId != nil || message?.fileId != nil {
+      HStack {
+        Image(systemName: "photo.fill")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+
+        Text("Photo")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+      }
+    } else if message?.hasUnsupportedTypes == true {
+      Text("Unsupported message")
+        .italic()
+        .font(.customCaption())
+        .foregroundColor(.secondary)
+
+    } else {
+      Text(message?.text ?? "")
+        .font(.customCaption())
+        .foregroundColor(.secondary)
+    }
   }
 
   @ViewBuilder
