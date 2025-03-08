@@ -13,7 +13,7 @@ struct ConnectionStateProvider<Content: View>: View {
   let content: (ConnectionStateConfiguration) -> Content
 
   @State var shouldShow = false
-  @State var apiState: RealtimeAPIState = .connecting
+  @State var apiState: RealtimeAPIState = Realtime.shared.apiState
 
   init(@ViewBuilder content: @escaping (ConnectionStateConfiguration) -> Content) {
     self.content = content
@@ -27,15 +27,17 @@ struct ConnectionStateProvider<Content: View>: View {
     )
 
     content(configuration)
-      .task {
+      .onAppear {
+        apiState = realtime.apiState
+
         if apiState != .connected {
           shouldShow = true
         }
       }
-      .onAppear {
-        apiState = realtime.apiState
-      }
       .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
+        if nextApiState == apiState {
+          return
+        }
         apiState = nextApiState
 
         if nextApiState == .connected {

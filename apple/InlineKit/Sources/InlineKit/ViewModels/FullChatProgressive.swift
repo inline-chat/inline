@@ -167,6 +167,7 @@ public class MessagesProgressiveViewModel {
             // Since user is still at bottom and haven't moved this means we need to ignore the range and show them the
             // latest messages
             loadMessages(.limit(initialLimit))
+            // TODO: if new messages were added, we should animate adding them
           } else {
             // 90/10 solution TODO: quick way to optimize is to check if updated messages are in the current range
             // check if actually anything changed then post update

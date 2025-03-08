@@ -11,12 +11,10 @@ public struct SpaceAvatar: View {
   }
 
   public var body: some View {
-    ZStack {
-      InitialsCircle(
-        name: space.name,
-        size: size,
-        symbol: "person.2.fill"
-      )
-    }
+    InitialsCircle(
+      name: space.name,
+      size: size,
+      symbol: "person.2.fill"
+    )
   }
 }
