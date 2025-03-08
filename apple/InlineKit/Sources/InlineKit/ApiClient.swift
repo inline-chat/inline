@@ -376,12 +376,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     text: String,
     messageId: Int64,
     peerId: Peer,
-    chatId: Int64
+    chatId: Int64,
+    fromId: Int64
   ) async throws -> CreateLinearIssue {
     var body: [String: Any] = [
       "text": text,
       "messageId": messageId,
       "chatId": chatId,
+      "fromId": fromId,
     ]
 
     // Create a proper peerId object structure as expected by the server
@@ -892,13 +894,13 @@ public enum ApiComposeAction: String, Codable, Sendable {
     switch self {
       case .typing:
         "typing..."
-      
+
       case .uploadingPhoto:
         "uploading photo..."
-      
+
       case .uploadingDocument:
         "uploading document..."
-      
+
       case .uploadingVideo:
         "uploading video..."
     }
