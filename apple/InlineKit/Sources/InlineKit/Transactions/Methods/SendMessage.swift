@@ -89,24 +89,32 @@ public struct TransactionSendMessage: Transaction {
     // (mo a few months later) TRADE OFFS BABY
     // Task { @MainActor in
 
-    let newMessage = try? AppDatabase.shared.dbWriter.write { db in
-      do {
-        return try message.saveAndFetch(db)
-      } catch {
-        Log.shared.error("Failed to save and fetch message", error: error)
-        return nil
+    Task(priority: .userInitiated) { // off main actor for db write
+      let newMessage = try? AppDatabase.shared.dbWriter.write { db in
+        do {
+          try message.save(db)
+          return try FullMessage.queryRequest()
+            .filter(Column("messageId") == message.messageId)
+            .filter(Column("chatId") == message.chatId)
+            .fetchOne(db)
+        } catch {
+          Log.shared.error("Failed to save and fetch message", error: error)
+          return nil
+        }
       }
-    }
 
-    Task(priority: .userInitiated) { @MainActor in
-      if let newMessage {
-        MessagesPublisher.shared.messageAddedSync(message: newMessage, peer: peerId)
+      Task(priority: .userInitiated) { @MainActor in
+        if let newMessage {
+          MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: peerId)
+        } else {
+          Log.shared.error("Failed to save message and push update")
+        }
       }
     }
   }
 
   func execute() async throws -> [InlineProtocol.Update] {
-    var date = Date()
+    let date = Date()
     var inputMedia: InputMedia? = nil
 
     // upload attachments and construct input media
