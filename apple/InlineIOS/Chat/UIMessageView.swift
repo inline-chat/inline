@@ -377,15 +377,15 @@ class UIMessageView: UIView {
     ]
 
     let constraints: [NSLayoutConstraint] = switch (message.hasFile, message.hasText) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -683,20 +683,18 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
         title: "Delete",
         attributes: .destructive
       ) { _ in
-        Task {
-          let _ = Transactions.shared.mutate(
-            transaction: .deleteMessage(
-              .init(
-                messageIds: [self.message.messageId],
-                peerId: self.message.peerId,
-                chatId: self.message.chatId
-              )
+        let _ = Transactions.shared.mutate(
+          transaction: .deleteMessage(
+            .init(
+              messageIds: [self.message.messageId],
+              peerId: self.message.peerId,
+              chatId: self.message.chatId
             )
           )
-        }
+        )
       }
-      actions.append(deleteAction)
 
+      actions.append(deleteAction)
       return UIMenu(children: actions)
     }
   }
