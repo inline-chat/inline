@@ -109,8 +109,31 @@ struct DirectChatItem: View {
           .foregroundColor(.secondary)
           .lineLimit(2)
           .truncationMode(.tail)
-          .padding(.top, 1)
       }
+      .padding(.top, 1)
+
+    } else if lastMsg?.photoId != nil || lastMsg?.fileId != nil {
+      HStack {
+        Image(systemName: "photo.fill")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+          
+
+        Text("Photo")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+          .lineLimit(2)
+          .truncationMode(.tail)
+      }
+      .padding(.top, 1)
+    } else if lastMsg?.hasUnsupportedTypes == true {
+      Text("Unsupported message")
+        .italic()
+        .font(.customCaption())
+        .foregroundColor(.secondary)
+        .lineLimit(2)
+        .truncationMode(.tail)
+        .padding(.top, 1)
     } else {
       Text(lastMsg?.text ?? "")
         .font(.customCaption())
