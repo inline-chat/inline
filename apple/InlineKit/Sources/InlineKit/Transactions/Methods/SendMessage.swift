@@ -98,12 +98,11 @@ public struct TransactionSendMessage: Transaction {
       }
     }
 
-    DispatchQueue.main.async {
+    Task(priority: .userInitiated) { @MainActor in
       if let newMessage {
         MessagesPublisher.shared.messageAddedSync(message: newMessage, peer: peerId)
       }
     }
-    // }
   }
 
   func execute() async throws -> [InlineProtocol.Update] {
