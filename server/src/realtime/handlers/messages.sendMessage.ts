@@ -31,7 +31,7 @@ export const sendMessage = async (
       photoId: media?.oneofKind === "photo" ? media.photo.photoId : undefined,
       videoId: media?.oneofKind === "video" ? media.video.videoId : undefined,
       documentId: media?.oneofKind === "document" ? media.document.documentId : undefined,
-      sendDate: input.temporarySendDate,
+      sendDate: input.temporarySendDate ? Number(input.temporarySendDate) : undefined,
     },
     {
       currentSessionId: handlerContext.sessionId,
