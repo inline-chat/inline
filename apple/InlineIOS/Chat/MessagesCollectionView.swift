@@ -363,19 +363,21 @@ private extension MessagesCollectionView {
         case let .added(newMessages, _):
           // get current snapshot and append new items
           var snapshot = dataSource.snapshot()
-          let existingIds = Set(snapshot.itemIdentifiers)
+          // let existingIds = Set(snapshot.itemIdentifiers)
           let newIds = newMessages.map(\.id)
-          let missingIds = newIds.filter { !existingIds.contains($0) }
+          // let missingIds = newIds.filter { !existingIds.contains($0) }
 
-          guard !missingIds.isEmpty else { return }
+          // guard !missingIds.isEmpty else { return }
           let shouldScroll = newMessages.contains {
             $0.message.fromId == Auth.shared.getCurrentUserId()
           }
 
           if let first = snapshot.itemIdentifiers.first {
-            snapshot.insertItems(missingIds, beforeItem: first)
+            // snapshot.insertItems(missingIds, beforeItem: first)
+            snapshot.insertItems(newIds, beforeItem: first)
           } else {
-            snapshot.appendItems(missingIds, toSection: .main)
+            // snapshot.appendItems(missingIds, toSection: .main)
+            snapshot.appendItems(newIds, toSection: .main)
           }
 
           // Mark as read if we're at bottom or message is from current user
