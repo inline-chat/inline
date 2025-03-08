@@ -444,14 +444,15 @@ public class DataManager: ObservableObject {
       archived: archived == nil ? updatedDialog.archived : archived
     )
 
-    try await database.dbWriter.write { db in
-      var dialog = Dialog(from: result.dialog)
-      if archived != nil {
-        dialog.archived = archived
-      }
-
-      try dialog.save(db, onConflict: .replace)
-    }
+    // Note(@Mo): don't do too many DB writes
+//    try await database.dbWriter.write { db in
+//      var dialog = Dialog(from: result.dialog)
+//      if archived != nil {
+//        dialog.archived = archived
+//      }
+//
+//      try dialog.save(db, onConflict: .replace)
+//    }
   }
 
   public func getDraft(peerId: Peer) async throws -> String? {
