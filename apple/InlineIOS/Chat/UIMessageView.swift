@@ -159,6 +159,8 @@ class UIMessageView: UIView {
   init(fullMessage: FullMessage, spaceId: Int64) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
+
+    // TODO: move to lazy var
     metadataView = MessageTimeAndStatus(fullMessage)
     floatingMetadataView = FloatingMetadataView(fullMessage: fullMessage)
     floatingMetadataView.translatesAutoresizingMaskIntoConstraints = false
@@ -417,13 +419,12 @@ class UIMessageView: UIView {
   }
 
   private func setupAppearance() {
+    let cacheKey = "\(message.stableId)-\(message.text?.count ?? 0)-\(message.text?.hash ?? 0)"
     bubbleView.backgroundColor = bubbleColor
 
     guard let text = message.text else { return }
-
-    if let cachedString = Self.attributedCache.object(forKey: NSString(string: "\(message.messageId)")) {
+    if let cachedString = Self.attributedCache.object(forKey: NSString(string: cacheKey)) {
       messageLabel.attributedText = cachedString
-
       return
     }
 
@@ -436,13 +437,10 @@ class UIMessageView: UIView {
     )
 
     detectAndStyleLinks(in: text, attributedString: attributedString)
-    cacheLink(attributedString, key: String("\(message.globalId ?? 0)"))
+
+    Self.attributedCache.setObject(attributedString, forKey: cacheKey as NSString)
 
     messageLabel.attributedText = attributedString
-  }
-
-  private func cacheLink(_ attributedString: NSMutableAttributedString, key: String) {
-    Self.attributedCache.setObject(attributedString, forKey: key as NSString)
   }
 
   private func detectAndStyleLinks(in text: String, attributedString: NSMutableAttributedString) {
