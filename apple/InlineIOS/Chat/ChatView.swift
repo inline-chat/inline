@@ -86,53 +86,58 @@ struct ChatView: View {
   // MARK: - Body
 
   var body: some View {
-    ChatViewUIKit(peerId: peerId, chatId: fullChatViewModel.chat?.id ?? 0, spaceId: fullChatViewModel.chat?.spaceId ?? 0)
-      .edgesIgnoringSafeArea(.all)
-      .onReceive(timer) { _ in
-        currentTime = Date()
+    ChatViewUIKit(
+      peerId: peerId,
+      chatId: fullChatViewModel.chat?.id ?? 0,
+      spaceId: fullChatViewModel.chat?.spaceId ?? 0
+    )
+    .edgesIgnoringSafeArea(.all)
+    .onReceive(timer) { _ in
+      currentTime = Date()
+    }
+    .toolbar {
+      ToolbarItem(placement: .principal) {
+        header
       }
-      .toolbar {
-        ToolbarItem(placement: .principal) {
-          header
+      if let user = fullChatViewModel.peerUserInfo {
+        ToolbarItem(placement: .topBarTrailing) {
+          UserAvatar(userInfo: user)
         }
-        if let user = fullChatViewModel.peerUserInfo {
-          ToolbarItem(placement: .topBarTrailing) {
-            UserAvatar(userInfo: user)
-          }
-        } else if let emoji = fullChatViewModel.chat?.emoji, isThreadChat {
-          ToolbarItem(placement: .topBarTrailing) {
-            Text(String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "").replacingOccurrences(of: "\")", with: ""))
-              .font(.customTitle())
-          }
-        }
-      }
-      .overlay(alignment: .top) {
-        if preview {
-          header
-            .frame(height: 45)
-            .frame(maxWidth: .infinity)
-            .background(.ultraThickMaterial)
+      } else if let emoji = fullChatViewModel.chat?.emoji, isThreadChat {
+        ToolbarItem(placement: .topBarTrailing) {
+          Text(
+            String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "")
+              .replacingOccurrences(of: "\")", with: "")
+          )
+          .font(.customTitle())
         }
       }
-      .navigationBarHidden(false)
-      .toolbarBackground(.visible, for: .navigationBar)
-      .toolbarTitleDisplayMode(.inline)
-      .onAppear {
-        Task {
-          await fetch()
-        }
+    }
+    .overlay(alignment: .top) {
+      if preview {
+        header
+          .frame(height: 45)
+          .frame(maxWidth: .infinity)
+          .background(.ultraThickMaterial)
       }
-      .onChange(of: scenePhase) { _, scenePhase_ in
-        switch scenePhase_ {
-          case .active:
-            Task {
-              await fetch()
-            }
-          default:
-            break
-        }
+    }
+    .navigationBarHidden(false)
+    .toolbarBackground(.visible, for: .navigationBar)
+    .toolbarTitleDisplayMode(.inline)
+    .onAppear {
+      fetch()
+    }
+    .onChange(of: scenePhase) { _, scenePhase_ in
+      switch scenePhase_ {
+        case .active:
+
+          fetch()
+
+        default:
+          break
       }
-      .environmentObject(fullChatViewModel)
+    }
+    .environmentObject(fullChatViewModel)
   }
 
   @ViewBuilder
@@ -162,7 +167,7 @@ struct ChatView: View {
     })
   }
 
-  func fetch() async {
+  func fetch() {
     fullChatViewModel.refetchChatView()
   }
 }
