@@ -33,13 +33,13 @@ public extension Date {
 public func getStatusText(_ state: RealtimeAPIState) -> String {
   switch state {
     case .connected:
-      "connected"
+      "Connected"
     case .connecting:
-      "connecting"
+      "Connecting"
     case .updating:
-      "updating"
+      "Updating"
     case .waitingForNetwork:
-      "waiting for network"
+      "Waiting for network"
   }
 }
 
