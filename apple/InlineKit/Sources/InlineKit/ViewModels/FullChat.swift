@@ -225,7 +225,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
       if peerUser == nil {
         do {
           if let userId = peer.asUserId() {
-            return try await DataManager.shared.getUser(id: userId)
+            try await DataManager.shared.getUser(id: userId)
           }
         } catch {
           Log.shared.error("Failed to refetch user info \(error)")
