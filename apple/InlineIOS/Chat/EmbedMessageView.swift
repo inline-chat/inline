@@ -10,10 +10,10 @@ class EmbedMessageView: UIView {
     static let horizontalPadding: CGFloat = 6
     static let imageIconSize: CGFloat = 16
   }
-    
+
   static let height = 42.0
   private var outgoing: Bool = false
-    
+
   private lazy var headerLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -21,7 +21,7 @@ class EmbedMessageView: UIView {
     label.numberOfLines = 1
     return label
   }()
-    
+
   private lazy var imageIconView: UIImageView = {
     let imageView = UIImageView()
     let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
@@ -31,7 +31,7 @@ class EmbedMessageView: UIView {
     imageView.translatesAutoresizingMaskIntoConstraints = false
     return imageView
   }()
-    
+
   private lazy var messageLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -39,7 +39,7 @@ class EmbedMessageView: UIView {
     label.numberOfLines = 1
     return label
   }()
-    
+
   private lazy var messageStackView: UIStackView = {
     let stackView = UIStackView(arrangedSubviews: [imageIconView, messageLabel])
     stackView.axis = .horizontal
@@ -48,48 +48,50 @@ class EmbedMessageView: UIView {
     stackView.translatesAutoresizingMaskIntoConstraints = false
     return stackView
   }()
-    
+
   private lazy var rectangleView: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.layer.mask = CAShapeLayer()
     return view
   }()
-    
+
   override init(frame: CGRect) {
     super.init(frame: frame)
     setupViews()
     setupLayer()
   }
-    
+
   required init?(coder: NSCoder) {
     super.init(coder: coder)
     setupViews()
     setupLayer()
   }
-    
+
   override func layoutSubviews() {
     super.layoutSubviews()
     updateRectangleMask()
   }
-    
+
   func configure(message: Message, senderName: String, outgoing: Bool) {
     self.outgoing = outgoing
     headerLabel.text = senderName
-        
-    let hasFile = message.fileId != nil
-    let hasText = message.text?.isEmpty == false
 
-    if hasFile {
+    if message.hasUnsupportedTypes {
+      imageIconView.isHidden = true
+      messageLabel.text = "Unsupported message"
+    } else if message.hasFile, message.hasText {
       imageIconView.isHidden = false
-      if hasText {
-        messageLabel.text = message.text
-      } else {
-        messageLabel.text = "Photo"
-      }
-    } else {
+      messageLabel.text = message.text
+    } else if message.hasFile, !message.hasText {
+      imageIconView.isHidden = false
+      messageLabel.text = "Photo"
+    } else if !message.hasFile, message.hasText {
       imageIconView.isHidden = true
       messageLabel.text = message.text
+    } else {
+      imageIconView.isHidden = true
+      messageLabel.text = "Not loaded"
     }
     updateColors()
   }
@@ -100,44 +102,56 @@ private extension EmbedMessageView {
     addSubview(rectangleView)
     addSubview(headerLabel)
     addSubview(messageStackView)
-        
+
     NSLayoutConstraint.activate([
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
       rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth),
       rectangleView.topAnchor.constraint(equalTo: topAnchor),
       rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            
-      headerLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor,
-                                           constant: Constants.contentSpacing),
-      headerLabel.trailingAnchor.constraint(equalTo: trailingAnchor,
-                                            constant: -Constants.horizontalPadding),
-      headerLabel.topAnchor.constraint(equalTo: topAnchor,
-                                       constant: Constants.verticalPadding),
+
+      headerLabel.leadingAnchor.constraint(
+        equalTo: rectangleView.trailingAnchor,
+        constant: Constants.contentSpacing
+      ),
+      headerLabel.trailingAnchor.constraint(
+        equalTo: trailingAnchor,
+        constant: -Constants.horizontalPadding
+      ),
+      headerLabel.topAnchor.constraint(
+        equalTo: topAnchor,
+        constant: Constants.verticalPadding
+      ),
       headerLabel.bottomAnchor.constraint(equalTo: messageStackView.topAnchor),
-            
-      messageStackView.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor,
-                                                constant: Constants.contentSpacing),
-      messageStackView.trailingAnchor.constraint(equalTo: trailingAnchor,
-                                                 constant: -Constants.horizontalPadding),
-      messageStackView.bottomAnchor.constraint(equalTo: bottomAnchor,
-                                               constant: -Constants.verticalPadding),
-            
+
+      messageStackView.leadingAnchor.constraint(
+        equalTo: rectangleView.trailingAnchor,
+        constant: Constants.contentSpacing
+      ),
+      messageStackView.trailingAnchor.constraint(
+        equalTo: trailingAnchor,
+        constant: -Constants.horizontalPadding
+      ),
+      messageStackView.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: -Constants.verticalPadding
+      ),
+
       imageIconView.widthAnchor.constraint(equalToConstant: Constants.imageIconSize),
-      imageIconView.heightAnchor.constraint(equalToConstant: Constants.imageIconSize)
+      imageIconView.heightAnchor.constraint(equalToConstant: Constants.imageIconSize),
     ])
   }
-    
+
   func setupLayer() {
     layer.cornerRadius = Constants.cornerRadius
     layer.masksToBounds = true
   }
-    
+
   func updateColors() {
     let textColor: UIColor = outgoing ? .white : .darkGray
     let rectangleColor = outgoing ? UIColor.white : .systemGray
     let bgAlpha: CGFloat = outgoing ? 0.13 : 0.1
     backgroundColor = outgoing ? .white.withAlphaComponent(bgAlpha) : .systemGray.withAlphaComponent(bgAlpha)
-        
+
     headerLabel.textColor = textColor
     messageLabel.textColor = textColor
     imageIconView.tintColor = textColor
@@ -152,7 +166,7 @@ private extension EmbedMessageView {
       byRoundingCorners: [.topLeft, .bottomLeft],
       cornerRadii: CGSize(width: Constants.cornerRadius, height: Constants.cornerRadius)
     )
-        
+
     if let mask = rectangleView.layer.mask as? CAShapeLayer {
       mask.path = path.cgPath
     }

@@ -156,18 +156,21 @@ class ComposeEmbedView: UIView {
 
     nameLabel.text = "Replying to \(name)"
     if let message = viewModel.fullMessage?.message {
-      let hasFile = viewModel.fullMessage?.message.fileId != nil
-      let hasText = message.text?.isEmpty == false
-      if hasFile {
+      if message.hasUnsupportedTypes {
+        imageIconView.isHidden = true
+        messageLabel.text = "Unsupported message"
+      } else if message.hasFile, message.hasText {
         imageIconView.isHidden = false
-        if hasText {
-          messageLabel.text = message.text
-        } else {
-          messageLabel.text = "Photo"
-        }
-      } else {
+        messageLabel.text = message.text
+      } else if message.hasFile, !message.hasText {
+        imageIconView.isHidden = false
+        messageLabel.text = "Photo"
+      } else if !message.hasFile, message.hasText {
         imageIconView.isHidden = true
         messageLabel.text = message.text
+      } else {
+        imageIconView.isHidden = true
+        messageLabel.text = "Not loaded"
       }
     }
   }
