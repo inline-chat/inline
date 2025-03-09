@@ -77,7 +77,7 @@ struct DirectChatItem: View {
   var unreadAndProfileView: some View {
     HStack(alignment: .center, spacing: 5) {
       Circle()
-        .fill(hasUnreadMessages ? Color.accentColor : .clear)
+        .fill(hasUnreadMessages ? ColorManager.shared.swiftUIColor : .clear)
         .frame(width: 6, height: 6)
         .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
       userProfile
@@ -117,7 +117,6 @@ struct DirectChatItem: View {
         Image(systemName: "photo.fill")
           .font(.customCaption())
           .foregroundColor(.secondary)
-          
 
         Text("Photo")
           .font(.customCaption())
