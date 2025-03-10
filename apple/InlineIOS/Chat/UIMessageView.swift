@@ -114,14 +114,24 @@ class UIMessageView: UIView {
   let spaceId: Int64
   private let metadataView: MessageTimeAndStatus
 
-  private let floatingMetadataView: FloatingMetadataView
+  private lazy var floatingMetadataView: FloatingMetadataView = {
+    let view = FloatingMetadataView(fullMessage: fullMessage)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
 
   var outgoing: Bool {
     fullMessage.message.out == true
   }
 
   private var bubbleColor: UIColor {
-    outgoing ? ColorManager.shared.selectedColor : ColorManager.shared.secondaryColor
+    if isEmojiOnlyMessage {
+      UIColor.clear
+    } else if outgoing {
+      ColorManager.shared.selectedColor
+    } else {
+      ColorManager.shared.secondaryColor
+    }
   }
 
   private var textColor: UIColor {
@@ -130,6 +140,25 @@ class UIMessageView: UIView {
 
   private var message: Message {
     fullMessage.message
+  }
+
+  var isEmojiOnlyMessage: Bool {
+    guard let text = message.text else { return false }
+    if text.containsOnlyEmojis {
+      return true
+    } else {
+      return false
+    }
+  }
+
+  var isSingleEmojiMessage: Bool {
+    guard let text = message.text else { return false }
+    return isEmojiOnlyMessage && text.count == 1
+  }
+
+  var isTripleEmojiMessage: Bool {
+    guard let text = message.text else { return false }
+    return isEmojiOnlyMessage && text.count <= 3
   }
 
   private var isMultiline: Bool {
@@ -162,8 +191,7 @@ class UIMessageView: UIView {
 
     // TODO: move to lazy var
     metadataView = MessageTimeAndStatus(fullMessage)
-    floatingMetadataView = FloatingMetadataView(fullMessage: fullMessage)
-    floatingMetadataView.translatesAutoresizingMaskIntoConstraints = false
+
     super.init(frame: .zero)
 
     handleLinkTap()
@@ -297,7 +325,7 @@ class UIMessageView: UIView {
     let metadataContainer = UIStackView()
     metadataContainer.axis = .horizontal
     metadataContainer.addArrangedSubview(UIView()) // Spacer
-    metadataContainer.addArrangedSubview(metadataView)
+    metadataContainer.addArrangedSubview(isEmojiOnlyMessage ? floatingMetadataView : metadataView)
     multiLineContainer.addArrangedSubview(metadataContainer)
   }
 
@@ -328,10 +356,10 @@ class UIMessageView: UIView {
 
   private func setupConstraints() {
     let padding = NSDirectionalEdgeInsets(
-      top: StackPadding.top,
-      leading: StackPadding.leading,
-      bottom: isMultiline ? 14 : StackPadding.bottom,
-      trailing: StackPadding.trailing
+      top: isEmojiOnlyMessage ? 6 : StackPadding.top,
+      leading: isEmojiOnlyMessage ? 0 : StackPadding.leading,
+      bottom: isEmojiOnlyMessage ? 6 : isMultiline ? 14 : StackPadding.bottom,
+      trailing: isEmojiOnlyMessage ? 0 : StackPadding.trailing
     )
 
     let baseConstraints: [NSLayoutConstraint] = [
@@ -431,7 +459,8 @@ class UIMessageView: UIView {
     let attributedString = NSMutableAttributedString(
       string: text,
       attributes: [
-        .font: UIFont.systemFont(ofSize: 17),
+        .font: UIFont
+          .systemFont(ofSize: isSingleEmojiMessage ? 120 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17),
         .foregroundColor: textColor,
       ]
     )
@@ -873,6 +902,21 @@ extension Character {
 extension String {
   var containsEmoji: Bool {
     contains { $0.isEmoji }
+  }
+
+  /// Determines if the string contains only emoji characters (no text)
+  var containsOnlyEmojis: Bool {
+    // Trim whitespace first
+    let trimmedText = trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // Return false for empty strings
+    guard !trimmedText.isEmpty else { return false }
+
+    // Regex pattern for emoji characters
+    let emojiPattern =
+      "^[\\p{Emoji}\\p{Emoji_Presentation}\\p{Emoji_Modifier}\\p{Emoji_Modifier_Base}\\p{Emoji_Component}]+$"
+
+    return trimmedText.range(of: emojiPattern, options: .regularExpression) != nil
   }
 }
 
