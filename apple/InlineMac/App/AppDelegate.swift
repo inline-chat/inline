@@ -122,14 +122,16 @@ extension AppDelegate {
   func handleNotification(_ response: UNNotificationResponse) {
     log.debug("Received notification: \(response)")
 
-    // TODO: Navigate
     guard let userInfo = response.notification.request.content.userInfo as? [String: Any] else {
       return
     }
 
     if let peerId = getPeerFromNotification(userInfo) {
-      navigation.select(.chat(peer: peerId))
-      // TODO: Handle spaceId
+      Task(priority: .userInitiated) { @MainActor in
+        dependencies.nav.open(.chat(peer: peerId))
+
+        // TODO: Handle notification from threads/space chats
+      }
     }
   }
 
