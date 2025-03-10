@@ -537,7 +537,7 @@ private extension MessagesCollectionView {
 
         snapshot.appendItems(orderedIds, toSection: .main)
 
-        dataSource.apply(snapshot, animatingDifferences: true)
+        dataSource.apply(snapshot, animatingDifferences: false)
       }
     }
   }
