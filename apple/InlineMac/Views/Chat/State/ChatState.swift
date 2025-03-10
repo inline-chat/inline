@@ -1,3 +1,4 @@
+import AsyncAlgorithms
 import Combine
 import Foundation
 import InlineKit
@@ -18,7 +19,8 @@ class ChatState {
   // MARK: - State
 
   private var data: ChatStateData
-  private var highlightedMsgId: Int64?
+
+  @MainActor public var events = AsyncChannel<MessageListAction>()
 
   public var replyingToMsgId: Int64? {
     data.replyingToMsgId
@@ -35,8 +37,11 @@ class ChatState {
     }
   }
 
-  public func highlight(msgId: Int64) {
-    highlightedMsgId = msgId
+  /// Scroll to a message by ID and highlight
+  public func scrollTo(msgId: Int64) {
+    Task { @MainActor in
+      await events.send(.scrollToMsg(msgId))
+    }
   }
 
   public func setReplyingToMsgId(_ id: Int64) {

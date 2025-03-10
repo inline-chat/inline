@@ -56,7 +56,15 @@ class MessageListAppKit: NSViewController {
     }
 
     // observe events
-    // TODO
+    Task { @MainActor in
+      for await event in state.events {
+        switch event {
+          case let .scrollToMsg(msgId):
+            // scroll and highlight
+            scrollToMsgAndHighlight(msgId)
+        }
+      }
+    }
   }
 
   @available(*, unavailable)
@@ -1123,4 +1131,94 @@ extension Notification.Name {
 enum MessageListScrollState {
   case scrolling
   case idle
+}
+
+extension MessageListAppKit {
+  // MARK: - Scroll to message
+
+  func scrollToMsgAndHighlight(_ msgId: Int64) {
+    if messages.isEmpty {
+      log.error("No messages to scroll to")
+      return
+    }
+
+    guard let index = messages.firstIndex(where: { $0.message.messageId == msgId }) else {
+      log.error("Message not found for id \(msgId)")
+
+      // TODO: Load more to get to it
+      if let first = messages.first, first.message.messageId > msgId {
+        log
+          .debug(
+            "Loading batch at top to find message because first message id = \(first.message.messageId) and what we want is \(msgId)"
+          )
+        loadBatch(at: .older)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+          self?.scrollToMsgAndHighlight(msgId)
+        }
+      } else {
+        log.error("Message not found for id even after loading all messages from cache \(msgId)")
+      }
+      return
+    }
+
+    // Get current scroll position and target position
+    let currentY = scrollView.contentView.bounds.origin.y
+    let targetRect = tableView.rect(ofRow: index)
+    let viewportHeight = scrollView.contentView.bounds.height
+    let targetY = max(0, targetRect.midY - (viewportHeight / 2))
+
+    // Calculate distance to scroll
+    let distance = abs(targetY - currentY)
+
+    // Prepare for animation
+    isProgrammaticScroll = true
+
+    // For long distances, use a two-phase animation
+    if distance > viewportHeight * 2 {
+      // Phase 1: Quick scroll to get close
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.3
+        context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+
+        // Scroll to a point just before the target
+        let intermediateY = targetY > currentY
+          ? targetY - viewportHeight / 2
+          : targetY + viewportHeight / 2
+        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: intermediateY))
+      } completionHandler: {
+        // Phase 2: Slow down for final approach
+        NSAnimationContext.runAnimationGroup { context in
+          context.duration = 0.4
+          context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+
+          // Final scroll to target
+          self.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
+        } completionHandler: {
+          // Clean up
+          self.isProgrammaticScroll = false
+
+          self.highlightMessage(at: index)
+        }
+      }
+    } else {
+      // For short distances, use a single smooth animation
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.4
+        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
+      } completionHandler: {
+        // Clean up
+        self.isProgrammaticScroll = false
+
+        self.highlightMessage(at: index)
+      }
+    }
+  }
+
+  private func highlightMessage(at row: Int) {
+    guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell else {
+      return
+    }
+    cell.highlight()
+  }
 }

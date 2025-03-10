@@ -63,7 +63,9 @@ class ComposeReplyView: NSView {
     wantsLayer = true
     clipsToBounds = true
 
-    addSubview(closeButton)
+    addMessageView()
+
+    addSubview(closeButton, positioned: .above, relativeTo: messageView)
 
     heightConstraint = heightAnchor.constraint(equalToConstant: 0)
 
@@ -75,8 +77,6 @@ class ComposeReplyView: NSView {
 
       heightConstraint,
     ])
-
-    addMessageView()
 
     // Initially hidden
     alphaValue = 0

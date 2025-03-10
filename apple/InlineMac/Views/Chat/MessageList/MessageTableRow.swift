@@ -21,6 +21,7 @@ class MessageTableCell: NSView {
 
   private func setupView() {
     wantsLayer = true
+    layer?.backgroundColor = .clear
     layerContentsRedrawPolicy = .onSetNeedsDisplay
   }
 
@@ -143,7 +144,45 @@ class MessageTableCell: NSView {
     messageView?.reflectBoundsChange(fraction: fraction)
   }
 
+  func highlight() {
+    let currentMsgId = currentContent?.message.message.messageId
+
+    // Create animation
+    let fadeIn = CABasicAnimation(keyPath: "backgroundColor")
+    fadeIn.fromValue = NSColor.clear.cgColor
+    fadeIn.toValue = NSColor.systemGray.withAlphaComponent(0.2).cgColor
+    fadeIn.duration = 0.2
+    fadeIn.fillMode = .forwards
+    fadeIn.isRemovedOnCompletion = false
+
+    // Apply animation
+    layer?.add(fadeIn, forKey: "fadeInAnimation")
+
+    // Schedule fade out animation
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+      if self.currentContent?.message.message.messageId != currentMsgId {
+        // cell was reused
+        return
+      }
+
+      let fadeOut = CABasicAnimation(keyPath: "backgroundColor")
+      fadeOut.fromValue = NSColor.systemGray.withAlphaComponent(0.2).cgColor
+      fadeOut.toValue = NSColor.clear.cgColor
+      fadeOut.duration = 0.25
+      fadeOut.fillMode = .forwards
+      fadeOut.isRemovedOnCompletion = false
+
+      self.layer?.add(fadeOut, forKey: "fadeOutAnimation")
+
+      // Clean up after animation completes
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        self.layer?.removeAllAnimations()
+      }
+    }
+  }
+
   override func prepareForReuse() {
     super.prepareForReuse()
+    layer?.removeAllAnimations()
   }
 }
