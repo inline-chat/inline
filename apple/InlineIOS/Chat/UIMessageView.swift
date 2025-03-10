@@ -890,7 +890,7 @@ extension Character {
   /// A simple emoji is one scalar and presented to the user as an Emoji
   var isSimpleEmoji: Bool {
     guard let firstScalar = unicodeScalars.first else { return false }
-    return firstScalar.properties.isEmoji && firstScalar.value > 0x238C
+    return firstScalar.properties.isEmoji && firstScalar.value > 0x238c
   }
 
   /// Checks if the scalars will be merged into an emoji
@@ -904,19 +904,9 @@ extension String {
     contains { $0.isEmoji }
   }
 
-  /// Determines if the string contains only emoji characters (no text)
   var containsOnlyEmojis: Bool {
-    // Trim whitespace first
-    let trimmedText = trimmingCharacters(in: .whitespacesAndNewlines)
-
-    // Return false for empty strings
-    guard !trimmedText.isEmpty else { return false }
-
-    // Regex pattern for emoji characters
-    let emojiPattern =
-      "^[\\p{Emoji}\\p{Emoji_Presentation}\\p{Emoji_Modifier}\\p{Emoji_Modifier_Base}\\p{Emoji_Component}]+$"
-
-    return trimmedText.range(of: emojiPattern, options: .regularExpression) != nil
+    let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+    return !trimmed.isEmpty && trimmed.allSatisfy { $0.isEmoji }
   }
 }
 
