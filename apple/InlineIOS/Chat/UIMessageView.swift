@@ -894,6 +894,6 @@ extension Message {
 // Add extension for NewPhotoView to access current image
 extension NewPhotoView {
   func getCurrentImage() -> UIImage? {
-    imageView.image
+    imageView.imageView.image
   }
 }

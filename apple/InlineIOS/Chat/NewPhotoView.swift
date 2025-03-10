@@ -2,6 +2,7 @@ import InlineKit
 import InlineProtocol
 import Logger
 import Nuke
+import NukeExtensions
 import NukeUI
 import QuickLook
 import SwiftUI
@@ -31,23 +32,20 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
     let height: CGFloat
   }
 
-   let imageView: UIImageView = {
-    let view = UIImageView()
+  let imageView: LazyImageView = {
+    let view = LazyImageView()
     view.contentMode = .scaleAspectFit
     view.clipsToBounds = true
     view.translatesAutoresizingMaskIntoConstraints = false
+
+    let activityIndicator = UIActivityIndicatorView(style: .medium)
+    activityIndicator.startAnimating()
+    view.placeholderView = activityIndicator
+
     return view
   }()
 
-  private let loadingIndicator: UIActivityIndicatorView = {
-    let indicator = UIActivityIndicatorView(style: .medium)
-    indicator.translatesAutoresizingMaskIntoConstraints = false
-    indicator.hidesWhenStopped = true
-    return indicator
-  }()
-
   private var imageConstraints: [NSLayoutConstraint] = []
-  private var wasLoadedWithPlaceholder = false
 
   // MARK: - Initialization
 
@@ -137,12 +135,6 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
   private func setupViews() {
     addSubview(imageView)
 
-    addSubview(loadingIndicator)
-    NSLayoutConstraint.activate([
-      loadingIndicator.centerXAnchor.constraint(equalTo: centerXAnchor),
-      loadingIndicator.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
-
     setupImageConstraints()
     setupGestures()
     setupMask()
@@ -211,52 +203,21 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
 
   private func updateImage() {
     if let url = imageLocalUrl() {
-      // Set URL
-      guard let image = UIImage(contentsOfFile: url.path) else { return }
-
-      if wasLoadedWithPlaceholder {
-        print("wasLoadedWithPlaceholder")
-        // With animation
-        imageView.alpha = 0.0
-        imageView.image = image
-
-        setNeedsLayout()
-        layoutIfNeeded()
-
-        DispatchQueue.main.async {
-          UIView.animate(withDuration: 0.25, animations: {
-            self.imageView.alpha = 1.0
-          }) { _ in
-            self.hideLoadingView()
+      imageView.url = url
+    } else {
+      if let photoInfo = fullMessage.photoInfo {
+        Task(priority: .userInitiated) {
+          await FileCache.shared.download(photo: photoInfo, for: fullMessage.message)
+          await MainActor.run {
+            if let newUrl = imageLocalUrl() {
+              imageView.url = newUrl
+            }
           }
         }
-      } else {
-        // Without animation
-        imageView.image = image
-        hideLoadingView()
       }
 
-    } else {
-      // If no URL, trigger download and show loading
-      if let photoInfo = fullMessage.photoInfo {
-        Task {
-          await FileCache.shared.download(photo: photoInfo, for: fullMessage.message)
-        }
-      }
-
-      showLoadingView()
-      return
+      imageView.url = nil
     }
-  }
-
-  private func showLoadingView() {
-    print("showLoadingView")
-    wasLoadedWithPlaceholder = true
-    loadingIndicator.startAnimating()
-  }
-
-  private func hideLoadingView() {
-    loadingIndicator.stopAnimating()
   }
 
   private func imageLocalUrl() -> URL? {
@@ -340,5 +301,85 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
 
   func previewControllerDidDismiss(_ controller: QLPreviewController) {
     // Handle dismissal if needed
+  }
+}
+
+final class ImagePrefetcher {
+  static let shared = ImagePrefetcher()
+  private let pipeline = ImagePipeline.shared
+  private var prefetchTasks = [URL: Task<Void, Never>]()
+  private let prefetchQueue = DispatchQueue(label: "com.inline.imagePrefetcher", qos: .utility)
+  private let taskLock = NSLock()
+
+  func prefetchImages(for messages: [FullMessage]) {
+    prefetchQueue.async { [weak self] in
+      guard let self else { return }
+
+      // Limit the number of concurrent prefetches
+      let messagesToPrefetch = Array(messages.prefix(15))
+
+      for message in messagesToPrefetch {
+        if let photoInfo = message.photoInfo,
+           let photoSize = photoInfo.bestPhotoSize()
+        {
+          // First try local path
+          if let localPath = photoSize.localPath {
+            let url = FileCache.getUrl(for: .photos, localPath: localPath)
+            prefetchLocalImage(url: url)
+          }
+          // If not available locally, start downloading
+          else if let cdnUrl = photoSize.cdnUrl,
+                  let url = URL(string: cdnUrl)
+          {
+            taskLock.lock()
+            let taskExists = prefetchTasks[url] != nil
+            taskLock.unlock()
+
+            if !taskExists {
+              let task = Task(priority: .utility) {
+                do {
+                  await FileCache.shared.download(photo: photoInfo, for: message.message)
+
+                  // After download, prefetch the local image
+                  if let localPath = photoSize.localPath {
+                    let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
+                    self.prefetchLocalImage(url: localUrl)
+                  }
+                } catch {
+                  print("Error downloading image: \(error)")
+                }
+
+                // Thread-safe removal of task
+                self.taskLock.lock()
+                self.prefetchTasks.removeValue(forKey: url)
+                self.taskLock.unlock()
+              }
+
+              taskLock.lock()
+              prefetchTasks[url] = task
+              taskLock.unlock()
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func prefetchLocalImage(url: URL) {
+    let request = ImageRequest(url: url)
+    pipeline.loadImage(with: request) { _ in }
+  }
+
+  func cancelAllPrefetching() {
+    prefetchQueue.async { [weak self] in
+      guard let self else { return }
+
+      taskLock.lock()
+      for task in prefetchTasks.values {
+        task.cancel()
+      }
+      prefetchTasks.removeAll()
+      taskLock.unlock()
+    }
   }
 }
