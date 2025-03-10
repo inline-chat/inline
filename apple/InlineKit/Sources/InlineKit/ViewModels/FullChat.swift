@@ -210,43 +210,56 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         )
   }
 
-  public func refetchChatView() {
-    Log.shared.debug("Refetching chat view for peer \(peer)")
-//    Task {
-//      do {
-//        return try await DataManager.shared.getChatHistory(peerUserId: nil, peerThreadId: nil, peerId: peer)
-//      } catch {
-//        Log.shared.error("Failed to refetch chat view \(error)")
-//      }
-//    }
+  public func refetchChatViewAsync() async {
+    let peer_ = peer
+    await withTaskGroup(of: Void.self) { group in
+      group.addTask {
+        // Fetch user before hand
+        if self.peerUser == nil {
+          do {
+            if let userId = peer_.asUserId() {
+              try await DataManager.shared.getUser(id: userId)
+            }
+          } catch {
+            Log.shared.error("Failed to refetch user info \(error)")
+          }
+        }
 
-    Task {
-      // Fetch user before hand
-      if peerUser == nil {
+        await Realtime.shared
+          .invokeWithHandler(.getChatHistory, input: .getChatHistory(.with { input in
+            input.peerID = peer_.toInputPeer()
+          }))
+      }
+
+      group.addTask {
         do {
-          if let userId = peer.asUserId() {
-            try await DataManager.shared.getUser(id: userId)
+          if let userId = peer_.asUserId() {
+            return try await DataManager.shared.getUser(id: userId)
           }
         } catch {
           Log.shared.error("Failed to refetch user info \(error)")
         }
       }
-
-      await Realtime.shared
-        .invokeWithHandler(.getChatHistory, input: .getChatHistory(.with { input in
-          input.peerID = peer.toInputPeer()
-        }))
     }
+  }
 
-    // Refetch user info (online, lastSeen)
+  public func refetchChatView() {
+    Log.shared.debug("Refetching chat view for peer \(peer)")
     Task {
-      do {
-        if let userId = peer.asUserId() {
-          return try await DataManager.shared.getUser(id: userId)
-        }
-      } catch {
-        Log.shared.error("Failed to refetch user info \(error)")
+      await refetchChatViewAsync()
+    }
+  }
+
+  /// Ensure chat is loaded, if not fetch it
+  public func ensureChat() async -> Chat? {
+    if let chatItem, let chat = chatItem.chat {
+      return chat
+    } else {
+      await refetchChatViewAsync()
+      await MainActor.run {
+        fetchChat()
       }
+      return chatItem?.chat
     }
   }
 }
