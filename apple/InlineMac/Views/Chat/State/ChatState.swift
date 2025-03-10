@@ -2,6 +2,10 @@ import Combine
 import Foundation
 import InlineKit
 
+enum MessageListAction {
+  case scrollToMsg(Int64)
+}
+
 class ChatState {
   struct ChatStateData: Codable {
     var replyingToMsgId: Int64?
@@ -14,6 +18,7 @@ class ChatState {
   // MARK: - State
 
   private var data: ChatStateData
+  private var highlightedMsgId: Int64?
 
   public var replyingToMsgId: Int64? {
     data.replyingToMsgId
@@ -28,6 +33,10 @@ class ChatState {
     if let loadedData = load() {
       data = loadedData
     }
+  }
+
+  public func highlight(msgId: Int64) {
+    highlightedMsgId = msgId
   }
 
   public func setReplyingToMsgId(_ id: Int64) {
