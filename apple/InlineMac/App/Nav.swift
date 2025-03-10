@@ -34,6 +34,7 @@ struct NavEntry: Hashable, Codable, Equatable {
 }
 
 /// Manages navigation per window
+@MainActor
 class Nav: ObservableObject {
   static let main = Nav()
 
@@ -103,7 +104,6 @@ class Nav: ObservableObject {
 }
 
 // MARK: - Navigation APIs
-
 extension Nav {
   @MainActor public func openSpace(_ spaceId: Int64) {
     // TODO: Implement a caching for last viewed route in that space and restore that instead of opening .empty
@@ -218,9 +218,9 @@ extension Nav {
       history = if let navEntry = state.lastEntry { [navEntry] } else { [] }
 
       // we may need to do this sync
-      Task(priority: .userInitiated) { @MainActor in
-        reflectHistoryChange()
-      }
+      // Task(priority: .userInitiated) { @MainActor in
+      reflectHistoryChange()
+      // }
     } catch {
       Log.shared.error("Failed to load navigation state: \(error.localizedDescription)")
       // If loading fails, reset to default state
