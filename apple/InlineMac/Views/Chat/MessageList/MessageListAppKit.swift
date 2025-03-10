@@ -10,6 +10,7 @@ class MessageListAppKit: NSViewController {
   private var chatId: Int64 { chat?.id ?? 0 }
   private var viewModel: MessagesProgressiveViewModel
   private var messages: [FullMessage] { viewModel.messages }
+  private var state: ChatState
 
   private let log = Log.scoped("MessageListAppKit", enableTracing: false)
   private let sizeCalculator = MessageSizeCalculator.shared
@@ -33,13 +34,19 @@ class MessageListAppKit: NSViewController {
   // Debugging
   private var debug_slowAnimation = false
 
-  init(peerId: Peer, chat: Chat?) {
+  init(peerId: Peer, chat: Chat) {
     self.peerId = peerId
     self.chat = chat
     viewModel = MessagesProgressiveViewModel(peer: peerId)
+    state = ChatsManager
+      .get(
+        for: peerId,
+        chatId: chat.id
+      )
 
     super.init(nibName: nil, bundle: nil)
 
+    // observe data
     viewModel.observe { [weak self] update in
       self?.applyUpdate(update)
 
@@ -47,6 +54,9 @@ class MessageListAppKit: NSViewController {
         self?.updateUnreadIfNeeded()
       }
     }
+
+    // observe events
+    // TODO
   }
 
   @available(*, unavailable)

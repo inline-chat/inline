@@ -57,9 +57,7 @@ class ContentViewController: NSViewController {
 
       case let .chat(peer):
         let chatView = ChatViewAppKit(peerId: peer, dependencies: dependencies)
-        chatView
-          .update(viewModel: FullChatViewModel(db: dependencies.database, peer: peer))
-        addRouteSubview(chatView)
+        addRouteSubview(chatView.view, chatView)
 
       case .createSpace:
         let createSpaceVC = CreateSpaceViewController(dependencies: dependencies)

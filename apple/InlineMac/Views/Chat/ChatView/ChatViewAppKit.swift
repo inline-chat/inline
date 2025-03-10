@@ -1,181 +1,249 @@
 import AppKit
+import Cocoa
 import Combine
 import InlineKit
 import SwiftUI
 
-class ChatViewAppKit: NSView {
-  var peerId: Peer
-  var dependencies: AppDependencies
+enum ChatViewError: Error {
+  case failedToLoad
+}
 
-  private var messageList: MessageListAppKit
-  private var compose: ComposeAppKit
+class ChatViewAppKit: NSViewController {
+  let peerId: Peer
+  let dependencies: AppDependencies
+  private var viewModel: FullChatViewModel
+
+  private enum State {
+    case initial(Chat?)
+    case loading
+    case loaded(Chat)
+    case error(Error)
+  }
+
+  private var state: State {
+    didSet { updateState() }
+  }
+
+  // Child controllers
+  private var messageListVC: MessageListAppKit?
+  private var compose: ComposeAppKit?
+  private var spinnerVC: NSHostingController<SpinnerView>?
+  private var errorVC: NSHostingController<ErrorView>?
+
   private var didInitialRefetch = false
-  private var viewModel: FullChatViewModel? {
-    didSet {
-      guard !didInitialRefetch else { return }
-      // Update message list
-      viewModel?.refetchChatView()
-      didInitialRefetch = true
-    }
-  }
 
-  private var chat: Chat? // TODO: get rid of ?
-
-  override var acceptsFirstResponder: Bool {
-    true
-  }
-
-  private func createViews() {
-    setupView()
-  }
-
-  init(peerId: Peer, dependencies: AppDependencies) {
+  init(peerId: Peer, chat: Chat? = nil, dependencies: AppDependencies) {
     self.peerId = peerId
     self.dependencies = dependencies
+    viewModel = FullChatViewModel(db: dependencies.database, peer: peerId)
+    state = .initial(viewModel.chat)
+    super.init(nibName: nil, bundle: nil)
 
-    chat = try? Chat.getByPeerId(peerId: peerId)
-
-    messageList = MessageListAppKit(peerId: peerId, chat: chat)
-    compose = ComposeAppKit(peerId: peerId, messageList: messageList, chat: chat, dependencies: dependencies)
-
-    super.init(frame: .zero)
-    setupView()
-    setupDragAndDrop()
+    // Refetch
+    viewModel.refetchChatView()
   }
 
   @available(*, unavailable)
-  required init(coder: NSCoder) {
+  required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private var composeView: NSView {
-    compose
+  override func loadView() {
+    view = ChatDropView()
+    view.wantsLayer = true
   }
 
-  private var messageListView: NSView {
-    messageList.view
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    setupDragAndDrop()
+    transitionFromInitialState()
   }
 
-  private func setupView() {
-    // Performance
-    wantsLayer = true
-    layerContentsRedrawPolicy = .onSetNeedsDisplay
-    layer?.drawsAsynchronously = true
+  private func transitionFromInitialState() {
+    switch state {
+      case let .initial(chat):
+        if let chat {
+          state = .loaded(chat)
+        } else {
+          state = .loading
+          fetchChat()
+        }
+      default: break
+    }
+  }
 
-    // Enable Auto Layout for the main view
-    translatesAutoresizingMaskIntoConstraints = false
-    messageListView.translatesAutoresizingMaskIntoConstraints = false
-    composeView.translatesAutoresizingMaskIntoConstraints = false
+  private func updateState() {
+    clearCurrentViews()
 
-    addSubview(messageListView)
-    addSubview(composeView)
+    switch state {
+      case .initial:
+        break // Handled in transitionFromInitialState
+      case .loading:
+        showSpinner()
+      case let .loaded(chat):
+        setupChatComponents(chat: chat)
+      case let .error(error):
+        showError(error: error)
+    }
+  }
 
-    // initial height sync with msg list
-    compose.updateHeight()
+  // MARK: - Spinner
 
+  private func showSpinner() {
+    // Create SwiftUI spinner view
+    let spinnerView = SpinnerView()
+    let hostingController = NSHostingController(rootView: spinnerView)
+
+    // Add as child view controller
+    addChild(hostingController)
+    view.addSubview(hostingController.view)
+    hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      hostingController.view.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+      hostingController.view.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+    ])
+    spinnerVC = hostingController
+  }
+
+  private func showError(error: Error) {
+    // Create SwiftUI error view with retry action
+    let errorView = ErrorView(
+      errorMessage: error.localizedDescription,
+      retryAction: { [weak self] in
+        self?.state = .loading
+        self?.fetchChat()
+      }
+    )
+
+    let hostingController = NSHostingController(rootView: errorView)
+
+    // Add as child view controller
+    addChild(hostingController)
+    view.addSubview(hostingController.view)
+    hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      hostingController.view.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+      hostingController.view.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+    ])
+
+    errorVC = hostingController
+  }
+
+  private func setupChatComponents(chat: Chat) {
+    // Message List
+    let messageListVC = MessageListAppKit(peerId: peerId, chat: chat)
+    addChild(messageListVC)
+    view.addSubview(messageListVC.view)
+    messageListVC.view.translatesAutoresizingMaskIntoConstraints = false
+
+    self.messageListVC = messageListVC
+
+    // Compose
+    let compose = ComposeAppKit(
+      peerId: peerId,
+      messageList: messageListVC,
+      chat: chat,
+      dependencies: dependencies
+    )
+    view.addSubview(compose)
+    compose.translatesAutoresizingMaskIntoConstraints = false
+    self.compose = compose
+
+    // Layout
     NSLayoutConstraint.activate([
       // messageList
-      messageListView.topAnchor.constraint(equalTo: topAnchor),
-      messageListView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      messageListView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      messageListView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      messageListVC.view.topAnchor.constraint(equalTo: view.topAnchor),
+      messageListVC.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      messageListVC.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      messageListVC.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
       // compose
-      composeView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      composeView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      composeView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      compose.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+      compose.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      compose.trailingAnchor.constraint(equalTo: view.trailingAnchor),
     ])
+
+    // Initial height sync
+    compose.updateHeight()
   }
 
-  // @deprecated
-  func update(messages: [FullMessage]) {}
-
-  func update(viewModel: FullChatViewModel) {
-    self.viewModel = viewModel
-    // Update compose
-    compose.update(viewModel: viewModel)
-  }
-}
-
-// MARK: Drag
-
-extension ChatViewAppKit {
-  private func setupDragAndDrop() {
-    // Register for drag types
-    registerForDraggedTypes([
-      .fileURL,
-      .tiff,
-      .png,
-      NSPasteboard.PasteboardType("public.image"), // Generic image type
-      NSPasteboard.PasteboardType("public.file-url"), // Generic file URL
-    ])
-  }
-
-  // Called when the drag enters the view
-  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-    print("dragging entered")
-    // Check if the drag contains acceptable types
-    if checkForValidDraggedItems(sender) {
-      return .copy
+  private func fetchChat() {
+    Task {
+      do {
+        if let chat = try? await viewModel.ensureChat() {
+          await MainActor.run {
+            state = .loaded(chat)
+          }
+        } else {
+          await MainActor.run {
+            state = .error(ChatViewError.failedToLoad)
+          }
+        }
+      } catch {
+        await MainActor.run {
+          state = .error(error)
+        }
+      }
     }
-    return []
   }
 
-  override func draggingExited(_ sender: NSDraggingInfo?) {
-    print("Dragging exited")
+  private func clearCurrentViews() {
+    // Remove hosting view controllers
+    for child in children {
+      child.view.removeFromSuperview()
+      child.removeFromParent()
+    }
+
+    // Remove any non-controller views
+    messageListVC?.view.removeFromSuperview()
+    compose?.removeFromSuperview()
+
+    // Reset all references
+    spinnerVC = nil
+    errorVC = nil
+    messageListVC = nil
+    compose = nil
   }
 
-//  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-//    checkForValidDraggedItems(sender) ? .copy : []
-//  }
+  // MARK: - Drag and Drop
 
-  // Called when the drag is released
-  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+  private func setupDragAndDrop() {
+    guard let dropView = view as? ChatDropView else { return }
+    dropView.dropHandler = { [weak self] sender in
+      guard let self else { return false }
+      return handleDrop(sender)
+    }
+  }
+
+  private func handleDrop(_ sender: NSDraggingInfo) -> Bool {
     let pasteboard = sender.draggingPasteboard
 
-    // Try to get URLs first
+    // Handle URLs (files)
     if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
       for url in urls {
-        // if PDF, handle as file
+        // If PDF, handle as file
         if url.pathExtension == "pdf" {
-          handleDroppedFile(url)
+          compose?.handleFileDrop([url])
           continue
         }
-        
+
+        // Try to load as image
         if let image = NSImage(contentsOf: url) {
-          handleDroppedImage(image)
+          compose?.handleImageDropOrPaste(image)
           continue
         }
 
-        // Handle file drop
-        handleDroppedFile(url)
-        continue
+        // Otherwise handle as generic file
+        compose?.handleFileDrop([url])
       }
-
       return true
     }
 
-    // Try to get image data
+    // Handle images directly
     if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
        let image = images.first
     {
-      handleDroppedImage(image)
-      return true
-    }
-
-    return false
-  }
-
-  private func checkForValidDraggedItems(_ sender: NSDraggingInfo) -> Bool {
-    // Check for files
-    if sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self, NSImage.self], options: nil) {
-      return true
-    }
-
-    // Check for images
-    if sender.draggingPasteboard.data(forType: .tiff) != nil ||
-      sender.draggingPasteboard.data(forType: .png) != nil
-    {
+      compose?.handleImageDropOrPaste(image)
       return true
     }
 
@@ -184,11 +252,11 @@ extension ChatViewAppKit {
 
   // FILE DROPPED
   private func handleDroppedFile(_ url: URL) {
-    compose.handleFileDrop([url])
+    compose?.handleFileDrop([url])
   }
 
   // IMAGE DROPPED
   private func handleDroppedImage(_ image: NSImage) {
-    compose.handleImageDropOrPaste(image)
+    compose?.handleImageDropOrPaste(image)
   }
 }
