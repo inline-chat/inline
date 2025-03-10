@@ -23,6 +23,8 @@ class EmbeddedMessageView: NSView {
 
   private var kind: Kind
 
+  private var message: Message?
+
   private var senderFont: NSFont {
     .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
   }
@@ -89,9 +91,8 @@ class EmbeddedMessageView: NSView {
     wantsLayer = true
     layer?.cornerRadius = Constants.cornerRadius
     layer?.masksToBounds = true
-    
-    translatesAutoresizingMaskIntoConstraints = false
 
+    translatesAutoresizingMaskIntoConstraints = false
 
     addSubview(rectangleView)
     addSubview(nameLabel)
@@ -100,7 +101,7 @@ class EmbeddedMessageView: NSView {
     NSLayoutConstraint.activate([
       // Height
       heightAnchor.constraint(equalToConstant: Constants.height),
-      
+
       // Rectangle view
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
       rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth),
@@ -128,9 +129,23 @@ class EmbeddedMessageView: NSView {
         equalTo: bottomAnchor, constant: -Constants.verticalPadding
       ),
     ])
+
+    let clickGesture = NSClickGestureRecognizer(
+      target: self,
+      action: #selector(handleTap)
+    )
+    addGestureRecognizer(clickGesture)
+  }
+  
+  @objc func handleTap(_ gesture: NSClickGestureRecognizer) {
+    guard let message = message else { return }
+    
+    
   }
 
   func update(with message: Message, from: User, file: File?) {
+    self.message = message
+
     let senderName = from.fullName
     nameLabel.stringValue = switch kind {
       case .replyInMessage:

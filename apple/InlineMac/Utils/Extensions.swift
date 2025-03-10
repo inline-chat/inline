@@ -293,3 +293,13 @@ public func deg2rad(_ number: Float) -> Float {
 public func rad2deg(_ number: Float) -> Float {
   number * 180.0 / .pi
 }
+
+extension NSViewController {
+  func centerInSuperview() -> [NSLayoutConstraint] {
+    guard let superview = view.superview else { return [] }
+    return [
+      view.centerXAnchor.constraint(equalTo: superview.centerXAnchor),
+      view.centerYAnchor.constraint(equalTo: superview.centerYAnchor),
+    ]
+  }
+}
