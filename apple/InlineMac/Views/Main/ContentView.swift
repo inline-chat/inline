@@ -21,9 +21,11 @@ class ContentViewController: NSViewController {
 
     // move to did load?
     switchToRoute(dependencies.nav.currentRoute)
-    dependencies.nav.currentRoutePublisher.sink { [weak self] route in
-      self?.switchToRoute(route)
-    }.store(in: &cancellables)
+    dependencies.nav.currentRoutePublisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] route in
+        self?.switchToRoute(route)
+      }.store(in: &cancellables)
   }
 
   @available(*, unavailable)

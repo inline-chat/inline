@@ -25,6 +25,10 @@ public enum RealtimeAPIState: Sendable {
   }
 }
 
+/// Events emitted by the Realtime API
+///
+/// Currently only tracks the state of the API, but could be extended to
+/// include other events in the future.
 public enum RealtimeAPIEvent: Sendable {
   case stateUpdate(state: RealtimeAPIState)
 }
