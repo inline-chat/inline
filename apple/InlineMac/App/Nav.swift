@@ -77,6 +77,7 @@ class Nav: ObservableObject {
     loadState()
   }
 
+  @MainActor
   private func reflectHistoryChange() {
     // Update can go back
     let nextCanGoBack = history.count > 1 // below 1 must be go with esc
@@ -104,7 +105,7 @@ class Nav: ObservableObject {
 // MARK: - Navigation APIs
 
 extension Nav {
-  public func openSpace(_ spaceId: Int64) {
+  @MainActor public func openSpace(_ spaceId: Int64) {
     // TODO: Implement a caching for last viewed route in that space and restore that instead of opening .empty
     let entry = NavEntry(route: .empty, spaceId: spaceId)
     history.append(entry)
@@ -112,7 +113,7 @@ extension Nav {
     reflectHistoryChange()
   }
 
-  public func openHome() {
+  @MainActor public func openHome() {
     // TODO: Implement a caching for last viewed route in home
     let entry = NavEntry(route: .empty, spaceId: nil)
     history.append(entry)
@@ -124,7 +125,7 @@ extension Nav {
     // optimistic
     upcomingRoute = route
 
-    Task(priority: .userInitiated) { [weak self] in
+    Task(priority: .userInitiated) { @MainActor [weak self] in
       guard let self else { return }
       if let last = history.last, last.route == route, last.spaceId == currentSpaceId {
         // Skip opening duplicate routes
@@ -146,7 +147,7 @@ extension Nav {
     }
   }
 
-  public func goBack() {
+  @MainActor public func goBack() {
     print("goBack")
     print("history: \(history)")
     guard history.count > 0 else { return }
@@ -157,7 +158,7 @@ extension Nav {
     reflectHistoryChange()
   }
 
-  public func goForward() {
+  @MainActor public func goForward() {
     guard forwardHistory.count >= 1 else { return }
 
     let current = forwardHistory.removeLast()
@@ -166,7 +167,7 @@ extension Nav {
     reflectHistoryChange()
   }
 
-  public func handleEsc() {
+  @MainActor public func handleEsc() {
     if history.count == 1 {
       history = []
       forwardHistory = []
@@ -216,7 +217,10 @@ extension Nav {
       // Update state
       history = if let navEntry = state.lastEntry { [navEntry] } else { [] }
 
-      reflectHistoryChange()
+      // we may need to do this sync
+      Task(priority: .userInitiated) { @MainActor in
+        reflectHistoryChange()
+      }
     } catch {
       Log.shared.error("Failed to load navigation state: \(error.localizedDescription)")
       // If loading fails, reset to default state
@@ -228,7 +232,9 @@ extension Nav {
   func reset() {
     history = []
 
-    reflectHistoryChange()
+    Task { @MainActor in
+      reflectHistoryChange()
+    }
 
     // Delete persisted state file
     try? FileManager.default.removeItem(at: stateFileURL)

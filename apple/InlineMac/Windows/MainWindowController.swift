@@ -149,7 +149,7 @@ class MainWindowController: NSWindowController {
 
   private var cancellables: Set<AnyCancellable> = []
   private func subscribe() {
-    dependencies.viewModel.$topLevelRoute.sink { route in
+    dependencies.viewModel.$topLevelRoute.receive(on: DispatchQueue.main).sink { route in
       self.log.debug("Top level route changed: \(route)")
 
       // Prevent re-open
@@ -162,22 +162,26 @@ class MainWindowController: NSWindowController {
       }
     }.store(in: &cancellables)
 
-    dependencies.nav.currentRoutePublisher.sink { [weak self] route in
-      guard let self else { return }
-      guard topLevelRoute == .main else { return }
+    dependencies.nav.currentRoutePublisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] route in
+        guard let self else { return }
+        guard topLevelRoute == .main else { return }
 
-      // Make sure this is called with the right route. Probably in sink we don't have latest value yet
-      reloadToolbar()
-      setupWindowFor(route: route)
-    }.store(in: &cancellables)
+        // Make sure this is called with the right route. Probably in sink we don't have latest value yet
+        reloadToolbar()
+        setupWindowFor(route: route)
+      }.store(in: &cancellables)
 
-    dependencies.nav.canGoBackPublisher.sink { [weak self] value in
-      self?.navBackButton?.isEnabled = value
-    }.store(in: &cancellables)
+    dependencies.nav.canGoBackPublisher
+      .receive(on: DispatchQueue.main).sink { [weak self] value in
+        self?.navBackButton?.isEnabled = value
+      }.store(in: &cancellables)
 
-    dependencies.nav.canGoForwardPublisher.sink { [weak self] value in
-      self?.navForwardButton?.isEnabled = value
-    }.store(in: &cancellables)
+    dependencies.nav.canGoForwardPublisher
+      .receive(on: DispatchQueue.main).sink { [weak self] value in
+        self?.navForwardButton?.isEnabled = value
+      }.store(in: &cancellables)
   }
 
   @available(*, unavailable)
