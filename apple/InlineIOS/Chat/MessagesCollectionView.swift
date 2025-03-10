@@ -9,7 +9,7 @@ class MessagesCollectionView: UICollectionView {
   private var chatId: Int64
   private var spaceId: Int64
   private var coordinator: Coordinator
-//  private var imagePrefetchDataSource: ImagePrefetchDataSource?
+  private var visibleMessagesPrefetchTimer: Timer?
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
     self.peerId = peerId
@@ -45,21 +45,50 @@ class MessagesCollectionView: UICollectionView {
     coordinator.setupDataSource(self)
     setupObservers()
 
+    setupImagePrefetching()
+
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(orientationDidChange),
       name: UIDevice.orientationDidChangeNotification,
       object: nil
     )
-
-//    let prefetchDS = ImagePrefetchDataSource(coordinator: coordinator)
-//    imagePrefetchDataSource = prefetchDS
-//    prefetchDataSource = prefetchDS
-//    prefetchDS.prefetchIfNeeded()
   }
 
   override func didMoveToWindow() {
     updateContentInsets()
+  }
+
+  private func setupImagePrefetching() {
+    visibleMessagesPrefetchTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+      self?.prefetchImagesForVisibleMessages()
+    }
+  }
+
+  private func prefetchImagesForVisibleMessages() {
+    let visibleMessages = indexPathsForVisibleItems.compactMap { indexPath -> FullMessage? in
+      guard indexPath.item < coordinator.messages.count else { return nil }
+      return coordinator.messages[indexPath.item]
+    }
+
+    // Get upcoming messages (next 10-15 messages after visible ones)
+    let lastVisibleIndex = indexPathsForVisibleItems.map { $0.item }.max() ?? 0
+    let upcomingRange = (lastVisibleIndex + 1) ..< min(lastVisibleIndex + 15, coordinator.messages.count)
+    let upcomingMessages = upcomingRange.map { coordinator.messages[$0] }
+
+    // Combine visible and upcoming messages for prefetching
+    let messagesToPrefetch = visibleMessages + upcomingMessages
+
+    // Only prefetch messages with photos
+    let messagesWithPhotos = messagesToPrefetch.filter { $0.photoInfo != nil }
+
+    if !messagesWithPhotos.isEmpty {
+      ImagePrefetcher.shared.prefetchImages(for: messagesWithPhotos)
+    }
+  }
+
+  deinit {
+    visibleMessagesPrefetchTimer?.invalidate()
   }
 
   func scrollToBottom() {
