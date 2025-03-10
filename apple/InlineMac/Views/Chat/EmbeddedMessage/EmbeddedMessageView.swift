@@ -136,11 +136,14 @@ class EmbeddedMessageView: NSView {
     )
     addGestureRecognizer(clickGesture)
   }
-  
+
   @objc func handleTap(_ gesture: NSClickGestureRecognizer) {
-    guard let message = message else { return }
-    
-    
+    guard let message else { return }
+
+    let messageId = message.messageId
+    let chatState = ChatsManager.shared.get(for: message.peerId, chatId: message.chatId)
+
+    chatState.scrollTo(msgId: messageId)
   }
 
   func update(with message: Message, from: User, file: File?) {
