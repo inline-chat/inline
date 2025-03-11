@@ -11,7 +11,7 @@ import { creationDate } from "./common"
 export const reactions = pgTable(
   "reactions",
   {
-    id: serial().primaryKey(),
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
 
     messageId: integer("message_id").notNull(),
     chatId: integer("chat_id")

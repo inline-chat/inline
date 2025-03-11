@@ -8,6 +8,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { deleteMessage } from "@in/server/realtime/handlers/messages.deleteMessage"
 import { sendMessage } from "@in/server/realtime/handlers/messages.sendMessage"
 import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHistory"
+import { addReaction } from "./messages.addReactions"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -44,6 +45,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await getChatHistory(call.input.getChatHistory, handlerContext)
       return { oneofKind: "getChatHistory", getChatHistory: result }
+    }
+
+    case Method.ADD_REACTION: {
+      if (call.input.oneofKind !== "addReaction") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await addReaction(call.input.addReaction, handlerContext)
+      return { oneofKind: "addReaction", addReaction: result }
     }
 
     default:
