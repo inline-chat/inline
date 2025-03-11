@@ -408,6 +408,113 @@ export interface Message {
      * @generated from protobuf field: optional MessageAttachments attachments = 13;
      */
     attachments?: MessageAttachments;
+    /**
+     * Reactions of the message
+     *
+     * @generated from protobuf field: optional MessageReactions reactions = 14;
+     */
+    reactions?: MessageReactions;
+}
+/**
+ * @generated from protobuf message MessageReactions
+ */
+export interface MessageReactions {
+    /**
+     * Reactions of the message
+     *
+     * @generated from protobuf field: repeated Reaction reactions = 1;
+     */
+    reactions: Reaction[];
+}
+/**
+ * @generated from protobuf message Reaction
+ */
+export interface Reaction {
+    /**
+     * Emoji of the reaction
+     *
+     * @generated from protobuf field: string emoji = 1;
+     */
+    emoji: string;
+    /**
+     * ID of the user who reacted
+     *
+     * @generated from protobuf field: int64 user_id = 2;
+     */
+    userId: bigint;
+    /**
+     * ID of the message that this reaction is for
+     *
+     * @generated from protobuf field: int64 message_id = 3;
+     */
+    messageId: bigint;
+    /**
+     * ID of the chat that this reaction is for
+     *
+     * @generated from protobuf field: int64 chat_id = 4;
+     */
+    chatId: bigint;
+    /**
+     * Date of the reaction
+     *
+     * @generated from protobuf field: int64 date = 5;
+     */
+    date: bigint;
+}
+/**
+ * Add reaction input
+ *
+ * @generated from protobuf message AddReactionInput
+ */
+export interface AddReactionInput {
+    /**
+     * Emoji of the reaction
+     *
+     * @generated from protobuf field: string emoji = 1;
+     */
+    emoji: string;
+    /**
+     * ID of the message that this reaction is for
+     *
+     * @generated from protobuf field: int64 message_id = 2;
+     */
+    messageId: bigint;
+    /**
+     * ID of the peer that this reaction is for
+     *
+     * @generated from protobuf field: InputPeer peer_id = 3;
+     */
+    peerId?: InputPeer;
+}
+/**
+ * Add reaction result
+ *
+ * @generated from protobuf message AddReactionResult
+ */
+export interface AddReactionResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * Remove reaction input
+ *
+ * @generated from protobuf message RemoveReactionInput
+ */
+export interface RemoveReactionInput {
+    /**
+     * @generated from protobuf field: int64 reaction_id = 1;
+     */
+    reactionId: bigint;
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 2;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: int64 message_id = 3;
+     */
+    messageId: bigint;
 }
 /**
  * @generated from protobuf message MessageAttachments
@@ -878,6 +985,12 @@ export interface RpcCall {
          */
         getChatHistory: GetChatHistoryInput;
     } | {
+        oneofKind: "addReaction";
+        /**
+         * @generated from protobuf field: AddReactionInput addReaction = 7;
+         */
+        addReaction: AddReactionInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -922,6 +1035,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetChatHistoryResult getChatHistory = 6;
          */
         getChatHistory: GetChatHistoryResult;
+    } | {
+        oneofKind: "addReaction";
+        /**
+         * @generated from protobuf field: AddReactionResult addReaction = 7;
+         */
+        addReaction: AddReactionResult;
     } | {
         oneofKind: undefined;
     };
@@ -1176,6 +1295,12 @@ export interface Update {
          */
         messageAttachment: UpdateMessageAttachment;
     } | {
+        oneofKind: "updateReaction";
+        /**
+         * @generated from protobuf field: UpdateReaction update_reaction = 11;
+         */
+        updateReaction: UpdateReaction;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1287,6 +1412,15 @@ export interface UpdateMessageAttachment {
     attachment?: MessageAttachment;
 }
 /**
+ * @generated from protobuf message UpdateReaction
+ */
+export interface UpdateReaction {
+    /**
+     * @generated from protobuf field: Reaction reaction = 1;
+     */
+    reaction?: Reaction;
+}
+/**
  * @generated from protobuf message UpdateUserStatus
  */
 export interface UpdateUserStatus {
@@ -1367,7 +1501,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_CHAT_HISTORY = 5;
      */
-    GET_CHAT_HISTORY = 5
+    GET_CHAT_HISTORY = 5,
+    /**
+     * @generated from protobuf enum value: ADD_REACTION = 6;
+     */
+    ADD_REACTION = 6
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -2400,7 +2538,8 @@ class Message$Type extends MessageType<Message> {
             { no: 10, name: "media", kind: "message", T: () => MessageMedia },
             { no: 11, name: "edit_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 12, name: "grouped_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 13, name: "attachments", kind: "message", T: () => MessageAttachments }
+            { no: 13, name: "attachments", kind: "message", T: () => MessageAttachments },
+            { no: 14, name: "reactions", kind: "message", T: () => MessageReactions }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -2458,6 +2597,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional MessageAttachments attachments */ 13:
                     message.attachments = MessageAttachments.internalBinaryRead(reader, reader.uint32(), options, message.attachments);
                     break;
+                case /* optional MessageReactions reactions */ 14:
+                    message.reactions = MessageReactions.internalBinaryRead(reader, reader.uint32(), options, message.reactions);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2509,6 +2651,9 @@ class Message$Type extends MessageType<Message> {
         /* optional MessageAttachments attachments = 13; */
         if (message.attachments)
             MessageAttachments.internalBinaryWrite(message.attachments, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageReactions reactions = 14; */
+        if (message.reactions)
+            MessageReactions.internalBinaryWrite(message.reactions, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2519,6 +2664,303 @@ class Message$Type extends MessageType<Message> {
  * @generated MessageType for protobuf message Message
  */
 export const Message = new Message$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageReactions$Type extends MessageType<MessageReactions> {
+    constructor() {
+        super("MessageReactions", [
+            { no: 1, name: "reactions", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Reaction }
+        ]);
+    }
+    create(value?: PartialMessage<MessageReactions>): MessageReactions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.reactions = [];
+        if (value !== undefined)
+            reflectionMergePartial<MessageReactions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageReactions): MessageReactions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Reaction reactions */ 1:
+                    message.reactions.push(Reaction.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageReactions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Reaction reactions = 1; */
+        for (let i = 0; i < message.reactions.length; i++)
+            Reaction.internalBinaryWrite(message.reactions[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageReactions
+ */
+export const MessageReactions = new MessageReactions$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Reaction$Type extends MessageType<Reaction> {
+    constructor() {
+        super("Reaction", [
+            { no: 1, name: "emoji", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Reaction>): Reaction {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.emoji = "";
+        message.userId = 0n;
+        message.messageId = 0n;
+        message.chatId = 0n;
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<Reaction>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Reaction): Reaction {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string emoji */ 1:
+                    message.emoji = reader.string();
+                    break;
+                case /* int64 user_id */ 2:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* int64 message_id */ 3:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* int64 chat_id */ 4:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 date */ 5:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Reaction, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string emoji = 1; */
+        if (message.emoji !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.emoji);
+        /* int64 user_id = 2; */
+        if (message.userId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.userId);
+        /* int64 message_id = 3; */
+        if (message.messageId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.messageId);
+        /* int64 chat_id = 4; */
+        if (message.chatId !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.chatId);
+        /* int64 date = 5; */
+        if (message.date !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Reaction
+ */
+export const Reaction = new Reaction$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AddReactionInput$Type extends MessageType<AddReactionInput> {
+    constructor() {
+        super("AddReactionInput", [
+            { no: 1, name: "emoji", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "peer_id", kind: "message", T: () => InputPeer }
+        ]);
+    }
+    create(value?: PartialMessage<AddReactionInput>): AddReactionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.emoji = "";
+        message.messageId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<AddReactionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AddReactionInput): AddReactionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string emoji */ 1:
+                    message.emoji = reader.string();
+                    break;
+                case /* int64 message_id */ 2:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* InputPeer peer_id */ 3:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AddReactionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string emoji = 1; */
+        if (message.emoji !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.emoji);
+        /* int64 message_id = 2; */
+        if (message.messageId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.messageId);
+        /* InputPeer peer_id = 3; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AddReactionInput
+ */
+export const AddReactionInput = new AddReactionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AddReactionResult$Type extends MessageType<AddReactionResult> {
+    constructor() {
+        super("AddReactionResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<AddReactionResult>): AddReactionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<AddReactionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AddReactionResult): AddReactionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AddReactionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AddReactionResult
+ */
+export const AddReactionResult = new AddReactionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RemoveReactionInput$Type extends MessageType<RemoveReactionInput> {
+    constructor() {
+        super("RemoveReactionInput", [
+            { no: 1, name: "reaction_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 3, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RemoveReactionInput>): RemoveReactionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.reactionId = 0n;
+        message.messageId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<RemoveReactionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RemoveReactionInput): RemoveReactionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 reaction_id */ 1:
+                    message.reactionId = reader.int64().toBigInt();
+                    break;
+                case /* InputPeer peer_id */ 2:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 message_id */ 3:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RemoveReactionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 reaction_id = 1; */
+        if (message.reactionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.reactionId);
+        /* InputPeer peer_id = 2; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* int64 message_id = 3; */
+        if (message.messageId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.messageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RemoveReactionInput
+ */
+export const RemoveReactionInput = new RemoveReactionInput$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageAttachments$Type extends MessageType<MessageAttachments> {
     constructor() {
@@ -3373,7 +3815,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 3, name: "getPeerPhoto", kind: "message", oneof: "input", T: () => GetPeerPhotoInput },
             { no: 4, name: "deleteMessages", kind: "message", oneof: "input", T: () => DeleteMessagesInput },
             { no: 5, name: "sendMessage", kind: "message", oneof: "input", T: () => SendMessageInput },
-            { no: 6, name: "getChatHistory", kind: "message", oneof: "input", T: () => GetChatHistoryInput }
+            { no: 6, name: "getChatHistory", kind: "message", oneof: "input", T: () => GetChatHistoryInput },
+            { no: 7, name: "addReaction", kind: "message", oneof: "input", T: () => AddReactionInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -3422,6 +3865,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getChatHistory: GetChatHistoryInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getChatHistory)
                     };
                     break;
+                case /* AddReactionInput addReaction */ 7:
+                    message.input = {
+                        oneofKind: "addReaction",
+                        addReaction: AddReactionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).addReaction)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3452,6 +3901,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetChatHistoryInput getChatHistory = 6; */
         if (message.input.oneofKind === "getChatHistory")
             GetChatHistoryInput.internalBinaryWrite(message.input.getChatHistory, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* AddReactionInput addReaction = 7; */
+        if (message.input.oneofKind === "addReaction")
+            AddReactionInput.internalBinaryWrite(message.input.addReaction, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3471,7 +3923,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 3, name: "getPeerPhoto", kind: "message", oneof: "result", T: () => GetPeerPhotoResult },
             { no: 4, name: "deleteMessages", kind: "message", oneof: "result", T: () => DeleteMessagesResult },
             { no: 5, name: "sendMessage", kind: "message", oneof: "result", T: () => SendMessageResult },
-            { no: 6, name: "getChatHistory", kind: "message", oneof: "result", T: () => GetChatHistoryResult }
+            { no: 6, name: "getChatHistory", kind: "message", oneof: "result", T: () => GetChatHistoryResult },
+            { no: 7, name: "addReaction", kind: "message", oneof: "result", T: () => AddReactionResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -3520,6 +3973,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getChatHistory: GetChatHistoryResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getChatHistory)
                     };
                     break;
+                case /* AddReactionResult addReaction */ 7:
+                    message.result = {
+                        oneofKind: "addReaction",
+                        addReaction: AddReactionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).addReaction)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3550,6 +4009,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetChatHistoryResult getChatHistory = 6; */
         if (message.result.oneofKind === "getChatHistory")
             GetChatHistoryResult.internalBinaryWrite(message.result.getChatHistory, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* AddReactionResult addReaction = 7; */
+        if (message.result.oneofKind === "addReaction")
+            AddReactionResult.internalBinaryWrite(message.result.addReaction, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4296,7 +4758,8 @@ class Update$Type extends MessageType<Update> {
             { no: 7, name: "delete_messages", kind: "message", oneof: "update", T: () => UpdateDeleteMessages },
             { no: 8, name: "update_compose_action", kind: "message", oneof: "update", T: () => UpdateComposeAction },
             { no: 9, name: "update_user_status", kind: "message", oneof: "update", T: () => UpdateUserStatus },
-            { no: 10, name: "message_attachment", kind: "message", oneof: "update", T: () => UpdateMessageAttachment }
+            { no: 10, name: "message_attachment", kind: "message", oneof: "update", T: () => UpdateMessageAttachment },
+            { no: 11, name: "update_reaction", kind: "message", oneof: "update", T: () => UpdateReaction }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -4353,6 +4816,12 @@ class Update$Type extends MessageType<Update> {
                         messageAttachment: UpdateMessageAttachment.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).messageAttachment)
                     };
                     break;
+                case /* UpdateReaction update_reaction */ 11:
+                    message.update = {
+                        oneofKind: "updateReaction",
+                        updateReaction: UpdateReaction.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).updateReaction)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4386,6 +4855,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateMessageAttachment message_attachment = 10; */
         if (message.update.oneofKind === "messageAttachment")
             UpdateMessageAttachment.internalBinaryWrite(message.update.messageAttachment, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateReaction update_reaction = 11; */
+        if (message.update.oneofKind === "updateReaction")
+            UpdateReaction.internalBinaryWrite(message.update.updateReaction, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4713,6 +5185,52 @@ class UpdateMessageAttachment$Type extends MessageType<UpdateMessageAttachment> 
  * @generated MessageType for protobuf message UpdateMessageAttachment
  */
 export const UpdateMessageAttachment = new UpdateMessageAttachment$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateReaction$Type extends MessageType<UpdateReaction> {
+    constructor() {
+        super("UpdateReaction", [
+            { no: 1, name: "reaction", kind: "message", T: () => Reaction }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateReaction>): UpdateReaction {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateReaction>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateReaction): UpdateReaction {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Reaction reaction */ 1:
+                    message.reaction = Reaction.internalBinaryRead(reader, reader.uint32(), options, message.reaction);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateReaction, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Reaction reaction = 1; */
+        if (message.reaction)
+            Reaction.internalBinaryWrite(message.reaction, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateReaction
+ */
+export const UpdateReaction = new UpdateReaction$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateUserStatus$Type extends MessageType<UpdateUserStatus> {
     constructor() {

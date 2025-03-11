@@ -163,6 +163,56 @@ message Message {
 
   // Attachments of the message
   optional MessageAttachments attachments = 13;
+
+  // Reactions of the message
+  optional MessageReactions reactions = 14;
+}
+
+message MessageReactions {
+  // Reactions of the message
+  repeated Reaction reactions = 1;
+  
+}
+
+message Reaction {
+  // Emoji of the reaction
+  string emoji = 1;
+
+  // ID of the user who reacted
+  int64 user_id = 2;
+
+  // ID of the message that this reaction is for
+  int64 message_id = 3;
+
+  // ID of the chat that this reaction is for
+  int64 chat_id = 4;
+
+  // Date of the reaction
+  int64 date = 5;
+}
+
+// Add reaction input
+message AddReactionInput {
+  // Emoji of the reaction
+  string emoji = 1;
+
+  // ID of the message that this reaction is for
+  int64 message_id = 2;
+
+  // ID of the peer that this reaction is for
+  InputPeer peer_id = 3;
+}
+
+// Add reaction result
+message AddReactionResult {
+  repeated Update updates = 1;
+}
+
+// Remove reaction input
+message RemoveReactionInput {
+  int64 reaction_id = 1;
+  InputPeer peer_id = 2;
+  int64 message_id = 3;
 }
 
 message MessageAttachments {
@@ -363,6 +413,7 @@ enum Method {
   GET_PEER_PHOTO = 3;
   DELETE_MESSAGES = 4;
   GET_CHAT_HISTORY = 5;
+  ADD_REACTION = 6;
 }
 
 message RpcCall {
@@ -373,6 +424,7 @@ message RpcCall {
     DeleteMessagesInput deleteMessages = 4;
     SendMessageInput sendMessage = 5;
     GetChatHistoryInput getChatHistory = 6;
+    AddReactionInput addReaction = 7;
   }
 }
 
@@ -385,6 +437,7 @@ message RpcResult {
     DeleteMessagesResult deleteMessages = 4;
     SendMessageResult sendMessage = 5;
     GetChatHistoryResult getChatHistory = 6;
+    AddReactionResult addReaction = 7;
   }
 }
 
@@ -482,6 +535,7 @@ message Update {
     UpdateComposeAction update_compose_action = 8;
     UpdateUserStatus update_user_status = 9;
     UpdateMessageAttachment message_attachment = 10;
+    UpdateReaction update_reaction = 11;
   }
 }
 
@@ -527,6 +581,10 @@ message UpdateComposeAction {
 
 message UpdateMessageAttachment {
   MessageAttachment attachment = 1;
+}
+
+message UpdateReaction {
+  Reaction reaction = 1;
 }
 
 message UpdateUserStatus {
