@@ -108,12 +108,6 @@ class MessageSizeCalculator {
 
     // Add file/photo/video sizes
     if hasMedia {
-      let maxMediaSize = CGSize(
-        width: Theme.messageMaxWidth,
-        height: 310.0
-      ) // prevent too big media
-      let minMediaSize = CGSize(width: 180.0, height: 20.0) // prevent too narrow media
-
       var width: CGFloat = 0
       var height: CGFloat = 0
 
@@ -124,55 +118,28 @@ class MessageSizeCalculator {
         let photo = photoInfo.bestPhotoSize()
         width = CGFloat(photo?.width ?? 0)
         height = CGFloat(photo?.height ?? 0)
+
+        log.debug("photo width \(width) height \(height)")
       }
 
       // /start photo
       if message.file?.fileType == .photo || message.photoInfo != nil {
-        // do we have width/height?
-        if width > 0, height > 0 {
-          let aspectRatio = CGFloat(width) / CGFloat(height)
-          var mediaWidth: CGFloat
-          var mediaHeight: CGFloat
+        photoSize = calculatePhotoSize(
+          width: width,
+          height: height,
+          parentAvailableWidth: parentAvailableWidth,
+          hasCaption: hasText
+        )
 
-          // for landscape
-          let maxAvailableWidth = min(maxMediaSize.width, parentAvailableWidth)
+        log.debug("photo width adjusted \(photoSize?.width) height \(photoSize?.height)")
 
-          if width > height {
-            mediaWidth = max(
-              minMediaSize.width,
-              min(CGFloat(width), maxAvailableWidth)
-            )
-            mediaHeight = mediaWidth / aspectRatio
-            if mediaHeight > maxMediaSize.height {
-              mediaHeight = maxMediaSize.height
-              mediaWidth = mediaHeight * aspectRatio
-            }
-          } else {
-            // for portrait
-            mediaHeight = max(
-              minMediaSize.height,
-              min(CGFloat(height), maxMediaSize.height)
-            )
-            mediaWidth = mediaHeight * aspectRatio
-            if mediaWidth > maxAvailableWidth {
-              mediaWidth = maxAvailableWidth
-              mediaHeight = mediaWidth / aspectRatio
-            }
-          }
-
-          photoSize = CGSize(width: mediaWidth, height: mediaHeight)
-        } else {
-          // use fallback width and height
-          photoSize = minMediaSize
-        }
         // /end photo
       } else {
-
         // todo file
         if hasDocument {
           documentSize = CGSize(width: 200, height: Theme.documentViewHeight)
         }
-        
+
         // todo video
       }
     }
@@ -184,7 +151,6 @@ class MessageSizeCalculator {
       // if we have photo, min available width is the photo width
       availableWidth = max(availableWidth, photoSize.width)
     }
-    
 
     // Highly Experimental:
     // So we get smooth bubble resize but less lag
@@ -272,7 +238,7 @@ class MessageSizeCalculator {
       if let photoSize {
         totalHeight += photoSize.height
       }
-      
+
       if let documentSize {
         totalHeight += documentSize.height
       }
@@ -354,6 +320,56 @@ class MessageSizeCalculator {
     log.trace("calculateSizeForText \(text) width \(width) resulting in rect \(textRect)")
 
     return CGSize(width: textWidth, height: textHeight)
+  }
+
+  func calculatePhotoSize(
+    width: CGFloat,
+    height: CGFloat,
+    parentAvailableWidth: CGFloat,
+    hasCaption: Bool
+  ) -> CGSize {
+    let maxMediaSize = CGSize(
+      width: min(320, parentAvailableWidth),
+      height: min(320, parentAvailableWidth)
+    )
+    let minMediaSize = CGSize(width: 40.0, height: 40.0)
+
+    guard width > 0, height > 0 else {
+      return minMediaSize
+    }
+
+    let aspectRatio = CGFloat(width) / CGFloat(height)
+    var mediaWidth: CGFloat
+    var mediaHeight: CGFloat
+
+    if !hasCaption {
+      if width < maxMediaSize.width, height < maxMediaSize.height {
+        mediaWidth = width
+        mediaHeight = height
+      } else {
+        mediaWidth = maxMediaSize.width
+        mediaHeight = mediaWidth / aspectRatio
+      }
+    }
+    // Has caption, maintain reasonable size
+
+    // handle small images
+    if width < maxMediaSize.width, height < maxMediaSize.height {
+      mediaWidth = maxMediaSize.width
+      mediaHeight = height
+      return CGSize(width: mediaWidth, height: mediaHeight)
+    }
+
+    // default
+    mediaWidth = maxMediaSize.width
+    mediaHeight = mediaWidth / aspectRatio
+
+    if mediaHeight > maxMediaSize.height {
+      mediaHeight = maxMediaSize.height
+      mediaWidth = maxMediaSize.width
+    }
+
+    return CGSize(width: mediaWidth, height: mediaHeight)
   }
 }
 
