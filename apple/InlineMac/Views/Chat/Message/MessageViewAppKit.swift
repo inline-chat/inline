@@ -392,6 +392,7 @@ class MessageViewAppKit: NSView {
   private var textViewWidthConstraint: NSLayoutConstraint?
   private var textViewHeightConstraint: NSLayoutConstraint?
   private var photoViewHeightConstraint: NSLayoutConstraint?
+  private var photoViewWidthConstraint: NSLayoutConstraint?
   private var contentViewWidthConstraint: NSLayoutConstraint!
 
   private func setupConstraints() {
@@ -432,17 +433,18 @@ class MessageViewAppKit: NSView {
 
     // MARK: - Content Layout Constraints
 
+    Log.shared.debug("contentWidth: \(contentWidth)")
     contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: contentWidth)
-
+    contentViewWidthConstraint.priority = .defaultHigh
     if hasText {
-      textViewWidthConstraint = textView.widthAnchor
-        .constraint(greaterThanOrEqualToConstant: textWidth)
+      // textViewWidthConstraint = textView.widthAnchor
+      // .constraint(greaterThanOrEqualToConstant: textWidth)
       textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: props.textHeight ?? 0)
 
       NSLayoutConstraint.activate([
         // Text view
         textViewHeightConstraint!,
-        textViewWidthConstraint!,
+        // textViewWidthConstraint!,
         textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
         textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
       ])
@@ -465,19 +467,26 @@ class MessageViewAppKit: NSView {
 
     ])
 
-    if hasLegacyPhoto, let photoHeight = props.photoHeight {
+    if hasLegacyPhoto, let photoHeight = props.photoHeight, let photoWidth = props.photoWidth {
       photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photoHeight)
+      photoViewWidthConstraint = photoView.widthAnchor
+        .constraint(greaterThanOrEqualToConstant: photoWidth)
       NSLayoutConstraint.activate(
         [
+          photoViewWidthConstraint!,
           photoViewHeightConstraint!,
         ]
       )
     }
-    if hasPhoto, let photoHeight = props.photoHeight {
+    if hasPhoto, let photoHeight = props.photoHeight, let photoWidth = props.photoWidth {
       photoViewHeightConstraint = newPhotoView.heightAnchor.constraint(equalToConstant: photoHeight)
+      photoViewWidthConstraint = newPhotoView.widthAnchor
+        .constraint(greaterThanOrEqualToConstant: photoWidth)
+      Log.shared.debug("photo view width: \(photoWidth) height: \(photoHeight) msg id: \(message.text)")
       NSLayoutConstraint.activate(
         [
           photoViewHeightConstraint!,
+          photoViewWidthConstraint!,
         ]
       )
     }
@@ -737,9 +746,12 @@ class MessageViewAppKit: NSView {
     // photo size
     if hasPhotoSizeChanged,
        let photoViewHeightConstraint,
-       let photoHeight = props.photoHeight
+       let photoViewWidthConstraint,
+       let photoHeight = props.photoHeight,
+       let photoWidth = props.photoWidth
     {
       photoViewHeightConstraint.constant = photoHeight
+      photoViewWidthConstraint.constant = photoWidth
     }
   }
 
