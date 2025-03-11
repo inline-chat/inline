@@ -29,6 +29,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getPeerPhoto // = 3
   case deleteMessages // = 4
   case getChatHistory // = 5
+  case addReaction // = 6
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -43,6 +44,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 3: self = .getPeerPhoto
     case 4: self = .deleteMessages
     case 5: self = .getChatHistory
+    case 6: self = .addReaction
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -55,6 +57,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getPeerPhoto: return 3
     case .deleteMessages: return 4
     case .getChatHistory: return 5
+    case .addReaction: return 6
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -67,6 +70,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getPeerPhoto,
     .deleteMessages,
     .getChatHistory,
+    .addReaction,
   ]
 
 }
@@ -653,11 +657,127 @@ public struct Message: @unchecked Sendable {
   /// Clears the value of `attachments`. Subsequent reads from it will return its default value.
   public mutating func clearAttachments() {_uniqueStorage()._attachments = nil}
 
+  /// Reactions of the message
+  public var reactions: MessageReactions {
+    get {return _storage._reactions ?? MessageReactions()}
+    set {_uniqueStorage()._reactions = newValue}
+  }
+  /// Returns true if `reactions` has been explicitly set.
+  public var hasReactions: Bool {return _storage._reactions != nil}
+  /// Clears the value of `reactions`. Subsequent reads from it will return its default value.
+  public mutating func clearReactions() {_uniqueStorage()._reactions = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct MessageReactions: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Reactions of the message
+  public var reactions: [Reaction] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Reaction: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Emoji of the reaction
+  public var emoji: String = String()
+
+  /// ID of the user who reacted
+  public var userID: Int64 = 0
+
+  /// ID of the message that this reaction is for
+  public var messageID: Int64 = 0
+
+  /// ID of the chat that this reaction is for
+  public var chatID: Int64 = 0
+
+  /// Date of the reaction
+  public var date: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Add reaction input
+public struct AddReactionInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Emoji of the reaction
+  public var emoji: String = String()
+
+  /// ID of the message that this reaction is for
+  public var messageID: Int64 = 0
+
+  /// ID of the peer that this reaction is for
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+/// Add reaction result
+public struct AddReactionResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Remove reaction input
+public struct RemoveReactionInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var reactionID: Int64 = 0
+
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var messageID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
 }
 
 public struct MessageAttachments: Sendable {
@@ -1228,6 +1348,14 @@ public struct RpcCall: Sendable {
     set {input = .getChatHistory(newValue)}
   }
 
+  public var addReaction: AddReactionInput {
+    get {
+      if case .addReaction(let v)? = input {return v}
+      return AddReactionInput()
+    }
+    set {input = .addReaction(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -1236,6 +1364,7 @@ public struct RpcCall: Sendable {
     case deleteMessages(DeleteMessagesInput)
     case sendMessage(SendMessageInput)
     case getChatHistory(GetChatHistoryInput)
+    case addReaction(AddReactionInput)
 
   }
 
@@ -1291,6 +1420,14 @@ public struct RpcResult: Sendable {
     set {result = .getChatHistory(newValue)}
   }
 
+  public var addReaction: AddReactionResult {
+    get {
+      if case .addReaction(let v)? = result {return v}
+      return AddReactionResult()
+    }
+    set {result = .addReaction(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -1299,6 +1436,7 @@ public struct RpcResult: Sendable {
     case deleteMessages(DeleteMessagesResult)
     case sendMessage(SendMessageResult)
     case getChatHistory(GetChatHistoryResult)
+    case addReaction(AddReactionResult)
 
   }
 
@@ -1704,6 +1842,14 @@ public struct Update: Sendable {
     set {update = .messageAttachment(newValue)}
   }
 
+  public var updateReaction: UpdateReaction {
+    get {
+      if case .updateReaction(let v)? = update {return v}
+      return UpdateReaction()
+    }
+    set {update = .updateReaction(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -1714,6 +1860,7 @@ public struct Update: Sendable {
     case updateComposeAction(UpdateComposeAction)
     case updateUserStatus(UpdateUserStatus)
     case messageAttachment(UpdateMessageAttachment)
+    case updateReaction(UpdateReaction)
 
   }
 
@@ -1897,6 +2044,27 @@ public struct UpdateMessageAttachment: Sendable {
   fileprivate var _attachment: MessageAttachment? = nil
 }
 
+public struct UpdateReaction: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var reaction: Reaction {
+    get {return _reaction ?? Reaction()}
+    set {_reaction = newValue}
+  }
+  /// Returns true if `reaction` has been explicitly set.
+  public var hasReaction: Bool {return self._reaction != nil}
+  /// Clears the value of `reaction`. Subsequent reads from it will return its default value.
+  public mutating func clearReaction() {self._reaction = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _reaction: Reaction? = nil
+}
+
 public struct UpdateUserStatus: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -2013,6 +2181,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     3: .same(proto: "GET_PEER_PHOTO"),
     4: .same(proto: "DELETE_MESSAGES"),
     5: .same(proto: "GET_CHAT_HISTORY"),
+    6: .same(proto: "ADD_REACTION"),
   ]
 }
 
@@ -2952,6 +3121,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     11: .standard(proto: "edit_date"),
     12: .standard(proto: "grouped_id"),
     13: .same(proto: "attachments"),
+    14: .same(proto: "reactions"),
   ]
 
   fileprivate class _StorageClass {
@@ -2968,6 +3138,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _editDate: Int64? = nil
     var _groupedID: Int64? = nil
     var _attachments: MessageAttachments? = nil
+    var _reactions: MessageReactions? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -2995,6 +3166,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       _editDate = source._editDate
       _groupedID = source._groupedID
       _attachments = source._attachments
+      _reactions = source._reactions
     }
   }
 
@@ -3026,6 +3198,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 11: try { try decoder.decodeSingularInt64Field(value: &_storage._editDate) }()
         case 12: try { try decoder.decodeSingularInt64Field(value: &_storage._groupedID) }()
         case 13: try { try decoder.decodeSingularMessageField(value: &_storage._attachments) }()
+        case 14: try { try decoder.decodeSingularMessageField(value: &_storage._reactions) }()
         default: break
         }
       }
@@ -3077,6 +3250,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._attachments {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
       } }()
+      try { if let v = _storage._reactions {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -3099,10 +3275,227 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         if _storage._editDate != rhs_storage._editDate {return false}
         if _storage._groupedID != rhs_storage._groupedID {return false}
         if _storage._attachments != rhs_storage._attachments {return false}
+        if _storage._reactions != rhs_storage._reactions {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageReactions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageReactions"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "reactions"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.reactions) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.reactions.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.reactions, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageReactions, rhs: MessageReactions) -> Bool {
+    if lhs.reactions != rhs.reactions {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Reaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "Reaction"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "emoji"),
+    2: .standard(proto: "user_id"),
+    3: .standard(proto: "message_id"),
+    4: .standard(proto: "chat_id"),
+    5: .same(proto: "date"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.emoji) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.emoji.isEmpty {
+      try visitor.visitSingularStringField(value: self.emoji, fieldNumber: 1)
+    }
+    if self.userID != 0 {
+      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
+    }
+    if self.messageID != 0 {
+      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 3)
+    }
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 4)
+    }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Reaction, rhs: Reaction) -> Bool {
+    if lhs.emoji != rhs.emoji {return false}
+    if lhs.userID != rhs.userID {return false}
+    if lhs.messageID != rhs.messageID {return false}
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs.date != rhs.date {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension AddReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AddReactionInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "emoji"),
+    2: .standard(proto: "message_id"),
+    3: .standard(proto: "peer_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.emoji) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.emoji.isEmpty {
+      try visitor.visitSingularStringField(value: self.emoji, fieldNumber: 1)
+    }
+    if self.messageID != 0 {
+      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 2)
+    }
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AddReactionInput, rhs: AddReactionInput) -> Bool {
+    if lhs.emoji != rhs.emoji {return false}
+    if lhs.messageID != rhs.messageID {return false}
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension AddReactionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AddReactionResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AddReactionResult, rhs: AddReactionResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension RemoveReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RemoveReactionInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "reaction_id"),
+    2: .standard(proto: "peer_id"),
+    3: .standard(proto: "message_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.reactionID) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.reactionID != 0 {
+      try visitor.visitSingularInt64Field(value: self.reactionID, fieldNumber: 1)
+    }
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.messageID != 0 {
+      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RemoveReactionInput, rhs: RemoveReactionInput) -> Bool {
+    if lhs.reactionID != rhs.reactionID {return false}
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.messageID != rhs.messageID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -3830,6 +4223,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     4: .same(proto: "deleteMessages"),
     5: .same(proto: "sendMessage"),
     6: .same(proto: "getChatHistory"),
+    7: .same(proto: "addReaction"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -3904,6 +4298,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .getChatHistory(v)
         }
       }()
+      case 7: try {
+        var v: AddReactionInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .addReaction(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .addReaction(v)
+        }
+      }()
       default: break
       }
     }
@@ -3938,6 +4345,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .getChatHistory(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
     }()
+    case .addReaction?: try {
+      guard case .addReaction(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -3960,6 +4371,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     4: .same(proto: "deleteMessages"),
     5: .same(proto: "sendMessage"),
     6: .same(proto: "getChatHistory"),
+    7: .same(proto: "addReaction"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4034,6 +4446,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
           self.result = .getChatHistory(v)
         }
       }()
+      case 7: try {
+        var v: AddReactionResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .addReaction(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .addReaction(v)
+        }
+      }()
       default: break
       }
     }
@@ -4067,6 +4492,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     case .getChatHistory?: try {
       guard case .getChatHistory(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    }()
+    case .addReaction?: try {
+      guard case .addReaction(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     }()
     case nil: break
     }
@@ -4660,6 +5089,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     8: .standard(proto: "update_compose_action"),
     9: .standard(proto: "update_user_status"),
     10: .standard(proto: "message_attachment"),
+    11: .standard(proto: "update_reaction"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4759,6 +5189,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
           self.update = .messageAttachment(v)
         }
       }()
+      case 11: try {
+        var v: UpdateReaction?
+        var hadOneofValue = false
+        if let current = self.update {
+          hadOneofValue = true
+          if case .updateReaction(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.update = .updateReaction(v)
+        }
+      }()
       default: break
       }
     }
@@ -4797,6 +5240,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     case .messageAttachment?: try {
       guard case .messageAttachment(let v)? = self.update else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+    }()
+    case .updateReaction?: try {
+      guard case .updateReaction(let v)? = self.update else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
     }()
     case nil: break
     }
@@ -5051,6 +5498,42 @@ extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._Message
 
   public static func ==(lhs: UpdateMessageAttachment, rhs: UpdateMessageAttachment) -> Bool {
     if lhs._attachment != rhs._attachment {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateReaction"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "reaction"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._reaction) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._reaction {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateReaction, rhs: UpdateReaction) -> Bool {
+    if lhs._reaction != rhs._reaction {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
