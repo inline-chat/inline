@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 
 public struct ApiReaction: Codable, Sendable {
   public var id: Int64
@@ -14,7 +15,7 @@ public struct Reaction: FetchableRecord, Identifiable, Codable, Hashable, Persis
   TableRecord,
   Sendable, Equatable
 {
-  public var id: Int64
+  public var id: Int64?
   public var messageId: Int64
   public var userId: Int64
   public var chatId: Int64
@@ -38,7 +39,7 @@ public struct Reaction: FetchableRecord, Identifiable, Codable, Hashable, Persis
     case chatId
   }
 
-  public init(id: Int64, messageId: Int64, userId: Int64, emoji: String, date: Date, chatId: Int64) {
+  public init(id: Int64 = Int64.random(in: 1 ... 50_000), messageId: Int64, userId: Int64, emoji: String, date: Date, chatId: Int64) {
     self.id = id
     self.messageId = messageId
     self.userId = userId
@@ -62,5 +63,23 @@ public extension Reaction {
 public extension Reaction {
   static func fromTimestamp(from: Int) -> Date {
     Date(timeIntervalSince1970: Double(from) / 1_000)
+  }
+}
+
+public extension Reaction {
+  init(from: InlineProtocol.Reaction) {
+    messageId = from.messageID
+    userId = from.userID
+    chatId = from.chatID
+    emoji = from.emoji
+    date = Date(timeIntervalSince1970: TimeInterval(from.date))
+  }
+
+  static func save(
+    _ db: Database, protocolMessage: InlineProtocol.Reaction, publishChanges: Bool = false
+  ) throws -> Reaction {
+    let reaction = Reaction(from: protocolMessage)
+    try reaction.save(db)
+    return reaction
   }
 }
