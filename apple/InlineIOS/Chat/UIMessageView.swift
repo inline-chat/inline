@@ -120,6 +120,20 @@ class UIMessageView: UIView {
     return view
   }()
 
+  private lazy var reactionsFlowView: ReactionsFlowView = {
+    let view = ReactionsFlowView(outgoing: outgoing)
+    view.onReactionTap = { [weak self] emoji in
+      guard let self = self else { return }
+      Transactions.shared.mutate(transaction: .addReaction(.init(
+        message: self.message,
+        emoji: emoji,
+        userId: Auth.shared.getCurrentUserId() ?? 0,
+        peerId: self.message.peerId
+      )))
+    }
+    return view
+  }()
+
   var outgoing: Bool {
     fullMessage.message.out == true
   }
@@ -162,6 +176,9 @@ class UIMessageView: UIView {
   }
 
   private var isMultiline: Bool {
+    if !fullMessage.reactions.isEmpty {
+      return true
+    }
     if message.hasUnsupportedTypes {
       return false
     }
@@ -267,6 +284,45 @@ class UIMessageView: UIView {
     containerStack.addArrangedSubview(newPhotoView)
   }
 
+  private func setupReactionsIfNeeded() {
+    guard !fullMessage.reactions.isEmpty else { return }
+
+    // Group reactions by emoji and track count, userIds, and the most recent date
+    var reactionsDict: [String: (count: Int, userIds: [Int64], latestDate: Date)] = [:]
+
+    for reaction in fullMessage.reactions {
+      if let existing = reactionsDict[reaction.emoji] {
+        // Update count and userIds
+        let newCount = existing.count + 1
+        let newUserIds = existing.userIds + [reaction.userId]
+
+        // Keep the most recent date
+        let mostRecentDate = max(existing.latestDate, reaction.date)
+
+        reactionsDict[reaction.emoji] = (newCount, newUserIds, mostRecentDate)
+      } else {
+        reactionsDict[reaction.emoji] = (1, [reaction.userId], reaction.date)
+      }
+    }
+
+    // Convert to array and sort by date (ascending, so newest are last)
+    let sortedReactions = reactionsDict.map {
+      (emoji: $0.key, count: $0.value.count, userIds: $0.value.userIds, date: $0.value.latestDate)
+    }.sorted { $0.date < $1.date }
+
+    // Configure the flow view with the sorted reactions
+    reactionsFlowView.configure(
+      with: sortedReactions.map { (emoji: $0.emoji, count: $0.count, userIds: $0.userIds) },
+      currentUserId: Auth.shared.getCurrentUserId()
+    )
+
+    // Add to container and set constraints
+    multiLineContainer.addArrangedSubview(reactionsFlowView)
+
+    // Ensure the flow view gets the full width of its container
+    reactionsFlowView.widthAnchor.constraint(equalTo: multiLineContainer.widthAnchor).isActive = true
+  }
+
   private func setupMessageContainer() {
     if isMultiline {
       setupMultilineMessage()
@@ -311,6 +367,10 @@ class UIMessageView: UIView {
       if !fullMessage.attachments.isEmpty {
         setupAttachmentView()
         multiLineContainer.addArrangedSubview(attachmentView)
+      }
+
+      if !fullMessage.reactions.isEmpty {
+        setupReactionsIfNeeded()
       }
 
       if !message.hasFile || message.hasText {
@@ -835,31 +895,117 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
   }
 
   func onRequestMenuAuxiliaryPreview(sender: ContextMenuManager) -> UIView? {
+    let reactions = ["👍", "👎", "🫡", "🥲", "😂", "🥹", "✔️"]
     let previewHeight: CGFloat = 45
-    let width: CGFloat = 100
+    let reactionButtonSize: CGFloat = 42
+    let willDoButtonWidth: CGFloat = 80
+    let horizontalPadding: CGFloat = 10
 
-    let stackView = UIStackView()
-    stackView.axis = .horizontal
-    stackView.distribution = .fill
-    stackView.spacing = 0
-    stackView.alignment = .fill
-    stackView.backgroundColor = .clear
+    let capsuleWidth = CGFloat(reactions.count) * reactionButtonSize + willDoButtonWidth + (horizontalPadding * 2)
 
-    stackView.frame = CGRect(x: 0, y: 0, width: width, height: previewHeight)
+    let containerView = UIView(frame: CGRect(x: 0, y: 0, width: capsuleWidth, height: previewHeight))
+    containerView.backgroundColor = .systemGray6
+    containerView.layer.cornerRadius = 20
+    containerView.layer.masksToBounds = true
 
-    let button = UIButton(type: .custom)
-    button.isUserInteractionEnabled = true
-    button.setTitle("Will Do", for: .normal)
-    button.setTitleColor(.systemBlue, for: .normal)
-    button.backgroundColor = .systemGray6
-    button.layer.cornerRadius = 22
-    button.layer.masksToBounds = true
+    let mainStackView = UIStackView(frame: containerView.bounds)
+    mainStackView.axis = .horizontal
+    mainStackView.alignment = .fill
+    mainStackView.distribution = .fill
+    mainStackView.spacing = 0
+    mainStackView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    containerView.addSubview(mainStackView)
 
-    button.addTarget(self, action: #selector(handleWillDoTap(_:)), for: .touchUpInside)
+    let leftPaddingView = UIView()
+    leftPaddingView.backgroundColor = .clear
+    leftPaddingView.widthAnchor.constraint(equalToConstant: horizontalPadding).isActive = true
+    mainStackView.addArrangedSubview(leftPaddingView)
 
-    stackView.addArrangedSubview(button)
+    let reactionsStackView = UIStackView()
+    reactionsStackView.axis = .horizontal
+    reactionsStackView.alignment = .fill
+    reactionsStackView.distribution = .fillEqually
+    reactionsStackView.spacing = 0
 
-    return stackView
+    reactionsStackView.widthAnchor.constraint(equalToConstant: CGFloat(reactions.count) * reactionButtonSize).isActive = true
+
+    for (index, reaction) in reactions.enumerated() {
+      let button = UIButton(type: .system)
+      button.setTitle(reaction, for: .normal)
+      button.titleLabel?.font = UIFont.systemFont(ofSize: 20)
+      button.backgroundColor = .clear
+
+      button.titleLabel?.textAlignment = .center
+      button.contentVerticalAlignment = .center
+      button.contentHorizontalAlignment = .center
+
+      button.tag = index
+      button.addTarget(self, action: #selector(handleReactionTap(_:)), for: .touchUpInside)
+
+      reactionsStackView.addArrangedSubview(button)
+    }
+
+    mainStackView.addArrangedSubview(reactionsStackView)
+
+    let separator = UIView()
+    separator.backgroundColor = .systemGray5
+    separator.heightAnchor.constraint(equalToConstant: previewHeight - 20).isActive = true
+    separator.widthAnchor.constraint(equalToConstant: 1).isActive = true
+    separator.setContentHuggingPriority(.required, for: .horizontal)
+
+    let separatorContainer = UIView()
+    separatorContainer.addSubview(separator)
+    separator.translatesAutoresizingMaskIntoConstraints = false
+    separator.centerYAnchor.constraint(equalTo: separatorContainer.centerYAnchor).isActive = true
+    separator.centerXAnchor.constraint(equalTo: separatorContainer.centerXAnchor).isActive = true
+
+    mainStackView.addArrangedSubview(separatorContainer)
+
+    let willDoButton = UIButton(type: .system)
+    willDoButton.setTitle("Will Do", for: .normal)
+    willDoButton.setTitleColor(.adaptiveTitle, for: .normal)
+    willDoButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+    willDoButton.backgroundColor = .adaptiveBackground.withAlphaComponent(0.9)
+
+    willDoButton.layer.cornerRadius = 16
+
+    willDoButton.titleLabel?.textAlignment = .center
+    willDoButton.contentVerticalAlignment = .center
+    willDoButton.contentHorizontalAlignment = .center
+
+    willDoButton.addTarget(self, action: #selector(handleWillDoTap(_:)), for: .touchUpInside)
+
+    let willDoButtonContainer = UIView()
+    willDoButtonContainer.widthAnchor.constraint(equalToConstant: willDoButtonWidth).isActive = true
+
+    willDoButtonContainer.addSubview(willDoButton)
+
+    let buttonPadding: CGFloat = 8
+    willDoButton.frame = CGRect(
+      x: buttonPadding / 2,
+      y: buttonPadding / 2,
+      width: willDoButtonWidth - buttonPadding,
+      height: 32
+    )
+
+    mainStackView.addArrangedSubview(willDoButtonContainer)
+
+    let rightPaddingView = UIView()
+    rightPaddingView.backgroundColor = .clear
+    rightPaddingView.widthAnchor.constraint(equalToConstant: 3).isActive = true
+    mainStackView.addArrangedSubview(rightPaddingView)
+
+    return containerView
+  }
+
+  @objc private func handleReactionTap(_ sender: UIButton) {
+    let reactions = ["👍", "👎", "🫡", "🥲", "😂", "🥹", "✔️"]
+    let selectedReaction = reactions[sender.tag]
+    Self.contextMenuOpen = false
+    interaction?.dismissMenu()
+
+    // Handle the reaction selection
+    Transactions.shared.mutate(transaction: .addReaction(.init(message: message, emoji: selectedReaction, userId: Auth.shared.getCurrentUserId() ?? 0, peerId: message.peerId)))
   }
 
   @objc private func handleWillDoTap(_ sender: UIButton) {
@@ -929,5 +1075,17 @@ extension Message {
 extension NewPhotoView {
   func getCurrentImage() -> UIImage? {
     imageView.imageView.image
+  }
+}
+
+extension UIColor {
+  static let adaptiveBackground = UIColor { traitCollection in
+    traitCollection.userInterfaceStyle == .dark ?
+      UIColor(hex: "#6E242D")! : UIColor(hex: "#FFC4CB")!
+  }
+
+  static let adaptiveTitle = UIColor { traitCollection in
+    traitCollection.userInterfaceStyle == .dark ?
+      UIColor(hex: "#FFC2C0")! : UIColor(hex: "#D5312B")!
   }
 }
