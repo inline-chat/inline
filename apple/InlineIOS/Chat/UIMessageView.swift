@@ -285,6 +285,7 @@ class UIMessageView: UIView {
   }
 
   private func setupReactionsIfNeeded() {
+    print("SETTING UP REACTIONS \(fullMessage.reactions.count)")
     guard !fullMessage.reactions.isEmpty else { return }
 
     // Group reactions by emoji and track count, userIds, and the most recent date
@@ -312,8 +313,7 @@ class UIMessageView: UIView {
 
     // Configure the flow view with the sorted reactions
     reactionsFlowView.configure(
-      with: sortedReactions.map { (emoji: $0.emoji, count: $0.count, userIds: $0.userIds) },
-      currentUserId: Auth.shared.getCurrentUserId()
+      with: sortedReactions.map { (emoji: $0.emoji, count: $0.count, userIds: $0.userIds) }
     )
 
     // Add to container and set constraints

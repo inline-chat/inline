@@ -73,17 +73,29 @@ class MessagesCollectionView: UICollectionView {
 
     // Get upcoming messages (next 10-15 messages after visible ones)
     let lastVisibleIndex = indexPathsForVisibleItems.map { $0.item }.max() ?? 0
-    let upcomingRange = (lastVisibleIndex + 1) ..< min(lastVisibleIndex + 15, coordinator.messages.count)
-    let upcomingMessages = upcomingRange.map { coordinator.messages[$0] }
+    let nextIndex = lastVisibleIndex + 1
 
-    // Combine visible and upcoming messages for prefetching
-    let messagesToPrefetch = visibleMessages + upcomingMessages
+    // Check if we have any upcoming messages to prefetch
+    if nextIndex < coordinator.messages.count {
+      let upcomingRange = nextIndex ..< min(lastVisibleIndex + 15, coordinator.messages.count)
+      let upcomingMessages = upcomingRange.map { coordinator.messages[$0] }
 
-    // Only prefetch messages with photos
-    let messagesWithPhotos = messagesToPrefetch.filter { $0.photoInfo != nil }
+      // Combine visible and upcoming messages for prefetching
+      let messagesToPrefetch = visibleMessages + upcomingMessages
 
-    if !messagesWithPhotos.isEmpty {
-      ImagePrefetcher.shared.prefetchImages(for: messagesWithPhotos)
+      // Only prefetch messages with photos
+      let messagesWithPhotos = messagesToPrefetch.filter { $0.photoInfo != nil }
+
+      if !messagesWithPhotos.isEmpty {
+        ImagePrefetcher.shared.prefetchImages(for: messagesWithPhotos)
+      }
+    } else {
+      // No upcoming messages to prefetch, just handle visible ones
+      let messagesWithPhotos = visibleMessages.filter { $0.photoInfo != nil }
+
+      if !messagesWithPhotos.isEmpty {
+        ImagePrefetcher.shared.prefetchImages(for: messagesWithPhotos)
+      }
     }
   }
 
@@ -434,6 +446,7 @@ private extension MessagesCollectionView {
         case let .updated(newMessages, what, animated):
           var snapshot = dataSource.snapshot()
           let ids = newMessages.map(\.id)
+          print("RECONFIGURING IDS \(ids)")
           snapshot.reconfigureItems(ids)
           dataSource.apply(snapshot, animatingDifferences: animated ?? false)
 
