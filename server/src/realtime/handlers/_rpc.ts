@@ -9,6 +9,7 @@ import { deleteMessage } from "@in/server/realtime/handlers/messages.deleteMessa
 import { sendMessage } from "@in/server/realtime/handlers/messages.sendMessage"
 import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHistory"
 import { addReaction } from "./messages.addReactions"
+import { deleteReaction } from "./messages.deleteReaction"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -55,6 +56,13 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "addReaction", addReaction: result }
     }
 
+    case Method.DELETE_REACTION: {
+      if (call.input.oneofKind !== "deleteReaction") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await deleteReaction(call.input.deleteReaction, handlerContext)
+      return { oneofKind: "deleteReaction", deleteReaction: result }
+    }
     default:
       Log.shared.error(`Unknown method: ${call.method}`)
       throw RealtimeRpcError.BadRequest
