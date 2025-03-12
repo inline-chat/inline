@@ -33,6 +33,9 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
         case let .messageAttachment(updateMessageAttachment):
           try updateMessageAttachment.apply(db)
 
+        case let .updateReaction(updateReaction):
+          try updateReaction.apply(db)
+
         default:
           break
       }
@@ -212,6 +215,23 @@ extension InlineProtocol.UpdateMessageAttachment {
       Task { @MainActor in
         await MessagesPublisher.shared
           .messageUpdated(message: message, peer: message.peerId, animated: true)
+      }
+    }
+  }
+}
+
+extension InlineProtocol.UpdateReaction {
+  func apply(_ db: Database) throws {
+    print("RECIVED UPDATE FOR REACTON \(reaction)")
+    _ = try Reaction.save(db, protocolMessage: reaction, publishChanges: true)
+    let message = try Message.filter(Column("messageId") == reaction.messageID).fetchOne(db)
+    print("RECIVED UPDATE FOR REACTON ON MESSAGE \(message)")
+    if let message = message {
+      print("TRIGERRING RELOAD")
+      db.afterNextTransaction { _ in
+        Task(priority: .userInitiated) { @MainActor in
+          MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
+        }
       }
     }
   }
