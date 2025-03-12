@@ -39,7 +39,14 @@ public struct Reaction: FetchableRecord, Identifiable, Codable, Hashable, Persis
     case chatId
   }
 
-  public init(id: Int64 = Int64.random(in: 1 ... 50_000), messageId: Int64, userId: Int64, emoji: String, date: Date, chatId: Int64) {
+  public init(
+    id: Int64 = Int64.random(in: 1 ... 50_000),
+    messageId: Int64,
+    userId: Int64,
+    emoji: String,
+    date: Date,
+    chatId: Int64
+  ) {
     self.id = id
     self.messageId = messageId
     self.userId = userId
@@ -72,7 +79,7 @@ public extension Reaction {
     userId = from.userID
     chatId = from.chatID
     emoji = from.emoji
-    date = Date(timeIntervalSince1970: TimeInterval(from.date))
+    date = Date(timeIntervalSince1970: TimeInterval(from.date) / 1_000)
   }
 
   static func save(
