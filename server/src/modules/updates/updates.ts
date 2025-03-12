@@ -7,8 +7,9 @@ export class Updates {
   static shared = new Updates()
 
   public async pushUpdate(updates: Update[], context: { peerId: InputPeer; currentUserId: number }) {
+    console.log("context", context)
     const updateGroup = await getUpdateGroupFromInputPeer(context.peerId, { currentUserId: context.currentUserId })
-
+    console.log("updateGroup", updateGroup)
     switch (updateGroup.type) {
       case "users":
         const { userIds } = updateGroup

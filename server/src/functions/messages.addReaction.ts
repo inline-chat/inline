@@ -18,7 +18,7 @@ type Output = {
 
 export const addReaction = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
-
+  console.log("context of function", context)
   const reactions = await ReactionModel.insertReaction({
     messageId: Number(input.messageId),
     chatId: chatId,
@@ -28,7 +28,7 @@ export const addReaction = async (input: Input, context: FunctionContext): Promi
   })
 
   console.log("reactions", reactions)
-
+  console.log("input", input)
   const update: Update = {
     update: {
       oneofKind: "updateReaction",

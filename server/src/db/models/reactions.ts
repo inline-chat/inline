@@ -9,7 +9,9 @@ export const ReactionModel = {
 }
 
 async function insertReaction(reaction: DbNewReaction) {
-  await db.insert(reactions).values(reaction).returning()
+  const result = await db.insert(reactions).values(reaction).returning()
+  console.log("result", result)
+  return result[0]
 }
 
 async function getReactions(messageId: bigint, chatId: bigint) {
