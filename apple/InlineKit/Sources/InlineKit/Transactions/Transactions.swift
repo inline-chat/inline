@@ -98,6 +98,7 @@ public enum TransactionType: Codable {
   case mockMessage(MockMessageTransaction)
   case deleteMessage(TransactionDeleteMessage)
   case addReaction(TransactionAddReaction)
+  case deleteReaction(TransactionDeleteReaction)
   var id: String {
     transaction.id
     //    switch self {
@@ -115,6 +116,8 @@ public enum TransactionType: Codable {
       case let .deleteMessage(t):
         t
       case let .addReaction(t):
+        t
+      case let .deleteReaction(t):
         t
     }
   }
@@ -151,6 +154,9 @@ public enum TransactionType: Codable {
       case let .addReaction(transaction):
         try container.encode("addReaction", forKey: .type)
         try container.encode(transaction, forKey: .transaction)
+      case let .deleteReaction(transaction):
+        try container.encode("deleteReaction", forKey: .type)
+        try container.encode(transaction, forKey: .transaction)
     }
   }
 
@@ -171,6 +177,9 @@ public enum TransactionType: Codable {
       case "addReaction":
         let transaction = try container.decode(TransactionAddReaction.self, forKey: .transaction)
         self = .addReaction(transaction)
+      case "deleteReaction":
+        let transaction = try container.decode(TransactionDeleteReaction.self, forKey: .transaction)
+        self = .deleteReaction(transaction)
       default:
         throw DecodingError.dataCorruptedError(
           forKey: .type,

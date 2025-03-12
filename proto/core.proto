@@ -208,11 +208,15 @@ message AddReactionResult {
   repeated Update updates = 1;
 }
 
-// Remove reaction input
-message RemoveReactionInput {
-  int64 reaction_id = 1;
+// Delete reaction input
+message DeleteReactionInput {
+  string emoji = 1;
   InputPeer peer_id = 2;
   int64 message_id = 3;
+}
+
+message DeleteReactionResult {
+  repeated Update updates = 1;
 }
 
 message MessageAttachments {
@@ -414,6 +418,7 @@ enum Method {
   DELETE_MESSAGES = 4;
   GET_CHAT_HISTORY = 5;
   ADD_REACTION = 6;
+  DELETE_REACTION = 7;
 }
 
 message RpcCall {
@@ -425,6 +430,7 @@ message RpcCall {
     SendMessageInput sendMessage = 5;
     GetChatHistoryInput getChatHistory = 6;
     AddReactionInput addReaction = 7;
+    DeleteReactionInput deleteReaction = 8;
   }
 }
 
@@ -438,6 +444,7 @@ message RpcResult {
     SendMessageResult sendMessage = 5;
     GetChatHistoryResult getChatHistory = 6;
     AddReactionResult addReaction = 7;
+    DeleteReactionResult deleteReaction = 8;
   }
 }
 
@@ -536,6 +543,7 @@ message Update {
     UpdateUserStatus update_user_status = 9;
     UpdateMessageAttachment message_attachment = 10;
     UpdateReaction update_reaction = 11;
+    UpdateDeleteReaction delete_reaction = 12;
   }
 }
 
@@ -585,6 +593,12 @@ message UpdateMessageAttachment {
 
 message UpdateReaction {
   Reaction reaction = 1;
+}
+
+message UpdateDeleteReaction {
+  string emoji = 1;
+  int64 chat_id = 2;
+  int64 message_id = 3;
 }
 
 message UpdateUserStatus {

@@ -123,13 +123,23 @@ class UIMessageView: UIView {
   private lazy var reactionsFlowView: ReactionsFlowView = {
     let view = ReactionsFlowView(outgoing: outgoing)
     view.onReactionTap = { [weak self] emoji in
-      guard let self = self else { return }
-      Transactions.shared.mutate(transaction: .addReaction(.init(
-        message: self.message,
-        emoji: emoji,
-        userId: Auth.shared.getCurrentUserId() ?? 0,
-        peerId: self.message.peerId
-      )))
+      guard let self else { return }
+
+      if let reaction = fullMessage.reactions.filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first {
+        Transactions.shared.mutate(transaction: .deleteReaction(.init(
+          message: message,
+          emoji: emoji,
+          peerId: message.peerId,
+          chatId: message.chatId
+        )))
+      } else {
+        Transactions.shared.mutate(transaction: .addReaction(.init(
+          message: message,
+          emoji: emoji,
+          userId: Auth.shared.getCurrentUserId() ?? 0,
+          peerId: message.peerId
+        )))
+      }
     }
     return view
   }()
@@ -927,7 +937,8 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
     reactionsStackView.distribution = .fillEqually
     reactionsStackView.spacing = 0
 
-    reactionsStackView.widthAnchor.constraint(equalToConstant: CGFloat(reactions.count) * reactionButtonSize).isActive = true
+    reactionsStackView.widthAnchor.constraint(equalToConstant: CGFloat(reactions.count) * reactionButtonSize)
+      .isActive = true
 
     for (index, reaction) in reactions.enumerated() {
       let button = UIButton(type: .system)
@@ -1004,8 +1015,24 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
     Self.contextMenuOpen = false
     interaction?.dismissMenu()
 
-    // Handle the reaction selection
-    Transactions.shared.mutate(transaction: .addReaction(.init(message: message, emoji: selectedReaction, userId: Auth.shared.getCurrentUserId() ?? 0, peerId: message.peerId)))
+    // check if there was a reaction that we added before delete our reaction otherwise add the reaction
+    if let reaction = fullMessage.reactions.filter({ $0.emoji == selectedReaction && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first {
+      print("deleting reaction", reaction)
+      Transactions.shared.mutate(transaction: .deleteReaction(.init(
+        message: message,
+        emoji: selectedReaction,
+        peerId: message.peerId,
+        chatId: message.chatId
+      )))
+    } else {
+      print("adding reaction", selectedReaction)
+      Transactions.shared.mutate(transaction: .addReaction(.init(
+        message: message,
+        emoji: selectedReaction,
+        userId: Auth.shared.getCurrentUserId() ?? 0,
+        peerId: message.peerId
+      )))
+    }
   }
 
   @objc private func handleWillDoTap(_ sender: UIButton) {
@@ -1036,7 +1063,7 @@ extension Character {
   /// A simple emoji is one scalar and presented to the user as an Emoji
   var isSimpleEmoji: Bool {
     guard let firstScalar = unicodeScalars.first else { return false }
-    return firstScalar.properties.isEmoji && firstScalar.value > 0x238c
+    return firstScalar.properties.isEmoji && firstScalar.value > 0x238C
   }
 
   /// Checks if the scalars will be merged into an emoji
@@ -1052,7 +1079,7 @@ extension String {
 
   var containsOnlyEmojis: Bool {
     let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-    return !trimmed.isEmpty && trimmed.allSatisfy { $0.isEmoji }
+    return !trimmed.isEmpty && trimmed.allSatisfy(\.isEmoji)
   }
 }
 
