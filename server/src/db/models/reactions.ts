@@ -21,14 +21,18 @@ async function getReactions(messageId: bigint, chatId: bigint) {
     .where(and(eq(reactions.messageId, Number(messageId)), eq(reactions.chatId, Number(chatId))))
 }
 
-async function deleteReaction(messageId: bigint, chatId: bigint, reactionId: bigint) {
-  await db
+async function deleteReaction(messageId: bigint, chatId: number, emoji: string, currentUserId: number) {
+  const result = await db
     .delete(reactions)
     .where(
       and(
         eq(reactions.messageId, Number(messageId)),
-        eq(reactions.chatId, Number(chatId)),
-        eq(reactions.id, Number(reactionId)),
+        eq(reactions.chatId, chatId),
+        eq(reactions.emoji, emoji),
+        eq(reactions.userId, currentUserId),
       ),
     )
+    .returning()
+  console.log("result", result)
+  return result
 }
