@@ -4,10 +4,10 @@ import UIKit
 class MessageReactionView: UIView {
   // MARK: - Properties
 
-  private let emoji: String
-  private let count: Int
-  private let byCurrentUser: Bool
-  private let outgoing: Bool
+  let emoji: String
+  let count: Int
+  let byCurrentUser: Bool
+  let outgoing: Bool
 
   var onTap: ((String) -> Void)?
 
@@ -25,7 +25,7 @@ class MessageReactionView: UIView {
   private lazy var stackView: UIStackView = {
     let stack = UIStackView()
     stack.axis = .horizontal
-    stack.spacing = 4
+    stack.spacing = 0
     stack.alignment = .center
     stack.translatesAutoresizingMaskIntoConstraints = false
     return stack
@@ -40,7 +40,7 @@ class MessageReactionView: UIView {
 
   private lazy var countLabel: UILabel = {
     let label = UILabel()
-    label.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+    label.font = UIFont.systemFont(ofSize: 13)
     label.text = "\(count)"
     return label
   }()
@@ -73,6 +73,10 @@ class MessageReactionView: UIView {
     // Configure text colors
     countLabel.textColor = outgoing ? .white : .label
 
+    // Center the emoji and count labels
+    stackView.distribution = .equalSpacing
+    stackView.alignment = .center
+
     // Add subviews
     addSubview(containerView)
     containerView.addSubview(stackView)
@@ -88,8 +92,8 @@ class MessageReactionView: UIView {
       containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       stackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 4),
-      stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 6),
-      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -6),
+      stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
+      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8),
       stackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -4),
     ])
 
@@ -108,12 +112,29 @@ class MessageReactionView: UIView {
   // MARK: - Layout
 
   override var intrinsicContentSize: CGSize {
-    let stackSize = stackView.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-    return CGSize(width: stackSize.width + 5, height: stackSize.height + 8)
+    let height = stackView.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height + 8
+    return CGSize(width: 48, height: height)
   }
 
   override func sizeThatFits(_ size: CGSize) -> CGSize {
     intrinsicContentSize
+  }
+
+  func updateCount(_ newCount: Int, animated: Bool) {
+    guard count != newCount else { return }
+
+    if animated {
+      UIView.animate(withDuration: 0.15, animations: {
+        self.countLabel.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
+      }) { _ in
+        self.countLabel.text = "\(newCount)"
+        UIView.animate(withDuration: 0.15) {
+          self.countLabel.transform = .identity
+        }
+      }
+    } else {
+      countLabel.text = "\(newCount)"
+    }
   }
 }
 
