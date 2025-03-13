@@ -10,6 +10,7 @@ class ReactionsFlowView: UIView {
   private var outgoing: Bool = false
 
   private var containerStackView: UIStackView!
+  private var reactionViews = [String: MessageReactionView]()
 
   var onReactionTap: ((String) -> Void)?
 
@@ -49,64 +50,138 @@ class ReactionsFlowView: UIView {
 
   // MARK: - Public Methods
 
-  func configure(with reactions: [(emoji: String, count: Int, userIds: [Int64])]) {
-    // Clear existing content
-    containerStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+  func configure(with reactions: [(emoji: String, count: Int, userIds: [Int64])], animatedEmoji: String? = nil) {
+    // Create a dictionary of new reactions
+    let newReactions = reactions.reduce(into: [String: (count: Int, userIds: [Int64])]()) {
+      $0[$1.emoji] = ($1.count, $1.userIds)
+    }
 
-    // Create reaction views
-    let reactionViews = reactions.map { reaction -> MessageReactionView in
-      let byCurrentUser = reaction.userIds.contains(Auth.shared.getCurrentUserId() ?? 0)
-      let view = MessageReactionView(
-        emoji: reaction.emoji,
-        count: reaction.count,
-        byCurrentUser: byCurrentUser,
-        outgoing: outgoing
-      )
+    // Find reactions to remove and add
+    let currentEmojis = Set(reactionViews.keys)
+    let newEmojis = Set(newReactions.keys)
+    let removedEmojis = currentEmojis.subtracting(newEmojis)
+    let addedEmojis = newEmojis.subtracting(currentEmojis)
 
-      view.onTap = { [weak self] emoji in
-        self?.onReactionTap?(emoji)
+    // Store views that need animation
+    var viewsToRemove: [(view: UIView, originalFrame: CGRect)] = []
+    var viewsToAdd: [MessageReactionView] = []
+
+    // Process removals - collect views to animate later
+    for emoji in removedEmojis {
+      guard let view = reactionViews[emoji] else { continue }
+
+      // Store original position for animation
+      let originalFrame = view.convert(view.bounds, to: self)
+      
+      // Only animate if this is the specific emoji being removed
+      if emoji == animatedEmoji {
+        viewsToRemove.append((view: view, originalFrame: originalFrame))
       }
 
-      return view
+      // Remove from dictionary
+      reactionViews.removeValue(forKey: emoji)
     }
-    print("REACTION VIEWS COUNT \(reactionViews.count)")
 
-    // Calculate sizes
-    let sizes = reactionViews.map { $0.sizeThatFits(CGSize(
-      width: CGFloat.greatestFiniteMagnitude,
-      height: CGFloat.greatestFiniteMagnitude
-    )) }
+    // Create new views but don't add to layout yet
+    for reaction in reactions {
+      if addedEmojis.contains(reaction.emoji) {
+        let byCurrentUser = reaction.userIds.contains(Auth.shared.getCurrentUserId() ?? 0)
+        let view = MessageReactionView(
+          emoji: reaction.emoji,
+          count: reaction.count,
+          byCurrentUser: byCurrentUser,
+          outgoing: outgoing
+        )
 
-    // Organize into rows
-    var currentRow = UIStackView()
-    currentRow.axis = .horizontal
-    currentRow.spacing = horizontalSpacing
-    currentRow.alignment = .center
+        view.onTap = { [weak self] emoji in
+          self?.onReactionTap?(emoji)
+        }
 
+        reactionViews[reaction.emoji] = view
+        
+        // Only animate if this is the specific emoji being added
+        if reaction.emoji == animatedEmoji {
+          viewsToAdd.append(view)
+        }
+      }
+    }
+
+    // Update existing reactions
+    for (emoji, view) in reactionViews {
+      if let newCount = newReactions[emoji]?.count, newCount != view.count {
+        // Animate count change only for the specific emoji
+        view.updateCount(newCount, animated: emoji == animatedEmoji)
+      }
+    }
+
+    // Disable animations temporarily for layout rebuild
+    UIView.performWithoutAnimation {
+      // Clear and rebuild the entire layout
+      rebuildLayout(with: Array(reactionViews.values))
+    }
+
+    // Now animate removals using snapshots
+    for (view, originalFrame) in viewsToRemove {
+      let snapshot = view.snapshotView(afterScreenUpdates: true) ?? UIView()
+      snapshot.frame = originalFrame
+      addSubview(snapshot)
+
+      UIView.animate(withDuration: 0.2, animations: {
+        snapshot.alpha = 0
+        snapshot.transform = CGAffineTransform(scaleX: 0.1, y: 0.1)
+      }) { _ in
+        snapshot.removeFromSuperview()
+      }
+    }
+
+    // Animate additions
+    for view in viewsToAdd {
+      view.alpha = 0
+      view.transform = CGAffineTransform(scaleX: 0.7, y: 0.7)
+
+      UIView.animate(withDuration: 0.3, delay: 0.1, usingSpringWithDamping: 0.6, initialSpringVelocity: 0.5) {
+        view.alpha = 1
+        view.transform = .identity
+      }
+    }
+  }
+
+  // MARK: - Private Methods
+
+  private func rebuildLayout(with views: [MessageReactionView]) {
+    // Remove all existing rows
+    for arrangedSubview in containerStackView.arrangedSubviews {
+      containerStackView.removeArrangedSubview(arrangedSubview)
+      arrangedSubview.removeFromSuperview()
+    }
+
+    // Sort views to maintain consistent order
+    let sortedViews = views.sorted { $0.emoji < $1.emoji }
+
+    var currentRow: UIStackView?
     var currentRowWidth: CGFloat = 0
-    let maxWidth = UIScreen.main.bounds.width * 0.7 // Adjust as needed
+    let maxWidth = UIScreen.main.bounds.width * 0.7
 
-    for (index, view) in reactionViews.enumerated() {
-      let viewWidth = sizes[index].width
+    for view in sortedViews {
+      let viewWidth = view.sizeThatFits(CGSize(
+        width: CGFloat.greatestFiniteMagnitude,
+        height: CGFloat.greatestFiniteMagnitude
+      )).width
 
-      if currentRowWidth + viewWidth > maxWidth, currentRowWidth > 0 {
-        // Add the current row and start a new one
-        containerStackView.addArrangedSubview(currentRow)
-
+      if currentRow == nil || currentRowWidth + viewWidth + horizontalSpacing > maxWidth {
         currentRow = UIStackView()
-        currentRow.axis = .horizontal
-        currentRow.spacing = horizontalSpacing
-        currentRow.alignment = .center
+        currentRow!.axis = .horizontal
+        currentRow!.spacing = horizontalSpacing
+        currentRow!.alignment = .center
+        containerStackView.addArrangedSubview(currentRow!)
         currentRowWidth = 0
       }
 
-      currentRow.addArrangedSubview(view)
+      currentRow!.addArrangedSubview(view)
       currentRowWidth += viewWidth + horizontalSpacing
     }
 
-    // Add the last row if it has any views
-    if currentRow.arrangedSubviews.count > 0 {
-      containerStackView.addArrangedSubview(currentRow)
-    }
+    // Force layout update
+    layoutIfNeeded()
   }
 }
