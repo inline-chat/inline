@@ -74,17 +74,33 @@ class MessageViewAppKit: NSView {
   }
 
   private var textColor: NSColor {
-    NSColor.labelColor
+    if outgoing {
+      NSColor.white
+    } else {
+      NSColor.labelColor
+    }
+  }
+
+  private var bubbleBackgroundColor: NSColor {
+    if outgoing {
+      Theme.messageBubblePrimaryBgColor
+    } else {
+      Theme.messageBubbleSecondaryBgColor
+    }
   }
 
   private var linkColor: NSColor {
-    NSColor.linkColor
+    if outgoing {
+      NSColor.white
+    } else {
+      NSColor.linkColor
+    }
   }
 
   private var senderFont: NSFont {
     .systemFont(
-      ofSize: NSFont.systemFontSize,
-      weight: .medium
+      ofSize: 12, // NSFont.smallSystemFontSize
+      weight: .semibold
     )
   }
 
@@ -92,6 +108,14 @@ class MessageViewAppKit: NSView {
   private var isMouseInside = false
 
   // MARK: Views
+
+  private lazy var bubbleView: BasicView = {
+    let view = BasicView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.cornerRadius = Theme.messageBubbleCornerRadius
+    view.backgroundColor = bubbleBackgroundColor
+    return view
+  }()
 
   private lazy var avatarView: UserAvatarView = {
     let view = UserAvatarView(userInfo: fullMessage.senderInfo ?? .deleted)
@@ -135,7 +159,6 @@ class MessageViewAppKit: NSView {
 
   private lazy var newPhotoView: NewPhotoView = {
     let view = NewPhotoView(fullMessage)
-    Log.shared.debug("new photo view init \(fullMessage.photoInfo)")
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
