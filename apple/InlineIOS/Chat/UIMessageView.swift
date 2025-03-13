@@ -294,7 +294,7 @@ class UIMessageView: UIView {
     containerStack.addArrangedSubview(newPhotoView)
   }
 
-  private func setupReactionsIfNeeded() {
+  private func setupReactionsIfNeeded(animatedEmoji: String? = nil) {
     print("SETTING UP REACTIONS \(fullMessage.reactions.count)")
     guard !fullMessage.reactions.isEmpty else { return }
 
