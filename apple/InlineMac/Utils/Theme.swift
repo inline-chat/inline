@@ -1,4 +1,5 @@
 import AppKit
+import Cocoa
 import Foundation
 import SwiftUI
 
@@ -53,6 +54,26 @@ enum Theme {
   static let messageTextViewPadding: CGFloat = 0
   static let messageContentViewSpacing: CGFloat = 8.0
 
+  // - after bubble -
+  static let messageBubbleHorizontalPadding: CGFloat = 8.0
+  static let messageBubbleContentEdgePadding: CGFloat = 8.0
+  static let messageBubbleCornerRadius: CGFloat = 14.0
+  static let messageBubblePrimaryBgColor: NSColor = .init(
+    calibratedRed: 143 / 255,
+    green: 116 / 255,
+    blue: 238 / 255,
+    alpha: 1.0
+  )
+  static let messageBubbleSecondaryBgColor: NSColor = .init(name: "messageBubbleSecondaryBgColor") { appearance in
+    appearance.name == .darkAqua ? NSColor.white
+      .withAlphaComponent(0.1) : .init(
+        calibratedRed: 236 / 255,
+        green: 236 / 255,
+        blue: 236 / 255,
+        alpha: 1.0
+      )
+  }
+
   // MARK: - Chat View
 
   static let chatToolbarIconSize: CGFloat = 32
@@ -75,7 +96,6 @@ enum Theme {
       .withAlphaComponent(0.1) : NSColor.black
       .withAlphaComponent(0.09)
   }
-  
 
   // MARK: - Devtools
 
