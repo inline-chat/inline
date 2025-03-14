@@ -479,7 +479,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public func updateDialog(
     peerId: Peer,
     pinned: Bool?,
-    draft: String?,
     archived: Bool?
   ) async throws -> UpdateDialog {
     var queryItems: [URLQueryItem] = []
@@ -493,9 +492,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       queryItems.append(URLQueryItem(name: "pinned", value: "\(pinned)"))
     }
 
-    if let draft {
-      queryItems.append(URLQueryItem(name: "draft", value: draft))
-    }
     if let archived {
       queryItems.append(URLQueryItem(name: "archived", value: "\(archived)"))
     }

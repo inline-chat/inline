@@ -247,12 +247,8 @@ public class DataManager: ObservableObject {
           try chat.save(db, onConflict: .replace)
         }
 
-        // Finally save dialogs
-        let dialogs = result.dialogs.map { dialog in
-          Dialog(from: dialog)
-        }
-        try dialogs.forEach { dialog in
-          try dialog.save(db, onConflict: .replace)
+        try result.dialogs.forEach { dialog in
+          try dialog.saveFull(db)
         }
 
         return chats
@@ -437,29 +433,11 @@ public class DataManager: ObservableObject {
       return
     }
 
-    let result = try await ApiClient.shared.updateDialog(
+    _ = try await ApiClient.shared.updateDialog(
       peerId: peerId,
       pinned: pinned,
-      draft: draft,
       archived: archived == nil ? updatedDialog.archived : archived
     )
-
-    // Note(@Mo): don't do too many DB writes
-//    try await database.dbWriter.write { db in
-//      var dialog = Dialog(from: result.dialog)
-//      if archived != nil {
-//        dialog.archived = archived
-//      }
-//
-//      try dialog.save(db, onConflict: .replace)
-//    }
-  }
-
-  public func getDraft(peerId: Peer) async throws -> String? {
-    try await database.dbWriter.read { db in
-      let dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
-      return dialog?.draft
-    }
   }
 
   public func getSpace(spaceId: Int64) async throws {
