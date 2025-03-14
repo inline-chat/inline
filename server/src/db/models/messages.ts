@@ -20,7 +20,7 @@ import {
   type DbReaction,
   type DbUser,
 } from "@in/server/db/schema"
-import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, desc, eq, gt, inArray, lt } from "drizzle-orm"
@@ -32,7 +32,9 @@ export const MessageModel = {
   deleteMessages: deleteMessages,
   insertMessage: insertMessage,
   getMessages: getMessages,
+  getMessage: getMessage, // 1 msg
   processMessage: processMessage,
+  editMessage: editMessage,
 }
 
 export type DbInputFullMessage = DbMessage & {
@@ -209,4 +211,71 @@ async function deleteMessages(messageIds: bigint[], chatId: number) {
 
   await ChatModel.refreshLastMessageId(chatId)
   log.trace("refreshed last message id after deletion")
+}
+
+async function editMessage(messageId: number, chatId: number, text: string) {
+  log.trace("editMessage", { messageId, chatId, text })
+  const encryptedMessage = text ? encryptMessage(text) : undefined
+
+  let updated = await db
+    .update(messages)
+    .set({
+      text: text,
+      textEncrypted: encryptedMessage?.encrypted,
+      textIv: encryptedMessage?.iv,
+      textTag: encryptedMessage?.authTag,
+    })
+    .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
+    .returning()
+
+  if (updated.length === 0) {
+    log.trace("message not found", { messageId, chatId })
+    throw ModelError.MessageInvalid
+  }
+
+  return updated[0]
+}
+
+async function getMessage(messageId: number, chatId: number): Promise<DbFullMessage> {
+  let result = await db.query.messages.findFirst({
+    where: and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)),
+    with: {
+      from: true,
+      reactions: true,
+      photo: {
+        with: {
+          photoSizes: {
+            with: {
+              file: true,
+            },
+          },
+        },
+      },
+      video: {
+        with: {
+          file: true,
+          photo: {
+            with: {
+              photoSizes: {
+                with: {
+                  file: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      document: {
+        with: {
+          file: true,
+        },
+      },
+    },
+  })
+
+  if (!result) {
+    throw ModelError.MessageInvalid
+  }
+
+  return processMessage(result)
 }

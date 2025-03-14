@@ -5,6 +5,12 @@ import UIKit
 class ComposeEmbedView: UIView {
   static let height: CGFloat = 56
 
+  enum Mode {
+    case reply
+    case edit
+  }
+
+  var mode: Mode = .reply
   var peerId: Peer
   private var chatId: Int64
   private var messageId: Int64
@@ -71,7 +77,8 @@ class ComposeEmbedView: UIView {
     return stackView
   }()
 
-  init(peerId: Peer, chatId: Int64, messageId: Int64) {
+  init(peerId: Peer, chatId: Int64, messageId: Int64, mode: Mode = .reply) {
+    self.mode = mode
     self.peerId = peerId
     self.chatId = chatId
     self.messageId = messageId
@@ -154,7 +161,15 @@ class ComposeEmbedView: UIView {
     let name = Auth.shared.getCurrentUserId() == viewModel.fullMessage?.message.fromId ?
       "You" : viewModel.fullMessage?.from?.firstName ?? "User"
 
-    nameLabel.text = "Replying to \(name)"
+    switch mode {
+      case .reply:
+        nameLabel.text = "Replying to \(name)"
+        imageIconView.image = UIImage(systemName: "photo.fill")
+      case .edit:
+        nameLabel.text = "Editing message"
+        imageIconView.image = UIImage(systemName: "pencil")
+    }
+
     if let message = viewModel.fullMessage?.message {
       if message.hasUnsupportedTypes {
         imageIconView.isHidden = true
@@ -176,7 +191,12 @@ class ComposeEmbedView: UIView {
   }
 
   @objc private func closeButtonTapped() {
-    ChatState.shared.clearReplyingMessageId(peer: peerId)
+    switch mode {
+      case .reply:
+        ChatState.shared.clearReplyingMessageId(peer: peerId)
+      case .edit:
+        ChatState.shared.clearEditingMessageId(peer: peerId)
+    }
   }
 
   deinit {

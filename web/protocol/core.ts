@@ -1006,6 +1006,12 @@ export interface RpcCall {
          */
         deleteReaction: DeleteReactionInput;
     } | {
+        oneofKind: "editMessage";
+        /**
+         * @generated from protobuf field: EditMessageInput editMessage = 9;
+         */
+        editMessage: EditMessageInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1063,6 +1069,12 @@ export interface RpcResult {
          */
         deleteReaction: DeleteReactionResult;
     } | {
+        oneofKind: "editMessage";
+        /**
+         * @generated from protobuf field: EditMessageResult editMessage = 9;
+         */
+        editMessage: EditMessageResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1119,6 +1131,32 @@ export interface DeleteMessagesInput {
  * @generated from protobuf message DeleteMessagesResult
  */
 export interface DeleteMessagesResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message EditMessageInput
+ */
+export interface EditMessageInput {
+    /**
+     * @generated from protobuf field: int64 message_id = 1;
+     */
+    messageId: bigint;
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 2;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: string text = 3;
+     */
+    text: string;
+}
+/**
+ * @generated from protobuf message EditMessageResult
+ */
+export interface EditMessageResult {
     /**
      * @generated from protobuf field: repeated Update updates = 1;
      */
@@ -1553,7 +1591,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: DELETE_REACTION = 7;
      */
-    DELETE_REACTION = 7
+    DELETE_REACTION = 7,
+    /**
+     * @generated from protobuf enum value: EDIT_MESSAGE = 8;
+     */
+    EDIT_MESSAGE = 8
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -3912,7 +3954,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 5, name: "sendMessage", kind: "message", oneof: "input", T: () => SendMessageInput },
             { no: 6, name: "getChatHistory", kind: "message", oneof: "input", T: () => GetChatHistoryInput },
             { no: 7, name: "addReaction", kind: "message", oneof: "input", T: () => AddReactionInput },
-            { no: 8, name: "deleteReaction", kind: "message", oneof: "input", T: () => DeleteReactionInput }
+            { no: 8, name: "deleteReaction", kind: "message", oneof: "input", T: () => DeleteReactionInput },
+            { no: 9, name: "editMessage", kind: "message", oneof: "input", T: () => EditMessageInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -3973,6 +4016,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         deleteReaction: DeleteReactionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteReaction)
                     };
                     break;
+                case /* EditMessageInput editMessage */ 9:
+                    message.input = {
+                        oneofKind: "editMessage",
+                        editMessage: EditMessageInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).editMessage)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4009,6 +4058,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DeleteReactionInput deleteReaction = 8; */
         if (message.input.oneofKind === "deleteReaction")
             DeleteReactionInput.internalBinaryWrite(message.input.deleteReaction, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* EditMessageInput editMessage = 9; */
+        if (message.input.oneofKind === "editMessage")
+            EditMessageInput.internalBinaryWrite(message.input.editMessage, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4030,7 +4082,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 5, name: "sendMessage", kind: "message", oneof: "result", T: () => SendMessageResult },
             { no: 6, name: "getChatHistory", kind: "message", oneof: "result", T: () => GetChatHistoryResult },
             { no: 7, name: "addReaction", kind: "message", oneof: "result", T: () => AddReactionResult },
-            { no: 8, name: "deleteReaction", kind: "message", oneof: "result", T: () => DeleteReactionResult }
+            { no: 8, name: "deleteReaction", kind: "message", oneof: "result", T: () => DeleteReactionResult },
+            { no: 9, name: "editMessage", kind: "message", oneof: "result", T: () => EditMessageResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -4091,6 +4144,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         deleteReaction: DeleteReactionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteReaction)
                     };
                     break;
+                case /* EditMessageResult editMessage */ 9:
+                    message.result = {
+                        oneofKind: "editMessage",
+                        editMessage: EditMessageResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).editMessage)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4127,6 +4186,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DeleteReactionResult deleteReaction = 8; */
         if (message.result.oneofKind === "deleteReaction")
             DeleteReactionResult.internalBinaryWrite(message.result.deleteReaction, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* EditMessageResult editMessage = 9; */
+        if (message.result.oneofKind === "editMessage")
+            EditMessageResult.internalBinaryWrite(message.result.editMessage, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4417,6 +4479,115 @@ class DeleteMessagesResult$Type extends MessageType<DeleteMessagesResult> {
  * @generated MessageType for protobuf message DeleteMessagesResult
  */
 export const DeleteMessagesResult = new DeleteMessagesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class EditMessageInput$Type extends MessageType<EditMessageInput> {
+    constructor() {
+        super("EditMessageInput", [
+            { no: 1, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 3, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<EditMessageInput>): EditMessageInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageId = 0n;
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<EditMessageInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: EditMessageInput): EditMessageInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 message_id */ 1:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* InputPeer peer_id */ 2:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* string text */ 3:
+                    message.text = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: EditMessageInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 message_id = 1; */
+        if (message.messageId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.messageId);
+        /* InputPeer peer_id = 2; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* string text = 3; */
+        if (message.text !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.text);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message EditMessageInput
+ */
+export const EditMessageInput = new EditMessageInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class EditMessageResult$Type extends MessageType<EditMessageResult> {
+    constructor() {
+        super("EditMessageResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<EditMessageResult>): EditMessageResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<EditMessageResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: EditMessageResult): EditMessageResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: EditMessageResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message EditMessageResult
+ */
+export const EditMessageResult = new EditMessageResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class InputMedia$Type extends MessageType<InputMedia> {
     constructor() {
