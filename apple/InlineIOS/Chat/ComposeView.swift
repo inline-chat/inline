@@ -318,12 +318,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
 
       clearDraft()
       ChatState.shared.clearReplyingMessageId(peer: peerId)
-      textViewContainer.textView.text = ""
-      resetHeight()
-      textViewContainer.textView.showPlaceholder(true)
-      buttonDisappear()
-      sendMessageHaptic()
     }
+
+    clearDraft()
+    textViewContainer.textView.text = ""
+    resetHeight()
+    textViewContainer.textView.showPlaceholder(true)
+    buttonDisappear()
+    sendMessageHaptic()
   }
 
   @objc private func presentPicker() {
@@ -434,7 +436,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
     super.removeFromSuperview()
   }
 
-  func setDraft(_ draft: String?) {
+  func applyDraft(_ draft: String?) {
     if let draft, !draft.isEmpty {
       textViewContainer.textView.text = draft
       textViewContainer.textView.showPlaceholder(false)
@@ -445,14 +447,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
 
   func loadDraft() {
     guard let peerId else { return }
-    Task {
-      do {
-        if let draft = try await DataManager.shared.getDraft(peerId: peerId) {
-          setDraft(draft)
-        }
-      } catch {
-        print("Failed to load draft", error)
-      }
+
+    if let draft = getDraft(peerId: peerId) {
+      applyDraft(draft)
+    }
+  }
+
+  public func getDraft(peerId: Peer) -> String? {
+    try? AppDatabase.shared.dbWriter.read { db in
+      let dialog = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+      return dialog?.draft
     }
   }
 
@@ -715,7 +719,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
 
     Task {
       do {
-        try await DataManager.shared.updateDialog(peerId: peerId, draft: nil)
+        try await DataManager.shared.updateDialog(peerId: peerId, draft: "")
       } catch {
         print("Failed to clear draft", error)
       }
