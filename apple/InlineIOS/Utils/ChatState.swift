@@ -8,6 +8,7 @@ final class ChatState: ObservableObject {
 
   struct State {
     var replyingMessageId: Int64?
+    var editingMessageId: Int64?
   }
 
   @Published var states: [Peer: State] = [:]
@@ -51,11 +52,41 @@ final class ChatState: ObservableObject {
     }
   }
 
+  func setEditingMessageId(peer: Peer, id: Int64) {
+    var state = getState(peer: peer)
+    state.editingMessageId = id
+    states[peer] = state
+
+    NotificationCenter.default.post(
+      name: .init("ChatStateSetEditingCalled"),
+      object: nil,
+      userInfo: ["messageId": id]
+    )
+
+    // Persist in BG
+    Task(priority: .background) {
+      persistStates()
+    }
+  }
+
   func clearReplyingMessageId(peer: Peer) {
     var state = getState(peer: peer)
     state.replyingMessageId = nil
     states[peer] = state
     NotificationCenter.default.post(name: .init("ChatStateClearReplyCalled"), object: nil)
+    // Persist in BG
+    Task(priority: .background) {
+      persistStates()
+    }
+  }
+
+  func clearEditingMessageId(peer: Peer) {
+    var state = getState(peer: peer)
+    state.editingMessageId = nil
+    states[peer] = state
+
+    NotificationCenter.default.post(name: .init("ChatStateClearEditingCalled"), object: nil)
+
     // Persist in BG
     Task(priority: .background) {
       persistStates()
