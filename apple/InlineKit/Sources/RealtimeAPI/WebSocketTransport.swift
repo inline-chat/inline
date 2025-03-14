@@ -179,10 +179,10 @@ actor WebSocketTransport: NSObject, Sendable {
       return
     }
 
-    await cancelTasks()
-
     connectionState = .connecting
     notifyStateChange()
+
+    await cancelTasks()
 
     setupConnectionTimeout()
     let url = URL(string: urlString)!
