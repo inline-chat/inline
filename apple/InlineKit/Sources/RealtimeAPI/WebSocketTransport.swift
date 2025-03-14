@@ -73,7 +73,7 @@ actor WebSocketTransport: NSObject, Sendable {
     // Create session configuration
     let configuration = URLSessionConfiguration.default
     configuration.shouldUseExtendedBackgroundIdleMode = true
-    configuration.timeoutIntervalForResource = 60
+    configuration.timeoutIntervalForResource = 300
     configuration.timeoutIntervalForRequest = 30
     configuration.waitsForConnectivity = false // Don't wait, try immediately
     configuration.httpMaximumConnectionsPerHost = 1 // Allow multiple connections
@@ -384,7 +384,7 @@ actor WebSocketTransport: NSObject, Sendable {
     }
   }
 
-  private let pingInterval: TimeInterval = 15.0
+  private let pingInterval: TimeInterval = 10.0
   private let pingTimeout: TimeInterval = 8.0
   private let maxConsecutivePingFailures = 3
 
@@ -546,6 +546,11 @@ actor WebSocketTransport: NSObject, Sendable {
     reason: Data? = nil,
     error: Error? = nil
   ) async {
+    if webSocketTask?.state == .running {
+      log.debug("WebSocket disconnect was stale")
+      return
+    }
+    
     connectionState = .disconnected
     notifyStateChange()
 
