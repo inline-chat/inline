@@ -8,7 +8,6 @@ public struct ApiDialog: Codable, Hashable, Sendable {
   public var unreadCount: Int?
   public var readInboxMaxId: Int64?
   public var readOutboxMaxId: Int64?
-  public var draft: String?
   public var archived: Bool?
 }
 
@@ -65,7 +64,6 @@ public extension Dialog {
     readInboxMaxId = from.readInboxMaxId
     readOutboxMaxId = from.readOutboxMaxId
     pinned = from.pinned
-    draft = from.draft
     archived = from.archived
     unreadCount = from.unreadCount
   }
@@ -113,6 +111,23 @@ public extension Dialog {
     } else {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
+  }
+}
+
+public extension ApiDialog {
+  @discardableResult
+  func saveFull(
+    _ db: Database
+  )
+    throws -> Dialog
+  {
+    let existing = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+    var dialog = Dialog(from: self)
+    if let existing {
+      dialog.draft = existing.draft
+      try dialog.save(db)
+    }
+    return dialog
   }
 }
 
