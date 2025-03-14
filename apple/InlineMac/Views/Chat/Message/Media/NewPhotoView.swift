@@ -48,16 +48,16 @@ final class NewPhotoView: NSView {
 
   // Corner radius properties
   private let maskLayer = CAShapeLayer()
-  let topLeftRadius: CGFloat = 8.0
-  let topRightRadius: CGFloat = 8.0
-  let bottomLeftRadius: CGFloat = 8.0
-  let bottomRightRadius: CGFloat = 8.0
+  let topLeftRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
+  let topRightRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
+  let bottomLeftRadius: CGFloat = 2.0
+  let bottomRightRadius: CGFloat = 2.0
 
   var haveAddedImageView = false
 
   private func setupView() {
     wantsLayer = true
-    //translatesAutoresizingMaskIntoConstraints = false
+    // translatesAutoresizingMaskIntoConstraints = false
 
     // Add background view first (below image view)
     addSubview(backgroundView)
@@ -116,13 +116,13 @@ final class NewPhotoView: NSView {
     if let url = imageLocalUrl() {
       // Set URL
       guard let image = NSImage(contentsOf: url) else { return }
-      
+
       // Add image view
       addImageView()
 
       if wasLoadedWithPlaceholder {
         print("wasLoadedWithPlaceholder")
-        
+
         // With animation
         imageView.alphaValue = 0.0
         imageView.image = image
@@ -176,6 +176,20 @@ final class NewPhotoView: NSView {
     updateMasks()
   }
 
+  override func setFrameSize(_ newSize: NSSize) {
+    super.setFrameSize(newSize)
+    updateMasks()
+  }
+
+  // Update the mask path based on current bounds
+  private func updateMasks() {
+    // Only update if we have valid dimensions
+    if bounds.width > 0, bounds.height > 0 {
+      maskLayer.frame = bounds
+      maskLayer.path = createRoundedRectPath(for: bounds)
+    }
+  }
+
   private func setupMasks() {
     wantsLayer = true
     maskLayer.fillColor = NSColor.black.cgColor
@@ -183,10 +197,6 @@ final class NewPhotoView: NSView {
 
     // Initial update of mask paths
     updateMasks()
-  }
-
-  private func updateMasks() {
-    maskLayer.path = createRoundedRectPath(for: bounds)
   }
 
   private func createRoundedRectPath(for rect: CGRect) -> CGPath {
@@ -199,50 +209,60 @@ final class NewPhotoView: NSView {
       return path
     }
 
-    // Top-left corner
-    path.move(to: CGPoint(x: topLeftRadius, y: 0))
+    // In Cocoa/AppKit, (0,0) is at the BOTTOM-LEFT
+    // So we need to adjust our mental model:
+    // - "Top" corners are at y = height
+    // - "Bottom" corners are at y = 0
+
+    // Start at the bottom-left corner
+    path.move(to: CGPoint(x: bottomLeftRadius, y: 0))
+
+    // Bottom edge to bottom-right corner
+    path.addLine(to: CGPoint(x: width - bottomRightRadius, y: 0))
+
+    // Bottom-right corner arc
     path.addArc(
-      center: CGPoint(x: topLeftRadius, y: topLeftRadius),
-      radius: topLeftRadius,
-      startAngle: .pi * 3 / 2,
-      endAngle: .pi,
-      clockwise: true
-    )
-
-    // Left edge
-    path.addLine(to: CGPoint(x: 0, y: height - bottomLeftRadius))
-
-    // Bottom-left corner
-    path.addArc(
-      center: CGPoint(x: bottomLeftRadius, y: height - bottomLeftRadius),
-      radius: bottomLeftRadius,
-      startAngle: .pi,
-      endAngle: .pi / 2,
-      clockwise: true
-    )
-
-    // Bottom edge
-    path.addLine(to: CGPoint(x: width - bottomRightRadius, y: height))
-
-    // Bottom-right corner
-    path.addArc(
-      center: CGPoint(x: width - bottomRightRadius, y: height - bottomRightRadius),
+      center: CGPoint(x: width - bottomRightRadius, y: bottomRightRadius),
       radius: bottomRightRadius,
-      startAngle: .pi / 2,
+      startAngle: CGFloat(3 * Double.pi / 2),
       endAngle: 0,
-      clockwise: true
+      clockwise: false
     )
 
-    // Right edge
-    path.addLine(to: CGPoint(x: width, y: topRightRadius))
+    // Right edge to top-right corner
+    path.addLine(to: CGPoint(x: width, y: height - topRightRadius))
 
-    // Top-right corner
+    // Top-right corner arc
     path.addArc(
-      center: CGPoint(x: width - topRightRadius, y: topRightRadius),
+      center: CGPoint(x: width - topRightRadius, y: height - topRightRadius),
       radius: topRightRadius,
       startAngle: 0,
-      endAngle: .pi * 3 / 2,
-      clockwise: true
+      endAngle: CGFloat(Double.pi / 2),
+      clockwise: false
+    )
+
+    // Top edge to top-left corner
+    path.addLine(to: CGPoint(x: topLeftRadius, y: height))
+
+    // Top-left corner arc
+    path.addArc(
+      center: CGPoint(x: topLeftRadius, y: height - topLeftRadius),
+      radius: topLeftRadius,
+      startAngle: CGFloat(Double.pi / 2),
+      endAngle: CGFloat(Double.pi),
+      clockwise: false
+    )
+
+    // Left edge back to start
+    path.addLine(to: CGPoint(x: 0, y: bottomLeftRadius))
+
+    // Bottom-left corner arc
+    path.addArc(
+      center: CGPoint(x: bottomLeftRadius, y: bottomLeftRadius),
+      radius: bottomLeftRadius,
+      startAngle: CGFloat(Double.pi),
+      endAngle: CGFloat(3 * Double.pi / 2),
+      clockwise: false
     )
 
     path.closeSubpath()

@@ -76,35 +76,120 @@ class MessageSizeCalculator {
     getTextWidthIfSingleLine(fullMessage, availableWidth: availableWidth) != nil
   }
 
+  struct LayoutPlan: Equatable, Codable, Hashable {
+    var size: NSSize
+
+    /// outer spacings
+    var spacing: NSEdgeInsets
+  }
+
+  struct LayoutPlans: Equatable, Codable, Hashable {
+    /// the outer wrapper of bubble, avatar, and name, currently doesn't define width
+    var wrapper: LayoutPlan
+
+    /// name can be present or not, and it's always above bubble
+    var name: LayoutPlan?
+
+    /// avatar can be present or not, and it's to the left of the bubble
+    var avatar: LayoutPlan?
+
+    /// bubble wraps all the content elements, but it can be hidden for certain messages like stickers or emojis
+    var bubble: LayoutPlan
+
+    /// text
+    var text: LayoutPlan?
+
+    /// photo is always above text
+    var photo: LayoutPlan?
+
+    /// document is always above text, and it's mutually exclusive with other media types
+    var document: LayoutPlan?
+
+    /// reply is always above text
+    var reply: LayoutPlan?
+
+    /// time can be beside text or below it. it doesn't define vertical spacing.
+    var time: LayoutPlan?
+
+    // used for determining if the message is single line for time view positioning
+    var singleLine: Bool
+
+    // computed
+    var totalHeight: CGFloat {
+      var height = wrapper.size.height
+      height += wrapper.spacing.verticalTotal
+      return height
+    }
+
+    var totalWidth: CGFloat {
+      var width = wrapper.size.width
+      width += wrapper.spacing.horizontalTotal
+      return width
+    }
+
+    var hasText: Bool { text != nil }
+    var hasPhoto: Bool { photo != nil }
+    var hasAvatar: Bool { avatar != nil }
+    var hasName: Bool { name != nil }
+    var hasReply: Bool { reply != nil }
+    var hasDocument: Bool { document != nil }
+
+    // used as edge inset for content view stack
+    var topMostContentTopSpacing: CGFloat {
+      if let reply {
+        reply.spacing.top
+      } else if let photo {
+        photo.spacing.top
+      } else if let document {
+        document.spacing.top
+      } else if let text {
+        text.spacing.top
+      } else {
+        0
+      }
+    }
+
+    // used as edge inset for content view stack
+    var bottomMostContentBottomSpacing: CGFloat {
+      if let text {
+        text.spacing.bottom
+      } else if let photo {
+        photo.spacing.bottom
+      } else {
+        0.0
+      }
+    }
+
+    var nameAndBubbleLeading: CGFloat {
+      Theme.messageAvatarSize + Theme.messageHorizontalStackSpacing + Theme.messageSidePadding
+    }
+  }
+
   func calculateSize(
     for message: FullMessage,
-    with props: MessageViewProps,
+    with props: MessageViewInputProps,
     tableWidth width: CGFloat
-  ) -> (NSSize, NSSize, NSSize?) {
+  ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     let hasText = message.message.text != nil
     let text = message.message.text ?? emptyFallback
     let hasMedia = message.hasMedia
     let hasDocument = message.documentInfo != nil
     let hasReply = message.message.repliedToMessageId != nil
+    let isOutgoing = message.message.out == true
+    var isSingleLine = false
+    var textSize: CGSize?
+    var photoSize: CGSize?
 
     // If text is empty, height is always 1 line
     // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
-    if hasText, text.isEmpty, !hasMedia, !hasReply {
-      // TODO: fix this to include name, etc
-      return (
-        CGSize(width: 1, height: heightForSingleLineText()),
-        CGSize(width: 1, height: heightForSingleLineText()),
-        nil
-      )
+    if hasText, text.isEmpty {
+      textSize = CGSize(width: 1, height: heightForSingleLineText())
+      isSingleLine = true
     }
 
     // Total available before taking into account photo/video size constraints as they can impact it for the text view.
     // Eg. with a narrow image with 200 width, even if window gives us 500, we should cap at 200.
     let parentAvailableWidth: CGFloat = getAvailableWidth(tableWidth: width)
-
-    // Need it here to cap text size
-    var photoSize: CGSize?
-    var documentSize: CGSize?
 
     // Add file/photo/video sizes
     if hasMedia {
@@ -118,11 +203,8 @@ class MessageSizeCalculator {
         let photo = photoInfo.bestPhotoSize()
         width = CGFloat(photo?.width ?? 0)
         height = CGFloat(photo?.height ?? 0)
-
-        log.debug("photo width \(width) height \(height)")
       }
 
-      // /start photo
       if message.file?.fileType == .photo || message.photoInfo != nil {
         photoSize = calculatePhotoSize(
           width: width,
@@ -130,18 +212,8 @@ class MessageSizeCalculator {
           parentAvailableWidth: parentAvailableWidth,
           hasCaption: hasText
         )
-
-        log.debug("photo width adjusted \(photoSize?.width) height \(photoSize?.height)")
-
-        // /end photo
-      } else {
-        // todo file
-        if hasDocument {
-          documentSize = CGSize(width: 200, height: Theme.documentViewHeight)
-        }
-
-        // todo video
       }
+      // todo video
     }
 
     // What's the available width for the text
@@ -152,46 +224,27 @@ class MessageSizeCalculator {
       availableWidth = max(availableWidth, photoSize.width)
     }
 
-    // Highly Experimental:
-    // So we get smooth bubble resize but less lag
-    // Make available width divisible by 4 to do one fourth of layouting per text
-    // availableWidth = floor(availableWidth / 3) * 3
-
     log.trace("availableWidth \(availableWidth) for text \(text)")
-    var textSize: CGSize?
 
     let cacheKey = "\(message.id):\(props.toString()):\(availableWidth)" as NSString
     if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue,
        let cachedTextSize = textHeightCache.object(forKey: cacheKey)?.sizeValue
     {
-      if hasMedia || hasReply { // we can skip reply probably
-        // Just use the text size if we have media
-        textSize = cachedTextSize
-      } else {
-        return (cachedSize, cachedTextSize, nil)
+      textSize = cachedTextSize
+
+      if hasText, abs(cachedTextSize.height - heightForSingleLineText()) < 0.5 {
+        isSingleLine = true
       }
     }
 
-    // MARK: Calculate text size
-
-    var cachHitForSingleLine = false
-
-    // Previous local logic
-//    if textSize == nil,
-//       let minSize = minTextWidthForSingleLine.object(forKey: text as NSString) as? CGSize,
-//       minSize.width < availableWidth
-//    {
-//      log.trace("single line minWidth \(minSize.width) is less than viewport \(width)")
-//      cachHitForSingleLine = true
-//      textSize = CGSize(width: minSize.width, height: heightForSingleLineText())
-//    }
+    // MARK: Calculate text size if caches are missed
 
     // Shared logic
     if hasText,
        textSize == nil,
        let minTextWidth = getTextWidthIfSingleLine(message, availableWidth: availableWidth)
     {
-      cachHitForSingleLine = true
+      isSingleLine = true
       textSize = CGSize(width: minTextWidth, height: heightForSingleLineText())
     } else {
       // remove from single line cache. possibly logic can be improved
@@ -199,69 +252,257 @@ class MessageSizeCalculator {
     }
 
     if hasText, textSize == nil {
-      textSize = calculateSizeForText(text, width: availableWidth, message: message.message)
+      let textSize_ = calculateSizeForText(text, width: availableWidth, message: message.message)
+      textSize = textSize_
+
+      // Cache as single line if height is equal to single line height
+      if hasText, abs(textSize_.height - heightForSingleLineText()) < 0.5 {
+        isSingleLine = true
+        minTextWidthForSingleLine.setObject(
+          NSValue(size: textSize_),
+          forKey: text as NSString
+        )
+      }
     }
 
     let textHeight = ceil(textSize?.height ?? 0.0)
     let textWidth = textSize?.width ?? 0.0
     let textSizeCeiled = CGSize(width: ceil(textWidth), height: ceil(textHeight))
 
-    // Mark as single line if height is equal to single line height
-    if hasText, !cachHitForSingleLine, abs(textHeight - heightForSingleLineText()) < 0.5 {
-      log.trace("cached single line text \(text) width \(textWidth)")
-      minTextWidthForSingleLine.setObject(
-        NSValue(size: CGSize(width: textWidth, height: textHeight)),
-        forKey: text as NSString
+    // MARK: - Layout Plans
+
+    // we prepare our plans and after done with calculations we will use them to calculate the final size
+    // some rules:
+    // - spacing means outer spacing, so it's additive to the size of the element (it's different from insets)
+    // - for content views we add just bottom spacing to all elements, except for the first element in the group which
+    // has top as well.
+    // - we add left edge spacing to elements stacked together, except for the last element which needs right spacing as
+    // well.
+    // - we don't set width for most elements, only photo and text that can affact the width of the bubble
+
+    var wrapperPlan = LayoutPlan(size: .zero, spacing: .zero)
+    var bubblePlan = LayoutPlan(size: .zero, spacing: .zero)
+    var namePlan: LayoutPlan?
+    var avatarPlan: LayoutPlan?
+    var textPlan: LayoutPlan?
+    var photoPlan: LayoutPlan?
+    var documentPlan: LayoutPlan?
+    var replyPlan: LayoutPlan?
+    var timePlan: LayoutPlan?
+
+    // MARK: - Name
+
+    if props.firstInGroup {
+      let nameHeight = Theme.messageNameLabelHeight
+      namePlan = LayoutPlan(
+        size: CGSize(width: 0, height: nameHeight),
+        spacing: .init(top: 0, left: 5.0, bottom: 0, right: 0)
       )
     }
 
-    // MARK: Add other UI element heights to the text
-
-    // don't let it be smaller than that
-    var totalHeight = 1.0
-
-    if hasText {
-      totalHeight = max(textHeight, heightForSingleLineText())
-    }
-
-    // Inter message spacing (between two bubbles vertically)
-    totalHeight += Theme.messageOuterVerticalPadding * 2
+    // MARK: - Avatar
 
     if props.firstInGroup {
-      totalHeight += Theme.messageNameLabelHeight
-      totalHeight += Theme.messageVerticalStackSpacing
-      totalHeight += Theme.messageGroupSpacing
+      avatarPlan = LayoutPlan(
+        size: .init(width: Theme.messageAvatarSize, height: Theme.messageAvatarSize),
+        spacing: .init(
+          top: Theme.messageNameLabelHeight,
+          left: Theme.messageSidePadding,
+          bottom: 0,
+          right: Theme.messageHorizontalStackSpacing
+        )
+      )
     }
 
-    // Add file/photo/video sizes
-    if hasMedia {
-      if let photoSize {
-        totalHeight += photoSize.height
+    // MARK: - Text
+
+    if hasText {
+      let textHeight = max(textHeight, heightForSingleLineText())
+      var textTopSpacing: CGFloat = 0
+      var textBottomSpacing: CGFloat = 0
+      let textSidePadding = Theme.messageBubbleContentHorizontalInset
+
+      // If just text
+      if !hasMedia, !hasReply {
+        textTopSpacing += Theme.messageTextOnlyVerticalInsets
       }
 
-      if let documentSize {
-        totalHeight += documentSize.height
+      if isSingleLine {
+        textBottomSpacing += Theme.messageTextOnlyVerticalInsets
+      } else {
+        textBottomSpacing += Theme.messageTextAndTimeSpacing
       }
 
-      // Add some padding
-      totalHeight += Theme.messageContentViewSpacing
+      textPlan = LayoutPlan(
+        size: NSSize(width: ceil(textWidth), height: ceil(textHeight)),
+        spacing: NSEdgeInsets(
+          top: textTopSpacing,
+          left: textSidePadding,
+          bottom: textBottomSpacing,
+          right: textSidePadding
+        )
+      )
     }
+
+    // MARK: - Reply
 
     if hasReply {
-      totalHeight += Theme.embeddedMessageHeight
-      totalHeight += Theme.messageContentViewSpacing
+      replyPlan = LayoutPlan(size: .zero, spacing: .zero)
+      replyPlan!.size.height = Theme.embeddedMessageHeight
+      replyPlan!.size.width = 200
+      replyPlan!.spacing = .init(
+        top: 6.0,
+        left: Theme.messageBubbleContentHorizontalInset,
+        bottom: 3.0,
+        right: Theme.messageBubbleContentHorizontalInset
+      )
     }
 
-    let totalWidth = textWidth
+    // MARK: - Photo
+
+    if let photoSize {
+      photoPlan = LayoutPlan(size: .zero, spacing: .zero)
+      photoPlan!.size = photoSize
+
+      if hasText {
+        photoPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
+      } else {
+        photoPlan!.spacing = .zero
+      }
+    }
+
+    // MARK: - Document
+
+    if hasDocument {
+      documentPlan = LayoutPlan(size: .zero, spacing: .zero)
+      documentPlan!.size = CGSize(width: 200, height: Theme.documentViewHeight)
+
+      if hasText {
+        documentPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
+      } else {
+        documentPlan!.spacing = .vertical(Theme.messageBubbleContentHorizontalInset)
+      }
+    }
+
+    // MARK: - Reactions
+
+    // todo
+
+    // MARK: - Time Size
+
+    timePlan = LayoutPlan(size: .zero, spacing: .zero)
+    timePlan!.size = CGSize(
+      width: isOutgoing ? Theme.messageOutgoingTimeWidth : Theme.messageIncomingTimeWidth,
+      height: Theme.messageTimeHeight
+    )
+
+    if isSingleLine {
+      timePlan!.spacing = .init(top: 0, left: 0, bottom: 5.0, right: 9.0)
+    } else {
+      timePlan!.spacing = .init(top: 1.0, left: 9.0, bottom: 5.0, right: 9.0)
+    }
+
+    // modify isSignleLine to be false if we have photo or document and text won't fit in a single line with time
+    if isSingleLine, let textPlan, let photoPlan {
+      let textWidth = textPlan.size.width + textPlan.spacing.horizontalTotal
+      let timeWidth = timePlan!.size.width + timePlan!.spacing.horizontalTotal
+      let totalWidth = textWidth + timeWidth
+
+      if totalWidth > photoPlan.size.width {
+        isSingleLine = false
+      }
+    }
+
+    // MARK: - Bubble
+
+    var bubbleWidth: CGFloat = 0
+    var bubbleHeight: CGFloat = 0
+
+    if let textPlan {
+      bubbleHeight += textPlan.size.height
+      bubbleHeight += textPlan.spacing.bottom
+      bubbleWidth = max(bubbleWidth, textPlan.size.width + textPlan.spacing.horizontalTotal)
+
+      if isSingleLine, let timePlan {
+        bubbleWidth = max(bubbleWidth, textPlan.size.width + textPlan.spacing.horizontalTotal + timePlan.size.width)
+      }
+    }
+    if let replyPlan {
+      bubbleHeight += replyPlan.size.height
+      bubbleHeight += replyPlan.spacing.bottom
+      bubbleWidth = max(bubbleWidth, replyPlan.size.width + replyPlan.spacing.horizontalTotal)
+    }
+    if let photoPlan {
+      bubbleHeight += photoPlan.size.height
+      bubbleHeight += photoPlan.spacing.bottom
+      bubbleWidth = photoPlan.size.width
+    }
+    if let timePlan {
+      if !isSingleLine {
+        bubbleHeight += timePlan.size.height
+        bubbleHeight += timePlan.spacing.verticalTotal // ??? probably too much
+      }
+    }
+
+    bubblePlan.size = CGSize(width: bubbleWidth, height: bubbleHeight)
+    bubblePlan.spacing = .zero
+
+    // MARK: - Wrapper
+
+    var wrapperWidth: CGFloat = bubblePlan.size.width
+    var wrapperHeight: CGFloat = bubblePlan.size.height
+    var wrapperTopSpacing: CGFloat = 0
+
+    if let namePlan {
+      wrapperHeight += namePlan.size.height
+      wrapperHeight += namePlan.spacing.verticalTotal
+    }
+    if props.firstInGroup {
+      wrapperTopSpacing = Theme.messageGroupSpacing
+    }
+    if let avatarPlan {
+      wrapperWidth += avatarPlan.size.width
+      wrapperWidth += avatarPlan.spacing.horizontalTotal
+    }
+    
+    wrapperHeight += bubblePlan.spacing.top
+    wrapperHeight += bubblePlan.spacing.bottom
+
+    wrapperPlan.size = CGSize(width: wrapperWidth, height: wrapperHeight)
+    wrapperPlan.spacing = .init(
+      top: wrapperTopSpacing + Theme.messageOuterVerticalPadding,
+      left: 0,
+      bottom: Theme.messageOuterVerticalPadding,
+      right: 0
+    )
+
+    // MARK: - Finalize Layout Plan
+
+    var plan = LayoutPlans(
+      wrapper: wrapperPlan,
+      name: namePlan,
+      avatar: avatarPlan,
+      bubble: bubblePlan,
+      text: textPlan,
+      photo: photoPlan,
+      document: documentPlan,
+      reply: replyPlan,
+      time: timePlan,
+      singleLine: isSingleLine
+    )
+
+    // final pass
+    plan.bubble.size.height += plan.topMostContentTopSpacing
+    plan.wrapper.size.height += plan.topMostContentTopSpacing
 
     // Fitting width
-    let size = NSSize(width: textWidth, height: totalHeight)
+    let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
 
     cache.setObject(NSValue(size: size), forKey: cacheKey)
     textHeightCache.setObject(NSValue(size: textSizeCeiled), forKey: cacheKey)
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
 
-    return (size, textSizeCeiled, photoSize)
+    return (size, textSizeCeiled, photoSize, plan)
   }
 
   func cachedSize(messageStableId: Int64) -> CGSize? {
@@ -281,7 +522,7 @@ class MessageSizeCalculator {
     if let height = heightForSingleLine {
       return height
     } else {
-      let text = "I"
+      let text = "Ij"
       let size = calculateSizeForText(text, width: 1_000)
       heightForSingleLine = size.height
       return size.height
