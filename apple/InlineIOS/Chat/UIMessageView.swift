@@ -956,7 +956,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
 
     for (index, reaction) in reactions.enumerated() {
       let button = UIButton(type: .system)
-      button.frame = circleContainer.bounds
+
       button.setTitle(reaction, for: .normal)
       button.titleLabel?.font = UIFont.systemFont(ofSize: 20)
       button.backgroundColor = .clear
@@ -988,7 +988,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
     mainStackView.addArrangedSubview(separatorContainer)
 
     let willDoButton = UIButton(type: .system)
-    willDoButton.frame = willDoContainer.bounds
+
     willDoButton.setTitle("Will Do", for: .normal)
     willDoButton.setTitleColor(.adaptiveTitle, for: .normal)
     willDoButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
