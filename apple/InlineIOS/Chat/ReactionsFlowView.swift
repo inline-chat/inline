@@ -72,7 +72,7 @@ class ReactionsFlowView: UIView {
 
       // Store original position for animation
       let originalFrame = view.convert(view.bounds, to: self)
-      
+
       // Only animate if this is the specific emoji being removed
       if emoji == animatedEmoji {
         viewsToRemove.append((view: view, originalFrame: originalFrame))
@@ -98,7 +98,7 @@ class ReactionsFlowView: UIView {
         }
 
         reactionViews[reaction.emoji] = view
-        
+
         // Only animate if this is the specific emoji being added
         if reaction.emoji == animatedEmoji {
           viewsToAdd.append(view)

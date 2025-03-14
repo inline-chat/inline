@@ -125,7 +125,9 @@ class UIMessageView: UIView {
     view.onReactionTap = { [weak self] emoji in
       guard let self else { return }
 
-      if let reaction = fullMessage.reactions.filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first {
+      if let reaction = fullMessage.reactions
+        .filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
+      {
         Transactions.shared.mutate(transaction: .deleteReaction(.init(
           message: message,
           emoji: emoji,
@@ -245,7 +247,7 @@ class UIMessageView: UIView {
     setupPhotoViewIfNeeded()
     setupMessageContainer()
 
-    if message.hasFile, !message.hasText {
+    if message.hasFile, !message.hasText, fullMessage.reactions.isEmpty {
       addFloatingMetadata()
     }
 
@@ -325,12 +327,6 @@ class UIMessageView: UIView {
     reactionsFlowView.configure(
       with: sortedReactions.map { (emoji: $0.emoji, count: $0.count, userIds: $0.userIds) }
     )
-
-    // Add to container and set constraints
-    multiLineContainer.addArrangedSubview(reactionsFlowView)
-
-    // Ensure the flow view gets the full width of its container
-    reactionsFlowView.widthAnchor.constraint(equalTo: multiLineContainer.widthAnchor).isActive = true
   }
 
   private func setupMessageContainer() {
@@ -342,7 +338,7 @@ class UIMessageView: UIView {
   }
 
   private func setupMultilineMessage() {
-    if message.hasFile, message.hasText {
+    if message.hasFile, message.hasText || !fullMessage.reactions.isEmpty {
       let innerContainer = UIStackView()
       innerContainer.axis = .vertical
       innerContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -363,6 +359,11 @@ class UIMessageView: UIView {
         innerContainer.addArrangedSubview(attachmentView)
       }
 
+      if !fullMessage.reactions.isEmpty {
+        setupReactionsIfNeeded()
+        innerContainer.addArrangedSubview(reactionsFlowView)
+      }
+
       let metadataContainer = UIStackView()
       metadataContainer.axis = .horizontal
       metadataContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -381,6 +382,7 @@ class UIMessageView: UIView {
 
       if !fullMessage.reactions.isEmpty {
         setupReactionsIfNeeded()
+        containerStack.addArrangedSubview(multiLineContainer)
       }
 
       if !message.hasFile || message.hasText {
@@ -495,7 +497,7 @@ class UIMessageView: UIView {
       ).withPriority(.defaultHigh),
     ]
 
-    let constraints: [NSLayoutConstraint] = switch (message.hasFile, message.hasText) {
+    let constraints: [NSLayoutConstraint] = switch (message.hasFile, message.hasText || !fullMessage.reactions.isEmpty) {
     case (true, false):
       // File only
       withFileConstraints
@@ -1015,8 +1017,9 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
     Self.contextMenuOpen = false
     interaction?.dismissMenu()
 
-    // check if there was a reaction that we added before delete our reaction otherwise add the reaction
-    if let reaction = fullMessage.reactions.filter({ $0.emoji == selectedReaction && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first {
+    if let reaction = fullMessage.reactions
+      .filter({ $0.emoji == selectedReaction && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
+    {
       print("deleting reaction", reaction)
       Transactions.shared.mutate(transaction: .deleteReaction(.init(
         message: message,
@@ -1098,7 +1101,6 @@ extension Message {
   }
 }
 
-// Add extension for NewPhotoView to access current image
 extension NewPhotoView {
   func getCurrentImage() -> UIImage? {
     imageView.imageView.image

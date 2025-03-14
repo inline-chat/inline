@@ -20,8 +20,9 @@ class FloatingMetadataView: UIView {
 
   private func setupViews() {
     materialBackgroundView.backgroundColor = UIColor.black.withAlphaComponent(0.6)
-
-    materialBackgroundView.layer.cornerRadius = 10
+    UIView.performWithoutAnimation {
+      materialBackgroundView.layer.cornerRadius = 10
+    }
     materialBackgroundView.clipsToBounds = true
     materialBackgroundView.translatesAutoresizingMaskIntoConstraints = false
 
