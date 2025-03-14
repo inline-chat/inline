@@ -151,22 +151,58 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
     layer.mask = maskLayer
   }
 
+//  private func updateMask() {
+//    let width = bounds.width
+//    let height = bounds.height
+//
+//    let shouldRoundTopCorners = hasText && !hasReply || !fullMessage.reactions.isEmpty
+//    let shouldRoundBottomCorners = hasReply && !hasText || fullMessage.reactions.isEmpty
+//    let shouldRoundAllCorners = !hasText && !hasReply || fullMessage.reactions.isEmpty
+//
+//    let roundingCorners: UIRectCorner = if shouldRoundAllCorners {
+//      .allCorners
+//    } else if shouldRoundTopCorners {
+//      [.topLeft, .topRight]
+//    } else if shouldRoundBottomCorners {
+//      [.bottomLeft, .bottomRight]
+//    } else {
+//      []
+//    }
+//
+//    let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+//    let bezierPath = UIBezierPath(
+//      roundedRect: bounds,
+//      byRoundingCorners: roundingCorners,
+//      cornerRadii: CGSize(width: cornerRadius, height: cornerRadius)
+//    )
+//
+//    maskLayer.path = bezierPath.cgPath
+//  }
+
   private func updateMask() {
     let width = bounds.width
     let height = bounds.height
 
-    let shouldRoundTopCorners = hasText && !hasReply
-    let shouldRoundBottomCorners = hasReply && !hasText
-    let shouldRoundAllCorners = !hasText && !hasReply
+    // Determine which corners to round based on message properties
+    let hasReactions = !fullMessage.reactions.isEmpty
 
-    let roundingCorners: UIRectCorner = if shouldRoundAllCorners {
-      .allCorners
-    } else if shouldRoundTopCorners {
-      [.topLeft, .topRight]
-    } else if shouldRoundBottomCorners {
-      [.bottomLeft, .bottomRight]
+    let roundingCorners: UIRectCorner
+
+    if !hasText && !hasReply && !hasReactions {
+      // No text and no reply - round all corners
+      roundingCorners = .allCorners
+    } else if hasReactions {
+      // No text but has reactions - round top corners only
+      roundingCorners = [.topLeft, .topRight]
+    } else if hasText && !hasReply {
+      // Has text but no reply - round top corners
+      roundingCorners = [.topLeft, .topRight]
+    } else if hasReply && !hasText {
+      // Has reply but no text - round bottom corners
+      roundingCorners = [.bottomLeft, .bottomRight]
     } else {
-      []
+      // Default case - don't round any corners
+      roundingCorners = []
     }
 
     let bounds = CGRect(x: 0, y: 0, width: width, height: height)
