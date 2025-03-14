@@ -114,6 +114,11 @@ public struct TransactionSendMessage: Transaction {
   }
 
   func execute() async throws -> [InlineProtocol.Update] {
+    // clear typing...
+    Task {
+      await ComposeActions.shared.stoppedTyping(for: peerId)
+    }
+
     let date = Date()
     var inputMedia: InputMedia? = nil
 
