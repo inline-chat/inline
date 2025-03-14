@@ -20,7 +20,7 @@ export const realtime = new Elysia().ws("/realtime", {
   sendPings: true,
   backpressureLimit: 1024 * 1024 * 16, // bytes
   closeOnBackpressureLimit: false,
-  idleTimeout: 240, // 240 seconds
+  idleTimeout: 480, //  8 min
 
   // ------------------------------------------------------------
   // HANDLERS
