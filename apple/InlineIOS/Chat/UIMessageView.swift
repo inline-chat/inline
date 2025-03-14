@@ -239,6 +239,10 @@ class UIMessageView: UIView {
   }
 
   private func setupViews() {
+    bubbleView.isUserInteractionEnabled = true
+    messageLabel.isUserInteractionEnabled = true
+    containerStack.isUserInteractionEnabled = true
+
     addSubview(bubbleView)
     bubbleView.addSubview(containerStack)
 
@@ -413,11 +417,10 @@ class UIMessageView: UIView {
   }
 
   private func addGestureRecognizer() {
-    bubbleView.isUserInteractionEnabled = true
     messageLabel.isUserInteractionEnabled = true
 
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-    bubbleView.addGestureRecognizer(tapGesture)
+    messageLabel.addGestureRecognizer(tapGesture)
   }
 
   enum StackPadding {
@@ -502,15 +505,15 @@ class UIMessageView: UIView {
       message.hasFile,
       message.hasText || !fullMessage.reactions.isEmpty
     ) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -550,50 +553,56 @@ class UIMessageView: UIView {
   }
 
   private func detectAndStyleLinks(in text: String, attributedString: NSMutableAttributedString) {
-    if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
-      let nsString = text as NSString
-      let range = NSRange(location: 0, length: nsString.length)
-      let matches = detector.matches(in: text, options: [], range: range)
+    guard let detector = Self.linkDetector else { return }
 
-      links = matches.compactMap { match in
-        guard let url = match.url else { return nil }
+    let nsString = text as NSString
+    let range = NSRange(location: 0, length: nsString.length)
+    let matches = detector.matches(in: text, options: [], range: range)
 
-        let linkAttributes: [NSAttributedString.Key: Any] = [
-          .foregroundColor: outgoing ? UIColor.white.withAlphaComponent(0.9) : .systemBlue,
-          .underlineStyle: NSUnderlineStyle.single.rawValue,
-        ]
-        attributedString.addAttributes(linkAttributes, range: match.range)
+    links = matches.compactMap { match in
+      guard let url = match.url else { return nil }
 
-        return (range: match.range, url: url)
-      }
+      let linkAttributes: [NSAttributedString.Key: Any] = [
+        .foregroundColor: outgoing ? UIColor.white.withAlphaComponent(0.9) : .systemBlue,
+        .underlineStyle: NSUnderlineStyle.single.rawValue,
+      ]
+      attributedString.addAttributes(linkAttributes, range: match.range)
+
+      return (range: match.range, url: url)
     }
   }
 
   @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
     guard !links.isEmpty else { return }
 
-    let point = gesture.location(in: messageLabel)
+    // Get tap location in the label's coordinate space
+    let tapLocation = gesture.location(in: messageLabel)
 
+    // Create text container to match the label's configuration
     let textContainer = NSTextContainer(size: messageLabel.bounds.size)
+    textContainer.lineFragmentPadding = 0
+    textContainer.lineBreakMode = messageLabel.lineBreakMode
+    textContainer.maximumNumberOfLines = messageLabel.numberOfLines
+
+    // Create layout manager and text storage
     let layoutManager = NSLayoutManager()
     let textStorage = NSTextStorage(attributedString: messageLabel.attributedText ?? NSAttributedString())
 
     layoutManager.addTextContainer(textContainer)
     textStorage.addLayoutManager(layoutManager)
 
-    textContainer.lineFragmentPadding = 0
-    textContainer.lineBreakMode = messageLabel.lineBreakMode
-    textContainer.maximumNumberOfLines = messageLabel.numberOfLines
-
-    let index = layoutManager.characterIndex(
-      for: point,
+    // Get character index at tap location
+    let characterIndex = layoutManager.characterIndex(
+      for: tapLocation,
       in: textContainer,
       fractionOfDistanceBetweenInsertionPoints: nil
     )
 
-    for link in links where NSLocationInRange(index, link.range) {
+    // Check if tap is on a link
+    for link in links where NSLocationInRange(characterIndex, link.range) {
+      print("Link tapped: \(link.url)")
       linkTapHandler?(link.url)
-      break
+      return
     }
   }
 
