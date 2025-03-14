@@ -73,6 +73,16 @@ actor WebSocketTransport: NSObject, Sendable {
     // Create session configuration
     let configuration = URLSessionConfiguration.default
     configuration.shouldUseExtendedBackgroundIdleMode = true
+    configuration.timeoutIntervalForResource = 30
+    configuration.timeoutIntervalForRequest = 15
+    configuration.waitsForConnectivity = false // Don't wait, try immediately
+    configuration.httpMaximumConnectionsPerHost = 5 // Allow multiple connections
+
+    // Set TCP options for faster connection establishment
+    configuration.connectionProxyDictionary = [
+      kCFNetworkProxiesHTTPEnable: false,
+      kCFStreamPropertyShouldCloseNativeSocket: true,
+    ]
 
     session = nil
 
@@ -89,6 +99,10 @@ actor WebSocketTransport: NSObject, Sendable {
   private func startBackgroundObservers() {
     // Add background/foreground observers
     #if os(iOS)
+    // Remove any existing observers first
+    NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
+    NotificationCenter.default.removeObserver(self, name: UIApplication.willEnterForegroundNotification, object: nil)
+
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(handleAppDidEnterBackground),
@@ -105,8 +119,6 @@ actor WebSocketTransport: NSObject, Sendable {
     #endif
   }
 
-  // Add background handling methods
-  #if os(iOS)
   // Add these properties at the top with other properties
   private var isInBackground = false
 
@@ -114,22 +126,93 @@ actor WebSocketTransport: NSObject, Sendable {
     self.isInBackground = isInBackground
   }
 
+  // Add background handling methods
+  #if os(iOS)
+
+  private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+  private var backgroundTransitionTime: Date?
+
+  private func wentInBackground() async {
+    setIsInBackground(true)
+
+    backgroundTask = await UIApplication.shared
+      .beginBackgroundTask { [weak self] in
+        Task {
+          await self?.endBackgroundTask()
+        }
+      }
+
+    defer {
+      Task { endBackgroundTask() }
+    }
+
+    try? await Task.sleep(for: .seconds(25))
+    await cleanupBackgroundResources()
+  }
+
+  private func disconnectIfInBackground() async {
+    // Only disconnect if still in background
+    if isInBackground, connectionState == .connected {
+      log.debug("Disconnecting due to extended background time")
+      await cancelTasks()
+      connectionState = .disconnected
+      notifyStateChange()
+    }
+  }
+
   // Update background handling to be more robust
   @objc private nonisolated func handleAppDidEnterBackground() {
     Task {
-      await self.setIsInBackground(true)
+      await wentInBackground()
+    }
+  }
+
+  private func endBackgroundTask() {
+    guard backgroundTask != .invalid else { return }
+    Task {
+      await UIApplication.shared.endBackgroundTask(backgroundTask)
+    }
+    backgroundTask = .invalid
+  }
+
+  private func cleanupBackgroundResources() async {
+    // Only disconnect if we've been in background for more than 30 seconds
+    if connectionState == .connected {
+      log.debug("Disconnecting due to extended background time")
+      await cancelTasks()
+      connectionState = .disconnected
+      notifyStateChange()
     }
   }
 
   @objc private nonisolated func handleAppWillEnterForeground() {
-    Task {
-      await self.setIsInBackground(false)
-
-      // Check connection and reconnect if needed
-      await ensureConnected()
+    Task(priority: .userInitiated) {
+      await prepareForForeground()
     }
   }
   #endif
+
+  private var reconnectionAttempts: Int = 0
+  
+  private func prepareForForeground() async {
+    setIsInBackground(false)
+
+    // Reset reconnection attempts counter for foreground transitions
+    reconnectionAttempts = 0
+
+    if connectionState != .connected {
+      // Direct connection is faster than going through reconnection logic
+      await connect(foregroundTransition: true)
+    } else {
+      // Verify existing connection
+      do {
+        try await sendPing(fastTimeout: true)
+      } catch {
+        log.trace("Ping failed after foreground, reconnecting...")
+        await connect(foregroundTransition: true)
+      }
+    }
+  }
 
   deinit {
     // Remove notification observers
@@ -152,6 +235,8 @@ actor WebSocketTransport: NSObject, Sendable {
 
     setupPingPong()
 
+    reconnectionAttempts = 0
+
     msgTask = Task {
       log.debug("starting message receiving")
       await receiveMessages()
@@ -172,24 +257,33 @@ actor WebSocketTransport: NSObject, Sendable {
     await connect()
   }
 
-  func connect() async {
+  func connect(foregroundTransition: Bool = false) async {
     // Add this guard to prevent connecting if already connected
     guard connectionState == .disconnected else {
       log.trace("Already connected or connecting")
       return
     }
 
+    // Cancel existing tasks before changing state
+    await cancelTasks()
+
+    // Double-check state after task cancellation
+    if connectionState != .disconnected {
+      log.trace("State changed during task cancellation")
+      return
+    }
+
+    // Now update state
     connectionState = .connecting
     notifyStateChange()
 
-    await cancelTasks()
+    setupConnectionTimeout(foregroundTransition: foregroundTransition)
 
-    setupConnectionTimeout()
     let url = URL(string: urlString)!
     log.debug("connecting to \(urlString)")
     webSocketTask = session!.webSocketTask(with: url)
+    webSocketTask?.priority = URLSessionTask.highPriority
     webSocketTask?.resume()
-    log.debug("connecting to \(urlString)")
   }
 
   func stopAndReset() async {
@@ -213,8 +307,7 @@ actor WebSocketTransport: NSObject, Sendable {
     webSocketTask = nil
 
     // Stop network monitoring
-    pathMonitor?.cancel()
-    pathMonitor = nil
+    stopNetworkMonitoring()
 
     // Clear state
     connectionState = .disconnected
@@ -225,6 +318,12 @@ actor WebSocketTransport: NSObject, Sendable {
     notifyStateChange()
 
     log.debug("Transport stopped completely")
+  }
+
+  // Track network quality
+  private var networkQualityIsLow: Bool {
+    guard let pathMonitor else { return false }
+    return pathMonitor.currentPath.isExpensive || pathMonitor.currentPath.isConstrained
   }
 
   // MARK: - State Management
@@ -281,6 +380,10 @@ actor WebSocketTransport: NSObject, Sendable {
     }
   }
 
+  private let pingInterval: TimeInterval = 15.0
+  private let pingTimeout: TimeInterval = 8.0
+  private let maxConsecutivePingFailures = 3
+
   private func setupPingPong() {
     guard webSocketTask != nil else { return }
 
@@ -293,14 +396,14 @@ actor WebSocketTransport: NSObject, Sendable {
             !Task.isCancelled
       {
         do {
-          try await Task.sleep(for: .seconds(10))
+          try await Task.sleep(for: .seconds(pingInterval))
           try await sendPing()
           consecutiveFailures = 0
         } catch {
           consecutiveFailures += 1
           log.error("Ping failed (\(consecutiveFailures)/3)", error: error)
 
-          if consecutiveFailures >= 2 {
+          if consecutiveFailures >= maxConsecutivePingFailures {
             await handleDisconnection(error: error)
             break
           }
@@ -309,7 +412,7 @@ actor WebSocketTransport: NSObject, Sendable {
     }
   }
 
-  private func sendPing() async throws {
+  private func sendPing(fastTimeout: Bool = false) async throws {
     guard running else { return }
     guard let webSocketTask else { return }
 
@@ -319,7 +422,7 @@ actor WebSocketTransport: NSObject, Sendable {
 
       // Add timeout task
       group.addTask {
-        try await Task.sleep(for: .seconds(5)) // 5 seconds timeout for ping
+        try await Task.sleep(for: .seconds(fastTimeout ? 2.0 : self.pingTimeout)) // 5 seconds timeout for ping
         if hasCompleted.compareExchange(expected: false, desired: true, ordering: .relaxed).exchanged {
           throw TransportError.connectionTimeout
         }
@@ -351,13 +454,22 @@ actor WebSocketTransport: NSObject, Sendable {
     }
   }
 
-  private func setupConnectionTimeout() {
+  private let connectionTimeout: TimeInterval = 20.0
+
+  private func setupConnectionTimeout(foregroundTransition: Bool = false) {
     connectionTimeoutTask?.cancel()
     connectionTimeoutTask = Task {
-      try? await Task.sleep(for: .seconds(20))
+      let timeout = foregroundTransition ? 8.0 : (networkQualityIsLow ? connectionTimeout * 1.5 : connectionTimeout)
+
+      try? await Task.sleep(for: .seconds(timeout))
+
       if self.connectionState == .connecting, !Task.isCancelled, running {
-        log.error("Connection timeout after 20s")
-        await handleDisconnection()
+        log.error("Connection timeout after \(timeout)s")
+
+        // Create a new task to avoid potential deadlock
+        Task {
+          await handleDisconnection()
+        }
       }
     }
   }
@@ -377,8 +489,8 @@ actor WebSocketTransport: NSObject, Sendable {
     log.debug("waiting for messages")
     guard let webSocketTask else { return }
 
-    do {
-      while running, connectionState == .connected, !Task.isCancelled {
+    while running, connectionState == .connected, !Task.isCancelled {
+      do {
         let message = try await webSocketTask.receive()
         log.debug("got message")
         switch message {
@@ -388,25 +500,33 @@ actor WebSocketTransport: NSObject, Sendable {
           case let .data(data):
             log.debug("got data message \(data.count) bytes")
 
-            let message = try ServerProtocolMessage(serializedBytes: data)
-            log.debug("decoded message \(message.id)")
-            notifyMessageReceived(message)
+            do {
+              let message = try ServerProtocolMessage(serializedBytes: data)
+              log.debug("decoded message \(message.id)")
+              notifyMessageReceived(message)
+            } catch {
+              log.error("Invalid message format", error: error)
+              // Consider custom recovery instead of disconnection
+            }
+
           @unknown default:
             // unsupported
             break
         }
-      }
-    } catch {
-      log.error("Error receiving messages", error: error)
-      if running {
-        await handleDisconnection()
+      } catch {
+        if error is CancellationError { break }
+
+        log.error("Error receiving messages", error: error)
+        if running {
+          await handleDisconnection()
+        }
       }
     }
   }
 
   private func cancelTasks() async {
     // Cancel all tasks first
-    let tasks = [pingPongTask, msgTask].compactMap { $0 }
+    let tasks = [pingPongTask, msgTask, connectionTimeoutTask].compactMap { $0 }
     tasks.forEach { $0.cancel() }
 
     // Then nullify references
@@ -414,6 +534,7 @@ actor WebSocketTransport: NSObject, Sendable {
     webSocketTask = nil
     pingPongTask = nil
     msgTask = nil
+    connectionTimeoutTask = nil
   }
 
   private func handleDisconnection(
@@ -436,11 +557,28 @@ actor WebSocketTransport: NSObject, Sendable {
     await cancelTasks()
 
     if running {
-      attemptReconnection()
+      // Check if this is an error that warrants immediate retry
+      let shouldRetryImmediately = shouldRetryImmediately(error: error)
+      attemptReconnection(immediate: shouldRetryImmediately)
     }
   }
 
-  private func attemptReconnection() {
+  private func shouldRetryImmediately(error: Error?) -> Bool {
+    guard let error else { return false }
+
+    // Network transition errors often resolve quickly
+    if let nsError = error as NSError? {
+      let networkTransitionCodes = [
+        NSURLErrorNetworkConnectionLost,
+        NSURLErrorNotConnectedToInternet,
+      ]
+      return networkTransitionCodes.contains(nsError.code)
+    }
+
+    return false
+  }
+
+  private func attemptReconnection(immediate: Bool = false) {
     guard running else { return }
 
     // Atomic check and set for reconnection state
@@ -453,8 +591,18 @@ actor WebSocketTransport: NSObject, Sendable {
       return
     }
 
-    let jitter = Double.random(in: 0 ... 3)
-    let delay = 5.0 + jitter
+    let delay: Double
+
+    if immediate {
+      // Immediate reconnection for foreground transitions
+      delay = 0.1 // Small delay to avoid race conditions
+    } else {
+      // Exponential backoff for reconnection attempts
+      reconnectionAttempts += 1
+      let baseDelay = min(15.0, pow(1.5, Double(min(reconnectionAttempts, 5))))
+      let jitter = Double.random(in: 0 ... 1.5)
+      delay = baseDelay + jitter
+    }
 
     log.trace("Attempting reconnection after \(delay) seconds")
 
@@ -474,7 +622,7 @@ actor WebSocketTransport: NSObject, Sendable {
 
         // if still needed
         if connectionState == .disconnected, running {
-          await connect()
+          await connect(foregroundTransition: immediate)
         }
       } catch {
         log.error("Reconnection attempt failed", error: error)
@@ -487,16 +635,18 @@ actor WebSocketTransport: NSObject, Sendable {
 // MARK: Network Connectivity
 
 extension WebSocketTransport {
-  private func setNetworkAvailable(_ networkAvailable: Bool) async {
-    if networkAvailable {
-      log.trace("Network became available")
-      self.networkAvailable = networkAvailable
+  private func setNetworkAvailable(_ available: Bool) async {
+    guard networkAvailable != available else { return }
+    networkAvailable = available
 
-      // Side-effect
-      await ensureConnected()
-    } else {
+    if !available {
       log.trace("Network is unavailable")
-      self.networkAvailable = networkAvailable
+      await cancelTasks()
+      connectionState = .disconnected
+      notifyStateChange()
+    } else {
+      log.trace("Network became available")
+      await ensureConnected()
     }
   }
 
@@ -518,6 +668,11 @@ extension WebSocketTransport {
       }
     }
     pathMonitor?.start(queue: DispatchQueue.global())
+  }
+
+  private func stopNetworkMonitoring() {
+    pathMonitor?.cancel()
+    pathMonitor = nil
   }
 }
 
