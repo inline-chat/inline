@@ -55,9 +55,9 @@ enum Theme {
   // - after bubble -
   static let messageBubblePrimaryBgColor: NSColor = .init(name: "messageBubblePrimaryBgColor") { appearance in
     appearance.name == .darkAqua ? NSColor(
-      calibratedRed: 133 / 255,
-      green: 110 / 255,
-      blue: 255 / 255,
+      calibratedRed: 120 / 255,
+      green: 94 / 255,
+      blue: 212 / 255,
       alpha: 1.0
     ) : NSColor(
       calibratedRed: 143 / 255,
