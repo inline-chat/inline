@@ -38,6 +38,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     globalId ?? 0
   }
 
+  /// @Deprecated
   public var id: Int64 {
     // this is wrong
     messageId
@@ -324,7 +325,6 @@ public extension Message {
           try? await ApiClient.shared.updateDialog(
             peerId: peer,
             pinned: nil,
-            draft: nil,
             archived: false
           )
         }
@@ -347,6 +347,7 @@ public extension ApiMessage {
       message.globalId = existing.globalId
       message.status = existing.status
       message.fileId = existing.fileId
+      message.text = existing.text
       // ... anything else?
     } else {
       // attach main photo
