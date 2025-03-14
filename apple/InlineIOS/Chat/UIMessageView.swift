@@ -533,6 +533,10 @@ class UIMessageView: UIView {
     guard let text = message.text else { return }
     if let cachedString = Self.attributedCache.object(forKey: NSString(string: cacheKey)) {
       messageLabel.attributedText = cachedString
+      // Re-detect links even with cached string to ensure links array is populated
+      if let attributedString = cachedString.mutableCopy() as? NSMutableAttributedString {
+        detectAndStyleLinks(in: text, attributedString: attributedString)
+      }
       return
     }
 
