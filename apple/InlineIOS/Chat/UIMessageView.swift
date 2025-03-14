@@ -382,7 +382,8 @@ class UIMessageView: UIView {
 
       if !fullMessage.reactions.isEmpty {
         setupReactionsIfNeeded()
-        containerStack.addArrangedSubview(multiLineContainer)
+        multiLineContainer.addArrangedSubview(reactionsFlowView)
+//        reactionsFlowView.widthAnchor.constraint(equalTo: multiLineContainer.widthAnchor).isActive = true
       }
 
       if !message.hasFile || message.hasText {
@@ -501,15 +502,15 @@ class UIMessageView: UIView {
       message.hasFile,
       message.hasText || !fullMessage.reactions.isEmpty
     ) {
-      case (true, false):
-        // File only
-        withFileConstraints
-      case (true, true):
-        // File with text
-        withFileAndTextConstraints
-      default:
-        // Text only
-        withoutFileConstraints
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -955,6 +956,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
 
     for (index, reaction) in reactions.enumerated() {
       let button = UIButton(type: .system)
+      button.frame = circleContainer.bounds
       button.setTitle(reaction, for: .normal)
       button.titleLabel?.font = UIFont.systemFont(ofSize: 20)
       button.backgroundColor = .clear
@@ -986,6 +988,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
     mainStackView.addArrangedSubview(separatorContainer)
 
     let willDoButton = UIButton(type: .system)
+    willDoButton.frame = willDoContainer.bounds
     willDoButton.setTitle("Will Do", for: .normal)
     willDoButton.setTitleColor(.adaptiveTitle, for: .normal)
     willDoButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
