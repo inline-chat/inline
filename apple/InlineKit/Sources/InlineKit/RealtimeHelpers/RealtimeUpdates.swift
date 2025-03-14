@@ -40,6 +40,10 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
         case let .deleteReaction(deleteReaction):
           try deleteReaction.apply(db)
 
+        case let .editMessage(editMessage):
+          print("EDIT MESSAGE IN UPDATE \(editMessage)")
+          try editMessage.apply(db)
+
         default:
           break
       }
@@ -247,5 +251,25 @@ extension InlineProtocol.UpdateDeleteReaction {
       Column("messageId") == messageID && Column("chatId") == chatID && Column("emoji") == emoji && Column("userId") ==
         Auth.shared.getCurrentUserId() ?? 0
     ).deleteAll(db)
+  }
+}
+
+extension InlineProtocol.UpdateEditMessage {
+  func apply(_ db: Database) throws {
+    print("MESSAGE IN UPDATE \(message)")
+    let savedMessage = try Message.save(db, protocolMessage: message, publishChanges: true)
+
+    print("SAVED MESSAGE: \(savedMessage)")
+
+    db.afterNextTransaction { _ in
+      Task { @MainActor in
+        MessagesPublisher.shared.messageUpdatedWithId(
+          messageId: message.id,
+          chatId: message.chatID,
+          peer: message.peerID.toPeer(),
+          animated: false
+        )
+      }
+    }
   }
 }

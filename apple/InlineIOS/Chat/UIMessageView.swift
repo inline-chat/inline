@@ -497,16 +497,19 @@ class UIMessageView: UIView {
       ).withPriority(.defaultHigh),
     ]
 
-    let constraints: [NSLayoutConstraint] = switch (message.hasFile, message.hasText || !fullMessage.reactions.isEmpty) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+    let constraints: [NSLayoutConstraint] = switch (
+      message.hasFile,
+      message.hasText || !fullMessage.reactions.isEmpty
+    ) {
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -519,7 +522,8 @@ class UIMessageView: UIView {
   }
 
   private func setupAppearance() {
-    let cacheKey = "\(message.stableId)-\(message.text?.count ?? 0)-\(message.text?.hash ?? 0)"
+    // let cacheKey = "\(message.stableId)-\(message.text?.count ?? 0)-\(message.text?.hash ?? 0)"
+    let cacheKey = "\(message.stableId)-\(message.text ?? "")"
     bubbleView.backgroundColor = bubbleColor
 
     guard let text = message.text else { return }
@@ -826,9 +830,16 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
       }
 
       let replyAction = UIAction(title: "Reply") { _ in
-        ChatState.shared.setReplyingMessageId(peer: self.message.peerId, id: self.message.id)
+        ChatState.shared.setReplyingMessageId(peer: self.message.peerId, id: self.message.messageId)
       }
       actions.append(replyAction)
+
+      if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText {
+        let editAction = UIAction(title: "Edit") { _ in
+          ChatState.shared.setEditingMessageId(peer: self.message.peerId, id: self.message.messageId)
+        }
+        actions.append(editAction)
+      }
 
       let openLinkAction = UIAction(title: "Open Link") { _ in
         if let url = self.getURLAtLocation(location) {

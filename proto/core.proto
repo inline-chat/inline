@@ -419,6 +419,7 @@ enum Method {
   GET_CHAT_HISTORY = 5;
   ADD_REACTION = 6;
   DELETE_REACTION = 7;
+  EDIT_MESSAGE = 8;
 }
 
 message RpcCall {
@@ -431,6 +432,7 @@ message RpcCall {
     GetChatHistoryInput getChatHistory = 6;
     AddReactionInput addReaction = 7;
     DeleteReactionInput deleteReaction = 8;
+    EditMessageInput editMessage = 9;
   }
 }
 
@@ -445,6 +447,7 @@ message RpcResult {
     GetChatHistoryResult getChatHistory = 6;
     AddReactionResult addReaction = 7;
     DeleteReactionResult deleteReaction = 8;
+    EditMessageResult editMessage = 9;
   }
 }
 
@@ -466,6 +469,17 @@ message DeleteMessagesInput {
   InputPeer peer_id = 2;
 }
 message DeleteMessagesResult {
+  repeated Update updates = 1;
+}
+
+
+message EditMessageInput {
+  int64 message_id = 1;
+  InputPeer peer_id = 2;
+  string text = 3;
+}
+
+message EditMessageResult {
   repeated Update updates = 1;
 }
 

@@ -452,4 +452,20 @@ public final class MessagesPublisher {
   func messagesReload(peer: Peer, animated: Bool?) {
     publisher.send(.reload(peer: peer, animated: animated))
   }
+
+  public func messageUpdatedWithId(messageId: Int64, chatId: Int64, peer: Peer, animated: Bool?) {
+    let fullMessage = try? db.reader.read { db in
+      let query = FullMessage.queryRequest()
+      return try query
+        .filter(Column("messageId") == messageId)
+        .filter(Column("chatId") == chatId)
+        .fetchOne(db)
+    }
+
+    guard let fullMessage else {
+      Log.shared.error("Failed to get full message by messageId: \(messageId)")
+      return
+    }
+    publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
+  }
 }

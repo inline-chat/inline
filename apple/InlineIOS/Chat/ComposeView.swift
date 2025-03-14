@@ -164,6 +164,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
     super.init(frame: frame)
     setupViews()
     setupScenePhaseObserver()
+    setupChatStateObservers()
   }
 
   @available(*, unavailable)
@@ -292,31 +293,41 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
     return button
   }
 
+  private func updateSendButtonForEditing(_ isEditing: Bool) {
+    let imageName = isEditing ? "checkmark" : "arrow.up"
+    sendButton.configuration?.image = UIImage(systemName: imageName)?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+    )
+  }
+
   @objc private func sendTapped() {
     guard let peerId else { return }
+    let state = ChatState.shared.getState(peer: peerId)
+    let isEditing = state.editingMessageId != nil
 
     guard let text = textViewContainer.textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
           !text.isEmpty
     else { return }
     guard let chatId else { return }
 
-    let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
-    let canSend = !text.isEmpty
-
-    if canSend {
-      Transactions.shared.mutate(
-        transaction:
-        .sendMessage(
-          .init(
-            text: text,
-            peerId: peerId,
-            chatId: chatId,
-            replyToMsgId: replyToMessageId
-          )
-        )
-      )
-
-      clearDraft()
+    if isEditing {
+      // Handle message edit
+      Transactions.shared.mutate(transaction: .editMessage(.init(
+        messageId: state.editingMessageId ?? 0,
+        text: text,
+        chatId: chatId,
+        peerId: peerId
+      )))
+      ChatState.shared.clearEditingMessageId(peer: peerId)
+    } else {
+      // Original send message logic
+      let replyToMessageId = state.replyingMessageId
+      Transactions.shared.mutate(transaction: .sendMessage(.init(
+        text: text,
+        peerId: peerId,
+        chatId: chatId,
+        replyToMsgId: replyToMessageId
+      )))
       ChatState.shared.clearReplyingMessageId(peer: peerId)
     }
 
@@ -722,6 +733,37 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
         try await DataManager.shared.updateDialog(peerId: peerId, draft: "")
       } catch {
         print("Failed to clear draft", error)
+      }
+    }
+  }
+
+  private func setupChatStateObservers() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleEditingStateChange),
+      name: .init("ChatStateSetEditingCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleEditingStateChange),
+      name: .init("ChatStateClearEditingCalled"),
+      object: nil
+    )
+  }
+
+  @objc private func handleEditingStateChange() {
+    guard let peerId, let chatId else { return }
+    let isEditing = ChatState.shared.getState(peer: peerId).editingMessageId != nil
+    updateSendButtonForEditing(isEditing)
+
+    if isEditing {
+      if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
+         let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
+      {
+        textView.text = message.message.text
+        textView.showPlaceholder(false)
+        buttonAppear()
       }
     }
   }

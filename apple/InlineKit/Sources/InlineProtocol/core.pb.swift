@@ -16,7 +16,7 @@ import SwiftProtobuf
 // incompatible with the version of SwiftProtobuf to which you are linking.
 // Please ensure that you are building against the same version of the API
 // that was used to generate this file.
-fileprivate struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAPIVersionCheck {
+private struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAPIVersionCheck {
   struct _2: SwiftProtobuf.ProtobufAPIVersion_2 {}
   typealias Version = _2
 }
@@ -31,6 +31,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getChatHistory // = 5
   case addReaction // = 6
   case deleteReaction // = 7
+  case editMessage // = 8
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -47,6 +48,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 5: self = .getChatHistory
     case 6: self = .addReaction
     case 7: self = .deleteReaction
+    case 8: self = .editMessage
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -61,6 +63,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getChatHistory: return 5
     case .addReaction: return 6
     case .deleteReaction: return 7
+    case .editMessage: return 8
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -75,8 +78,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getChatHistory,
     .addReaction,
     .deleteReaction,
+    .editMessage,
   ]
-
 }
 
 public struct ClientMessage: Sendable {
@@ -92,34 +95,34 @@ public struct ClientMessage: Sendable {
 
   public var connectionInit: ConnectionInit {
     get {
-      if case .connectionInit(let v)? = body {return v}
+      if case .connectionInit(let v)? = body { return v }
       return ConnectionInit()
     }
-    set {body = .connectionInit(newValue)}
+    set { body = .connectionInit(newValue) }
   }
 
   public var rpcCall: RpcCall {
     get {
-      if case .rpcCall(let v)? = body {return v}
+      if case .rpcCall(let v)? = body { return v }
       return RpcCall()
     }
-    set {body = .rpcCall(newValue)}
+    set { body = .rpcCall(newValue) }
   }
 
   public var ack: Ack {
     get {
-      if case .ack(let v)? = body {return v}
+      if case .ack(let v)? = body { return v }
       return Ack()
     }
-    set {body = .ack(newValue)}
+    set { body = .ack(newValue) }
   }
 
   public var ping: Ping {
     get {
-      if case .ping(let v)? = body {return v}
+      if case .ping(let v)? = body { return v }
       return Ping()
     }
-    set {body = .ping(newValue)}
+    set { body = .ping(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -129,7 +132,6 @@ public struct ClientMessage: Sendable {
     case rpcCall(RpcCall)
     case ack(Ack)
     case ping(Ping)
-
   }
 
   public init() {}
@@ -140,7 +142,7 @@ public struct ConnectionInit: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var token: String = String()
+  public var token: String = .init()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -158,50 +160,50 @@ public struct ServerProtocolMessage: Sendable {
 
   public var connectionOpen: ConnectionOpen {
     get {
-      if case .connectionOpen(let v)? = body {return v}
+      if case .connectionOpen(let v)? = body { return v }
       return ConnectionOpen()
     }
-    set {body = .connectionOpen(newValue)}
+    set { body = .connectionOpen(newValue) }
   }
 
   public var rpcResult: RpcResult {
     get {
-      if case .rpcResult(let v)? = body {return v}
+      if case .rpcResult(let v)? = body { return v }
       return RpcResult()
     }
-    set {body = .rpcResult(newValue)}
+    set { body = .rpcResult(newValue) }
   }
 
   public var rpcError: RpcError {
     get {
-      if case .rpcError(let v)? = body {return v}
+      if case .rpcError(let v)? = body { return v }
       return RpcError()
     }
-    set {body = .rpcError(newValue)}
+    set { body = .rpcError(newValue) }
   }
 
   public var message: ServerMessage {
     get {
-      if case .message(let v)? = body {return v}
+      if case .message(let v)? = body { return v }
       return ServerMessage()
     }
-    set {body = .message(newValue)}
+    set { body = .message(newValue) }
   }
 
   public var ack: Ack {
     get {
-      if case .ack(let v)? = body {return v}
+      if case .ack(let v)? = body { return v }
       return Ack()
     }
-    set {body = .ack(newValue)}
+    set { body = .ack(newValue) }
   }
 
   public var pong: Pong {
     get {
-      if case .pong(let v)? = body {return v}
+      if case .pong(let v)? = body { return v }
       return Pong()
     }
-    set {body = .pong(newValue)}
+    set { body = .pong(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -213,7 +215,6 @@ public struct ServerProtocolMessage: Sendable {
     case message(ServerMessage)
     case ack(Ack)
     case pong(Pong)
-
   }
 
   public init() {}
@@ -228,17 +229,16 @@ public struct ServerMessage: Sendable {
 
   public var update: UpdatesPayload {
     get {
-      if case .update(let v)? = payload {return v}
+      if case .update(let v)? = payload { return v }
       return UpdatesPayload()
     }
-    set {payload = .update(newValue)}
+    set { payload = .update(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Payload: Equatable, Sendable {
     case update(UpdatesPayload)
-
   }
 
   public init() {}
@@ -311,26 +311,26 @@ public struct InputPeer: Sendable {
 
   public var self_p: InputPeerSelf {
     get {
-      if case .self_p(let v)? = type {return v}
+      if case .self_p(let v)? = type { return v }
       return InputPeerSelf()
     }
-    set {type = .self_p(newValue)}
+    set { type = .self_p(newValue) }
   }
 
   public var chat: InputPeerChat {
     get {
-      if case .chat(let v)? = type {return v}
+      if case .chat(let v)? = type { return v }
       return InputPeerChat()
     }
-    set {type = .chat(newValue)}
+    set { type = .chat(newValue) }
   }
 
   public var user: InputPeerUser {
     get {
-      if case .user(let v)? = type {return v}
+      if case .user(let v)? = type { return v }
       return InputPeerUser()
     }
-    set {type = .user(newValue)}
+    set { type = .user(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -339,7 +339,6 @@ public struct InputPeer: Sendable {
     case self_p(InputPeerSelf)
     case chat(InputPeerChat)
     case user(InputPeerUser)
-
   }
 
   public init() {}
@@ -388,18 +387,18 @@ public struct Peer: Sendable {
 
   public var chat: PeerChat {
     get {
-      if case .chat(let v)? = type {return v}
+      if case .chat(let v)? = type { return v }
       return PeerChat()
     }
-    set {type = .chat(newValue)}
+    set { type = .chat(newValue) }
   }
 
   public var user: PeerUser {
     get {
-      if case .user(let v)? = type {return v}
+      if case .user(let v)? = type { return v }
       return PeerUser()
     }
-    set {type = .user(newValue)}
+    set { type = .user(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -407,7 +406,6 @@ public struct Peer: Sendable {
   public enum OneOf_Type: Equatable, Sendable {
     case chat(PeerChat)
     case user(PeerUser)
-
   }
 
   public init() {}
@@ -445,77 +443,85 @@ public struct User: Sendable {
   public var id: Int64 = 0
 
   public var firstName: String {
-    get {return _firstName ?? String()}
-    set {_firstName = newValue}
+    get { return _firstName ?? String() }
+    set { _firstName = newValue }
   }
+
   /// Returns true if `firstName` has been explicitly set.
-  public var hasFirstName: Bool {return self._firstName != nil}
+  public var hasFirstName: Bool { return _firstName != nil }
   /// Clears the value of `firstName`. Subsequent reads from it will return its default value.
-  public mutating func clearFirstName() {self._firstName = nil}
+  public mutating func clearFirstName() { _firstName = nil }
 
   public var lastName: String {
-    get {return _lastName ?? String()}
-    set {_lastName = newValue}
+    get { return _lastName ?? String() }
+    set { _lastName = newValue }
   }
+
   /// Returns true if `lastName` has been explicitly set.
-  public var hasLastName: Bool {return self._lastName != nil}
+  public var hasLastName: Bool { return _lastName != nil }
   /// Clears the value of `lastName`. Subsequent reads from it will return its default value.
-  public mutating func clearLastName() {self._lastName = nil}
+  public mutating func clearLastName() { _lastName = nil }
 
   public var username: String {
-    get {return _username ?? String()}
-    set {_username = newValue}
+    get { return _username ?? String() }
+    set { _username = newValue }
   }
+
   /// Returns true if `username` has been explicitly set.
-  public var hasUsername: Bool {return self._username != nil}
+  public var hasUsername: Bool { return _username != nil }
   /// Clears the value of `username`. Subsequent reads from it will return its default value.
-  public mutating func clearUsername() {self._username = nil}
+  public mutating func clearUsername() { _username = nil }
 
   public var phoneNumber: String {
-    get {return _phoneNumber ?? String()}
-    set {_phoneNumber = newValue}
+    get { return _phoneNumber ?? String() }
+    set { _phoneNumber = newValue }
   }
+
   /// Returns true if `phoneNumber` has been explicitly set.
-  public var hasPhoneNumber: Bool {return self._phoneNumber != nil}
+  public var hasPhoneNumber: Bool { return _phoneNumber != nil }
   /// Clears the value of `phoneNumber`. Subsequent reads from it will return its default value.
-  public mutating func clearPhoneNumber() {self._phoneNumber = nil}
+  public mutating func clearPhoneNumber() { _phoneNumber = nil }
 
   public var email: String {
-    get {return _email ?? String()}
-    set {_email = newValue}
+    get { return _email ?? String() }
+    set { _email = newValue }
   }
+
   /// Returns true if `email` has been explicitly set.
-  public var hasEmail: Bool {return self._email != nil}
+  public var hasEmail: Bool { return _email != nil }
   /// Clears the value of `email`. Subsequent reads from it will return its default value.
-  public mutating func clearEmail() {self._email = nil}
+  public mutating func clearEmail() { _email = nil }
 
   /// If true, certain fields such as email or phone_number will be missing
   public var min: Bool {
-    get {return _min ?? false}
-    set {_min = newValue}
+    get { return _min ?? false }
+    set { _min = newValue }
   }
+
   /// Returns true if `min` has been explicitly set.
-  public var hasMin: Bool {return self._min != nil}
+  public var hasMin: Bool { return _min != nil }
   /// Clears the value of `min`. Subsequent reads from it will return its default value.
-  public mutating func clearMin() {self._min = nil}
+  public mutating func clearMin() { _min = nil }
 
   public var status: UserStatus {
-    get {return _status ?? UserStatus()}
-    set {_status = newValue}
+    get { return _status ?? UserStatus() }
+    set { _status = newValue }
   }
+
   /// Returns true if `status` has been explicitly set.
-  public var hasStatus: Bool {return self._status != nil}
+  public var hasStatus: Bool { return _status != nil }
   /// Clears the value of `status`. Subsequent reads from it will return its default value.
-  public mutating func clearStatus() {self._status = nil}
+  public mutating func clearStatus() { _status = nil }
 
   public var profilePhoto: UserProfilePhoto {
-    get {return _profilePhoto ?? UserProfilePhoto()}
-    set {_profilePhoto = newValue}
+    get { return _profilePhoto ?? UserProfilePhoto() }
+    set { _profilePhoto = newValue }
   }
+
   /// Returns true if `profilePhoto` has been explicitly set.
-  public var hasProfilePhoto: Bool {return self._profilePhoto != nil}
+  public var hasProfilePhoto: Bool { return _profilePhoto != nil }
   /// Clears the value of `profilePhoto`. Subsequent reads from it will return its default value.
-  public mutating func clearProfilePhoto() {self._profilePhoto = nil}
+  public mutating func clearProfilePhoto() { _profilePhoto = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -540,7 +546,7 @@ public struct UserProfilePhoto: @unchecked Sendable {
   public var photoID: Int64 = 0
 
   /// Stripped thumbnail of the photo
-  public var strippedThumb: Data = Data()
+  public var strippedThumb: Data = .init()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -553,123 +559,132 @@ public struct Message: @unchecked Sendable {
   // methods supported on all messages.
 
   public var id: Int64 {
-    get {return _storage._id}
-    set {_uniqueStorage()._id = newValue}
+    get { return _storage._id }
+    set { _uniqueStorage()._id = newValue }
   }
 
   /// User ID of the sender
   public var fromID: Int64 {
-    get {return _storage._fromID}
-    set {_uniqueStorage()._fromID = newValue}
+    get { return _storage._fromID }
+    set { _uniqueStorage()._fromID = newValue }
   }
 
   /// Peer ID of the recipient
   public var peerID: Peer {
-    get {return _storage._peerID ?? Peer()}
-    set {_uniqueStorage()._peerID = newValue}
+    get { return _storage._peerID ?? Peer() }
+    set { _uniqueStorage()._peerID = newValue }
   }
+
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return _storage._peerID != nil}
+  public var hasPeerID: Bool { return _storage._peerID != nil }
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
-  public mutating func clearPeerID() {_uniqueStorage()._peerID = nil}
+  public mutating func clearPeerID() { _uniqueStorage()._peerID = nil }
 
   /// The "chat ID" of the message, for messages in a chat
   public var chatID: Int64 {
-    get {return _storage._chatID}
-    set {_uniqueStorage()._chatID = newValue}
+    get { return _storage._chatID }
+    set { _uniqueStorage()._chatID = newValue }
   }
 
   /// Message text
   public var message: String {
-    get {return _storage._message ?? String()}
-    set {_uniqueStorage()._message = newValue}
+    get { return _storage._message ?? String() }
+    set { _uniqueStorage()._message = newValue }
   }
+
   /// Returns true if `message` has been explicitly set.
-  public var hasMessage: Bool {return _storage._message != nil}
+  public var hasMessage: Bool { return _storage._message != nil }
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
-  public mutating func clearMessage() {_uniqueStorage()._message = nil}
+  public mutating func clearMessage() { _uniqueStorage()._message = nil }
 
   /// Whether the message is outgoing
   public var out: Bool {
-    get {return _storage._out}
-    set {_uniqueStorage()._out = newValue}
+    get { return _storage._out }
+    set { _uniqueStorage()._out = newValue }
   }
 
   /// Date of the message
   public var date: Int64 {
-    get {return _storage._date}
-    set {_uniqueStorage()._date = newValue}
+    get { return _storage._date }
+    set { _uniqueStorage()._date = newValue }
   }
 
   /// Whether user is mentioned
   public var mentioned: Bool {
-    get {return _storage._mentioned ?? false}
-    set {_uniqueStorage()._mentioned = newValue}
+    get { return _storage._mentioned ?? false }
+    set { _uniqueStorage()._mentioned = newValue }
   }
+
   /// Returns true if `mentioned` has been explicitly set.
-  public var hasMentioned: Bool {return _storage._mentioned != nil}
+  public var hasMentioned: Bool { return _storage._mentioned != nil }
   /// Clears the value of `mentioned`. Subsequent reads from it will return its default value.
-  public mutating func clearMentioned() {_uniqueStorage()._mentioned = nil}
+  public mutating func clearMentioned() { _uniqueStorage()._mentioned = nil }
 
   /// Message ID of the message being replied to
   public var replyToMsgID: Int64 {
-    get {return _storage._replyToMsgID ?? 0}
-    set {_uniqueStorage()._replyToMsgID = newValue}
+    get { return _storage._replyToMsgID ?? 0 }
+    set { _uniqueStorage()._replyToMsgID = newValue }
   }
+
   /// Returns true if `replyToMsgID` has been explicitly set.
-  public var hasReplyToMsgID: Bool {return _storage._replyToMsgID != nil}
+  public var hasReplyToMsgID: Bool { return _storage._replyToMsgID != nil }
   /// Clears the value of `replyToMsgID`. Subsequent reads from it will return its default value.
-  public mutating func clearReplyToMsgID() {_uniqueStorage()._replyToMsgID = nil}
+  public mutating func clearReplyToMsgID() { _uniqueStorage()._replyToMsgID = nil }
 
   /// Media of the message
   public var media: MessageMedia {
-    get {return _storage._media ?? MessageMedia()}
-    set {_uniqueStorage()._media = newValue}
+    get { return _storage._media ?? MessageMedia() }
+    set { _uniqueStorage()._media = newValue }
   }
+
   /// Returns true if `media` has been explicitly set.
-  public var hasMedia: Bool {return _storage._media != nil}
+  public var hasMedia: Bool { return _storage._media != nil }
   /// Clears the value of `media`. Subsequent reads from it will return its default value.
-  public mutating func clearMedia() {_uniqueStorage()._media = nil}
+  public mutating func clearMedia() { _uniqueStorage()._media = nil }
 
   /// Date of the last edit if edited
   public var editDate: Int64 {
-    get {return _storage._editDate ?? 0}
-    set {_uniqueStorage()._editDate = newValue}
+    get { return _storage._editDate ?? 0 }
+    set { _uniqueStorage()._editDate = newValue }
   }
+
   /// Returns true if `editDate` has been explicitly set.
-  public var hasEditDate: Bool {return _storage._editDate != nil}
+  public var hasEditDate: Bool { return _storage._editDate != nil }
   /// Clears the value of `editDate`. Subsequent reads from it will return its default value.
-  public mutating func clearEditDate() {_uniqueStorage()._editDate = nil}
+  public mutating func clearEditDate() { _uniqueStorage()._editDate = nil }
 
   /// ID of the grouped message if it's part of an album
   public var groupedID: Int64 {
-    get {return _storage._groupedID ?? 0}
-    set {_uniqueStorage()._groupedID = newValue}
+    get { return _storage._groupedID ?? 0 }
+    set { _uniqueStorage()._groupedID = newValue }
   }
+
   /// Returns true if `groupedID` has been explicitly set.
-  public var hasGroupedID: Bool {return _storage._groupedID != nil}
+  public var hasGroupedID: Bool { return _storage._groupedID != nil }
   /// Clears the value of `groupedID`. Subsequent reads from it will return its default value.
-  public mutating func clearGroupedID() {_uniqueStorage()._groupedID = nil}
+  public mutating func clearGroupedID() { _uniqueStorage()._groupedID = nil }
 
   /// Attachments of the message
   public var attachments: MessageAttachments {
-    get {return _storage._attachments ?? MessageAttachments()}
-    set {_uniqueStorage()._attachments = newValue}
+    get { return _storage._attachments ?? MessageAttachments() }
+    set { _uniqueStorage()._attachments = newValue }
   }
+
   /// Returns true if `attachments` has been explicitly set.
-  public var hasAttachments: Bool {return _storage._attachments != nil}
+  public var hasAttachments: Bool { return _storage._attachments != nil }
   /// Clears the value of `attachments`. Subsequent reads from it will return its default value.
-  public mutating func clearAttachments() {_uniqueStorage()._attachments = nil}
+  public mutating func clearAttachments() { _uniqueStorage()._attachments = nil }
 
   /// Reactions of the message
   public var reactions: MessageReactions {
-    get {return _storage._reactions ?? MessageReactions()}
-    set {_uniqueStorage()._reactions = newValue}
+    get { return _storage._reactions ?? MessageReactions() }
+    set { _uniqueStorage()._reactions = newValue }
   }
+
   /// Returns true if `reactions` has been explicitly set.
-  public var hasReactions: Bool {return _storage._reactions != nil}
+  public var hasReactions: Bool { return _storage._reactions != nil }
   /// Clears the value of `reactions`. Subsequent reads from it will return its default value.
-  public mutating func clearReactions() {_uniqueStorage()._reactions = nil}
+  public mutating func clearReactions() { _uniqueStorage()._reactions = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -697,7 +712,7 @@ public struct Reaction: Sendable {
   // methods supported on all messages.
 
   /// Emoji of the reaction
-  public var emoji: String = String()
+  public var emoji: String = .init()
 
   /// ID of the user who reacted
   public var userID: Int64 = 0
@@ -723,20 +738,21 @@ public struct AddReactionInput: Sendable {
   // methods supported on all messages.
 
   /// Emoji of the reaction
-  public var emoji: String = String()
+  public var emoji: String = .init()
 
   /// ID of the message that this reaction is for
   public var messageID: Int64 = 0
 
   /// ID of the peer that this reaction is for
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
-    set {_peerID = newValue}
+    get { return _peerID ?? InputPeer() }
+    set { _peerID = newValue }
   }
+
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool { return _peerID != nil }
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
-  public mutating func clearPeerID() {self._peerID = nil}
+  public mutating func clearPeerID() { _peerID = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -764,16 +780,17 @@ public struct DeleteReactionInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var emoji: String = String()
+  public var emoji: String = .init()
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
-    set {_peerID = newValue}
+    get { return _peerID ?? InputPeer() }
+    set { _peerID = newValue }
   }
+
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool { return _peerID != nil }
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
-  public mutating func clearPeerID() {self._peerID = nil}
+  public mutating func clearPeerID() { _peerID = nil }
 
   public var messageID: Int64 = 0
 
@@ -819,17 +836,16 @@ public struct MessageAttachment: Sendable {
 
   public var externalTask: MessageAttachmentExternalTask {
     get {
-      if case .externalTask(let v)? = attachment {return v}
+      if case .externalTask(let v)? = attachment { return v }
       return MessageAttachmentExternalTask()
     }
-    set {attachment = .externalTask(newValue)}
+    set { attachment = .externalTask(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Attachment: Equatable, Sendable {
     case externalTask(MessageAttachmentExternalTask)
-
   }
 
   public init() {}
@@ -844,13 +860,13 @@ public struct MessageAttachmentExternalTask: Sendable {
   public var id: Int64 = 0
 
   /// ID of the task in the external application
-  public var taskID: String = String()
+  public var taskID: String = .init()
 
-  /// Application name 
-  public var application: String = String()
+  /// Application name
+  public var application: String = .init()
 
   /// Title of the task/issue
-  public var title: String = String()
+  public var title: String = .init()
 
   /// Status of the task
   public var status: MessageAttachmentExternalTask.Status = .unspecified
@@ -859,10 +875,10 @@ public struct MessageAttachmentExternalTask: Sendable {
   public var assignedUserID: Int64 = 0
 
   /// URL of the task/issue in the external application
-  public var url: String = String()
+  public var url: String = .init()
 
   /// Number/code of the task/issue in the external application
-  public var number: String = String()
+  public var number: String = .init()
 
   /// Date of creation/addition in Inline
   public var date: Int64 = 0
@@ -916,7 +932,6 @@ public struct MessageAttachmentExternalTask: Sendable {
       .done,
       .cancelled,
     ]
-
   }
 
   public init() {}
@@ -932,26 +947,26 @@ public struct MessageMedia: Sendable {
 
   public var photo: MessagePhoto {
     get {
-      if case .photo(let v)? = media {return v}
+      if case .photo(let v)? = media { return v }
       return MessagePhoto()
     }
-    set {media = .photo(newValue)}
+    set { media = .photo(newValue) }
   }
 
   public var video: MessageVideo {
     get {
-      if case .video(let v)? = media {return v}
+      if case .video(let v)? = media { return v }
       return MessageVideo()
     }
-    set {media = .video(newValue)}
+    set { media = .video(newValue) }
   }
 
   public var document: MessageDocument {
     get {
-      if case .document(let v)? = media {return v}
+      if case .document(let v)? = media { return v }
       return MessageDocument()
     }
-    set {media = .document(newValue)}
+    set { media = .document(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -960,7 +975,6 @@ public struct MessageMedia: Sendable {
     case photo(MessagePhoto)
     case video(MessageVideo)
     case document(MessageDocument)
-
   }
 
   public init() {}
@@ -972,13 +986,14 @@ public struct MessagePhoto: Sendable {
   // methods supported on all messages.
 
   public var photo: Photo {
-    get {return _photo ?? Photo()}
-    set {_photo = newValue}
+    get { return _photo ?? Photo() }
+    set { _photo = newValue }
   }
+
   /// Returns true if `photo` has been explicitly set.
-  public var hasPhoto: Bool {return self._photo != nil}
+  public var hasPhoto: Bool { return _photo != nil }
   /// Clears the value of `photo`. Subsequent reads from it will return its default value.
-  public mutating func clearPhoto() {self._photo = nil}
+  public mutating func clearPhoto() { _photo = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -993,13 +1008,14 @@ public struct MessageVideo: Sendable {
   // methods supported on all messages.
 
   public var video: Video {
-    get {return _video ?? Video()}
-    set {_video = newValue}
+    get { return _video ?? Video() }
+    set { _video = newValue }
   }
+
   /// Returns true if `video` has been explicitly set.
-  public var hasVideo: Bool {return self._video != nil}
+  public var hasVideo: Bool { return _video != nil }
   /// Clears the value of `video`. Subsequent reads from it will return its default value.
-  public mutating func clearVideo() {self._video = nil}
+  public mutating func clearVideo() { _video = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1014,13 +1030,14 @@ public struct MessageDocument: Sendable {
   // methods supported on all messages.
 
   public var document: Document {
-    get {return _document ?? Document()}
-    set {_document = newValue}
+    get { return _document ?? Document() }
+    set { _document = newValue }
   }
+
   /// Returns true if `document` has been explicitly set.
-  public var hasDocument: Bool {return self._document != nil}
+  public var hasDocument: Bool { return _document != nil }
   /// Clears the value of `document`. Subsequent reads from it will return its default value.
-  public mutating func clearDocument() {self._document = nil}
+  public mutating func clearDocument() { _document = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1053,23 +1070,25 @@ public struct Video: Sendable {
 
   /// Thumbnail of the video
   public var photo: Photo {
-    get {return _photo ?? Photo()}
-    set {_photo = newValue}
+    get { return _photo ?? Photo() }
+    set { _photo = newValue }
   }
+
   /// Returns true if `photo` has been explicitly set.
-  public var hasPhoto: Bool {return self._photo != nil}
+  public var hasPhoto: Bool { return _photo != nil }
   /// Clears the value of `photo`. Subsequent reads from it will return its default value.
-  public mutating func clearPhoto() {self._photo = nil}
+  public mutating func clearPhoto() { _photo = nil }
 
   /// CDN URL
   public var cdnURL: String {
-    get {return _cdnURL ?? String()}
-    set {_cdnURL = newValue}
+    get { return _cdnURL ?? String() }
+    set { _cdnURL = newValue }
   }
+
   /// Returns true if `cdnURL` has been explicitly set.
-  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  public var hasCdnURL: Bool { return _cdnURL != nil }
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
-  public mutating func clearCdnURL() {self._cdnURL = nil}
+  public mutating func clearCdnURL() { _cdnURL = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1087,23 +1106,24 @@ public struct Document: Sendable {
   public var id: Int64 = 0
 
   /// Original file name
-  public var fileName: String = String()
+  public var fileName: String = .init()
 
   /// MIME type of the file
-  public var mimeType: String = String()
+  public var mimeType: String = .init()
 
   /// File size
   public var size: Int32 = 0
 
   /// CDN URL
   public var cdnURL: String {
-    get {return _cdnURL ?? String()}
-    set {_cdnURL = newValue}
+    get { return _cdnURL ?? String() }
+    set { _cdnURL = newValue }
   }
+
   /// Returns true if `cdnURL` has been explicitly set.
-  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  public var hasCdnURL: Bool { return _cdnURL != nil }
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
-  public mutating func clearCdnURL() {self._cdnURL = nil}
+  public mutating func clearCdnURL() { _cdnURL = nil }
 
   /// Date of upload
   public var date: Int64 = 0
@@ -1134,13 +1154,14 @@ public struct Photo: Sendable {
 
   /// Unique identifier of the file
   public var fileUniqueID: String {
-    get {return _fileUniqueID ?? String()}
-    set {_fileUniqueID = newValue}
+    get { return _fileUniqueID ?? String() }
+    set { _fileUniqueID = newValue }
   }
+
   /// Returns true if `fileUniqueID` has been explicitly set.
-  public var hasFileUniqueID: Bool {return self._fileUniqueID != nil}
+  public var hasFileUniqueID: Bool { return _fileUniqueID != nil }
   /// Clears the value of `fileUniqueID`. Subsequent reads from it will return its default value.
-  public mutating func clearFileUniqueID() {self._fileUniqueID = nil}
+  public mutating func clearFileUniqueID() { _fileUniqueID = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1179,7 +1200,6 @@ public struct Photo: Sendable {
       .jpeg,
       .png,
     ]
-
   }
 
   public init() {}
@@ -1192,18 +1212,18 @@ public struct PhotoSize: @unchecked Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  ///* Thumbnail type.
-  ///Currently supported: 
-  ///- "b" - small box 140x140
-  ///- "c" - medium box 320x320
-  ///- "d" - regular box 800x800
-  ///- "f" - large box 2560x2560
-  ///- "s" - stripped (tiny version embedded in bytes)
-  ///- "y" - ??
-  ///- "x" - small cropped ??
-  ///- "w" - medium cropped ??
-  ///- "v" - ??
-  public var type: String = String()
+  /// * Thumbnail type.
+  /// Currently supported:
+  /// - "b" - small box 140x140
+  /// - "c" - medium box 320x320
+  /// - "d" - regular box 800x800
+  /// - "f" - large box 2560x2560
+  /// - "s" - stripped (tiny version embedded in bytes)
+  /// - "y" - ??
+  /// - "x" - small cropped ??
+  /// - "w" - medium cropped ??
+  /// - "v" - ??
+  public var type: String = .init()
 
   /// Width in pixels
   public var w: Int32 = 0
@@ -1216,30 +1236,32 @@ public struct PhotoSize: @unchecked Sendable {
 
   /// Bytes for stripped size used in blur thumbnails
   public var bytes: Data {
-    get {return _bytes ?? Data()}
-    set {_bytes = newValue}
+    get { return _bytes ?? Data() }
+    set { _bytes = newValue }
   }
+
   /// Returns true if `bytes` has been explicitly set.
-  public var hasBytes: Bool {return self._bytes != nil}
+  public var hasBytes: Bool { return _bytes != nil }
   /// Clears the value of `bytes`. Subsequent reads from it will return its default value.
-  public mutating func clearBytes() {self._bytes = nil}
+  public mutating func clearBytes() { _bytes = nil }
 
   /// CDN URL
   public var cdnURL: String {
-    get {return _cdnURL ?? String()}
-    set {_cdnURL = newValue}
+    get { return _cdnURL ?? String() }
+    set { _cdnURL = newValue }
   }
+
   /// Returns true if `cdnURL` has been explicitly set.
-  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  public var hasCdnURL: Bool { return _cdnURL != nil }
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
-  public mutating func clearCdnURL() {self._cdnURL = nil}
+  public mutating func clearCdnURL() { _cdnURL = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _bytes: Data? = nil
-  fileprivate var _cdnURL: String? = nil
+  fileprivate var _bytes: Data?
+  fileprivate var _cdnURL: String?
 }
 
 public struct RpcError: Sendable {
@@ -1251,7 +1273,7 @@ public struct RpcError: Sendable {
 
   public var errorCode: RpcError.Code = .unknown
 
-  public var message: String = String()
+  public var message: String = .init()
 
   public var code: Int32 = 0
 
@@ -1309,7 +1331,6 @@ public struct RpcError: Sendable {
       .peerIDInvalid,
       .messageIDInvalid,
     ]
-
   }
 
   public init() {}
@@ -1326,58 +1347,66 @@ public struct RpcCall: Sendable {
 
   public var getMe: GetMeInput {
     get {
-      if case .getMe(let v)? = input {return v}
+      if case .getMe(let v)? = input { return v }
       return GetMeInput()
     }
-    set {input = .getMe(newValue)}
+    set { input = .getMe(newValue) }
   }
 
   public var getPeerPhoto: GetPeerPhotoInput {
     get {
-      if case .getPeerPhoto(let v)? = input {return v}
+      if case .getPeerPhoto(let v)? = input { return v }
       return GetPeerPhotoInput()
     }
-    set {input = .getPeerPhoto(newValue)}
+    set { input = .getPeerPhoto(newValue) }
   }
 
   public var deleteMessages: DeleteMessagesInput {
     get {
-      if case .deleteMessages(let v)? = input {return v}
+      if case .deleteMessages(let v)? = input { return v }
       return DeleteMessagesInput()
     }
-    set {input = .deleteMessages(newValue)}
+    set { input = .deleteMessages(newValue) }
   }
 
   public var sendMessage: SendMessageInput {
     get {
-      if case .sendMessage(let v)? = input {return v}
+      if case .sendMessage(let v)? = input { return v }
       return SendMessageInput()
     }
-    set {input = .sendMessage(newValue)}
+    set { input = .sendMessage(newValue) }
   }
 
   public var getChatHistory: GetChatHistoryInput {
     get {
-      if case .getChatHistory(let v)? = input {return v}
+      if case .getChatHistory(let v)? = input { return v }
       return GetChatHistoryInput()
     }
-    set {input = .getChatHistory(newValue)}
+    set { input = .getChatHistory(newValue) }
   }
 
   public var addReaction: AddReactionInput {
     get {
-      if case .addReaction(let v)? = input {return v}
+      if case .addReaction(let v)? = input { return v }
       return AddReactionInput()
     }
-    set {input = .addReaction(newValue)}
+    set { input = .addReaction(newValue) }
   }
 
   public var deleteReaction: DeleteReactionInput {
     get {
-      if case .deleteReaction(let v)? = input {return v}
+      if case .deleteReaction(let v)? = input { return v }
       return DeleteReactionInput()
     }
-    set {input = .deleteReaction(newValue)}
+    set { input = .deleteReaction(newValue) }
+  }
+
+  public var editMessage: EditMessageInput {
+    get {
+      if case .editMessage(let v)? = input { return v }
+      return EditMessageInput()
+    }
+    set { input = .editMessage(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1390,7 +1419,7 @@ public struct RpcCall: Sendable {
     case getChatHistory(GetChatHistoryInput)
     case addReaction(AddReactionInput)
     case deleteReaction(DeleteReactionInput)
-
+    case editMessage(EditMessageInput)
   }
 
   public init() {}
@@ -1407,58 +1436,66 @@ public struct RpcResult: Sendable {
 
   public var getMe: GetMeResult {
     get {
-      if case .getMe(let v)? = result {return v}
+      if case .getMe(let v)? = result { return v }
       return GetMeResult()
     }
-    set {result = .getMe(newValue)}
+    set { result = .getMe(newValue) }
   }
 
   public var getPeerPhoto: GetPeerPhotoResult {
     get {
-      if case .getPeerPhoto(let v)? = result {return v}
+      if case .getPeerPhoto(let v)? = result { return v }
       return GetPeerPhotoResult()
     }
-    set {result = .getPeerPhoto(newValue)}
+    set { result = .getPeerPhoto(newValue) }
   }
 
   public var deleteMessages: DeleteMessagesResult {
     get {
-      if case .deleteMessages(let v)? = result {return v}
+      if case .deleteMessages(let v)? = result { return v }
       return DeleteMessagesResult()
     }
-    set {result = .deleteMessages(newValue)}
+    set { result = .deleteMessages(newValue) }
   }
 
   public var sendMessage: SendMessageResult {
     get {
-      if case .sendMessage(let v)? = result {return v}
+      if case .sendMessage(let v)? = result { return v }
       return SendMessageResult()
     }
-    set {result = .sendMessage(newValue)}
+    set { result = .sendMessage(newValue) }
   }
 
   public var getChatHistory: GetChatHistoryResult {
     get {
-      if case .getChatHistory(let v)? = result {return v}
+      if case .getChatHistory(let v)? = result { return v }
       return GetChatHistoryResult()
     }
-    set {result = .getChatHistory(newValue)}
+    set { result = .getChatHistory(newValue) }
   }
 
   public var addReaction: AddReactionResult {
     get {
-      if case .addReaction(let v)? = result {return v}
+      if case .addReaction(let v)? = result { return v }
       return AddReactionResult()
     }
-    set {result = .addReaction(newValue)}
+    set { result = .addReaction(newValue) }
   }
 
   public var deleteReaction: DeleteReactionResult {
     get {
-      if case .deleteReaction(let v)? = result {return v}
+      if case .deleteReaction(let v)? = result { return v }
       return DeleteReactionResult()
     }
-    set {result = .deleteReaction(newValue)}
+    set { result = .deleteReaction(newValue) }
+  }
+
+  public var editMessage: EditMessageResult {
+    get {
+      if case .editMessage(let v)? = result { return v }
+      return EditMessageResult()
+    }
+    set { result = .editMessage(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1471,7 +1508,7 @@ public struct RpcResult: Sendable {
     case getChatHistory(GetChatHistoryResult)
     case addReaction(AddReactionResult)
     case deleteReaction(DeleteReactionResult)
-
+    case editMessage(EditMessageResult)
   }
 
   public init() {}
@@ -1493,13 +1530,14 @@ public struct GetMeResult: Sendable {
   // methods supported on all messages.
 
   public var user: User {
-    get {return _user ?? User()}
-    set {_user = newValue}
+    get { return _user ?? User() }
+    set { _user = newValue }
   }
+
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return self._user != nil}
+  public var hasUser: Bool { return _user != nil }
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
-  public mutating func clearUser() {self._user = nil}
+  public mutating func clearUser() { _user = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1514,13 +1552,14 @@ public struct GetPeerPhotoInput: Sendable {
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
-    set {_peerID = newValue}
+    get { return _peerID ?? InputPeer() }
+    set { _peerID = newValue }
   }
+
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool { return _peerID != nil }
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
-  public mutating func clearPeerID() {self._peerID = nil}
+  public mutating func clearPeerID() { _peerID = nil }
 
   public var photoID: Int64 = 0
 
@@ -1537,13 +1576,14 @@ public struct GetPeerPhotoResult: Sendable {
   // methods supported on all messages.
 
   public var photo: Photo {
-    get {return _photo ?? Photo()}
-    set {_photo = newValue}
+    get { return _photo ?? Photo() }
+    set { _photo = newValue }
   }
+
   /// Returns true if `photo` has been explicitly set.
-  public var hasPhoto: Bool {return self._photo != nil}
+  public var hasPhoto: Bool { return _photo != nil }
   /// Clears the value of `photo`. Subsequent reads from it will return its default value.
-  public mutating func clearPhoto() {self._photo = nil}
+  public mutating func clearPhoto() { _photo = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1560,13 +1600,14 @@ public struct DeleteMessagesInput: Sendable {
   public var messageIds: [Int64] = []
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
-    set {_peerID = newValue}
+    get { return _peerID ?? InputPeer() }
+    set { _peerID = newValue }
   }
+
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool { return _peerID != nil }
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
-  public mutating func clearPeerID() {self._peerID = nil}
+  public mutating func clearPeerID() { _peerID = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1587,6 +1628,44 @@ public struct DeleteMessagesResult: Sendable {
   public init() {}
 }
 
+public struct EditMessageInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var messageID: Int64 = 0
+
+  public var peerID: InputPeer {
+    get { return _peerID ?? InputPeer() }
+    set { _peerID = newValue }
+  }
+
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool { return _peerID != nil }
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() { _peerID = nil }
+
+  public var text: String = .init()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public struct EditMessageResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public struct InputMedia: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1596,26 +1675,26 @@ public struct InputMedia: Sendable {
 
   public var photo: InputMediaPhoto {
     get {
-      if case .photo(let v)? = media {return v}
+      if case .photo(let v)? = media { return v }
       return InputMediaPhoto()
     }
-    set {media = .photo(newValue)}
+    set { media = .photo(newValue) }
   }
 
   public var video: InputMediaVideo {
     get {
-      if case .video(let v)? = media {return v}
+      if case .video(let v)? = media { return v }
       return InputMediaVideo()
     }
-    set {media = .video(newValue)}
+    set { media = .video(newValue) }
   }
 
   public var document: InputMediaDocument {
     get {
-      if case .document(let v)? = media {return v}
+      if case .document(let v)? = media { return v }
       return InputMediaDocument()
     }
-    set {media = .document(newValue)}
+    set { media = .document(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1624,7 +1703,6 @@ public struct InputMedia: Sendable {
     case photo(InputMediaPhoto)
     case video(InputMediaVideo)
     case document(InputMediaDocument)
-
   }
 
   public init() {}
@@ -1675,63 +1753,69 @@ public struct SendMessageInput: Sendable {
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
-    set {_peerID = newValue}
+    get { return _peerID ?? InputPeer() }
+    set { _peerID = newValue }
   }
+
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool { return _peerID != nil }
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
-  public mutating func clearPeerID() {self._peerID = nil}
+  public mutating func clearPeerID() { _peerID = nil }
 
   /// Message text or caption
   public var message: String {
-    get {return _message ?? String()}
-    set {_message = newValue}
+    get { return _message ?? String() }
+    set { _message = newValue }
   }
+
   /// Returns true if `message` has been explicitly set.
-  public var hasMessage: Bool {return self._message != nil}
+  public var hasMessage: Bool { return _message != nil }
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
-  public mutating func clearMessage() {self._message = nil}
+  public mutating func clearMessage() { _message = nil }
 
   /// Message ID of the message being replied to
   public var replyToMsgID: Int64 {
-    get {return _replyToMsgID ?? 0}
-    set {_replyToMsgID = newValue}
+    get { return _replyToMsgID ?? 0 }
+    set { _replyToMsgID = newValue }
   }
+
   /// Returns true if `replyToMsgID` has been explicitly set.
-  public var hasReplyToMsgID: Bool {return self._replyToMsgID != nil}
+  public var hasReplyToMsgID: Bool { return _replyToMsgID != nil }
   /// Clears the value of `replyToMsgID`. Subsequent reads from it will return its default value.
-  public mutating func clearReplyToMsgID() {self._replyToMsgID = nil}
+  public mutating func clearReplyToMsgID() { _replyToMsgID = nil }
 
   /// Random ID to prevent duplicate messages
   public var randomID: Int64 {
-    get {return _randomID ?? 0}
-    set {_randomID = newValue}
+    get { return _randomID ?? 0 }
+    set { _randomID = newValue }
   }
+
   /// Returns true if `randomID` has been explicitly set.
-  public var hasRandomID: Bool {return self._randomID != nil}
+  public var hasRandomID: Bool { return _randomID != nil }
   /// Clears the value of `randomID`. Subsequent reads from it will return its default value.
-  public mutating func clearRandomID() {self._randomID = nil}
+  public mutating func clearRandomID() { _randomID = nil }
 
   /// Media to send
   public var media: InputMedia {
-    get {return _media ?? InputMedia()}
-    set {_media = newValue}
+    get { return _media ?? InputMedia() }
+    set { _media = newValue }
   }
+
   /// Returns true if `media` has been explicitly set.
-  public var hasMedia: Bool {return self._media != nil}
+  public var hasMedia: Bool { return _media != nil }
   /// Clears the value of `media`. Subsequent reads from it will return its default value.
-  public mutating func clearMedia() {self._media = nil}
+  public mutating func clearMedia() { _media = nil }
 
   /// Date of sending (until we fix the client reordering)
   public var temporarySendDate: Int64 {
-    get {return _temporarySendDate ?? 0}
-    set {_temporarySendDate = newValue}
+    get { return _temporarySendDate ?? 0 }
+    set { _temporarySendDate = newValue }
   }
+
   /// Returns true if `temporarySendDate` has been explicitly set.
-  public var hasTemporarySendDate: Bool {return self._temporarySendDate != nil}
+  public var hasTemporarySendDate: Bool { return _temporarySendDate != nil }
   /// Clears the value of `temporarySendDate`. Subsequent reads from it will return its default value.
-  public mutating func clearTemporarySendDate() {self._temporarySendDate = nil}
+  public mutating func clearTemporarySendDate() { _temporarySendDate = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1763,33 +1847,36 @@ public struct GetChatHistoryInput: Sendable {
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
-    set {_peerID = newValue}
+    get { return _peerID ?? InputPeer() }
+    set { _peerID = newValue }
   }
+
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool { return _peerID != nil }
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
-  public mutating func clearPeerID() {self._peerID = nil}
+  public mutating func clearPeerID() { _peerID = nil }
 
   /// ID of the message to start from
   public var offsetID: Int64 {
-    get {return _offsetID ?? 0}
-    set {_offsetID = newValue}
+    get { return _offsetID ?? 0 }
+    set { _offsetID = newValue }
   }
+
   /// Returns true if `offsetID` has been explicitly set.
-  public var hasOffsetID: Bool {return self._offsetID != nil}
+  public var hasOffsetID: Bool { return _offsetID != nil }
   /// Clears the value of `offsetID`. Subsequent reads from it will return its default value.
-  public mutating func clearOffsetID() {self._offsetID = nil}
+  public mutating func clearOffsetID() { _offsetID = nil }
 
   /// Number of messages to return
   public var limit: Int32 {
-    get {return _limit ?? 0}
-    set {_limit = newValue}
+    get { return _limit ?? 0 }
+    set { _limit = newValue }
   }
+
   /// Returns true if `limit` has been explicitly set.
-  public var hasLimit: Bool {return self._limit != nil}
+  public var hasLimit: Bool { return _limit != nil }
   /// Clears the value of `limit`. Subsequent reads from it will return its default value.
-  public mutating func clearLimit() {self._limit = nil}
+  public mutating func clearLimit() { _limit = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1822,74 +1909,74 @@ public struct Update: Sendable {
 
   public var newMessage: UpdateNewMessage {
     get {
-      if case .newMessage(let v)? = update {return v}
+      if case .newMessage(let v)? = update { return v }
       return UpdateNewMessage()
     }
-    set {update = .newMessage(newValue)}
+    set { update = .newMessage(newValue) }
   }
 
   public var editMessage: UpdateEditMessage {
     get {
-      if case .editMessage(let v)? = update {return v}
+      if case .editMessage(let v)? = update { return v }
       return UpdateEditMessage()
     }
-    set {update = .editMessage(newValue)}
+    set { update = .editMessage(newValue) }
   }
 
   public var updateMessageID: UpdateMessageId {
     get {
-      if case .updateMessageID(let v)? = update {return v}
+      if case .updateMessageID(let v)? = update { return v }
       return UpdateMessageId()
     }
-    set {update = .updateMessageID(newValue)}
+    set { update = .updateMessageID(newValue) }
   }
 
   public var deleteMessages: UpdateDeleteMessages {
     get {
-      if case .deleteMessages(let v)? = update {return v}
+      if case .deleteMessages(let v)? = update { return v }
       return UpdateDeleteMessages()
     }
-    set {update = .deleteMessages(newValue)}
+    set { update = .deleteMessages(newValue) }
   }
 
   public var updateComposeAction: UpdateComposeAction {
     get {
-      if case .updateComposeAction(let v)? = update {return v}
+      if case .updateComposeAction(let v)? = update { return v }
       return UpdateComposeAction()
     }
-    set {update = .updateComposeAction(newValue)}
+    set { update = .updateComposeAction(newValue) }
   }
 
   public var updateUserStatus: UpdateUserStatus {
     get {
-      if case .updateUserStatus(let v)? = update {return v}
+      if case .updateUserStatus(let v)? = update { return v }
       return UpdateUserStatus()
     }
-    set {update = .updateUserStatus(newValue)}
+    set { update = .updateUserStatus(newValue) }
   }
 
   public var messageAttachment: UpdateMessageAttachment {
     get {
-      if case .messageAttachment(let v)? = update {return v}
+      if case .messageAttachment(let v)? = update { return v }
       return UpdateMessageAttachment()
     }
-    set {update = .messageAttachment(newValue)}
+    set { update = .messageAttachment(newValue) }
   }
 
   public var updateReaction: UpdateReaction {
     get {
-      if case .updateReaction(let v)? = update {return v}
+      if case .updateReaction(let v)? = update { return v }
       return UpdateReaction()
     }
-    set {update = .updateReaction(newValue)}
+    set { update = .updateReaction(newValue) }
   }
 
   public var deleteReaction: UpdateDeleteReaction {
     get {
-      if case .deleteReaction(let v)? = update {return v}
+      if case .deleteReaction(let v)? = update { return v }
       return UpdateDeleteReaction()
     }
-    set {update = .deleteReaction(newValue)}
+    set { update = .deleteReaction(newValue) }
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1904,7 +1991,6 @@ public struct Update: Sendable {
     case messageAttachment(UpdateMessageAttachment)
     case updateReaction(UpdateReaction)
     case deleteReaction(UpdateDeleteReaction)
-
   }
 
   public init() {}
@@ -1916,13 +2002,14 @@ public struct UpdateNewMessage: Sendable {
   // methods supported on all messages.
 
   public var message: Message {
-    get {return _message ?? Message()}
-    set {_message = newValue}
+    get { return _message ?? Message() }
+    set { _message = newValue }
   }
+
   /// Returns true if `message` has been explicitly set.
-  public var hasMessage: Bool {return self._message != nil}
+  public var hasMessage: Bool { return _message != nil }
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
-  public mutating func clearMessage() {self._message = nil}
+  public mutating func clearMessage() { _message = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1937,13 +2024,14 @@ public struct UpdateEditMessage: Sendable {
   // methods supported on all messages.
 
   public var message: Message {
-    get {return _message ?? Message()}
-    set {_message = newValue}
+    get { return _message ?? Message() }
+    set { _message = newValue }
   }
+
   /// Returns true if `message` has been explicitly set.
-  public var hasMessage: Bool {return self._message != nil}
+  public var hasMessage: Bool { return _message != nil }
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
-  public mutating func clearMessage() {self._message = nil}
+  public mutating func clearMessage() { _message = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1961,13 +2049,14 @@ public struct UpdateDeleteMessages: Sendable {
   public var messageIds: [Int64] = []
 
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
-    set {_peerID = newValue}
+    get { return _peerID ?? Peer() }
+    set { _peerID = newValue }
   }
+
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool { return _peerID != nil }
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
-  public mutating func clearPeerID() {self._peerID = nil}
+  public mutating func clearPeerID() { _peerID = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2002,13 +2091,14 @@ public struct UpdateComposeAction: Sendable {
 
   /// Peer ID of the peer user is composing the message to
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
-    set {_peerID = newValue}
+    get { return _peerID ?? Peer() }
+    set { _peerID = newValue }
   }
+
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool { return _peerID != nil }
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
-  public mutating func clearPeerID() {self._peerID = nil}
+  public mutating func clearPeerID() { _peerID = nil }
 
   /// Action of the user (typing, etc)
   public var action: UpdateComposeAction.ComposeAction = .none
@@ -2058,7 +2148,6 @@ public struct UpdateComposeAction: Sendable {
       .uploadingDocument,
       .uploadingVideo,
     ]
-
   }
 
   public init() {}
@@ -2072,13 +2161,14 @@ public struct UpdateMessageAttachment: Sendable {
   // methods supported on all messages.
 
   public var attachment: MessageAttachment {
-    get {return _attachment ?? MessageAttachment()}
-    set {_attachment = newValue}
+    get { return _attachment ?? MessageAttachment() }
+    set { _attachment = newValue }
   }
+
   /// Returns true if `attachment` has been explicitly set.
-  public var hasAttachment: Bool {return self._attachment != nil}
+  public var hasAttachment: Bool { return _attachment != nil }
   /// Clears the value of `attachment`. Subsequent reads from it will return its default value.
-  public mutating func clearAttachment() {self._attachment = nil}
+  public mutating func clearAttachment() { _attachment = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2093,13 +2183,14 @@ public struct UpdateReaction: Sendable {
   // methods supported on all messages.
 
   public var reaction: Reaction {
-    get {return _reaction ?? Reaction()}
-    set {_reaction = newValue}
+    get { return _reaction ?? Reaction() }
+    set { _reaction = newValue }
   }
+
   /// Returns true if `reaction` has been explicitly set.
-  public var hasReaction: Bool {return self._reaction != nil}
+  public var hasReaction: Bool { return _reaction != nil }
   /// Clears the value of `reaction`. Subsequent reads from it will return its default value.
-  public mutating func clearReaction() {self._reaction = nil}
+  public mutating func clearReaction() { _reaction = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2113,7 +2204,7 @@ public struct UpdateDeleteReaction: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var emoji: String = String()
+  public var emoji: String = .init()
 
   public var chatID: Int64 = 0
 
@@ -2132,13 +2223,14 @@ public struct UpdateUserStatus: Sendable {
   public var userID: Int64 = 0
 
   public var status: UserStatus {
-    get {return _status ?? UserStatus()}
-    set {_status = newValue}
+    get { return _status ?? UserStatus() }
+    set { _status = newValue }
   }
+
   /// Returns true if `status` has been explicitly set.
-  public var hasStatus: Bool {return self._status != nil}
+  public var hasStatus: Bool { return _status != nil }
   /// Clears the value of `status`. Subsequent reads from it will return its default value.
-  public mutating func clearStatus() {self._status = nil}
+  public mutating func clearStatus() { _status = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2155,13 +2247,14 @@ public struct UserStatus: Sendable {
   public var online: UserStatus.Status = .unknown
 
   public var lastOnline: LastOnline {
-    get {return _lastOnline ?? LastOnline()}
-    set {_lastOnline = newValue}
+    get { return _lastOnline ?? LastOnline() }
+    set { _lastOnline = newValue }
   }
+
   /// Returns true if `lastOnline` has been explicitly set.
-  public var hasLastOnline: Bool {return self._lastOnline != nil}
+  public var hasLastOnline: Bool { return _lastOnline != nil }
   /// Clears the value of `lastOnline`. Subsequent reads from it will return its default value.
-  public mutating func clearLastOnline() {self._lastOnline = nil}
+  public mutating func clearLastOnline() { _lastOnline = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2200,7 +2293,6 @@ public struct UserStatus: Sendable {
       .online,
       .offline,
     ]
-
   }
 
   public init() {}
@@ -2215,13 +2307,14 @@ public struct LastOnline: Sendable {
 
   /// Date of the last online if exact last online is permitted by the user
   public var date: Int64 {
-    get {return _date ?? 0}
-    set {_date = newValue}
+    get { return _date ?? 0 }
+    set { _date = newValue }
   }
+
   /// Returns true if `date` has been explicitly set.
-  public var hasDate: Bool {return self._date != nil}
+  public var hasDate: Bool { return _date != nil }
   /// Clears the value of `date`. Subsequent reads from it will return its default value.
-  public mutating func clearDate() {self._date = nil}
+  public mutating func clearDate() { _date = nil }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2242,6 +2335,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     5: .same(proto: "GET_CHAT_HISTORY"),
     6: .same(proto: "ADD_REACTION"),
     7: .same(proto: "DELETE_REACTION"),
+    8: .same(proto: "EDIT_MESSAGE"),
   ]
 }
 
@@ -2262,60 +2356,60 @@ extension ClientMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.seq) }()
+      case 1: try decoder.decodeSingularUInt64Field(value: &id)
+      case 2: try decoder.decodeSingularUInt32Field(value: &seq)
       case 4: try {
-        var v: ConnectionInit?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .connectionInit(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .connectionInit(v)
-        }
-      }()
+          var v: ConnectionInit?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .connectionInit(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .connectionInit(v)
+          }
+        }()
       case 5: try {
-        var v: RpcCall?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .rpcCall(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .rpcCall(v)
-        }
-      }()
+          var v: RpcCall?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .rpcCall(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .rpcCall(v)
+          }
+        }()
       case 6: try {
-        var v: Ack?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .ack(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .ack(v)
-        }
-      }()
+          var v: Ack?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .ack(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .ack(v)
+          }
+        }()
       case 7: try {
-        var v: Ping?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .ping(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .ping(v)
-        }
-      }()
+          var v: Ping?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .ping(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .ping(v)
+          }
+        }()
       default: break
       }
     }
@@ -2326,39 +2420,39 @@ extension ClientMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.id != 0 {
-      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    if id != 0 {
+      try visitor.visitSingularUInt64Field(value: id, fieldNumber: 1)
     }
-    if self.seq != 0 {
-      try visitor.visitSingularUInt32Field(value: self.seq, fieldNumber: 2)
+    if seq != 0 {
+      try visitor.visitSingularUInt32Field(value: seq, fieldNumber: 2)
     }
-    switch self.body {
+    switch body {
     case .connectionInit?: try {
-      guard case .connectionInit(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
+        guard case .connectionInit(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      }()
     case .rpcCall?: try {
-      guard case .rpcCall(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    }()
+        guard case .rpcCall(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      }()
     case .ack?: try {
-      guard case .ack(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    }()
+        guard case .ack(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      }()
     case .ping?: try {
-      guard case .ping(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    }()
+        guard case .ping(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ClientMessage, rhs: ClientMessage) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs.seq != rhs.seq {return false}
-    if lhs.body != rhs.body {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.id != rhs.id { return false }
+    if lhs.seq != rhs.seq { return false }
+    if lhs.body != rhs.body { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2375,22 +2469,22 @@ extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.token) }()
+      case 1: try decoder.decodeSingularStringField(value: &token)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.token.isEmpty {
-      try visitor.visitSingularStringField(value: self.token, fieldNumber: 1)
+    if !token.isEmpty {
+      try visitor.visitSingularStringField(value: token, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ConnectionInit, rhs: ConnectionInit) -> Bool {
-    if lhs.token != rhs.token {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.token != rhs.token { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2413,85 +2507,85 @@ extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
+      case 1: try decoder.decodeSingularUInt64Field(value: &id)
       case 4: try {
-        var v: ConnectionOpen?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .connectionOpen(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .connectionOpen(v)
-        }
-      }()
+          var v: ConnectionOpen?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .connectionOpen(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .connectionOpen(v)
+          }
+        }()
       case 5: try {
-        var v: RpcResult?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .rpcResult(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .rpcResult(v)
-        }
-      }()
+          var v: RpcResult?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .rpcResult(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .rpcResult(v)
+          }
+        }()
       case 6: try {
-        var v: RpcError?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .rpcError(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .rpcError(v)
-        }
-      }()
+          var v: RpcError?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .rpcError(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .rpcError(v)
+          }
+        }()
       case 7: try {
-        var v: ServerMessage?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .message(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .message(v)
-        }
-      }()
+          var v: ServerMessage?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .message(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .message(v)
+          }
+        }()
       case 8: try {
-        var v: Ack?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .ack(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .ack(v)
-        }
-      }()
+          var v: Ack?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .ack(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .ack(v)
+          }
+        }()
       case 9: try {
-        var v: Pong?
-        var hadOneofValue = false
-        if let current = self.body {
-          hadOneofValue = true
-          if case .pong(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.body = .pong(v)
-        }
-      }()
+          var v: Pong?
+          var hadOneofValue = false
+          if let current = self.body {
+            hadOneofValue = true
+            if case .pong(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.body = .pong(v)
+          }
+        }()
       default: break
       }
     }
@@ -2502,43 +2596,43 @@ extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.id != 0 {
-      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    if id != 0 {
+      try visitor.visitSingularUInt64Field(value: id, fieldNumber: 1)
     }
-    switch self.body {
+    switch body {
     case .connectionOpen?: try {
-      guard case .connectionOpen(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
+        guard case .connectionOpen(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      }()
     case .rpcResult?: try {
-      guard case .rpcResult(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    }()
+        guard case .rpcResult(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      }()
     case .rpcError?: try {
-      guard case .rpcError(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    }()
+        guard case .rpcError(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      }()
     case .message?: try {
-      guard case .message(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    }()
+        guard case .message(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      }()
     case .ack?: try {
-      guard case .ack(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-    }()
+        guard case .ack(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+      }()
     case .pong?: try {
-      guard case .pong(let v)? = self.body else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
-    }()
+        guard case .pong(let v)? = self.body else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ServerProtocolMessage, rhs: ServerProtocolMessage) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs.body != rhs.body {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.id != rhs.id { return false }
+    if lhs.body != rhs.body { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2556,18 +2650,18 @@ extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 4: try {
-        var v: UpdatesPayload?
-        var hadOneofValue = false
-        if let current = self.payload {
-          hadOneofValue = true
-          if case .update(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.payload = .update(v)
-        }
-      }()
+          var v: UpdatesPayload?
+          var hadOneofValue = false
+          if let current = self.payload {
+            hadOneofValue = true
+            if case .update(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.payload = .update(v)
+          }
+        }()
       default: break
       }
     }
@@ -2585,8 +2679,8 @@ extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 
   public static func ==(lhs: ServerMessage, rhs: ServerMessage) -> Bool {
-    if lhs.payload != rhs.payload {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.payload != rhs.payload { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2603,22 +2697,22 @@ extension UpdatesPayload: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      case 1: try decoder.decodeRepeatedMessageField(value: &updates)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.updates.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    if !updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: updates, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdatesPayload, rhs: UpdatesPayload) -> Bool {
-    if lhs.updates != rhs.updates {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.updates != rhs.updates { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2635,22 +2729,22 @@ extension Ack: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, 
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.msgID) }()
+      case 1: try decoder.decodeSingularUInt64Field(value: &msgID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.msgID != 0 {
-      try visitor.visitSingularUInt64Field(value: self.msgID, fieldNumber: 1)
+    if msgID != 0 {
+      try visitor.visitSingularUInt64Field(value: msgID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Ack, rhs: Ack) -> Bool {
-    if lhs.msgID != rhs.msgID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.msgID != rhs.msgID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2669,7 +2763,7 @@ extension ConnectionOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 
   public static func ==(lhs: ConnectionOpen, rhs: ConnectionOpen) -> Bool {
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2686,22 +2780,22 @@ extension Ping: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.nonce) }()
+      case 1: try decoder.decodeSingularUInt64Field(value: &nonce)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.nonce != 0 {
-      try visitor.visitSingularUInt64Field(value: self.nonce, fieldNumber: 1)
+    if nonce != 0 {
+      try visitor.visitSingularUInt64Field(value: nonce, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Ping, rhs: Ping) -> Bool {
-    if lhs.nonce != rhs.nonce {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.nonce != rhs.nonce { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2718,22 +2812,22 @@ extension Pong: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.nonce) }()
+      case 1: try decoder.decodeSingularUInt64Field(value: &nonce)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.nonce != 0 {
-      try visitor.visitSingularUInt64Field(value: self.nonce, fieldNumber: 1)
+    if nonce != 0 {
+      try visitor.visitSingularUInt64Field(value: nonce, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Pong, rhs: Pong) -> Bool {
-    if lhs.nonce != rhs.nonce {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.nonce != rhs.nonce { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2753,44 +2847,44 @@ extension InputPeer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 2: try {
-        var v: InputPeerSelf?
-        var hadOneofValue = false
-        if let current = self.type {
-          hadOneofValue = true
-          if case .self_p(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.type = .self_p(v)
-        }
-      }()
+          var v: InputPeerSelf?
+          var hadOneofValue = false
+          if let current = self.type {
+            hadOneofValue = true
+            if case .self_p(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.type = .self_p(v)
+          }
+        }()
       case 3: try {
-        var v: InputPeerChat?
-        var hadOneofValue = false
-        if let current = self.type {
-          hadOneofValue = true
-          if case .chat(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.type = .chat(v)
-        }
-      }()
+          var v: InputPeerChat?
+          var hadOneofValue = false
+          if let current = self.type {
+            hadOneofValue = true
+            if case .chat(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.type = .chat(v)
+          }
+        }()
       case 4: try {
-        var v: InputPeerUser?
-        var hadOneofValue = false
-        if let current = self.type {
-          hadOneofValue = true
-          if case .user(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.type = .user(v)
-        }
-      }()
+          var v: InputPeerUser?
+          var hadOneofValue = false
+          if let current = self.type {
+            hadOneofValue = true
+            if case .user(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.type = .user(v)
+          }
+        }()
       default: break
       }
     }
@@ -2801,27 +2895,27 @@ extension InputPeer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    switch self.type {
+    switch type {
     case .self_p?: try {
-      guard case .self_p(let v)? = self.type else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    }()
+        guard case .self_p(let v)? = self.type else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      }()
     case .chat?: try {
-      guard case .chat(let v)? = self.type else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    }()
+        guard case .chat(let v)? = self.type else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      }()
     case .user?: try {
-      guard case .user(let v)? = self.type else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
+        guard case .user(let v)? = self.type else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: InputPeer, rhs: InputPeer) -> Bool {
-    if lhs.type != rhs.type {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.type != rhs.type { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2840,7 +2934,7 @@ extension InputPeerSelf: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 
   public static func ==(lhs: InputPeerSelf, rhs: InputPeerSelf) -> Bool {
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2857,22 +2951,22 @@ extension InputPeerChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &chatID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.chatID != 0 {
-      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    if chatID != 0 {
+      try visitor.visitSingularInt64Field(value: chatID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: InputPeerChat, rhs: InputPeerChat) -> Bool {
-    if lhs.chatID != rhs.chatID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.chatID != rhs.chatID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2889,22 +2983,22 @@ extension InputPeerUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &userID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.userID != 0 {
-      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 1)
+    if userID != 0 {
+      try visitor.visitSingularInt64Field(value: userID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: InputPeerUser, rhs: InputPeerUser) -> Bool {
-    if lhs.userID != rhs.userID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.userID != rhs.userID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2923,31 +3017,31 @@ extension Peer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 2: try {
-        var v: PeerChat?
-        var hadOneofValue = false
-        if let current = self.type {
-          hadOneofValue = true
-          if case .chat(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.type = .chat(v)
-        }
-      }()
+          var v: PeerChat?
+          var hadOneofValue = false
+          if let current = self.type {
+            hadOneofValue = true
+            if case .chat(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.type = .chat(v)
+          }
+        }()
       case 3: try {
-        var v: PeerUser?
-        var hadOneofValue = false
-        if let current = self.type {
-          hadOneofValue = true
-          if case .user(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.type = .user(v)
-        }
-      }()
+          var v: PeerUser?
+          var hadOneofValue = false
+          if let current = self.type {
+            hadOneofValue = true
+            if case .user(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.type = .user(v)
+          }
+        }()
       default: break
       }
     }
@@ -2958,23 +3052,23 @@ extension Peer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    switch self.type {
+    switch type {
     case .chat?: try {
-      guard case .chat(let v)? = self.type else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    }()
+        guard case .chat(let v)? = self.type else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      }()
     case .user?: try {
-      guard case .user(let v)? = self.type else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    }()
+        guard case .user(let v)? = self.type else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Peer, rhs: Peer) -> Bool {
-    if lhs.type != rhs.type {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.type != rhs.type { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -2991,22 +3085,22 @@ extension PeerChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &chatID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.chatID != 0 {
-      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    if chatID != 0 {
+      try visitor.visitSingularInt64Field(value: chatID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: PeerChat, rhs: PeerChat) -> Bool {
-    if lhs.chatID != rhs.chatID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.chatID != rhs.chatID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3023,22 +3117,22 @@ extension PeerUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &userID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.userID != 0 {
-      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 1)
+    if userID != 0 {
+      try visitor.visitSingularInt64Field(value: userID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: PeerUser, rhs: PeerUser) -> Bool {
-    if lhs.userID != rhs.userID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.userID != rhs.userID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3063,15 +3157,15 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self._firstName) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self._lastName) }()
-      case 4: try { try decoder.decodeSingularStringField(value: &self._username) }()
-      case 5: try { try decoder.decodeSingularStringField(value: &self._phoneNumber) }()
-      case 6: try { try decoder.decodeSingularStringField(value: &self._email) }()
-      case 7: try { try decoder.decodeSingularBoolField(value: &self._min) }()
-      case 8: try { try decoder.decodeSingularMessageField(value: &self._status) }()
-      case 9: try { try decoder.decodeSingularMessageField(value: &self._profilePhoto) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &id)
+      case 2: try decoder.decodeSingularStringField(value: &_firstName)
+      case 3: try decoder.decodeSingularStringField(value: &_lastName)
+      case 4: try decoder.decodeSingularStringField(value: &_username)
+      case 5: try decoder.decodeSingularStringField(value: &_phoneNumber)
+      case 6: try decoder.decodeSingularStringField(value: &_email)
+      case 7: try decoder.decodeSingularBoolField(value: &_min)
+      case 8: try decoder.decodeSingularMessageField(value: &_status)
+      case 9: try decoder.decodeSingularMessageField(value: &_profilePhoto)
       default: break
       }
     }
@@ -3082,8 +3176,8 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.id != 0 {
-      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    if id != 0 {
+      try visitor.visitSingularInt64Field(value: id, fieldNumber: 1)
     }
     try { if let v = self._firstName {
       try visitor.visitSingularStringField(value: v, fieldNumber: 2)
@@ -3113,16 +3207,16 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
   }
 
   public static func ==(lhs: User, rhs: User) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs._firstName != rhs._firstName {return false}
-    if lhs._lastName != rhs._lastName {return false}
-    if lhs._username != rhs._username {return false}
-    if lhs._phoneNumber != rhs._phoneNumber {return false}
-    if lhs._email != rhs._email {return false}
-    if lhs._min != rhs._min {return false}
-    if lhs._status != rhs._status {return false}
-    if lhs._profilePhoto != rhs._profilePhoto {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.id != rhs.id { return false }
+    if lhs._firstName != rhs._firstName { return false }
+    if lhs._lastName != rhs._lastName { return false }
+    if lhs._username != rhs._username { return false }
+    if lhs._phoneNumber != rhs._phoneNumber { return false }
+    if lhs._email != rhs._email { return false }
+    if lhs._min != rhs._min { return false }
+    if lhs._status != rhs._status { return false }
+    if lhs._profilePhoto != rhs._profilePhoto { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3140,27 +3234,27 @@ extension UserProfilePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.photoID) }()
-      case 2: try { try decoder.decodeSingularBytesField(value: &self.strippedThumb) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &photoID)
+      case 2: try decoder.decodeSingularBytesField(value: &strippedThumb)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.photoID != 0 {
-      try visitor.visitSingularInt64Field(value: self.photoID, fieldNumber: 1)
+    if photoID != 0 {
+      try visitor.visitSingularInt64Field(value: photoID, fieldNumber: 1)
     }
-    if !self.strippedThumb.isEmpty {
-      try visitor.visitSingularBytesField(value: self.strippedThumb, fieldNumber: 2)
+    if !strippedThumb.isEmpty {
+      try visitor.visitSingularBytesField(value: strippedThumb, fieldNumber: 2)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UserProfilePhoto, rhs: UserProfilePhoto) -> Bool {
-    if lhs.photoID != rhs.photoID {return false}
-    if lhs.strippedThumb != rhs.strippedThumb {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.photoID != rhs.photoID { return false }
+    if lhs.strippedThumb != rhs.strippedThumb { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3187,25 +3281,25 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
   fileprivate class _StorageClass {
     var _id: Int64 = 0
     var _fromID: Int64 = 0
-    var _peerID: Peer? = nil
+    var _peerID: Peer?
     var _chatID: Int64 = 0
-    var _message: String? = nil
+    var _message: String?
     var _out: Bool = false
     var _date: Int64 = 0
-    var _mentioned: Bool? = nil
-    var _replyToMsgID: Int64? = nil
-    var _media: MessageMedia? = nil
-    var _editDate: Int64? = nil
-    var _groupedID: Int64? = nil
-    var _attachments: MessageAttachments? = nil
-    var _reactions: MessageReactions? = nil
+    var _mentioned: Bool?
+    var _replyToMsgID: Int64?
+    var _media: MessageMedia?
+    var _editDate: Int64?
+    var _groupedID: Int64?
+    var _attachments: MessageAttachments?
+    var _reactions: MessageReactions?
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
-      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+      nonisolated(unsafe) static let defaultInstance = _StorageClass()
     #else
       static let defaultInstance = _StorageClass()
     #endif
@@ -3245,20 +3339,20 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         // allocates stack space for every case branch when no optimizations are
         // enabled. https://github.com/apple/swift-protobuf/issues/1034
         switch fieldNumber {
-        case 1: try { try decoder.decodeSingularInt64Field(value: &_storage._id) }()
-        case 2: try { try decoder.decodeSingularInt64Field(value: &_storage._fromID) }()
-        case 3: try { try decoder.decodeSingularMessageField(value: &_storage._peerID) }()
-        case 4: try { try decoder.decodeSingularInt64Field(value: &_storage._chatID) }()
-        case 5: try { try decoder.decodeSingularStringField(value: &_storage._message) }()
-        case 6: try { try decoder.decodeSingularBoolField(value: &_storage._out) }()
-        case 7: try { try decoder.decodeSingularInt64Field(value: &_storage._date) }()
-        case 8: try { try decoder.decodeSingularBoolField(value: &_storage._mentioned) }()
-        case 9: try { try decoder.decodeSingularInt64Field(value: &_storage._replyToMsgID) }()
-        case 10: try { try decoder.decodeSingularMessageField(value: &_storage._media) }()
-        case 11: try { try decoder.decodeSingularInt64Field(value: &_storage._editDate) }()
-        case 12: try { try decoder.decodeSingularInt64Field(value: &_storage._groupedID) }()
-        case 13: try { try decoder.decodeSingularMessageField(value: &_storage._attachments) }()
-        case 14: try { try decoder.decodeSingularMessageField(value: &_storage._reactions) }()
+        case 1: try decoder.decodeSingularInt64Field(value: &_storage._id)
+        case 2: try decoder.decodeSingularInt64Field(value: &_storage._fromID)
+        case 3: try decoder.decodeSingularMessageField(value: &_storage._peerID)
+        case 4: try decoder.decodeSingularInt64Field(value: &_storage._chatID)
+        case 5: try decoder.decodeSingularStringField(value: &_storage._message)
+        case 6: try decoder.decodeSingularBoolField(value: &_storage._out)
+        case 7: try decoder.decodeSingularInt64Field(value: &_storage._date)
+        case 8: try decoder.decodeSingularBoolField(value: &_storage._mentioned)
+        case 9: try decoder.decodeSingularInt64Field(value: &_storage._replyToMsgID)
+        case 10: try decoder.decodeSingularMessageField(value: &_storage._media)
+        case 11: try decoder.decodeSingularInt64Field(value: &_storage._editDate)
+        case 12: try decoder.decodeSingularInt64Field(value: &_storage._groupedID)
+        case 13: try decoder.decodeSingularMessageField(value: &_storage._attachments)
+        case 14: try decoder.decodeSingularMessageField(value: &_storage._reactions)
         default: break
         }
       }
@@ -3322,25 +3416,25 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
         let _storage = _args.0
         let rhs_storage = _args.1
-        if _storage._id != rhs_storage._id {return false}
-        if _storage._fromID != rhs_storage._fromID {return false}
-        if _storage._peerID != rhs_storage._peerID {return false}
-        if _storage._chatID != rhs_storage._chatID {return false}
-        if _storage._message != rhs_storage._message {return false}
-        if _storage._out != rhs_storage._out {return false}
-        if _storage._date != rhs_storage._date {return false}
-        if _storage._mentioned != rhs_storage._mentioned {return false}
-        if _storage._replyToMsgID != rhs_storage._replyToMsgID {return false}
-        if _storage._media != rhs_storage._media {return false}
-        if _storage._editDate != rhs_storage._editDate {return false}
-        if _storage._groupedID != rhs_storage._groupedID {return false}
-        if _storage._attachments != rhs_storage._attachments {return false}
-        if _storage._reactions != rhs_storage._reactions {return false}
+        if _storage._id != rhs_storage._id { return false }
+        if _storage._fromID != rhs_storage._fromID { return false }
+        if _storage._peerID != rhs_storage._peerID { return false }
+        if _storage._chatID != rhs_storage._chatID { return false }
+        if _storage._message != rhs_storage._message { return false }
+        if _storage._out != rhs_storage._out { return false }
+        if _storage._date != rhs_storage._date { return false }
+        if _storage._mentioned != rhs_storage._mentioned { return false }
+        if _storage._replyToMsgID != rhs_storage._replyToMsgID { return false }
+        if _storage._media != rhs_storage._media { return false }
+        if _storage._editDate != rhs_storage._editDate { return false }
+        if _storage._groupedID != rhs_storage._groupedID { return false }
+        if _storage._attachments != rhs_storage._attachments { return false }
+        if _storage._reactions != rhs_storage._reactions { return false }
         return true
       }
-      if !storagesAreEqual {return false}
+      if !storagesAreEqual { return false }
     }
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3357,22 +3451,22 @@ extension MessageReactions: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.reactions) }()
+      case 1: try decoder.decodeRepeatedMessageField(value: &reactions)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.reactions.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.reactions, fieldNumber: 1)
+    if !reactions.isEmpty {
+      try visitor.visitRepeatedMessageField(value: reactions, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: MessageReactions, rhs: MessageReactions) -> Bool {
-    if lhs.reactions != rhs.reactions {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.reactions != rhs.reactions { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3393,42 +3487,42 @@ extension Reaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.emoji) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
-      case 4: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
-      case 5: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 1: try decoder.decodeSingularStringField(value: &emoji)
+      case 2: try decoder.decodeSingularInt64Field(value: &userID)
+      case 3: try decoder.decodeSingularInt64Field(value: &messageID)
+      case 4: try decoder.decodeSingularInt64Field(value: &chatID)
+      case 5: try decoder.decodeSingularInt64Field(value: &date)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.emoji.isEmpty {
-      try visitor.visitSingularStringField(value: self.emoji, fieldNumber: 1)
+    if !emoji.isEmpty {
+      try visitor.visitSingularStringField(value: emoji, fieldNumber: 1)
     }
-    if self.userID != 0 {
-      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
+    if userID != 0 {
+      try visitor.visitSingularInt64Field(value: userID, fieldNumber: 2)
     }
-    if self.messageID != 0 {
-      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 3)
+    if messageID != 0 {
+      try visitor.visitSingularInt64Field(value: messageID, fieldNumber: 3)
     }
-    if self.chatID != 0 {
-      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 4)
+    if chatID != 0 {
+      try visitor.visitSingularInt64Field(value: chatID, fieldNumber: 4)
     }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 5)
+    if date != 0 {
+      try visitor.visitSingularInt64Field(value: date, fieldNumber: 5)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Reaction, rhs: Reaction) -> Bool {
-    if lhs.emoji != rhs.emoji {return false}
-    if lhs.userID != rhs.userID {return false}
-    if lhs.messageID != rhs.messageID {return false}
-    if lhs.chatID != rhs.chatID {return false}
-    if lhs.date != rhs.date {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.emoji != rhs.emoji { return false }
+    if lhs.userID != rhs.userID { return false }
+    if lhs.messageID != rhs.messageID { return false }
+    if lhs.chatID != rhs.chatID { return false }
+    if lhs.date != rhs.date { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3447,9 +3541,9 @@ extension AddReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.emoji) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
-      case 3: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 1: try decoder.decodeSingularStringField(value: &emoji)
+      case 2: try decoder.decodeSingularInt64Field(value: &messageID)
+      case 3: try decoder.decodeSingularMessageField(value: &_peerID)
       default: break
       }
     }
@@ -3460,11 +3554,11 @@ extension AddReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.emoji.isEmpty {
-      try visitor.visitSingularStringField(value: self.emoji, fieldNumber: 1)
+    if !emoji.isEmpty {
+      try visitor.visitSingularStringField(value: emoji, fieldNumber: 1)
     }
-    if self.messageID != 0 {
-      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 2)
+    if messageID != 0 {
+      try visitor.visitSingularInt64Field(value: messageID, fieldNumber: 2)
     }
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
@@ -3473,10 +3567,10 @@ extension AddReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 
   public static func ==(lhs: AddReactionInput, rhs: AddReactionInput) -> Bool {
-    if lhs.emoji != rhs.emoji {return false}
-    if lhs.messageID != rhs.messageID {return false}
-    if lhs._peerID != rhs._peerID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.emoji != rhs.emoji { return false }
+    if lhs.messageID != rhs.messageID { return false }
+    if lhs._peerID != rhs._peerID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3493,22 +3587,22 @@ extension AddReactionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      case 1: try decoder.decodeRepeatedMessageField(value: &updates)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.updates.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    if !updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: updates, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: AddReactionResult, rhs: AddReactionResult) -> Bool {
-    if lhs.updates != rhs.updates {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.updates != rhs.updates { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3527,9 +3621,9 @@ extension DeleteReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.emoji) }()
-      case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 1: try decoder.decodeSingularStringField(value: &emoji)
+      case 2: try decoder.decodeSingularMessageField(value: &_peerID)
+      case 3: try decoder.decodeSingularInt64Field(value: &messageID)
       default: break
       }
     }
@@ -3540,23 +3634,23 @@ extension DeleteReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.emoji.isEmpty {
-      try visitor.visitSingularStringField(value: self.emoji, fieldNumber: 1)
+    if !emoji.isEmpty {
+      try visitor.visitSingularStringField(value: emoji, fieldNumber: 1)
     }
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
-    if self.messageID != 0 {
-      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 3)
+    if messageID != 0 {
+      try visitor.visitSingularInt64Field(value: messageID, fieldNumber: 3)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: DeleteReactionInput, rhs: DeleteReactionInput) -> Bool {
-    if lhs.emoji != rhs.emoji {return false}
-    if lhs._peerID != rhs._peerID {return false}
-    if lhs.messageID != rhs.messageID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.emoji != rhs.emoji { return false }
+    if lhs._peerID != rhs._peerID { return false }
+    if lhs.messageID != rhs.messageID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3573,22 +3667,22 @@ extension DeleteReactionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      case 1: try decoder.decodeRepeatedMessageField(value: &updates)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.updates.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    if !updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: updates, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: DeleteReactionResult, rhs: DeleteReactionResult) -> Bool {
-    if lhs.updates != rhs.updates {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.updates != rhs.updates { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3605,22 +3699,22 @@ extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.attachments) }()
+      case 1: try decoder.decodeRepeatedMessageField(value: &attachments)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.attachments.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.attachments, fieldNumber: 1)
+    if !attachments.isEmpty {
+      try visitor.visitRepeatedMessageField(value: attachments, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: MessageAttachments, rhs: MessageAttachments) -> Bool {
-    if lhs.attachments != rhs.attachments {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.attachments != rhs.attachments { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3638,20 +3732,20 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &messageID)
       case 2: try {
-        var v: MessageAttachmentExternalTask?
-        var hadOneofValue = false
-        if let current = self.attachment {
-          hadOneofValue = true
-          if case .externalTask(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.attachment = .externalTask(v)
-        }
-      }()
+          var v: MessageAttachmentExternalTask?
+          var hadOneofValue = false
+          if let current = self.attachment {
+            hadOneofValue = true
+            if case .externalTask(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.attachment = .externalTask(v)
+          }
+        }()
       default: break
       }
     }
@@ -3662,8 +3756,8 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.messageID != 0 {
-      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 1)
+    if messageID != 0 {
+      try visitor.visitSingularInt64Field(value: messageID, fieldNumber: 1)
     }
     try { if case .externalTask(let v)? = self.attachment {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
@@ -3672,9 +3766,9 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 
   public static func ==(lhs: MessageAttachment, rhs: MessageAttachment) -> Bool {
-    if lhs.messageID != rhs.messageID {return false}
-    if lhs.attachment != rhs.attachment {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.messageID != rhs.messageID { return false }
+    if lhs.attachment != rhs.attachment { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3699,62 +3793,62 @@ extension MessageAttachmentExternalTask: SwiftProtobuf.Message, SwiftProtobuf._M
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.taskID) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.application) }()
-      case 4: try { try decoder.decodeSingularStringField(value: &self.title) }()
-      case 5: try { try decoder.decodeSingularEnumField(value: &self.status) }()
-      case 6: try { try decoder.decodeSingularInt64Field(value: &self.assignedUserID) }()
-      case 7: try { try decoder.decodeSingularStringField(value: &self.url) }()
-      case 8: try { try decoder.decodeSingularStringField(value: &self.number) }()
-      case 9: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &id)
+      case 2: try decoder.decodeSingularStringField(value: &taskID)
+      case 3: try decoder.decodeSingularStringField(value: &application)
+      case 4: try decoder.decodeSingularStringField(value: &title)
+      case 5: try decoder.decodeSingularEnumField(value: &status)
+      case 6: try decoder.decodeSingularInt64Field(value: &assignedUserID)
+      case 7: try decoder.decodeSingularStringField(value: &url)
+      case 8: try decoder.decodeSingularStringField(value: &number)
+      case 9: try decoder.decodeSingularInt64Field(value: &date)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.id != 0 {
-      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    if id != 0 {
+      try visitor.visitSingularInt64Field(value: id, fieldNumber: 1)
     }
-    if !self.taskID.isEmpty {
-      try visitor.visitSingularStringField(value: self.taskID, fieldNumber: 2)
+    if !taskID.isEmpty {
+      try visitor.visitSingularStringField(value: taskID, fieldNumber: 2)
     }
-    if !self.application.isEmpty {
-      try visitor.visitSingularStringField(value: self.application, fieldNumber: 3)
+    if !application.isEmpty {
+      try visitor.visitSingularStringField(value: application, fieldNumber: 3)
     }
-    if !self.title.isEmpty {
-      try visitor.visitSingularStringField(value: self.title, fieldNumber: 4)
+    if !title.isEmpty {
+      try visitor.visitSingularStringField(value: title, fieldNumber: 4)
     }
-    if self.status != .unspecified {
-      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 5)
+    if status != .unspecified {
+      try visitor.visitSingularEnumField(value: status, fieldNumber: 5)
     }
-    if self.assignedUserID != 0 {
-      try visitor.visitSingularInt64Field(value: self.assignedUserID, fieldNumber: 6)
+    if assignedUserID != 0 {
+      try visitor.visitSingularInt64Field(value: assignedUserID, fieldNumber: 6)
     }
-    if !self.url.isEmpty {
-      try visitor.visitSingularStringField(value: self.url, fieldNumber: 7)
+    if !url.isEmpty {
+      try visitor.visitSingularStringField(value: url, fieldNumber: 7)
     }
-    if !self.number.isEmpty {
-      try visitor.visitSingularStringField(value: self.number, fieldNumber: 8)
+    if !number.isEmpty {
+      try visitor.visitSingularStringField(value: number, fieldNumber: 8)
     }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 9)
+    if date != 0 {
+      try visitor.visitSingularInt64Field(value: date, fieldNumber: 9)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: MessageAttachmentExternalTask, rhs: MessageAttachmentExternalTask) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs.taskID != rhs.taskID {return false}
-    if lhs.application != rhs.application {return false}
-    if lhs.title != rhs.title {return false}
-    if lhs.status != rhs.status {return false}
-    if lhs.assignedUserID != rhs.assignedUserID {return false}
-    if lhs.url != rhs.url {return false}
-    if lhs.number != rhs.number {return false}
-    if lhs.date != rhs.date {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.id != rhs.id { return false }
+    if lhs.taskID != rhs.taskID { return false }
+    if lhs.application != rhs.application { return false }
+    if lhs.title != rhs.title { return false }
+    if lhs.status != rhs.status { return false }
+    if lhs.assignedUserID != rhs.assignedUserID { return false }
+    if lhs.url != rhs.url { return false }
+    if lhs.number != rhs.number { return false }
+    if lhs.date != rhs.date { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3785,44 +3879,44 @@ extension MessageMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try {
-        var v: MessagePhoto?
-        var hadOneofValue = false
-        if let current = self.media {
-          hadOneofValue = true
-          if case .photo(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.media = .photo(v)
-        }
-      }()
+          var v: MessagePhoto?
+          var hadOneofValue = false
+          if let current = self.media {
+            hadOneofValue = true
+            if case .photo(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.media = .photo(v)
+          }
+        }()
       case 2: try {
-        var v: MessageVideo?
-        var hadOneofValue = false
-        if let current = self.media {
-          hadOneofValue = true
-          if case .video(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.media = .video(v)
-        }
-      }()
+          var v: MessageVideo?
+          var hadOneofValue = false
+          if let current = self.media {
+            hadOneofValue = true
+            if case .video(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.media = .video(v)
+          }
+        }()
       case 3: try {
-        var v: MessageDocument?
-        var hadOneofValue = false
-        if let current = self.media {
-          hadOneofValue = true
-          if case .document(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.media = .document(v)
-        }
-      }()
+          var v: MessageDocument?
+          var hadOneofValue = false
+          if let current = self.media {
+            hadOneofValue = true
+            if case .document(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.media = .document(v)
+          }
+        }()
       default: break
       }
     }
@@ -3833,27 +3927,27 @@ extension MessageMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    switch self.media {
+    switch media {
     case .photo?: try {
-      guard case .photo(let v)? = self.media else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-    }()
+        guard case .photo(let v)? = self.media else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      }()
     case .video?: try {
-      guard case .video(let v)? = self.media else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    }()
+        guard case .video(let v)? = self.media else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      }()
     case .document?: try {
-      guard case .document(let v)? = self.media else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    }()
+        guard case .document(let v)? = self.media else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: MessageMedia, rhs: MessageMedia) -> Bool {
-    if lhs.media != rhs.media {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.media != rhs.media { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3870,7 +3964,7 @@ extension MessagePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._photo) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_photo)
       default: break
       }
     }
@@ -3888,8 +3982,8 @@ extension MessagePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 
   public static func ==(lhs: MessagePhoto, rhs: MessagePhoto) -> Bool {
-    if lhs._photo != rhs._photo {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._photo != rhs._photo { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3906,7 +4000,7 @@ extension MessageVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._video) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_video)
       default: break
       }
     }
@@ -3924,8 +4018,8 @@ extension MessageVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 
   public static func ==(lhs: MessageVideo, rhs: MessageVideo) -> Bool {
-    if lhs._video != rhs._video {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._video != rhs._video { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3942,7 +4036,7 @@ extension MessageDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._document) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_document)
       default: break
       }
     }
@@ -3960,8 +4054,8 @@ extension MessageDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 
   public static func ==(lhs: MessageDocument, rhs: MessageDocument) -> Bool {
-    if lhs._document != rhs._document {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._document != rhs._document { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -3985,14 +4079,14 @@ extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
-      case 3: try { try decoder.decodeSingularInt32Field(value: &self.w) }()
-      case 4: try { try decoder.decodeSingularInt32Field(value: &self.h) }()
-      case 5: try { try decoder.decodeSingularInt32Field(value: &self.duration) }()
-      case 6: try { try decoder.decodeSingularInt32Field(value: &self.size) }()
-      case 7: try { try decoder.decodeSingularMessageField(value: &self._photo) }()
-      case 8: try { try decoder.decodeSingularStringField(value: &self._cdnURL) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &id)
+      case 2: try decoder.decodeSingularInt64Field(value: &date)
+      case 3: try decoder.decodeSingularInt32Field(value: &w)
+      case 4: try decoder.decodeSingularInt32Field(value: &h)
+      case 5: try decoder.decodeSingularInt32Field(value: &duration)
+      case 6: try decoder.decodeSingularInt32Field(value: &size)
+      case 7: try decoder.decodeSingularMessageField(value: &_photo)
+      case 8: try decoder.decodeSingularStringField(value: &_cdnURL)
       default: break
       }
     }
@@ -4003,23 +4097,23 @@ extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.id != 0 {
-      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    if id != 0 {
+      try visitor.visitSingularInt64Field(value: id, fieldNumber: 1)
     }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 2)
+    if date != 0 {
+      try visitor.visitSingularInt64Field(value: date, fieldNumber: 2)
     }
-    if self.w != 0 {
-      try visitor.visitSingularInt32Field(value: self.w, fieldNumber: 3)
+    if w != 0 {
+      try visitor.visitSingularInt32Field(value: w, fieldNumber: 3)
     }
-    if self.h != 0 {
-      try visitor.visitSingularInt32Field(value: self.h, fieldNumber: 4)
+    if h != 0 {
+      try visitor.visitSingularInt32Field(value: h, fieldNumber: 4)
     }
-    if self.duration != 0 {
-      try visitor.visitSingularInt32Field(value: self.duration, fieldNumber: 5)
+    if duration != 0 {
+      try visitor.visitSingularInt32Field(value: duration, fieldNumber: 5)
     }
-    if self.size != 0 {
-      try visitor.visitSingularInt32Field(value: self.size, fieldNumber: 6)
+    if size != 0 {
+      try visitor.visitSingularInt32Field(value: size, fieldNumber: 6)
     }
     try { if let v = self._photo {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
@@ -4031,15 +4125,15 @@ extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
   }
 
   public static func ==(lhs: Video, rhs: Video) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs.date != rhs.date {return false}
-    if lhs.w != rhs.w {return false}
-    if lhs.h != rhs.h {return false}
-    if lhs.duration != rhs.duration {return false}
-    if lhs.size != rhs.size {return false}
-    if lhs._photo != rhs._photo {return false}
-    if lhs._cdnURL != rhs._cdnURL {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.id != rhs.id { return false }
+    if lhs.date != rhs.date { return false }
+    if lhs.w != rhs.w { return false }
+    if lhs.h != rhs.h { return false }
+    if lhs.duration != rhs.duration { return false }
+    if lhs.size != rhs.size { return false }
+    if lhs._photo != rhs._photo { return false }
+    if lhs._cdnURL != rhs._cdnURL { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4061,12 +4155,12 @@ extension Document: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.fileName) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.mimeType) }()
-      case 4: try { try decoder.decodeSingularInt32Field(value: &self.size) }()
-      case 5: try { try decoder.decodeSingularStringField(value: &self._cdnURL) }()
-      case 6: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &id)
+      case 2: try decoder.decodeSingularStringField(value: &fileName)
+      case 3: try decoder.decodeSingularStringField(value: &mimeType)
+      case 4: try decoder.decodeSingularInt32Field(value: &size)
+      case 5: try decoder.decodeSingularStringField(value: &_cdnURL)
+      case 6: try decoder.decodeSingularInt64Field(value: &date)
       default: break
       }
     }
@@ -4077,35 +4171,35 @@ extension Document: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.id != 0 {
-      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    if id != 0 {
+      try visitor.visitSingularInt64Field(value: id, fieldNumber: 1)
     }
-    if !self.fileName.isEmpty {
-      try visitor.visitSingularStringField(value: self.fileName, fieldNumber: 2)
+    if !fileName.isEmpty {
+      try visitor.visitSingularStringField(value: fileName, fieldNumber: 2)
     }
-    if !self.mimeType.isEmpty {
-      try visitor.visitSingularStringField(value: self.mimeType, fieldNumber: 3)
+    if !mimeType.isEmpty {
+      try visitor.visitSingularStringField(value: mimeType, fieldNumber: 3)
     }
-    if self.size != 0 {
-      try visitor.visitSingularInt32Field(value: self.size, fieldNumber: 4)
+    if size != 0 {
+      try visitor.visitSingularInt32Field(value: size, fieldNumber: 4)
     }
     try { if let v = self._cdnURL {
       try visitor.visitSingularStringField(value: v, fieldNumber: 5)
     } }()
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 6)
+    if date != 0 {
+      try visitor.visitSingularInt64Field(value: date, fieldNumber: 6)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Document, rhs: Document) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs.fileName != rhs.fileName {return false}
-    if lhs.mimeType != rhs.mimeType {return false}
-    if lhs.size != rhs.size {return false}
-    if lhs._cdnURL != rhs._cdnURL {return false}
-    if lhs.date != rhs.date {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.id != rhs.id { return false }
+    if lhs.fileName != rhs.fileName { return false }
+    if lhs.mimeType != rhs.mimeType { return false }
+    if lhs.size != rhs.size { return false }
+    if lhs._cdnURL != rhs._cdnURL { return false }
+    if lhs.date != rhs.date { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4126,11 +4220,11 @@ extension Photo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
-      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.sizes) }()
-      case 4: try { try decoder.decodeSingularEnumField(value: &self.format) }()
-      case 100: try { try decoder.decodeSingularStringField(value: &self._fileUniqueID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &id)
+      case 2: try decoder.decodeSingularInt64Field(value: &date)
+      case 3: try decoder.decodeRepeatedMessageField(value: &sizes)
+      case 4: try decoder.decodeSingularEnumField(value: &format)
+      case 100: try decoder.decodeSingularStringField(value: &_fileUniqueID)
       default: break
       }
     }
@@ -4141,17 +4235,17 @@ extension Photo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.id != 0 {
-      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    if id != 0 {
+      try visitor.visitSingularInt64Field(value: id, fieldNumber: 1)
     }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 2)
+    if date != 0 {
+      try visitor.visitSingularInt64Field(value: date, fieldNumber: 2)
     }
-    if !self.sizes.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.sizes, fieldNumber: 3)
+    if !sizes.isEmpty {
+      try visitor.visitRepeatedMessageField(value: sizes, fieldNumber: 3)
     }
-    if self.format != .unspecified {
-      try visitor.visitSingularEnumField(value: self.format, fieldNumber: 4)
+    if format != .unspecified {
+      try visitor.visitSingularEnumField(value: format, fieldNumber: 4)
     }
     try { if let v = self._fileUniqueID {
       try visitor.visitSingularStringField(value: v, fieldNumber: 100)
@@ -4160,12 +4254,12 @@ extension Photo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
   }
 
   public static func ==(lhs: Photo, rhs: Photo) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs.date != rhs.date {return false}
-    if lhs.sizes != rhs.sizes {return false}
-    if lhs.format != rhs.format {return false}
-    if lhs._fileUniqueID != rhs._fileUniqueID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.id != rhs.id { return false }
+    if lhs.date != rhs.date { return false }
+    if lhs.sizes != rhs.sizes { return false }
+    if lhs.format != rhs.format { return false }
+    if lhs._fileUniqueID != rhs._fileUniqueID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4195,12 +4289,12 @@ extension PhotoSize: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.type) }()
-      case 2: try { try decoder.decodeSingularInt32Field(value: &self.w) }()
-      case 3: try { try decoder.decodeSingularInt32Field(value: &self.h) }()
-      case 4: try { try decoder.decodeSingularInt32Field(value: &self.size) }()
-      case 5: try { try decoder.decodeSingularBytesField(value: &self._bytes) }()
-      case 6: try { try decoder.decodeSingularStringField(value: &self._cdnURL) }()
+      case 1: try decoder.decodeSingularStringField(value: &type)
+      case 2: try decoder.decodeSingularInt32Field(value: &w)
+      case 3: try decoder.decodeSingularInt32Field(value: &h)
+      case 4: try decoder.decodeSingularInt32Field(value: &size)
+      case 5: try decoder.decodeSingularBytesField(value: &_bytes)
+      case 6: try decoder.decodeSingularStringField(value: &_cdnURL)
       default: break
       }
     }
@@ -4211,17 +4305,17 @@ extension PhotoSize: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.type.isEmpty {
-      try visitor.visitSingularStringField(value: self.type, fieldNumber: 1)
+    if !type.isEmpty {
+      try visitor.visitSingularStringField(value: type, fieldNumber: 1)
     }
-    if self.w != 0 {
-      try visitor.visitSingularInt32Field(value: self.w, fieldNumber: 2)
+    if w != 0 {
+      try visitor.visitSingularInt32Field(value: w, fieldNumber: 2)
     }
-    if self.h != 0 {
-      try visitor.visitSingularInt32Field(value: self.h, fieldNumber: 3)
+    if h != 0 {
+      try visitor.visitSingularInt32Field(value: h, fieldNumber: 3)
     }
-    if self.size != 0 {
-      try visitor.visitSingularInt32Field(value: self.size, fieldNumber: 4)
+    if size != 0 {
+      try visitor.visitSingularInt32Field(value: size, fieldNumber: 4)
     }
     try { if let v = self._bytes {
       try visitor.visitSingularBytesField(value: v, fieldNumber: 5)
@@ -4233,13 +4327,13 @@ extension PhotoSize: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
   }
 
   public static func ==(lhs: PhotoSize, rhs: PhotoSize) -> Bool {
-    if lhs.type != rhs.type {return false}
-    if lhs.w != rhs.w {return false}
-    if lhs.h != rhs.h {return false}
-    if lhs.size != rhs.size {return false}
-    if lhs._bytes != rhs._bytes {return false}
-    if lhs._cdnURL != rhs._cdnURL {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.type != rhs.type { return false }
+    if lhs.w != rhs.w { return false }
+    if lhs.h != rhs.h { return false }
+    if lhs.size != rhs.size { return false }
+    if lhs._bytes != rhs._bytes { return false }
+    if lhs._cdnURL != rhs._cdnURL { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4259,37 +4353,37 @@ extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.reqMsgID) }()
-      case 2: try { try decoder.decodeSingularEnumField(value: &self.errorCode) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.message) }()
-      case 4: try { try decoder.decodeSingularInt32Field(value: &self.code) }()
+      case 1: try decoder.decodeSingularUInt64Field(value: &reqMsgID)
+      case 2: try decoder.decodeSingularEnumField(value: &errorCode)
+      case 3: try decoder.decodeSingularStringField(value: &message)
+      case 4: try decoder.decodeSingularInt32Field(value: &code)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.reqMsgID != 0 {
-      try visitor.visitSingularUInt64Field(value: self.reqMsgID, fieldNumber: 1)
+    if reqMsgID != 0 {
+      try visitor.visitSingularUInt64Field(value: reqMsgID, fieldNumber: 1)
     }
-    if self.errorCode != .unknown {
-      try visitor.visitSingularEnumField(value: self.errorCode, fieldNumber: 2)
+    if errorCode != .unknown {
+      try visitor.visitSingularEnumField(value: errorCode, fieldNumber: 2)
     }
-    if !self.message.isEmpty {
-      try visitor.visitSingularStringField(value: self.message, fieldNumber: 3)
+    if !message.isEmpty {
+      try visitor.visitSingularStringField(value: message, fieldNumber: 3)
     }
-    if self.code != 0 {
-      try visitor.visitSingularInt32Field(value: self.code, fieldNumber: 4)
+    if code != 0 {
+      try visitor.visitSingularInt32Field(value: code, fieldNumber: 4)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: RpcError, rhs: RpcError) -> Bool {
-    if lhs.reqMsgID != rhs.reqMsgID {return false}
-    if lhs.errorCode != rhs.errorCode {return false}
-    if lhs.message != rhs.message {return false}
-    if lhs.code != rhs.code {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.reqMsgID != rhs.reqMsgID { return false }
+    if lhs.errorCode != rhs.errorCode { return false }
+    if lhs.message != rhs.message { return false }
+    if lhs.code != rhs.code { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4317,6 +4411,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     6: .same(proto: "getChatHistory"),
     7: .same(proto: "addReaction"),
     8: .same(proto: "deleteReaction"),
+    9: .same(proto: "editMessage"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4325,98 +4420,111 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularEnumField(value: &self.method) }()
+      case 1: try decoder.decodeSingularEnumField(value: &method)
       case 2: try {
-        var v: GetMeInput?
-        var hadOneofValue = false
-        if let current = self.input {
-          hadOneofValue = true
-          if case .getMe(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.input = .getMe(v)
-        }
-      }()
+          var v: GetMeInput?
+          var hadOneofValue = false
+          if let current = self.input {
+            hadOneofValue = true
+            if case .getMe(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.input = .getMe(v)
+          }
+        }()
       case 3: try {
-        var v: GetPeerPhotoInput?
-        var hadOneofValue = false
-        if let current = self.input {
-          hadOneofValue = true
-          if case .getPeerPhoto(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.input = .getPeerPhoto(v)
-        }
-      }()
+          var v: GetPeerPhotoInput?
+          var hadOneofValue = false
+          if let current = self.input {
+            hadOneofValue = true
+            if case .getPeerPhoto(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.input = .getPeerPhoto(v)
+          }
+        }()
       case 4: try {
-        var v: DeleteMessagesInput?
-        var hadOneofValue = false
-        if let current = self.input {
-          hadOneofValue = true
-          if case .deleteMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.input = .deleteMessages(v)
-        }
-      }()
+          var v: DeleteMessagesInput?
+          var hadOneofValue = false
+          if let current = self.input {
+            hadOneofValue = true
+            if case .deleteMessages(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.input = .deleteMessages(v)
+          }
+        }()
       case 5: try {
-        var v: SendMessageInput?
-        var hadOneofValue = false
-        if let current = self.input {
-          hadOneofValue = true
-          if case .sendMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.input = .sendMessage(v)
-        }
-      }()
+          var v: SendMessageInput?
+          var hadOneofValue = false
+          if let current = self.input {
+            hadOneofValue = true
+            if case .sendMessage(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.input = .sendMessage(v)
+          }
+        }()
       case 6: try {
-        var v: GetChatHistoryInput?
-        var hadOneofValue = false
-        if let current = self.input {
-          hadOneofValue = true
-          if case .getChatHistory(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.input = .getChatHistory(v)
-        }
-      }()
+          var v: GetChatHistoryInput?
+          var hadOneofValue = false
+          if let current = self.input {
+            hadOneofValue = true
+            if case .getChatHistory(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.input = .getChatHistory(v)
+          }
+        }()
       case 7: try {
-        var v: AddReactionInput?
-        var hadOneofValue = false
-        if let current = self.input {
-          hadOneofValue = true
-          if case .addReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.input = .addReaction(v)
-        }
-      }()
+          var v: AddReactionInput?
+          var hadOneofValue = false
+          if let current = self.input {
+            hadOneofValue = true
+            if case .addReaction(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.input = .addReaction(v)
+          }
+        }()
       case 8: try {
-        var v: DeleteReactionInput?
-        var hadOneofValue = false
-        if let current = self.input {
-          hadOneofValue = true
-          if case .deleteReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.input = .deleteReaction(v)
-        }
-      }()
+          var v: DeleteReactionInput?
+          var hadOneofValue = false
+          if let current = self.input {
+            hadOneofValue = true
+            if case .deleteReaction(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.input = .deleteReaction(v)
+          }
+        }()
+      case 9: try {
+          var v: EditMessageInput?
+          var hadOneofValue = false
+          if let current = self.input {
+            hadOneofValue = true
+            if case .editMessage(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.input = .editMessage(v)
+          }
+        }()
       default: break
       }
     }
@@ -4427,47 +4535,51 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.method != .unspecified {
-      try visitor.visitSingularEnumField(value: self.method, fieldNumber: 1)
+    if method != .unspecified {
+      try visitor.visitSingularEnumField(value: method, fieldNumber: 1)
     }
-    switch self.input {
+    switch input {
     case .getMe?: try {
-      guard case .getMe(let v)? = self.input else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    }()
+        guard case .getMe(let v)? = self.input else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      }()
     case .getPeerPhoto?: try {
-      guard case .getPeerPhoto(let v)? = self.input else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    }()
+        guard case .getPeerPhoto(let v)? = self.input else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      }()
     case .deleteMessages?: try {
-      guard case .deleteMessages(let v)? = self.input else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
+        guard case .deleteMessages(let v)? = self.input else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      }()
     case .sendMessage?: try {
-      guard case .sendMessage(let v)? = self.input else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    }()
+        guard case .sendMessage(let v)? = self.input else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      }()
     case .getChatHistory?: try {
-      guard case .getChatHistory(let v)? = self.input else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    }()
+        guard case .getChatHistory(let v)? = self.input else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      }()
     case .addReaction?: try {
-      guard case .addReaction(let v)? = self.input else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    }()
+        guard case .addReaction(let v)? = self.input else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      }()
     case .deleteReaction?: try {
-      guard case .deleteReaction(let v)? = self.input else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-    }()
+        guard case .deleteReaction(let v)? = self.input else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+      }()
+    case .editMessage?: try {
+        guard case .editMessage(let v)? = self.input else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: RpcCall, rhs: RpcCall) -> Bool {
-    if lhs.method != rhs.method {return false}
-    if lhs.input != rhs.input {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.method != rhs.method { return false }
+    if lhs.input != rhs.input { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4483,6 +4595,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     6: .same(proto: "getChatHistory"),
     7: .same(proto: "addReaction"),
     8: .same(proto: "deleteReaction"),
+    9: .same(proto: "editMessage"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4491,98 +4604,111 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.reqMsgID) }()
+      case 1: try decoder.decodeSingularUInt64Field(value: &reqMsgID)
       case 2: try {
-        var v: GetMeResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getMe(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getMe(v)
-        }
-      }()
+          var v: GetMeResult?
+          var hadOneofValue = false
+          if let current = self.result {
+            hadOneofValue = true
+            if case .getMe(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.result = .getMe(v)
+          }
+        }()
       case 3: try {
-        var v: GetPeerPhotoResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getPeerPhoto(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getPeerPhoto(v)
-        }
-      }()
+          var v: GetPeerPhotoResult?
+          var hadOneofValue = false
+          if let current = self.result {
+            hadOneofValue = true
+            if case .getPeerPhoto(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.result = .getPeerPhoto(v)
+          }
+        }()
       case 4: try {
-        var v: DeleteMessagesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteMessages(v)
-        }
-      }()
+          var v: DeleteMessagesResult?
+          var hadOneofValue = false
+          if let current = self.result {
+            hadOneofValue = true
+            if case .deleteMessages(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.result = .deleteMessages(v)
+          }
+        }()
       case 5: try {
-        var v: SendMessageResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .sendMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .sendMessage(v)
-        }
-      }()
+          var v: SendMessageResult?
+          var hadOneofValue = false
+          if let current = self.result {
+            hadOneofValue = true
+            if case .sendMessage(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.result = .sendMessage(v)
+          }
+        }()
       case 6: try {
-        var v: GetChatHistoryResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getChatHistory(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getChatHistory(v)
-        }
-      }()
+          var v: GetChatHistoryResult?
+          var hadOneofValue = false
+          if let current = self.result {
+            hadOneofValue = true
+            if case .getChatHistory(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.result = .getChatHistory(v)
+          }
+        }()
       case 7: try {
-        var v: AddReactionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .addReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .addReaction(v)
-        }
-      }()
+          var v: AddReactionResult?
+          var hadOneofValue = false
+          if let current = self.result {
+            hadOneofValue = true
+            if case .addReaction(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.result = .addReaction(v)
+          }
+        }()
       case 8: try {
-        var v: DeleteReactionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteReaction(v)
-        }
-      }()
+          var v: DeleteReactionResult?
+          var hadOneofValue = false
+          if let current = self.result {
+            hadOneofValue = true
+            if case .deleteReaction(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.result = .deleteReaction(v)
+          }
+        }()
+      case 9: try {
+          var v: EditMessageResult?
+          var hadOneofValue = false
+          if let current = self.result {
+            hadOneofValue = true
+            if case .editMessage(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.result = .editMessage(v)
+          }
+        }()
       default: break
       }
     }
@@ -4593,47 +4719,51 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.reqMsgID != 0 {
-      try visitor.visitSingularUInt64Field(value: self.reqMsgID, fieldNumber: 1)
+    if reqMsgID != 0 {
+      try visitor.visitSingularUInt64Field(value: reqMsgID, fieldNumber: 1)
     }
-    switch self.result {
+    switch result {
     case .getMe?: try {
-      guard case .getMe(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    }()
+        guard case .getMe(let v)? = self.result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      }()
     case .getPeerPhoto?: try {
-      guard case .getPeerPhoto(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    }()
+        guard case .getPeerPhoto(let v)? = self.result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      }()
     case .deleteMessages?: try {
-      guard case .deleteMessages(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
+        guard case .deleteMessages(let v)? = self.result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      }()
     case .sendMessage?: try {
-      guard case .sendMessage(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    }()
+        guard case .sendMessage(let v)? = self.result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      }()
     case .getChatHistory?: try {
-      guard case .getChatHistory(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    }()
+        guard case .getChatHistory(let v)? = self.result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      }()
     case .addReaction?: try {
-      guard case .addReaction(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    }()
+        guard case .addReaction(let v)? = self.result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      }()
     case .deleteReaction?: try {
-      guard case .deleteReaction(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-    }()
+        guard case .deleteReaction(let v)? = self.result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+      }()
+    case .editMessage?: try {
+        guard case .editMessage(let v)? = self.result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: RpcResult, rhs: RpcResult) -> Bool {
-    if lhs.reqMsgID != rhs.reqMsgID {return false}
-    if lhs.result != rhs.result {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.reqMsgID != rhs.reqMsgID { return false }
+    if lhs.result != rhs.result { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4652,7 +4782,7 @@ extension GetMeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
   }
 
   public static func ==(lhs: GetMeInput, rhs: GetMeInput) -> Bool {
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4669,7 +4799,7 @@ extension GetMeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementati
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._user) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_user)
       default: break
       }
     }
@@ -4687,8 +4817,8 @@ extension GetMeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementati
   }
 
   public static func ==(lhs: GetMeResult, rhs: GetMeResult) -> Bool {
-    if lhs._user != rhs._user {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._user != rhs._user { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4706,8 +4836,8 @@ extension GetPeerPhotoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.photoID) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_peerID)
+      case 2: try decoder.decodeSingularInt64Field(value: &photoID)
       default: break
       }
     }
@@ -4721,16 +4851,16 @@ extension GetPeerPhotoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
-    if self.photoID != 0 {
-      try visitor.visitSingularInt64Field(value: self.photoID, fieldNumber: 2)
+    if photoID != 0 {
+      try visitor.visitSingularInt64Field(value: photoID, fieldNumber: 2)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetPeerPhotoInput, rhs: GetPeerPhotoInput) -> Bool {
-    if lhs._peerID != rhs._peerID {return false}
-    if lhs.photoID != rhs.photoID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._peerID != rhs._peerID { return false }
+    if lhs.photoID != rhs.photoID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4747,7 +4877,7 @@ extension GetPeerPhotoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._photo) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_photo)
       default: break
       }
     }
@@ -4765,8 +4895,8 @@ extension GetPeerPhotoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 
   public static func ==(lhs: GetPeerPhotoResult, rhs: GetPeerPhotoResult) -> Bool {
-    if lhs._photo != rhs._photo {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._photo != rhs._photo { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4784,8 +4914,8 @@ extension DeleteMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
-      case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 1: try decoder.decodeRepeatedInt64Field(value: &messageIds)
+      case 2: try decoder.decodeSingularMessageField(value: &_peerID)
       default: break
       }
     }
@@ -4796,8 +4926,8 @@ extension DeleteMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.messageIds.isEmpty {
-      try visitor.visitPackedInt64Field(value: self.messageIds, fieldNumber: 1)
+    if !messageIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: messageIds, fieldNumber: 1)
     }
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
@@ -4806,9 +4936,9 @@ extension DeleteMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 
   public static func ==(lhs: DeleteMessagesInput, rhs: DeleteMessagesInput) -> Bool {
-    if lhs.messageIds != rhs.messageIds {return false}
-    if lhs._peerID != rhs._peerID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.messageIds != rhs.messageIds { return false }
+    if lhs._peerID != rhs._peerID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4825,22 +4955,102 @@ extension DeleteMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      case 1: try decoder.decodeRepeatedMessageField(value: &updates)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.updates.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    if !updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: updates, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: DeleteMessagesResult, rhs: DeleteMessagesResult) -> Bool {
-    if lhs.updates != rhs.updates {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.updates != rhs.updates { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
+    return true
+  }
+}
+
+extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "EditMessageInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "message_id"),
+    2: .standard(proto: "peer_id"),
+    3: .same(proto: "text"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try decoder.decodeSingularInt64Field(value: &messageID)
+      case 2: try decoder.decodeSingularMessageField(value: &_peerID)
+      case 3: try decoder.decodeSingularStringField(value: &text)
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if messageID != 0 {
+      try visitor.visitSingularInt64Field(value: messageID, fieldNumber: 1)
+    }
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if !text.isEmpty {
+      try visitor.visitSingularStringField(value: text, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: EditMessageInput, rhs: EditMessageInput) -> Bool {
+    if lhs.messageID != rhs.messageID { return false }
+    if lhs._peerID != rhs._peerID { return false }
+    if lhs.text != rhs.text { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
+    return true
+  }
+}
+
+extension EditMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "EditMessageResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try decoder.decodeRepeatedMessageField(value: &updates)
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: EditMessageResult, rhs: EditMessageResult) -> Bool {
+    if lhs.updates != rhs.updates { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4860,44 +5070,44 @@ extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try {
-        var v: InputMediaPhoto?
-        var hadOneofValue = false
-        if let current = self.media {
-          hadOneofValue = true
-          if case .photo(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.media = .photo(v)
-        }
-      }()
+          var v: InputMediaPhoto?
+          var hadOneofValue = false
+          if let current = self.media {
+            hadOneofValue = true
+            if case .photo(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.media = .photo(v)
+          }
+        }()
       case 2: try {
-        var v: InputMediaVideo?
-        var hadOneofValue = false
-        if let current = self.media {
-          hadOneofValue = true
-          if case .video(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.media = .video(v)
-        }
-      }()
+          var v: InputMediaVideo?
+          var hadOneofValue = false
+          if let current = self.media {
+            hadOneofValue = true
+            if case .video(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.media = .video(v)
+          }
+        }()
       case 3: try {
-        var v: InputMediaDocument?
-        var hadOneofValue = false
-        if let current = self.media {
-          hadOneofValue = true
-          if case .document(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.media = .document(v)
-        }
-      }()
+          var v: InputMediaDocument?
+          var hadOneofValue = false
+          if let current = self.media {
+            hadOneofValue = true
+            if case .document(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.media = .document(v)
+          }
+        }()
       default: break
       }
     }
@@ -4908,27 +5118,27 @@ extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    switch self.media {
+    switch media {
     case .photo?: try {
-      guard case .photo(let v)? = self.media else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-    }()
+        guard case .photo(let v)? = self.media else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      }()
     case .video?: try {
-      guard case .video(let v)? = self.media else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    }()
+        guard case .video(let v)? = self.media else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      }()
     case .document?: try {
-      guard case .document(let v)? = self.media else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    }()
+        guard case .document(let v)? = self.media else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: InputMedia, rhs: InputMedia) -> Bool {
-    if lhs.media != rhs.media {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.media != rhs.media { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4945,22 +5155,22 @@ extension InputMediaPhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.photoID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &photoID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.photoID != 0 {
-      try visitor.visitSingularInt64Field(value: self.photoID, fieldNumber: 1)
+    if photoID != 0 {
+      try visitor.visitSingularInt64Field(value: photoID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: InputMediaPhoto, rhs: InputMediaPhoto) -> Bool {
-    if lhs.photoID != rhs.photoID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.photoID != rhs.photoID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -4977,22 +5187,22 @@ extension InputMediaVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.videoID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &videoID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.videoID != 0 {
-      try visitor.visitSingularInt64Field(value: self.videoID, fieldNumber: 1)
+    if videoID != 0 {
+      try visitor.visitSingularInt64Field(value: videoID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: InputMediaVideo, rhs: InputMediaVideo) -> Bool {
-    if lhs.videoID != rhs.videoID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.videoID != rhs.videoID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5009,22 +5219,22 @@ extension InputMediaDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.documentID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &documentID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.documentID != 0 {
-      try visitor.visitSingularInt64Field(value: self.documentID, fieldNumber: 1)
+    if documentID != 0 {
+      try visitor.visitSingularInt64Field(value: documentID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: InputMediaDocument, rhs: InputMediaDocument) -> Bool {
-    if lhs.documentID != rhs.documentID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.documentID != rhs.documentID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5046,12 +5256,12 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self._message) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self._replyToMsgID) }()
-      case 4: try { try decoder.decodeSingularInt64Field(value: &self._randomID) }()
-      case 5: try { try decoder.decodeSingularMessageField(value: &self._media) }()
-      case 1000: try { try decoder.decodeSingularInt64Field(value: &self._temporarySendDate) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_peerID)
+      case 2: try decoder.decodeSingularStringField(value: &_message)
+      case 3: try decoder.decodeSingularInt64Field(value: &_replyToMsgID)
+      case 4: try decoder.decodeSingularInt64Field(value: &_randomID)
+      case 5: try decoder.decodeSingularMessageField(value: &_media)
+      case 1000: try decoder.decodeSingularInt64Field(value: &_temporarySendDate)
       default: break
       }
     }
@@ -5084,13 +5294,13 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 
   public static func ==(lhs: SendMessageInput, rhs: SendMessageInput) -> Bool {
-    if lhs._peerID != rhs._peerID {return false}
-    if lhs._message != rhs._message {return false}
-    if lhs._replyToMsgID != rhs._replyToMsgID {return false}
-    if lhs._randomID != rhs._randomID {return false}
-    if lhs._media != rhs._media {return false}
-    if lhs._temporarySendDate != rhs._temporarySendDate {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._peerID != rhs._peerID { return false }
+    if lhs._message != rhs._message { return false }
+    if lhs._replyToMsgID != rhs._replyToMsgID { return false }
+    if lhs._randomID != rhs._randomID { return false }
+    if lhs._media != rhs._media { return false }
+    if lhs._temporarySendDate != rhs._temporarySendDate { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5107,22 +5317,22 @@ extension SendMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      case 2: try decoder.decodeRepeatedMessageField(value: &updates)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.updates.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 2)
+    if !updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: updates, fieldNumber: 2)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: SendMessageResult, rhs: SendMessageResult) -> Bool {
-    if lhs.updates != rhs.updates {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.updates != rhs.updates { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5141,9 +5351,9 @@ extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self._offsetID) }()
-      case 3: try { try decoder.decodeSingularInt32Field(value: &self._limit) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_peerID)
+      case 2: try decoder.decodeSingularInt64Field(value: &_offsetID)
+      case 3: try decoder.decodeSingularInt32Field(value: &_limit)
       default: break
       }
     }
@@ -5167,10 +5377,10 @@ extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 
   public static func ==(lhs: GetChatHistoryInput, rhs: GetChatHistoryInput) -> Bool {
-    if lhs._peerID != rhs._peerID {return false}
-    if lhs._offsetID != rhs._offsetID {return false}
-    if lhs._limit != rhs._limit {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._peerID != rhs._peerID { return false }
+    if lhs._offsetID != rhs._offsetID { return false }
+    if lhs._limit != rhs._limit { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5187,22 +5397,22 @@ extension GetChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
+      case 1: try decoder.decodeRepeatedMessageField(value: &messages)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.messages.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.messages, fieldNumber: 1)
+    if !messages.isEmpty {
+      try visitor.visitRepeatedMessageField(value: messages, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetChatHistoryResult, rhs: GetChatHistoryResult) -> Bool {
-    if lhs.messages != rhs.messages {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.messages != rhs.messages { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5228,122 +5438,122 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 4: try {
-        var v: UpdateNewMessage?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .newMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .newMessage(v)
-        }
-      }()
+          var v: UpdateNewMessage?
+          var hadOneofValue = false
+          if let current = self.update {
+            hadOneofValue = true
+            if case .newMessage(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.update = .newMessage(v)
+          }
+        }()
       case 5: try {
-        var v: UpdateEditMessage?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .editMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .editMessage(v)
-        }
-      }()
+          var v: UpdateEditMessage?
+          var hadOneofValue = false
+          if let current = self.update {
+            hadOneofValue = true
+            if case .editMessage(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.update = .editMessage(v)
+          }
+        }()
       case 6: try {
-        var v: UpdateMessageId?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateMessageID(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateMessageID(v)
-        }
-      }()
+          var v: UpdateMessageId?
+          var hadOneofValue = false
+          if let current = self.update {
+            hadOneofValue = true
+            if case .updateMessageID(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.update = .updateMessageID(v)
+          }
+        }()
       case 7: try {
-        var v: UpdateDeleteMessages?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .deleteMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .deleteMessages(v)
-        }
-      }()
+          var v: UpdateDeleteMessages?
+          var hadOneofValue = false
+          if let current = self.update {
+            hadOneofValue = true
+            if case .deleteMessages(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.update = .deleteMessages(v)
+          }
+        }()
       case 8: try {
-        var v: UpdateComposeAction?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateComposeAction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateComposeAction(v)
-        }
-      }()
+          var v: UpdateComposeAction?
+          var hadOneofValue = false
+          if let current = self.update {
+            hadOneofValue = true
+            if case .updateComposeAction(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.update = .updateComposeAction(v)
+          }
+        }()
       case 9: try {
-        var v: UpdateUserStatus?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateUserStatus(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateUserStatus(v)
-        }
-      }()
+          var v: UpdateUserStatus?
+          var hadOneofValue = false
+          if let current = self.update {
+            hadOneofValue = true
+            if case .updateUserStatus(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.update = .updateUserStatus(v)
+          }
+        }()
       case 10: try {
-        var v: UpdateMessageAttachment?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .messageAttachment(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .messageAttachment(v)
-        }
-      }()
+          var v: UpdateMessageAttachment?
+          var hadOneofValue = false
+          if let current = self.update {
+            hadOneofValue = true
+            if case .messageAttachment(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.update = .messageAttachment(v)
+          }
+        }()
       case 11: try {
-        var v: UpdateReaction?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateReaction(v)
-        }
-      }()
+          var v: UpdateReaction?
+          var hadOneofValue = false
+          if let current = self.update {
+            hadOneofValue = true
+            if case .updateReaction(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.update = .updateReaction(v)
+          }
+        }()
       case 12: try {
-        var v: UpdateDeleteReaction?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .deleteReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .deleteReaction(v)
-        }
-      }()
+          var v: UpdateDeleteReaction?
+          var hadOneofValue = false
+          if let current = self.update {
+            hadOneofValue = true
+            if case .deleteReaction(let m) = current { v = m }
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue { try decoder.handleConflictingOneOf() }
+            self.update = .deleteReaction(v)
+          }
+        }()
       default: break
       }
     }
@@ -5354,51 +5564,51 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    switch self.update {
+    switch update {
     case .newMessage?: try {
-      guard case .newMessage(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
+        guard case .newMessage(let v)? = self.update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      }()
     case .editMessage?: try {
-      guard case .editMessage(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    }()
+        guard case .editMessage(let v)? = self.update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      }()
     case .updateMessageID?: try {
-      guard case .updateMessageID(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    }()
+        guard case .updateMessageID(let v)? = self.update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      }()
     case .deleteMessages?: try {
-      guard case .deleteMessages(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    }()
+        guard case .deleteMessages(let v)? = self.update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      }()
     case .updateComposeAction?: try {
-      guard case .updateComposeAction(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-    }()
+        guard case .updateComposeAction(let v)? = self.update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+      }()
     case .updateUserStatus?: try {
-      guard case .updateUserStatus(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
-    }()
+        guard case .updateUserStatus(let v)? = self.update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      }()
     case .messageAttachment?: try {
-      guard case .messageAttachment(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
-    }()
+        guard case .messageAttachment(let v)? = self.update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+      }()
     case .updateReaction?: try {
-      guard case .updateReaction(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
-    }()
+        guard case .updateReaction(let v)? = self.update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+      }()
     case .deleteReaction?: try {
-      guard case .deleteReaction(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
-    }()
+        guard case .deleteReaction(let v)? = self.update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+      }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Update, rhs: Update) -> Bool {
-    if lhs.update != rhs.update {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.update != rhs.update { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5415,7 +5625,7 @@ extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._message) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_message)
       default: break
       }
     }
@@ -5433,8 +5643,8 @@ extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 
   public static func ==(lhs: UpdateNewMessage, rhs: UpdateNewMessage) -> Bool {
-    if lhs._message != rhs._message {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._message != rhs._message { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5451,7 +5661,7 @@ extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._message) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_message)
       default: break
       }
     }
@@ -5469,8 +5679,8 @@ extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 
   public static func ==(lhs: UpdateEditMessage, rhs: UpdateEditMessage) -> Bool {
-    if lhs._message != rhs._message {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._message != rhs._message { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5488,8 +5698,8 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
-      case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 1: try decoder.decodeRepeatedInt64Field(value: &messageIds)
+      case 2: try decoder.decodeSingularMessageField(value: &_peerID)
       default: break
       }
     }
@@ -5500,8 +5710,8 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.messageIds.isEmpty {
-      try visitor.visitPackedInt64Field(value: self.messageIds, fieldNumber: 1)
+    if !messageIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: messageIds, fieldNumber: 1)
     }
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
@@ -5510,9 +5720,9 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 
   public static func ==(lhs: UpdateDeleteMessages, rhs: UpdateDeleteMessages) -> Bool {
-    if lhs.messageIds != rhs.messageIds {return false}
-    if lhs._peerID != rhs._peerID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.messageIds != rhs.messageIds { return false }
+    if lhs._peerID != rhs._peerID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5530,27 +5740,27 @@ extension UpdateMessageId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.randomID) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &messageID)
+      case 2: try decoder.decodeSingularInt64Field(value: &randomID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.messageID != 0 {
-      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 1)
+    if messageID != 0 {
+      try visitor.visitSingularInt64Field(value: messageID, fieldNumber: 1)
     }
-    if self.randomID != 0 {
-      try visitor.visitSingularInt64Field(value: self.randomID, fieldNumber: 2)
+    if randomID != 0 {
+      try visitor.visitSingularInt64Field(value: randomID, fieldNumber: 2)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateMessageId, rhs: UpdateMessageId) -> Bool {
-    if lhs.messageID != rhs.messageID {return false}
-    if lhs.randomID != rhs.randomID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.messageID != rhs.messageID { return false }
+    if lhs.randomID != rhs.randomID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5569,9 +5779,9 @@ extension UpdateComposeAction: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
-      case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
-      case 3: try { try decoder.decodeSingularEnumField(value: &self.action) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &userID)
+      case 2: try decoder.decodeSingularMessageField(value: &_peerID)
+      case 3: try decoder.decodeSingularEnumField(value: &action)
       default: break
       }
     }
@@ -5582,23 +5792,23 @@ extension UpdateComposeAction: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.userID != 0 {
-      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 1)
+    if userID != 0 {
+      try visitor.visitSingularInt64Field(value: userID, fieldNumber: 1)
     }
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
-    if self.action != .none {
-      try visitor.visitSingularEnumField(value: self.action, fieldNumber: 3)
+    if action != .none {
+      try visitor.visitSingularEnumField(value: action, fieldNumber: 3)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateComposeAction, rhs: UpdateComposeAction) -> Bool {
-    if lhs.userID != rhs.userID {return false}
-    if lhs._peerID != rhs._peerID {return false}
-    if lhs.action != rhs.action {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.userID != rhs.userID { return false }
+    if lhs._peerID != rhs._peerID { return false }
+    if lhs.action != rhs.action { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5625,7 +5835,7 @@ extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._Message
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._attachment) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_attachment)
       default: break
       }
     }
@@ -5643,8 +5853,8 @@ extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 
   public static func ==(lhs: UpdateMessageAttachment, rhs: UpdateMessageAttachment) -> Bool {
-    if lhs._attachment != rhs._attachment {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._attachment != rhs._attachment { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5661,7 +5871,7 @@ extension UpdateReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._reaction) }()
+      case 1: try decoder.decodeSingularMessageField(value: &_reaction)
       default: break
       }
     }
@@ -5679,8 +5889,8 @@ extension UpdateReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 
   public static func ==(lhs: UpdateReaction, rhs: UpdateReaction) -> Bool {
-    if lhs._reaction != rhs._reaction {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._reaction != rhs._reaction { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5699,32 +5909,32 @@ extension UpdateDeleteReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.emoji) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 1: try decoder.decodeSingularStringField(value: &emoji)
+      case 2: try decoder.decodeSingularInt64Field(value: &chatID)
+      case 3: try decoder.decodeSingularInt64Field(value: &messageID)
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.emoji.isEmpty {
-      try visitor.visitSingularStringField(value: self.emoji, fieldNumber: 1)
+    if !emoji.isEmpty {
+      try visitor.visitSingularStringField(value: emoji, fieldNumber: 1)
     }
-    if self.chatID != 0 {
-      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 2)
+    if chatID != 0 {
+      try visitor.visitSingularInt64Field(value: chatID, fieldNumber: 2)
     }
-    if self.messageID != 0 {
-      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 3)
+    if messageID != 0 {
+      try visitor.visitSingularInt64Field(value: messageID, fieldNumber: 3)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateDeleteReaction, rhs: UpdateDeleteReaction) -> Bool {
-    if lhs.emoji != rhs.emoji {return false}
-    if lhs.chatID != rhs.chatID {return false}
-    if lhs.messageID != rhs.messageID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.emoji != rhs.emoji { return false }
+    if lhs.chatID != rhs.chatID { return false }
+    if lhs.messageID != rhs.messageID { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5742,8 +5952,8 @@ extension UpdateUserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
-      case 2: try { try decoder.decodeSingularMessageField(value: &self._status) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &userID)
+      case 2: try decoder.decodeSingularMessageField(value: &_status)
       default: break
       }
     }
@@ -5754,8 +5964,8 @@ extension UpdateUserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.userID != 0 {
-      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 1)
+    if userID != 0 {
+      try visitor.visitSingularInt64Field(value: userID, fieldNumber: 1)
     }
     try { if let v = self._status {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
@@ -5764,9 +5974,9 @@ extension UpdateUserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 
   public static func ==(lhs: UpdateUserStatus, rhs: UpdateUserStatus) -> Bool {
-    if lhs.userID != rhs.userID {return false}
-    if lhs._status != rhs._status {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.userID != rhs.userID { return false }
+    if lhs._status != rhs._status { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5784,8 +5994,8 @@ extension UserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularEnumField(value: &self.online) }()
-      case 2: try { try decoder.decodeSingularMessageField(value: &self._lastOnline) }()
+      case 1: try decoder.decodeSingularEnumField(value: &online)
+      case 2: try decoder.decodeSingularMessageField(value: &_lastOnline)
       default: break
       }
     }
@@ -5796,8 +6006,8 @@ extension UserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.online != .unknown {
-      try visitor.visitSingularEnumField(value: self.online, fieldNumber: 1)
+    if online != .unknown {
+      try visitor.visitSingularEnumField(value: online, fieldNumber: 1)
     }
     try { if let v = self._lastOnline {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
@@ -5806,9 +6016,9 @@ extension UserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
   }
 
   public static func ==(lhs: UserStatus, rhs: UserStatus) -> Bool {
-    if lhs.online != rhs.online {return false}
-    if lhs._lastOnline != rhs._lastOnline {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs.online != rhs.online { return false }
+    if lhs._lastOnline != rhs._lastOnline { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }
@@ -5833,7 +6043,7 @@ extension LastOnline: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self._date) }()
+      case 1: try decoder.decodeSingularInt64Field(value: &_date)
       default: break
       }
     }
@@ -5851,8 +6061,8 @@ extension LastOnline: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
   }
 
   public static func ==(lhs: LastOnline, rhs: LastOnline) -> Bool {
-    if lhs._date != rhs._date {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
+    if lhs._date != rhs._date { return false }
+    if lhs.unknownFields != rhs.unknownFields { return false }
     return true
   }
 }

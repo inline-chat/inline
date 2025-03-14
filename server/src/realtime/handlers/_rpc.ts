@@ -10,6 +10,7 @@ import { sendMessage } from "@in/server/realtime/handlers/messages.sendMessage"
 import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHistory"
 import { addReaction } from "./messages.addReactions"
 import { deleteReaction } from "./messages.deleteReaction"
+import { editMessage } from "./messages.editMessage"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -62,6 +63,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await deleteReaction(call.input.deleteReaction, handlerContext)
       return { oneofKind: "deleteReaction", deleteReaction: result }
+    }
+
+    case Method.EDIT_MESSAGE: {
+      if (call.input.oneofKind !== "editMessage") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await editMessage(call.input.editMessage, handlerContext)
+      return { oneofKind: "editMessage", editMessage: result }
     }
     default:
       Log.shared.error(`Unknown method: ${call.method}`)

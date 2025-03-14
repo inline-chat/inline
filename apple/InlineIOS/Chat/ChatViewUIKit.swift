@@ -162,6 +162,18 @@ class ChatContainerView: UIView {
       name: .scrollToBottomChanged,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(setReply),
+      name: .init("ChatStateSetEditingCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(clearReply),
+      name: .init("ChatStateClearEditingCalled"),
+      object: nil
+    )
   }
 
   @objc private func handleScrollToBottomChanged(_ notification: Notification) {
@@ -229,11 +241,21 @@ class ChatContainerView: UIView {
 
   var hasReply: Bool { ChatState.shared.getState(peer: peerId).replyingMessageId != nil }
 
+  private var hasEmbed: Bool {
+    let state = ChatState.shared.getState(peer: peerId)
+    return state.replyingMessageId != nil || state.editingMessageId != nil
+  }
+
   private func addReplyView() {
+    let state = ChatState.shared.getState(peer: peerId)
+    guard let messageId = state.replyingMessageId ?? state.editingMessageId else { return }
+
+    let mode: ComposeEmbedView.Mode = state.editingMessageId != nil ? .edit : .reply
     let newComposeEmbedView = ComposeEmbedView(
       peerId: peerId,
       chatId: chatId ?? 0,
-      messageId: ChatState.shared.getState(peer: peerId).replyingMessageId ?? 0
+      messageId: messageId,
+      mode: mode
     )
     newComposeEmbedView.translatesAutoresizingMaskIntoConstraints = false
     composeEmbedViewWrapper.clipsToBounds = true
@@ -274,6 +296,12 @@ class ChatContainerView: UIView {
     } completion: { _ in
       self.composeEmbedView?.isHidden = true
       self.composeEmbedView?.removeFromSuperview()
+
+      // Clear compose text if we were editing
+      if ChatState.shared.getState(peer: self.peerId).editingMessageId != nil {
+        self.composeView.textView.text = ""
+        self.composeView.textView.becomeFirstResponder()
+      }
     }
   }
 
