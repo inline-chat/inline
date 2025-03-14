@@ -73,16 +73,20 @@ actor WebSocketTransport: NSObject, Sendable {
     // Create session configuration
     let configuration = URLSessionConfiguration.default
     configuration.shouldUseExtendedBackgroundIdleMode = true
-    configuration.timeoutIntervalForResource = 30
-    configuration.timeoutIntervalForRequest = 15
+    configuration.timeoutIntervalForResource = 60
+    configuration.timeoutIntervalForRequest = 30
     configuration.waitsForConnectivity = false // Don't wait, try immediately
-    configuration.httpMaximumConnectionsPerHost = 5 // Allow multiple connections
+    configuration.httpMaximumConnectionsPerHost = 1 // Allow multiple connections
+    configuration.allowsCellularAccess = true
+    configuration.isDiscretionary = false // Immediate connection attempt
+    configuration.networkServiceType = .responsiveData // For real-time priority
 
     // Set TCP options for faster connection establishment
     configuration.connectionProxyDictionary = [
       kCFNetworkProxiesHTTPEnable: false,
       kCFStreamPropertyShouldCloseNativeSocket: true,
     ]
+    configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
 
     session = nil
 
@@ -193,7 +197,7 @@ actor WebSocketTransport: NSObject, Sendable {
   #endif
 
   private var reconnectionAttempts: Int = 0
-  
+
   private func prepareForForeground() async {
     setIsInBackground(false)
 
