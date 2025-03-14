@@ -586,7 +586,8 @@ class MessageListAppKit: NSViewController {
     // let magicWidthDiff = 15.0
 
     // Experimental
-    let magicWidthDiff = 1.0
+    // let magicWidthDiff = 1.0
+    let magicWidthDiff = 0.5
 
     if abs(newWidth - lastKnownWidth) > magicWidthDiff {
       lastKnownWidth = newWidth
@@ -890,17 +891,23 @@ class MessageListAppKit: NSViewController {
   private func updateHeightsForRows(at indexSet: IndexSet) {
     for row in indexSet {
       if let rowView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell {
-        var props = messageProps(for: row)
+        let inputProps = messageProps(for: row)
         if let message = message(forRow: row) {
-          let (_, textSize, photoSize) = sizeCalculator.calculateSize(
+          let (_, _, _, plan) = sizeCalculator.calculateSize(
             for: message,
-            with: props,
+            with: inputProps,
             tableWidth: tableWidth()
           )
-          props.photoWidth = photoSize?.width
-          props.photoHeight = photoSize?.height
-          props.textWidth = textSize.width
-          props.textHeight = textSize.height
+
+          let props = MessageViewProps(
+            firstInGroup: inputProps.firstInGroup,
+            isLastMessage: inputProps.isLastMessage,
+            isFirstMessage: inputProps.isFirstMessage,
+            isRtl: inputProps.isRtl,
+            index: row,
+            layout: plan
+          )
+
           rowView.updateTextAndSizeWithProps(props: props)
         }
       }
@@ -952,9 +959,9 @@ class MessageListAppKit: NSViewController {
     return sizeCalculator.cachedSize(messageStableId: message.id)
   }
 
-  private func messageProps(for row: Int) -> MessageViewProps {
+  private func messageProps(for row: Int) -> MessageViewInputProps {
     guard row >= 0, row < messages.count else {
-      return MessageViewProps(
+      return MessageViewInputProps(
         firstInGroup: true,
         isLastMessage: true,
         isFirstMessage: true,
@@ -963,7 +970,7 @@ class MessageListAppKit: NSViewController {
     }
 
     let message = messages[row]
-    return MessageViewProps(
+    return MessageViewInputProps(
       firstInGroup: isFirstInGroup(at: row),
       isLastMessage: isLastMessage(at: row),
       isFirstMessage: isFirstMessage(at: row),
@@ -979,8 +986,8 @@ class MessageListAppKit: NSViewController {
     let message = messages[row]
     let props = messageProps(for: row)
 
-    let (size, _, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth())
-    return size.height
+    let (_, _, _, plan) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth())
+    return plan.totalHeight
   }
 
   deinit {
@@ -1063,17 +1070,18 @@ extension MessageListAppKit: NSTableViewDelegate {
       ?? MessageTableCell()
     cell.identifier = identifier
 
-    var props = messageProps(for: row)
+    let inputProps = messageProps(for: row)
 
-    let (_, textSize, photoSize) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth())
+    let (_, _, _, layoutPlan) = sizeCalculator.calculateSize(for: message, with: inputProps, tableWidth: tableWidth())
 
-    props.textWidth = textSize.width
-    props.textHeight = textSize.height
-
-    props.photoWidth = photoSize?.width
-    props.photoHeight = photoSize?.height
-
-    props.index = row
+    let props = MessageViewProps(
+      firstInGroup: inputProps.firstInGroup,
+      isLastMessage: inputProps.isLastMessage,
+      isFirstMessage: inputProps.isFirstMessage,
+      isRtl: inputProps.isRtl,
+      index: row,
+      layout: layoutPlan
+    )
 
     cell.configure(with: message, props: props)
     return cell
@@ -1086,17 +1094,12 @@ extension MessageListAppKit: NSTableViewDelegate {
     log.trace("Noting height change for row \(row)")
 
     let message = messages[row]
-
-    var height: CGFloat = 0.0
-
     let props = messageProps(for: row)
-
     let tableWidth = ceil(tableView.bounds.width)
 
-    let (size, _, _) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
-    height = size.height
+    let (_, _, _, plan) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
 
-    return height
+    return plan.totalHeight
   }
 }
 

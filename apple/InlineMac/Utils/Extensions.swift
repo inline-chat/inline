@@ -303,3 +303,72 @@ extension NSViewController {
     ]
   }
 }
+
+extension NSEdgeInsets {
+  static let zero = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+  static func vertical(_ value: CGFloat) -> NSEdgeInsets {
+    NSEdgeInsets(top: value, left: 0, bottom: value, right: 0)
+  }
+
+  static func horizontal(_ value: CGFloat) -> NSEdgeInsets {
+    NSEdgeInsets(top: 0, left: value, bottom: 0, right: value)
+  }
+
+  static func top(_ value: CGFloat) -> NSEdgeInsets {
+    NSEdgeInsets(top: value, left: 0, bottom: 0, right: 0)
+  }
+
+  static func bottom(_ value: CGFloat) -> NSEdgeInsets {
+    NSEdgeInsets(top: 0, left: 0, bottom: value, right: 0)
+  }
+
+  var verticalTotal: CGFloat {
+    top + bottom
+  }
+
+  var horizontalTotal: CGFloat {
+    left + right
+  }
+}
+
+extension NSEdgeInsets: Codable, @retroactive Hashable {
+  // MARK: - Codable
+
+  enum CodingKeys: String, CodingKey {
+    case top, left, bottom, right
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let top = try container.decode(CGFloat.self, forKey: .top)
+    let left = try container.decode(CGFloat.self, forKey: .left)
+    let bottom = try container.decode(CGFloat.self, forKey: .bottom)
+    let right = try container.decode(CGFloat.self, forKey: .right)
+    self.init(top: top, left: left, bottom: bottom, right: right)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(top, forKey: .top)
+    try container.encode(left, forKey: .left)
+    try container.encode(bottom, forKey: .bottom)
+    try container.encode(right, forKey: .right)
+  }
+
+  // MARK: - Hashable
+
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(top)
+    hasher.combine(left)
+    hasher.combine(bottom)
+    hasher.combine(right)
+  }
+}
+
+
+extension NSFont {
+  func withTraits(_ traits: NSFontDescriptor.SymbolicTraits) -> NSFont {
+    let descriptor = fontDescriptor.withSymbolicTraits(traits)
+    return NSFont(descriptor: descriptor, size: pointSize) ?? self
+  }
+}
