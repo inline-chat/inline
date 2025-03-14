@@ -679,14 +679,15 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func deleteMessage() {
-    Realtime.shared
-      .invokeWithHandler(
-        .deleteMessages,
-        input: .deleteMessages(.with { input in
-          input.messageIds = [message.id]
-          input.peerID = self.message.peerId.toInputPeer()
-        })
+    let _ = Transactions.shared.mutate(
+      transaction: .deleteMessage(
+        .init(
+          messageIds: [message.messageId],
+          peerId: message.peerId,
+          chatId: message.chatId
+        )
       )
+    )
   }
 
   @objc private func reply() {
