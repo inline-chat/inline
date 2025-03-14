@@ -40,13 +40,11 @@ enum Theme {
   // MARK: - Message View
 
   static let messageMaxWidth: CGFloat = 420
-  static let messageOuterVerticalPadding: CGFloat = 2.0 // gap between consequetive messages
+  static let messageOuterVerticalPadding: CGFloat = 1.0 // gap between consequetive messages
   static let messageSidePadding: CGFloat = 20.0
   static let messageAvatarSize: CGFloat = 28
   // between avatar and content
   static let messageHorizontalStackSpacing: CGFloat = 8.0
-  // between name and text
-  static let messageVerticalStackSpacing: CGFloat = 0.0
   static let messageNameLabelHeight: CGFloat = 16
   static let messageTextFont: NSFont = .systemFont(ofSize: NSFont.systemFontSize)
   static let messageTextLineFragmentPadding: CGFloat = 0
@@ -55,15 +53,20 @@ enum Theme {
   static let messageContentViewSpacing: CGFloat = 8.0
 
   // - after bubble -
-  static let messageBubbleHorizontalPadding: CGFloat = 8.0
-  static let messageBubbleContentEdgePadding: CGFloat = 8.0
-  static let messageBubbleCornerRadius: CGFloat = 14.0
-  static let messageBubblePrimaryBgColor: NSColor = .init(
-    calibratedRed: 143 / 255,
-    green: 116 / 255,
-    blue: 238 / 255,
-    alpha: 1.0
-  )
+  static let messageBubblePrimaryBgColor: NSColor = .init(name: "messageBubblePrimaryBgColor") { appearance in
+    appearance.name == .darkAqua ? NSColor(
+      calibratedRed: 133 / 255,
+      green: 110 / 255,
+      blue: 255 / 255,
+      alpha: 1.0
+    ) : NSColor(
+      calibratedRed: 143 / 255,
+      green: 116 / 255,
+      blue: 238 / 255,
+      alpha: 1.0
+    )
+  }
+
   static let messageBubbleSecondaryBgColor: NSColor = .init(name: "messageBubbleSecondaryBgColor") { appearance in
     appearance.name == .darkAqua ? NSColor.white
       .withAlphaComponent(0.1) : .init(
@@ -74,6 +77,16 @@ enum Theme {
       )
   }
 
+  static let messageBubbleContentHorizontalInset: CGFloat = 11.0
+  static let messageSingleLineTextOnlyHeight: CGFloat = 28.0
+  static let messageBubbleCornerRadius: CGFloat = 14.0
+  static let messageTimeHeight: CGFloat = 13.0
+  static let messageTextOnlyVerticalInsets: CGFloat = 6.0
+  static let messageTextAndPhotoSpacing: CGFloat = 10.0
+  static let messageTextAndTimeSpacing: CGFloat = 0.0
+  static let messageOutgoingTimeWidth: CGFloat = 48.0
+  static let messageIncomingTimeWidth: CGFloat = 38.0
+
   // MARK: - Chat View
 
   static let chatToolbarIconSize: CGFloat = 32
@@ -82,7 +95,7 @@ enum Theme {
   static let messageListTopInset: CGFloat = 14
   static let messageListBottomInset: CGFloat = 10
   static let embeddedMessageHeight: CGFloat = 40.0
-  static let documentViewHeight: CGFloat = 40.0
+  static let documentViewHeight: CGFloat = 36.0
 
   static let composeMinHeight: CGFloat = 44
   static let composeAttachmentsVPadding: CGFloat = 6

@@ -22,7 +22,7 @@ class ComposeReplyView: NSView {
   }()
 
   private lazy var messageView: EmbeddedMessageView = {
-    let view = EmbeddedMessageView(kind: kind)
+    let view = EmbeddedMessageView(kind: kind, style: .colored)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -85,9 +85,12 @@ class ComposeReplyView: NSView {
 
   private func addMessageView() {
     addSubview(messageView)
+    messageView
+      .setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     NSLayoutConstraint.activate([
       messageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       messageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      messageView.widthAnchor.constraint(equalTo: widthAnchor),
       messageView.heightAnchor.constraint(equalToConstant: defaultHeight),
     ])
   }

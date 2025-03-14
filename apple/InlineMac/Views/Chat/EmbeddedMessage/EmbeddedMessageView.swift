@@ -22,11 +22,12 @@ class EmbeddedMessageView: NSView {
   }
 
   private var kind: Kind
+  private var style: EmbeddedMessageStyle
 
   private var message: Message?
 
   private var senderFont: NSFont {
-    .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    .systemFont(ofSize: 12, weight: .semibold)
   }
 
   private var messageFont: NSFont {
@@ -34,7 +35,11 @@ class EmbeddedMessageView: NSView {
   }
 
   private var textColor: NSColor {
-    .labelColor
+    if style == .colored {
+      .labelColor
+    } else {
+      .white
+    }
   }
 
   // MARK: - Views
@@ -48,7 +53,11 @@ class EmbeddedMessageView: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
     view.layer?.masksToBounds = true
-    view.layer?.backgroundColor = NSColor.controlAccentColor.cgColor // use sender color
+    view.layer?.backgroundColor = if style == .colored {
+      NSColor.controlAccentColor.cgColor // use sender color
+    } else {
+      NSColor.white.cgColor
+    }
     return view
   }()
 
@@ -70,14 +79,21 @@ class EmbeddedMessageView: NSView {
     label.textColor = textColor
     label.maximumNumberOfLines = 1
     label.cell?.usesSingleLineMode = true
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
     return label
   }()
 
+  enum EmbeddedMessageStyle {
+    case colored
+    case white
+  }
+
   // MARK: - Initialization
 
-  init(kind: Kind) {
+  init(kind: Kind, style: EmbeddedMessageStyle) {
     self.kind = kind
+    self.style = style
     super.init(frame: .zero)
     setupView()
   }
@@ -157,7 +173,11 @@ class EmbeddedMessageView: NSView {
       case .replyingInCompose:
         "Reply to \(senderName)"
     }
-    nameLabel.textColor = NSColor(InitialsCircle.ColorPalette.color(for: senderName))
+    nameLabel.textColor = if style == .colored {
+      NSColor(InitialsCircle.ColorPalette.color(for: senderName))
+    } else {
+      .white
+    }
 
     if let text = message.text, !text.isEmpty {
       messageLabel.stringValue = text

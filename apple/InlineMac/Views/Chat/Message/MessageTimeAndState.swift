@@ -1,18 +1,24 @@
 import AppKit
 import InlineKit
 import InlineUI
-import SwiftUI
 import Logger
+import SwiftUI
 
-/// if outgoing message: [ [symbol] [time] ]
+/// if outgoing message: [ [time] [symbol] ]
 /// if incoming message: [          [time] ]
 
 class MessageTimeAndState: NSView {
   private var fullMessage: FullMessage
 
+  private var textColor: NSColor {
+    fullMessage.message.out == true ? .white
+      .withAlphaComponent(0.5) : .tertiaryLabelColor
+  }
+
   init(fullMessage: FullMessage) {
     self.fullMessage = fullMessage
-    super.init(frame: NSRect(x: 0, y: 0, width: Theme.messageAvatarSize, height: Theme.messageAvatarSize))
+    super.init(frame: .zero)
+    wantsLayer = true
     setupView()
     setupContent()
   }
@@ -29,8 +35,8 @@ class MessageTimeAndState: NSView {
     label.isSelectable = false
     label.isBezeled = false
     label.drawsBackground = false
-    label.textColor = .tertiaryLabelColor
-    label.font = .systemFont(ofSize: 11)
+    label.textColor = textColor
+    label.font = NSFont.systemFont(ofSize: 10, weight: .regular).withTraits(.italic)
 
     return label
   }()
@@ -62,7 +68,7 @@ class MessageTimeAndState: NSView {
     addSubview(timeLabel)
 
     NSLayoutConstraint.activate([
-      timeLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+      //timeLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
       timeLabel.topAnchor.constraint(equalTo: topAnchor),
       timeLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
@@ -167,7 +173,7 @@ class MessageTimeAndState: NSView {
   }
 
   private func updateImageTintColor() {
-    imageView.contentTintColor = isFailedMessage ? .systemRed : .tertiaryLabelColor
+    imageView.contentTintColor = isFailedMessage ? .systemRed : textColor
   }
 
   // MARK: - Public
