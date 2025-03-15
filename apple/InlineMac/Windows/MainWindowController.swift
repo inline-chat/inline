@@ -112,6 +112,8 @@ class MainWindowController: NSWindowController {
     window?.isMovableByWindowBackground = false
     window?.titlebarAppearsTransparent = false // depends on inner route as well
     // window background is set based on current route
+    
+    setupWindowFor(route: nav.currentRoute)
 
     reloadToolbar()
   }
@@ -169,8 +171,8 @@ class MainWindowController: NSWindowController {
         guard topLevelRoute == .main else { return }
 
         // Make sure this is called with the right route. Probably in sink we don't have latest value yet
-        reloadToolbar()
         setupWindowFor(route: route)
+        reloadToolbar()
       }.store(in: &cancellables)
 
     dependencies.nav.canGoBackPublisher
@@ -199,7 +201,9 @@ class MainWindowController: NSWindowController {
         window?.backgroundColor = .controlBackgroundColor
 
       default:
-        window?.backgroundColor = .windowBackgroundColor
+        // window?.backgroundColor = .windowBackgroundColor
+        window?.backgroundColor = .controlBackgroundColor
+        window?.titlebarAppearsTransparent = true
     }
   }
 
