@@ -725,7 +725,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
     }
   }
 
-  private func clearDraft() {
+   func clearDraft() {
     guard let peerId else { return }
 
     Task {
