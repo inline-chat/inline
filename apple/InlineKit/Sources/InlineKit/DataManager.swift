@@ -83,8 +83,8 @@ public class DataManager: ObservableObject {
       try await database.dbWriter.write { db in
         let chat = Chat(from: result.chat)
         try chat.save(db)
-        let dialog = Dialog(from: result.dialog)
-        try dialog.save(db)
+
+        try result.dialog.saveFull(db)
       }
 
       return Peer.user(id: result.user.id)
