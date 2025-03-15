@@ -17,6 +17,8 @@ extension NSScrollView {
     // Temporarily disable scrollers
     hasVerticalScroller = false
     hasHorizontalScroller = false
+    verticalScroller?.isHidden = true
+    horizontalScroller?.isHidden = true
 
     // Execute the scrolling code
     action()
@@ -24,5 +26,7 @@ extension NSScrollView {
     // Restore original states
     hasVerticalScroller = hadVerticalScroller
     hasHorizontalScroller = hadHorizontalScroller
+    verticalScroller?.isHidden = !hadVerticalScroller
+    horizontalScroller?.isHidden = !hadHorizontalScroller
   }
 }

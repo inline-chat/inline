@@ -51,6 +51,10 @@ enum Theme {
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
   static let messageContentViewSpacing: CGFloat = 8.0
+  static var messageRowMaxWidth: CGFloat {
+    Theme.messageMaxWidth + Theme.messageAvatarSize + Theme.messageSidePadding + Theme
+      .messageHorizontalStackSpacing + Theme.messageRowSafeAreaInset
+  }
 
   // - after bubble -
   static let messageBubblePrimaryBgColor: NSColor = .init(name: "messageBubblePrimaryBgColor") { appearance in
@@ -77,6 +81,8 @@ enum Theme {
       )
   }
 
+  /// used for bubbles diff to edge
+  static let messageRowSafeAreaInset: CGFloat = 50.0
   static let messageBubbleContentHorizontalInset: CGFloat = 11.0
   static let messageSingleLineTextOnlyHeight: CGFloat = 28.0
   static let messageBubbleCornerRadius: CGFloat = 14.0
