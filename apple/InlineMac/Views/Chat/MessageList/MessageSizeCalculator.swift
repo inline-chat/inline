@@ -25,7 +25,7 @@ class MessageSizeCalculator {
   private let log = Log.scoped("MessageSizeCalculator", enableTracing: false)
   private var heightForSingleLine: CGFloat?
 
-  static let safeAreaWidth: CGFloat = 50.0
+  static let safeAreaWidth: CGFloat = Theme.messageRowSafeAreaInset
   static let extraSafeWidth = 0.0
 
   static let maxMessageWidth: CGFloat = Theme.messageMaxWidth

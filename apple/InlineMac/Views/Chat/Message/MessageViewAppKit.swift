@@ -547,10 +547,13 @@ class MessageViewAppKit: NSView {
         self,
         selector: #selector(handleBoundsChange),
         name: NSView.boundsDidChangeNotification,
+//         name: NSView.frameDidChangeNotification,
         object: enclosingScrollView?.contentView
       )
     }
   }
+
+  // private var didTextLayoutAfterMaxWidth = false
 
   // Fix a bug that when messages were out of viewport and came back during a live resize
   // text would not appear until the user ended live resize operation. Seems like in TextKit 2 calling layoutViewport
@@ -566,12 +569,27 @@ class MessageViewAppKit: NSView {
           let clipView = notification.object as? NSClipView else { return }
 
     let visibleRect = scrollView.documentVisibleRect
+
+//    // Prevent this when window size is larger than max message width
+//    let isOverMaxWidth: Bool
+//    if visibleRect.width > Theme.messageRowMaxWidth {
+//      isOverMaxWidth = true
+//      Log.shared.debug("Message view \(message.id) is over max width")
+//      if didTextLayoutAfterMaxWidth {
+//        return
+//      }
+//    } else {
+//      isOverMaxWidth = false
+//      // reset
+//      didTextLayoutAfterMaxWidth = false
+//    }
+
     let frameInClipView = convert(bounds, to: clipView)
 
     if visibleRect
       // Limit the layout to the top 30 points of viewport so we minimize number of messages that are layouted
       // TODO: we need to eventually find a more optimized version of this
-      .divided(atDistance: 30.0, from: .minYEdge).slice
+      .divided(atDistance: 60.0, from: .minYEdge).slice
       .intersects(frameInClipView)
     {
       // Only do this during live resize
@@ -583,11 +601,13 @@ class MessageViewAppKit: NSView {
         return
       }
 
+//      if isOverMaxWidth {
+//        didTextLayoutAfterMaxWidth = true
+//      }
+
       if useTextKit2 {
         // TextKit 2 specific configuration
         if let textLayoutManager = textView.textLayoutManager {
-          let naiveThresholdForMultiLine: CGFloat = 50
-
           // Choose based on multiline vs single line
           if !props.layout.singleLine {
             // Important note:
@@ -756,9 +776,11 @@ class MessageViewAppKit: NSView {
     // less granular
     // guard props != self.props else { return }
 
-    contentViewWidthConstraint.constant = props.layout.bubble.size.width
-    bubbleViewWidthConstraint.constant = props.layout.bubble.size.width
-    bubbleViewHeightConstraint.constant = props.layout.bubble.size.height
+    if prevProps.layout.bubble != props.layout.bubble {
+      contentViewWidthConstraint.constant = props.layout.bubble.size.width
+      bubbleViewWidthConstraint.constant = props.layout.bubble.size.width
+      bubbleViewHeightConstraint.constant = props.layout.bubble.size.height
+    }
 
     let hasTextSizeChanged =
       prevProps.layout.text != props.layout.text
@@ -767,7 +789,9 @@ class MessageViewAppKit: NSView {
     let singleLineChanged =
       prevProps.layout.singleLine != props.layout.singleLine
 
-    if singleLineChanged {}
+    if singleLineChanged {
+      // TODO: Update time position
+    }
 
     // only proceed if text size or photo size has changed
     // Fun fact: I wasted too much time on || being &&

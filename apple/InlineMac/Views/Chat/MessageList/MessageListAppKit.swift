@@ -12,9 +12,9 @@ class MessageListAppKit: NSViewController {
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
 
-  private let log = Log.scoped("MessageListAppKit", enableTracing: false)
+  private let log = Log.scoped("MessageListAppKit", enableTracing: true)
   private let sizeCalculator = MessageSizeCalculator.shared
-  private let defaultRowHeight = 24.0
+  private let defaultRowHeight = 45.0
 
   // Specification - mostly useful in debug
   private var feature_scrollsToBottomOnNewMessage = true
@@ -81,13 +81,16 @@ class MessageListAppKit: NSViewController {
     table.headerView = nil
     table.rowSizeStyle = .custom
     table.selectionHighlightStyle = .none
+    table.allowsMultipleSelection = false
+
     table.intercellSpacing = NSSize(width: 0, height: 0)
     table.usesAutomaticRowHeights = false
     table.rowHeight = defaultRowHeight
 
     let column = NSTableColumn(identifier: .init("messageColumn"))
     column.isEditable = false
-    column.resizingMask = .autoresizingMask // v important
+    // column.resizingMask = .autoresizingMask // v important
+    column.resizingMask = [] // v important
     // Important: Set these properties
 
     table.addTableColumn(column)
@@ -141,6 +144,11 @@ class MessageListAppKit: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupScrollObserver()
+    hideScrollbars() // until initial scroll is done
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+      self?.enableScrollbars()
+    }
 
     // Read messages
     readAll()
@@ -244,6 +252,20 @@ class MessageListAppKit: NSViewController {
       scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
+
+    // Set column width to match scroll view width
+    updateColumnWidth()
+  }
+
+  private var lastColumnWidthUpdate: CGFloat = 0
+
+  private func updateColumnWidth() {
+    let newWidth = scrollView.contentSize.width
+    if abs(newWidth - lastColumnWidthUpdate) > 0.5 {
+      let column = tableView.tableColumns.first
+      column?.width = newWidth
+      lastColumnWidthUpdate = newWidth
+    }
   }
 
   private func scrollToBottom(animated: Bool) {
@@ -357,12 +379,12 @@ class MessageListAppKit: NSViewController {
   }
 
   /// Precalcs width in bg and does full recalc, only call in special cases, not super performant for realtime call
-  private func fullWidthAsyncCalc() {
+  private func fullWidthAsyncCalc(maintainScroll: Bool = true) {
     precalculateHeightsInBackground()
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
       // Recalculate all height when user is done resizing
-      self?.recalculateHeightsOnWidthChange(buffer: 400)
+      self?.recalculateHeightsOnWidthChange(buffer: 400, maintainScroll: maintainScroll)
     }
   }
 
@@ -490,11 +512,13 @@ class MessageListAppKit: NSViewController {
     // Early return if no change needed
     if abs(nextScrollPosition - scrollOffset.y) < 0.5 { return }
 
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    // Set new scroll position
-    documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
-    CATransaction.commit()
+    scrollView.withoutScrollerFlash {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      // Set new scroll position
+      documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
+      CATransaction.commit()
+    }
 
     //    Looked a bit laggy to me
 //    NSAnimationContext.runAnimationGroup { context in
@@ -507,12 +531,31 @@ class MessageListAppKit: NSViewController {
   private var lastKnownWidth: CGFloat = 0
   private var needsInitialScroll = true
 
+  private func hideScrollbars() {
+    scrollView.hasVerticalScroller = false
+    scrollView.verticalScroller?.isHidden = true
+    scrollView.verticalScroller?.alphaValue = 0.0
+  }
+
+  private func enableScrollbars() {
+    scrollView.hasVerticalScroller = true
+    scrollView.verticalScroller?.isHidden = false
+    scrollView.verticalScroller?.alphaValue = 1.0
+  }
+
   override func viewDidLayout() {
     super.viewDidLayout()
-    log.trace("viewDidLayout() called")
+    log.trace("viewDidLayout() called, width=\(tableWidth())")
+
+    updateToolbar()
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    updateColumnWidth()
+    CATransaction.commit()
+
     updateScrollViewInsets()
     checkWidthChangeForHeights()
-    updateToolbar()
     updateMessageViewColors()
 
     // Initial scroll to bottom
@@ -522,14 +565,14 @@ class MessageListAppKit: NSViewController {
         // it no longer works. this needs to be called unconditionally.
         // this is needed to ensure the scroll is done after the initial layout and prevents cutting off last msg
         // EXPERIMENTAL: GETTING RID OF THIS FOR PERFORMANCE REASONS
-        // let _ = recalculateHeightsOnWidthChange()
+        // let _ = recalculateHeightsOnWidthChange(maintainScroll: false)
 
-        // fullWidthAsyncCalc()
+        // fullWidthAsyncCalc(maintainScroll: true)
       }
 
       scrollToBottom(animated: false)
 
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { // EXPERIMENTAL: DECREASED FROM 0.1
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { // EXPERIMENTAL: DECREASED FROM 0.1
         // Finalize heights one last time to ensure no broken heights on initial load
         self.needsInitialScroll = false
       }
@@ -537,7 +580,7 @@ class MessageListAppKit: NSViewController {
 
     if feature_scrollsToBottomInDidLayout {
       // Note(@mo): This is a hack to fix scroll jumping when user is resizing the window at bottom.
-      if isAtAbsoluteBottom, !isPerformingUpdate {
+      if isAtAbsoluteBottom, !isPerformingUpdate, !needsInitialScroll {
         // TODO: see how we can avoid this when user is sending message and we're resizing it's fucked up
         scrollToBottom(animated: false)
       }
@@ -547,6 +590,8 @@ class MessageListAppKit: NSViewController {
   override func viewWillAppear() {
     super.viewWillAppear()
     log.trace("viewWillAppear() called")
+
+    updateColumnWidth()
   }
 
   override func viewDidAppear() {
@@ -597,7 +642,7 @@ class MessageListAppKit: NSViewController {
       /// calculations are paused, then increases height. now the recalc doesn't happen for older messages.
 
       if needsInitialScroll {
-        recalculateHeightsOnWidthChange(duringLiveResize: true)
+        recalculateHeightsOnWidthChange(duringLiveResize: false, maintainScroll: false)
         return
       }
 
@@ -819,7 +864,11 @@ class MessageListAppKit: NSViewController {
 
   // Note this function will stop any animation that is happening so must be used with caution
   // increasing buffer results in unstable scroll if not maintained
-  private func recalculateHeightsOnWidthChange(buffer: Int = 0, duringLiveResize: Bool = false) {
+  private func recalculateHeightsOnWidthChange(
+    buffer: Int = 0,
+    duringLiveResize: Bool = false,
+    maintainScroll: Bool = true
+  ) {
     log.trace("Recalculating heights on width change")
 
     if isPerformingUpdate {
@@ -871,7 +920,7 @@ class MessageListAppKit: NSViewController {
     }
 
     log.trace("Rows to update: \(rowsToUpdate)")
-    let apply: (() -> Void)? = if !duringLiveResize { anchorScroll(to: .bottomRow) } else { nil }
+    let apply: (() -> Void)? = if maintainScroll { anchorScroll(to: .bottomRow) } else { nil }
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0
       context.allowsImplicitAnimation = false
@@ -997,7 +1046,9 @@ class MessageListAppKit: NSViewController {
   // MARK: - Unread
 
   func readAll() {
-    UnreadManager.shared.readAll(peerId, chatId: chatId)
+    Task {
+      UnreadManager.shared.readAll(peerId, chatId: chatId)
+    }
   }
 
   func updateUnreadIfNeeded() {
@@ -1118,8 +1169,10 @@ extension NSTableView {
       y: maxVisibleY + bottomInset - scrollView.contentView.bounds.height
     )
 
-    // scrollView.contentView.scroll(targetPoint)
-    scrollView.documentView?.scroll(targetPoint)
+    scrollView.withoutScrollerFlash {
+      // scrollView.contentView.scroll(targetPoint)
+      scrollView.documentView?.scroll(targetPoint)
+    }
 
     // Ensure the last row is visible
     // let lastRow = numberOfRows - 1
