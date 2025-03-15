@@ -27,7 +27,7 @@ public struct InitialsCircle: View, Equatable {
       .blue,
       .teal,
       .green,
-      .primary,
+      //.primary,
       .red,
       .indigo,
       .mint,
