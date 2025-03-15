@@ -62,6 +62,11 @@ class MessageListAppKit: NSViewController {
           case let .scrollToMsg(msgId):
             // scroll and highlight
             scrollToMsgAndHighlight(msgId)
+
+          case .scrollToBottom:
+            if !isAtBottom {
+              scrollToIndex(tableView.numberOfRows - 1, position: .bottom, animated: true)
+            }
         }
       }
     }
@@ -160,12 +165,10 @@ class MessageListAppKit: NSViewController {
   public func updateInsetForCompose(_ inset: CGFloat) {
     insetForCompose = inset
 
-    scrollView.withoutScrollerFlash {
-      scrollView.contentInsets.bottom = Theme.messageListBottomInset + insetForCompose
-      // TODO: make quick changes smoother. currently it jitters a little
-      if isAtBottom {
-        self.tableView.scrollToBottomWithInset()
-      }
+    scrollView.contentInsets.bottom = Theme.messageListBottomInset + insetForCompose
+    // TODO: make quick changes smoother. currently it jitters a little
+    if isAtBottom {
+      tableView.scrollToBottomWithInset()
     }
   }
 
@@ -273,9 +276,11 @@ class MessageListAppKit: NSViewController {
     log.trace("Scrolling to bottom animated=\(animated)")
 
     isProgrammaticScroll = true
-    defer { isProgrammaticScroll = false }
 
-    // scrollView.withoutScrollerFlash {
+    defer {
+      isProgrammaticScroll = false
+    }
+
     if animated {
       // Causes clipping at the top
       NSAnimationContext.runAnimationGroup { context in
@@ -517,6 +522,7 @@ class MessageListAppKit: NSViewController {
       CATransaction.setDisableActions(true)
       // Set new scroll position
       documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
+      // scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: nextScrollPosition))
       CATransaction.commit()
     }
 
@@ -1276,5 +1282,111 @@ extension MessageListAppKit {
       return
     }
     cell.highlight()
+  }
+}
+
+extension MessageListAppKit {
+  /// Scrolls to a specific row index with a two-phase animation for distant targets
+  /// - Parameters:
+  ///   - index: The row index to scroll to
+  ///   - position: Where in the viewport to position the row (default: center)
+  ///   - animated: Whether to animate the scroll
+  func scrollToIndex(_ index: Int, position: ScrollPosition = .center, animated: Bool = true) {
+    guard index >= 0, index < tableView.numberOfRows else {
+      log.error("Invalid index to scroll to: \(index)")
+      return
+    }
+
+    // Get current scroll position and target position
+    let currentY = scrollView.contentView.bounds.origin.y
+    let targetRect = tableView.rect(ofRow: index)
+    let viewportHeight = scrollView.contentView.bounds.height
+
+    // Account for bottom insets
+    let bottomInset = scrollView.contentInsets.bottom
+    let effectiveViewportHeight = viewportHeight - bottomInset
+
+    // Calculate target Y based on desired position
+    let targetY: CGFloat = switch position {
+      case .top:
+        max(0, targetRect.minY - 8) // Small padding from top
+      case .center:
+        // Center in the effective viewport (accounting for bottom inset)
+        max(0, targetRect.midY - (effectiveViewportHeight / 2))
+      case .bottom:
+        // Position at bottom of effective viewport
+        max(0, targetRect.maxY - effectiveViewportHeight + 8)
+    }
+
+    // If not animated, just jump to position
+    if !animated {
+      scrollView.withoutScrollerFlash {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: targetY))
+        CATransaction.commit()
+      }
+      return
+    }
+
+    // Calculate distance to scroll
+    let distance = abs(targetY - currentY)
+
+    // Prepare for animation
+    isProgrammaticScroll = true
+
+    // For long distances, use a two-phase animation
+    if distance > viewportHeight * 2 {
+      // Phase 1: Quick scroll to get close
+      hideScrollbars()
+
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.0
+
+        // Scroll to a point just before the target
+        let intermediateY = targetY > currentY
+          ? targetY - viewportHeight / 2
+          : targetY + viewportHeight / 2
+        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: intermediateY))
+      } completionHandler: {
+        // Phase 2: Slow down for final approach
+        NSAnimationContext.runAnimationGroup { context in
+          context.duration = 0.3
+          context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+
+          // Final scroll to target
+          self.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
+        } completionHandler: {
+          // Clean up
+          self.isProgrammaticScroll = false
+
+          DispatchQueue.main.async { [weak self] in
+            self?.enableScrollbars()
+          }
+        }
+      }
+    } else {
+      // For short distances, use a single smooth animation
+      hideScrollbars()
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.3
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
+      } completionHandler: {
+        // Clean up
+        self.isProgrammaticScroll = false
+
+        DispatchQueue.main.async { [weak self] in
+          self?.enableScrollbars()
+        }
+      }
+    }
+  }
+
+  // Define scroll position options
+  enum ScrollPosition {
+    case top
+    case center
+    case bottom
   }
 }
