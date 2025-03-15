@@ -196,7 +196,25 @@ class ComposeEmbedView: UIView {
         ChatState.shared.clearReplyingMessageId(peer: peerId)
       case .edit:
         ChatState.shared.clearEditingMessageId(peer: peerId)
+        if let composeView = findComposeView() {
+          composeView.textView.text = ""
+          composeView.textView.showPlaceholder(true)
+          composeView.buttonDisappear()
+
+          composeView.clearDraft()
+        }
     }
+  }
+
+  private func findComposeView() -> ComposeView? {
+    var current: UIView? = self
+    while let parent = current?.superview {
+      if let chatContainer = parent as? ChatContainerView {
+        return chatContainer.composeView
+      }
+      current = parent
+    }
+    return nil
   }
 
   deinit {
