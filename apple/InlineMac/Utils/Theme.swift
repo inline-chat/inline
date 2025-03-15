@@ -102,6 +102,7 @@ enum Theme {
   static let messageListBottomInset: CGFloat = 10
   static let embeddedMessageHeight: CGFloat = 40.0
   static let documentViewHeight: CGFloat = 36.0
+  static let scrollButtonSize: CGFloat = 32.0
 
   static let composeMinHeight: CGFloat = 44
   static let composeAttachmentsVPadding: CGFloat = 6
