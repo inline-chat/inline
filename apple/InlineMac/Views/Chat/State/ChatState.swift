@@ -5,6 +5,7 @@ import InlineKit
 
 enum MessageListAction {
   case scrollToMsg(Int64)
+  case scrollToBottom
 }
 
 class ChatState {
@@ -41,6 +42,13 @@ class ChatState {
   public func scrollTo(msgId: Int64) {
     Task { @MainActor in
       await events.send(.scrollToMsg(msgId))
+    }
+  }
+
+  /// Scroll to end of chat view
+  public func scrollToBottom() {
+    Task { @MainActor in
+      await events.send(.scrollToBottom)
     }
   }
 
