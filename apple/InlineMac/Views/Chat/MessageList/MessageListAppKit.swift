@@ -140,6 +140,21 @@ class MessageListAppKit: NSViewController {
     return scroll
   }()
 
+  private var scrollToBottomBottomConstraint: NSLayoutConstraint!
+  private lazy var scrollToBottomButton: ScrollToBottomButton = {
+    let scrollToBottomButton = ScrollToBottomButton()
+    scrollToBottomButton.onClick = { [weak self] in
+      guard let self else { return }
+      // self?.scrollToBottom(animated: true)
+      scrollToIndex(tableView.numberOfRows - 1, position: .bottom, animated: true)
+      scrollToBottomButton.setVisibility(false)
+    }
+    scrollToBottomButton.alphaValue = 0
+    scrollToBottomButton.translatesAutoresizingMaskIntoConstraints = false
+
+    return scrollToBottomButton
+  }()
+
   override func loadView() {
     view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -167,6 +182,10 @@ class MessageListAppKit: NSViewController {
 
     scrollView.contentInsets.bottom = Theme.messageListBottomInset + insetForCompose
     // TODO: make quick changes smoother. currently it jitters a little
+
+    // TODO:
+    scrollToBottomBottomConstraint.constant = -(Theme.messageListBottomInset + insetForCompose)
+
     if isAtBottom {
       tableView.scrollToBottomWithInset()
     }
@@ -258,6 +277,24 @@ class MessageListAppKit: NSViewController {
 
     // Set column width to match scroll view width
     updateColumnWidth()
+
+    // Add the button
+    view.addSubview(scrollToBottomButton)
+
+    scrollToBottomBottomConstraint = scrollToBottomButton.bottomAnchor.constraint(
+      equalTo: view.bottomAnchor,
+      constant: -(Theme.messageListBottomInset + insetForCompose)
+    )
+
+    NSLayoutConstraint.activate([
+      scrollToBottomButton.trailingAnchor.constraint(
+        equalTo: view.trailingAnchor,
+        constant: -12
+      ),
+      scrollToBottomBottomConstraint,
+      scrollToBottomButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      scrollToBottomButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize)
+    ])
   }
 
   private var lastColumnWidthUpdate: CGFloat = 0
@@ -432,6 +469,7 @@ class MessageListAppKit: NSViewController {
 
     // Prevent iaAtBottom false negative when elastic scrolling
     let overScrolledToBottom = currentScrollOffset > maxScrollableHeight
+    let prevAtBottom = isAtBottom
     isAtBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 5.0
     isAtAbsoluteBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 0.1
 
@@ -450,6 +488,11 @@ class MessageListAppKit: NSViewController {
 
     updateToolbar()
     updateMessageViewColors()
+
+    if prevAtBottom != isAtBottom {
+      let shouldShow = !isAtBottom // && messages.count > 0
+      scrollToBottomButton.setVisibility(shouldShow)
+    }
   }
 
   // Using CFAbsoluteTimeGetCurrent()
@@ -1360,7 +1403,7 @@ extension MessageListAppKit {
           // Clean up
           self.isProgrammaticScroll = false
 
-          DispatchQueue.main.async { [weak self] in
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.enableScrollbars()
           }
         }
@@ -1376,7 +1419,7 @@ extension MessageListAppKit {
         // Clean up
         self.isProgrammaticScroll = false
 
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
           self?.enableScrollbars()
         }
       }
