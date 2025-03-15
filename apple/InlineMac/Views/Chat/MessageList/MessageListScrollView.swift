@@ -11,8 +11,10 @@ extension NSScrollView {
   /// - Parameter action: The scrolling code to execute
   func withoutScrollerFlash(_ action: () -> Void) {
     // Store original states
-    let hadVerticalScroller = hasVerticalScroller
-    let hadHorizontalScroller = hasHorizontalScroller
+//    let hadVerticalScroller = hasVerticalScroller
+//    let hadHorizontalScroller = hasHorizontalScroller
+    let hadVerticalScroller = true
+    let hadHorizontalScroller = true
 
     // Temporarily disable scrollers
     hasVerticalScroller = false
@@ -23,10 +25,13 @@ extension NSScrollView {
     // Execute the scrolling code
     action()
 
-    // Restore original states
-    hasVerticalScroller = hadVerticalScroller
-    hasHorizontalScroller = hadHorizontalScroller
-    verticalScroller?.isHidden = !hadVerticalScroller
-    horizontalScroller?.isHidden = !hadHorizontalScroller
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      // Restore original states
+      hasVerticalScroller = hadVerticalScroller
+      hasHorizontalScroller = hadHorizontalScroller
+      verticalScroller?.isHidden = !hadVerticalScroller
+      horizontalScroller?.isHidden = !hadHorizontalScroller
+    }
   }
 }

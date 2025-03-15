@@ -384,11 +384,11 @@ class ComposeAppKit: NSView {
 
   func removeFile(_ id: String) {
     // TODO: Delete from file cache as well
-    
+
     // Update UI
     attachments.removeDocumentView(id: id)
     updateHeight(animate: true)
-    
+
     // Update state
     attachmentItems.removeValue(forKey: id)
   }
@@ -422,7 +422,7 @@ class ComposeAppKit: NSView {
 
   // Send the message
   func send() {
-    DispatchQueue.main.async {
+    DispatchQueue.main.async(qos: .userInteractive) {
       self.ignoreNextHeightChange = true
       let rawText = self.textEditor.string.trimmingCharacters(in: .whitespacesAndNewlines)
       let replyToMsgId = self.state.replyingToMsgId
@@ -478,6 +478,11 @@ class ComposeAppKit: NSView {
       // Cancel typing
       Task {
         await ComposeActions.shared.stoppedTyping(for: self.peerId)
+      }
+
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        // Scroll to new message
+        self.state.scrollToBottom()
       }
 
       self.ignoreNextHeightChange = false
