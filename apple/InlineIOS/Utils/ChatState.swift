@@ -74,7 +74,7 @@ final class ChatState: ObservableObject {
     state.replyingMessageId = nil
     states[peer] = state
     NotificationCenter.default.post(name: .init("ChatStateClearReplyCalled"), object: nil)
-    // Persist in BG
+
     Task(priority: .background) {
       persistStates()
     }
@@ -84,10 +84,8 @@ final class ChatState: ObservableObject {
     var state = getState(peer: peer)
     state.editingMessageId = nil
     states[peer] = state
-
     NotificationCenter.default.post(name: .init("ChatStateClearEditingCalled"), object: nil)
 
-    // Persist in BG
     Task(priority: .background) {
       persistStates()
     }
