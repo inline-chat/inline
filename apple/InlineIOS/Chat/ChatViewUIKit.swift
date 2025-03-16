@@ -87,8 +87,12 @@ class ChatContainerView: UIView {
 
     // initialize the height constraint
     composeEmbedHeightConstraint = composeEmbedViewWrapper.heightAnchor
-      .constraint(equalToConstant: hasReply ? ComposeEmbedView.height : 0)
-    addReplyView()
+      .constraint(equalToConstant: hasEmbed ? ComposeEmbedView.height : 0)
+
+    if hasEmbed {
+      addReplyView()
+    }
+
     NSLayoutConstraint.activate([
       messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
       messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
