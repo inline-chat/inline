@@ -177,14 +177,19 @@ class MessageListAppKit: NSViewController {
   // MARK: - Insets
 
   private var insetForCompose: CGFloat = Theme.composeMinHeight
-  public func updateInsetForCompose(_ inset: CGFloat) {
+  public func updateInsetForCompose(_ inset: CGFloat, animate: Bool = true) {
     insetForCompose = inset
 
     scrollView.contentInsets.bottom = Theme.messageListBottomInset + insetForCompose
     // TODO: make quick changes smoother. currently it jitters a little
 
     // TODO:
-    scrollToBottomBottomConstraint.constant = -(Theme.messageListBottomInset + insetForCompose)
+    if animate {
+      scrollToBottomBottomConstraint
+        .animator().constant = -(Theme.messageListBottomInset + insetForCompose)
+    } else {
+      scrollToBottomBottomConstraint.constant = -(Theme.messageListBottomInset + insetForCompose)
+    }
 
     if isAtBottom {
       tableView.scrollToBottomWithInset()
@@ -293,7 +298,7 @@ class MessageListAppKit: NSViewController {
       ),
       scrollToBottomBottomConstraint,
       scrollToBottomButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
-      scrollToBottomButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize)
+      scrollToBottomButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
     ])
   }
 

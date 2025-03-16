@@ -287,13 +287,13 @@ class ComposeAppKit: NSView {
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         context.allowsImplicitAnimation = true
         // Disable screen updates during animation setup
-        NSAnimationContext.beginGrouping()
+        //NSAnimationContext.beginGrouping()
         heightConstraint.animator().constant = wrapperHeight
         textHeightConstraint.animator().constant = textEditorHeight
         textEditor.updateTextViewInsets(contentHeight: textViewContentHeight) // use height without paddings
         attachments.updateHeight(animated: true)
         messageList?.updateInsetForCompose(wrapperHeight)
-        NSAnimationContext.endGrouping()
+        //NSAnimationContext.endGrouping()
       }
     } else {
       textEditor.setHeight(textEditorHeight)
