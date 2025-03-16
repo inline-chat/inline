@@ -173,21 +173,26 @@ class EmbeddedMessageView: NSView {
       case .replyingInCompose:
         "Reply to \(senderName)"
     }
+//    nameLabel.textColor = if style == .colored {
+//      NSColor(InitialsCircle.ColorPalette.color(for: senderName))
+//    } else {
+//      .white
+//    }
     nameLabel.textColor = if style == .colored {
-      NSColor(InitialsCircle.ColorPalette.color(for: senderName))
+      NSColor.controlAccentColor // rect color
     } else {
-      .white
+      NSColor.white
     }
 
     if let text = message.text, !text.isEmpty {
       messageLabel.stringValue = text
     } else if let file {
       messageLabel.stringValue = file.fileType == .photo ? "🖼️ Photo" : "📄 File"
-    } else if let photoId = message.photoId {
+    } else if let _ = message.photoId {
       messageLabel.stringValue = "🖼️ Photo"
-    } else if let videoId = message.videoId {
+    } else if let _ = message.videoId {
       messageLabel.stringValue = "🎥 Video"
-    } else if let documentId = message.documentId {
+    } else if let _ = message.documentId {
       messageLabel.stringValue = "📄 Document"
     } else {
       messageLabel.stringValue = "Message"
