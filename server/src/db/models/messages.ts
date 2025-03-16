@@ -202,8 +202,6 @@ async function deleteMessages(messageIds: bigint[], chatId: number) {
     )
     .returning()
 
-  console.log("deleted", deleted)
-
   if (deleted.length === 0) {
     log.trace("messages not found", { messageIds, chatId })
     throw ModelError.MessageInvalid
