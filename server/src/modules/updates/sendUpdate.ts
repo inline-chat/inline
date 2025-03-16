@@ -11,7 +11,6 @@ import { TUpdateUserStatus, type TPeerInfo, type TUpdateComposeAction, type TUpd
 import { ApiError, InlineError } from "@in/server/types/errors"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
-import { createMessage, ServerMessageKind } from "@in/server/ws/protocol"
 import { Value } from "@sinclair/typebox/value"
 import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@in/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -35,18 +34,6 @@ export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTra
     const userIds = await DialogsModel.getUserIdsWeHavePrivateDialogsWith({ userId })
     log.debug(`Sending user presence update to ${userIds.length} users`)
     for (const targetUserId of userIds) {
-      // Generate updates for this user
-      const updates = [
-        {
-          updateUserStatus: Value.Encode(TUpdateUserStatus, {
-            userId,
-            online,
-            lastOnline: lastOnline ?? new Date(),
-          }),
-        },
-      ]
-      sendUpdatesToUser(targetUserId, updates)
-
       // New Updates
       const newUpdates = getNewUpdatesForUserPresenceUpdate(userId, online, lastOnline)
       RealtimeUpdates.pushToUser(targetUserId, [newUpdates])
@@ -60,7 +47,6 @@ export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTra
     const newUpdates = getNewUpdatesForComposeAction(update.userId, target, otherPeerId, update)
 
     if ("userId" in target) {
-      sendUpdatesToUser(target.userId, updates)
       RealtimeUpdates.pushToUser(target.userId, [newUpdates])
     } else {
       // not supported for threads
@@ -71,15 +57,6 @@ export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTra
   }
 
   throw new Error("Invalid reason")
-}
-
-/** Sends an array of updates to a connected user to old WS API */
-const sendUpdatesToUser = (userId: number, updates: TUpdateInfo[]) => {
-  const message = createMessage({
-    kind: ServerMessageKind.Message,
-    payload: { updates },
-  })
-  connectionManager.sendToUser(userId, message)
 }
 
 const getNewUpdatesForComposeAction = (

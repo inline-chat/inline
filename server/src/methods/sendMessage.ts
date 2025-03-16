@@ -23,7 +23,6 @@ import {
   type TUpdateInfo,
   Optional,
 } from "@in/server/api-types"
-import { createMessage, ServerMessageKind } from "@in/server/ws/protocol"
 import { connectionManager } from "@in/server/ws/connections"
 import { getUpdateGroup } from "@in/server/modules/updates"
 import * as APN from "apn"
@@ -261,31 +260,9 @@ const sendMessageUpdate = async ({
 }) => {
   const updateGroup = await getUpdateGroup(peerId, { currentUserId })
 
-  const updateMessageId: TUpdateInfo = {
-    updateMessageId: {
-      randomId: message.message.randomId?.toString() ?? "",
-      messageId: message.message.messageId,
-    },
-  }
-
   if (updateGroup.type === "users") {
     updateGroup.userIds.forEach((userId) => {
       let encodingForPeer: TPeerInfo = userId === currentUserId ? peerId : { userId: currentUserId }
-      const update: TUpdateInfo = {
-        newMessage: {
-          message: encodeMessageInfo(message.message, {
-            // must encode for the user we're sending to
-            currentUserId: userId,
-            //  customize this per user (e.g. threadId)
-            peerId: encodingForPeer,
-            files: message.file ? [message.file] : null,
-          }),
-        },
-      }
-
-      // legacy updates
-      const updates = userId === currentUserId ? [updateMessageId, update] : [update]
-      connectionManager.sendToUser(userId, createMessage({ kind: ServerMessageKind.Message, payload: { updates } }))
 
       // New updates
       let messageIdUpdate: Update = {
@@ -328,24 +305,6 @@ const sendMessageUpdate = async ({
     const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
     Log.shared.debug(`Sending message to space ${updateGroup.spaceId}`, { userIds })
     userIds.forEach((userId) => {
-      const update: TUpdateInfo = {
-        newMessage: {
-          message: encodeMessageInfo(message.message, {
-            // must encode for the user we're sending to
-            currentUserId: userId,
-            peerId,
-            files: message.file ? [message.file] : null,
-          }),
-        },
-      }
-
-      const updates = userId === currentUserId ? [updateMessageId, update] : [update]
-
-      connectionManager.sendToUser(
-        userId,
-        createMessage({ kind: ServerMessageKind.Message, payload: { updates: updates } }),
-      )
-
       // New updates
       let messageIdUpdate: Update = {
         update: {
