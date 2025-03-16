@@ -149,18 +149,23 @@ export async function getLastMessageId(
 
 /** Updates lastMsgId for a chat by selecting the highest messageId */
 async function refreshLastMessageId(chatId: number) {
-  let [chat] = await db.select().from(chats).where(eq(chats.id, chatId))
-  if (!chat) {
-    throw ModelError.ChatInvalid
-  }
+  // Use a transaction with FOR UPDATE to lock the row while we're working with it
+  return await db.transaction(async (tx) => {
+    let [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update")
+    if (!chat) {
+      throw ModelError.ChatInvalid
+    }
 
-  let [message] = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.chatId, chatId))
-    .orderBy(desc(messages.messageId))
-    .limit(1)
+    let [message] = await tx
+      .select()
+      .from(messages)
+      .where(eq(messages.chatId, chatId))
+      .orderBy(desc(messages.messageId))
+      .limit(1)
 
-  const newLastMsgId = message?.messageId ?? null
-  await db.update(chats).set({ lastMsgId: newLastMsgId }).where(eq(chats.id, chatId))
+    const newLastMsgId = message?.messageId ?? null
+    await tx.update(chats).set({ lastMsgId: newLastMsgId }).where(eq(chats.id, chatId))
+
+    return newLastMsgId
+  })
 }
