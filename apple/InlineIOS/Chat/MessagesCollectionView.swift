@@ -72,7 +72,7 @@ class MessagesCollectionView: UICollectionView {
     }
 
     // Get upcoming messages (next 10-15 messages after visible ones)
-    let lastVisibleIndex = indexPathsForVisibleItems.map { $0.item }.max() ?? 0
+    let lastVisibleIndex = indexPathsForVisibleItems.map(\.item).max() ?? 0
     let nextIndex = lastVisibleIndex + 1
 
     // Check if we have any upcoming messages to prefetch
@@ -147,12 +147,13 @@ class MessagesCollectionView: UICollectionView {
     let messagesBottomPadding = 12.0
     var bottomInset: CGFloat = 0.0
 
-    let hasReply = ChatState.shared.getState(peer: peerId).replyingMessageId != nil
+    let chatState = ChatState.shared.getState(peer: peerId)
+    let hasEmbed = chatState.replyingMessageId != nil || chatState.editingMessageId != nil
 
     bottomInset += composeHeight + (ComposeView.textViewVerticalMargin * 2)
     bottomInset += messagesBottomPadding
 
-    if hasReply {
+    if hasEmbed {
       bottomInset += composeEmbedViewHeight
     }
     if isKeyboardVisible {
@@ -212,6 +213,18 @@ class MessagesCollectionView: UICollectionView {
       self,
       selector: #selector(replyStateChanged),
       name: .init("ChatStateClearReplyCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(replyStateChanged),
+      name: .init("ChatStateSetEditingCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(replyStateChanged),
+      name: .init("ChatStateClearEditingCalled"),
       object: nil
     )
     NotificationCenter.default.addObserver(
