@@ -725,7 +725,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
     }
   }
 
-   func clearDraft() {
+  func clearDraft() {
     guard let peerId else { return }
 
     Task {
@@ -780,8 +780,8 @@ extension ComposeView: UITextViewDelegate {
     let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     textViewContainer.textView.showPlaceholder(isEmpty)
 
-    // Typing Indicators - only for DMs
     if isEmpty {
+      clearDraft()
       buttonDisappear()
       if let peerId, case .user = peerId {
         Task {
