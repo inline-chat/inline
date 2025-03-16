@@ -892,6 +892,138 @@ class MessageViewAppKit: NSView {
       self?.handleScrollStateChange(state)
     }
   }
+
+  // MARK: - Swipe to Reply
+
+  // Track swipe state
+  private var isSwipeInProgress = false
+  private var swipeOffset: CGFloat = 0
+  private var swipeAnimationView: NSView?
+  private var hasTriggerHapticFeedback = false
+  private var swipeThreshold: CGFloat = 50.0
+  private var didReachThreshold = false
+
+  override func scrollWheel(with event: NSEvent) {
+    // Only handle horizontal scrolling with two fingers
+    if event.phase == .began, abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+      // Start of a horizontal scroll
+      isSwipeInProgress = true
+      swipeOffset = 0
+      hasTriggerHapticFeedback = false
+      didReachThreshold = false
+
+      // Create animation view if needed
+      if swipeAnimationView == nil {
+        swipeAnimationView = createReplyIndicator()
+        addSubview(swipeAnimationView!)
+        swipeAnimationView?.alphaValue = 0
+      }
+
+      // Position the animation view
+      if let animView = swipeAnimationView {
+        let yPosition = bubbleView.bounds.midY - animView.bounds.height / 2
+        animView.frame.origin = NSPoint(x: bounds.width - animView.bounds.width - 10, y: yPosition)
+      }
+    }
+
+    if isSwipeInProgress {
+      // Update swipe offset based on scroll delta
+      // Note: scrollingDeltaX is positive for right-to-left swipes on some systems
+      // We need to ensure we're getting a negative value for left swipes
+      let deltaX = event.scrollingDeltaX
+
+      // Adjust the swipe offset - we want negative values for left swipes
+      swipeOffset += deltaX
+
+      // Only handle left swipes (negative swipeOffset)
+      if swipeOffset < 0 {
+        // Calculate swipe progress (0 to 1)
+        let progress = min(1.0, abs(swipeOffset) / swipeThreshold)
+
+        // Update position using layer transform on self
+        let maxOffset: CGFloat = 40.0
+        let offset = -min(maxOffset, abs(swipeOffset)) // Negative for left movement
+
+        // Apply transform to root view layer
+        wantsLayer = true
+        let transform = CATransform3DMakeTranslation(offset, 0, 0)
+        layer?.transform = transform
+
+        // Update animation view
+        swipeAnimationView?.alphaValue = progress
+
+        // Track if we've reached the threshold
+        let hasReachedThreshold = abs(swipeOffset) > swipeThreshold
+
+        // Only trigger haptic feedback when first crossing the threshold
+        if hasReachedThreshold, !didReachThreshold {
+          NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+          didReachThreshold = true
+          hasTriggerHapticFeedback = true
+        } else if !hasReachedThreshold, didReachThreshold {
+          // We've moved back below the threshold
+          didReachThreshold = false
+        }
+      } else {
+        // Reset for right swipes
+        layer?.transform = CATransform3DIdentity
+        swipeAnimationView?.alphaValue = 0
+      }
+
+      // End of swipe gesture
+      if event.phase == .ended || event.phase == .cancelled {
+        isSwipeInProgress = false
+
+        // Check if swipe was far enough to trigger reply
+        if abs(swipeOffset) > swipeThreshold {
+          Task(priority: .userInitiated) { @MainActor in self.reply() }
+          
+          // Animate back with spring effect
+          NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.3
+            context.allowsImplicitAnimation = true
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            self.layer?.transform = CATransform3DIdentity
+            swipeAnimationView?.animator().alphaValue = 0
+          }) {}
+        } else {
+          // Not far enough, just animate back
+          NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            self.layer?.transform = CATransform3DIdentity
+            swipeAnimationView?.animator().alphaValue = 0
+          }
+        }
+
+        // Reset state
+        hasTriggerHapticFeedback = false
+        didReachThreshold = false
+      }
+    } else {
+      // Pass the event to super if we're not handling it
+      super.scrollWheel(with: event)
+    }
+  }
+
+  private func createReplyIndicator() -> NSView {
+    // Create a smaller indicator (24x24 pixels)
+    let container = NSView(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
+    container.wantsLayer = true
+    container.layer?.cornerRadius = 12
+    container.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
+
+    // Add reply icon (smaller size)
+    let iconView = NSImageView(frame: NSRect(x: 4, y: 4, width: 16, height: 16))
+    if let replyImage = NSImage(systemSymbolName: "arrowshape.turn.up.left.fill", accessibilityDescription: "Reply") {
+      iconView.image = replyImage
+      iconView.contentTintColor = NSColor.controlAccentColor
+      container.addSubview(iconView)
+    }
+
+    return container
+  }
 }
 
 // MARK: - Tracking Area & Hover
