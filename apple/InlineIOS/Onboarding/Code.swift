@@ -21,7 +21,6 @@ struct Code: View {
   @EnvironmentObject var api: ApiClient
   @EnvironmentObject var userData: UserData
   @EnvironmentObject var mainViewRouter: MainViewRouter
-  @EnvironmentObject var ws: WebSocketManager
   @Environment(\.appDatabase) var database
   @Environment(\.auth) private var auth
   @Environment(\.realtime) private var realtime
