@@ -10,6 +10,10 @@
     "generate:proto": "cd scripts && bun run generate",
     "dev:server": "cd server && bun run dev",
     "typecheck": "cd server && bun run typecheck",
-    "dev": "cd server && bun run dev" 
+    "dev": "cd server && bun run dev",
+    "lint": "oxlint"
+  },
+  "devDependencies": {
+    "oxlint": "^0.16.0"
   }
 }
