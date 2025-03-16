@@ -790,7 +790,6 @@ public struct PinnedDialogsPayload: Codable, Sendable {
 
 public struct SendMessage: Codable, Sendable {
   public let message: ApiMessage
-  public let updates: [Update]?
 }
 
 public struct AddReaction: Codable, Sendable {

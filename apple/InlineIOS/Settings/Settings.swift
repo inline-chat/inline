@@ -6,7 +6,6 @@ import SwiftUI
 struct SettingsView: View {
   @Query(CurrentUser()) var currentUser: UserInfo?
   @Environment(\.auth) var auth
-  @EnvironmentObject private var webSocket: WebSocketManager
   @EnvironmentObject private var navigation: Navigation
   @EnvironmentObject private var onboardingNavigation: OnboardingNavigation
   @EnvironmentObject private var mainRouter: MainViewRouter

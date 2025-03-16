@@ -28,7 +28,6 @@ import { decrypt, encrypt } from "../modules/encryption/encryption"
 import { TInputPeerInfo, TPeerInfo, type TUpdateInfo } from "../api-types"
 import { getUpdateGroup } from "../modules/updates"
 import { connectionManager } from "../ws/connections"
-import { createMessage, ServerMessageKind } from "../ws/protocol"
 import { MessageAttachmentExternalTask_Status, type Update } from "@in/protocol/core"
 import { RealtimeUpdates } from "../realtime/message"
 import { examples, prompt } from "../libs/linear/prompt"
@@ -265,11 +264,9 @@ const messageAttachmentUpdate = async ({
     }
 
     const updateGroup = await getUpdateGroup(peerId, { currentUserId })
-    Log.shared.debug("updateGroup", updateGroup)
 
     if (updateGroup.type === "users") {
       updateGroup.userIds.forEach((userId: number) => {
-        Log.shared.debug("pushing update to user", userId)
         // New updates
         let messageAttachmentUpdate: Update = {
           update: {

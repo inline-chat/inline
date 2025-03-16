@@ -9,7 +9,6 @@ import type { Update } from "@in/protocol/core"
 import { filterFalsy } from "@in/server/utils/filter"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { presenceManager } from "@in/server/ws/presence"
-import { ServerMessage, type ServerMessageType } from "@in/server/ws/protocol"
 import { WebSocketTopic } from "@in/server/ws/topics"
 import { Value } from "@sinclair/typebox/value"
 import { type Server, type ServerWebSocket } from "bun"
@@ -152,25 +151,6 @@ class ConnectionManager {
     return [...userConnections].map((conId) => this.connections.get(conId)).filter(filterFalsy)
   }
 
-  // TODO: refactor to use publish
-  sendToUser(userId: number, message: ServerMessageType) {
-    const userConnections = this.authenticatedUsers.get(userId)
-    if (userConnections) {
-      log.debug(`Sending message to user ${userId}`)
-      userConnections.forEach((connectionId) => {
-        const connection = this.connections.get(connectionId)
-        if (connection?.version === ConnVersion.BASIC_V1) {
-          connection?.ws.send(message)
-        }
-      })
-    }
-  }
-
-  async sendToSpace(spaceId: number, message: ServerMessageType) {
-    log.debug(`Sending message to space ${spaceId}`)
-    this.publish(WebSocketTopic.Space(spaceId), message)
-  }
-
   getSpaceUserIds(spaceId: number): number[] {
     return Array.from(this.usersBySpaceId.get(spaceId) ?? [])
   }
@@ -225,24 +205,6 @@ class ConnectionManager {
     spaceIds.forEach((spaceId) => {
       this.subscribeToSpace(userId, spaceId)
     })
-  }
-
-  private publish(topic: string, message: ServerMessageType) {
-    if (this.server) {
-      const encoded = Value.Encode(ServerMessage, Value.Clean(ServerMessage, message))
-      let status = this.server.publish(topic, JSON.stringify(encoded))
-
-      if (status === 0) {
-        log.error(`Failed to publish message to topic ${topic}`, status)
-      } else if (status === -1) {
-        log.debug(`Published message to topic ${topic}`)
-      } else {
-        // Success
-        log.trace(`Published message to topic ${topic} with bytes ${status}`)
-      }
-    } else {
-      log.error("No server set, cannot publish")
-    }
   }
 }
 

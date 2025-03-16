@@ -20,7 +20,6 @@ import { TInputId } from "@in/server/types/methods"
 import { Authorize } from "../utils/authorize"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { getUpdateGroup } from "../modules/updates"
-import { createMessage, ServerMessageKind } from "../ws/protocol"
 import { connectionManager } from "../ws/connections"
 import type { Update } from "@in/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -118,16 +117,6 @@ const deleteMessageUpdate = async ({
   if (updateGroup.type === "users") {
     updateGroup.userIds.forEach((userId) => {
       let encodingForPeer: TPeerInfo = userId === currentUserId ? peerId : { userId: currentUserId }
-      const update: TUpdateInfo = {
-        deleteMessage: {
-          messageId,
-          peerId: encodingForPeer,
-        },
-      }
-
-      const updates = [update]
-
-      connectionManager.sendToUser(userId, createMessage({ kind: ServerMessageKind.Message, payload: { updates } }))
 
       // New updates
       let messageDeletedUpdate: Update = {
@@ -146,20 +135,6 @@ const deleteMessageUpdate = async ({
     const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
 
     userIds.forEach((userId) => {
-      const update: TUpdateInfo = {
-        deleteMessage: {
-          messageId,
-          peerId,
-        },
-      }
-
-      const updates = [update]
-
-      connectionManager.sendToUser(
-        userId,
-        createMessage({ kind: ServerMessageKind.Message, payload: { updates: updates } }),
-      )
-
       // New updates
       let messageDeletedUpdate: Update = {
         update: {
