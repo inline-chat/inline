@@ -534,6 +534,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Inline;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -569,6 +570,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Inline;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -667,6 +669,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Inline;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
