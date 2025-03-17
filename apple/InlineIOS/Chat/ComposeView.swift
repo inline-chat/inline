@@ -318,7 +318,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
         chatId: chatId,
         peerId: peerId
       )))
+
       ChatState.shared.clearEditingMessageId(peer: peerId)
+
+      clearDraft()
+      textViewContainer.textView.text = ""
+      resetHeight()
+      textViewContainer.textView.showPlaceholder(true)
+      buttonDisappear()
+      sendMessageHaptic()
+      return
     } else {
       // Original send message logic
       let replyToMessageId = state.replyingMessageId
@@ -732,7 +741,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate,
       do {
         try await DataManager.shared.updateDialog(peerId: peerId, draft: "")
       } catch {
-        print("Failed to clear draft", error)
+        Log.shared.error("Failed to clear draft", error: error)
       }
     }
   }
