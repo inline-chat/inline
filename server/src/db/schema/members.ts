@@ -1,4 +1,4 @@
-import { pgTable, pgEnum, unique, integer } from "drizzle-orm/pg-core"
+import { pgTable, pgEnum, unique, integer, timestamp, boolean } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { creationDate } from "@in/server/db/schema/common"
@@ -22,6 +22,12 @@ export const members = pgTable(
         onDelete: "cascade",
       }),
     role: rolesEnum().default("member"),
+
+    // per member state
+    // pinned: boolean("pinned").default(false),
+    // archivedAt: timestamp("archived_at"),
+    // lastInteractionDate: timestamp("last_interaction_date"),
+
     date: creationDate,
   },
   (table) => ({ uniqueUserInSpace: unique().on(table.userId, table.spaceId) }),
