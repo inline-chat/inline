@@ -2,6 +2,7 @@ import AppKit
 import InlineKit
 import Logger
 import SwiftUI
+import Throttler
 
 class MessageListAppKit: NSViewController {
   // Data
@@ -458,6 +459,15 @@ class MessageListAppKit: NSViewController {
   private var prevOffset: CGFloat = 0
 
   @objc func scrollViewBoundsChanged(notification: Notification) {
+    throttle(.milliseconds(16), identifier: "chat.scrollViewBoundsChanged", by: .mainActor, option: .default) { [
+      weak self
+    ] in
+      guard let self else { return }
+      handleBoundsChange()
+    }
+  }
+
+  private func handleBoundsChange() {
     let scrollOffset = scrollView.contentView.bounds.origin
     let viewportSize = scrollView.contentView.bounds.size
     let contentSize = scrollView.documentView?.frame.size ?? .zero
@@ -478,21 +488,12 @@ class MessageListAppKit: NSViewController {
     isAtBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 5.0
     isAtAbsoluteBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 0.1
 
-    if feature_updatesHeightsOnOffsetChange, isUserScrolling, !isPerformingUpdate,
-       currentScrollOffset
-       .truncatingRemainder(dividingBy: 5.0) ==
-       0 // Picking a too high number for this will make it not fire enough... we need a better way
-    {
-      let _ = recalculateHeightsOnWidthChange()
-    }
-
     // Check if we're approaching the top
     if feature_loadsMoreWhenApproachingTop, isUserScrolling, currentScrollOffset < viewportSize.height {
       loadBatch(at: .older)
     }
 
     updateToolbar()
-    updateMessageViewColors()
 
     if prevAtBottom != isAtBottom {
       let shouldShow = !isAtBottom // && messages.count > 0
