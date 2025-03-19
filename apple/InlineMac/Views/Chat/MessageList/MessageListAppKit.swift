@@ -47,6 +47,8 @@ class MessageListAppKit: NSViewController {
 
     super.init(nibName: nil, bundle: nil)
 
+    sizeCalculator.prepareForUse()
+    
     // observe data
     viewModel.observe { [weak self] update in
       self?.applyUpdate(update)

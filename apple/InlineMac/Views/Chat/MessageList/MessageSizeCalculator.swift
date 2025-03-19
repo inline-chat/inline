@@ -43,6 +43,15 @@ class MessageSizeCalculator {
     textHeightCache.countLimit = 5_000
     minTextWidthForSingleLine.countLimit = 5_000
     lastHeightForRow.countLimit = 1_000
+
+    prepareForUse()
+  }
+
+
+  // Call when new chat view is initialized
+  public func prepareForUse() {
+    // Re-call to pick up fresh time format
+    MessageTimeAndState.precalculateTimeWidth()
   }
 
   func getAvailableWidth(tableWidth width: CGFloat) -> CGFloat {
@@ -392,7 +401,9 @@ class MessageSizeCalculator {
 
     timePlan = LayoutPlan(size: .zero, spacing: .zero)
     timePlan!.size = CGSize(
-      width: isOutgoing ? Theme.messageOutgoingTimeWidth : Theme.messageIncomingTimeWidth,
+      width: isOutgoing ?
+        MessageTimeAndState.timeWidth + MessageTimeAndState.symbolWidth :
+        MessageTimeAndState.timeWidth,
       height: Theme.messageTimeHeight
     )
 
@@ -464,7 +475,7 @@ class MessageSizeCalculator {
       wrapperWidth += avatarPlan.size.width
       wrapperWidth += avatarPlan.spacing.horizontalTotal
     }
-    
+
     wrapperHeight += bubblePlan.spacing.top
     wrapperHeight += bubblePlan.spacing.bottom
 
