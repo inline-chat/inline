@@ -547,13 +547,14 @@ class MessageViewAppKit: NSView {
         self,
         selector: #selector(handleBoundsChange),
         name: NSView.boundsDidChangeNotification,
-//         name: NSView.frameDidChangeNotification,
         object: enclosingScrollView?.contentView
+//        name: NSView.frameDidChangeNotification,
+//        object: enclosingScrollView?.contentView
       )
     }
   }
 
-  // private var didTextLayoutAfterMaxWidth = false
+  private var prevWidth: CGFloat = 0
 
   // Fix a bug that when messages were out of viewport and came back during a live resize
   // text would not appear until the user ended live resize operation. Seems like in TextKit 2 calling layoutViewport
@@ -568,28 +569,22 @@ class MessageViewAppKit: NSView {
     guard let scrollView = enclosingScrollView,
           let clipView = notification.object as? NSClipView else { return }
 
-    let visibleRect = scrollView.documentVisibleRect
-
-//    // Prevent this when window size is larger than max message width
-//    let isOverMaxWidth: Bool
-//    if visibleRect.width > Theme.messageRowMaxWidth {
-//      isOverMaxWidth = true
-//      Log.shared.debug("Message view \(message.id) is over max width")
-//      if didTextLayoutAfterMaxWidth {
-//        return
-//      }
-//    } else {
-//      isOverMaxWidth = false
-//      // reset
-//      didTextLayoutAfterMaxWidth = false
+//    if prevWidth != 0 && prevWidth != bounds.width {
+//      // skip if width changed bc we are handling relayout in updatePropsAndUpdateLayout and causes flicker
+//      Log.shared.debug("Skipping relayout because width didn't change")
+//      return
 //    }
+//
+//    prevWidth = bounds.width
+
+    let visibleRect = scrollView.documentVisibleRect
 
     let frameInClipView = convert(bounds, to: clipView)
 
     if visibleRect
       // Limit the layout to the top 30 points of viewport so we minimize number of messages that are layouted
       // TODO: we need to eventually find a more optimized version of this
-      .divided(atDistance: 60.0, from: .minYEdge).slice
+      .divided(atDistance: 30.0, from: .minYEdge).slice
       .intersects(frameInClipView)
     {
       // Only do this during live resize
@@ -614,7 +609,10 @@ class MessageViewAppKit: NSView {
             // Less performant, but fixes flicker during live resize for large messages that are beyound viewport height
             // and during width resize
             Log.shared.debug("Layouting viewport (1) for text view \(message.id) ")
+
             textLayoutManager.textViewportLayoutController.layoutViewport()
+            textView.layout()
+            textView.display()
           } else {
             // More performant for single line messages
             throttle(.milliseconds(200), identifier: "layoutMessageTextView", by: .mainActor, option: .default) { [
@@ -624,8 +622,10 @@ class MessageViewAppKit: NSView {
               guard let self else { return }
               guard let textLayoutManager else { return }
 
-              Log.shared.debug("Layouting viewport (2) for text view \(message.id)")
+              Log.shared.debug("Layouting viewport for text view \(message.id)")
               textLayoutManager.textViewportLayoutController.layoutViewport()
+              textView.layout()
+              textView.display()
             }
           }
         }
@@ -776,58 +776,71 @@ class MessageViewAppKit: NSView {
     // less granular
     // guard props != self.props else { return }
 
-    if prevProps.layout.bubble != props.layout.bubble {
-      contentViewWidthConstraint.constant = props.layout.bubble.size.width
-      bubbleViewWidthConstraint.constant = props.layout.bubble.size.width
-      bubbleViewHeightConstraint.constant = props.layout.bubble.size.height
-    }
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0
+      context.allowsImplicitAnimation = false
 
-    let hasTextSizeChanged =
-      prevProps.layout.text != props.layout.text
-    let hasPhotoSizeChanged =
-      prevProps.layout.photo != props.layout.photo
-    let singleLineChanged =
-      prevProps.layout.singleLine != props.layout.singleLine
+      // will help?
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
 
-    if singleLineChanged {
-      // TODO: Update time position
-    }
+      defer {
+        CATransaction.commit()
+      }
 
-    // only proceed if text size or photo size has changed
-    // Fun fact: I wasted too much time on || being &&
-    guard hasTextSizeChanged || hasPhotoSizeChanged
-    else { return }
+      if prevProps.layout.bubble != props.layout.bubble {
+        contentViewWidthConstraint.constant = props.layout.bubble.size.width
+        bubbleViewWidthConstraint.constant = props.layout.bubble.size.width
+        bubbleViewHeightConstraint.constant = props.layout.bubble.size.height
+      }
 
-    // # Update sizes
-    // Text
-    if let text = props.layout.text {
-      textViewWidthConstraint?.constant = text.size.width
+      let hasTextSizeChanged =
+        prevProps.layout.text != props.layout.text
+      let hasPhotoSizeChanged =
+        prevProps.layout.photo != props.layout.photo
+      let singleLineChanged =
+        prevProps.layout.singleLine != props.layout.singleLine
 
-      // Text size
-      if hasTextSizeChanged {
-        textViewHeightConstraint?.constant = text.size.height
+      if singleLineChanged {
+        // TODO: Update time position
+      }
 
-        // This helps refresh the layout for textView
-        textView.textContainer?.containerSize = CGSize(width: text.size.width, height: text.size.height)
+      // only proceed if text size or photo size has changed
+      // Fun fact: I wasted too much time on || being &&
+      guard hasTextSizeChanged || hasPhotoSizeChanged
+      else { return }
 
-        // very subtle fix:
-        // ensure the change is reflected even if it was offscreen when live resize started
-        if useTextKit2, !disableTextRelayout {
-          textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
-          textView.layout()
-          textView.display()
+      // # Update sizes
+      // Text
+      if let text = props.layout.text {
+        textViewWidthConstraint?.constant = text.size.width
+
+        // Text size
+        if hasTextSizeChanged {
+          textViewHeightConstraint?.constant = text.size.height
+
+          // This helps refresh the layout for textView
+          textView.textContainer?.containerSize = CGSize(width: text.size.width, height: text.size.height)
+
+          // very subtle fix:
+          // ensure the change is reflected even if it was offscreen when live resize started
+          if useTextKit2, !disableTextRelayout {
+            textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
+            textView.layout()
+            textView.display()
+          }
         }
       }
-    }
 
-    // photo size
-    if hasPhotoSizeChanged,
-       let photoViewHeightConstraint,
-       let photoViewWidthConstraint,
-       let photo = props.layout.photo
-    {
-      photoViewHeightConstraint.constant = photo.size.height
-      photoViewWidthConstraint.constant = photo.size.width
+      // photo size
+      if hasPhotoSizeChanged,
+         let photoViewHeightConstraint,
+         let photoViewWidthConstraint,
+         let photo = props.layout.photo
+      {
+        photoViewHeightConstraint.constant = photo.size.height
+        photoViewWidthConstraint.constant = photo.size.width
+      }
     }
   }
 
@@ -853,18 +866,21 @@ class MessageViewAppKit: NSView {
       }
     }
 
+    // Update time and state
+    timeAndStateView.updateMessage(fullMessage)
+
     DispatchQueue.main.async(qos: .utility) { [weak self] in
       // As the message changes here, we need to update everything related to that. Otherwise we get wrong context menu.
       self?.setupContextMenu()
-
-      // Update time and state
-      self?.timeAndStateView.updateMessage(fullMessage)
     }
   }
 
   public func updateSize(props: MessageViewProps) {
     // update props and reflect changes
-    updatePropsAndUpdateLayout(props: props)
+    updatePropsAndUpdateLayout(
+      props: props,
+      disableTextRelayout: props.layout.singleLine // Quick hack to reduce such re-layouts
+    )
   }
 
   private func setTimeAndStateVisibility(visible: Bool) {
@@ -977,7 +993,7 @@ class MessageViewAppKit: NSView {
         // Check if swipe was far enough to trigger reply
         if abs(swipeOffset) > swipeThreshold {
           Task(priority: .userInitiated) { @MainActor in self.reply() }
-          
+
           // Animate back with spring effect
           NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.3
