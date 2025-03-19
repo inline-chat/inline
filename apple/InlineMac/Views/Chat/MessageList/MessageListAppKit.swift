@@ -779,6 +779,12 @@ class MessageListAppKit: NSViewController {
         }
 
       case let .deleted(_, indexSet):
+        for index in indexSet {
+          if let message = message(forRow: index) {
+            cellCache.removeCell(withType: "MessageCell", messageId: message.id)
+          }
+        }
+
         NSAnimationContext.runAnimationGroup { context in
           context.duration = animationDuration
           self.tableView.removeRows(at: IndexSet(indexSet), withAnimation: .effectFade)
@@ -788,6 +794,12 @@ class MessageListAppKit: NSViewController {
         }
 
       case let .updated(_, indexSet, animated):
+        for index in indexSet {
+          if let message = message(forRow: index) {
+            cellCache.removeCell(withType: "MessageCell", messageId: message.id)
+          }
+        }
+
         if animated == true {
           NSAnimationContext.runAnimationGroup { context in
             context.duration = animationDuration
@@ -805,6 +817,7 @@ class MessageListAppKit: NSViewController {
         }
 
       case .reload:
+        cellCache.clearCache()
         log.trace("reloading data")
         tableView.reloadData()
         if shouldScroll { scrollToBottom(animated: false) }
@@ -1121,6 +1134,8 @@ class MessageListAppKit: NSViewController {
       readAll()
     }
   }
+
+  private let cellCache = TableViewCellCache<MessageTableCell>(maxCacheSize: 200)
 }
 
 extension MessageListAppKit: NSTableViewDataSource {
@@ -1171,9 +1186,12 @@ extension MessageListAppKit: NSTableViewDelegate {
     let message = messages[row]
     let identifier = NSUserInterfaceItemIdentifier("MessageCell")
 
-    let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MessageTableCell
-      ?? MessageTableCell()
-    cell.identifier = identifier
+    // cell cache
+    let cell = cellCache.dequeueCell(withType: "MessageCell", messageId: message.id) {
+      let newCell = MessageTableCell()
+      newCell.identifier = NSUserInterfaceItemIdentifier("MessageCell")
+      return newCell
+    }
 
     let inputProps = messageProps(for: row)
 
@@ -1189,6 +1207,10 @@ extension MessageListAppKit: NSTableViewDelegate {
     )
 
     cell.configure(with: message, props: props)
+
+    // Store the configured cell in cache
+    cellCache.cacheCell(cell, withType: "MessageCell", messageId: message.id)
+
     return cell
   }
 
