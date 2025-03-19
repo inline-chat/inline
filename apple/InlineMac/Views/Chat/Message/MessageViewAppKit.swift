@@ -486,10 +486,6 @@ class MessageViewAppKit: NSView {
   }
 
   private func setupMessageText() {
-    // Setup time and state
-    // Show when failed or sending
-    setTimeAndStateVisibility(visible: shouldAlwaysShowTimeAndState)
-
     guard hasText else {
       return
     }
@@ -1064,10 +1060,6 @@ extension MessageViewAppKit {
 
   private func updateHoverState(_ isHovered: Bool) {
     isMouseInside = isHovered
-
-    if !shouldAlwaysShowTimeAndState {
-      setTimeAndStateVisibility(visible: isHovered)
-    }
   }
 
   func removeHoverTrackingArea() {
