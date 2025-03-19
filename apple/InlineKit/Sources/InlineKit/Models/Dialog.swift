@@ -122,11 +122,16 @@ public extension ApiDialog {
     throws -> Dialog
   {
     let existing = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+
     var dialog = Dialog(from: self)
+
     if let existing {
       dialog.draft = existing.draft
-      try dialog.save(db)
+      try dialog.save(db, onConflict: .replace)
+    } else {
+      try dialog.save(db, onConflict: .replace)
     }
+
     return dialog
   }
 }
