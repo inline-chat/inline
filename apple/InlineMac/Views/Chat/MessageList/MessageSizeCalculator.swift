@@ -174,6 +174,13 @@ class MessageSizeCalculator {
     }
   }
 
+  // Use a more efficient cache key
+  private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
+    // Hash-based approach is faster than string concatenation
+    let hashValue = "\(message.id)_\(Int(width))_\(props.hashValue)".hashValue
+    return NSString(string: "\(hashValue)")
+  }
+
   func calculateSize(
     for message: FullMessage,
     with props: MessageViewInputProps,
@@ -235,9 +242,9 @@ class MessageSizeCalculator {
 
     log.trace("availableWidth \(availableWidth) for text \(text)")
 
-    let cacheKey = "\(message.id):\(props.toString()):\(availableWidth)" as NSString
-    if let cachedSize = cache.object(forKey: cacheKey)?.sizeValue,
-       let cachedTextSize = textHeightCache.object(forKey: cacheKey)?.sizeValue
+    let cacheKey_ = cacheKey(for: message, width: availableWidth, props: props)
+    if let cachedSize = cache.object(forKey: cacheKey_)?.sizeValue,
+       let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue
     {
       textSize = cachedTextSize
 
@@ -509,8 +516,8 @@ class MessageSizeCalculator {
     // Fitting width
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
 
-    cache.setObject(NSValue(size: size), forKey: cacheKey)
-    textHeightCache.setObject(NSValue(size: textSizeCeiled), forKey: cacheKey)
+    cache.setObject(NSValue(size: size), forKey: cacheKey_)
+    textHeightCache.setObject(NSValue(size: textSizeCeiled), forKey: cacheKey_)
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
 
     return (size, textSizeCeiled, photoSize, plan)
