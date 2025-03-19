@@ -90,8 +90,6 @@ enum Theme {
   static let messageTextOnlyVerticalInsets: CGFloat = 6.0
   static let messageTextAndPhotoSpacing: CGFloat = 10.0
   static let messageTextAndTimeSpacing: CGFloat = 0.0
-  static let messageOutgoingTimeWidth: CGFloat = 48.0
-  static let messageIncomingTimeWidth: CGFloat = 38.0
 
   // MARK: - Chat View
 

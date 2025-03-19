@@ -4,58 +4,13 @@ import InlineUI
 import Logger
 import SwiftUI
 
-/// if outgoing message: [ [time] [symbol] ]
-/// if incoming message: [          [time] ]
-
 class MessageTimeAndState: NSView {
   private var fullMessage: FullMessage
-
-  private var textColor: NSColor {
-    fullMessage.message.out == true ? .white
-      .withAlphaComponent(0.5) : .tertiaryLabelColor
-  }
-
-  init(fullMessage: FullMessage) {
-    self.fullMessage = fullMessage
-    super.init(frame: .zero)
-    wantsLayer = true
-    setupView()
-    setupContent()
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  private lazy var timeLabel = {
-    let label = NSTextField()
-    label.translatesAutoresizingMaskIntoConstraints = false
-    label.isEditable = false
-    label.isSelectable = false
-    label.isBezeled = false
-    label.drawsBackground = false
-    label.textColor = textColor
-    label.font = NSFont.systemFont(ofSize: 10, weight: .regular).withTraits(.italic)
-
-    return label
-  }()
-
-  private var imageSize: CGFloat = 10
   private var currentState: MessageSendingStatus = .sent
 
-  private lazy var imageView = {
-    let imageView = NSImageView()
-    imageView.wantsLayer = true
-    imageView.layer?.shouldRasterize = true
-    imageView.layer?.rasterizationScale = NSScreen.main?.backingScaleFactor ?? 1.0
-    imageView.contentTintColor = isFailedMessage ? .systemRed : textColor
-    imageView.image = getSymbolImage()
-    imageView.imageScaling = .scaleNone
-    imageView.translatesAutoresizingMaskIntoConstraints = false
-
-    return imageView
-  }()
+  private var textColor: NSColor {
+    fullMessage.message.out == true ? .white.withAlphaComponent(0.6) : .tertiaryLabelColor
+  }
 
   private var hasSymbol: Bool {
     fullMessage.message.out == true
@@ -65,132 +20,196 @@ class MessageTimeAndState: NSView {
     fullMessage.message.status == .failed
   }
 
-  private func setupView() {
-    addSubview(timeLabel)
+  // MARK: - Layer Setup
 
-    NSLayoutConstraint.activate([
-      // timeLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-      timeLabel.topAnchor.constraint(equalTo: topAnchor),
-      timeLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-
-    if hasSymbol {
-      addSubview(imageView)
-
-      NSLayoutConstraint.activate([
-        imageView.leadingAnchor.constraint(equalTo: timeLabel.trailingAnchor, constant: 2),
-        imageView.widthAnchor.constraint(equalToConstant: 12),
-        imageView.heightAnchor.constraint(equalToConstant: 12),
-        imageView.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor),
-
-        imageView.trailingAnchor.constraint(greaterThanOrEqualTo: trailingAnchor),
-      ])
-    } else {
-      NSLayoutConstraint.activate([
-        timeLabel.trailingAnchor.constraint(greaterThanOrEqualTo: trailingAnchor),
-      ])
-    }
-  }
-
-  static let formatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "HH:mm"
-    return formatter
+  private lazy var timeLayer: CATextLayer = {
+    let layer = CATextLayer()
+    layer.contentsScale = NSScreen.main?.backingScaleFactor ?? 1.0
+    layer.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+    layer.fontSize = 10
+    layer.alignmentMode = .left
+    layer.truncationMode = .end
+    layer.isWrapped = false
+    return layer
   }()
 
-  private func setupContent() {
-    updateTimeLabel()
+  private lazy var statusLayer: CALayer = {
+    let layer = CALayer()
+    layer.contentsScale = NSScreen.main?.backingScaleFactor ?? 1.0
+    layer.contentsGravity = .center
+    layer.masksToBounds = true
+    return layer
+  }()
+
+  // MARK: - Initialization
+
+  init(fullMessage: FullMessage) {
+    self.fullMessage = fullMessage
+    super.init(frame: .zero)
+    configureLayerSetup()
+    updateContent()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func configureLayerSetup() {
+    wantsLayer = true
+    layer?.masksToBounds = true
+    layer?.addSublayer(timeLayer)
+    layer?.addSublayer(statusLayer)
+    statusLayer.isHidden = !hasSymbol
+  }
+
+  // MARK: - Layout
+
+  override func layout() {
+    super.layout()
+
+    let timeWidth = Self.timeWidth
+    timeLayer.frame = CGRect(
+      x: 4,
+      y: (bounds.height - Self.timeHeight) / 2,
+      width: timeWidth,
+      height: Self.timeHeight // timeLayer.preferredFrameSize().height
+    )
 
     if hasSymbol {
-      updateStatusImage(animated: false)
+      statusLayer.frame = CGRect(
+        x: timeWidth + 4,
+        y: (bounds.height - 12) / 2,
+        width: 12,
+        height: 12
+      )
     }
   }
 
-  private func getSymbolImage() -> NSImage {
-    let status = fullMessage.message.status ?? .sent
-    let image = switch status {
-      case .sent:
-        NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Sent")!.withSymbolConfiguration(
-          .init(pointSize: 9, weight: .medium).applying(.preferringMonochrome())
-        )!
-      case .sending:
-        NSImage(systemSymbolName: "clock", accessibilityDescription: "Sending")!.withSymbolConfiguration(
-          .init(pointSize: 9, weight: .medium).applying(.preferringMonochrome())
-        )!
-      case .failed:
-        NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Failed")!
-          .withSymbolConfiguration(
-            .init(pointSize: 9, weight: .medium).applying(.preferringMonochrome())
-          )!
-    }
-
-    return image
-  }
-
-  private func updateImageTintColor() {
-    imageView.contentTintColor = isFailedMessage ? .systemRed : textColor
-  }
-
-  // MARK: - Public
+  // MARK: - Content Updates
 
   public func updateMessage(_ fullMessage: FullMessage) {
-    // Check if we actually need to update
     let oldStatus = self.fullMessage.message.status
     let oldDate = self.fullMessage.message.date
     let oldOut = self.fullMessage.message.out
 
     self.fullMessage = fullMessage
 
-    // Only update what changed
-    let newStatus = fullMessage.message.status
-    let newDate = fullMessage.message.date
-    let newOut = fullMessage.message.out
-
-    if oldDate != newDate || oldOut != newOut || oldStatus != newStatus {
-      updateTimeLabel()
+    if fullMessage.message.date != oldDate || fullMessage.message.out != oldOut {
+      updateTimeContent()
     }
 
-    if oldStatus != newStatus {
-      updateStatusImage()
+    if fullMessage.message.status != oldStatus {
+      updateStatusContent()
     }
 
-    if oldOut != newOut {
-      updateTextColor()
+    if fullMessage.message.out != oldOut {
+      updateColorStyles()
     }
+
+    needsLayout = true
   }
 
-  private func updateTimeLabel() {
-    if isFailedMessage {
-      timeLabel.stringValue = "Failed"
-    } else {
-      timeLabel.stringValue = Self.formatter.string(from: fullMessage.message.date)
-    }
+  private func updateContent() {
+    updateTimeContent()
+    updateStatusContent()
+    updateColorStyles()
   }
 
-  private func updateStatusImage(animated: Bool = true) {
-    if currentState != fullMessage.message.status {
-      currentState = fullMessage.message.status ?? .sent
+  private func updateTimeContent() {
+    let string = isFailedMessage ? "Failed" : Self.formatter.string(from: fullMessage.message.date)
+    timeLayer.string = NSAttributedString(
+      string: string,
+      attributes: [
+        .font: NSFont.systemFont(ofSize: 10, weight: .regular).withTraits(.italic),
+        .foregroundColor: textColor,
+      ]
+    )
+  }
 
-      if animated, #available(macOS 14.0, *) {
-        imageView.setSymbolImage(
-          getSymbolImage(),
-          contentTransition: .replace.offUp,
-          options: .speed(1.5)
-        )
+  private func updateStatusContent() {
+    guard hasSymbol else { return }
+    statusLayer.contents = createStatusImage()
+  }
+
+  private func updateColorStyles() {
+    timeLayer.foregroundColor = textColor.cgColor
+    statusLayer.contents = createStatusImage()
+  }
+
+  // MARK: - Image Generation
+
+  private func createStatusImage() -> CGImage? {
+    let status = fullMessage.message.status ?? .sent
+    let color = isFailedMessage ? NSColor.systemRed : textColor
+
+    let imageName = switch status {
+      case .sent: "checkmark"
+      case .sending: "clock"
+      case .failed: "exclamationmark.triangle"
+    }
+
+    let config = NSImage.SymbolConfiguration(
+      pointSize: 11,
+      weight: .semibold,
+      scale: .small
+    ).applying(.init(paletteColors: [color]))
+
+    return NSImage(
+      systemSymbolName: imageName,
+      accessibilityDescription: nil
+    )?
+      .withSymbolConfiguration(config)?
+      .cgImage(forProposedRect: nil, context: nil, hints: nil)
+  }
+
+  // External Sizing
+
+  static var formatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.setLocalizedDateFormatFromTemplate("jmm")
+    formatter.locale = Locale.autoupdatingCurrent
+    return formatter
+  }()
+
+  static var symbolWidth: CGFloat {
+    14
+  }
+
+  static var font: NSFont {
+    NSFont.systemFont(ofSize: 10, weight: .regular).withTraits(.italic)
+  }
+
+  static var timeWidth: CGFloat = 0.0
+  static var timeHeight: CGFloat = 0.0
+
+  // Must be called once
+  static func precalculateTimeWidth() {
+    let formatter = DateFormatter()
+    formatter.setLocalizedDateFormatFromTemplate("jmm")
+    formatter.locale = Locale.autoupdatingCurrent
+
+    MessageTimeAndState.formatter = formatter
+
+    let timeFormatIs12Hour = (formatter.dateFormat ?? "").contains("a")
+    let maxTimeString =
+      if timeFormatIs12Hour {
+        "12:59 PM"
       } else {
-        imageView.image = getSymbolImage()
+        "23:59"
       }
-      updateImageTintColor()
-    }
-  }
 
-  private func updateTextColor() {
-    let newColor: NSColor = fullMessage.message.out == true ?
-      .white.withAlphaComponent(0.5) : .tertiaryLabelColor
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: MessageTimeAndState.font,
+    ]
+    let size = NSAttributedString(
+      string: maxTimeString,
+      attributes: attributes
+    ).size()
+    let timeWidth = size.width.rounded(.up)
+    let timeHeight = size.height.rounded(.up)
 
-    timeLabel.textColor = newColor
-    if !isFailedMessage {
-      imageView.contentTintColor = newColor
-    }
+    MessageTimeAndState.timeWidth = timeWidth
+    MessageTimeAndState.timeHeight = timeHeight
   }
 }
