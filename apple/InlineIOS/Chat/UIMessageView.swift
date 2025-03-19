@@ -505,15 +505,15 @@ class UIMessageView: UIView {
       message.hasFile,
       message.hasText || !fullMessage.reactions.isEmpty
     ) {
-      case (true, false):
-        // File only
-        withFileConstraints
-      case (true, true):
-        // File with text
-        withFileAndTextConstraints
-      default:
-        // Text only
-        withoutFileConstraints
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -932,114 +932,53 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
   }
 
   func onRequestMenuAuxiliaryPreview(sender: ContextMenuManager) -> UIView? {
-    let reactions = ["👍", "👎", "🫡", "🥲", "😂", "🥹", "✔️"]
-    let previewHeight: CGFloat = 45
-    let reactionButtonSize: CGFloat = 42
-    let willDoButtonWidth: CGFloat = 80
-    let horizontalPadding: CGFloat = 10
+    let reactions = ["👍", "❤️", "🥹", "🫡", "😂", "💯", "🆒", "✔️"]
 
-    let capsuleWidth = CGFloat(reactions.count) * reactionButtonSize + willDoButtonWidth + (horizontalPadding * 2)
+    // Create a SwiftUI hosting controller with our reaction picker view
+    let swiftUIView = ReactionPickerView(
+      emojis: reactions,
+      onEmojiSelected: { [weak self] emoji in
+        guard let self = self else { return }
+        Self.contextMenuOpen = false
+        self.interaction?.dismissMenu()
 
-    let containerView = UIView(frame: CGRect(x: 0, y: 0, width: capsuleWidth, height: previewHeight))
-    containerView.backgroundColor = .systemGray6
-    containerView.layer.cornerRadius = 20
-    containerView.layer.masksToBounds = true
+        if let reaction = self.fullMessage.reactions
+          .filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
+        {
+          Transactions.shared.mutate(transaction: .deleteReaction(.init(
+            message: self.message,
+            emoji: emoji,
+            peerId: self.message.peerId,
+            chatId: self.message.chatId
+          )))
+        } else {
+          Transactions.shared.mutate(transaction: .addReaction(.init(
+            message: self.message,
+            emoji: emoji,
+            userId: Auth.shared.getCurrentUserId() ?? 0,
+            peerId: self.message.peerId
+          )))
+        }
+      },
+      onWillDoTapped: { [weak self] in
+        guard let self = self else { return }
+        Self.contextMenuOpen = false
+        self.interaction?.dismissMenu()
 
-    let mainStackView = UIStackView(frame: containerView.bounds)
-    mainStackView.axis = .horizontal
-    mainStackView.alignment = .fill
-    mainStackView.distribution = .fill
-    mainStackView.spacing = 0
-    mainStackView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    containerView.addSubview(mainStackView)
-
-    let leftPaddingView = UIView()
-    leftPaddingView.backgroundColor = .clear
-    leftPaddingView.widthAnchor.constraint(equalToConstant: horizontalPadding).isActive = true
-    mainStackView.addArrangedSubview(leftPaddingView)
-
-    let reactionsStackView = UIStackView()
-    reactionsStackView.axis = .horizontal
-    reactionsStackView.alignment = .fill
-    reactionsStackView.distribution = .fillEqually
-    reactionsStackView.spacing = 0
-
-    reactionsStackView.widthAnchor.constraint(equalToConstant: CGFloat(reactions.count) * reactionButtonSize)
-      .isActive = true
-
-    for (index, reaction) in reactions.enumerated() {
-      let button = UIButton(type: .system)
-
-      button.setTitle(reaction, for: .normal)
-      button.titleLabel?.font = UIFont.systemFont(ofSize: 20)
-      button.backgroundColor = .clear
-
-      button.titleLabel?.textAlignment = .center
-      button.contentVerticalAlignment = .center
-      button.contentHorizontalAlignment = .center
-
-      button.tag = index
-      button.addTarget(self, action: #selector(handleReactionTap(_:)), for: .touchUpInside)
-
-      reactionsStackView.addArrangedSubview(button)
-    }
-
-    mainStackView.addArrangedSubview(reactionsStackView)
-
-    let separator = UIView()
-    separator.backgroundColor = .systemGray5
-    separator.heightAnchor.constraint(equalToConstant: previewHeight - 20).isActive = true
-    separator.widthAnchor.constraint(equalToConstant: 1).isActive = true
-    separator.setContentHuggingPriority(.required, for: .horizontal)
-
-    let separatorContainer = UIView()
-    separatorContainer.addSubview(separator)
-    separator.translatesAutoresizingMaskIntoConstraints = false
-    separator.centerYAnchor.constraint(equalTo: separatorContainer.centerYAnchor).isActive = true
-    separator.centerXAnchor.constraint(equalTo: separatorContainer.centerXAnchor).isActive = true
-
-    mainStackView.addArrangedSubview(separatorContainer)
-
-    let willDoButton = UIButton(type: .system)
-
-    willDoButton.setTitle("Will Do", for: .normal)
-    willDoButton.setTitleColor(.adaptiveTitle, for: .normal)
-    willDoButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
-    willDoButton.backgroundColor = .adaptiveBackground.withAlphaComponent(0.9)
-
-    willDoButton.layer.cornerRadius = 16
-
-    willDoButton.titleLabel?.textAlignment = .center
-    willDoButton.contentVerticalAlignment = .center
-    willDoButton.contentHorizontalAlignment = .center
-
-    willDoButton.addTarget(self, action: #selector(handleWillDoTap(_:)), for: .touchUpInside)
-
-    let willDoButtonContainer = UIView()
-    willDoButtonContainer.widthAnchor.constraint(equalToConstant: willDoButtonWidth).isActive = true
-
-    willDoButtonContainer.addSubview(willDoButton)
-
-    let buttonPadding: CGFloat = 8
-    willDoButton.frame = CGRect(
-      x: buttonPadding / 2,
-      y: buttonPadding / 2,
-      width: willDoButtonWidth - buttonPadding,
-      height: 32
+        Task { @MainActor in
+          self.createIssueFunc()
+        }
+      }
     )
 
-    mainStackView.addArrangedSubview(willDoButtonContainer)
+    let hostingController = ReactionPickerHostingController(rootView: swiftUIView)
+    hostingController.view.frame = CGRect(x: 0, y: 0, width: 380, height: 44)
 
-    let rightPaddingView = UIView()
-    rightPaddingView.backgroundColor = .clear
-    rightPaddingView.widthAnchor.constraint(equalToConstant: 3).isActive = true
-    mainStackView.addArrangedSubview(rightPaddingView)
-
-    return containerView
+    return hostingController.view
   }
 
   @objc private func handleReactionTap(_ sender: UIButton) {
-    let reactions = ["👍", "👎", "🫡", "🥲", "😂", "🥹", "✔️"]
+    let reactions = ["👍", "❤️", "🥹", "🫡", "😂", "💯", "🆒", "✔️"]
     let selectedReaction = reactions[sender.tag]
     Self.contextMenuOpen = false
     interaction?.dismissMenu()
