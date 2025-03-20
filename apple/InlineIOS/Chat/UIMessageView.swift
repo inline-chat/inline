@@ -932,92 +932,97 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
   }
 
   func onRequestMenuAuxiliaryPreview(sender: ContextMenuManager) -> UIView? {
-    let reactions = ["👍", "❤️", "🥹", "🫡", "😂", "💯", "🆒", "✔️"]
-
     // Create a SwiftUI hosting controller with our reaction picker view
-    let swiftUIView = ReactionPickerView(
-      emojis: reactions,
+    let hostingController = ReactionPickerHostingController(
+      emojis: ["👍", "❤️", "🥹", "🫡", "😂", "💯", "🆒", "✔️"],
       onEmojiSelected: { [weak self] emoji in
-        guard let self = self else { return }
+        guard let self else { return }
         Self.contextMenuOpen = false
-        self.interaction?.dismissMenu()
+        interaction?.dismissMenu()
 
-        if let reaction = self.fullMessage.reactions
+        if let reaction = fullMessage.reactions
           .filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
         {
           Transactions.shared.mutate(transaction: .deleteReaction(.init(
-            message: self.message,
+            message: message,
             emoji: emoji,
-            peerId: self.message.peerId,
-            chatId: self.message.chatId
+            peerId: message.peerId,
+            chatId: message.chatId
           )))
         } else {
           Transactions.shared.mutate(transaction: .addReaction(.init(
-            message: self.message,
+            message: message,
             emoji: emoji,
             userId: Auth.shared.getCurrentUserId() ?? 0,
-            peerId: self.message.peerId
+            peerId: message.peerId
           )))
         }
       },
       onWillDoTapped: { [weak self] in
-        guard let self = self else { return }
+        guard let self else { return }
         Self.contextMenuOpen = false
-        self.interaction?.dismissMenu()
+        interaction?.dismissMenu()
 
         Task { @MainActor in
           self.createIssueFunc()
         }
-      }
+      },
+      contextMenuInteraction: interaction
     )
 
-    let hostingController = ReactionPickerHostingController(rootView: swiftUIView)
-    hostingController.view.frame = CGRect(x: 0, y: 0, width: 380, height: 44)
+    // Subscribe to the notification to show the emoji picker sheet
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(showEmojiPickerSheet),
+      name: Notification.Name("ShowEmojiPickerSheet"),
+      object: nil
+    )
 
+    hostingController.view
+      .frame = CGRect(x: 0, y: 0, width: 390, height: 60) // Reduced height since we removed the grid
     return hostingController.view
   }
 
-  @objc private func handleReactionTap(_ sender: UIButton) {
-    let reactions = ["👍", "❤️", "🥹", "🫡", "😂", "💯", "🆒", "✔️"]
-    let selectedReaction = reactions[sender.tag]
-    Self.contextMenuOpen = false
-    interaction?.dismissMenu()
+  @objc private func showEmojiPickerSheet() {
+    // Clean up observer after handling the notification
+    NotificationCenter.default.removeObserver(self, name: Notification.Name("ShowEmojiPickerSheet"), object: nil)
 
-    if let reaction = fullMessage.reactions
-      .filter({ $0.emoji == selectedReaction && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
-    {
-      print("deleting reaction", reaction)
-      Transactions.shared.mutate(transaction: .deleteReaction(.init(
-        message: message,
-        emoji: selectedReaction,
-        peerId: message.peerId,
-        chatId: message.chatId
-      )))
-    } else {
-      print("adding reaction", selectedReaction)
-      Transactions.shared.mutate(transaction: .addReaction(.init(
-        message: message,
-        emoji: selectedReaction,
-        userId: Auth.shared.getCurrentUserId() ?? 0,
-        peerId: message.peerId
-      )))
+    guard let viewController = findViewController() else { return }
+
+    // Create and present a full emoji picker with grid layout
+    let emojiPickerVC = EmojiPickerViewController()
+    emojiPickerVC.modalPresentationStyle = .pageSheet
+
+    if let sheet = emojiPickerVC.sheetPresentationController {
+      sheet.detents = [.medium()]
+      sheet.prefersGrabberVisible = true
     }
-  }
 
-  @objc private func handleWillDoTap(_ sender: UIButton) {
-    Self.contextMenuOpen = false
-    interaction?.dismissMenu()
+    emojiPickerVC.emojiSelectedHandler = { [weak self] emoji in
+      guard let self else { return }
 
-    Task { @MainActor in
-      createIssueFunc()
+      if let reaction = fullMessage.reactions
+        .filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
+      {
+        Transactions.shared.mutate(transaction: .deleteReaction(.init(
+          message: message,
+          emoji: emoji,
+          peerId: message.peerId,
+          chatId: message.chatId
+        )))
+      } else {
+        Transactions.shared.mutate(transaction: .addReaction(.init(
+          message: message,
+          emoji: emoji,
+          userId: Auth.shared.getCurrentUserId() ?? 0,
+          peerId: message.peerId
+        )))
+      }
+
+      emojiPickerVC.dismiss(animated: true)
     }
-  }
 
-  private func triggerMessageReload() {
-    Task { @MainActor in
-      await MessagesPublisher.shared
-        .messageUpdated(message: fullMessage.message, peer: fullMessage.message.peerId, animated: true)
-    }
+    viewController.present(emojiPickerVC, animated: true)
   }
 }
 
