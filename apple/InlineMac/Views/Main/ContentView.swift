@@ -49,6 +49,18 @@ class ContentViewController: NSViewController {
 
     currentlyRenderedRoute = route
 
+    // Properly remove previous view controller
+    if let currentVC = currentRouteViewController {
+      currentVC.view.removeFromSuperview()
+      currentVC.removeFromParent()
+      currentRouteViewController = nil
+    }
+    
+    if let currentView = currentRouteSubview {
+      currentView.removeFromSuperview()
+      currentRouteSubview = nil
+    }
+
     removePreviousRoute()
 
     switch route {
@@ -72,13 +84,12 @@ class ContentViewController: NSViewController {
   var currentRouteViewController: NSViewController? = nil
 
   private func addRouteSubview(_ subview: NSView, _ viewController: NSViewController? = nil) {
-    if let currentRouteSubview {
-      currentRouteSubview.removeFromSuperview()
+    // Add the view controller as a child first
+    if let viewController {
+      addChild(viewController)
     }
-    if let currentRouteViewController {
-      currentRouteViewController.removeFromParent()
-    }
-
+    
+    // Then add and configure the view
     currentRouteSubview = subview
     currentRouteViewController = viewController
 
