@@ -22,24 +22,123 @@ class MessageTimeAndState: NSView {
 
   // MARK: - Layer Setup
 
-  private lazy var timeLayer: CATextLayer = {
+  // Improved cache with scale awareness and memory management
+  private static let imageCache = NSCache<NSString, CGImage>()
+
+  // Key struct for proper cache identity
+  fileprivate struct CacheKey: Hashable {
+    let status: MessageSendingStatus
+    let isFailed: Bool
+    let scaleFactor: CGFloat
+  }
+
+  // MARK: - Layer Setup (Modified)
+
+  private lazy var timeLayer: CATextLayer = createTextLayer()
+  private lazy var statusLayer: CALayer = createStatusLayer()
+
+  private func createTextLayer() -> CATextLayer {
     let layer = CATextLayer()
-    layer.contentsScale = NSScreen.main?.backingScaleFactor ?? 1.0
-    layer.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+    layer.contentsScale = effectiveScaleFactor
+    layer.font = Self.font
     layer.fontSize = 10
     layer.alignmentMode = .left
     layer.truncationMode = .end
     layer.isWrapped = false
     return layer
-  }()
+  }
 
-  private lazy var statusLayer: CALayer = {
+  private func createStatusLayer() -> CALayer {
     let layer = CALayer()
-    layer.contentsScale = NSScreen.main?.backingScaleFactor ?? 1.0
-    layer.contentsGravity = .center
+    layer.contentsScale = effectiveScaleFactor
     layer.masksToBounds = true
+    layer.contentsGravity = .resizeAspect
+    layer.minificationFilter = .trilinear
+    layer.magnificationFilter = .nearest
+    layer.shouldRasterize = true
+    layer.rasterizationScale = effectiveScaleFactor
     return layer
-  }()
+  }
+
+  // Dynamic scale factor handling
+  private var effectiveScaleFactor: CGFloat {
+    window?.backingScaleFactor ?? window?.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1.0
+  }
+
+  // MARK: - Image Generation (Improved)
+
+  private func createStatusImage() -> CGImage? {
+    let status = fullMessage.message.status ?? .sent
+    let color = isFailedMessage ? NSColor.systemRed : textColor
+    let scale = effectiveScaleFactor
+    let cacheKey = CacheKey(
+      status: status,
+      isFailed: isFailedMessage,
+      scaleFactor: scale
+    )
+
+    if let cached = Self.imageCache.object(forKey: cacheKey.key) {
+      return cached
+    }
+
+    let symbolName = switch status {
+      case .sent: "checkmark"
+      case .sending: "clock"
+      case .failed: "exclamationmark.triangle"
+    }
+
+    // Create a properly scaled configuration
+    let config = NSImage.SymbolConfiguration(
+      pointSize: 11 * scale, // Scale the point size
+      weight: .semibold,
+      scale: .small
+    )
+    .applying(.init(paletteColors: [color]))
+
+    // Create the symbol image
+    let symbolImage = NSImage(
+      systemSymbolName: symbolName,
+      accessibilityDescription: nil
+    )?
+      .withSymbolConfiguration(config)
+
+    // Create a new image with the correct dimensions
+    let size = CGSize(width: 12 * scale, height: 12 * scale)
+    let newImage = NSImage(size: size)
+
+    newImage.lockFocus()
+    if let symbolImage {
+      symbolImage.draw(
+        in: CGRect(origin: .zero, size: size),
+        from: .zero,
+        operation: .sourceOver,
+        fraction: 1.0
+      )
+    }
+    newImage.unlockFocus()
+
+    // Get the CGImage at the correct scale
+    let cgImage = newImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+
+    if let cgImage {
+      Self.imageCache.setObject(cgImage, forKey: cacheKey.key)
+    }
+
+    return cgImage
+  }
+
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    updateScaleFactors()
+  }
+
+  private func updateScaleFactors() {
+    let scale = effectiveScaleFactor
+    timeLayer.contentsScale = scale
+    statusLayer.contentsScale = scale
+    statusLayer.rasterizationScale = scale
+    statusLayer.contents = createStatusImage()
+  }
 
   // MARK: - Initialization
 
@@ -70,7 +169,7 @@ class MessageTimeAndState: NSView {
 
     let timeWidth = Self.timeWidth
     timeLayer.frame = CGRect(
-      x: 4,
+      x: 0,
       y: (bounds.height - Self.timeHeight) / 2,
       width: timeWidth,
       height: Self.timeHeight // timeLayer.preferredFrameSize().height
@@ -78,7 +177,7 @@ class MessageTimeAndState: NSView {
 
     if hasSymbol {
       statusLayer.frame = CGRect(
-        x: timeWidth + 4,
+        x: timeWidth,
         y: (bounds.height - 12) / 2,
         width: 12,
         height: 12
@@ -121,7 +220,7 @@ class MessageTimeAndState: NSView {
     timeLayer.string = NSAttributedString(
       string: string,
       attributes: [
-        .font: NSFont.systemFont(ofSize: 10, weight: .regular).withTraits(.italic),
+        .font: Self.font,
         .foregroundColor: textColor,
       ]
     )
@@ -138,30 +237,6 @@ class MessageTimeAndState: NSView {
   }
 
   // MARK: - Image Generation
-
-  private func createStatusImage() -> CGImage? {
-    let status = fullMessage.message.status ?? .sent
-    let color = isFailedMessage ? NSColor.systemRed : textColor
-
-    let imageName = switch status {
-      case .sent: "checkmark"
-      case .sending: "clock"
-      case .failed: "exclamationmark.triangle"
-    }
-
-    let config = NSImage.SymbolConfiguration(
-      pointSize: 11,
-      weight: .semibold,
-      scale: .small
-    ).applying(.init(paletteColors: [color]))
-
-    return NSImage(
-      systemSymbolName: imageName,
-      accessibilityDescription: nil
-    )?
-      .withSymbolConfiguration(config)?
-      .cgImage(forProposedRect: nil, context: nil, hints: nil)
-  }
 
   // External Sizing
 
@@ -211,5 +286,12 @@ class MessageTimeAndState: NSView {
 
     MessageTimeAndState.timeWidth = timeWidth
     MessageTimeAndState.timeHeight = timeHeight
+  }
+}
+
+// CacheKey extension for NSCache compatibility
+private extension MessageTimeAndState.CacheKey {
+  var key: NSString {
+    "\(status.rawValue)-\(isFailed)-\(scaleFactor)" as NSString
   }
 }
