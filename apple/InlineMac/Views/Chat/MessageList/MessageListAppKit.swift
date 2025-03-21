@@ -13,7 +13,7 @@ class MessageListAppKit: NSViewController {
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
 
-  private let log = Log.scoped("MessageListAppKit", enableTracing: true)
+  private let log = Log.scoped("MessageListAppKit", enableTracing: false)
   private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 45.0
 
@@ -35,6 +35,8 @@ class MessageListAppKit: NSViewController {
   // Debugging
   private var debug_slowAnimation = false
 
+  private var eventMonitorTask: Task<Void, Never>?
+
   init(peerId: Peer, chat: Chat) {
     self.peerId = peerId
     self.chat = chat
@@ -48,27 +50,33 @@ class MessageListAppKit: NSViewController {
     super.init(nibName: nil, bundle: nil)
 
     sizeCalculator.prepareForUse()
-    
+
     // observe data
     viewModel.observe { [weak self] update in
       self?.applyUpdate(update)
 
-      DispatchQueue.main.async {
-        self?.updateUnreadIfNeeded()
+      switch update {
+        case .added, .reload:
+          self?.updateUnreadIfNeeded()
+
+        default:
+          break
       }
     }
 
     // observe events
-    Task { @MainActor in
-      for await event in state.events {
+
+    eventMonitorTask = Task { @MainActor [weak self] in
+      guard let self_ = self else { return }
+      for await event in self_.state.events {
         switch event {
           case let .scrollToMsg(msgId):
             // scroll and highlight
-            scrollToMsgAndHighlight(msgId)
+            self_.scrollToMsgAndHighlight(msgId)
 
           case .scrollToBottom:
-            if !isAtBottom {
-              scrollToIndex(tableView.numberOfRows - 1, position: .bottom, animated: true)
+            if !self_.isAtBottom {
+              self_.scrollToIndex(self_.tableView.numberOfRows - 1, position: .bottom, animated: true)
             }
         }
       }
@@ -147,10 +155,10 @@ class MessageListAppKit: NSViewController {
   private lazy var scrollToBottomButton: ScrollToBottomButton = {
     let scrollToBottomButton = ScrollToBottomButton()
     scrollToBottomButton.onClick = { [weak self] in
-      guard let self else { return }
+      guard let weakSelf = self else { return }
       // self?.scrollToBottom(animated: true)
-      scrollToIndex(tableView.numberOfRows - 1, position: .bottom, animated: true)
-      scrollToBottomButton.setVisibility(false)
+      weakSelf.scrollToIndex(weakSelf.tableView.numberOfRows - 1, position: .bottom, animated: true)
+      weakSelf.scrollToBottomButton.setVisibility(false)
     }
     scrollToBottomButton.alphaValue = 0
     scrollToBottomButton.translatesAutoresizingMaskIntoConstraints = false
@@ -173,8 +181,10 @@ class MessageListAppKit: NSViewController {
       self?.enableScrollbars()
     }
 
+    log.debug("viewDidLoad for chat \(chatId)")
+
     // Read messages
-    readAll()
+    // readAll()
   }
 
   // MARK: - Insets
@@ -328,7 +338,8 @@ class MessageListAppKit: NSViewController {
 
     if animated {
       // Causes clipping at the top
-      NSAnimationContext.runAnimationGroup { context in
+      NSAnimationContext.runAnimationGroup { [weak self] context in
+        guard let self else { return }
         context.duration = debug_slowAnimation ? 1.5 : 0.2
         context.allowsImplicitAnimation = true
 
@@ -404,15 +415,19 @@ class MessageListAppKit: NSViewController {
   }
 
   @objc private func scrollWheelBegan() {
+    log.debug("scroll wheel began")
     isUserScrolling = true
     scrollState = .scrolling
   }
 
   @objc private func scrollWheelEnded() {
+    log.debug("scroll wheel ended")
     isUserScrolling = false
     scrollState = .idle
 
-    updateUnreadIfNeeded()
+    DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
+      self?.updateUnreadIfNeeded()
+    }
   }
 
   // Recalculate heights for all items once resize has ended
@@ -464,8 +479,7 @@ class MessageListAppKit: NSViewController {
     throttle(.milliseconds(16), identifier: "chat.scrollViewBoundsChanged", by: .mainActor, option: .default) { [
       weak self
     ] in
-      guard let self else { return }
-      handleBoundsChange()
+      self?.handleBoundsChange()
     }
   }
 
@@ -568,14 +582,12 @@ class MessageListAppKit: NSViewController {
     // Early return if no change needed
     if abs(nextScrollPosition - scrollOffset.y) < 0.5 { return }
 
-    scrollView.withoutScrollerFlash {
-      CATransaction.begin()
-      CATransaction.setDisableActions(true)
-      // Set new scroll position
-      documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
-      // scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: nextScrollPosition))
-      CATransaction.commit()
-    }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    // Set new scroll position
+    documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
+    // scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: nextScrollPosition))
+    CATransaction.commit()
 
     //    Looked a bit laggy to me
 //    NSAnimationContext.runAnimationGroup { context in
@@ -629,9 +641,10 @@ class MessageListAppKit: NSViewController {
 
       scrollToBottom(animated: false)
 
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { // EXPERIMENTAL: DECREASED FROM 0.1
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        guard let self else { return }
         // Finalize heights one last time to ensure no broken heights on initial load
-        self.needsInitialScroll = false
+        needsInitialScroll = false
       }
     }
 
@@ -729,9 +742,12 @@ class MessageListAppKit: NSViewController {
     if loadingBatch { return }
     loadingBatch = true
 
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       // Preserve scroll position from bottom if we're loading at top
-      maintainingBottomScroll {
+      maintainingBottomScroll { [weak self] in
+        guard let self else { return false }
+
         log.trace("Loading batch at top")
         let prevCount = viewModel.messages.count
         viewModel.loadBatch(at: direction)
@@ -773,12 +789,13 @@ class MessageListAppKit: NSViewController {
         log.trace("applying add changes")
 
         // Note: we don't need to begin/end updates here as it's a single operation
-        NSAnimationContext.runAnimationGroup { context in
+        NSAnimationContext.runAnimationGroup { [weak self] context in
+          guard let self else { return }
           context.duration = animationDuration
-          self.tableView.insertRows(at: IndexSet(indexSet), withAnimation: .effectFade)
-          if shouldScroll { self.scrollToBottom(animated: true) }
-        } completionHandler: {
-          self.isPerformingUpdate = false
+          tableView.insertRows(at: IndexSet(indexSet), withAnimation: .effectFade)
+          if shouldScroll { scrollToBottom(animated: true) }
+        } completionHandler: { [weak self] in
+          self?.isPerformingUpdate = false
         }
 
       case let .deleted(_, indexSet):
@@ -788,12 +805,13 @@ class MessageListAppKit: NSViewController {
           }
         }
 
-        NSAnimationContext.runAnimationGroup { context in
+        NSAnimationContext.runAnimationGroup { [weak self] context in
+          guard let self else { return }
           context.duration = animationDuration
-          self.tableView.removeRows(at: IndexSet(indexSet), withAnimation: .effectFade)
-          if shouldScroll { self.scrollToBottom(animated: true) }
-        } completionHandler: {
-          self.isPerformingUpdate = false
+          tableView.removeRows(at: IndexSet(indexSet), withAnimation: .effectFade)
+          if shouldScroll { scrollToBottom(animated: true) }
+        } completionHandler: { [weak self] in
+          self?.isPerformingUpdate = false
         }
 
       case let .updated(_, indexSet, animated):
@@ -804,13 +822,14 @@ class MessageListAppKit: NSViewController {
         }
 
         if animated == true {
-          NSAnimationContext.runAnimationGroup { context in
+          NSAnimationContext.runAnimationGroup { [weak self] context in
+            guard let self else { return }
             context.duration = animationDuration
-            self.tableView
+            tableView
               .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
-            if shouldScroll { self.scrollToBottom(animated: true) } // ??
-          } completionHandler: {
-            self.isPerformingUpdate = false
+            if shouldScroll { scrollToBottom(animated: true) } // ??
+          } completionHandler: { [weak self] in
+            self?.isPerformingUpdate = false
           }
         } else {
           tableView
@@ -907,27 +926,27 @@ class MessageListAppKit: NSViewController {
         """)
     }
 
-    return {
-      self.scrollView.layoutSubtreeIfNeeded()
+    return { [weak self] in
+      guard let self else { return }
+
+      scrollView.layoutSubtreeIfNeeded()
 
       switch anchor {
         case let .bottom(row, distanceFromViewportBottom):
           // Get the updated rect for the anchor row
-          let rowRect = self.tableView.rect(ofRow: row)
+          let rowRect = tableView.rect(ofRow: row)
 
           // Calculate new scroll position to maintain the same distance from viewport bottom
-          let viewportHeight = self.scrollView.contentView.bounds.height
+          let viewportHeight = scrollView.contentView.bounds.height
           let targetY = rowRect.minY - viewportHeight - distanceFromViewportBottom
 
           // Apply new scroll position
           let newOrigin = CGPoint(x: 0, y: targetY)
 
-          self.scrollView.withoutScrollerFlash {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            self.scrollView.contentView.scroll(newOrigin)
-            CATransaction.commit()
-          }
+          CATransaction.begin()
+          CATransaction.setDisableActions(true)
+          scrollView.contentView.scroll(newOrigin)
+          CATransaction.commit()
       }
     }
   }
@@ -991,17 +1010,19 @@ class MessageListAppKit: NSViewController {
 
     log.trace("Rows to update: \(rowsToUpdate)")
     let apply: (() -> Void)? = if maintainScroll { anchorScroll(to: .bottomRow) } else { nil }
-    NSAnimationContext.runAnimationGroup { context in
+    NSAnimationContext.runAnimationGroup { [weak self] context in
+      guard let self else { return }
+
       context.duration = 0
       context.allowsImplicitAnimation = false
 
-      self.tableView.beginUpdates()
+      tableView.beginUpdates()
       // Update heights in cells and setNeedsDisplay
       updateHeightsForRows(at: rowsToUpdate)
 
       // Experimental: noteheight of rows was below reload data initially
-      self.tableView.noteHeightOfRows(withIndexesChanged: rowsToUpdate)
-      self.tableView.endUpdates()
+      tableView.noteHeightOfRows(withIndexesChanged: rowsToUpdate)
+      tableView.endUpdates()
 
       apply?()
     }
@@ -1052,7 +1073,8 @@ class MessageListAppKit: NSViewController {
         rowsToUpdate = IndexSet(integersIn: visibleRange.location ..< visibleRange.location + visibleRange.length)
     }
 
-    Task(priority: .userInitiated) {
+    Task(priority: .userInitiated) { [weak self] in
+      guard let self else { return }
       for row in rowsToUpdate {
         guard let message = message(forRow: row) else { continue }
         let props = messageProps(for: row)
@@ -1110,7 +1132,9 @@ class MessageListAppKit: NSViewController {
   }
 
   deinit {
-    NotificationCenter.default.removeObserver(self)
+    dispose()
+
+    Log.shared.debug("🗑️ Deinit: \(type(of: self)) - \(self)")
   }
 
   // MARK: - Unread
@@ -1187,7 +1211,6 @@ extension MessageListAppKit: NSTableViewDelegate {
     log.trace("Making/using view for row \(row)")
 
     let message = messages[row]
-    let identifier = NSUserInterfaceItemIdentifier("MessageCell")
 
     // cell cache
     let cell = cellCache.dequeueCell(withType: "MessageCell", messageId: message.id) {
@@ -1248,10 +1271,7 @@ extension NSTableView {
       y: maxVisibleY + bottomInset - scrollView.contentView.bounds.height
     )
 
-    scrollView.withoutScrollerFlash {
-      // scrollView.contentView.scroll(targetPoint)
-      scrollView.documentView?.scroll(targetPoint)
-    }
+    scrollView.documentView?.scroll(targetPoint)
 
     // Ensure the last row is visible
     // let lastRow = numberOfRows - 1
@@ -1311,7 +1331,7 @@ extension MessageListAppKit {
     // For long distances, use a two-phase animation
     if distance > viewportHeight * 2 {
       // Phase 1: Quick scroll to get close
-      NSAnimationContext.runAnimationGroup { context in
+      NSAnimationContext.runAnimationGroup { [weak self] context in
         context.duration = 0.3
         context.timingFunction = CAMediaTimingFunction(name: .easeIn)
 
@@ -1319,33 +1339,33 @@ extension MessageListAppKit {
         let intermediateY = targetY > currentY
           ? targetY - viewportHeight / 2
           : targetY + viewportHeight / 2
-        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: intermediateY))
-      } completionHandler: {
+        self?.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: intermediateY))
+      } completionHandler: { [weak self] in
         // Phase 2: Slow down for final approach
-        NSAnimationContext.runAnimationGroup { context in
+        NSAnimationContext.runAnimationGroup { [weak self] context in
           context.duration = 0.4
           context.timingFunction = CAMediaTimingFunction(name: .easeOut)
 
           // Final scroll to target
-          self.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
-        } completionHandler: {
+          self?.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
+        } completionHandler: { [weak self] in
           // Clean up
-          self.isProgrammaticScroll = false
+          self?.isProgrammaticScroll = false
 
-          self.highlightMessage(at: index)
+          self?.highlightMessage(at: index)
         }
       }
     } else {
       // For short distances, use a single smooth animation
-      NSAnimationContext.runAnimationGroup { context in
+      NSAnimationContext.runAnimationGroup { [weak self] context in
         context.duration = 0.4
         context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
-      } completionHandler: {
+        self?.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
+      } completionHandler: { [weak self] in
         // Clean up
-        self.isProgrammaticScroll = false
+        self?.isProgrammaticScroll = false
 
-        self.highlightMessage(at: index)
+        self?.highlightMessage(at: index)
       }
     }
   }
@@ -1393,10 +1413,10 @@ extension MessageListAppKit {
 
     // If not animated, just jump to position
     if !animated {
-      scrollView.withoutScrollerFlash {
+      scrollView.withoutScrollerFlash { [weak self] in
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: targetY))
+        self?.scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: targetY))
         CATransaction.commit()
       }
       return
@@ -1429,9 +1449,9 @@ extension MessageListAppKit {
 
           // Final scroll to target
           self.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
-        } completionHandler: {
+        } completionHandler: { [weak self] in
           // Clean up
-          self.isProgrammaticScroll = false
+          self?.isProgrammaticScroll = false
 
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.enableScrollbars()
@@ -1445,9 +1465,9 @@ extension MessageListAppKit {
         context.duration = 0.3
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
-      } completionHandler: {
+      } completionHandler: { [weak self] in
         // Clean up
-        self.isProgrammaticScroll = false
+        self?.isProgrammaticScroll = false
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
           self?.enableScrollbars()
@@ -1461,5 +1481,35 @@ extension MessageListAppKit {
     case top
     case center
     case bottom
+  }
+}
+
+extension MessageListAppKit {
+  func dispose() {
+    // Cancel any tasks
+    eventMonitorTask?.cancel()
+    eventMonitorTask = nil
+
+    // Remove all observers
+    NotificationCenter.default.removeObserver(self)
+
+    // Clear all callbacks
+    scrollToBottomButton.onClick = nil
+
+    // Dispose view model
+    viewModel.dispose()
+
+    // Clear table view delegates
+    tableView.delegate = nil
+    tableView.dataSource = nil
+
+    // Clear cell cache
+    cellCache.clearCache()
+
+    // Remove from parent if still attached
+    view.removeFromSuperview()
+    removeFromParent()
+
+    Log.shared.debug("🗑️🧹 MessageListAppKit disposed: \(self)")
   }
 }

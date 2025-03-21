@@ -2,6 +2,7 @@ import AppKit
 import Cocoa
 import Combine
 import InlineKit
+import Logger
 import SwiftUI
 
 enum ChatViewError: Error {
@@ -131,17 +132,17 @@ class ChatViewAppKit: NSViewController {
 
   private func setupChatComponents(chat: Chat) {
     // Message List
-    let messageListVC = MessageListAppKit(peerId: peerId, chat: chat)
-    addChild(messageListVC)
-    view.addSubview(messageListVC.view)
-    messageListVC.view.translatesAutoresizingMaskIntoConstraints = false
+    let messageListVC_ = MessageListAppKit(peerId: peerId, chat: chat)
+    addChild(messageListVC_)
+    view.addSubview(messageListVC_.view)
+    messageListVC_.view.translatesAutoresizingMaskIntoConstraints = false
 
-    self.messageListVC = messageListVC
+    messageListVC = messageListVC_
 
     // Compose
     let compose = ComposeAppKit(
       peerId: peerId,
-      messageList: messageListVC,
+      messageList: messageListVC!,
       chat: chat,
       dependencies: dependencies
     )
@@ -152,10 +153,10 @@ class ChatViewAppKit: NSViewController {
     // Layout
     NSLayoutConstraint.activate([
       // messageList
-      messageListVC.view.topAnchor.constraint(equalTo: view.topAnchor),
-      messageListVC.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      messageListVC.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      messageListVC.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+      messageListVC!.view.topAnchor.constraint(equalTo: view.topAnchor),
+      messageListVC!.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      messageListVC!.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      messageListVC!.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
       // compose
       compose.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -188,14 +189,20 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func clearCurrentViews() {
-    // Remove hosting view controllers
+    // Remove any non-controller views
+    if let messageListVC {
+      messageListVC.dispose()
+      messageListVC.view.removeFromSuperview()
+      messageListVC.removeFromParent()
+    }
+
+    // Remove child view controllers properly
     for child in children {
       child.view.removeFromSuperview()
       child.removeFromParent()
     }
 
-    // Remove any non-controller views
-    messageListVC?.view.removeFromSuperview()
+    compose?.messageList = nil
     compose?.removeFromSuperview()
 
     // Reset all references
@@ -205,13 +212,23 @@ class ChatViewAppKit: NSViewController {
     compose = nil
   }
 
+  override func viewWillDisappear() {
+    super.viewWillDisappear()
+    // Clean up regardless of window state when view disappears
+    clearCurrentViews()
+  }
+
+  deinit {
+    // Remove window check since cleanup should have happened in viewWillDisappear
+    Log.shared.debug("🗑️ Deinit: \(type(of: self)) - \(self)")
+  }
+
   // MARK: - Drag and Drop
 
   private func setupDragAndDrop() {
     guard let dropView = view as? ChatDropView else { return }
     dropView.dropHandler = { [weak self] sender in
-      guard let self else { return false }
-      return handleDrop(sender)
+      self?.handleDrop(sender) ?? false
     }
   }
 

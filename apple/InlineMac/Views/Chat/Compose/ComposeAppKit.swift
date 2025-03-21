@@ -12,8 +12,8 @@ class ComposeAppKit: NSView {
   private var dependencies: AppDependencies
 
   // State
-  private weak var messageList: MessageListAppKit?
-  private var viewModel: FullChatViewModel?
+  weak var messageList: MessageListAppKit?
+  private weak var viewModel: FullChatViewModel?
 
   // [uniqueId: FileMediaItem]
   private var attachmentItems: [String: FileMediaItem] = [:]
@@ -287,13 +287,13 @@ class ComposeAppKit: NSView {
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         context.allowsImplicitAnimation = true
         // Disable screen updates during animation setup
-        //NSAnimationContext.beginGrouping()
+        // NSAnimationContext.beginGrouping()
         heightConstraint.animator().constant = wrapperHeight
         textHeightConstraint.animator().constant = textEditorHeight
         textEditor.updateTextViewInsets(contentHeight: textViewContentHeight) // use height without paddings
         attachments.updateHeight(animated: true)
         messageList?.updateInsetForCompose(wrapperHeight)
-        //NSAnimationContext.endGrouping()
+        // NSAnimationContext.endGrouping()
       }
     } else {
       textEditor.setHeight(textEditorHeight)
@@ -520,6 +520,8 @@ class ComposeAppKit: NSView {
   deinit {
     keyMonitorUnsubscribe?()
     keyMonitorUnsubscribe = nil
+
+    Log.shared.debug("🗑️🧹 deinit ComposeAppKit: \(self)")
   }
 }
 
