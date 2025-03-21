@@ -297,8 +297,8 @@ struct HomeView: View {
         }
         .tint(.indigo)
       }
-      .swipeActions(edge: .leading, allowsFullSwipe: true) {
-        Button(role: .destructive) {
+      .swipeActions(edge: .leading) {
+        Button {
           Task {
             UnreadManager.shared.readAll(item.dialog.peerId, chatId: item.chat?.id ?? 0)
           }
