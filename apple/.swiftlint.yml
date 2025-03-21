@@ -1,0 +1,119 @@
+# SwiftLint configuration file
+# Disables style rules and focuses on code quality and bug prevention
+
+# Disabled rules (style-related)
+disabled_rules:
+  # Formatting and style
+  - colon
+  - comma
+  - control_statement
+  - file_length
+  - identifier_name
+  - switch_case_alignment
+  - no_extension_access_modifier
+  - force_cast
+  - force_try
+  - function_body_length
+  - function_parameter_count
+  - leading_whitespace
+  - line_length
+  - nesting
+  - opening_brace
+  - operator_whitespace
+  - return_arrow_whitespace
+  - statement_position
+  - todo
+  - trailing_semicolon
+  - trailing_whitespace
+  - type_body_length
+  - type_name
+  - missing_docs
+  - valid_ibinspectable
+  - vertical_whitespace
+
+# Opt-in rules (quality and bug prevention focused)
+opt_in_rules:
+  - array_init
+  - attributes
+  - closure_end_indentation
+  - closure_spacing
+  - collection_alignment
+  - contains_over_filter_count
+  - contains_over_filter_is_empty
+  - contains_over_first_not_nil
+  - discouraged_optional_boolean
+  - empty_count
+  - empty_string
+  - empty_xctest_method
+  - explicit_init
+  - fallthrough
+  - fatal_error_message
+  - first_where
+  - force_unwrapping
+  - identical_operands
+  - implicitly_unwrapped_optional
+  - joined_default_parameter
+  - last_where
+  - legacy_random
+  - let_var_whitespace
+  - literal_expression_end_indentation
+  - lower_acl_than_parent
+  - modifier_order
+  - multiline_parameters
+  - nimble_operator
+  - no_extension_access_modifier
+  - no_fallthrough_only
+  - notification_center_detachment
+  - number_separator
+  - object_literal
+  - operator_usage_whitespace
+  - overridden_super_call
+  - override_in_extension
+  - pattern_matching_keywords
+  - prefer_self_type_over_type_of_self
+  - private_action
+  - private_outlet
+  - prohibited_super_call
+  - quick_discouraged_call
+  - quick_discouraged_focused_test
+  - quick_discouraged_pending_test
+  - redundant_nil_coalescing
+  - redundant_type_annotation
+  - required_enum_case
+  - single_test_class
+  - sorted_first_last
+  - static_operator
+  - strong_iboutlet
+  - toggle_bool
+  - unavailable_function
+  - unneeded_parentheses_in_closure_argument
+  - unowned_variable_capture
+  - untyped_error_in_catch
+  - vertical_parameter_alignment_on_call
+  - xct_specific_matcher
+  - yoda_condition
+
+# Rule configurations
+force_unwrapping:
+  severity: error
+
+implicitly_unwrapped_optional:
+  severity: error
+
+force_cast:
+  severity: error
+
+force_try:
+  severity: error
+
+# Paths to ignore during linting
+excluded:
+  - Carthage
+  - Pods
+  - DerivedData
+  - .build
+  - fastlane
+  - vendor
+
+# Reporter type (xcode, json, csv, checkstyle, codeclimate, junit, html, emoji, sonarqube, markdown)
+reporter: "xcode"
