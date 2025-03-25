@@ -205,7 +205,7 @@ class MessageListAppKit: NSViewController {
     }
 
     if isAtBottom {
-      tableView.scrollToBottomWithInset()
+      tableView.scrollToBottomWithInset(cancel: false)
     }
   }
 
@@ -343,14 +343,16 @@ class MessageListAppKit: NSViewController {
         context.duration = debug_slowAnimation ? 1.5 : 0.2
         context.allowsImplicitAnimation = true
 
-        tableView.scrollToBottomWithInset()
+        tableView.scrollToBottomWithInset(cancel: false)
         //        tableView.scrollRowToVisible(lastRow)
       }
     } else {
-      CATransaction.begin()
-      CATransaction.setDisableActions(true)
-      tableView.scrollToBottomWithInset()
-      CATransaction.commit()
+      tableView.scrollToBottomWithInset(cancel: true)
+
+//      CATransaction.begin()
+//      CATransaction.setDisableActions(true)
+//      tableView.scrollToBottomWithInset()
+//      CATransaction.commit()
 
       // Test if this gives better performance than above solution
 //        NSAnimationContext.runAnimationGroup { context in
@@ -582,12 +584,14 @@ class MessageListAppKit: NSViewController {
     // Early return if no change needed
     if abs(nextScrollPosition - scrollOffset.y) < 0.5 { return }
 
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
+    scrollView.contentView.updateBounds(NSPoint(x: 0, y: nextScrollPosition), cancel: true)
+
+    // CATransaction.begin()
+    // CATransaction.setDisableActions(true)
     // Set new scroll position
-    documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
+    // documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
     // scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: nextScrollPosition))
-    CATransaction.commit()
+    // CATransaction.commit()
 
     //    Looked a bit laggy to me
 //    NSAnimationContext.runAnimationGroup { context in
@@ -929,7 +933,8 @@ class MessageListAppKit: NSViewController {
     return { [weak self] in
       guard let self else { return }
 
-      scrollView.layoutSubtreeIfNeeded()
+      // see if it's needed
+      // scrollView.layoutSubtreeIfNeeded()
 
       switch anchor {
         case let .bottom(row, distanceFromViewportBottom):
@@ -943,10 +948,7 @@ class MessageListAppKit: NSViewController {
           // Apply new scroll position
           let newOrigin = CGPoint(x: 0, y: targetY)
 
-          CATransaction.begin()
-          CATransaction.setDisableActions(true)
-          scrollView.contentView.scroll(newOrigin)
-          CATransaction.commit()
+          scrollView.contentView.updateBounds(newOrigin, cancel: true)
       }
     }
   }
@@ -1257,7 +1259,7 @@ extension MessageListAppKit: NSTableViewDelegate {
 }
 
 extension NSTableView {
-  func scrollToBottomWithInset() {
+  func scrollToBottomWithInset(cancel: Bool = false) {
     guard let scrollView = enclosingScrollView,
           numberOfRows > 0 else { return }
 
@@ -1271,7 +1273,9 @@ extension NSTableView {
       y: maxVisibleY + bottomInset - scrollView.contentView.bounds.height
     )
 
-    scrollView.documentView?.scroll(targetPoint)
+    // scrollView.documentView?.scroll(targetPoint)
+
+    scrollView.contentView.updateBounds(targetPoint, cancel: cancel)
 
     // Ensure the last row is visible
     // let lastRow = numberOfRows - 1
