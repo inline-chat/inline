@@ -1214,12 +1214,16 @@ extension MessageListAppKit: NSTableViewDelegate {
 
     let message = messages[row]
 
+    let identifier = NSUserInterfaceItemIdentifier("MessageCell")
+    let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MessageTableCell
+      ?? MessageTableCell()
+    cell.identifier = identifier
+
     // cell cache
-    let cell = cellCache.dequeueCell(withType: "MessageCell", messageId: message.id) {
-      let newCell = MessageTableCell()
-      newCell.identifier = NSUserInterfaceItemIdentifier("MessageCell")
-      return newCell
-    }
+//    let cell = cellCache.dequeueCell(withType: "MessageCell", messageId: message.id) {
+//      let newCell = MessageTableCell()
+//      newCell.identifier = NSUserInterfaceItemIdentifier("MessageCell")
+//      return newCell
 
     let inputProps = messageProps(for: row)
 
