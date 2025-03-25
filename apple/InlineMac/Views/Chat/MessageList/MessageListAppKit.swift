@@ -641,7 +641,6 @@ class MessageListAppKit: NSViewController {
 
     updateScrollViewInsets()
     checkWidthChangeForHeights()
-    updateMessageViewColors()
 
     // Initial scroll to bottom
     if needsInitialScroll {
@@ -732,21 +731,29 @@ class MessageListAppKit: NSViewController {
         return
       }
 
-      let availableWidth = sizeCalculator.getAvailableWidth(
-        tableWidth: tableWidth()
+      recalculateHeightsOnWidthChange(
+        duringLiveResize: true,
+        maintainScroll: !isAtBottom
       )
-      if availableWidth < Theme.messageMaxWidth {
-        recalculateHeightsOnWidthChange(duringLiveResize: true)
-        wasLastResizeAboveLimit = false
-      } else {
-        if !wasLastResizeAboveLimit {
-          // One last time just before stopping at the limit. This is import so stuff don't get stuck
-          recalculateHeightsOnWidthChange(duringLiveResize: true)
-          wasLastResizeAboveLimit = true
-        } else {
-          log.trace("skipped width recalc")
-        }
-      }
+
+      // COMMENTED FOR NOW TO SEE IF IT WAS OWRTH THE EXTRA BUGS THAT
+      // APPEAR during live resize while maximize
+
+//      let availableWidth = sizeCalculator.getAvailableWidth(
+//        tableWidth: tableWidth()
+//      )
+//      if availableWidth < Theme.messageMaxWidth {
+//        recalculateHeightsOnWidthChange(duringLiveResize: true)
+//        wasLastResizeAboveLimit = false
+//      } else {
+//        if !wasLastResizeAboveLimit {
+//          // One last time just before stopping at the limit. This is import so stuff don't get stuck
+//          recalculateHeightsOnWidthChange(duringLiveResize: true)
+//          wasLastResizeAboveLimit = true
+//        } else {
+//          log.trace("skipped width recalc")
+//        }
+//      }
     }
   }
 
@@ -1236,6 +1243,7 @@ extension MessageListAppKit: NSTableViewDelegate {
 //      let newCell = MessageTableCell()
 //      newCell.identifier = NSUserInterfaceItemIdentifier("MessageCell")
 //      return newCell
+//    }
 
     let inputProps = messageProps(for: row)
 
