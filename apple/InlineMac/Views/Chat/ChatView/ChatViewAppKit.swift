@@ -214,11 +214,15 @@ class ChatViewAppKit: NSViewController {
 
   override func viewWillDisappear() {
     super.viewWillDisappear()
-    // Clean up regardless of window state when view disappears
+  }
+
+  func dispose() {
     clearCurrentViews()
   }
 
   deinit {
+    clearCurrentViews()
+
     // Remove window check since cleanup should have happened in viewWillDisappear
     Log.shared.debug("🗑️ Deinit: \(type(of: self)) - \(self)")
   }
