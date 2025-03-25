@@ -51,17 +51,21 @@ class ContentViewController: NSViewController {
 
     // Properly remove previous view controller
     if let currentVC = currentRouteViewController {
+      if let currentVC = currentVC as? ChatViewAppKit {
+        currentVC.dispose()
+      }
+
       currentVC.view.removeFromSuperview()
       currentVC.removeFromParent()
       currentRouteViewController = nil
     }
-    
+
     if let currentView = currentRouteSubview {
       currentView.removeFromSuperview()
       currentRouteSubview = nil
     }
 
-    removePreviousRoute()
+    // removePreviousRoute()
 
     switch route {
       case .empty:
@@ -88,7 +92,7 @@ class ContentViewController: NSViewController {
     if let viewController {
       addChild(viewController)
     }
-    
+
     // Then add and configure the view
     currentRouteSubview = subview
     currentRouteViewController = viewController
