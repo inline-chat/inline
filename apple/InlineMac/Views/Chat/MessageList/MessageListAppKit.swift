@@ -317,13 +317,28 @@ class MessageListAppKit: NSViewController {
 
   private var lastColumnWidthUpdate: CGFloat = 0
 
-  private func updateColumnWidth() {
+  private func updateColumnWidth(commit: Bool = false) {
     let newWidth = scrollView.contentSize.width
     if abs(newWidth - lastColumnWidthUpdate) > 0.5 {
       let column = tableView.tableColumns.first
+
+      if commit {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+      }
+
       column?.width = newWidth
+
+      if commit {
+        CATransaction.commit()
+      }
+
       lastColumnWidthUpdate = newWidth
     }
+  }
+
+  private func updateColumnWidthAndCommit() {
+    updateColumnWidth(commit: true)
   }
 
   private func scrollToBottom(animated: Bool) {
@@ -622,10 +637,7 @@ class MessageListAppKit: NSViewController {
 
     updateToolbar()
 
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    updateColumnWidth()
-    CATransaction.commit()
+    updateColumnWidthAndCommit()
 
     updateScrollViewInsets()
     checkWidthChangeForHeights()
