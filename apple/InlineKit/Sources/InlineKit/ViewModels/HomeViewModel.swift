@@ -61,7 +61,7 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   static func all() -> QueryInterfaceRequest<HomeChatItem> {
     Dialog
       // filter saved message
-      .filter(Column("peerUserId") != Auth.shared.getCurrentUserId())
+      .filter(Column("peerUserId") != Auth.getCurrentUserId())
       .including(
         required: Dialog.peerUser
           .forKey(CodingKeys.user)

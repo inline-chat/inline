@@ -19,6 +19,8 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   @Published public private(set) var currentUserId: Int64?
   @Published public private(set) var token: String?
 
+  private var task: Task<Void, Never>?
+
   private init() {
     authManager = AuthManager.shared
 
@@ -26,9 +28,10 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     isLoggedIn = authManager.initialIsLoggedIn
     currentUserId = authManager.initialUserId
     token = authManager.initialToken
+    task = nil
 
     // Listen to changes
-    Task { [weak self] in
+    task = Task { [weak self] in
       guard let self else { return }
 
       for await isLoggedIn in await authManager.isLoggedIn {
@@ -57,6 +60,12 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   public func getToken() -> String? {
     lock.withLock {
       token
+    }
+  }
+
+  public func getIsLoggedIn() -> Bool? {
+    lock.withLock {
+      isLoggedIn
     }
   }
 
@@ -102,11 +111,15 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   public static func mocked(authenticated: Bool) -> Auth {
     Auth(mockAuthenticated: authenticated)
   }
+
+  public nonisolated static func getCurrentUserId() -> Int64? {
+    AuthManager.getCurrentUserId()
+  }
 }
 
 actor AuthManager: Sendable {
   public static var shared = AuthManager()
-  
+
   private let log = Log.scoped("AuthManager")
 
   nonisolated let initialUserId: Int64?
@@ -120,12 +133,22 @@ actor AuthManager: Sendable {
   // config
   private var accessGroup: String
   private var userDefaultsPrefix: String
+  private var mocked: Bool = false
 
   // internals
   private let keychain: KeychainSwift
 
   // public
   public var isLoggedIn = AsyncChannel<Bool>()
+
+  static func getUserDefaultsPrefix(mocked: Bool) -> String {
+    if mocked { "mock" }
+    else if let userProfile = ProjectConfig.userProfile {
+      "\(userProfile)_"
+    } else {
+      ""
+    }
+  }
 
   init() {
     // Initialization logic from original Auth class
@@ -145,14 +168,13 @@ actor AuthManager: Sendable {
     #endif
     #endif
 
+    userDefaultsPrefix = Self.getUserDefaultsPrefix(mocked: false)
     if let userProfile = ProjectConfig.userProfile {
       log.debug("Using user profile \(userProfile)")
-      userDefaultsPrefix = "\(userProfile)_"
       keyChainPrefix = "\(keyChainPrefix)\(userProfile)_"
-    } else {
-      userDefaultsPrefix = ""
     }
 
+    mocked = false
     keychain = KeychainSwift(keyPrefix: keyChainPrefix)
     keychain.accessGroup = accessGroup
 
@@ -170,12 +192,16 @@ actor AuthManager: Sendable {
     }
   }
 
+  nonisolated static func getCurrentUserId() -> Int64? {
+    UserDefaults.standard.value(forKey: "\(getUserDefaultsPrefix(mocked: false))userId") as? Int64
+  }
+
   // Mock for testing/previews
   init(mockAuthenticated: Bool) {
     keychain = KeychainSwift(keyPrefix: "mock")
     accessGroup = "2487AN8AL4.keychainGroup"
-    userDefaultsPrefix = "mock"
-
+    userDefaultsPrefix = Self.getUserDefaultsPrefix(mocked: true)
+    mocked = true
     if mockAuthenticated {
       cachedToken = "1:mockToken"
       cachedUserId = 1

@@ -71,7 +71,7 @@ public actor RealtimeAPI: Sendable {
 
     log.debug("starting realtime API")
 
-    guard let _ = Auth.shared.getToken() else {
+    guard let _ = await Auth.shared.getToken() else {
       log.error("No token available")
       throw RealtimeAPIError.notAuthorized
     }
@@ -187,7 +187,7 @@ public actor RealtimeAPI: Sendable {
     log.debug("authenticating")
     // Send connection init
     do {
-      let token = Auth.shared.getToken() ?? ""
+      let token = await Auth.shared.getToken() ?? ""
       log.debug("sending connection init with token \(token)")
       let msg = wrapMessage(body: .connectionInit(.with {
         $0.token = token

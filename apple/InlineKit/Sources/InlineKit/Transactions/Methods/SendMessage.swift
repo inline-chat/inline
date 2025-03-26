@@ -70,7 +70,7 @@ public struct TransactionSendMessage: Transaction {
     let message = Message(
       messageId: temporaryMessageId,
       randomId: randomId,
-      fromId: Auth.shared.getCurrentUserId()!,
+      fromId: Auth.getCurrentUserId()!,
       date: date,
       text: text,
       peerUserId: peerUserId,
@@ -224,7 +224,7 @@ public struct TransactionSendMessage: Transaction {
     do {
       let message = try await AppDatabase.shared.dbWriter.write { db in
         try Message
-          .filter(Column("randomId") == randomId && Column("fromId") == Auth.shared.getCurrentUserId()!)
+          .filter(Column("randomId") == randomId && Column("fromId") == Auth.getCurrentUserId()!)
           .updateAll(
             db,
             Column("status").set(to: MessageSendingStatus.failed.rawValue)
