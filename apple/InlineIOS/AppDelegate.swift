@@ -45,17 +45,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   }
 
   private func applicationDidResignActive(_ notification: Notification) {
-    Task {
-      // Mark offline
-      try? await DataManager.shared.updateStatus(online: false)
-    }
+//    Task {
+//      // Mark offline
+//      try? await DataManager.shared.updateStatus(online: false)
+//    }
   }
 
   private func applicationDidBecomeActive(_ notification: Notification) {
-    Task {
-      // Mark online
-      try? await DataManager.shared.updateStatus(online: true)
-    }
+//    Task {
+//      // Mark online
+//      try? await DataManager.shared.updateStatus(online: true)
+//    }
   }
 
   @objc private func handleAuthenticationChange(_ notification: Notification) {

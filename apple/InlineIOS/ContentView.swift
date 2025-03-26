@@ -102,21 +102,21 @@ extension ContentView {
           sheetContent(for: destination)
             .presentationDetents(destination == .alphaSheet ?[.medium, .large] : [.large])
         }
-        .onAppear {
-          markAsOnline()
-        }
-        .onChange(of: scene) { _, newScene in
-          switch newScene {
-            case .active:
-              markAsOnline()
-            case .inactive:
-              markAsOffline()
-            case .background:
-              markAsOffline()
-            default:
-              break
-          }
-        }
+//        .onAppear {
+//          markAsOnline()
+//        }
+//        .onChange(of: scene) { _, newScene in
+//          switch newScene {
+//            case .active:
+//              markAsOnline()
+//            case .inactive:
+//              markAsOffline()
+//            case .background:
+//              markAsOffline()
+//            default:
+//              break
+//          }
+//        }
 
       case .onboarding:
         OnboardingView()
