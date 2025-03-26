@@ -24,7 +24,7 @@ public extension InlineProtocol.InputPeer {
       case let .chat(value):
         return Peer.thread(id: value.chatID)
       case .self_p:
-        let currentUserId = Auth.shared.getCurrentUserId()
+        let currentUserId = Auth.getCurrentUserId()
         return Peer.user(id: currentUserId ?? 0)
       default:
         Log.shared.error("Unknown peer type")

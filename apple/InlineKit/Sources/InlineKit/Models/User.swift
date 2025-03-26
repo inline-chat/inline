@@ -1,7 +1,7 @@
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
-import Auth
 
 public struct ApiUser: Codable, Hashable, Sendable {
   public var id: Int64
@@ -134,7 +134,7 @@ public extension User {
     Date(timeIntervalSince1970: Double(from))
   }
 
-  func isCurrentUser() -> Bool {
+  @MainActor func isCurrentUser() -> Bool {
     id == Auth.shared.currentUserId
   }
 }
