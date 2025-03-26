@@ -2,7 +2,7 @@ import Foundation
 import InlineKit
 import SwiftUI
 import Auth
-
+import Logger
 
 public enum MainRoutes {
   case main
@@ -10,9 +10,10 @@ public enum MainRoutes {
 }
 
 public class MainViewRouter: ObservableObject {
-  @Published var route: MainRoutes = .main
+  @Published var route: MainRoutes
+  
   init() {
-    print("MainViewRouter init called")
+    Log.shared.info("MainViewRouter init called. Is logged in \(Auth.shared.isLoggedIn)")
     if Auth.shared.isLoggedIn { route = .main } else { route = .onboarding }
   }
 
