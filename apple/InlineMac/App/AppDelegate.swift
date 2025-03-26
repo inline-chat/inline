@@ -41,21 +41,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidResignActive(_ notification: Notification) {
-    Task {
-      if Auth.shared.isLoggedIn {
-        // Mark offline
-        try? await DataManager.shared.updateStatus(online: false)
-      }
-    }
+//    Task {
+//      if Auth.shared.isLoggedIn {
+//        // Mark offline
+//        try? await DataManager.shared.updateStatus(online: false)
+//      }
+//    }
   }
 
   func applicationDidBecomeActive(_ notification: Notification) {
-    Task {
-      if Auth.shared.isLoggedIn {
-        // Mark online
-        try? await DataManager.shared.updateStatus(online: true)
-      }
-    }
+//    Task {
+//      if Auth.shared.isLoggedIn {
+//        // Mark online
+//        try? await DataManager.shared.updateStatus(online: true)
+//      }
+//    }
   }
 
   @MainActor private func setupMainWindow() {

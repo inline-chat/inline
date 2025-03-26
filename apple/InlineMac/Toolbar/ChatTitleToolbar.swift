@@ -212,7 +212,7 @@ final class ChatStatusView: NSView {
       return "public"
     }
 
-    guard let user else { return "last seen a long time ago" }
+    guard let user else { return "" }
 
     if user.isCurrentUser() {
       return ""
@@ -220,16 +220,15 @@ final class ChatStatusView: NSView {
 
     if let action = currentComposeAction {
       return action.toHumanReadable()
-    } else if user.online == true {
-      return "online"
-    } else if let lastOnline = user.lastOnline {
-      return getLastOnlineText(date: lastOnline)
     }
-    return "last seen recently"
+    return ""
   }
 
   private func updateLabel() {
     label.stringValue = currentLabel
+
+    // Hide the entire status view if there's no text to display
+    isHidden = currentLabel.isEmpty
   }
 
   private func setupView() {

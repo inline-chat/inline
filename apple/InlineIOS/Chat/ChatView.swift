@@ -63,16 +63,19 @@ struct ChatView: View {
       getStatusText(realtime.apiState)
     } else if let composeAction = currentComposeAction() {
       composeAction.rawValue
-    } else if let online = fullChatViewModel.peerUser?.online {
-      online
-        ? "online"
-        : (
-          fullChatViewModel.peerUser?.lastOnline != nil
-            ? getLastOnlineText(date: fullChatViewModel.peerUser?.lastOnline) : "offline"
-        )
     } else {
-      "last seen recently"
+      ""
     }
+//    } else if let online = fullChatViewModel.peerUser?.online {
+//      online
+//        ? "online"
+//        : (
+//          fullChatViewModel.peerUser?.lastOnline != nil
+//            ? getLastOnlineText(date: fullChatViewModel.peerUser?.lastOnline) : "offline"
+//        )
+//    } else {
+//      "last seen recently"
+//    }
   }
 
   init(peer: Peer, preview: Bool = false) {
@@ -146,19 +149,21 @@ struct ChatView: View {
       Text(title)
         .fontWeight(.semibold)
 
-      if !isCurrentUser, isPrivateChat {
+      if !isCurrentUser, isPrivateChat, !subtitle.isEmpty {
         HStack {
           if let composeAction = currentComposeAction() {
             AnimatedDots(dotSize: 3)
           }
 
-          Text(subtitle)
+          Text(subtitle.lowercased())
             .font(.caption)
             .foregroundStyle(.secondary)
         }
         .padding(.top, -2)
+        .fixedSize()
       }
     }
+    .fixedSize()
     .onAppear {
       apiState = realtime.apiState
     }
