@@ -1,14 +1,14 @@
+import Auth
 import Combine
 import GRDB
 import GRDBQuery
-import Auth
 
 /// Fetches current user from the database.
 public struct CurrentUser: ValueObservationQueryable {
   public static var defaultValue: UserInfo? { nil }
 
   public func fetch(_ db: Database) throws -> UserInfo? {
-    guard let userId = Auth.shared.getCurrentUserId() else { return nil }
+    guard let userId = Auth.getCurrentUserId() else { return nil }
 
     return try User
       .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
