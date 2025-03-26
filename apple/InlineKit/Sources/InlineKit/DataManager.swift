@@ -399,8 +399,8 @@ public class DataManager: ObservableObject {
   }
 
   public func updateStatus(online: Bool) async throws {
-    log.debug("updateStatus")
-    let _ = try await ApiClient.shared.updateStatus(online: online)
+//    log.debug("updateStatus")
+//    let _ = try await ApiClient.shared.updateStatus(online: online)
   }
 
   public func updateDialog(
