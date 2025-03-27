@@ -13,6 +13,7 @@ class EmbedMessageView: UIView {
 
   static let height = 42.0
   private var outgoing: Bool = false
+  private var isOnlyEmoji: Bool = false
 
   private lazy var headerLabel: UILabel = {
     let label = UILabel()
@@ -73,8 +74,9 @@ class EmbedMessageView: UIView {
     updateRectangleMask()
   }
 
-  func configure(message: Message, senderName: String, outgoing: Bool) {
+  func configure(message: Message, senderName: String, outgoing: Bool, isOnlyEmoji: Bool) {
     self.outgoing = outgoing
+    self.isOnlyEmoji = isOnlyEmoji
     headerLabel.text = senderName
 
     if message.hasUnsupportedTypes {
@@ -147,10 +149,10 @@ private extension EmbedMessageView {
   }
 
   func updateColors() {
-    let textColor: UIColor = outgoing ? .white : .darkGray
-    let rectangleColor = outgoing ? UIColor.white : .systemGray
-    let bgAlpha: CGFloat = outgoing ? 0.13 : 0.1
-    backgroundColor = outgoing ? .white.withAlphaComponent(bgAlpha) : .systemGray.withAlphaComponent(bgAlpha)
+    let textColor: UIColor = outgoing && !isOnlyEmoji ?.white : .darkGray
+    let rectangleColor = outgoing && !isOnlyEmoji ? UIColor.white : .systemGray
+    let bgAlpha: CGFloat = outgoing && !isOnlyEmoji ? 0.13 : 0.1
+    backgroundColor = outgoing && !isOnlyEmoji ? .white.withAlphaComponent(bgAlpha) : .systemGray.withAlphaComponent(bgAlpha)
 
     headerLabel.textColor = textColor
     messageLabel.textColor = textColor

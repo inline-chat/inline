@@ -283,7 +283,8 @@ class UIMessageView: UIView {
       embedView.configure(
         message: repliedMessage,
         senderName: senderName,
-        outgoing: outgoing
+        outgoing: outgoing,
+        isOnlyEmoji: isEmojiOnlyMessage
       )
     }
   }
