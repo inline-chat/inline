@@ -37,14 +37,15 @@ class ColorManager {
   private let secondaryColorKey = "selected_bubble_secondary_color"
   // Default color palette
   let availableColors: [UIColor] = [
-    UIColor(hex: "#2F8AFA")!,
-    UIColor(hex: "#AE4DF2")!,
-    UIColor(hex: "#F776B3")!,
-    UIColor(hex: "#2BC738")!,
-    .systemIndigo,
-    UIColor(hex: "#FF6449")!,
-    .systemTeal,
-    UIColor(hex: "#F34747")!,
+    UIColor(hex: "#52A5FF")!,
+    UIColor(hex: "#2D93FF")!,
+    UIColor(hex: "#FF82B8")!,
+    UIColor(hex: "#CF7DFF")!,
+    UIColor(hex: "#FF946D")!,
+    UIColor(hex: "#55CA76")!,
+    UIColor(hex: "#4DAEAD")!,
+    UIColor(hex: "#6570FF")!,
+    UIColor(hex: "#826FFF")!,
   ]
 
   // Get the currently selected color, defaulting to system blue if none selected
