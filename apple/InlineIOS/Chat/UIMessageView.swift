@@ -545,7 +545,7 @@ class UIMessageView: UIView {
       string: text,
       attributes: [
         .font: UIFont
-          .systemFont(ofSize: isSingleEmojiMessage ? 120 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17),
+          .systemFont(ofSize: isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17),
         .foregroundColor: textColor,
       ]
     )
