@@ -22,7 +22,7 @@ class MessageSizeCalculator {
   /// in due to a bug
   private let emptyFallback = " "
 
-  private let log = Log.scoped("MessageSizeCalculator", enableTracing: false)
+  private let log = Log.scoped("MessageSizeCalculator", enableTracing: true)
   private var heightForSingleLine: CGFloat?
 
   static let safeAreaWidth: CGFloat = Theme.messageRowSafeAreaInset
@@ -40,7 +40,7 @@ class MessageSizeCalculator {
     MessageTextConfiguration.configureTextContainer(textContainer)
     // TODO: Use message id or a fast hash for the keys instead of text
     cache.countLimit = 5_000
-    textHeightCache.countLimit = 5_000
+    textHeightCache.countLimit = 10_000
     minTextWidthForSingleLine.countLimit = 5_000
     lastHeightForRow.countLimit = 1_000
 
@@ -176,7 +176,7 @@ class MessageSizeCalculator {
   // Use a more efficient cache key
   private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
     // Hash-based approach is faster than string concatenation
-    let hashValue = "\(message.id)_\(Int(width))_\(props.hashValue)".hashValue
+    let hashValue = "\(message.id)_\(Int(width))_\(props.toString())"
     return NSString(string: "\(hashValue)")
   }
 
@@ -242,14 +242,16 @@ class MessageSizeCalculator {
     log.trace("availableWidth \(availableWidth) for text \(text)")
 
     let cacheKey_ = cacheKey(for: message, width: availableWidth, props: props)
-    if let cachedSize = cache.object(forKey: cacheKey_)?.sizeValue,
-       let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue
+    if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue
     {
       textSize = cachedTextSize
+      log.debug("text size cache hit \(message.message.messageId)")
 
       if hasText, abs(cachedTextSize.height - heightForSingleLineText()) < 0.5 {
         isSingleLine = true
       }
+    } else {
+      log.debug("text size cache miss \(message.id)")
     }
 
     // MARK: Calculate text size if caches are missed
@@ -259,6 +261,7 @@ class MessageSizeCalculator {
        textSize == nil,
        let minTextWidth = getTextWidthIfSingleLine(message, availableWidth: availableWidth)
     {
+      log.trace("single line cache hit \(message.id)")
       isSingleLine = true
       textSize = CGSize(width: minTextWidth, height: heightForSingleLineText())
     } else {
@@ -280,9 +283,8 @@ class MessageSizeCalculator {
       }
     }
 
-    let textHeight = ceil(textSize?.height ?? 0.0)
+    let textHeight = textSize?.height ?? 0.0
     let textWidth = textSize?.width ?? 0.0
-    let textSizeCeiled = CGSize(width: ceil(textWidth), height: ceil(textHeight))
 
     // MARK: - Layout Plans
 
@@ -534,10 +536,12 @@ class MessageSizeCalculator {
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
 
     cache.setObject(NSValue(size: size), forKey: cacheKey_)
-    textHeightCache.setObject(NSValue(size: textSizeCeiled), forKey: cacheKey_)
+    if let textSize {
+      textHeightCache.setObject(NSValue(size: textSize), forKey: cacheKey_)
+    }
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
 
-    return (size, textSizeCeiled, photoSize, plan)
+    return (size, textSize ?? NSSize.zero, photoSize, plan)
   }
 
   func cachedSize(messageStableId: Int64) -> CGSize? {
@@ -560,6 +564,7 @@ class MessageSizeCalculator {
       let text = "Ij"
       let size = calculateSizeForText(text, width: 1_000)
       heightForSingleLine = size.height
+      log.trace("heightForSingleLine \(heightForSingleLine ?? 0)")
       return size.height
     }
   }
@@ -591,7 +596,7 @@ class MessageSizeCalculator {
     let textRect = layoutManager.usedRect(for: textContainer)
 
     let textHeight = ceil(textRect.height)
-    let textWidth = textRect.width + Self.extraSafeWidth
+    let textWidth = ceil(textRect.width) + Self.extraSafeWidth
 
     log.trace("calculateSizeForText \(text) width \(width) resulting in rect \(textRect)")
 
