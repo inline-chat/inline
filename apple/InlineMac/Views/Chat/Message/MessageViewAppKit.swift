@@ -151,7 +151,8 @@ class MessageViewAppKit: NSView {
 
     let view = DocumentView(
       documentInfo: documentInfo,
-      fullMessage: self.fullMessage
+      fullMessage: self.fullMessage,
+      white: true
     )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -469,6 +470,20 @@ class MessageViewAppKit: NSView {
         ]
       )
       contentView.setCustomSpacing(reply.spacing.bottom, after: replyView)
+    }
+
+    // Document
+    if let document = layout.document, let documentView {
+      constraints.append(
+        contentsOf: [
+          documentView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
+          documentView.trailingAnchor.constraint(
+            equalTo: contentView.trailingAnchor,
+            constant: -document.spacing.right
+          ),
+        ]
+      )
+      contentView.setCustomSpacing(document.spacing.bottom, after: documentView)
     }
 
     // Photo

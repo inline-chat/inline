@@ -47,7 +47,6 @@ class MessageSizeCalculator {
     prepareForUse()
   }
 
-
   // Call when new chat view is initialized
   public func prepareForUse() {
     // Re-call to pick up fresh time format
@@ -394,9 +393,20 @@ class MessageSizeCalculator {
       documentPlan!.size = CGSize(width: 200, height: Theme.documentViewHeight)
 
       if hasText {
-        documentPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
+        // documentPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
+        documentPlan!.spacing = NSEdgeInsets(
+          top: 8,
+          left: Theme.messageBubbleContentHorizontalInset,
+          bottom: Theme.messageTextAndPhotoSpacing,
+          right: Theme.messageBubbleContentHorizontalInset
+        )
       } else {
-        documentPlan!.spacing = .vertical(Theme.messageBubbleContentHorizontalInset)
+        documentPlan!.spacing = NSEdgeInsets(
+          top: 8,
+          left: Theme.messageBubbleContentHorizontalInset,
+          bottom: 8,
+          right: Theme.messageBubbleContentHorizontalInset
+        )
       }
     }
 
@@ -454,6 +464,11 @@ class MessageSizeCalculator {
       bubbleHeight += photoPlan.size.height
       bubbleHeight += photoPlan.spacing.bottom
       bubbleWidth = photoPlan.size.width
+    }
+    if let documentPlan {
+      bubbleHeight += documentPlan.size.height
+      bubbleHeight += documentPlan.spacing.bottom
+      bubbleWidth = max(bubbleWidth, documentPlan.size.width + documentPlan.spacing.horizontalTotal)
     }
     if let timePlan {
       if !isSingleLine {
