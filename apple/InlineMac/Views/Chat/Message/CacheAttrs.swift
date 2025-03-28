@@ -8,7 +8,7 @@ class CacheAttrs {
 
   init() {
     cache = NSCache<NSString, NSAttributedString>()
-    cache.countLimit = 1_000 // Set appropriate limit
+    cache.countLimit = 2_000 // Set appropriate limit
   }
 
   func get(key: String) -> NSAttributedString? {
@@ -16,7 +16,7 @@ class CacheAttrs {
   }
 
   func getKey(_ message: Message) -> String {
-    "\(message.text ?? "")___\(message.stableId)"
+    "\(message.text?.count ?? 0)___\(message.stableId)"
   }
 
   func get(message: Message) -> NSAttributedString? {
