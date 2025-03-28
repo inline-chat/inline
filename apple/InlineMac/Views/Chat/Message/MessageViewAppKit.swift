@@ -24,7 +24,9 @@ class MessageViewAppKit: NSView {
   }
 
   private var showsAvatar: Bool { props.layout.hasAvatar }
-  private var showsName: Bool { props.layout.hasName }
+  private var showsName: Bool {
+    props.layout.hasName
+  }
   private var outgoing: Bool {
     message.out == true
   }

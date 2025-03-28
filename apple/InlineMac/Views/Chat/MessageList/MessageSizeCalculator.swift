@@ -307,7 +307,7 @@ class MessageSizeCalculator {
 
     // MARK: - Name
 
-    if props.firstInGroup {
+    if props.firstInGroup, !isOutgoing {
       let nameHeight = Theme.messageNameLabelHeight
       namePlan = LayoutPlan(
         size: CGSize(width: 0, height: nameHeight),
@@ -317,11 +317,13 @@ class MessageSizeCalculator {
 
     // MARK: - Avatar
 
+    let hasName = namePlan != nil
+
     if props.firstInGroup {
       avatarPlan = LayoutPlan(
         size: .init(width: Theme.messageAvatarSize, height: Theme.messageAvatarSize),
         spacing: .init(
-          top: Theme.messageNameLabelHeight,
+          top: hasName ? Theme.messageNameLabelHeight : 0,
           left: Theme.messageSidePadding,
           bottom: 0,
           right: Theme.messageHorizontalStackSpacing
