@@ -19,24 +19,29 @@ class DocumentView: NSView {
 
   private var progressSubscription: AnyCancellable?
   private var isDownloading = false
+  private var white = false
 
   // MARK: - UI Elements
 
-  private let iconContainer: NSView = {
+  private lazy var iconContainer: NSView = {
     let container = NSView()
     container.translatesAutoresizingMaskIntoConstraints = false
     container.wantsLayer = true
-    container.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.05).cgColor
+    container.layer?.backgroundColor = white ?
+      NSColor.white.withAlphaComponent(0.08).cgColor :
+      NSColor.black.withAlphaComponent(0.05).cgColor
     container.layer?.cornerRadius = DocumentView.iconCircleSize / 2
     return container
   }()
 
-  private let iconView: NSImageView = {
+  private lazy var iconView: NSImageView = {
     let imageView = NSImageView()
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.wantsLayer = true
     imageView.image = NSImage(systemSymbolName: "document", accessibilityDescription: nil)
-    imageView.contentTintColor = .secondaryLabelColor
+    imageView.contentTintColor = white ?
+      .white :
+      .secondaryLabelColor
 
     let config = NSImage.SymbolConfiguration(pointSize: 21, weight: .regular)
     imageView.symbolConfiguration = config
@@ -58,11 +63,12 @@ class DocumentView: NSView {
     return imageView
   }()
 
-  private let fileNameLabel: NSTextField = {
+  private lazy var fileNameLabel: NSTextField = {
     let label = NSTextField(labelWithString: "File")
     label.font = .systemFont(ofSize: 12, weight: .regular)
     label.maximumNumberOfLines = 1
     label.lineBreakMode = .byTruncatingTail
+    label.textColor = white ? .white : .labelColor
     // Configure truncation
     label.cell?.lineBreakMode = .byTruncatingMiddle // Truncate in the middle for filenames
     label.cell?.truncatesLastVisibleLine = true
@@ -70,20 +76,20 @@ class DocumentView: NSView {
     return label
   }()
 
-  private let fileSizeLabel: NSTextField = {
+  private lazy var fileSizeLabel: NSTextField = {
     let label = NSTextField(labelWithString: "2 MB")
     label.font = .systemFont(ofSize: 12)
-    label.textColor = .secondaryLabelColor
+    label.textColor = white ? .white.withAlphaComponent(0.8) : .secondaryLabelColor
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
 
-  private let actionButton: NSButton = {
+  private lazy var actionButton: NSButton = {
     let button = NSButton(title: "Download", target: nil, action: #selector(actionButtonTapped))
     button.isBordered = false
     button.font = .systemFont(ofSize: 12)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.contentTintColor = NSColor.controlAccentColor
+    button.contentTintColor = white ? .white : NSColor.controlAccentColor
     return button
   }()
 
@@ -144,11 +150,13 @@ class DocumentView: NSView {
     documentInfo: DocumentInfo,
     fullMessage: FullMessage? = nil,
     /// Set when rendering in compose and it renders a close button
-    removeAction: (() -> Void)? = nil
+    removeAction: (() -> Void)? = nil,
+    white: Bool? = nil
   ) {
     self.documentInfo = documentInfo
     self.removeAction = removeAction
     self.fullMessage = fullMessage
+    self.white = white ?? false
 
     super.init(frame: NSRect(x: 0, y: 0, width: 300, height: Theme.documentViewHeight))
 
@@ -322,7 +330,7 @@ class DocumentView: NSView {
         actionButton.isHidden = false
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Show in Finder"
-        actionButton.contentTintColor = NSColor.systemBlue
+        actionButton.contentTintColor = white ? .white : NSColor.systemBlue
 
       case .needsDownload:
         // Show download button
@@ -331,7 +339,7 @@ class DocumentView: NSView {
         actionButton.isHidden = false
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Download"
-        actionButton.contentTintColor = NSColor.controlAccentColor
+        actionButton.contentTintColor = white ? .white : NSColor.controlAccentColor
 
       case let .downloading(bytesReceived, totalBytes):
         // Show download progress
