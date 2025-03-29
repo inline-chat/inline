@@ -45,6 +45,7 @@ class TransactionsCache {
 
   public func remove(transactionId: String) {
     transactions.removeAll { persistedTransaction in
+      persistedTransaction.transaction.id == transactionId
     }
 
     persistAll()
@@ -86,7 +87,7 @@ class TransactionsCache {
       return []
     }
   }
-  
+
   func clearAll() {
     transactions = []
     persistAll()
