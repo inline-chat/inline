@@ -76,7 +76,7 @@ public class Transactions: @unchecked Sendable {
   }
 
   /// Immediately triggers rollback and removes transaction from cache
-  func cancel(transactionId: String) {
+  public func cancel(transactionId: String) {
     Task {
       // Remove from cache
       cache.remove(transactionId: transactionId)

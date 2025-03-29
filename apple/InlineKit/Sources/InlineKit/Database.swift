@@ -259,7 +259,7 @@ public extension AppDatabase {
         t.column("externalTaskId", .integer).references("externalTask", column: "id", onDelete: .cascade)
       }
     }
-    
+
     migrator.registerMigration("media tables") { db in
       // Photo table
       try db.create(table: "photo") { t in
@@ -268,7 +268,7 @@ public extension AppDatabase {
         t.column("date", .datetime).notNull()
         t.column("format", .text).notNull() // "jpeg", "png"
       }
-      
+
       // PhotoSize table
       try db.create(table: "photoSize") { t in
         t.autoIncrementedPrimaryKey("id")
@@ -283,7 +283,7 @@ public extension AppDatabase {
         t.column("cdnUrl", .text)
         t.column("localPath", .text)
       }
-      
+
       // Video table
       try db.create(table: "video") { t in
         t.autoIncrementedPrimaryKey("id")
@@ -298,7 +298,7 @@ public extension AppDatabase {
         t.column("cdnUrl", .text)
         t.column("localPath", .text)
       }
-      
+
       // Document table
       try db.create(table: "document") { t in
         t.autoIncrementedPrimaryKey("id")
@@ -312,12 +312,18 @@ public extension AppDatabase {
         t.column("thumbnailPhotoId", .integer)
           .references("photo", column: "id", onDelete: .setNull)
       }
-      
+
       // Update message table to reference media
       try db.alter(table: "message") { t in
         t.add(column: "photoId", .integer).references("photo", column: "photoId", onDelete: .setNull)
         t.add(column: "videoId", .integer).references("video", column: "videoId", onDelete: .setNull)
         t.add(column: "documentId", .integer).references("document", column: "documentId", onDelete: .setNull)
+      }
+    }
+
+    migrator.registerMigration("transactionId") { db in
+      try db.alter(table: "message") { t in
+        t.add(column: "transactionId", .text)
       }
     }
 
@@ -460,12 +466,11 @@ public extension AppDatabase {
       )
 
       let directory =
-        if let userProfile = ProjectConfig.userProfile
-      {
-        "Database_\(userProfile)"
-      } else {
-        "Database"
-      }
+        if let userProfile = ProjectConfig.userProfile {
+          "Database_\(userProfile)"
+        } else {
+          "Database"
+        }
 
       let directoryURL = appSupportURL.appendingPathComponent(directory, isDirectory: true)
       try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)

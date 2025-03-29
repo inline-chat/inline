@@ -823,10 +823,36 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
     return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
       guard let self else { return UIMenu(children: []) }
 
+      let isMessageSending = message.status == .sending
+
       let copyAction = UIAction(title: "Copy") { _ in
         UIPasteboard.general.string = self.message.text
       }
 
+      if isMessageSending {
+        let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { [weak self] _ in
+          guard let self = self else { return }
+
+          if let transactionId = self.message.transactionId, !transactionId.isEmpty {
+            Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
+
+            Transactions.shared.cancel(transactionId: transactionId)
+            Task {
+              let _ = try? await AppDatabase.shared.dbWriter.write { db in
+                try Message
+                  .filter(Column("chatId") == self.message.chatId)
+                  .filter(Column("messageId") == self.message.messageId)
+                  .deleteAll(db)
+              }
+
+              // Remove from cache
+              MessagesPublisher.shared
+                .messagesDeleted(messageIds: [self.message.messageId], peer: self.message.peerId)
+            }
+          }
+        }
+        return UIMenu(children: [copyAction, cancelAction])
+      }
       var actions: [UIAction] = [copyAction]
 
       if fullMessage.photoInfo != nil {
@@ -933,9 +959,14 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
   }
 
   func onRequestMenuAuxiliaryPreview(sender: ContextMenuManager) -> UIView? {
+    // Don't show reaction picker if message is sending
+    if message.status == .sending {
+      return nil
+    }
+
     // Create a SwiftUI hosting controller with our reaction picker view
     let hostingController = ReactionPickerHostingController(
-      emojis: ["👍", "❤️", "🥹", "🫡", "😂", "💯", "🆒", "✔️"],
+      emojis: ["👍", "❤️", "🥹", "🫡", "😂", "💯", "��", "✔️"],
       onEmojiSelected: { [weak self] emoji in
         guard let self else { return }
         Self.contextMenuOpen = false
