@@ -80,6 +80,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var photoId: Int64?
   public var videoId: Int64?
   public var documentId: Int64?
+  public var transactionId: String?
 
   enum Columns {
     static let messageId = Column(CodingKeys.messageId)
@@ -178,7 +179,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     fileId: String? = nil,
     photoId: Int64? = nil,
     videoId: Int64? = nil,
-    documentId: Int64? = nil
+    documentId: Int64? = nil,
+    transactionId: String? = nil
   ) {
     self.messageId = messageId
     self.randomId = randomId
@@ -198,7 +200,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.photoId = photoId
     self.videoId = videoId
     self.documentId = documentId
-
+    self.transactionId = transactionId
     if peerUserId == nil, peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
@@ -274,6 +276,7 @@ public extension Message {
       if let existing = try? Message.fetchOne(db, key: ["messageId": messageId, "chatId": chatId]) {
         globalId = existing.globalId
         fileId = existing.fileId ?? fileId
+        transactionId = existing.transactionId
         isExisting = true
       }
     } else {
@@ -348,6 +351,7 @@ public extension ApiMessage {
       message.status = existing.status
       message.fileId = existing.fileId
       message.text = existing.text
+      message.transactionId = existing.transactionId
       // ... anything else?
     } else {
       // attach main photo
@@ -404,7 +408,7 @@ public extension Message {
       message.photoId = message.photoId ?? existing.photoId
       message.videoId = message.videoId ?? existing.videoId
       message.documentId = message.documentId ?? existing.documentId
-
+      message.transactionId = message.transactionId ?? existing.transactionId
       // Update media selectively if needed
       if protocolMessage.hasMedia {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)

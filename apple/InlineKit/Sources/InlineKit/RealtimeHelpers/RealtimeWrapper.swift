@@ -119,10 +119,10 @@ public final actor Realtime: Sendable {
     }
   }
 
-  public func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws
+  public func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?, discardIfNotConnected: Bool = false) async throws
     -> RpcResult.OneOf_Result?
   {
-    try await api.invoke(method, input: input)
+    try await api.invoke(method, input: input, discardIfNotConnected: discardIfNotConnected)
   }
 
   public func loggedOut() {

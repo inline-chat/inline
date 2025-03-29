@@ -82,9 +82,11 @@ public struct TransactionSendMessage: Transaction {
       fileId: nil,
       photoId: media?.asPhotoId(),
       videoId: media?.asVideoId(),
-      documentId: media?.asDocumentId()
+      documentId: media?.asDocumentId(),
+      transactionId: id
     )
 
+    print("message \(message)")
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
     // (mo a few months later) TRADE OFFS BABY
     // Task { @MainActor in
@@ -184,7 +186,8 @@ public struct TransactionSendMessage: Transaction {
 
     let result_ = try await Realtime.shared.invoke(
       .sendMessage,
-      input: .sendMessage(input)
+      input: .sendMessage(input),
+      discardIfNotConnected: true
     )
 
     guard case let .sendMessage(result) = result_ else {

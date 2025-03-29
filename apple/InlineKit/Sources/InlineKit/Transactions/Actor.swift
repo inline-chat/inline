@@ -18,6 +18,8 @@ actor TransactionsActor {
   // Return when done
   private var completionHandler: CompletionHandler?
 
+  var canceledTransactionIds: [String] = []
+
   // MARK: - Lifecycle
 
   init() {
@@ -56,6 +58,7 @@ actor TransactionsActor {
   }
 
   func cancel(transactionId: String) {
+    canceledTransactionIds.append(transactionId)
     guard let transaction = queue.first(where: { $0.id == transactionId }) else { return }
 
     // Remove from queue if not yet started
@@ -80,15 +83,21 @@ actor TransactionsActor {
 
   public func run(transaction: some Transaction) async {
     do {
-      // Simple execution
-      // let result = try await transaction.execute()
 
-      // Basic retry logic
-      let result = try await executeWithRetry(transaction)
+      do {
+        let result = try await executeWithRetry(transaction)
 
-      // TODO: Proper smart retry
-      await transaction.didSucceed(result: result)
-      completionHandler?(transaction)
+        await transaction.didSucceed(result: result)
+        completionHandler?(transaction)
+      } catch TransactionError.canceled {
+        print("Transaction \(transaction.id) was canceled during execution or retry")
+        await transaction.rollback()
+        completionHandler?(transaction)
+        return
+      } catch {
+        await transaction.didFail(error: error)
+        completionHandler?(transaction)
+      }
 
     } catch {
       await transaction.didFail(error: error)
@@ -100,6 +109,9 @@ actor TransactionsActor {
     var attempts = 0
 
     while attempts < transaction.config.maxRetries {
+      if canceledTransactionIds.contains(transaction.id) {
+        throw TransactionError.canceled
+      }
       do {
         return try await transaction.execute()
       } catch {
