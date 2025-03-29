@@ -210,9 +210,14 @@ public actor RealtimeAPI: Sendable {
 extension RealtimeAPI {
   // MARK: - RPC
 
-  public func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> RpcResult
+  public func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?, discardIfNotConnected: Bool = false) async throws -> RpcResult
     .OneOf_Result?
   {
+    if state == .paused, discardIfNotConnected {
+      log.debug("flowing paused, discarding")
+      throw RealtimeAPIError.notConnected
+    }
+
     let message = wrapMessage(body: .rpcCall(.with {
       $0.method = method
       $0.input = input

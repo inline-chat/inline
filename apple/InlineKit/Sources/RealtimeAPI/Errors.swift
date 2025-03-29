@@ -15,4 +15,5 @@ public enum RealtimeAPIError: Error {
   case unknown(Error)
   case notAuthorized
   case stopped
+  case notConnected
 }
