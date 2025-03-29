@@ -30,11 +30,12 @@ public class MessagesProgressiveViewModel {
   // internals
   // was 80
   private lazy var initialLimit: Int = // divide window height by 25
-    if let height = ScreenMetrics.height {
-      (Int(height.rounded()) / 24) + 30
-    } else {
-      60
-    }
+    if let height = ScreenMetrics.height
+  {
+    (Int(height.rounded()) / 24) + 30
+  } else {
+    60
+  }
 
   private let log = Log.scoped("MessagesViewModel", enableTracing: false)
   private let db = AppDatabase.shared
@@ -392,7 +393,7 @@ public final class MessagesPublisher {
   }
 
   // Message IDs not Global IDs
-  func messagesDeleted(messageIds: [Int64], peer: Peer) {
+  public func messagesDeleted(messageIds: [Int64], peer: Peer) {
     publisher.send(.delete(MessageDelete(messageIds: messageIds, peer: peer)))
   }
 
@@ -402,14 +403,15 @@ public final class MessagesPublisher {
     let fullMessage = try? await db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
-        if let messageGlobalId = message.globalId {
-          query
-            .filter(id: messageGlobalId)
-        } else {
-          query
-            .filter(Column("messageId") == message.messageId)
-            .filter(Column("chatId") == message.chatId)
-        }
+        if let messageGlobalId = message.globalId
+      {
+        query
+          .filter(id: messageGlobalId)
+      } else {
+        query
+          .filter(Column("messageId") == message.messageId)
+          .filter(Column("chatId") == message.chatId)
+      }
 
       return try base.fetchOne(db)
     }
@@ -427,14 +429,15 @@ public final class MessagesPublisher {
     let fullMessage = try? db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
-        if let messageGlobalId = message.globalId {
-          query
-            .filter(id: messageGlobalId)
-        } else {
-          query
-            .filter(Column("messageId") == message.messageId)
-            .filter(Column("chatId") == message.chatId)
-        }
+        if let messageGlobalId = message.globalId
+      {
+        query
+          .filter(id: messageGlobalId)
+      } else {
+        query
+          .filter(Column("messageId") == message.messageId)
+          .filter(Column("chatId") == message.chatId)
+      }
 
       return try base.fetchOne(db)
     }
@@ -467,8 +470,8 @@ public final class MessagesPublisher {
   }
 }
 
-extension MessagesProgressiveViewModel {
-  public func dispose() {
+public extension MessagesProgressiveViewModel {
+  func dispose() {
     callback = nil
     cancellable.removeAll()
   }
