@@ -531,17 +531,56 @@ public extension AppDatabase {
       log.error("Unresolved error", error: error)
 
       // handle db password issue and create a new one
+      log.error("Database initialization error", error: error)
+
+      // Handle different error scenarios
       if error.localizedDescription.contains("SQLite error 26") {
-        // re-create database and re-run
+        // Password/encryption error
+        log.info("Re-creating database because token was lost")
         do {
-          log.info("Re-creating database because token was lost")
           try AppDatabase.deleteDatabaseFile()
           return AppDatabase.makeShared()
         } catch {
-          fatalError("Unresolved error \(error)")
+          log.error("Failed to recreate database after encryption error", error: error)
         }
-      } else {
-        fatalError("Unresolved error \(error)")
+      } else if error.localizedDescription.contains("FOREIGN KEY constraint violation") {
+        // Foreign key constraint violation
+        log.info("Attempting to recover from foreign key constraint violation")
+        do {
+          // try recoverFromConstraintViolation()
+          try AppDatabase.deleteDatabaseFile()
+          return AppDatabase.makeShared()
+        } catch {
+          log.error("Failed to recover from constraint violation", error: error)
+        }
+      } else if error.localizedDescription.contains("database disk image is malformed") {
+        // Corrupted database
+        log.info("Database appears to be corrupted, recreating")
+        do {
+          try AppDatabase.deleteDatabaseFile()
+          return AppDatabase.makeShared()
+        } catch {
+          log.error("Failed to recreate corrupted database", error: error)
+        }
+      }
+
+      // Create a new empty database as last resort
+      log.warning("Creating new empty database as fallback")
+      do {
+        try AppDatabase.deleteDatabaseFile()
+        return AppDatabase.makeShared()
+      } catch {
+        // If we still can't create a database, we have a serious problem
+        log.error("Fatal database error: \(error.localizedDescription)")
+
+        // Instead of crashing, create an in-memory database to allow app to function
+        do {
+          let dbQueue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration())
+          return try AppDatabase(dbQueue)
+        } catch {
+          // At this point we have no choice but to crash
+          fatalError("Completely unable to initialize database: \(error)")
+        }
       }
     }
   }
