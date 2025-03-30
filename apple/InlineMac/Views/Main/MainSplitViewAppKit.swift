@@ -46,9 +46,9 @@ extension MainSplitViewController {
   private func fetchData() {
     Task {
       await dependencies.realtime.invokeWithHandler(.getMe, input: .getMe(.init()))
-      
+
       // wait for our own user to finish fetching
-      // todo: dedup from home sidebar
+      // TODO: dedup from home sidebar
       Task {
         try? await dependencies.data.getSpaces()
       }
@@ -121,6 +121,16 @@ class SidebarViewController: NSViewController {
   }
 
   private func makeSidebar() -> NSView {
-    NSHostingView(rootView: SidebarContent().environment(dependencies: dependencies))
+    let hostingView = NSHostingView(
+      rootView:
+      SidebarContent()
+        .environment(dependencies: dependencies)
+    )
+
+    // Optimize rendering
+    hostingView.wantsLayer = true
+    hostingView.layerContentsRedrawPolicy = .onSetNeedsDisplay
+
+    return hostingView
   }
 }
