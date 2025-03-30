@@ -57,6 +57,11 @@ final class NewPhotoView: NSView {
 
   private func setupView() {
     wantsLayer = true
+    layerContentsRedrawPolicy = .onSetNeedsDisplay
+    layer?.drawsAsynchronously = true
+    layer?.shouldRasterize = true
+    layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
+
     // translatesAutoresizingMaskIntoConstraints = false
 
     // Add background view first (below image view)
