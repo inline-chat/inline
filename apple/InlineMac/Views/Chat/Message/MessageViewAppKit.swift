@@ -27,6 +27,7 @@ class MessageViewAppKit: NSView {
   private var showsName: Bool {
     props.layout.hasName
   }
+
   private var outgoing: Bool {
     message.out == true
   }
@@ -196,6 +197,9 @@ class MessageViewAppKit: NSView {
     textView.textContainerInset = MessageTextConfiguration.containerInset
     textView.font = MessageTextConfiguration.font
     textView.textColor = textColor
+    textView.layerContentsRedrawPolicy = .duringViewResize
+    textView.wantsLayer = true
+    textView.layer?.drawsAsynchronously = true
 
     let textContainer = textView.textContainer
     textContainer?.widthTracksTextView = true
@@ -203,6 +207,12 @@ class MessageViewAppKit: NSView {
 
     textView.isVerticallyResizable = false
     textView.isHorizontallyResizable = false
+
+    if let textLayoutManager = textView.textLayoutManager {
+      textLayoutManager.textViewportLayoutController
+        .adjustViewport(byVerticalOffset: 300)
+      // Only layout 300pt above viewport
+    }
 
     textView.delegate = self
 
@@ -230,7 +240,7 @@ class MessageViewAppKit: NSView {
     setupView()
 
     DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-      self?.addHoverTrackingArea()
+      // self?.//addHoverTrackingArea()
       self?.setupScrollStateObserver()
     }
   }
@@ -335,7 +345,7 @@ class MessageViewAppKit: NSView {
       right: 0
     )
 
-    if let avatar = layout.avatar {
+    if let avatar = layout.avatar, showsAvatar {
       constraints.append(
         contentsOf: [
           avatarView.leadingAnchor
@@ -528,8 +538,7 @@ class MessageViewAppKit: NSView {
     )
 
     // Detect and add links
-    let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-    if let detector {
+    if let detector = Self.detector {
       let matches = detector.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
 
       for match in matches {
@@ -549,20 +558,24 @@ class MessageViewAppKit: NSView {
     CacheAttrs.shared.set(message: message, value: attributedString)
   }
 
+  static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
   func reflectBoundsChange(fraction uncappedFraction: CGFloat) {}
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
 
+    // Experimental in build 66
+    // Adjust viewport instead of layouting
     if window != nil {
       // Register for scroll visibility notifications
       NotificationCenter.default.addObserver(
         self,
         selector: #selector(handleBoundsChange),
-        name: NSView.boundsDidChangeNotification,
-        object: enclosingScrollView?.contentView
-//        name: NSView.frameDidChangeNotification,
+//        name: NSView.boundsDidChangeNotification,
 //        object: enclosingScrollView?.contentView
+        name: NSView.frameDidChangeNotification,
+        object: enclosingScrollView?.contentView
       )
     }
   }
@@ -578,9 +591,18 @@ class MessageViewAppKit: NSView {
   // which made it unsusable.
   // This approach still needs further testing.
   @objc private func handleBoundsChange(_ notification: Notification) {
-    guard feature_relayoutOnBoundsChange else { return }
     guard let scrollView = enclosingScrollView,
           let clipView = notification.object as? NSClipView else { return }
+
+    throttle(.milliseconds(32), identifier: "boundsChange\(message.id)", by: .mainActor, option: .default) { [
+      weak self
+    ] in
+      self?.boundsChangeThrottled(scrollView: scrollView, clipView: clipView)
+    }
+  }
+
+  private func boundsChangeThrottled(scrollView: NSScrollView, clipView: NSClipView) {
+    guard feature_relayoutOnBoundsChange else { return }
 
 //    if prevWidth != 0 && prevWidth != bounds.width {
 //      // skip if width changed bc we are handling relayout in updatePropsAndUpdateLayout and causes flicker
@@ -839,8 +861,8 @@ class MessageViewAppKit: NSView {
           // ensure the change is reflected even if it was offscreen when live resize started
           if useTextKit2, !disableTextRelayout {
             textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
-            textView.layout()
-            textView.display()
+            textView.layoutSubtreeIfNeeded()
+            textView.displayIfNeeded()
           }
         }
       }
@@ -1065,9 +1087,10 @@ extension MessageViewAppKit {
         // Clear hover state
         updateHoverState(false)
       case .idle:
+        break
         // Re-enable hover state if needed
         // TODO: How can I check if mouse is inside the view?
-        addHoverTrackingArea()
+        // addHoverTrackingArea()
     }
   }
 
@@ -1148,5 +1171,17 @@ private extension NSLayoutConstraint {
   func withPriority(_ priority: NSLayoutConstraint.Priority) -> NSLayoutConstraint {
     self.priority = priority
     return self
+  }
+}
+
+// Implement viewport constraint
+extension MessageViewAppKit: NSTextViewportLayoutControllerDelegate {
+  func textViewportLayoutController(
+    _ textViewportLayoutController: NSTextViewportLayoutController,
+    configureRenderingSurfaceFor textLayoutFragment: NSTextLayoutFragment
+  ) {}
+
+  func viewportBounds(for textViewportLayoutController: NSTextViewportLayoutController) -> CGRect {
+    textView.visibleRect.insetBy(dx: 0, dy: -300) // Match layout strategy
   }
 }
