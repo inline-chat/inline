@@ -581,78 +581,79 @@ class MessageSizeCalculator {
     }
   }
 
-  private func calculateSizeForText(_ text: String, width: CGFloat, message: Message? = nil) -> NSSize {
-    textContainer.size = NSSize(width: width, height: .greatestFiniteMagnitude)
-
-    // See if this actually helps performance or not
-    let attributedString = if let message, let attrs = CacheAttrs.shared.get(message: message) {
-      attrs
-    } else {
-      NSAttributedString(
-        string: text, // whitespacesAndNewline
-        attributes: [.font: MessageTextConfiguration.font]
-      )
-    }
-
-  //    let attributedString = NSAttributedString(
-  //      string: text, // whitespacesAndNewline
-  //      attributes: [.font: MessageTextConfiguration.font]
-  //    )
-    
-    let textStorage = NSTextStorage()
-    textStorage.setAttributedString(attributedString)
-    textStorage.addLayoutManager(layoutManager)
-    defer {
-      textStorage.removeLayoutManager(layoutManager)
-    }
-    layoutManager.ensureLayout(for: textContainer)
-    // Get the glyphRange to ensure we're measuring all content
-  //    let glyphRange = layoutManager.glyphRange(for: textContainer)
-  //    let textRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
-
-    // Alternative
-    let textRect = layoutManager.usedRect(for: textContainer)
-
-    let textHeight = ceil(textRect.height)
-    let textWidth = ceil(textRect.width) + Self.extraSafeWidth
-
-    log.trace("calculateSizeForText \(text) width \(width) resulting in rect \(textRect)")
-
-    return CGSize(width: textWidth, height: textHeight)
-  }
-
 //  private func calculateSizeForText(_ text: String, width: CGFloat, message: Message? = nil) -> NSSize {
-//    // Create attributed string
+//    textContainer.size = NSSize(width: width, height: .greatestFiniteMagnitude)
+//
+//    // See if this actually helps performance or not
 //    let attributedString = if let message, let attrs = CacheAttrs.shared.get(message: message) {
 //      attrs
 //    } else {
 //      NSAttributedString(
-//        string: text,
-//        attributes: typographicSettings
+//        string: text, // whitespacesAndNewline
+//        attributes: [.font: MessageTextConfiguration.font]
 //      )
 //    }
 //
-//    // Create a frame setter with our attributed string
-//    let frameSetter = CTFramesetterCreateWithAttributedString(attributedString)
+//  //    let attributedString = NSAttributedString(
+//  //      string: text, // whitespacesAndNewline
+//  //      attributes: [.font: MessageTextConfiguration.font]
+//  //    )
+//    
+//    // Use separate text storages https://github.com/lordvisionz/cocoa-string-size-performance
+//    let textStorage = NSTextStorage()
+//    textStorage.setAttributedString(attributedString)
+//    textStorage.addLayoutManager(layoutManager)
+//    defer {
+//      textStorage.removeLayoutManager(layoutManager)
+//    }
+//    layoutManager.ensureLayout(for: textContainer)
+//    // Get the glyphRange to ensure we're measuring all content
+//  //    let glyphRange = layoutManager.glyphRange(for: textContainer)
+//  //    let textRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
 //
-//    // Calculate the frame size that would fit the text with the given constraints
-//    let constraintSize = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-//    let frameSize = CTFramesetterSuggestFrameSizeWithConstraints(
-//      frameSetter,
-//      CFRange(location: 0, length: attributedString.length),
-//      nil,
-//      constraintSize,
-//      nil
-//    )
+//    // Alternative
+//    let textRect = layoutManager.usedRect(for: textContainer)
 //
-//    // Add a small amount of padding to account for any rounding errors
-//    let textWidth = ceil(frameSize.width) + Self.extraSafeWidth
-//    let textHeight = ceil(frameSize.height)
+//    let textHeight = ceil(textRect.height)
+//    let textWidth = ceil(textRect.width) + Self.extraSafeWidth
 //
-//    log.trace("calculateSizeForText \(text) width \(width) resulting in size \(frameSize)")
+//    log.trace("calculateSizeForText \(text) width \(width) resulting in rect \(textRect)")
 //
 //    return CGSize(width: textWidth, height: textHeight)
 //  }
+
+  private func calculateSizeForText(_ text: String, width: CGFloat, message: Message? = nil) -> NSSize {
+    // Create attributed string
+    let attributedString = if let message, let attrs = CacheAttrs.shared.get(message: message) {
+      attrs
+    } else {
+      NSAttributedString(
+        string: text,
+        attributes: typographicSettings
+      )
+    }
+
+    // Create a frame setter with our attributed string
+    let frameSetter = CTFramesetterCreateWithAttributedString(attributedString)
+
+    // Calculate the frame size that would fit the text with the given constraints
+    let constraintSize = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+    let frameSize = CTFramesetterSuggestFrameSizeWithConstraints(
+      frameSetter,
+      CFRange(location: 0, length: attributedString.length),
+      nil,
+      constraintSize,
+      nil
+    )
+
+    // Add a small amount of padding to account for any rounding errors
+    let textWidth = ceil(frameSize.width) + Self.extraSafeWidth
+    let textHeight = ceil(frameSize.height)
+
+    log.trace("calculateSizeForText \(text) width \(width) resulting in size \(frameSize)")
+
+    return CGSize(width: textWidth, height: textHeight)
+  }
 
   func calculatePhotoSize(
     width: CGFloat,
