@@ -32,7 +32,7 @@ class UserAvatarView: NSView {
   func setupView() {
     // Layer optimization
     wantsLayer = true
-    layerContentsRedrawPolicy = .onSetNeedsDisplay
+    layerContentsRedrawPolicy = .never
     layer?.drawsAsynchronously = true
 
     // Only enable if content rarely changes

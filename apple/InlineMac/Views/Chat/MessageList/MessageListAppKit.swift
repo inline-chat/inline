@@ -271,12 +271,15 @@ class MessageListAppKit: NSViewController {
 //    }
   }
 
+  private var isToolbarVisible = false
+
   private func updateToolbar() {
     // make window toolbar layout and have background to fight the swiftui defaUlt behaviour
     guard let window = view.window else { return }
     log.trace("Adjusting view's toolbar")
 
     let atTop = isAtTop()
+    isToolbarVisible = !atTop
     window.titlebarAppearsTransparent = atTop
     window.isMovableByWindowBackground = true
     window.titlebarSeparatorStyle = .automatic
@@ -500,6 +503,19 @@ class MessageListAppKit: NSViewController {
     }
   }
 
+  func updateToolbarDebounced() {
+    if isToolbarVisible {
+      throttle(.milliseconds(100), identifier: "chat.updateToolbar", by: .mainActor, option: .default) { [
+        weak self
+      ] in
+        self?.updateToolbar()
+      }
+    } else {
+      // bring it back as fast as possible as it looks bad
+      updateToolbar()
+    }
+  }
+
   private func handleBoundsChange() {
     let scrollOffset = scrollView.contentView.bounds.origin
     let viewportSize = scrollView.contentView.bounds.size
@@ -526,7 +542,7 @@ class MessageListAppKit: NSViewController {
       loadBatch(at: .older)
     }
 
-    updateToolbar()
+    updateToolbarDebounced()
 
     if prevAtBottom != isAtBottom {
       let shouldShow = !isAtBottom // && messages.count > 0
@@ -953,7 +969,7 @@ class MessageListAppKit: NSViewController {
       guard let self else { return }
 
       // see if it's needed
-      // scrollView.layoutSubtreeIfNeeded()
+      scrollView.layoutSubtreeIfNeeded()
 
       switch anchor {
         case let .bottom(row, distanceFromViewportBottom):
@@ -981,6 +997,7 @@ class MessageListAppKit: NSViewController {
   ) {
     log.trace("Recalculating heights on width change")
 
+    // should we keep this??
     if isPerformingUpdate {
       log.trace("Ignoring recalculation due to ongoing update")
       return
@@ -1003,50 +1020,25 @@ class MessageListAppKit: NSViewController {
     }
 
     // First, immediately update visible rows
-    let visibleIndexesToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
-
-    var rowsToUpdate = IndexSet()
-
-    if duringLiveResize {
-      // Find which rows are shorter than available width
-      let availableWidth = sizeCalculator.getAvailableWidth(
-        tableWidth: tableView.bounds.width
-      )
-
-      for row in visibleStartIndex ..< visibleEndIndex {
-        if let message = message(forRow: row), !sizeCalculator
-          .isSingleLine(message, availableWidth: availableWidth)
-        {
-          rowsToUpdate.insert(row)
-        }
-      }
-
-    } else {
-      // Update all regardless of width
-      // Why? Less optimized but quickly fixes a bug where items that crossed the threshold out of viewport, don't
-      // update
-      // even when we scroll to them.
-      rowsToUpdate = visibleIndexesToUpdate
-    }
+    let rowsToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
 
     log.trace("Rows to update: \(rowsToUpdate)")
     let apply: (() -> Void)? = if maintainScroll { anchorScroll(to: .bottomRow) } else { nil }
-    NSAnimationContext.runAnimationGroup { [weak self] context in
-      guard let self else { return }
+    CATransaction.begin()
+    NSAnimationContext.beginGrouping()
+    NSAnimationContext.current.duration = 0
 
-      context.duration = 0
-      context.allowsImplicitAnimation = false
+    tableView.beginUpdates()
+    // Update heights in cells and setNeedsDisplay
+    updateHeightsForRows(at: rowsToUpdate)
 
-      tableView.beginUpdates()
-      // Update heights in cells and setNeedsDisplay
-      updateHeightsForRows(at: rowsToUpdate)
+    // Experimental: noteheight of rows was below reload data initially
+    tableView.noteHeightOfRows(withIndexesChanged: rowsToUpdate)
+    tableView.endUpdates()
 
-      // Experimental: noteheight of rows was below reload data initially
-      tableView.noteHeightOfRows(withIndexesChanged: rowsToUpdate)
-      tableView.endUpdates()
-
-      apply?()
-    }
+    apply?()
+    NSAnimationContext.endGrouping()
+    CATransaction.commit()
   }
 
   private func updateHeightsForRows(at indexSet: IndexSet) {
