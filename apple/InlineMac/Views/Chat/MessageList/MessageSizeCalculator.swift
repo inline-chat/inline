@@ -29,6 +29,8 @@ class MessageSizeCalculator {
   static let extraSafeWidth = 0.0
 
   static let maxMessageWidth: CGFloat = Theme.messageMaxWidth
+  // Core Text typographic settings
+  private let typographicSettings: [NSAttributedString.Key: Any]
 
   init() {
     textStorage = NSTextStorage()
@@ -43,6 +45,17 @@ class MessageSizeCalculator {
     textHeightCache.countLimit = 10_000
     minTextWidthForSingleLine.countLimit = 5_000
     lastHeightForRow.countLimit = 1_000
+
+    // Initialize typographic settings for Core Text
+    typographicSettings = [
+      .font: MessageTextConfiguration.font,
+      // Add any other text attributes needed for consistent rendering
+      .paragraphStyle: {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byWordWrapping
+        return style
+      }(),
+    ]
 
     prepareForUse()
   }
@@ -242,8 +255,7 @@ class MessageSizeCalculator {
     log.trace("availableWidth \(availableWidth) for text \(text)")
 
     let cacheKey_ = cacheKey(for: message, width: availableWidth, props: props)
-    if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue
-    {
+    if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
       textSize = cachedTextSize
       log.debug("text size cache hit \(message.message.messageId)")
 
@@ -582,15 +594,21 @@ class MessageSizeCalculator {
       )
     }
 
-//    let attributedString = NSAttributedString(
-//      string: text, // whitespacesAndNewline
-//      attributes: [.font: MessageTextConfiguration.font]
-//    )
+  //    let attributedString = NSAttributedString(
+  //      string: text, // whitespacesAndNewline
+  //      attributes: [.font: MessageTextConfiguration.font]
+  //    )
+    
+    let textStorage = NSTextStorage()
     textStorage.setAttributedString(attributedString)
+    textStorage.addLayoutManager(layoutManager)
+    defer {
+      textStorage.removeLayoutManager(layoutManager)
+    }
     layoutManager.ensureLayout(for: textContainer)
     // Get the glyphRange to ensure we're measuring all content
-//    let glyphRange = layoutManager.glyphRange(for: textContainer)
-//    let textRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+  //    let glyphRange = layoutManager.glyphRange(for: textContainer)
+  //    let textRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
 
     // Alternative
     let textRect = layoutManager.usedRect(for: textContainer)
@@ -602,6 +620,39 @@ class MessageSizeCalculator {
 
     return CGSize(width: textWidth, height: textHeight)
   }
+
+//  private func calculateSizeForText(_ text: String, width: CGFloat, message: Message? = nil) -> NSSize {
+//    // Create attributed string
+//    let attributedString = if let message, let attrs = CacheAttrs.shared.get(message: message) {
+//      attrs
+//    } else {
+//      NSAttributedString(
+//        string: text,
+//        attributes: typographicSettings
+//      )
+//    }
+//
+//    // Create a frame setter with our attributed string
+//    let frameSetter = CTFramesetterCreateWithAttributedString(attributedString)
+//
+//    // Calculate the frame size that would fit the text with the given constraints
+//    let constraintSize = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+//    let frameSize = CTFramesetterSuggestFrameSizeWithConstraints(
+//      frameSetter,
+//      CFRange(location: 0, length: attributedString.length),
+//      nil,
+//      constraintSize,
+//      nil
+//    )
+//
+//    // Add a small amount of padding to account for any rounding errors
+//    let textWidth = ceil(frameSize.width) + Self.extraSafeWidth
+//    let textHeight = ceil(frameSize.height)
+//
+//    log.trace("calculateSizeForText \(text) width \(width) resulting in size \(frameSize)")
+//
+//    return CGSize(width: textWidth, height: textHeight)
+//  }
 
   func calculatePhotoSize(
     width: CGFloat,
