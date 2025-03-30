@@ -13,7 +13,7 @@ class MessageListAppKit: NSViewController {
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
 
-  private let log = Log.scoped("MessageListAppKit", enableTracing: false)
+  private let log = Log.scoped("MessageListAppKit", enableTracing: true)
   private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 45.0
 
@@ -297,7 +297,7 @@ class MessageListAppKit: NSViewController {
     ])
 
     // Set column width to match scroll view width
-    updateColumnWidth()
+    // updateColumnWidth()
 
     // Add the button
     view.addSubview(scrollToBottomButton)
@@ -322,6 +322,7 @@ class MessageListAppKit: NSViewController {
 
   private func updateColumnWidth(commit: Bool = false) {
     let newWidth = scrollView.contentSize.width
+    log.trace("Updating column width \(newWidth)")
     if abs(newWidth - lastColumnWidthUpdate) > 0.5 {
       let column = tableView.tableColumns.first
 
@@ -691,14 +692,11 @@ class MessageListAppKit: NSViewController {
   override func viewWillAppear() {
     super.viewWillAppear()
     log.trace("viewWillAppear() called")
-
-    updateColumnWidth()
   }
 
   override func viewDidAppear() {
     super.viewDidAppear()
     log.trace("viewDidAppear() called")
-
     updateScrollViewInsets()
     updateToolbar()
   }
