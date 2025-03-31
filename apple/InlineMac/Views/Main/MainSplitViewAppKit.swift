@@ -97,40 +97,19 @@ extension MainSplitViewController {}
 
 // MARK: - Sidebar View Controller
 
-class SidebarViewController: NSViewController {
+class SidebarViewController: NSHostingController<AnyView> {
   private let dependencies: AppDependencies
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
-    super.init(nibName: nil, bundle: nil)
+    super.init(rootView: SidebarContent().environment(dependencies: dependencies))
+    sizingOptions = [
+      .minSize,
+    ]
   }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
-  }
-
-  override func loadView() {
-//    let effectView = NSVisualEffectView()
-//    effectView.material = .sidebar
-//    effectView.blendingMode = .behindWindow
-//    effectView.state = .active
-//    view = effectView
-
-    view = makeSidebar()
-  }
-
-  private func makeSidebar() -> NSView {
-    let hostingView = NSHostingView(
-      rootView:
-      SidebarContent()
-        .environment(dependencies: dependencies)
-    )
-
-    // Optimize rendering
-    hostingView.wantsLayer = true
-    hostingView.layerContentsRedrawPolicy = .onSetNeedsDisplay
-
-    return hostingView
   }
 }
