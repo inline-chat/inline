@@ -20,7 +20,7 @@ class ComposeTextView: UITextView {
 
   private func setupTextView() {
     backgroundColor = .clear
-    isEditable = true
+
     allowsEditingTextAttributes = true
     delegate = self
     font = .systemFont(ofSize: 17)
