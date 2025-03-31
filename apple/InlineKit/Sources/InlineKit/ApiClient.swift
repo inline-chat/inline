@@ -900,6 +900,22 @@ public enum ApiComposeAction: String, Codable, Sendable {
         "uploading video..."
     }
   }
+
+  public func toHumanReadableForIOS() -> String {
+    switch self {
+      case .typing:
+        "typing"
+
+      case .uploadingPhoto:
+        "uploading photo"
+
+      case .uploadingDocument:
+        "uploading document"
+
+      case .uploadingVideo:
+        "uploading video"
+    }
+  }
 }
 
 public struct LinearAuthUrl: Codable, Sendable {

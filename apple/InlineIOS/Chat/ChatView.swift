@@ -60,9 +60,9 @@ struct ChatView: View {
 
   var subtitle: String {
     if apiState != .connected {
-      getStatusText(realtime.apiState)
+      getStatusTextForChatHeader(realtime.apiState)
     } else if let composeAction = currentComposeAction() {
-      composeAction.rawValue
+      composeAction.toHumanReadableForIOS()
     } else {
       ""
     }
