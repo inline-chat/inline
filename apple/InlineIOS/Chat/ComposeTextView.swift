@@ -8,6 +8,12 @@ class ComposeTextView: UITextView {
   private var lastText: String = ""
   weak var composeView: ComposeView?
 
+  // Added for sticker handling
+  private var processedRanges = Set<String>()
+  private var recentlySentImageHashes = Set<Int>()
+  private let processingLock = NSLock()
+  private let textModificationQueue = DispatchQueue(label: "com.app.textview.modification", qos: .userInitiated)
+
   init(composeView: ComposeView) {
     self.composeView = composeView
     super.init(frame: .zero, textContainer: nil)
@@ -23,7 +29,6 @@ class ComposeTextView: UITextView {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
-    Log.shared.debug("ComposeTextView deinit")
   }
 
   private func setupTextView() {
@@ -75,20 +80,7 @@ class ComposeTextView: UITextView {
     showPlaceholder(text.isEmpty)
 
     if text.contains("￼") || attributedText.string.contains("￼") {
-      if let pasteboardImage = UIPasteboard.general.image {
-        if let imageData = pasteboardImage.pngData() ?? pasteboardImage.jpegData(compressionQuality: 0.9) {
-          DispatchQueue.main.async { [weak self] in
-            self?.sendStickerImage(imageData, metadata: ["source": "pasteboard_textDidChange"])
-
-            if let range = self?.text.range(of: "￼") {
-              let nsRange = NSRange(range, in: self?.text ?? "")
-              self?.removeAttachment(at: nsRange)
-              return
-            }
-          }
-        }
-      }
-      checkForNewAttachments()
+      handleStickerDetection()
     }
 
     lastText = text
@@ -96,7 +88,7 @@ class ComposeTextView: UITextView {
 
   @objc private func keyboardWillShow(_ notification: Notification) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-      self.checkForNewAttachments()
+      self.handleStickerDetection()
     }
   }
 
@@ -108,7 +100,7 @@ class ComposeTextView: UITextView {
     super.insertText(text)
 
     if text.contains("￼") {
-      checkForNewAttachments()
+      handleStickerDetection()
     }
   }
 
@@ -126,7 +118,7 @@ class ComposeTextView: UITextView {
 
           if let range = self?.text.range(of: "￼") {
             let nsRange = NSRange(range, in: self?.text ?? "")
-            self?.removeAttachment(at: nsRange)
+            self?.safelyRemoveAttachment(at: nsRange)
           }
         }
         return
@@ -134,36 +126,83 @@ class ComposeTextView: UITextView {
     }
 
     if text.contains("￼") || attributedText.string.contains("￼") {
-      checkForNewAttachments()
+      handleStickerDetection()
     }
   }
 
   override var attributedText: NSAttributedString! {
     didSet {
       if attributedText?.string.contains("￼") == true {
-        checkForNewAttachments()
+        handleStickerDetection()
       }
     }
+  }
+
+  // New method to handle sticker detection with debouncing
+  private func handleStickerDetection() {
+    // Clear any previous detection timers
+    NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(performStickerDetection), object: nil)
+
+    // Schedule a new detection with a slight delay to batch multiple detections
+    perform(#selector(performStickerDetection), with: nil, afterDelay: 0.1)
+  }
+
+  @objc private func performStickerDetection() {
+    checkForNewAttachments()
   }
 
   public func checkForNewAttachments() {
     guard let attributedText else { return }
 
     let string = attributedText.string
+    var rangesToProcess: [NSRange] = []
+
+    // First collect all ranges to process
     for (index, char) in string.enumerated() {
       if char == "\u{FFFC}" {
         let nsRange = NSRange(location: index, length: 1)
+        rangesToProcess.append(nsRange)
+      }
+    }
 
-        let attributes = attributedText.attributes(at: index, effectiveRange: nil)
-
-        DispatchQueue.main.async { [weak self] in
-          self?.processReplacementCharacter(at: nsRange, attributes: attributes)
+    // Then process them on the main thread
+    if !rangesToProcess.isEmpty {
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        for range in rangesToProcess {
+          if range.location < attributedText.length {
+            let attributes = attributedText.attributes(at: range.location, effectiveRange: nil)
+            processReplacementCharacter(at: range, attributes: attributes)
+          }
         }
       }
     }
   }
 
   private func processReplacementCharacter(at range: NSRange, attributes: [NSAttributedString.Key: Any]) {
+    // Create a unique identifier for this range
+    let rangeIdentifier = "\(range.location):\(range.length):\(Date().timeIntervalSince1970)"
+
+    // Use a lock to prevent race conditions
+    processingLock.lock()
+
+    // Check if we've already processed this range
+    if processedRanges.contains(rangeIdentifier) {
+      processingLock.unlock()
+      return
+    }
+
+    // Mark this range as being processed
+    processedRanges.insert(rangeIdentifier)
+    processingLock.unlock()
+
+    // Set a timer to remove this identifier after a short delay
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      self?.processingLock.lock()
+      self?.processedRanges.remove(rangeIdentifier)
+      self?.processingLock.unlock()
+    }
+
     var finalImage: UIImage?
     var imageSource = "unknown"
 
@@ -223,7 +262,7 @@ class ComposeTextView: UITextView {
 
       if let imageData = processedImage.pngData() ?? processedImage.jpegData(compressionQuality: 0.9) {
         sendStickerImage(imageData, metadata: ["source": imageSource])
-        removeAttachment(at: range)
+        safelyRemoveAttachment(at: range)
       } else {
         captureTextViewForDebug()
       }
@@ -295,7 +334,7 @@ class ComposeTextView: UITextView {
     }
 
     if adaptiveGlyph.responds(to: Selector(("nominalTextAttachment"))) {
-      if let attachment = adaptiveGlyph.perform(Selector(("nominalTextAttachment")))?
+      if let attachment = adaptiveGlyph.perform(Selector(("nominalTextAttachment")))
         .takeUnretainedValue() as? NSTextAttachment
       {
         if let image = attachment.image {
@@ -407,10 +446,32 @@ class ComposeTextView: UITextView {
 
     sendStickerImage(imageData, metadata: ["source": "adaptive_image_provider"])
 
-    removeAttachment(at: range)
+    safelyRemoveAttachment(at: range)
   }
 
   private func sendStickerImage(_ imageData: Data, metadata: [String: Any]) {
+    // Create a simple hash of the image data to identify duplicates
+    let imageHash = imageData.prefix(1_024).hashValue
+
+    processingLock.lock()
+
+    // Check if we've recently sent this image
+    if recentlySentImageHashes.contains(imageHash) {
+      processingLock.unlock()
+      return
+    }
+
+    // Add to recently sent images
+    recentlySentImageHashes.insert(imageHash)
+    processingLock.unlock()
+
+    // Remove from set after a delay
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+      self?.processingLock.lock()
+      self?.recentlySentImageHashes.remove(imageHash)
+      self?.processingLock.unlock()
+    }
+
     if let originalImage = UIImage(data: imageData) {
       let maxDimension: CGFloat = 300
 
@@ -439,13 +500,28 @@ class ComposeTextView: UITextView {
   }
 
   private func removeAttachment(at range: NSRange) {
+    safelyRemoveAttachment(at: range)
+  }
+
+  private func safelyRemoveAttachment(at range: NSRange) {
     guard let attributedString = attributedText?.mutableCopy() as? NSMutableAttributedString else {
       return
     }
 
-    attributedString.replaceCharacters(in: range, with: "")
+    // Validate the range before attempting to replace characters
+    let validRange = NSRange(
+      location: min(range.location, attributedString.length),
+      length: min(range.length, max(0, attributedString.length - range.location))
+    )
 
-    attributedText = attributedString
+    // Only proceed if we have a valid range
+    if validRange.length > 0 {
+      attributedString.replaceCharacters(in: validRange, with: "")
+
+      DispatchQueue.main.async { [weak self] in
+        self?.attributedText = attributedString
+      }
+    }
   }
 }
 
@@ -505,18 +581,38 @@ extension ComposeTextView {
       return
     }
 
-    removeAttachment(at: range)
+    // Create a hash to check for duplicates
+    let imageHash: Int = if let imageData = image.pngData()?.prefix(1_024) {
+      imageData.hashValue
+    } else {
+      image.description.hashValue
+    }
+
+    processingLock.lock()
+
+    // Check if we've recently processed this image
+    if recentlySentImageHashes.contains(imageHash) {
+      processingLock.unlock()
+      return
+    }
+
+    // Add to recently processed images
+    recentlySentImageHashes.insert(imageHash)
+    processingLock.unlock()
+
+    // Remove from set after a delay
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+      self?.processingLock.lock()
+      self?.recentlySentImageHashes.remove(imageHash)
+      self?.processingLock.unlock()
+    }
+
+    safelyRemoveAttachment(at: range)
 
     if let composeView {
       DispatchQueue.main.async {
         composeView.sendSticker(image)
       }
-      return
-    }
-
-    if let composeView {
-      composeView.sendSticker(image)
-
       return
     }
 
