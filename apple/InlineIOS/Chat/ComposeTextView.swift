@@ -7,8 +7,6 @@ class ComposeTextView: UITextView {
   private var placeholderLabel: UILabel?
   private var lastText: String = ""
   weak var composeView: ComposeView?
-
-  // Added for sticker handling
   private var processedRanges = Set<String>()
   private var recentlySentImageHashes = Set<Int>()
   private let processingLock = NSLock()
@@ -29,12 +27,14 @@ class ComposeTextView: UITextView {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+    Log.shared.debug("ComposeTextView deinit")
   }
 
   private func setupTextView() {
     backgroundColor = .clear
     allowsEditingTextAttributes = true
     font = .systemFont(ofSize: 17)
+    typingAttributes[.font] = font
     textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
     translatesAutoresizingMaskIntoConstraints = false
     tintColor = ColorManager.shared.selectedColor
@@ -84,6 +84,7 @@ class ComposeTextView: UITextView {
     }
 
     lastText = text
+    fixFontSizeAfterStickerInsertion()
   }
 
   @objc private func keyboardWillShow(_ notification: Notification) {
@@ -138,12 +139,34 @@ class ComposeTextView: UITextView {
     }
   }
 
-  // New method to handle sticker detection with debouncing
-  private func handleStickerDetection() {
-    // Clear any previous detection timers
-    NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(performStickerDetection), object: nil)
+  private func fixFontSizeAfterStickerInsertion() {
+    guard let attributedText = attributedText?.mutableCopy() as? NSMutableAttributedString,
+          attributedText.length > 0
+    else {
+      return
+    }
 
-    // Schedule a new detection with a slight delay to batch multiple detections
+    var needsFix = false
+    attributedText.enumerateAttribute(.font, in: NSRange(location: 0, length: attributedText.length), options: []) { value, _, stop in
+      if let font = value as? UIFont, font.pointSize != 17 {
+        needsFix = true
+        stop.pointee = true
+      }
+    }
+
+    if needsFix {
+      attributedText.addAttribute(
+        .font,
+        value: UIFont.systemFont(ofSize: 17),
+        range: NSRange(location: 0, length: attributedText.length)
+      )
+
+      self.attributedText = attributedText
+    }
+  }
+
+  private func handleStickerDetection() {
+    NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(performStickerDetection), object: nil)
     perform(#selector(performStickerDetection), with: nil, afterDelay: 0.1)
   }
 
@@ -152,12 +175,11 @@ class ComposeTextView: UITextView {
   }
 
   public func checkForNewAttachments() {
-    guard let attributedText else { return }
+    guard let attributedText = attributedText else { return }
 
     let string = attributedText.string
     var rangesToProcess: [NSRange] = []
 
-    // First collect all ranges to process
     for (index, char) in string.enumerated() {
       if char == "\u{FFFC}" {
         let nsRange = NSRange(location: index, length: 1)
@@ -165,14 +187,13 @@ class ComposeTextView: UITextView {
       }
     }
 
-    // Then process them on the main thread
     if !rangesToProcess.isEmpty {
       DispatchQueue.main.async { [weak self] in
-        guard let self else { return }
+        guard let self = self else { return }
         for range in rangesToProcess {
           if range.location < attributedText.length {
             let attributes = attributedText.attributes(at: range.location, effectiveRange: nil)
-            processReplacementCharacter(at: range, attributes: attributes)
+            self.processReplacementCharacter(at: range, attributes: attributes)
           }
         }
       }
@@ -180,23 +201,18 @@ class ComposeTextView: UITextView {
   }
 
   private func processReplacementCharacter(at range: NSRange, attributes: [NSAttributedString.Key: Any]) {
-    // Create a unique identifier for this range
     let rangeIdentifier = "\(range.location):\(range.length):\(Date().timeIntervalSince1970)"
 
-    // Use a lock to prevent race conditions
     processingLock.lock()
 
-    // Check if we've already processed this range
     if processedRanges.contains(rangeIdentifier) {
       processingLock.unlock()
       return
     }
 
-    // Mark this range as being processed
     processedRanges.insert(rangeIdentifier)
     processingLock.unlock()
 
-    // Set a timer to remove this identifier after a short delay
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       self?.processingLock.lock()
       self?.processedRanges.remove(rangeIdentifier)
@@ -450,22 +466,18 @@ class ComposeTextView: UITextView {
   }
 
   private func sendStickerImage(_ imageData: Data, metadata: [String: Any]) {
-    // Create a simple hash of the image data to identify duplicates
-    let imageHash = imageData.prefix(1_024).hashValue
+    let imageHash = imageData.prefix(1024).hashValue
 
     processingLock.lock()
 
-    // Check if we've recently sent this image
     if recentlySentImageHashes.contains(imageHash) {
       processingLock.unlock()
       return
     }
 
-    // Add to recently sent images
     recentlySentImageHashes.insert(imageHash)
     processingLock.unlock()
 
-    // Remove from set after a delay
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
       self?.processingLock.lock()
       self?.recentlySentImageHashes.remove(imageHash)
@@ -492,8 +504,9 @@ class ComposeTextView: UITextView {
       UIGraphicsEndImageContext()
 
       if let composeView {
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
           composeView.sendSticker(resizedImage)
+          self?.fixFontSizeAfterStickerInsertion()
         }
       }
     }
@@ -508,15 +521,15 @@ class ComposeTextView: UITextView {
       return
     }
 
-    // Validate the range before attempting to replace characters
     let validRange = NSRange(
       location: min(range.location, attributedString.length),
       length: min(range.length, max(0, attributedString.length - range.location))
     )
 
-    // Only proceed if we have a valid range
     if validRange.length > 0 {
       attributedString.replaceCharacters(in: validRange, with: "")
+      attributedString.addAttribute(.font, value: UIFont.systemFont(ofSize: 17),
+                                    range: NSRange(location: 0, length: attributedString.length))
 
       DispatchQueue.main.async { [weak self] in
         self?.attributedText = attributedString
@@ -581,26 +594,23 @@ extension ComposeTextView {
       return
     }
 
-    // Create a hash to check for duplicates
-    let imageHash: Int = if let imageData = image.pngData()?.prefix(1_024) {
-      imageData.hashValue
+    let imageHash: Int
+    if let imageData = image.pngData()?.prefix(1024) {
+      imageHash = imageData.hashValue
     } else {
-      image.description.hashValue
+      imageHash = image.description.hashValue
     }
 
     processingLock.lock()
 
-    // Check if we've recently processed this image
     if recentlySentImageHashes.contains(imageHash) {
       processingLock.unlock()
       return
     }
 
-    // Add to recently processed images
     recentlySentImageHashes.insert(imageHash)
     processingLock.unlock()
 
-    // Remove from set after a delay
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
       self?.processingLock.lock()
       self?.recentlySentImageHashes.remove(imageHash)
@@ -610,8 +620,9 @@ extension ComposeTextView {
     safelyRemoveAttachment(at: range)
 
     if let composeView {
-      DispatchQueue.main.async {
+      DispatchQueue.main.async { [weak self] in
         composeView.sendSticker(image)
+        self?.fixFontSizeAfterStickerInsertion()
       }
       return
     }
