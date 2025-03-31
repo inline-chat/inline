@@ -49,9 +49,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   // MARK: - UI Components
 
   lazy var textView: ComposeTextView = {
-    let view = ComposeTextView()
+    let view = ComposeTextView(composeView: self)
     view.translatesAutoresizingMaskIntoConstraints = false
-
+    view.delegate = self
     return view
   }()
 
@@ -61,7 +61,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     container.isUserInteractionEnabled = true
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(sendTapped))
     container.addGestureRecognizer(tapGesture)
-    container.alpha = 1
+    container.alpha = 0
     return container
   }()
 
@@ -69,6 +69,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   lazy var plusButton = makePlusButton()
 
   // MARK: - Initialization
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+    Log.shared.debug("ComposeView deinit")
+  }
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -92,7 +97,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 
   @objc private func handleStickerDetected(_ notification: Notification) {
     if let image = notification.userInfo?["image"] as? UIImage {
-      print("📤 COMPOSE - Received sticker notification with image: \(image.size)")
+      Log.shared.debug("📤 COMPOSE - Received sticker notification with image: \(image.size)")
       // Ensure we're on the main thread
       DispatchQueue.main.async {
         self.sendSticker(image)
@@ -119,25 +124,20 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     return super.resignFirstResponder()
   }
 
-  // Add this method to ComposeView
   public func sendSticker(_ image: UIImage) {
-    print("📤 COMPOSE - Sending sticker image: \(image.size)")
+    Log.shared.debug("📤 COMPOSE - Sending sticker image: \(image.size)")
     guard let peerId else {
-      print("❌ COMPOSE - No peerId available")
+      Log.shared.debug("❌ COMPOSE - No peerId available")
       return
     }
 
-    sendButton.configuration?.showsActivityIndicator = true
-
     do {
       let photoInfo = try FileCache.savePhoto(image: image)
-      print("✅ COMPOSE - Saved sticker to file cache: \(photoInfo)")
 
-      // Send the sticker immediately without caption
       Transactions.shared.mutate(
         transaction: .sendMessage(
           .init(
-            text: "", // No caption for stickers
+            text: nil,
             peerId: peerId,
             chatId: chatId ?? 0,
             mediaItems: [.photo(photoInfo)],
@@ -146,10 +146,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         )
       )
 
-      print("✅ COMPOSE - Sticker sent successfully")
+      clearDraft()
+      textView.text = ""
+      resetHeight()
+      textView.showPlaceholder(true)
+      buttonDisappear()
       sendMessageHaptic()
     } catch {
-      print("❌ COMPOSE - Failed to save sticker: \(error)")
+      Log.shared.error("❌ COMPOSE - Failed to save sticker", error: error)
     }
 
     sendButton.configuration?.showsActivityIndicator = false
@@ -203,28 +207,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 
   // MARK: - UI Component Creation
 
-  private func makeTextView() -> ComposeTextView {
-    let textView = ComposeTextView()
-    textView.font = .systemFont(ofSize: 17)
-    textView.isScrollEnabled = true
-    textView.backgroundColor = .clear
-    textView.textContainerInset = UIEdgeInsets(
-      top: Self.textViewVerticalPadding,
-      left: 0,
-      bottom: Self.textViewVerticalPadding,
-      right: 0
-    )
-    textView.delegate = self
-    textView.textLayoutManager?.delegate = self
-    textView.translatesAutoresizingMaskIntoConstraints = false
-
-    if #available(iOS 16.0, *) {
-      textView.usesStandardTextScaling = true
-    }
-
-    return textView
-  }
-
   private func makeSendButton() -> UIButton {
     let button = UIButton()
     button.translatesAutoresizingMaskIntoConstraints = false
@@ -268,8 +250,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     let cameraAction = UIAction(
       title: "Camera",
       image: UIImage(systemName: "camera"),
-      handler: { _ in
-        self.presentCamera()
+      handler: { [weak self] _ in
+        self?.presentCamera()
       }
     )
 
@@ -326,12 +308,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   }
 
   func buttonAppear() {
-    print("📱 UI - buttonAppear called")
+    Log.shared.debug("📱 UI - buttonAppear called")
     UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseOut) {
       self.sendButtonContainer.alpha = 1
       self.sendButtonContainer.transform = .identity
     } completion: { _ in
-      print("📱 UI - buttonAppear animation completed, alpha: \(self.sendButtonContainer.alpha)")
+      Log.shared.debug("📱 UI - buttonAppear animation completed, alpha: \(self.sendButtonContainer.alpha)")
     }
   }
 
@@ -426,7 +408,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         do {
           try await DataManager.shared.updateDialog(peerId: peerId, draft: text)
         } catch {
-          print("Failed to save draft", error)
+          Log.shared.error("Failed to save draft", error: error)
         }
       }
     }
@@ -734,9 +716,9 @@ extension ComposeView: UITextViewDelegate {
 
     // Placeholder Visibility & Attachment Checks
     let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    print("📱 UI - textViewDidChange, isEmpty: \(isEmpty)")
+    Log.shared.debug("📱 UI - textViewDidChange, isEmpty: \(isEmpty)")
     (textView as? ComposeTextView)?.showPlaceholder(isEmpty)
-    (textView as? ComposeTextView)?.checkForNewAttachments()
+    // (textView as? ComposeTextView)?.checkForNewAttachments()
 
     if isEmpty {
       clearDraft()
@@ -755,6 +737,16 @@ extension ComposeView: UITextViewDelegate {
       buttonAppear()
     }
   }
+
+  func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+    if text.contains("￼") {
+      DispatchQueue.main.async { [weak self] in
+        self?.textView.checkForNewAttachmentsImmediate()
+      }
+    }
+
+    return true
+  }
 }
 
 // MARK: - PHPickerViewControllerDelegate
@@ -770,7 +762,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
       guard let self, let picker else { return }
 
       if let error {
-        print("Failed to load image:", error.localizedDescription)
+        Log.shared.debug("Failed to load image:", file: error.localizedDescription)
         DispatchQueue.main.async {
           picker.dismiss(animated: true)
         }
