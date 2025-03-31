@@ -1,6 +1,10 @@
 import AppKit
 
 extension NSClipView {
+  var documentOffset: NSPoint {
+    bounds.origin
+  }
+
   func updateBounds(_ point: NSPoint, cancel: Bool = false) {
     if bounds.origin != point {
       if cancel {
