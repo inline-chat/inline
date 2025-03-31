@@ -284,8 +284,8 @@ class MessageTimeAndState: NSView {
     let timeWidth = size.width.rounded(.up)
     let timeHeight = size.height.rounded(.up)
 
-    MessageTimeAndState.timeWidth = timeWidth
-    MessageTimeAndState.timeHeight = timeHeight
+    MessageTimeAndState.timeWidth = ceil(timeWidth)
+    MessageTimeAndState.timeHeight = ceil(timeHeight)
   }
 }
 
