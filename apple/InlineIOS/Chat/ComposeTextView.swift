@@ -160,6 +160,11 @@ class ComposeTextView: UITextView {
         value: UIFont.systemFont(ofSize: 17),
         range: NSRange(location: 0, length: attributedText.length)
       )
+      attributedText.addAttribute(
+        .foregroundColor,
+        value: UIColor.label,
+        range: NSRange(location: 0, length: attributedText.length)
+      )
 
       self.attributedText = attributedText
     }
