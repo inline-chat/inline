@@ -7,6 +7,10 @@ class MessageListScrollView: NSScrollView {
 }
 
 extension NSScrollView {
+  func scrollWithoutFeedback(to point: NSPoint) {
+    self.enclosingScrollView?.contentView.bounds.origin = point
+  }
+  
   /// Executes scrolling code with temporarily disabled scroll bars
   /// - Parameter action: The scrolling code to execute
   func withoutScrollerFlash(_ action: () -> Void) {

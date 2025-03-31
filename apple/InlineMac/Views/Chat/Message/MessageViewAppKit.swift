@@ -11,7 +11,7 @@ import Throttler
 
 class MessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
-
+  private let log = Log.scoped("MessageView", enableTracing: true)
   static let avatarSize: CGFloat = Theme.messageAvatarSize
   private var fullMessage: FullMessage
   private var props: MessageViewProps
@@ -126,13 +126,9 @@ class MessageViewAppKit: NSView {
     return label
   }()
 
-  private lazy var contentView: NSStackView = {
-    let view = NSStackView()
-    view.spacing = 0.0 // don't use this, use spacer views
-    view.orientation = .vertical
+  private lazy var contentView: NSView = {
+    let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.alignment = .leading
-    view.distribution = .fill
     return view
   }()
 
@@ -181,54 +177,92 @@ class MessageViewAppKit: NSView {
   }()
 
   private lazy var textView: NSTextView = {
-    let textView = if useTextKit2 {
-      MessageTextView(usingTextLayoutManager: true) // Experimental text kit 2
+    if useTextKit2 {
+      let textView = MessageTextView(usingTextLayoutManager: true)
+      textView.translatesAutoresizingMaskIntoConstraints = false
+      textView.isEditable = false
+      textView.isSelectable = true
+      textView.backgroundColor = .clear
+      textView.drawsBackground = false
+      // Clips to bounds = false fucks up performance so badly. what!?
+      // textView.clipsToBounds = true
+      textView.textContainerInset = MessageTextConfiguration.containerInset
+      textView.font = MessageTextConfiguration.font
+      textView.textColor = textColor
+      textView.layerContentsRedrawPolicy = .onSetNeedsDisplay
+      textView.wantsLayer = true
+      textView.layer?.drawsAsynchronously = true
+
+      let textContainer = textView.textContainer
+      textContainer?.widthTracksTextView = false
+      textContainer?.heightTracksTextView = false
+
+      textView.isVerticallyResizable = false
+      textView.isHorizontallyResizable = false
+      textView.delegate = self
+
+      // In NSTextView you need to customize link colors here otherwise the attributed string for links
+      // does not have any effect.
+      textView.linkTextAttributes = [
+        .foregroundColor: linkColor,
+        .underlineStyle: NSUnderlineStyle.single.rawValue,
+        .cursor: NSCursor.pointingHand,
+      ]
+
+      // Match the sizes and spacing with the size calculator we use to calculate cell height
+      MessageTextConfiguration.configureTextContainer(textContainer!)
+      MessageTextConfiguration.configureTextView(textView)
+
+      return textView
     } else {
-      MessageTextView(usingTextLayoutManager: false) // TextKit 1
+      let textContainer = NSTextContainer(size: props.layout.text?.size ?? .zero)
+      let layoutManager = NSLayoutManager()
+      let textStorage = NSTextStorage()
+
+      textStorage.addLayoutManager(layoutManager)
+      layoutManager.addTextContainer(textContainer)
+
+      let textView = MessageTextView(frame: .zero, textContainer: textContainer)
+
+      // Essential TextKit 1 optimizations
+      textContainer.lineFragmentPadding = 0
+      textContainer.maximumNumberOfLines = 0
+      textContainer.widthTracksTextView = false
+      textContainer.heightTracksTextView = false
+      textContainer.lineBreakMode = .byClipping
+      textContainer.maximumNumberOfLines = 0
+      textContainer.containerSize = props.layout.text?.size ?? .zero
+      textContainer.size = props.layout.text?.size ?? .zero
+
+      //    layoutManager.showsControlCharacters = true
+      //    layoutManager.showsInvisibleCharacters = true
+
+      layoutManager.usesDefaultHyphenation = false
+      layoutManager.allowsNonContiguousLayout = true
+      layoutManager.backgroundLayoutEnabled = true
+
+      // Match your existing configuration
+      textView.isEditable = false
+      textView.isSelectable = true
+      textView.usesFontPanel = false
+      textView.textContainerInset = MessageTextConfiguration.containerInset
+      textView.linkTextAttributes = [
+        .foregroundColor: linkColor,
+        .underlineStyle: NSUnderlineStyle.single.rawValue,
+        .cursor: NSCursor.pointingHand,
+      ]
+      textView.delegate = self
+      textView.wantsLayer = true
+      textView.layer?.drawsAsynchronously = true
+      textView.layerContentsRedrawPolicy = .onSetNeedsDisplay
+      textView.layer?.contentsGravity = .topLeft
+      textView.layer?.needsDisplayOnBoundsChange = false
+      textView.drawsBackground = false
+      textView.isVerticallyResizable = false
+      textView.isHorizontallyResizable = false
+      textView.translatesAutoresizingMaskIntoConstraints = false
+      return textView
     }
-
-    textView.translatesAutoresizingMaskIntoConstraints = false
-    textView.isEditable = false
-    textView.isSelectable = true
-    textView.drawsBackground = false
-    textView.backgroundColor = .clear
-    // Clips to bounds = false fucks up performance so badly. what!?
-    textView.clipsToBounds = true
-    textView.textContainerInset = MessageTextConfiguration.containerInset
-    textView.font = MessageTextConfiguration.font
-    textView.textColor = textColor
-    textView.layerContentsRedrawPolicy = .duringViewResize
-    textView.wantsLayer = true
-    textView.layer?.drawsAsynchronously = true
-
-    let textContainer = textView.textContainer
-    textContainer?.widthTracksTextView = true
-    textContainer?.heightTracksTextView = true
-
-    textView.isVerticallyResizable = false
-    textView.isHorizontallyResizable = false
-
-    if let textLayoutManager = textView.textLayoutManager {
-      textLayoutManager.textViewportLayoutController
-        .adjustViewport(byVerticalOffset: 300)
-      // Only layout 300pt above viewport
-    }
-
-    textView.delegate = self
-
-    // In NSTextView you need to customize link colors here otherwise the attributed string for links
-    // does not have any effect.
-    textView.linkTextAttributes = [
-      .foregroundColor: linkColor,
-      .underlineStyle: NSUnderlineStyle.single.rawValue,
-      .cursor: NSCursor.pointingHand,
-    ]
-
-    // Match the sizes and spacing with the size calculator we use to calculate cell height
-    MessageTextConfiguration.configureTextContainer(textContainer!)
-    MessageTextConfiguration.configureTextView(textView)
-
-    return textView
   }()
 
   // MARK: - Initialization
@@ -240,7 +274,7 @@ class MessageViewAppKit: NSView {
     setupView()
 
     DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-      // self?.//addHoverTrackingArea()
+      // self?.addHoverTrackingArea()
       self?.setupScrollStateObserver()
     }
   }
@@ -254,10 +288,6 @@ class MessageViewAppKit: NSView {
 
   override func layout() {
     super.layout()
-  }
-
-  override func updateConstraints() {
-    super.updateConstraints()
   }
 
   // MARK: - Setup
@@ -297,33 +327,27 @@ class MessageViewAppKit: NSView {
     addSubview(contentView)
 
     if hasReply {
-      contentView.addArrangedSubview(replyView)
+      contentView.addSubview(replyView)
     }
 
     if hasPhoto {
-      contentView.addArrangedSubview(newPhotoView)
+      contentView.addSubview(newPhotoView)
     }
 
     if hasDocument, let documentView {
-      contentView.addArrangedSubview(documentView)
+      contentView.addSubview(documentView)
     }
 
     if hasText {
-      contentView.addArrangedSubview(textView)
+      contentView.addSubview(textView)
     }
 
     setupMessageText()
-    setupConstraints()
+    // setupConstraints()
     setupContextMenu()
-  }
 
-  private var textViewWidthConstraint: NSLayoutConstraint?
-  private var textViewHeightConstraint: NSLayoutConstraint?
-  private var photoViewHeightConstraint: NSLayoutConstraint?
-  private var photoViewWidthConstraint: NSLayoutConstraint?
-  private var contentViewWidthConstraint: NSLayoutConstraint!
-  private var bubbleViewWidthConstraint: NSLayoutConstraint!
-  private var bubbleViewHeightConstraint: NSLayoutConstraint!
+//    needsUpdateConstraints = true
+  }
 
   private func setupConstraints() {
     var constraints: [NSLayoutConstraint] = []
@@ -338,12 +362,12 @@ class MessageViewAppKit: NSView {
     // and stored in the layout plan.
 
     // Content View Top and Bottom Insets
-    contentView.edgeInsets = NSEdgeInsets(
-      top: layout.topMostContentTopSpacing,
-      left: 0,
-      bottom: layout.bottomMostContentBottomSpacing,
-      right: 0
-    )
+//    contentView.edgeInsets = NSEdgeInsets(
+//      top: layout.topMostContentTopSpacing,
+//      left: 0,
+//      bottom: layout.bottomMostContentBottomSpacing,
+//      right: 0
+//    )
 
     if let avatar = layout.avatar, showsAvatar {
       constraints.append(
@@ -410,6 +434,7 @@ class MessageViewAppKit: NSView {
       equalToConstant: layout.bubble.size.width
     )
     contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: layout.bubble.size.width)
+    contentViewHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: layout.bubble.size.height)
 
     constraints.append(
       contentsOf: [
@@ -421,6 +446,7 @@ class MessageViewAppKit: NSView {
             constant: layout.nameAndBubbleLeading
           ),
 
+        contentViewHeightConstraint,
         contentViewWidthConstraint,
         contentView.leadingAnchor
           .constraint(
@@ -437,19 +463,22 @@ class MessageViewAppKit: NSView {
         .constraint(equalToConstant: text.size.width)
       textViewHeightConstraint = textView.heightAnchor
         .constraint(equalToConstant: text.size.height)
+      textViewTopConstraint = textView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: layout.textContentViewTop
+      )
 
       constraints.append(
         contentsOf: [
           textViewHeightConstraint!,
           textViewWidthConstraint!,
+          textViewTopConstraint!,
           textView.leadingAnchor.constraint(
             equalTo: contentView.leadingAnchor,
             constant: text.spacing.left
           ),
         ]
       )
-
-      contentView.setCustomSpacing(text.spacing.bottom, after: textView)
 
       // TODO: Handle RTL
     }
@@ -475,19 +504,30 @@ class MessageViewAppKit: NSView {
     }
 
     if let reply = layout.reply {
+      replyViewTopConstraint = replyView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: reply.spacing.top
+      )
+
       constraints.append(
         contentsOf: [
           replyView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: reply.spacing.left),
           replyView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -reply.spacing.right),
+          replyViewTopConstraint!,
         ]
       )
-      contentView.setCustomSpacing(reply.spacing.bottom, after: replyView)
     }
 
     // Document
     if let document = layout.document, let documentView {
+      documentViewTopConstraint = documentView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: layout.documentContentViewTop
+      )
+
       constraints.append(
         contentsOf: [
+          documentViewTopConstraint!,
           documentView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
           documentView.trailingAnchor.constraint(
             equalTo: contentView.trailingAnchor,
@@ -495,42 +535,164 @@ class MessageViewAppKit: NSView {
           ),
         ]
       )
-      contentView.setCustomSpacing(document.spacing.bottom, after: documentView)
     }
 
     // Photo
 
     if let photo = layout.photo {
+      photoViewTopConstraint = newPhotoView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: layout.photoContentViewTop
+      )
       photoViewHeightConstraint = newPhotoView.heightAnchor.constraint(equalToConstant: photo.size.height)
       photoViewWidthConstraint = newPhotoView.widthAnchor
-        .constraint(greaterThanOrEqualToConstant: photo.size.width)
+        .constraint(equalToConstant: photo.size.width)
       constraints.append(contentsOf: [
+        photoViewTopConstraint!,
         photoViewHeightConstraint!,
         photoViewWidthConstraint!,
+        newPhotoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
       ])
-      contentView.setCustomSpacing(photo.spacing.bottom, after: newPhotoView)
     }
   }
 
-  private func setupMessageText() {
-    guard hasText else {
+  // MARK: - Constraints
+
+  private var textViewWidthConstraint: NSLayoutConstraint?
+  private var textViewHeightConstraint: NSLayoutConstraint?
+  private var textViewTopConstraint: NSLayoutConstraint?
+
+  private var photoViewHeightConstraint: NSLayoutConstraint?
+  private var photoViewWidthConstraint: NSLayoutConstraint?
+  private var photoViewTopConstraint: NSLayoutConstraint?
+
+  private var replyViewTopConstraint: NSLayoutConstraint?
+
+  private var documentViewTopConstraint: NSLayoutConstraint?
+
+  private var contentViewWidthConstraint: NSLayoutConstraint!
+  private var contentViewHeightConstraint: NSLayoutConstraint!
+
+  private var bubbleViewWidthConstraint: NSLayoutConstraint!
+  private var bubbleViewHeightConstraint: NSLayoutConstraint!
+
+  private var isInitialUpdateConstraint = true
+
+  override func updateConstraints() {
+    if isInitialUpdateConstraint {
+      setupConstraints()
+      isInitialUpdateConstraint = false
+      super.updateConstraints()
       return
     }
 
-    // Setup text
+    // Update constraints if changed
+    if let text = props.layout.text,
+       let textViewWidthConstraint,
+       let textViewHeightConstraint,
+       let textViewTopConstraint
+    {
+      log.trace("Updating text view constraints for message \(text.size)")
+      if textViewWidthConstraint.constant != text.size.width {
+        textViewWidthConstraint.constant = text.size.width
+      }
+
+      if textViewHeightConstraint.constant != text.size.height {
+        textViewHeightConstraint.constant = text.size.height
+      }
+
+      if textViewTopConstraint.constant != props.layout.textContentViewTop {
+        textViewTopConstraint.constant = props.layout.textContentViewTop
+      }
+    }
+
+    if let reply = props.layout.reply,
+       let replyViewTopConstraint
+    {
+      log.trace("Updating reply view constraints for message \(reply.size)")
+      if replyViewTopConstraint.constant != reply.spacing.top {
+        replyViewTopConstraint.constant = reply.spacing.top
+      }
+    }
+
+    if let photo = props.layout.photo,
+       let photoViewHeightConstraint,
+       let photoViewWidthConstraint,
+       let photoViewTopConstraint
+    {
+      log.trace("Updating photo view constraints for message \(photo.size)")
+      if photoViewHeightConstraint.constant != photo.size.height {
+        photoViewHeightConstraint.constant = photo.size.height
+      }
+
+      if photoViewWidthConstraint.constant != photo.size.width {
+        photoViewWidthConstraint.constant = photo.size.width
+      }
+
+      if photoViewTopConstraint.constant != props.layout.photoContentViewTop {
+        photoViewTopConstraint.constant = props.layout.photoContentViewTop
+      }
+    }
+
+    if let document = props.layout.document,
+       let documentViewTopConstraint
+    {
+      log.trace("Updating document view constraints for message \(document.size)")
+      if documentViewTopConstraint.constant != document.spacing.top {
+        documentViewTopConstraint.constant = document.spacing.top
+      }
+    }
+
+    if let bubbleViewWidthConstraint,
+       let bubbleViewHeightConstraint,
+       let contentViewWidthConstraint,
+       let contentViewHeightConstraint
+    {
+      let bubble = props.layout.bubble
+      log.trace("Updating bubble view constraints for message \(bubble.size)")
+      if bubbleViewWidthConstraint.constant != bubble.size.width {
+        bubbleViewWidthConstraint.constant = bubble.size.width
+      }
+
+      if bubbleViewHeightConstraint.constant != bubble.size.height {
+        bubbleViewHeightConstraint.constant = bubble.size.height
+      }
+
+      if contentViewWidthConstraint.constant != bubble.size.width {
+        contentViewWidthConstraint.constant = bubble.size.width
+      }
+
+      if contentViewHeightConstraint.constant != bubble.size.height {
+        contentViewHeightConstraint.constant = bubble.size.height
+      }
+    }
+
+    super.updateConstraints()
+  }
+
+  private func setupMessageText() {
+    guard hasText else { return }
+
     let text = message.text ?? ""
 
-    textView.baseWritingDirection = props.isRtl ? .rightToLeft : .natural
+    // From Cache
+    if let cachedAttributedString = CacheAttrs.shared.get(message: message) {
+      let attributedString = cachedAttributedString
+      textView.textStorage?.setAttributedString(attributedString)
 
-    if let attrs = CacheAttrs.shared.get(message: message) {
-      textView.textStorage?.setAttributedString(attrs)
+      if useTextKit2 {
+        textView.textContainer?.size = props.layout.text?.size ?? .zero
+      } else {
+        textView.textContainer?.size = props.layout.text?.size ?? .zero
+        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
+      }
       return
     }
 
     // Create mutable attributed string
     let attributedString = NSMutableAttributedString(
       // Trim to avoid known issue with size calculator
-      string: text, // .trimmingCharacters(in: .whitespacesAndNewlines),
+      string: text,
       attributes: [
         .font: MessageTextConfiguration.font,
         .foregroundColor: textColor,
@@ -539,7 +701,11 @@ class MessageViewAppKit: NSView {
 
     // Detect and add links
     if let detector = Self.detector {
-      let matches = detector.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
+      let matches = detector.matches(
+        in: text,
+        options: [],
+        range: NSRange(location: 0, length: text.utf16.count)
+      )
 
       for match in matches {
         if let url = match.url {
@@ -556,6 +722,42 @@ class MessageViewAppKit: NSView {
     textView.textStorage?.setAttributedString(attributedString)
 
     CacheAttrs.shared.set(message: message, value: attributedString)
+
+    if useTextKit2 {
+      textView.textContainer?.size = props.layout.text?.size ?? .zero
+    } else {
+      textView.textContainer?.size = props.layout.text?.size ?? .zero
+      textView.layoutManager?.ensureLayout(for: textView.textContainer!)
+    }
+
+//    // Use parallel text processing
+//    DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
+//      guard let self else { return }
+//
+//      DispatchQueue.main.async { [weak self] in
+//        guard let self else { return }
+//
+//        // Detect and add links
+//        if let detector = Self.detector {
+//          let matches = detector.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
+//
+//          for match in matches {
+//            if let url = match.url {
+//              attributedString.addAttributes([
+//                .cursor: NSCursor.pointingHand,
+//                .link: url,
+//                .foregroundColor: linkColor,
+//                .underlineStyle: NSUnderlineStyle.single.rawValue,
+//              ], range: match.range)
+//            }
+//          }
+//        }
+//
+//        textView.textStorage?.setAttributedString(attributedString)
+//
+//        CacheAttrs.shared.set(message: message, value: attributedString)
+//      }
+//    }
   }
 
   static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
@@ -606,7 +808,7 @@ class MessageViewAppKit: NSView {
 
 //    if prevWidth != 0 && prevWidth != bounds.width {
 //      // skip if width changed bc we are handling relayout in updatePropsAndUpdateLayout and causes flicker
-//      Log.shared.debug("Skipping relayout because width didn't change")
+//      log.trace("Skipping relayout because width didn't change")
 //      return
 //    }
 //
@@ -631,9 +833,9 @@ class MessageViewAppKit: NSView {
         return
       }
 
-//      if isOverMaxWidth {
-//        didTextLayoutAfterMaxWidth = true
-//      }
+      if (message.text?.count ?? 0) < 20 {
+        return
+      }
 
       if useTextKit2 {
         // TextKit 2 specific configuration
@@ -643,29 +845,29 @@ class MessageViewAppKit: NSView {
             // Important note:
             // Less performant, but fixes flicker during live resize for large messages that are beyound viewport height
             // and during width resize
-            Log.shared.debug("Layouting viewport (1) for text view \(message.id) ")
+            log.trace("Layouting viewport (1) for text view \(message.id) ")
 
             textLayoutManager.textViewportLayoutController.layoutViewport()
-            textView.layout()
-            textView.display()
+            // textView.layout()
+            // textView.display()
           } else {
             // More performant for single line messages
-            throttle(.milliseconds(200), identifier: "layoutMessageTextView", by: .mainActor, option: .default) { [
+            throttle(.milliseconds(50), identifier: "layoutMessageTextView", by: .mainActor, option: .default) { [
               weak self,
               weak textLayoutManager
             ] in
               guard let self else { return }
               guard let textLayoutManager else { return }
 
-              Log.shared.debug("Layouting viewport for text view \(message.id)")
+              log.trace("Layouting viewport for text view \(message.id)")
               textLayoutManager.textViewportLayoutController.layoutViewport()
-              textView.layout()
-              textView.display()
+//              textView.layout()
+//              textView.display()
             }
           }
         }
       } else {
-        //        Log.shared.debug("Layouting viewport for text view \(message.id)")
+        //        log.trace("Layouting viewport for text view \(message.id)")
 
         // TODO: Ensure layout for textkit 1
         // textView.layoutManager?.ensureLayout(for: textView.textContainer!)
@@ -803,7 +1005,7 @@ class MessageViewAppKit: NSView {
 
   private func updatePropsAndUpdateLayout(props: MessageViewProps, disableTextRelayout: Bool = false) {
     // save for comparison
-    let prevProps = self.props
+//    let prevProps = self.props
 
     // update internal props (must update so contentView is recalced)
     self.props = props
@@ -811,75 +1013,72 @@ class MessageViewAppKit: NSView {
     // less granular
     // guard props != self.props else { return }
 
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0
-      context.allowsImplicitAnimation = false
+    needsUpdateConstraints = true
 
-      // will help?
-      CATransaction.begin()
-      CATransaction.setDisableActions(true)
-
-      defer {
-        CATransaction.commit()
-      }
-
-      if prevProps.layout.bubble != props.layout.bubble {
-        contentViewWidthConstraint.constant = props.layout.bubble.size.width
-        bubbleViewWidthConstraint.constant = props.layout.bubble.size.width
-        bubbleViewHeightConstraint.constant = props.layout.bubble.size.height
-      }
-
-      let hasTextSizeChanged =
-        prevProps.layout.text != props.layout.text
-      let hasPhotoSizeChanged =
-        prevProps.layout.photo != props.layout.photo
-      let singleLineChanged =
-        prevProps.layout.singleLine != props.layout.singleLine
-
-      if singleLineChanged {
-        // TODO: Update time position
-      }
-
-      // only proceed if text size or photo size has changed
-      // Fun fact: I wasted too much time on || being &&
-      guard hasTextSizeChanged || hasPhotoSizeChanged
-      else { return }
-
-      // # Update sizes
-      // Text
-      if let text = props.layout.text {
-        textViewWidthConstraint?.constant = text.size.width
-
-        // Text size
-        if hasTextSizeChanged {
-          textViewHeightConstraint?.constant = text.size.height
-
-          // This helps refresh the layout for textView
-          textView.textContainer?.containerSize = CGSize(width: text.size.width, height: text.size.height)
-
-          // very subtle fix:
-          // ensure the change is reflected even if it was offscreen when live resize started
-          if useTextKit2, !disableTextRelayout {
-            textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
-            textView.layoutSubtreeIfNeeded()
-            textView.displayIfNeeded()
-          }
-        }
-      }
-
-      // photo size
-      if hasPhotoSizeChanged,
-         let photoViewHeightConstraint,
-         let photoViewWidthConstraint,
-         let photo = props.layout.photo
-      {
-        photoViewHeightConstraint.constant = photo.size.height
-        photoViewWidthConstraint.constant = photo.size.width
-      }
+    if textView.textContainer?.size != props.layout.text?.size ?? .zero {
+      textView.textContainer?.size = props.layout.text?.size ?? .zero
     }
+
+//    if prevProps.layout.bubble != props.layout.bubble {
+//      contentViewWidthConstraint.constant = props.layout.bubble.size.width
+//      bubbleViewWidthConstraint.constant = props.layout.bubble.size.width
+//      bubbleViewHeightConstraint.constant = props.layout.bubble.size.height
+//    }
+//
+//    let hasTextSizeChanged =
+//      prevProps.layout.text != props.layout.text
+//    let hasPhotoSizeChanged =
+//      prevProps.layout.photo != props.layout.photo
+//    let singleLineChanged =
+//      prevProps.layout.singleLine != props.layout.singleLine
+//
+//    if singleLineChanged {
+//      // TODO: Update time position
+//    }
+//
+//    // only proceed if text size or photo size has changed
+//    // Fun fact: I wasted too much time on || being &&
+//    guard hasTextSizeChanged || hasPhotoSizeChanged
+//    else { return }
+//
+//    // # Update sizes
+//    // Text
+//    if let text = props.layout.text {
+//      textViewWidthConstraint?.constant = text.size.width
+//
+//      // Text size
+//      if hasTextSizeChanged {
+//        textViewHeightConstraint?.constant = text.size.height
+//
+//        // This helps refresh the layout for textView
+//        // textView.textContainer?.containerSize = CGSize(width: text.size.width, height: text.size.height)
+//
+//        // very subtle fix:
+//        // ensure the change is reflected even if it was offscreen when live resize started
+//        if useTextKit2, !disableTextRelayout {
+    ////          textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    ////          textView.layoutSubtreeIfNeeded()
+    ////          textView.displayIfNeeded()
+//        }
+//      }
+//    }
+//
+//    // photo size
+//    if hasPhotoSizeChanged,
+//       let photoViewHeightConstraint,
+//       let photoViewWidthConstraint,
+//       let photo = props.layout.photo
+//    {
+//      photoViewHeightConstraint.constant = photo.size.height
+//      photoViewWidthConstraint.constant = photo.size.width
+//    }
   }
 
   public func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps) {
+    log.trace(
+      "Updating message view content. from: \(self.fullMessage.message.messageId) to: \(fullMessage.message.messageId)"
+    )
+
     // update internal props
     self.fullMessage = fullMessage
 
@@ -914,7 +1113,8 @@ class MessageViewAppKit: NSView {
     // update props and reflect changes
     updatePropsAndUpdateLayout(
       props: props,
-      disableTextRelayout: props.layout.singleLine // Quick hack to reduce such re-layouts
+      // disableTextRelayout: props.layout.singleLine // Quick hack to reduce such re-layouts
+      disableTextRelayout: true
     )
   }
 
