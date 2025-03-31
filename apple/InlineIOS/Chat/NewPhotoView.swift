@@ -91,7 +91,10 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
       calculatedHeight = calculatedWidth / aspectRatio
     }
 
-    return ImageDimensions(width: isPng ? calculatedWidth / 2 : calculatedWidth, height: isPng ? calculatedHeight / 2 : calculatedHeight)
+    return ImageDimensions(
+      width: isPng ? calculatedWidth / 2 : calculatedWidth,
+      height: isPng ? calculatedHeight / 2 : calculatedHeight
+    )
   }
 
   private func setupImageConstraints() {
@@ -120,18 +123,46 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
 
     let dimensions = calculateImageDimensions(width: width, height: height)
 
-    let widthConstraint = widthAnchor.constraint(equalToConstant: dimensions.width)
-    let heightConstraint = heightAnchor.constraint(equalToConstant: dimensions.height)
+    if !isPng {
+      let widthConstraint = widthAnchor.constraint(equalToConstant: dimensions.width)
+      let heightConstraint = heightAnchor.constraint(equalToConstant: dimensions.height)
 
-    let imageViewTopConstraint = imageView.topAnchor.constraint(equalTo: topAnchor)
-    let imageViewLeadingConstraint = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
-    let imageViewTrailingConstraint = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
-    let imageViewBottomConstraint = imageView.bottomAnchor.constraint(equalTo: bottomAnchor)
+      let imageViewTopConstraint = imageView.topAnchor.constraint(equalTo: topAnchor)
+      let imageViewLeadingConstraint = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
+      let imageViewTrailingConstraint = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
+      let imageViewBottomConstraint = imageView.bottomAnchor.constraint(equalTo: bottomAnchor)
 
-    imageConstraints = [
-      widthConstraint, heightConstraint,
-      imageViewTopConstraint, imageViewLeadingConstraint, imageViewTrailingConstraint, imageViewBottomConstraint,
-    ]
+      imageConstraints = [
+        widthConstraint, heightConstraint,
+        imageViewTopConstraint, imageViewLeadingConstraint, imageViewTrailingConstraint, imageViewBottomConstraint,
+      ]
+    }
+
+    else {
+      // Add extra vertical padding for PNG stickers
+      let verticalPadding: CGFloat = 16.0
+
+      let widthConstraint = widthAnchor.constraint(equalToConstant: dimensions.width)
+      let heightConstraint = heightAnchor.constraint(equalToConstant: dimensions.height + (verticalPadding * 2))
+
+      // Center the image view within the container with padding
+      let imageViewTopConstraint = imageView.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding)
+      let imageViewLeadingConstraint = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
+      let imageViewTrailingConstraint = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
+      let imageViewBottomConstraint = imageView.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: -verticalPadding
+      )
+
+      // Set a fixed height for the imageView to ensure it doesn't stretch
+      let imageViewHeightConstraint = imageView.heightAnchor.constraint(equalToConstant: dimensions.height)
+
+      imageConstraints = [
+        widthConstraint, heightConstraint,
+        imageViewTopConstraint, imageViewLeadingConstraint, imageViewTrailingConstraint, imageViewBottomConstraint,
+        imageViewHeightConstraint,
+      ]
+    }
 
     NSLayoutConstraint.activate(imageConstraints)
   }
@@ -190,23 +221,21 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
     // Determine which corners to round based on message properties
     let hasReactions = !fullMessage.reactions.isEmpty
 
-    let roundingCorners: UIRectCorner
-
-    if !hasText && !hasReply && !hasReactions {
+    let roundingCorners: UIRectCorner = if !hasText, !hasReply, !hasReactions {
       // No text and no reply - round all corners
-      roundingCorners = .allCorners
+      .allCorners
     } else if hasReactions {
       // No text but has reactions - round top corners only
-      roundingCorners = [.topLeft, .topRight]
-    } else if hasText && !hasReply {
+      [.topLeft, .topRight]
+    } else if hasText, !hasReply {
       // Has text but no reply - round top corners
-      roundingCorners = [.topLeft, .topRight]
-    } else if hasReply && !hasText {
+      [.topLeft, .topRight]
+    } else if hasReply, !hasText {
       // Has reply but no text - round bottom corners
-      roundingCorners = [.bottomLeft, .bottomRight]
+      [.bottomLeft, .bottomRight]
     } else {
       // Default case - don't round any corners
-      roundingCorners = []
+      []
     }
 
     let bounds = CGRect(x: 0, y: 0, width: width, height: height)
