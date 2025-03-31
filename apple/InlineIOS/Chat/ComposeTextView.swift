@@ -431,7 +431,7 @@ class ComposeTextView: UITextView {
       UIGraphicsEndImageContext()
 
       if let composeView {
-        Task { @MainActor in
+        DispatchQueue.main.async {
           composeView.sendSticker(resizedImage)
         }
       }
@@ -439,18 +439,13 @@ class ComposeTextView: UITextView {
   }
 
   private func removeAttachment(at range: NSRange) {
-    textStorage.beginEditing()
-    if range.location + range.length <= textStorage.length {
-      textStorage.replaceCharacters(in: range, with: "")
+    guard let attributedString = attributedText?.mutableCopy() as? NSMutableAttributedString else {
+      return
     }
-    textStorage.endEditing()
 
-    let currentText = attributedText ?? NSAttributedString()
-    if range.location + range.length <= currentText.length {
-      let mutableText = NSMutableAttributedString(attributedString: currentText)
-      mutableText.replaceCharacters(in: range, with: "")
-      attributedText = mutableText
-    }
+    attributedString.replaceCharacters(in: range, with: "")
+
+    attributedText = attributedString
   }
 }
 
@@ -513,9 +508,15 @@ extension ComposeTextView {
     removeAttachment(at: range)
 
     if let composeView {
-      Task { @MainActor in
+      DispatchQueue.main.async {
         composeView.sendSticker(image)
       }
+      return
+    }
+
+    if let composeView {
+      composeView.sendSticker(image)
+
       return
     }
 
