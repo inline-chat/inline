@@ -10,9 +10,11 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerDelegate,
+  UINavigationControllerDelegate
+{
   // MARK: - Configuration Constants
-    
+
   static let minHeight: CGFloat = 42.0
   private let maxHeight: CGFloat = 600
   private let buttonSize: CGSize = .init(width: 36, height: 36)
@@ -20,9 +22,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   static let textViewHorizantalPadding: CGFloat = 12.0
   static let textViewHorizantalMargin: CGFloat = 7.0
   static let textViewVerticalMargin: CGFloat = 7.0
-    
+
   // MARK: - Private Properties
-    
+
   private var composeHeightConstraint: NSLayoutConstraint!
   private var prevTextHeight: CGFloat = 0.0
   private let buttonBottomPadding: CGFloat = -4.0
@@ -31,123 +33,176 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   private var overlayView: UIView?
   private var isOverlayVisible = false
   private var phaseObserver: AnyCancellable?
-    
+
   // MARK: - State Management
-    
+
   var selectedImage: UIImage?
   var showingPhotoPreview: Bool = false
   var imageCaption: String = ""
   let previewViewModel = PhotoPreviewViewModel()
   var attachmentItems: [UIImage: FileMediaItem] = [:]
-    
+
   var onHeightChange: ((CGFloat) -> Void)?
   var peerId: Peer?
   var chatId: Int64?
-    
+
   // MARK: - UI Components
-    
-  lazy var textView: ComposeTextView = makeTextView()
-    
-  lazy var textViewContainer: TextViewContainer = {
-    let container = TextViewContainer(textView: textView)
-    container.translatesAutoresizingMaskIntoConstraints = false
-    return container
+
+  lazy var textView: ComposeTextView = {
+    let view = ComposeTextView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+
+    return view
   }()
-    
+
   lazy var sendButtonContainer: UIView = {
     let container = UIView()
     container.translatesAutoresizingMaskIntoConstraints = false
     container.isUserInteractionEnabled = true
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(sendTapped))
     container.addGestureRecognizer(tapGesture)
-    container.alpha = 0
+    container.alpha = 1
     return container
   }()
-    
+
   lazy var sendButton = makeSendButton()
   lazy var plusButton = makePlusButton()
-    
+
   // MARK: - Initialization
-    
+
   override init(frame: CGRect) {
     super.init(frame: frame)
     setupViews()
     setupScenePhaseObserver()
     setupChatStateObservers()
+
+    // Add observer for sticker notifications
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleStickerDetected(_:)),
+      name: NSNotification.Name("StickerDetected"),
+      object: nil
+    )
   }
-    
+
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
-    
+
+  @objc private func handleStickerDetected(_ notification: Notification) {
+    if let image = notification.userInfo?["image"] as? UIImage {
+      print("📤 COMPOSE - Received sticker notification with image: \(image.size)")
+      // Ensure we're on the main thread
+      DispatchQueue.main.async {
+        self.sendSticker(image)
+      }
+    }
+  }
+
   // MARK: - View Lifecycle
-    
+
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window != nil {
       loadDraft()
     }
   }
-    
+
   override func removeFromSuperview() {
     saveDraft()
     super.removeFromSuperview()
   }
-    
+
   override func resignFirstResponder() -> Bool {
     dismissOverlay()
     return super.resignFirstResponder()
   }
-    
+
+  // Add this method to ComposeView
+  public func sendSticker(_ image: UIImage) {
+    print("📤 COMPOSE - Sending sticker image: \(image.size)")
+    guard let peerId else {
+      print("❌ COMPOSE - No peerId available")
+      return
+    }
+
+    sendButton.configuration?.showsActivityIndicator = true
+
+    do {
+      let photoInfo = try FileCache.savePhoto(image: image)
+      print("✅ COMPOSE - Saved sticker to file cache: \(photoInfo)")
+
+      // Send the sticker immediately without caption
+      Transactions.shared.mutate(
+        transaction: .sendMessage(
+          .init(
+            text: "", // No caption for stickers
+            peerId: peerId,
+            chatId: chatId ?? 0,
+            mediaItems: [.photo(photoInfo)],
+            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
+          )
+        )
+      )
+
+      print("✅ COMPOSE - Sticker sent successfully")
+      sendMessageHaptic()
+    } catch {
+      print("❌ COMPOSE - Failed to save sticker: \(error)")
+    }
+
+    sendButton.configuration?.showsActivityIndicator = false
+  }
+
   // MARK: - Setup & Layout
-    
+
   private func setupViews() {
     backgroundColor = .clear
-    addSubview(textViewContainer)
+    addSubview(textView)
     addSubview(sendButtonContainer)
     sendButtonContainer.addSubview(sendButton)
     addSubview(plusButton)
-        
+
     composeHeightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
-        
+
     NSLayoutConstraint.activate([
       composeHeightConstraint,
-            
-      textViewContainer.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
-      textViewContainer.topAnchor.constraint(equalTo: topAnchor),
-      textViewContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textViewContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
-            
+
+      textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
+      textView.topAnchor.constraint(equalTo: topAnchor),
+      textView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      textView.trailingAnchor.constraint(equalTo: trailingAnchor),
+
       sendButtonContainer.trailingAnchor.constraint(
-        equalTo: textViewContainer.trailingAnchor,
+        equalTo: textView.trailingAnchor,
         constant: 6
       ),
       sendButtonContainer.bottomAnchor.constraint(
-        equalTo: textViewContainer.bottomAnchor,
+        equalTo: textView.bottomAnchor,
         constant: 7
       ),
       sendButtonContainer.widthAnchor.constraint(equalToConstant: buttonSize.width + 20),
       sendButtonContainer.heightAnchor.constraint(equalToConstant: buttonSize.height + 20),
-            
+
       sendButton.centerXAnchor.constraint(equalTo: sendButtonContainer.centerXAnchor),
       sendButton.centerYAnchor.constraint(equalTo: sendButtonContainer.centerYAnchor),
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
-            
+
       plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
-      plusButton.bottomAnchor.constraint(equalTo: textViewContainer.bottomAnchor, constant: -3),
+      plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: -3),
       plusButton.widthAnchor.constraint(equalToConstant: Self.minHeight - 6),
       plusButton.heightAnchor.constraint(equalToConstant: Self.minHeight - 6),
     ])
-        
+
     // Add drop interaction
     let dropInteraction = UIDropInteraction(delegate: self)
     addInteraction(dropInteraction)
   }
-    
+
   // MARK: - UI Component Creation
-    
+
   private func makeTextView() -> ComposeTextView {
     let textView = ComposeTextView()
     textView.font = .systemFont(ofSize: 17)
@@ -162,19 +217,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     textView.delegate = self
     textView.textLayoutManager?.delegate = self
     textView.translatesAutoresizingMaskIntoConstraints = false
-        
+
     if #available(iOS 16.0, *) {
       textView.usesStandardTextScaling = true
     }
-        
+
     return textView
   }
-    
+
   private func makeSendButton() -> UIButton {
     let button = UIButton()
     button.translatesAutoresizingMaskIntoConstraints = false
     button.frame = CGRect(origin: .zero, size: buttonSize)
-        
+
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "arrow.up")?.withConfiguration(
       UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
@@ -182,16 +237,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     config.baseForegroundColor = .white
     config.background.backgroundColor = ColorManager.shared.selectedColor
     config.cornerStyle = .capsule
-        
+
     button.configuration = config
     button.isUserInteractionEnabled = false
     return button
   }
-    
+
   private func makePlusButton() -> UIButton {
     let button = UIButton()
     button.translatesAutoresizingMaskIntoConstraints = false
-        
+
     var config = UIButton.Configuration.plain()
     config.image = UIImage(systemName: "plus")?.withConfiguration(
       UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
@@ -201,7 +256,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     button.configuration = config
     button.layer.cornerRadius = Self.minHeight / 2
     button.clipsToBounds = true
-        
+
     let libraryAction = UIAction(
       title: "Photos",
       image: UIImage(systemName: "photo"),
@@ -209,7 +264,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         self?.presentPicker()
       }
     )
-        
+
     let cameraAction = UIAction(
       title: "Camera",
       image: UIImage(systemName: "camera"),
@@ -217,42 +272,42 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         self.presentCamera()
       }
     )
-        
+
     button.menu = UIMenu(children: [libraryAction, cameraAction])
     button.showsMenuAsPrimaryAction = true
-        
+
     return button
   }
-    
+
   // MARK: - Height Management
-    
+
   func textViewHeightByContentHeight(_ contentHeight: CGFloat) -> CGFloat {
     let newHeight = min(maxHeight, max(Self.minHeight, contentHeight + Self.textViewVerticalPadding * 2))
     return newHeight
   }
-    
+
   private func updateHeight() {
-    let layoutManager = textViewContainer.textView.layoutManager
-    let textContainer = textViewContainer.textView.textContainer
-        
+    let layoutManager = textView.layoutManager
+    let textContainer = textView.textContainer
+
     let contentHeight = layoutManager.usedRect(for: textContainer).height
-        
+
     // Ignore small height changes
     if abs(prevTextHeight - contentHeight) < 8.0 {
       return
     }
-        
+
     prevTextHeight = contentHeight
-        
+
     let newHeight = textViewHeightByContentHeight(contentHeight)
     guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
-        
+
     composeHeightConstraint.constant = newHeight
     superview?.layoutIfNeeded()
-        
+
     onHeightChange?(newHeight)
   }
-    
+
   private func resetHeight() {
     UIView.animate(withDuration: 0.2) {
       self.composeHeightConstraint.constant = Self.minHeight
@@ -260,35 +315,38 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     }
     onHeightChange?(Self.minHeight)
   }
-    
+
   // MARK: - Button Animation
-    
+
   func buttonDisappear() {
     UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseIn) {
       self.sendButtonContainer.alpha = 0
       self.sendButtonContainer.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
     }
   }
-    
+
   func buttonAppear() {
+    print("📱 UI - buttonAppear called")
     UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseOut) {
       self.sendButtonContainer.alpha = 1
       self.sendButtonContainer.transform = .identity
+    } completion: { _ in
+      print("📱 UI - buttonAppear animation completed, alpha: \(self.sendButtonContainer.alpha)")
     }
   }
-    
+
   // MARK: - Message Actions
-    
+
   @objc private func sendTapped() {
     guard let peerId else { return }
     let state = ChatState.shared.getState(peer: peerId)
     let isEditing = state.editingMessageId != nil
-        
-    guard let text = textViewContainer.textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+
+    guard let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
           !text.isEmpty
     else { return }
     guard let chatId else { return }
-        
+
     if isEditing {
       // Handle message edit
       Transactions.shared.mutate(transaction: .editMessage(.init(
@@ -297,7 +355,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         chatId: chatId,
         peerId: peerId
       )))
-            
+
       ChatState.shared.clearEditingMessageId(peer: peerId)
     } else {
       // Original send message logic
@@ -310,22 +368,22 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       )))
       ChatState.shared.clearReplyingMessageId(peer: peerId)
     }
-        
+
     clearDraft()
-    textViewContainer.textView.text = ""
+    textView.text = ""
     resetHeight()
-    textViewContainer.textView.showPlaceholder(true)
+    textView.showPlaceholder(true)
     buttonDisappear()
     sendMessageHaptic()
   }
-    
+
   private func updateSendButtonForEditing(_ isEditing: Bool) {
     let imageName = isEditing ? "checkmark" : "arrow.up"
     sendButton.configuration?.image = UIImage(systemName: imageName)?.withConfiguration(
       UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
     )
   }
-    
+
   func sendMessageHaptic() {
     Task { @MainActor in
       let generator = UIImpactFeedbackGenerator(style: .medium)
@@ -333,37 +391,37 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       generator.impactOccurred()
     }
   }
-    
+
   // MARK: - Draft Management
-    
+
   func applyDraft(_ draft: String?) {
     if let draft, !draft.isEmpty {
-      textViewContainer.textView.text = draft
-      textViewContainer.textView.showPlaceholder(false)
+      textView.text = draft
+      textView.showPlaceholder(false)
       buttonAppear()
       updateHeight()
     }
   }
-    
+
   func loadDraft() {
     guard let peerId else { return }
-        
+
     if let draft = getDraft(peerId: peerId) {
       applyDraft(draft)
     }
   }
-    
+
   public func getDraft(peerId: Peer) -> String? {
     try? AppDatabase.shared.dbWriter.read { db in
       let dialog = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
       return dialog?.draft
     }
   }
-    
+
   private func saveDraft() {
     guard let peerId else { return }
-        
-    if let text = textViewContainer.textView.text, !text.isEmpty {
+
+    if let text = textView.text, !text.isEmpty {
       Task {
         do {
           try await DataManager.shared.updateDialog(peerId: peerId, draft: text)
@@ -373,10 +431,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       }
     }
   }
-    
+
   func clearDraft() {
     guard let peerId else { return }
-        
+
     Task {
       do {
         try await DataManager.shared.updateDialog(peerId: peerId, draft: "")
@@ -385,16 +443,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       }
     }
   }
-    
+
   @objc private func saveCurrentDraft() {
     saveDraft()
   }
-    
+
   // MARK: - Observers Setup
-    
+
   private func setupScenePhaseObserver() {
     NotificationCenter.default.removeObserver(self) // Remove any existing observers first
-    
+
     NotificationCenter.default.addObserver(
       forName: UIApplication.didEnterBackgroundNotification,
       object: nil,
@@ -402,7 +460,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     ) { [weak self] _ in
       self?.saveCurrentDraft()
     }
-        
+
     NotificationCenter.default.addObserver(
       forName: UIApplication.willTerminateNotification,
       object: nil,
@@ -410,7 +468,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     ) { [weak self] _ in
       self?.saveCurrentDraft()
     }
-      
+
     NotificationCenter.default.addObserver(
       forName: UIApplication.willResignActiveNotification,
       object: nil,
@@ -419,7 +477,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       self?.saveCurrentDraft()
     }
   }
-    
+
   private func setupChatStateObservers() {
     NotificationCenter.default.addObserver(
       self,
@@ -434,12 +492,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       object: nil
     )
   }
-    
+
   @objc private func handleEditingStateChange() {
     guard let peerId, let chatId else { return }
     let isEditing = ChatState.shared.getState(peer: peerId).editingMessageId != nil
     updateSendButtonForEditing(isEditing)
-        
+
     if isEditing {
       if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
          let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
@@ -450,9 +508,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       }
     }
   }
-    
+
   // MARK: - Overlay Management
-    
+
   @objc private func handleTapOutside(_ gesture: UITapGestureRecognizer) {
     let location = gesture.location(in: self)
     if let overlayView,
@@ -461,10 +519,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       dismissOverlay()
     }
   }
-    
+
   private func dismissOverlay() {
     guard isOverlayVisible, let overlay = overlayView else { return }
-        
+
     UIView.animate(withDuration: 0.15, delay: 0, options: .curveEaseIn) {
       overlay.alpha = 0
       overlay.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
@@ -477,49 +535,49 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       self.gestureRecognizers?.removeAll()
     }
   }
-    
+
   // MARK: - Image Handling
-    
+
   private func presentPicker() {
     guard let windowScene = window?.windowScene else { return }
-        
+
     var configuration = PHPickerConfiguration(photoLibrary: .shared())
     configuration.filter = .images
     configuration.selectionLimit = 1
-        
+
     let picker = PHPickerViewController(configuration: configuration)
     picker.delegate = self
-        
+
     let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow })
     let rootVC = keyWindow?.rootViewController
     rootVC?.present(picker, animated: true)
   }
-    
+
   private func presentCamera() {
     let status = AVCaptureDevice.authorizationStatus(for: .video)
-        
+
     switch status {
-    case .notDetermined:
-      AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-        if granted {
-          DispatchQueue.main.async {
-            self?.showCameraPicker()
+      case .notDetermined:
+        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+          if granted {
+            DispatchQueue.main.async {
+              self?.showCameraPicker()
+            }
           }
         }
-      }
-    case .authorized:
-      showCameraPicker()
-    default:
-      Log.shared.error("Failed to presentCamera")
+      case .authorized:
+        showCameraPicker()
+      default:
+        Log.shared.error("Failed to presentCamera")
     }
   }
-    
+
   private func showCameraPicker() {
     let picker = UIImagePickerController()
     picker.sourceType = .camera
     picker.delegate = self
     picker.allowsEditing = false
-        
+
     if let windowScene = window?.windowScene,
        let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
        let rootVC = keyWindow.rootViewController
@@ -527,11 +585,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       rootVC.present(picker, animated: true)
     }
   }
-    
+
   private func handleDroppedImage(_ image: UIImage) {
     selectedImage = image
     previewViewModel.isPresented = true
-        
+
     let previewView = PhotoPreviewView(
       image: image,
       caption: Binding(
@@ -551,11 +609,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         self?.sendImage(image, caption: caption)
       }
     )
-        
+
     let previewVC = UIHostingController(rootView: previewView)
     previewVC.modalPresentationStyle = .fullScreen
     previewVC.modalTransitionStyle = .crossDissolve
-        
+
     if let windowScene = window?.windowScene,
        let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
        let rootVC = keyWindow.rootViewController
@@ -563,11 +621,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       rootVC.present(previewVC, animated: true)
     }
   }
-    
+
   private func dismissPreview() {
     var responder: UIResponder? = self
     var currentVC: UIViewController?
-        
+
     while let nextResponder = responder?.next {
       if let viewController = nextResponder as? UIViewController {
         currentVC = viewController
@@ -575,16 +633,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       }
       responder = nextResponder
     }
-        
+
     guard let currentVC else { return }
-        
+
     var topmostVC = currentVC
     while let presentedVC = topmostVC.presentedViewController {
       topmostVC = presentedVC
     }
-        
+
     let picker = topmostVC.presentingViewController as? PHPickerViewController
-        
+
     topmostVC.dismiss(animated: true) { [weak self] in
       picker?.dismiss(animated: true)
       self?.selectedImage = nil
@@ -592,20 +650,20 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       self?.previewViewModel.isPresented = false
     }
   }
-    
+
   private func sendImage(_ image: UIImage, caption: String) {
     guard let peerId else { return }
-        
+
     sendButton.configuration?.showsActivityIndicator = true
     attachmentItems.removeAll()
-        
+
     do {
       let photoInfo = try FileCache.savePhoto(image: image)
       attachmentItems[image] = .photo(photoInfo)
     } catch {
       Log.shared.error("Failed to save photo", error: error)
     }
-        
+
     for (_, attachment) in attachmentItems {
       Transactions.shared.mutate(
         transaction: .sendMessage(
@@ -619,19 +677,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         )
       )
     }
-        
+
     dismissPreview()
     sendButton.configuration?.showsActivityIndicator = false
     attachmentItems.removeAll()
     sendMessageHaptic()
   }
-    
+
   func handlePastedImage() {
     guard let image = UIPasteboard.general.image else { return }
-        
+
     selectedImage = image
     previewViewModel.isPresented = true
-        
+
     let previewView = PhotoPreviewView(
       image: image,
       caption: Binding(
@@ -651,11 +709,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         self?.sendImage(image, caption: caption)
       }
     )
-        
+
     let previewVC = UIHostingController(rootView: previewView)
     previewVC.modalPresentationStyle = .fullScreen
     previewVC.modalTransitionStyle = .crossDissolve
-        
+
     var responder: UIResponder? = self
     while let nextResponder = responder?.next {
       if let viewController = nextResponder as? UIViewController {
@@ -673,11 +731,13 @@ extension ComposeView: UITextViewDelegate {
   func textViewDidChange(_ textView: UITextView) {
     // Height Management
     UIView.animate(withDuration: 0.2) { self.updateHeight() }
-        
-    // Placeholder Visibility
+
+    // Placeholder Visibility & Attachment Checks
     let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    textViewContainer.textView.showPlaceholder(isEmpty)
-        
+    print("📱 UI - textViewDidChange, isEmpty: \(isEmpty)")
+    (textView as? ComposeTextView)?.showPlaceholder(isEmpty)
+    (textView as? ComposeTextView)?.checkForNewAttachments()
+
     if isEmpty {
       clearDraft()
       buttonDisappear()
@@ -705,10 +765,10 @@ extension ComposeView: PHPickerViewControllerDelegate {
       picker.dismiss(animated: true)
       return
     }
-        
+
     result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self, weak picker] object, error in
       guard let self, let picker else { return }
-            
+
       if let error {
         print("Failed to load image:", error.localizedDescription)
         DispatchQueue.main.async {
@@ -716,18 +776,18 @@ extension ComposeView: PHPickerViewControllerDelegate {
         }
         return
       }
-            
+
       guard let image = object as? UIImage else {
         DispatchQueue.main.async {
           picker.dismiss(animated: true)
         }
         return
       }
-            
+
       DispatchQueue.main.async {
         self.selectedImage = image
         self.previewViewModel.isPresented = true
-                
+
         let previewView = PhotoPreviewView(
           image: image,
           caption: Binding(
@@ -747,11 +807,11 @@ extension ComposeView: PHPickerViewControllerDelegate {
             self?.sendImage(image, caption: caption)
           }
         )
-                
+
         let previewVC = UIHostingController(rootView: previewView)
         previewVC.modalPresentationStyle = .fullScreen
         previewVC.modalTransitionStyle = .crossDissolve
-                
+
         picker.present(previewVC, animated: true)
       }
     }
@@ -769,12 +829,12 @@ extension ComposeView {
       picker.dismiss(animated: true)
       return
     }
-        
+
     picker.dismiss(animated: true) { [weak self] in
       self?.handleDroppedImage(image)
     }
   }
-    
+
   func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
     picker.dismiss(animated: true)
   }
@@ -786,11 +846,11 @@ extension ComposeView: UIDropInteractionDelegate {
   func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
     session.hasItemsConforming(toTypeIdentifiers: [UTType.image.identifier])
   }
-    
+
   func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession) -> UIDropProposal {
     UIDropProposal(operation: .copy)
   }
-    
+
   func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
     for provider in session.items {
       provider.itemProvider.loadObject(ofClass: UIImage.self) { [weak self] (
@@ -798,7 +858,7 @@ extension ComposeView: UIDropInteractionDelegate {
         _: Error?
       ) in
         guard let image = image as? UIImage else { return }
-                
+
         DispatchQueue.main.async {
           self?.handleDroppedImage(image)
         }
