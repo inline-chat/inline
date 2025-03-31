@@ -21,11 +21,11 @@ class MessageListAppKit: NSViewController {
   private var feature_scrollsToBottomOnNewMessage = true
   private var feature_setupsInsetsManually = true
   private var feature_updatesHeightsOnWidthChange = true
-  private var feature_updatesHeightsOnLiveResizeEnd = true
   private var feature_recalculatesHeightsWhileInitialScroll = true
   private var feature_loadsMoreWhenApproachingTop = true
 
   // Testing
+  private var feature_updatesHeightsOnLiveResizeEnd = true
   private var feature_scrollsToBottomInDidLayout = true
   private var feature_maintainsScrollFromBottomOnResize = true
 
@@ -181,7 +181,7 @@ class MessageListAppKit: NSViewController {
       self?.enableScrollbars()
     }
 
-    log.debug("viewDidLoad for chat \(chatId)")
+    log.trace("viewDidLoad for chat \(chatId)")
 
     // Read messages
     // readAll()
@@ -436,13 +436,13 @@ class MessageListAppKit: NSViewController {
   }
 
   @objc private func scrollWheelBegan() {
-    log.debug("scroll wheel began")
+    log.trace("scroll wheel began")
     isUserScrolling = true
     scrollState = .scrolling
   }
 
   @objc private func scrollWheelEnded() {
-    log.debug("scroll wheel ended")
+    log.trace("scroll wheel ended")
     isUserScrolling = false
     scrollState = .idle
 
@@ -497,7 +497,7 @@ class MessageListAppKit: NSViewController {
   private var prevOffset: CGFloat = 0
 
   @objc func scrollViewBoundsChanged(notification: Notification) {
-    throttle(.milliseconds(16), identifier: "chat.scrollViewBoundsChanged", by: .mainActor, option: .default) { [
+    throttle(.milliseconds(32), identifier: "chat.scrollViewBoundsChanged", by: .mainActor, option: .default) { [
       weak self
     ] in
       self?.handleBoundsChange()
@@ -657,6 +657,7 @@ class MessageListAppKit: NSViewController {
     updateColumnWidthAndCommit()
 
     updateScrollViewInsets()
+
     checkWidthChangeForHeights()
 
     // Initial scroll to bottom
@@ -734,25 +735,30 @@ class MessageListAppKit: NSViewController {
     let magicWidthDiff = 0.5
 
     if abs(newWidth - lastKnownWidth) > magicWidthDiff {
+      let wasPrevWidthZero = lastKnownWidth == 0
       lastKnownWidth = newWidth
 
       /// Below used to check if width is above max width to not calculate anything, but
       /// this results in very subtle bugs, eg. when window was smaller, then increased width beyond max (so the
       /// calculations are paused, then increases height. now the recalc doesn't happen for older messages.
 
-      if needsInitialScroll {
+      if needsInitialScroll, !wasPrevWidthZero {
         recalculateHeightsOnWidthChange(duringLiveResize: false, maintainScroll: false)
         return
       }
 
+      // TODO: Calculate buffer based on screen height to get smooth maximize
+
       recalculateHeightsOnWidthChange(
         duringLiveResize: true,
-        maintainScroll: !isAtBottom
+        // maintainScroll: !isAtBottom
+        maintainScroll: false
       )
 
       // COMMENTED FOR NOW TO SEE IF IT WAS OWRTH THE EXTRA BUGS THAT
       // APPEAR during live resize while maximize
 
+//
 //      let availableWidth = sizeCalculator.getAvailableWidth(
 //        tableWidth: tableWidth()
 //      )
@@ -932,7 +938,7 @@ class MessageListAppKit: NSViewController {
       width: visibleRect.width,
       height: visibleRect.height - bottomInset
     )
-    log.debug("Anchoring to bottom. Visible rect: \(visibleRectInsetted) inset: \(bottomInset)")
+    log.trace("Anchoring to bottom. Visible rect: \(visibleRectInsetted) inset: \(bottomInset)")
 
     let viewportHeight = scrollView.contentView.bounds.height
     let currentOffset = scrollView.contentView.bounds.origin.y
@@ -952,7 +958,7 @@ class MessageListAppKit: NSViewController {
         let topEdgeToViewportBottom = rowRect.minY - visibleRect.maxY
 
         anchor = .bottom(row: index, distanceFromViewportBottom: topEdgeToViewportBottom)
-        log.debug("""
+        log.trace("""
                 Anchoring to bottom row: \(index), 
                 distance: \(topEdgeToViewportBottom)  
                 row.minY=\(rowRect.minY) 
@@ -1059,7 +1065,7 @@ class MessageListAppKit: NSViewController {
             layout: plan
           )
 
-          rowView.updateTextAndSizeWithProps(props: props)
+          rowView.updateSizeWithProps(props: props)
         }
       }
     }

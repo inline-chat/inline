@@ -22,7 +22,7 @@ class MessageSizeCalculator {
   /// in due to a bug
   private let emptyFallback = " "
 
-  private let log = Log.scoped("MessageSizeCalculator", enableTracing: true)
+  private let log = Log.scoped("MessageSizeCalculator", enableTracing: false)
   private var heightForSingleLine: CGFloat?
 
   static let safeAreaWidth: CGFloat = Theme.messageRowSafeAreaInset
@@ -181,6 +181,40 @@ class MessageSizeCalculator {
       }
     }
 
+    var replyContentTop: CGFloat {
+      reply?.spacing.top ?? 0
+    }
+
+    var photoContentViewTop: CGFloat {
+      var top: CGFloat = photo?.spacing.top ?? 0
+      if let reply {
+        top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      return top
+    }
+
+    var documentContentViewTop: CGFloat {
+      var top: CGFloat = document?.spacing.top ?? 0
+      if let reply {
+        top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      return top
+    }
+
+    var textContentViewTop: CGFloat {
+      var top: CGFloat = text?.spacing.top ?? 0
+      if let reply {
+        top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      if let photo {
+        top += photo.spacing.top + photo.size.height + photo.spacing.bottom
+      }
+      if let document {
+        top += document.spacing.top + document.size.height + document.spacing.bottom
+      }
+      return top
+    }
+
     var nameAndBubbleLeading: CGFloat {
       Theme.messageAvatarSize + Theme.messageHorizontalStackSpacing + Theme.messageSidePadding
     }
@@ -198,6 +232,8 @@ class MessageSizeCalculator {
     with props: MessageViewInputProps,
     tableWidth width: CGFloat
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
+    let start = CFAbsoluteTimeGetCurrent()
+
     let hasText = message.message.text != nil
     let text = message.message.text ?? emptyFallback
     let hasMedia = message.hasMedia
@@ -225,12 +261,12 @@ class MessageSizeCalculator {
       var height: CGFloat = 0
 
       if let file = message.file {
-        width = CGFloat(file.width ?? 0)
-        height = CGFloat(file.height ?? 0)
+        width = ceil(CGFloat(file.width ?? 0))
+        height = ceil(CGFloat(file.height ?? 0))
       } else if let photoInfo = message.photoInfo {
         let photo = photoInfo.bestPhotoSize()
-        width = CGFloat(photo?.width ?? 0)
-        height = CGFloat(photo?.height ?? 0)
+        width = ceil(CGFloat(photo?.width ?? 0))
+        height = ceil(CGFloat(photo?.height ?? 0))
       }
 
       if message.file?.fileType == .photo || message.photoInfo != nil {
@@ -257,13 +293,13 @@ class MessageSizeCalculator {
     let cacheKey_ = cacheKey(for: message, width: availableWidth, props: props)
     if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
       textSize = cachedTextSize
-      log.debug("text size cache hit \(message.message.messageId)")
+      log.trace("text size cache hit \(message.message.messageId)")
 
       if hasText, abs(cachedTextSize.height - heightForSingleLineText()) < 0.5 {
         isSingleLine = true
       }
     } else {
-      log.debug("text size cache miss \(message.id)")
+      log.trace("text size cache miss \(message.id)")
     }
 
     // MARK: Calculate text size if caches are missed
@@ -553,6 +589,12 @@ class MessageSizeCalculator {
     }
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
 
+    #if DEBUG
+    let end = CFAbsoluteTimeGetCurrent()
+    let timeElapsed = (end - start) * 1_000 // Convert to milliseconds
+    log.trace("calculating size for msg\(message.id) took \(String(format: "%.2f", timeElapsed))ms")
+    #endif
+
     return (size, textSize ?? NSSize.zero, photoSize, plan)
   }
 
@@ -598,7 +640,7 @@ class MessageSizeCalculator {
 //  //      string: text, // whitespacesAndNewline
 //  //      attributes: [.font: MessageTextConfiguration.font]
 //  //    )
-//    
+//
 //    // Use separate text storages https://github.com/lordvisionz/cocoa-string-size-performance
 //    let textStorage = NSTextStorage()
 //    textStorage.setAttributedString(attributedString)
@@ -662,8 +704,8 @@ class MessageSizeCalculator {
     hasCaption: Bool
   ) -> CGSize {
     let maxMediaSize = CGSize(
-      width: min(320, parentAvailableWidth),
-      height: min(320, parentAvailableWidth)
+      width: min(320, ceil(parentAvailableWidth)),
+      height: min(320, ceil(parentAvailableWidth))
     )
     let minMediaSize = CGSize(width: 40.0, height: 40.0)
 
@@ -681,21 +723,21 @@ class MessageSizeCalculator {
         mediaHeight = height
       } else {
         mediaWidth = maxMediaSize.width
-        mediaHeight = mediaWidth / aspectRatio
+        mediaHeight = ceil(mediaWidth / aspectRatio)
       }
     }
     // Has caption, maintain reasonable size
 
     // handle small images
     if width < maxMediaSize.width, height < maxMediaSize.height {
-      mediaWidth = maxMediaSize.width
-      mediaHeight = height
+      mediaWidth = ceil(maxMediaSize.width)
+      mediaHeight = ceil(height)
       return CGSize(width: mediaWidth, height: mediaHeight)
     }
 
     // default
     mediaWidth = maxMediaSize.width
-    mediaHeight = mediaWidth / aspectRatio
+    mediaHeight = ceil(mediaWidth / aspectRatio)
 
     if mediaHeight > maxMediaSize.height {
       mediaHeight = maxMediaSize.height

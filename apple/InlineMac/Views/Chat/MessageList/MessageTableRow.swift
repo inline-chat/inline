@@ -103,12 +103,11 @@ class MessageTableCell: NSView {
     needsDisplay = true
   }
 
-  func updateTextAndSizeWithProps(props: MessageViewProps) {
-    guard let content = currentContent else { return }
+  func updateSizeWithProps(props: MessageViewProps) {
     guard let messageView else { return }
-
-    messageView.updateTextAndSize(fullMessage: content.0, props: props)
-    needsDisplay = true
+    currentContent?.props = props
+    messageView.updateSize(props: props)
+    // needsDisplay = true
   }
 
   func updateSize() {
@@ -116,7 +115,7 @@ class MessageTableCell: NSView {
     guard let messageView else { return }
 
     messageView.updateSize(props: content.1)
-    needsDisplay = true
+    // needsDisplay = true
   }
 
   private func updateContent() {

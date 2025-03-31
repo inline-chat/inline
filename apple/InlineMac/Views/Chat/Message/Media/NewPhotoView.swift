@@ -62,7 +62,7 @@ final class NewPhotoView: NSView {
     layer?.shouldRasterize = true
     layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
 
-    // translatesAutoresizingMaskIntoConstraints = false
+    translatesAutoresizingMaskIntoConstraints = false
 
     // Add background view first (below image view)
     addSubview(backgroundView)
@@ -88,7 +88,21 @@ final class NewPhotoView: NSView {
     guard !haveAddedImageView else { return }
     haveAddedImageView = true
     addSubview(imageView)
+    // Remove existing constraints array if needed
+    NSLayoutConstraint.deactivate(imageConstraints)
     imageConstraints = [
+//      // Center the image in the container
+//      imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+//      imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+//
+//      // Set maximum size constraints
+//      imageView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
+//      imageView.heightAnchor.constraint(lessThanOrEqualTo: heightAnchor),
+//
+//      // Ensure the image view doesn't get smaller than the parent
+//      imageView.widthAnchor.constraint(equalTo: widthAnchor),
+//      imageView.heightAnchor.constraint(equalTo: heightAnchor),
+      
       imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       imageView.topAnchor.constraint(equalTo: topAnchor),
