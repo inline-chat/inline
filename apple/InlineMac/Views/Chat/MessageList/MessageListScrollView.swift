@@ -8,9 +8,9 @@ class MessageListScrollView: NSScrollView {
 
 extension NSScrollView {
   func scrollWithoutFeedback(to point: NSPoint) {
-    self.enclosingScrollView?.contentView.bounds.origin = point
+    enclosingScrollView?.contentView.bounds.origin = point
   }
-  
+
   /// Executes scrolling code with temporarily disabled scroll bars
   /// - Parameter action: The scrolling code to execute
   func withoutScrollerFlash(_ action: () -> Void) {
@@ -38,4 +38,24 @@ extension NSScrollView {
       horizontalScroller?.isHidden = !hadHorizontalScroller
     }
   }
+}
+
+extension NSScrollView {
+  func effectiveVisibleRect() -> CGRect {
+    // Get the visible bounds in the scroll view's own coordinate space
+    let visibleBounds = documentVisibleRect
+    
+    // Apply content insets to the visible rect
+    let insetRect = NSRect(
+      x: visibleBounds.origin.x,
+      y: visibleBounds.origin.y + contentInsets.top,
+      width: visibleBounds.width,
+      height: visibleBounds.height - contentInsets.top - contentInsets.bottom
+    )
+    
+    // The documentVisibleRect is already in the document view's coordinate space,
+    // so we just need to apply the insets
+    return insetRect
+  }
+
 }
