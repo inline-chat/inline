@@ -23,6 +23,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationWillFinishLaunching(_ notification: Notification) {
     // Disable native tabbing
     NSWindow.allowsAutomaticWindowTabbing = false
+    
+    // Disable the bug with TableView https://christiantietze.de/posts/2022/11/nstableview-variable-row-heights-broken-macos-ventura-13-0/
+    UserDefaults.standard.set(false, forKey: "NSTableViewCanEstimateRowHeights")
 
     // Setup Notifications Delegate
     setupNotifications()
