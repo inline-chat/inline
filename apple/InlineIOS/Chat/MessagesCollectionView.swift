@@ -1,5 +1,6 @@
 import Auth
 import InlineKit
+import Logger
 import Nuke
 import NukeUI
 import UIKit
@@ -100,6 +101,8 @@ class MessagesCollectionView: UICollectionView {
   }
 
   deinit {
+    NotificationCenter.default.removeObserver(self)
+    Log.shared.debug("CollectionView deinit")
     visibleMessagesPrefetchTimer?.invalidate()
   }
 
