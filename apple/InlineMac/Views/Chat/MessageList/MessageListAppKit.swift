@@ -13,7 +13,7 @@ class MessageListAppKit: NSViewController {
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
 
-  private let log = Log.scoped("MessageListAppKit", enableTracing: true)
+  private let log = Log.scoped("MessageListAppKit", enableTracing: false)
   private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 45.0
 
@@ -751,8 +751,8 @@ class MessageListAppKit: NSViewController {
 
       recalculateHeightsOnWidthChange(
         duringLiveResize: true,
-        // maintainScroll: !isAtBottom
-        maintainScroll: false
+        maintainScroll: !isAtBottom
+        // maintainScroll: false
       )
 
       // COMMENTED FOR NOW TO SEE IF IT WAS OWRTH THE EXTRA BUGS THAT
