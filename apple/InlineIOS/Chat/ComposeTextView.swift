@@ -1,3 +1,4 @@
+import Logger
 import ObjectiveC
 import UIKit
 import UniformTypeIdentifiers
@@ -5,9 +6,11 @@ import UniformTypeIdentifiers
 class ComposeTextView: UITextView {
   private var placeholderLabel: UILabel?
   private var lastText: String = ""
+  weak var composeView: ComposeView?
 
-  override init(frame: CGRect, textContainer: NSTextContainer?) {
-    super.init(frame: frame, textContainer: textContainer)
+  init(composeView: ComposeView) {
+    self.composeView = composeView
+    super.init(frame: .zero, textContainer: nil)
     setupTextView()
     setupPlaceholder()
     setupNotifications()
@@ -18,11 +21,14 @@ class ComposeTextView: UITextView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+    Log.shared.debug("ComposeTextView deinit")
+  }
+
   private func setupTextView() {
     backgroundColor = .clear
-
     allowsEditingTextAttributes = true
-    delegate = self
     font = .systemFont(ofSize: 17)
     textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
     translatesAutoresizingMaskIntoConstraints = false
@@ -71,12 +77,12 @@ class ComposeTextView: UITextView {
     if text.contains("￼") || attributedText.string.contains("￼") {
       if let pasteboardImage = UIPasteboard.general.image {
         if let imageData = pasteboardImage.pngData() ?? pasteboardImage.jpegData(compressionQuality: 0.9) {
-          DispatchQueue.main.async {
-            self.sendStickerImage(imageData, metadata: ["source": "pasteboard_textDidChange"])
+          DispatchQueue.main.async { [weak self] in
+            self?.sendStickerImage(imageData, metadata: ["source": "pasteboard_textDidChange"])
 
-            if let range = self.text.range(of: "￼") {
-              let nsRange = NSRange(range, in: self.text)
-              self.removeAttachment(at: nsRange)
+            if let range = self?.text.range(of: "￼") {
+              let nsRange = NSRange(range, in: self?.text ?? "")
+              self?.removeAttachment(at: nsRange)
               return
             }
           }
@@ -106,17 +112,6 @@ class ComposeTextView: UITextView {
     }
   }
 
-  private func findParentComposeView() -> ComposeView? {
-    var responder: UIResponder? = self
-    while let nextResponder = responder?.next {
-      if let composeView = nextResponder as? ComposeView {
-        return composeView
-      }
-      responder = nextResponder
-    }
-    return nil
-  }
-
   override func paste(_ sender: Any?) {
     let pasteboard = UIPasteboard.general
     let hadImage = pasteboard.hasImages
@@ -126,12 +121,12 @@ class ComposeTextView: UITextView {
 
     if hadImage, let image = originalImage {
       if let imageData = image.pngData() ?? image.jpegData(compressionQuality: 0.9) {
-        DispatchQueue.main.async {
-          self.sendStickerImage(imageData, metadata: ["source": "direct_pasteboard"])
+        DispatchQueue.main.async { [weak self] in
+          self?.sendStickerImage(imageData, metadata: ["source": "direct_pasteboard"])
 
-          if let range = self.text.range(of: "￼") {
-            let nsRange = NSRange(range, in: self.text)
-            self.removeAttachment(at: nsRange)
+          if let range = self?.text.range(of: "￼") {
+            let nsRange = NSRange(range, in: self?.text ?? "")
+            self?.removeAttachment(at: nsRange)
           }
         }
         return
@@ -161,8 +156,8 @@ class ComposeTextView: UITextView {
 
         let attributes = attributedText.attributes(at: index, effectiveRange: nil)
 
-        DispatchQueue.main.async {
-          self.processReplacementCharacter(at: nsRange, attributes: attributes)
+        DispatchQueue.main.async { [weak self] in
+          self?.processReplacementCharacter(at: nsRange, attributes: attributes)
         }
       }
     }
@@ -435,27 +430,10 @@ class ComposeTextView: UITextView {
       let resizedImage = UIGraphicsGetImageFromCurrentImageContext() ?? originalImage
       UIGraphicsEndImageContext()
 
-      if let composeView = findParentComposeView() {
+      if let composeView {
         DispatchQueue.main.async {
           composeView.sendSticker(resizedImage)
         }
-      } else {
-        var currentView: UIView? = self
-        while let superview = currentView?.superview {
-          if let composeView = superview as? ComposeView {
-            DispatchQueue.main.async {
-              composeView.sendSticker(resizedImage)
-            }
-            return
-          }
-          currentView = superview
-        }
-
-        NotificationCenter.default.post(
-          name: NSNotification.Name("StickerDetected"),
-          object: nil,
-          userInfo: ["image": resizedImage]
-        )
       }
     }
   }
@@ -475,16 +453,6 @@ extension ComposeTextView: UITextViewDelegate {
   func textViewDidBeginEditing(_ textView: UITextView) {}
 
   func textViewDidEndEditing(_ textView: UITextView) {}
-
-  func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-    if text.contains("￼") {
-      DispatchQueue.main.async {
-        self.checkForNewAttachmentsImmediate()
-      }
-    }
-
-    return true
-  }
 }
 
 extension ComposeTextView {
@@ -503,15 +471,11 @@ extension ComposeTextView {
       if let attachment = value as? NSTextAttachment {
         foundAttachments = true
 
-        DispatchQueue.main.async {
-          self.processTextAttachmentEnhanced(attachment, range: range)
-        }
+        self.processTextAttachmentEnhanced(attachment, range: range)
 
         stop.pointee = true
       }
     }
-
-    if !foundAttachments {}
   }
 
   private func processTextAttachmentEnhanced(_ attachment: NSTextAttachment, range: NSRange) {
@@ -543,17 +507,16 @@ extension ComposeTextView {
 
     removeAttachment(at: range)
 
-    if let composeView = findEnhancedParentComposeView() {
+    if let composeView {
       DispatchQueue.main.async {
         composeView.sendSticker(image)
       }
       return
     }
 
-    if let composeView = findParentComposeView() {
-      DispatchQueue.main.async {
-        composeView.sendSticker(image)
-      }
+    if let composeView {
+      composeView.sendSticker(image)
+
       return
     }
 

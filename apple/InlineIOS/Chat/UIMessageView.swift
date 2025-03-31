@@ -218,6 +218,10 @@ class UIMessageView: UIView {
 
   // MARK: - Initialization
 
+  deinit {
+    print("MessageView  deinit")
+  }
+
   init(fullMessage: FullMessage, spaceId: Int64) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId

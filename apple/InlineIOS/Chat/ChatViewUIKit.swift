@@ -53,6 +53,10 @@ class ChatContainerView: UIView {
 
   private var blurViewBottomConstraint: NSLayoutConstraint?
 
+  deinit {
+    print("ChatView  deinit")
+  }
+
   init(peerId: Peer, chatId: Int64?, spaceId: Int64) {
     self.peerId = peerId
     self.chatId = chatId
