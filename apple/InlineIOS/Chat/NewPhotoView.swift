@@ -19,6 +19,10 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
   private let cornerRadius: CGFloat = 16.0
   private let maskLayer = CAShapeLayer()
 
+  var isPng: Bool {
+    fullMessage.photoInfo?.photo.format == .png
+  }
+
   private var hasText: Bool {
     fullMessage.message.text?.isEmpty == false
   }
@@ -87,7 +91,7 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
       calculatedHeight = calculatedWidth / aspectRatio
     }
 
-    return ImageDimensions(width: calculatedWidth, height: calculatedHeight)
+    return ImageDimensions(width: isPng ? calculatedWidth / 2 : calculatedWidth, height: isPng ? calculatedHeight / 2 : calculatedHeight)
   }
 
   private func setupImageConstraints() {

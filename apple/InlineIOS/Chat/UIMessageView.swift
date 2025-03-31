@@ -150,8 +150,12 @@ class UIMessageView: UIView {
     fullMessage.message.out == true
   }
 
+  var isPngImage: Bool {
+    fullMessage.photoInfo?.photo.format == .png
+  }
+
   private var bubbleColor: UIColor {
-    if isEmojiOnlyMessage {
+    if isEmojiOnlyMessage || isPngImage {
       UIColor.clear
     } else if outgoing {
       ColorManager.shared.selectedColor
@@ -831,9 +835,9 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
 
       if isMessageSending {
         let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { [weak self] _ in
-          guard let self = self else { return }
+          guard let self else { return }
 
-          if let transactionId = self.message.transactionId, !transactionId.isEmpty {
+          if let transactionId = message.transactionId, !transactionId.isEmpty {
             Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
 
             Transactions.shared.cancel(transactionId: transactionId)
