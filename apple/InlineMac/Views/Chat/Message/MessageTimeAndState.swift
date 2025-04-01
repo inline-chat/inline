@@ -251,9 +251,9 @@ class MessageTimeAndState: NSView {
     14
   }
 
-  static var font: NSFont {
+  static var font: NSFont = {
     NSFont.systemFont(ofSize: 10, weight: .regular).withTraits(.italic)
-  }
+  }()
 
   static var timeWidth: CGFloat = 0.0
   static var timeHeight: CGFloat = 0.0

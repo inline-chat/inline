@@ -72,19 +72,22 @@ class MessageTableCell: NSView {
     // currentContent.message.message.text != message.message.text
     {
       log.trace("updating message text and size")
+#if DEBUG
       log.trace("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
+      #endif
       self.currentContent = (message, props)
       updateTextAndSize()
 
       return
     }
 
-    log.trace("""
-    recreating message view for \(message.message.id)
-
-    previous: \(currentContent?.message.debugDescription ?? "nil")
-    new: \(message.debugDescription)
-    """)
+    // Too expensive.
+//    log.trace("""
+//    recreating message view for \(message.message.id)
+//
+//    previous: \(currentContent?.message.debugDescription ?? "nil")
+//    new: \(message.debugDescription)
+//    """)
 
     currentContent = (message, props)
     updateContent()
@@ -136,7 +139,7 @@ class MessageTableCell: NSView {
     ])
 
     messageView = newMessageView
-    needsDisplay = true
+    // needsDisplay = true
   }
 
   func reflectBoundsChange(fraction: CGFloat) {
