@@ -43,20 +43,20 @@ public final class Log: @unchecked Sendable {
 
   private let scope: String
   private let level: LogLevel
-  #if DEBUG
-  private let logger: String // Using String as identifier for debug builds
-  #else
+//  #if DEBUG
+//  private let logger: String // Using String as identifier for debug builds
+//  #else
   private let logger: Logger
-  #endif
+//  #endif
 
   private init(scope: String, level: LogLevel = .debug) {
     self.scope = scope
     self.level = level
-    #if DEBUG
-    logger = scope
-    #else
+//    #if DEBUG
+//    logger = scope
+//    #else
     logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "chat.inline", category: scope)
-    #endif
+//    #endif
   }
 
   public static func scoped(_ scope: String, enableTracing: Bool = false) -> Log {
@@ -86,14 +86,14 @@ public final class Log: @unchecked Sendable {
       logMessage = "\(message) \(errorDescription)"
     }
 
-    #if DEBUG
-    print("\(level.rawValue) |  \(scope_) | \(logMessage)")
-    #else
+//    #if DEBUG
+//    print("\(level.rawValue) |  \(scope_) | \(logMessage)")
+//    #else
     logger.log(
       level: level.osLogType,
       "\(level.rawValue, privacy: .public) |  \(scope_, privacy: .public) | \(logMessage, privacy: .public)"
     )
-    #endif
+    //#endif
 
     let level_ = level
 
