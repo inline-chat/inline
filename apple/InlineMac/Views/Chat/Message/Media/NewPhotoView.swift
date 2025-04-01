@@ -40,7 +40,7 @@ final class NewPhotoView: NSView {
     isScrolling = scrollState.isScrolling
     let text = fullMessage.message.text
     let hasText = text != nil && text?.isEmpty == false
-    
+
     // Adjust radius based on text presence
     if hasText {
       topLeftRadius = Theme.messageBubbleCornerRadius - 1
@@ -53,7 +53,7 @@ final class NewPhotoView: NSView {
       bottomLeftRadius = Theme.messageBubbleCornerRadius - 1
       bottomRightRadius = Theme.messageBubbleCornerRadius - 1
     }
-    
+
     super.init(frame: .zero)
     setupView()
   }
@@ -481,7 +481,30 @@ extension NewPhotoView: QLPreviewPanelDataSource {
 
 extension NewPhotoView: QLPreviewPanelDelegate {
   func previewPanel(_ panel: QLPreviewPanel!, sourceFrameOnScreenFor item: QLPreviewItem!) -> NSRect {
-    window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
+    guard let imageSize = imageView.image?.size else {
+      return window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
+    }
+    let aspectRatio = imageSize.width / imageSize.height
+
+    let width: CGFloat
+    let height: CGFloat
+    if imageSize.width > imageSize.height {
+      width = bounds.width
+      height = ceil(width / aspectRatio)
+    } else {
+      height = bounds.height
+      width = ceil(height * aspectRatio)
+    }
+
+    let actualBounds = NSRect(origin: CGPoint(
+      x: imageView.bounds.minX + (imageView.bounds.width - width) / 2,
+      y: imageView.bounds.minY + (imageView.bounds.height - height) / 2
+    ), size: CGSize(
+      width: width,
+      height: height
+    ))
+
+    return window?.convertToScreen(convert(actualBounds, to: nil)) ?? .zero
   }
 
   // Doesn't work.
