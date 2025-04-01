@@ -173,19 +173,18 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     NSLayoutConstraint.activate([
       composeHeightConstraint,
 
+      plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+      plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: -3),
+      plusButton.widthAnchor.constraint(equalToConstant: Self.minHeight - 6),
+      plusButton.heightAnchor.constraint(equalToConstant: Self.minHeight - 6),
+
       textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      textView.trailingAnchor.constraint(equalTo: sendButtonContainer.leadingAnchor, constant: 24),
 
-      sendButtonContainer.trailingAnchor.constraint(
-        equalTo: textView.trailingAnchor,
-        constant: 6
-      ),
-      sendButtonContainer.bottomAnchor.constraint(
-        equalTo: textView.bottomAnchor,
-        constant: 7
-      ),
+      sendButtonContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
+      sendButtonContainer.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: 7),
       sendButtonContainer.widthAnchor.constraint(equalToConstant: buttonSize.width + 20),
       sendButtonContainer.heightAnchor.constraint(equalToConstant: buttonSize.height + 20),
 
@@ -193,14 +192,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       sendButton.centerYAnchor.constraint(equalTo: sendButtonContainer.centerYAnchor),
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
-
-      plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
-      plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: -3),
-      plusButton.widthAnchor.constraint(equalToConstant: Self.minHeight - 6),
-      plusButton.heightAnchor.constraint(equalToConstant: Self.minHeight - 6),
     ])
 
-    // Add drop interaction
     let dropInteraction = UIDropInteraction(delegate: self)
     addInteraction(dropInteraction)
   }
