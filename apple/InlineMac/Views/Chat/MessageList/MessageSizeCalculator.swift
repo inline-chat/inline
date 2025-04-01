@@ -535,7 +535,7 @@ class MessageSizeCalculator {
       bubbleWidth = max(bubbleWidth, documentPlan.size.width + documentPlan.spacing.horizontalTotal)
     }
     if let timePlan {
-      if !isSingleLine {
+      if !isSingleLine, hasText {
         bubbleHeight += timePlan.size.height
         bubbleHeight += timePlan.spacing.verticalTotal // ??? probably too much
       }
