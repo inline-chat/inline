@@ -146,6 +146,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         )
       )
 
+      ChatState.shared.clearEditingMessageId(peer: peerId)
+      ChatState.shared.clearReplyingMessageId(peer: peerId)
+
       clearDraft()
       textView.text = ""
       resetHeight()
