@@ -38,6 +38,22 @@ final class NewPhotoView: NSView {
   init(_ fullMessage: FullMessage, scrollState: MessageListScrollState) {
     self.fullMessage = fullMessage
     isScrolling = scrollState.isScrolling
+    let text = fullMessage.message.text
+    let hasText = text != nil && text?.isEmpty == false
+    
+    // Adjust radius based on text presence
+    if hasText {
+      topLeftRadius = Theme.messageBubbleCornerRadius - 1
+      topRightRadius = Theme.messageBubbleCornerRadius - 1
+      bottomLeftRadius = 2.0
+      bottomRightRadius = 2.0
+    } else {
+      topLeftRadius = Theme.messageBubbleCornerRadius - 1
+      topRightRadius = Theme.messageBubbleCornerRadius - 1
+      bottomLeftRadius = Theme.messageBubbleCornerRadius - 1
+      bottomRightRadius = Theme.messageBubbleCornerRadius - 1
+    }
+    
     super.init(frame: .zero)
     setupView()
   }
@@ -49,10 +65,10 @@ final class NewPhotoView: NSView {
 
   // Corner radius properties
   private let maskLayer = CAShapeLayer()
-  let topLeftRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
-  let topRightRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
-  let bottomLeftRadius: CGFloat = 2.0
-  let bottomRightRadius: CGFloat = 2.0
+  var topLeftRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
+  var topRightRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
+  var bottomLeftRadius: CGFloat = 2.0
+  var bottomRightRadius: CGFloat = 2.0
 
   var haveAddedImageView = false
 
