@@ -151,7 +151,7 @@ class MessageViewAppKit: NSView {
     let view = DocumentView(
       documentInfo: documentInfo,
       fullMessage: self.fullMessage,
-      white: true
+      white: outgoing
     )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
