@@ -72,7 +72,7 @@ class MessageTableCell: NSView {
     // currentContent.message.message.text != message.message.text
     {
       log.trace("updating message text and size")
-#if DEBUG
+      #if DEBUG
       log.trace("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
       #endif
       self.currentContent = (message, props)
@@ -110,7 +110,7 @@ class MessageTableCell: NSView {
     guard let messageView else { return }
     currentContent?.props = props
     messageView.updateSize(props: props)
-    // needsDisplay = true
+    needsDisplay = true
   }
 
   func updateSize() {
@@ -118,7 +118,7 @@ class MessageTableCell: NSView {
     guard let messageView else { return }
 
     messageView.updateSize(props: content.1)
-    // needsDisplay = true
+    needsDisplay = true
   }
 
   private func updateContent() {
@@ -127,7 +127,7 @@ class MessageTableCell: NSView {
 
     messageView?.removeFromSuperview()
 
-    let newMessageView = MessageViewAppKit(fullMessage: content.0, props: content.1)
+    let newMessageView = MessageViewAppKit(fullMessage: content.0, props: content.1, isScrolling: scrollState.isScrolling)
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(newMessageView)
 
@@ -139,11 +139,17 @@ class MessageTableCell: NSView {
     ])
 
     messageView = newMessageView
-    // needsDisplay = true
+    needsDisplay = true
   }
 
   func reflectBoundsChange(fraction: CGFloat) {
     messageView?.reflectBoundsChange(fraction: fraction)
+  }
+
+  private var scrollState: MessageListScrollState = .idle
+  func setScrollState(_ state: MessageListScrollState) {
+    scrollState = state
+    messageView?.setScrollState(state)
   }
 
   func highlight() {

@@ -35,8 +35,9 @@ final class NewPhotoView: NSView {
 
   private var fullMessage: FullMessage
 
-  init(_ fullMessage: FullMessage) {
+  init(_ fullMessage: FullMessage, scrollState: MessageListScrollState) {
     self.fullMessage = fullMessage
+    isScrolling = scrollState.isScrolling
     super.init(frame: .zero)
     setupView()
   }
@@ -91,7 +92,7 @@ final class NewPhotoView: NSView {
     // Remove existing constraints array if needed
     NSLayoutConstraint.deactivate(imageConstraints)
     imageConstraints = [
-//      // Center the image in the container
+      //      // Center the image in the container
 //      imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
 //      imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
 //
@@ -102,7 +103,7 @@ final class NewPhotoView: NSView {
 //      // Ensure the image view doesn't get smaller than the parent
 //      imageView.widthAnchor.constraint(equalTo: widthAnchor),
 //      imageView.heightAnchor.constraint(equalTo: heightAnchor),
-      
+
       imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       imageView.topAnchor.constraint(equalTo: topAnchor),
@@ -130,40 +131,33 @@ final class NewPhotoView: NSView {
   }
 
   private var wasLoadedWithPlaceholder = false
+  private var isScrolling = false
+  private func shouldLoadSync() -> Bool {
+    !inLiveResize && !isScrolling
+  }
+
+  public func setIsScrolling(_ isScrolling: Bool) {
+    self.isScrolling = isScrolling
+  }
 
   private func updateImage() {
     if let url = imageLocalUrl() {
-      // Set URL
-      guard let image = NSImage(contentsOf: url) else { return }
+      let loadSync = shouldLoadSync()
 
-      // Add image view
-      addImageView()
-
-      if wasLoadedWithPlaceholder {
-        print("wasLoadedWithPlaceholder")
-
-        // With animation
-        imageView.alphaValue = 0.0
-        imageView.image = image
-
-        // Perform layout before animation
-        needsLayout = true
-        layoutSubtreeIfNeeded()
-
-        DispatchQueue.main.async {
-          NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
-            context.allowsImplicitAnimation = true
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            self.imageView.animator().alphaValue = 1.0
-          } completionHandler: {
-            self.hideLoadingView()
-          }
+      ImageCacheManager.shared.image(for: url, loadSync: loadSync) { [weak self] image in
+        guard let self, let image else {
+          self?.hideLoadingView()
+          return
         }
-      } else {
-        // Without animation
-        imageView.image = image
-        hideLoadingView()
+
+        addImageView()
+
+        if loadSync {
+          imageView.image = image
+          hideLoadingView()
+        } else {
+          animateImageTransition(to: image)
+        }
       }
 
     } else {
@@ -176,6 +170,27 @@ final class NewPhotoView: NSView {
 
       showLoadingView()
       return
+    }
+  }
+
+  private func animateImageTransition(to image: NSImage) {
+    // With animation
+    imageView.alphaValue = 0.0
+    imageView.image = image
+
+    // Perform layout before animation
+    needsLayout = true
+    layoutSubtreeIfNeeded()
+
+    DispatchQueue.main.async {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.25
+        context.allowsImplicitAnimation = true
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        self.imageView.animator().alphaValue = 1.0
+      } completionHandler: {
+        self.hideLoadingView()
+      }
     }
   }
 

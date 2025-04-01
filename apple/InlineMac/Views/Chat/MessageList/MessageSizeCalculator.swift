@@ -227,6 +227,8 @@ class MessageSizeCalculator {
     return NSString(string: "\(hashValue)")
   }
 
+  private var singleLineDiff = 4.0
+  
   func calculateSize(
     for message: FullMessage,
     with props: MessageViewInputProps,
@@ -301,7 +303,7 @@ class MessageSizeCalculator {
       log.trace("text size cache hit \(message.message.messageId)")
       #endif
 
-      if hasText, abs(cachedTextSize.height - heightForSingleLineText()) < 0.5 {
+      if hasText, abs(cachedTextSize.height - heightForSingleLineText()) < singleLineDiff {
         isSingleLine = true
       }
     } else {
@@ -332,7 +334,7 @@ class MessageSizeCalculator {
       textSize = textSize_
 
       // Cache as single line if height is equal to single line height
-      if hasText, abs(textSize_.height - heightForSingleLineText()) < 4.0 {
+      if hasText, abs(textSize_.height - heightForSingleLineText()) < singleLineDiff {
         isSingleLine = true
         minTextWidthForSingleLine.setObject(
           NSValue(size: textSize_),

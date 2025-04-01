@@ -140,7 +140,7 @@ class MessageViewAppKit: NSView {
   }()
 
   private lazy var newPhotoView: NewPhotoView = {
-    let view = NewPhotoView(fullMessage)
+    let view = NewPhotoView(fullMessage, scrollState: scrollState)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -266,9 +266,10 @@ class MessageViewAppKit: NSView {
 
   // MARK: - Initialization
 
-  init(fullMessage: FullMessage, props: MessageViewProps) {
+  init(fullMessage: FullMessage, props: MessageViewProps, isScrolling: Bool = false) {
     self.fullMessage = fullMessage
     self.props = props
+    scrollState = isScrolling ? .scrolling : .idle
     super.init(frame: .zero)
     setupView()
 
@@ -1080,7 +1081,18 @@ class MessageViewAppKit: NSView {
 
   // ---
   private var notificationObserver: NSObjectProtocol?
-  private var scrollState: MessageListScrollState = .idle
+  private var scrollState: MessageListScrollState = .idle {
+    didSet {
+      if hasPhoto {
+        if scrollState == .idle {
+          newPhotoView.setIsScrolling(false)
+        } else {
+          newPhotoView.setIsScrolling(true)
+        }
+      }
+    }
+  }
+
   private var hoverTrackingArea: NSTrackingArea?
   private func setupScrollStateObserver() {
     notificationObserver = NotificationCenter.default.addObserver(
@@ -1229,6 +1241,10 @@ class MessageViewAppKit: NSView {
 // MARK: - Tracking Area & Hover
 
 extension MessageViewAppKit {
+  public func setScrollState(_ state: MessageListScrollState) {
+    handleScrollStateChange(state)
+  }
+
   private func handleScrollStateChange(_ state: MessageListScrollState) {
     scrollState = state
     switch state {
