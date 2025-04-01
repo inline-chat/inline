@@ -1266,8 +1266,9 @@ extension MessageListAppKit: NSTableViewDelegate {
       layout: layoutPlan
     )
 
+    cell.setScrollState(scrollState)
     cell.configure(with: message, props: props)
-
+    
     // Store the configured cell in cache
     // cellCache.cacheCell(cell, withType: "MessageCell", messageId: message.id)
 
@@ -1324,6 +1325,10 @@ extension Notification.Name {
 enum MessageListScrollState {
   case scrolling
   case idle
+  
+  var isScrolling: Bool {
+    self == .scrolling
+  }
 }
 
 extension MessageListAppKit {
