@@ -264,6 +264,7 @@ class UIMessageView: UIView {
     }
 
     addGestureRecognizer()
+    setupDoubleTapGestureRecognizer()
     setupAppearance()
     setupConstraints()
     setupContextMenu()
@@ -432,6 +433,85 @@ class UIMessageView: UIView {
     messageLabel.addGestureRecognizer(tapGesture)
   }
 
+  private func setupDoubleTapGestureRecognizer() {
+    let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
+    doubleTapGesture.numberOfTapsRequired = 2
+
+    // Ensure double tap doesn't interfere with other gestures
+    if let interaction {
+      doubleTapGesture.delegate = self
+      interaction.view?.gestureRecognizers?.forEach { gesture in
+        doubleTapGesture.require(toFail: gesture)
+      }
+    }
+
+    bubbleView.addGestureRecognizer(doubleTapGesture)
+  }
+
+  @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+    guard !links.isEmpty else { return }
+
+    // Get tap location in the label's coordinate space
+    let tapLocation = gesture.location(in: messageLabel)
+
+    // Create text container to match the label's configuration
+    let textContainer = NSTextContainer(size: messageLabel.bounds.size)
+    textContainer.lineFragmentPadding = 0
+    textContainer.lineBreakMode = messageLabel.lineBreakMode
+    textContainer.maximumNumberOfLines = messageLabel.numberOfLines
+
+    // Create layout manager and text storage
+    let layoutManager = NSLayoutManager()
+    let textStorage = NSTextStorage(attributedString: messageLabel.attributedText ?? NSAttributedString())
+
+    layoutManager.addTextContainer(textContainer)
+    textStorage.addLayoutManager(layoutManager)
+
+    // Get character index at tap location
+    let characterIndex = layoutManager.characterIndex(
+      for: tapLocation,
+      in: textContainer,
+      fractionOfDistanceBetweenInsertionPoints: nil
+    )
+
+    // Check if tap is on a link
+    for link in links where NSLocationInRange(characterIndex, link.range) {
+      print("Link tapped: \(link.url)")
+      linkTapHandler?(link.url)
+      return
+    }
+  }
+
+  @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+    // Don't allow reactions on messages that are still sending
+    if message.status == .sending {
+      return
+    }
+
+    let checkmarkEmoji = "✔️"
+
+    // Check if the user already has this reaction
+    if let existingReaction = fullMessage.reactions
+      .first(where: { $0.emoji == checkmarkEmoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 })
+    {
+      // Remove existing reaction (toggle behavior)
+      Transactions.shared.mutate(transaction: .deleteReaction(.init(
+        message: message,
+        emoji: checkmarkEmoji,
+        peerId: message.peerId,
+        chatId: message.chatId
+      )))
+    } else {
+      // Add new checkmark reaction
+      Transactions.shared.mutate(transaction: .addReaction(.init(
+        message: message,
+        emoji: checkmarkEmoji,
+        userId: Auth.shared.getCurrentUserId() ?? 0,
+        peerId: message.peerId
+      )))
+    }
+  }
+
   enum StackPadding {
     static let top: CGFloat = 9
     static let leading: CGFloat = 12
@@ -582,40 +662,6 @@ class UIMessageView: UIView {
       attributedString.addAttributes(linkAttributes, range: match.range)
 
       return (range: match.range, url: url)
-    }
-  }
-
-  @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-    guard !links.isEmpty else { return }
-
-    // Get tap location in the label's coordinate space
-    let tapLocation = gesture.location(in: messageLabel)
-
-    // Create text container to match the label's configuration
-    let textContainer = NSTextContainer(size: messageLabel.bounds.size)
-    textContainer.lineFragmentPadding = 0
-    textContainer.lineBreakMode = messageLabel.lineBreakMode
-    textContainer.maximumNumberOfLines = messageLabel.numberOfLines
-
-    // Create layout manager and text storage
-    let layoutManager = NSLayoutManager()
-    let textStorage = NSTextStorage(attributedString: messageLabel.attributedText ?? NSAttributedString())
-
-    layoutManager.addTextContainer(textContainer)
-    textStorage.addLayoutManager(layoutManager)
-
-    // Get character index at tap location
-    let characterIndex = layoutManager.characterIndex(
-      for: tapLocation,
-      in: textContainer,
-      fractionOfDistanceBetweenInsertionPoints: nil
-    )
-
-    // Check if tap is on a link
-    for link in links where NSLocationInRange(characterIndex, link.range) {
-      print("Link tapped: \(link.url)")
-      linkTapHandler?(link.url)
-      return
     }
   }
 
@@ -974,7 +1020,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
 
     // Create a SwiftUI hosting controller with our reaction picker view
     let hostingController = ReactionPickerHostingController(
-      emojis: ["👍", "❤️", "🥹", "🫡", "😂", "💯", "��", "✔️"],
+      emojis: ["👍", "❤️", "🥹", "🫡", "😂", "💯", "🆒", "✔️"],
       onEmojiSelected: { [weak self] emoji in
         guard let self else { return }
         Self.contextMenuOpen = false
@@ -1127,5 +1173,19 @@ extension UIColor {
   static let adaptiveTitle = UIColor { traitCollection in
     traitCollection.userInterfaceStyle == .dark ?
       UIColor(hex: "#FFC2C0")! : UIColor(hex: "#D5312B")!
+  }
+}
+
+extension UIMessageView: UIGestureRecognizerDelegate {
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    // Allow simultaneous recognition with context menu interaction
+    if otherGestureRecognizer is UILongPressGestureRecognizer, gestureRecognizer is UITapGestureRecognizer {
+      let tapGesture = gestureRecognizer as! UITapGestureRecognizer
+      return tapGesture.numberOfTapsRequired == 2
+    }
+    return false
   }
 }

@@ -34,7 +34,19 @@ class MessageReactionView: UIView {
   private lazy var emojiLabel: UILabel = {
     let label = UILabel()
     label.font = UIFont.systemFont(ofSize: 17)
-    label.text = emoji
+
+    if emoji == "✓" || emoji == "✔️" {
+      let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+      let checkmarkImage = UIImage(systemName: "checkmark", withConfiguration: config)?
+        .withTintColor(UIColor(hex: "#2AAC28")!, renderingMode: .alwaysOriginal)
+      let imageAttachment = NSTextAttachment()
+      imageAttachment.image = checkmarkImage
+      let attributedString = NSAttributedString(attachment: imageAttachment)
+      label.attributedText = attributedString
+    } else {
+      label.text = emoji
+    }
+
     return label
   }()
 
