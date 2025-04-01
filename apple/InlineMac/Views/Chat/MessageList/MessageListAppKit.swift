@@ -322,7 +322,9 @@ class MessageListAppKit: NSViewController {
 
   private func updateColumnWidth(commit: Bool = false) {
     let newWidth = scrollView.contentSize.width
+    #if DEBUG
     log.trace("Updating column width \(newWidth)")
+    #endif
     if abs(newWidth - lastColumnWidthUpdate) > 0.5 {
       let column = tableView.tableColumns.first
 
@@ -347,7 +349,9 @@ class MessageListAppKit: NSViewController {
 
   private func scrollToBottom(animated: Bool) {
     guard messages.count > 0 else { return }
+    #if DEBUG
     log.trace("Scrolling to bottom animated=\(animated)")
+    #endif
 
     isProgrammaticScroll = true
 
@@ -586,7 +590,9 @@ class MessageListAppKit: NSViewController {
       return
     }
 
+    #if DEBUG
     log.trace("scroll view frame changed, maintaining scroll from bottom")
+    #endif
 
     let viewportSize = scrollView.contentView.bounds.size
 
@@ -599,17 +605,21 @@ class MessageListAppKit: NSViewController {
     let scrollOffset = scrollView.contentView.bounds.origin
     let contentSize = scrollView.documentView?.frame.size ?? .zero
 
+    #if DEBUG
     log
       .trace(
         "scroll view frame changed, maintaining scroll from bottom \(contentSize.height) \(previousViewportHeight)"
       )
+    #endif
     previousViewportHeight = viewportSize.height
 
     // TODO: min max
     let nextScrollPosition = contentSize.height - (oldDistanceFromBottom + viewportSize.height)
 
     if nextScrollPosition == scrollOffset.y {
+      #if DEBUG
       log.trace("scroll position is same, skipping maintaining")
+      #endif
       return
     }
 
@@ -650,7 +660,9 @@ class MessageListAppKit: NSViewController {
 
   override func viewDidLayout() {
     super.viewDidLayout()
+    #if DEBUG
     log.trace("viewDidLayout() called, width=\(tableWidth())")
+    #endif
 
     updateToolbar()
 
@@ -723,7 +735,9 @@ class MessageListAppKit: NSViewController {
   func checkWidthChangeForHeights() {
     guard feature_updatesHeightsOnWidthChange else { return }
 
+    #if DEBUG
     log.trace("Checking width change, diff = \(abs(tableView.bounds.width - lastKnownWidth))")
+    #endif
     let newWidth = tableView.bounds.width
 
     // Using this prevents an issue where cells height was stuck in a cut off way when using
@@ -750,6 +764,7 @@ class MessageListAppKit: NSViewController {
       // TODO: Calculate buffer based on screen height to get smooth maximize
 
       recalculateHeightsOnWidthChange(
+        buffer: 3,
         duringLiveResize: true,
         maintainScroll: !isAtBottom
         // maintainScroll: false
@@ -908,7 +923,9 @@ class MessageListAppKit: NSViewController {
     //    let newOffset = newContentHeight - (distanceFromBottom + viewportHeight)
     let newOffset = newContentHeight - (oldDistanceFromBottom + viewportHeight)
 
+    #if DEBUG
     log.trace("Maintaining scroll from bottom, oldOffset=\(currentOffset), newOffset=\(newOffset)")
+    #endif
 
     CATransaction.begin()
     CATransaction.setDisableActions(true)
@@ -938,7 +955,9 @@ class MessageListAppKit: NSViewController {
       width: visibleRect.width,
       height: visibleRect.height - bottomInset
     )
+    #if DEBUG
     log.trace("Anchoring to bottom. Visible rect: \(visibleRectInsetted) inset: \(bottomInset)")
+    #endif
 
     let viewportHeight = scrollView.contentView.bounds.height
     let currentOffset = scrollView.contentView.bounds.origin.y
@@ -958,15 +977,17 @@ class MessageListAppKit: NSViewController {
         let topEdgeToViewportBottom = rowRect.minY - visibleRect.maxY
 
         anchor = .bottom(row: index, distanceFromViewportBottom: topEdgeToViewportBottom)
-        log.trace("""
-                Anchoring to bottom row: \(index), 
-                distance: \(topEdgeToViewportBottom)  
-                row.minY=\(rowRect.minY) 
-                row.maxY=\(rowRect.maxY)  
-                row.height=\(rowRect.height) 
-                visibleRect.minY=\(visibleRect.minY)
-                visibleRect.maxY=\(visibleRect.maxY)  
-        """)
+        #if DEBUG
+//        log.trace("""
+//                Anchoring to bottom row: \(index),
+//                distance: \(topEdgeToViewportBottom)
+//                row.minY=\(rowRect.minY)
+//                row.maxY=\(rowRect.maxY)
+//                row.height=\(rowRect.height)
+//                visibleRect.minY=\(visibleRect.minY)
+//                visibleRect.maxY=\(visibleRect.maxY)
+//        """)
+        #endif
     }
 
     return { [weak self] in
@@ -999,7 +1020,9 @@ class MessageListAppKit: NSViewController {
     duringLiveResize: Bool = false,
     maintainScroll: Bool = true
   ) {
+    #if DEBUG
     log.trace("Recalculating heights on width change")
+    #endif
 
     // should we keep this??
     if isPerformingUpdate {
@@ -1026,7 +1049,9 @@ class MessageListAppKit: NSViewController {
     // First, immediately update visible rows
     let rowsToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
 
+    #if DEBUG
     log.trace("Rows to update: \(rowsToUpdate)")
+    #endif
     let apply: (() -> Void)? = if maintainScroll { anchorScroll(to: .bottomRow) } else { nil }
     CATransaction.begin()
     NSAnimationContext.beginGrouping()
@@ -1190,27 +1215,18 @@ extension MessageListAppKit: NSTableViewDataSource {
 
 extension MessageListAppKit: NSTableViewDelegate {
   func isFirstInGroup(at row: Int) -> Bool {
-    guard row >= 0, row < messages.count else { return true }
+    guard messages.indices.contains(row) else { return true }
+    guard row > 0 else { return true }
 
-    let prevMessage = row > 0 ? messages[row - 1] : nil
-    guard prevMessage != nil else {
-      return true
-    }
+    let current = messages[row]
+    let previous = messages[row - 1]
 
-    if prevMessage?.message.fromId != messages[row].message.fromId {
-      return true
-    }
-
-    if messages[row].message.date.timeIntervalSince(prevMessage!.message.date) > 60 * 5 {
-      return true
-    }
-
-    return false
+    return previous.message.fromId != current.message.fromId ||
+      current.message.date.timeIntervalSince(previous.message.date) > 300
   }
 
   func isLastMessage(at row: Int) -> Bool {
-    guard row >= 0, row < messages.count else { return true }
-    return row == messages.count - 1
+    row == messages.count - 1
   }
 
   func isFirstMessage(at row: Int) -> Bool {
@@ -1225,7 +1241,10 @@ extension MessageListAppKit: NSTableViewDelegate {
 
   func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     guard row >= 0, row < messages.count else { return nil }
+
+    #if DEBUG
     log.trace("Making/using view for row \(row)")
+    #endif
 
     let message = messages[row]
 
@@ -1233,13 +1252,6 @@ extension MessageListAppKit: NSTableViewDelegate {
     let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MessageTableCell
       ?? MessageTableCell()
     cell.identifier = identifier
-
-    // cell cache
-//    let cell = cellCache.dequeueCell(withType: "MessageCell", messageId: message.id) {
-//      let newCell = MessageTableCell()
-//      newCell.identifier = NSUserInterfaceItemIdentifier("MessageCell")
-//      return newCell
-//    }
 
     let inputProps = messageProps(for: row)
 
@@ -1257,7 +1269,7 @@ extension MessageListAppKit: NSTableViewDelegate {
     cell.configure(with: message, props: props)
 
     // Store the configured cell in cache
-    cellCache.cacheCell(cell, withType: "MessageCell", messageId: message.id)
+    // cellCache.cacheCell(cell, withType: "MessageCell", messageId: message.id)
 
     return cell
   }
@@ -1266,7 +1278,9 @@ extension MessageListAppKit: NSTableViewDelegate {
     guard row >= 0, row < messages.count else {
       return defaultRowHeight
     }
+    #if DEBUG
     log.trace("Noting height change for row \(row)")
+    #endif
 
     let message = messages[row]
     let props = messageProps(for: row)

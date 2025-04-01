@@ -232,7 +232,9 @@ class MessageSizeCalculator {
     with props: MessageViewInputProps,
     tableWidth width: CGFloat
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
+    #if DEBUG
     let start = CFAbsoluteTimeGetCurrent()
+    #endif
 
     let hasText = message.message.text != nil
     let text = message.message.text ?? emptyFallback
@@ -288,18 +290,24 @@ class MessageSizeCalculator {
       availableWidth = max(availableWidth, photoSize.width)
     }
 
+    #if DEBUG
     log.trace("availableWidth \(availableWidth) for text \(text)")
+    #endif
 
     let cacheKey_ = cacheKey(for: message, width: availableWidth, props: props)
     if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
       textSize = cachedTextSize
+      #if DEBUG
       log.trace("text size cache hit \(message.message.messageId)")
+      #endif
 
       if hasText, abs(cachedTextSize.height - heightForSingleLineText()) < 0.5 {
         isSingleLine = true
       }
     } else {
+      #if DEBUG
       log.trace("text size cache miss \(message.id)")
+      #endif
     }
 
     // MARK: Calculate text size if caches are missed
@@ -309,7 +317,9 @@ class MessageSizeCalculator {
        textSize == nil,
        let minTextWidth = getTextWidthIfSingleLine(message, availableWidth: availableWidth)
     {
+      #if DEBUG
       log.trace("single line cache hit \(message.id)")
+      #endif
       isSingleLine = true
       textSize = CGSize(width: minTextWidth, height: heightForSingleLineText())
     } else {
@@ -322,7 +332,7 @@ class MessageSizeCalculator {
       textSize = textSize_
 
       // Cache as single line if height is equal to single line height
-      if hasText, abs(textSize_.height - heightForSingleLineText()) < 0.5 {
+      if hasText, abs(textSize_.height - heightForSingleLineText()) < 4.0 {
         isSingleLine = true
         minTextWidthForSingleLine.setObject(
           NSValue(size: textSize_),
@@ -589,11 +599,11 @@ class MessageSizeCalculator {
     }
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
 
-    #if DEBUG
-    let end = CFAbsoluteTimeGetCurrent()
-    let timeElapsed = (end - start) * 1_000 // Convert to milliseconds
-    log.trace("calculating size for msg\(message.id) took \(String(format: "%.2f", timeElapsed))ms")
-    #endif
+//    #if DEBUG
+//    let end = CFAbsoluteTimeGetCurrent()
+//    let timeElapsed = (end - start) * 1_000 // Convert to milliseconds
+//    log.trace("calculating size for msg\(message.id) took \(String(format: "%.2f", timeElapsed))ms")
+//    #endif
 
     return (size, textSize ?? NSSize.zero, photoSize, plan)
   }
@@ -618,7 +628,9 @@ class MessageSizeCalculator {
       let text = "Ij"
       let size = calculateSizeForText(text, width: 1_000)
       heightForSingleLine = size.height
+      #if DEBUG
       log.trace("heightForSingleLine \(heightForSingleLine ?? 0)")
+      #endif
       return size.height
     }
   }
@@ -692,7 +704,9 @@ class MessageSizeCalculator {
     let textWidth = ceil(frameSize.width) + Self.extraSafeWidth
     let textHeight = ceil(frameSize.height)
 
+    #if DEBUG
     log.trace("calculateSizeForText \(text) width \(width) resulting in size \(frameSize)")
+    #endif
 
     return CGSize(width: textWidth, height: textHeight)
   }

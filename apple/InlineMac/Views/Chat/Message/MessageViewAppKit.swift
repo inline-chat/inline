@@ -11,7 +11,7 @@ import Throttler
 
 class MessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
-  private let log = Log.scoped("MessageView", enableTracing: true)
+  private let log = Log.scoped("MessageView", enableTracing: false)
   static let avatarSize: CGFloat = Theme.messageAvatarSize
   private var fullMessage: FullMessage
   private var props: MessageViewProps
@@ -93,7 +93,7 @@ class MessageViewAppKit: NSView {
 
   private var senderFont: NSFont {
     .systemFont(
-      ofSize: 12, // NSFont.smallSystemFontSize
+      ofSize: 12,
       weight: .semibold
     )
   }
@@ -168,13 +168,7 @@ class MessageViewAppKit: NSView {
 
   private var useTextKit2: Bool = true
 
-  /// Wraps text and helps with layout
-  private lazy var textViewWrapper: NSView = {
-    let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.wantsLayer = true
-    return view
-  }()
+  private var prevDelegate: NSTextViewportLayoutControllerDelegate?
 
   private lazy var textView: NSTextView = {
     if useTextKit2 {
@@ -189,9 +183,10 @@ class MessageViewAppKit: NSView {
       textView.textContainerInset = MessageTextConfiguration.containerInset
       textView.font = MessageTextConfiguration.font
       textView.textColor = textColor
-      textView.layerContentsRedrawPolicy = .onSetNeedsDisplay
       textView.wantsLayer = true
+      textView.layerContentsRedrawPolicy = .onSetNeedsDisplay
       textView.layer?.drawsAsynchronously = true
+      textView.layer?.needsDisplayOnBoundsChange = true
 
       let textContainer = textView.textContainer
       textContainer?.widthTracksTextView = false
@@ -200,6 +195,10 @@ class MessageViewAppKit: NSView {
       textView.isVerticallyResizable = false
       textView.isHorizontallyResizable = false
       textView.delegate = self
+
+      // we need default delegate to handle rendering (GENIUS)
+      prevDelegate = textView.textLayoutManager?.textViewportLayoutController.delegate
+      textView.textLayoutManager?.textViewportLayoutController.delegate = self
 
       // In NSTextView you need to customize link colors here otherwise the attributed string for links
       // does not have any effect.
@@ -256,7 +255,7 @@ class MessageViewAppKit: NSView {
       textView.layer?.drawsAsynchronously = true
       textView.layerContentsRedrawPolicy = .onSetNeedsDisplay
       textView.layer?.contentsGravity = .topLeft
-      textView.layer?.needsDisplayOnBoundsChange = false
+      textView.layer?.needsDisplayOnBoundsChange = true
       textView.drawsBackground = false
       textView.isVerticallyResizable = false
       textView.isHorizontallyResizable = false
@@ -343,10 +342,7 @@ class MessageViewAppKit: NSView {
     }
 
     setupMessageText()
-    // setupConstraints()
     setupContextMenu()
-
-//    needsUpdateConstraints = true
   }
 
   private func setupConstraints() {
@@ -729,35 +725,6 @@ class MessageViewAppKit: NSView {
       textView.textContainer?.size = props.layout.text?.size ?? .zero
       textView.layoutManager?.ensureLayout(for: textView.textContainer!)
     }
-
-//    // Use parallel text processing
-//    DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-//      guard let self else { return }
-//
-//      DispatchQueue.main.async { [weak self] in
-//        guard let self else { return }
-//
-//        // Detect and add links
-//        if let detector = Self.detector {
-//          let matches = detector.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
-//
-//          for match in matches {
-//            if let url = match.url {
-//              attributedString.addAttributes([
-//                .cursor: NSCursor.pointingHand,
-//                .link: url,
-//                .foregroundColor: linkColor,
-//                .underlineStyle: NSUnderlineStyle.single.rawValue,
-//              ], range: match.range)
-//            }
-//          }
-//        }
-//
-//        textView.textStorage?.setAttributedString(attributedString)
-//
-//        CacheAttrs.shared.set(message: message, value: attributedString)
-//      }
-//    }
   }
 
   static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
@@ -770,15 +737,29 @@ class MessageViewAppKit: NSView {
     // Experimental in build 66
     // Adjust viewport instead of layouting
     if window != nil {
-      // Register for scroll visibility notifications
+      // Register for both frame and bounds changes
+//      NotificationCenter.default.addObserver(
+//        self,
+//        selector: #selector(handleBoundsChange),
+//        name: NSView.frameDidChangeNotification,
+//        object: enclosingScrollView?.contentView
+//      )
+
+      ////      // Also observe bounds changes
       NotificationCenter.default.addObserver(
         self,
         selector: #selector(handleBoundsChange),
-//        name: NSView.boundsDidChangeNotification,
-//        object: enclosingScrollView?.contentView
-        name: NSView.frameDidChangeNotification,
+        name: NSView.boundsDidChangeNotification,
         object: enclosingScrollView?.contentView
       )
+
+//      // Observe window resize notifications
+//      NotificationCenter.default.addObserver(
+//        self,
+//        selector: #selector(handleBoundsChange),
+//        name: NSWindow.didResizeNotification,
+//        object: window
+//      )
     }
   }
 
@@ -796,82 +777,34 @@ class MessageViewAppKit: NSView {
     guard let scrollView = enclosingScrollView,
           let clipView = notification.object as? NSClipView else { return }
 
-    throttle(.milliseconds(32), identifier: "boundsChange\(message.id)", by: .mainActor, option: .default) { [
-      weak self
-    ] in
-      self?.boundsChangeThrottled(scrollView: scrollView, clipView: clipView)
-    }
+    boundsChange(scrollView: scrollView, clipView: clipView)
   }
 
-  private func boundsChangeThrottled(scrollView: NSScrollView, clipView: NSClipView) {
-    guard feature_relayoutOnBoundsChange else { return }
+  private var prevInViewport = false
 
-//    if prevWidth != 0 && prevWidth != bounds.width {
-//      // skip if width changed bc we are handling relayout in updatePropsAndUpdateLayout and causes flicker
-//      log.trace("Skipping relayout because width didn't change")
-//      return
-//    }
-//
-//    prevWidth = bounds.width
+  private func boundsChange(scrollView: NSScrollView, clipView: NSClipView) {
+    guard feature_relayoutOnBoundsChange else { return }
+    guard hasText else { return }
+    // guard textView.inLiveResize else { return }
 
     let visibleRect = scrollView.documentVisibleRect
+    let textViewRect = convert(bounds, to: clipView)
+    let inViewport = visibleRect.insetBy(dx: 0.0, dy: 60.0).intersects(
+      textViewRect
+    )
 
-    let frameInClipView = convert(bounds, to: clipView)
-
-    if visibleRect
-      // Limit the layout to the top 30 points of viewport so we minimize number of messages that are layouted
-      // TODO: we need to eventually find a more optimized version of this
-      .divided(atDistance: 30.0, from: .minYEdge).slice
-      .intersects(frameInClipView)
-    {
-      // Only do this during live resize
-      if !textView.inLiveResize {
-        return
+    if !prevInViewport, inViewport {
+      if textView.inLiveResize {
+        textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
       }
-
-      if !hasText {
-        return
-      }
-
-      if (message.text?.count ?? 0) < 20 {
-        return
-      }
-
-      if useTextKit2 {
-        // TextKit 2 specific configuration
-        if let textLayoutManager = textView.textLayoutManager {
-          // Choose based on multiline vs single line
-          if !props.layout.singleLine {
-            // Important note:
-            // Less performant, but fixes flicker during live resize for large messages that are beyound viewport height
-            // and during width resize
-            log.trace("Layouting viewport (1) for text view \(message.id) ")
-
-            textLayoutManager.textViewportLayoutController.layoutViewport()
-            // textView.layout()
-            // textView.display()
-          } else {
-            // More performant for single line messages
-            throttle(.milliseconds(50), identifier: "layoutMessageTextView", by: .mainActor, option: .default) { [
-              weak self,
-              weak textLayoutManager
-            ] in
-              guard let self else { return }
-              guard let textLayoutManager else { return }
-
-              log.trace("Layouting viewport for text view \(message.id)")
-              textLayoutManager.textViewportLayoutController.layoutViewport()
-//              textView.layout()
-//              textView.display()
-            }
-          }
-        }
-      } else {
-        //        log.trace("Layouting viewport for text view \(message.id)")
-
-        // TODO: Ensure layout for textkit 1
-        // textView.layoutManager?.ensureLayout(for: textView.textContainer!)
-      }
+      log
+        .trace(
+          "Layouting viewport for text view \(message.id)"
+        )
+      prevInViewport = true
+    }
+    if !inViewport {
+      prevInViewport = false
     }
   }
 
@@ -1013,11 +946,25 @@ class MessageViewAppKit: NSView {
     // less granular
     // guard props != self.props else { return }
 
-    needsUpdateConstraints = true
-
     if textView.textContainer?.size != props.layout.text?.size ?? .zero {
+      log.trace("updating size for text in msg \(message.id)")
+//      textViewWidthConstraint?.constant = props.layout.text?.size.width ?? .zero
+//      textViewHeightConstraint?.constant = props.layout.text?.size.height ?? .zero
       textView.textContainer?.size = props.layout.text?.size ?? .zero
+//      textView.textContainer?.containerSize = props.layout.text?.size ?? .zero
+//      needsLayout = true
+//      layoutSubtreeIfNeeded()
+//      textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
+//      textView.layout()
+//      textView.display()
     }
+    // if useTextKit2, !disableTextRelayout {
+//      textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
+//      textView.layoutSubtreeIfNeeded()
+//      textView.displayIfNeeded()
+    // }
+
+    needsUpdateConstraints = true
 
 //    if prevProps.layout.bubble != props.layout.bubble {
 //      contentViewWidthConstraint.constant = props.layout.bubble.size.width
@@ -1081,6 +1028,8 @@ class MessageViewAppKit: NSView {
 
     // update internal props
     self.fullMessage = fullMessage
+
+    prevInViewport = false
 
     // Update props and reflect changes
     updatePropsAndUpdateLayout(props: props, disableTextRelayout: true)
@@ -1374,14 +1323,36 @@ private extension NSLayoutConstraint {
   }
 }
 
-// Implement viewport constraint
+//// Implement viewport constraint
 extension MessageViewAppKit: NSTextViewportLayoutControllerDelegate {
   func textViewportLayoutController(
     _ textViewportLayoutController: NSTextViewportLayoutController,
     configureRenderingSurfaceFor textLayoutFragment: NSTextLayoutFragment
-  ) {}
+  ) {
+    prevDelegate?.textViewportLayoutController(
+      textViewportLayoutController,
+      configureRenderingSurfaceFor: textLayoutFragment
+    )
+  }
+
+  func textViewportLayoutControllerWillLayout(_ textViewportLayoutController: NSTextViewportLayoutController) {
+    prevDelegate?.textViewportLayoutControllerWillLayout?(textViewportLayoutController)
+  }
+
+  func textViewportLayoutControllerDidLayout(_ textViewportLayoutController: NSTextViewportLayoutController) {
+    prevDelegate?.textViewportLayoutControllerDidLayout?(textViewportLayoutController)
+  }
 
   func viewportBounds(for textViewportLayoutController: NSTextViewportLayoutController) -> CGRect {
-    textView.visibleRect.insetBy(dx: 0, dy: -300) // Match layout strategy
+    // During resize, we need to be more aggressive with the viewport size
+    let visibleRect = enclosingScrollView?.documentVisibleRect ?? textView.visibleRect
+
+    // Create a larger viewport during resize to ensure text remains visible
+    let expandedRect = visibleRect.insetBy(dx: -100, dy: -500)
+
+    // Convert to text view coordinates if needed
+    let textViewRect = textView.convert(expandedRect, from: enclosingScrollView?.contentView)
+
+    return textViewRect
   }
 }
