@@ -42,6 +42,14 @@ class ChatViewAppKit: NSViewController {
 
     // Refetch
     viewModel.refetchChatView()
+    
+    NotificationCenter.default.addObserver(
+      forName: NSApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      self?.viewModel.refetchChatView()
+    }
   }
 
   @available(*, unavailable)
@@ -222,6 +230,9 @@ class ChatViewAppKit: NSViewController {
 
   deinit {
     clearCurrentViews()
+    
+    // Remove observer
+    NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
 
     // Remove window check since cleanup should have happened in viewWillDisappear
     Log.shared.debug("🗑️ Deinit: \(type(of: self)) - \(self)")
