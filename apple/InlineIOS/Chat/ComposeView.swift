@@ -170,21 +170,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     addSubview(sendButtonContainer)
     sendButtonContainer.addSubview(sendButton)
     addSubview(plusButton)
-
+    
     composeHeightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
-
+    
     NSLayoutConstraint.activate([
       composeHeightConstraint,
-
+      
       plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
       plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: -3),
       plusButton.widthAnchor.constraint(equalToConstant: Self.minHeight - 6),
       plusButton.heightAnchor.constraint(equalToConstant: Self.minHeight - 6),
-
+      
       textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: sendButtonContainer.leadingAnchor, constant: 24),
+      textView.trailingAnchor.constraint(equalTo: sendButtonContainer.leadingAnchor),
 
       sendButtonContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
       sendButtonContainer.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: 7),
