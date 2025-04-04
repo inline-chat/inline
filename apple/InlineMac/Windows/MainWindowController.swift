@@ -13,6 +13,7 @@ class MainWindowController: NSWindowController {
   private var topLevelRoute: TopLevelRoute {
     dependencies.viewModel.topLevelRoute
   }
+  private var currentTopLevelRoute: TopLevelRoute? = nil
 
   private var navBackButton: NSButton?
   private var navForwardButton: NSButton?
@@ -61,11 +62,12 @@ class MainWindowController: NSWindowController {
     window?.toolbarStyle = .unified
     window?.setFrameAutosaveName("MainWindow")
 
-    if topLevelRoute == .onboarding {
-      setupOnboarding()
-    } else {
-      setupMainSplitView()
-    }
+    switchTopLevel(topLevelRoute)
+//    if topLevelRoute == .onboarding {
+//      setupOnboarding()
+//    } else {
+//      setupMainSplitView()
+//    }
   }
 
   /// Animate or switch to next VC
@@ -78,6 +80,7 @@ class MainWindowController: NSWindowController {
 //        window?.contentViewController = viewController
 //      }
 //    } else {
+
     window?.contentViewController = viewController
 //    }
   }
@@ -112,7 +115,7 @@ class MainWindowController: NSWindowController {
     window?.isMovableByWindowBackground = false
     window?.titlebarAppearsTransparent = false // depends on inner route as well
     // window background is set based on current route
-    
+
     setupWindowFor(route: nav.currentRoute)
 
     reloadToolbar()
@@ -141,6 +144,7 @@ class MainWindowController: NSWindowController {
   }
 
   private func switchTopLevel(_ route: TopLevelRoute) {
+    currentTopLevelRoute = route
     switch route {
       case .onboarding:
         setupOnboarding()
@@ -155,7 +159,7 @@ class MainWindowController: NSWindowController {
       self.log.debug("Top level route changed: \(route)")
 
       // Prevent re-open
-      if route == self.topLevelRoute {
+      if route == self.currentTopLevelRoute {
         self.log.debug("Skipped top level change")
         return
       }
