@@ -141,7 +141,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
             peerId: peerId,
             chatId: chatId ?? 0,
             mediaItems: [.photo(photoInfo)],
-            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
+            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
+            isSticker: true
           )
         )
       )
@@ -184,7 +185,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: sendButtonContainer.leadingAnchor),
+      textView.trailingAnchor.constraint(equalTo: sendButtonContainer.leadingAnchor, constant: 2),
 
       sendButtonContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
       sendButtonContainer.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: 7),
