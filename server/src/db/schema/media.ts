@@ -2,7 +2,7 @@ import { bytea, creationDate } from "@in/server/db/schema/common"
 import { files } from "@in/server/db/schema/files"
 import { messages } from "@in/server/db/schema/messages"
 import { relations } from "drizzle-orm"
-import { pgTable, serial, integer, text, bigint } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, text, bigint, boolean } from "drizzle-orm/pg-core"
 
 // export const messageMedia = pgTable("message_media", {
 //   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
@@ -26,7 +26,7 @@ export const photos = pgTable("photos", {
   strippedIv: bytea("stripped_iv"),
   strippedTag: bytea("stripped_tag"),
 
-  date: creationDate,
+  date: creationDate
 })
 
 export type DbPhoto = typeof photos.$inferSelect

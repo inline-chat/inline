@@ -121,7 +121,20 @@ struct ChatItemView: View {
 
   @ViewBuilder
   var lastMessageView: some View {
-    if message?.photoId != nil || message?.fileId != nil {
+     if message?.isSticker == true {
+     HStack(spacing: 4) {
+       Image(systemName: "cup.and.saucer.fill")
+         .font(.customCaption())
+         .foregroundColor(.secondary)
+
+       Text("Sticker")
+         .font(.customCaption())
+         .foregroundColor(.secondary)
+         .lineLimit(2)
+         .truncationMode(.tail)
+     }
+     .padding(.top, 1)
+   } else  if message?.photoId != nil || message?.fileId != nil {
       HStack {
         Image(systemName: "photo.fill")
           .font(.customCaption())
