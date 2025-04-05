@@ -95,6 +95,7 @@ export const encodeMessage = ({
     mentioned: false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
+    isSticker: message.isSticker ?? false,
   }
 
   return messageProto
@@ -158,6 +159,7 @@ export const encodeFullMessage = ({
     mentioned: false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
+    isSticker: message.isSticker ?? false,
   }
 
   return messageProto

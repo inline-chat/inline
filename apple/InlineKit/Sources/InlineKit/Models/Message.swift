@@ -18,6 +18,7 @@ public struct ApiMessage: Codable, Hashable, Sendable {
 
   public var photo: [ApiPhoto]?
   public var replyToMsgId: Int64?
+  public var isSticker: Bool?
 }
 
 public enum MessageSendingStatus: Int64, Codable, DatabaseValueConvertible, Sendable {
@@ -81,6 +82,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var videoId: Int64?
   public var documentId: Int64?
   public var transactionId: String?
+  public var isSticker: Bool?
 
   enum Columns {
     static let messageId = Column(CodingKeys.messageId)
@@ -180,7 +182,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     photoId: Int64? = nil,
     videoId: Int64? = nil,
     documentId: Int64? = nil,
-    transactionId: String? = nil
+    transactionId: String? = nil,
+    isSticker: Bool? = nil
   ) {
     self.messageId = messageId
     self.randomId = randomId
@@ -201,6 +204,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.videoId = videoId
     self.documentId = documentId
     self.transactionId = transactionId
+    self.isSticker = isSticker
+
     if peerUserId == nil, peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
@@ -223,7 +228,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       pinned: from.pinned,
       editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) },
       status: from.out == true ? MessageSendingStatus.sent : nil,
-      repliedToMessageId: from.replyToMsgId
+      repliedToMessageId: from.replyToMsgId,
+      isSticker: from.isSticker
     )
   }
 
@@ -246,7 +252,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       fileId: nil,
       photoId: from.media.photo.hasPhoto ? from.media.photo.photo.id : nil,
       videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
-      documentId: from.media.document.hasDocument ? from.media.document.document.id : nil
+      documentId: from.media.document.hasDocument ? from.media.document.document.id : nil,
+      isSticker: from.isSticker
     )
   }
 
@@ -365,6 +372,7 @@ public extension ApiMessage {
       }
       message.fileId = file?.id
 
+      
       try message.saveMessage(db, publishChanges: false) // publish is below
     }
 
@@ -409,6 +417,7 @@ public extension Message {
       message.videoId = message.videoId ?? existing.videoId
       message.documentId = message.documentId ?? existing.documentId
       message.transactionId = message.transactionId ?? existing.transactionId
+      message.isSticker = message.isSticker ?? existing.isSticker
       // Update media selectively if needed
       if protocolMessage.hasMedia {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)

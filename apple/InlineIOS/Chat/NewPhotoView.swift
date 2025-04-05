@@ -19,8 +19,8 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
   private let cornerRadius: CGFloat = 16.0
   private let maskLayer = CAShapeLayer()
 
-  var isPng: Bool {
-    fullMessage.photoInfo?.photo.format == .png
+  var isSticker: Bool {
+    fullMessage.message.isSticker == true
   }
 
   private var hasText: Bool {
@@ -92,8 +92,8 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
     }
 
     return ImageDimensions(
-      width: isPng ? calculatedWidth / 2 : calculatedWidth,
-      height: isPng ? calculatedHeight / 2 : calculatedHeight
+      width: isSticker ? calculatedWidth / 2 : calculatedWidth,
+      height: isSticker ? calculatedHeight / 2 : calculatedHeight
     )
   }
 
@@ -123,7 +123,7 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
 
     let dimensions = calculateImageDimensions(width: width, height: height)
 
-    if !isPng {
+    if !isSticker {
       let widthConstraint = widthAnchor.constraint(equalToConstant: dimensions.width)
       let heightConstraint = heightAnchor.constraint(equalToConstant: dimensions.height)
 

@@ -21,6 +21,7 @@ public struct TransactionSendMessage: Transaction {
   var chatId: Int64
   var attachments: [SendMessageAttachment]
   var replyToMsgId: Int64? = nil
+  var isSticker: Bool? = nil
 
   // Config
   public var id = UUID().uuidString
@@ -38,11 +39,13 @@ public struct TransactionSendMessage: Transaction {
     peerId: Peer,
     chatId: Int64,
     mediaItems: [FileMediaItem] = [],
-    replyToMsgId: Int64? = nil
+    replyToMsgId: Int64? = nil,
+    isSticker: Bool? = nil  
   ) {
     self.text = text
     self.peerId = peerId
     self.chatId = chatId
+    self.isSticker = isSticker
     attachments = mediaItems.map { SendMessageAttachment(media: $0) }
     self.replyToMsgId = replyToMsgId
     randomId = Int64.random(in: 0 ... Int64.max)
@@ -83,9 +86,11 @@ public struct TransactionSendMessage: Transaction {
       photoId: media?.asPhotoId(),
       videoId: media?.asVideoId(),
       documentId: media?.asDocumentId(),
-      transactionId: id
+      transactionId: id,
+      isSticker: isSticker
     )
 
+    
     print("message \(message)")
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
     // (mo a few months later) TRADE OFFS BABY
@@ -178,7 +183,8 @@ public struct TransactionSendMessage: Transaction {
       $0.peerID = peerId.toInputPeer()
       $0.randomID = randomId
       $0.temporarySendDate = Int64(date.timeIntervalSince1970.rounded())
-
+      $0.isSticker = isSticker ?? false
+      
       if let text { $0.message = text }
       if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
       if let inputMedia { $0.media = inputMedia }
