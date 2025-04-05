@@ -112,7 +112,19 @@ struct DirectChatItem: View {
       }
       .padding(.top, 1)
 
-    } else if lastMsg?.photoId != nil || lastMsg?.fileId != nil {
+  } else if lastMsg?.isSticker == true {
+    HStack(spacing: 4) {
+      Image(systemName: "cup.and.saucer.fill")
+        .font(.customCaption())
+        .foregroundColor(.secondary)
+      Text("Sticker")
+        .font(.customCaption())
+        .foregroundColor(.secondary)
+        .lineLimit(2)
+        .truncationMode(.tail)
+    }
+    .padding(.top, 1)
+  } else  if lastMsg?.photoId != nil || lastMsg?.fileId != nil {
       HStack {
         Image(systemName: "photo.fill")
           .font(.customCaption())

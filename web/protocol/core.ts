@@ -414,13 +414,19 @@ export interface Message {
      * @generated from protobuf field: optional MessageReactions reactions = 14;
      */
     reactions?: MessageReactions;
+    /**
+     * Whether the message is a sticker
+     *
+     * @generated from protobuf field: optional bool is_sticker = 15;
+     */
+    isSticker?: boolean;
 }
 /**
  * @generated from protobuf message MessageReactions
  */
 export interface MessageReactions {
     /**
-     * Reactions of the message
+     * Reactions of the messageprotocol buffers
      *
      * @generated from protobuf field: repeated Reaction reactions = 1;
      */
@@ -1262,6 +1268,12 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional int64 temporary_send_date = 1000;
      */
     temporarySendDate?: bigint;
+    /**
+     * Whether the message is a sticker
+     *
+     * @generated from protobuf field: optional bool is_sticker = 6;
+     */
+    isSticker?: boolean;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -2629,7 +2641,8 @@ class Message$Type extends MessageType<Message> {
             { no: 11, name: "edit_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 12, name: "grouped_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 13, name: "attachments", kind: "message", T: () => MessageAttachments },
-            { no: 14, name: "reactions", kind: "message", T: () => MessageReactions }
+            { no: 14, name: "reactions", kind: "message", T: () => MessageReactions },
+            { no: 15, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -2690,6 +2703,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional MessageReactions reactions */ 14:
                     message.reactions = MessageReactions.internalBinaryRead(reader, reader.uint32(), options, message.reactions);
                     break;
+                case /* optional bool is_sticker */ 15:
+                    message.isSticker = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2744,6 +2760,9 @@ class Message$Type extends MessageType<Message> {
         /* optional MessageReactions reactions = 14; */
         if (message.reactions)
             MessageReactions.internalBinaryWrite(message.reactions, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_sticker = 15; */
+        if (message.isSticker !== undefined)
+            writer.tag(15, WireType.Varint).bool(message.isSticker);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4808,7 +4827,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 3, name: "reply_to_msg_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "random_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "media", kind: "message", T: () => InputMedia },
-            { no: 1000, name: "temporary_send_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1000, name: "temporary_send_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -4840,6 +4860,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional int64 temporary_send_date */ 1000:
                     message.temporarySendDate = reader.int64().toBigInt();
                     break;
+                case /* optional bool is_sticker */ 6:
+                    message.isSticker = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4870,6 +4893,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional int64 temporary_send_date = 1000; */
         if (message.temporarySendDate !== undefined)
             writer.tag(1000, WireType.Varint).int64(message.temporarySendDate);
+        /* optional bool is_sticker = 6; */
+        if (message.isSticker !== undefined)
+            writer.tag(6, WireType.Varint).bool(message.isSticker);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

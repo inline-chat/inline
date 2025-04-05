@@ -298,8 +298,8 @@ export const TMessageInfo = Type.Object({
   pinned: Optional(Type.Boolean()),
   replyToMsgId: Optional(Type.Integer()),
   // reactionIds: Optional(Type.Array(Type.Integer())),
-
   photo: Optional(Type.Array(PhotoInfo)),
+  isSticker: Optional(Type.Boolean()),
 })
 
 export type TMessageInfo = StaticEncode<typeof TMessageInfo>

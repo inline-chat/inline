@@ -166,10 +166,13 @@ message Message {
 
   // Reactions of the message
   optional MessageReactions reactions = 14;
+  
+  // Whether the message is a sticker
+  optional bool is_sticker = 15;
 }
 
 message MessageReactions {
-  // Reactions of the message
+  // Reactions of the messageprotocol buffers
   repeated Reaction reactions = 1;
   
 }
@@ -524,6 +527,9 @@ message SendMessageInput {
 
   // Date of sending (until we fix the client reordering)
   optional int64 temporary_send_date = 1000;
+
+  // Whether the message is a sticker
+  optional bool is_sticker = 6;
 }
 
 message SendMessageResult {

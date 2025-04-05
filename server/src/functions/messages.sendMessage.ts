@@ -27,6 +27,7 @@ type Input = {
   videoId?: bigint
   documentId?: bigint
   sendDate?: number
+  isSticker?: boolean
 }
 
 type Output = {
@@ -77,7 +78,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     mediaType: mediaType,
     photoId: dbFullPhoto?.id ?? null,
     videoId: dbFullVideo?.id ?? null,
-    documentId: dbFullDocument?.id ?? null,
+     documentId: dbFullDocument?.id ?? null,
+    isSticker: input.isSticker ?? false,
   })
 
   // encode message info

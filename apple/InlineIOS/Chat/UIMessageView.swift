@@ -150,12 +150,12 @@ class UIMessageView: UIView {
     fullMessage.message.out == true
   }
 
-  var isPngImage: Bool {
-    fullMessage.photoInfo?.photo.format == .png
+  var isSticker: Bool {
+    fullMessage.message.isSticker == true
   }
 
   private var bubbleColor: UIColor {
-    if isEmojiOnlyMessage || isPngImage {
+      if isEmojiOnlyMessage || isSticker {
       UIColor.clear
     } else if outgoing {
       ColorManager.shared.selectedColor
