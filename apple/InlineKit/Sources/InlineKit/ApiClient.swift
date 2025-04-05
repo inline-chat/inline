@@ -339,7 +339,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     randomId: Int64?,
     repliedToMessageId: Int64?,
     date: Double?,
-    fileUniqueId: String? = nil
+    fileUniqueId: String? = nil,
+    isSticker: Bool? = nil
   ) async throws -> SendMessage {
     var body: [String: Any] = [
       "text": text as Any,
@@ -363,6 +364,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     if let fileUniqueId {
       body["fileUniqueId"] = fileUniqueId
+ }
+
+    if let isSticker   {
+      body["isSticker"] = isSticker
     }
 
     return try await postRequest(
