@@ -471,51 +471,38 @@ class ComposeTextView: UITextView {
   }
 
   private func sendStickerImage(_ imageData: Data, metadata: [String: Any]) {
-    let imageHash = imageData.prefix(1024).hashValue
+      let imageHash = imageData.prefix(1024).hashValue
 
-    processingLock.lock()
+      processingLock.lock()
 
-    if recentlySentImageHashes.contains(imageHash) {
+      if recentlySentImageHashes.contains(imageHash) {
+          processingLock.unlock()
+          return
+      }
+
+      recentlySentImageHashes.insert(imageHash)
       processingLock.unlock()
-      return
-    }
 
-    recentlySentImageHashes.insert(imageHash)
-    processingLock.unlock()
-
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-      self?.processingLock.lock()
-      self?.recentlySentImageHashes.remove(imageHash)
-      self?.processingLock.unlock()
-    }
-
-    if let originalImage = UIImage(data: imageData) {
-      let maxDimension: CGFloat = 300
-
-      var newSize = originalImage.size
-      if newSize.width > maxDimension || newSize.height > maxDimension {
-        if newSize.width > newSize.height {
-          newSize.height = (newSize.height / newSize.width) * maxDimension
-          newSize.width = maxDimension
-        } else {
-          newSize.width = (newSize.width / newSize.height) * maxDimension
-          newSize.height = maxDimension
-        }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+          self?.processingLock.lock()
+          self?.recentlySentImageHashes.remove(imageHash)
+          self?.processingLock.unlock()
       }
 
-      UIGraphicsBeginImageContextWithOptions(newSize, false, 0)
-      originalImage.draw(in: CGRect(origin: .zero, size: newSize))
-      let resizedImage = UIGraphicsGetImageFromCurrentImageContext() ?? originalImage
-      UIGraphicsEndImageContext()
-
-      if let composeView {
-        DispatchQueue.main.async { [weak self] in
-          composeView.sendSticker(resizedImage)
-          self?.fixFontSizeAfterStickerInsertion()
-        }
+      if let originalImage = UIImage(data: imageData) {
+          ImageProcessor.shared.processImage(originalImage) { [weak self] optimizedImage, optimizedData in
+              guard let self = self, let composeView = self.composeView else { return }
+              
+              if let finalImage = optimizedImage {
+                  DispatchQueue.main.async {
+                      composeView.sendSticker(finalImage)
+                      self.fixFontSizeAfterStickerInsertion()
+                  }
+              }
+          }
       }
-    }
   }
+
 
   private func removeAttachment(at range: NSRange) {
     safelyRemoveAttachment(at: range)
@@ -572,72 +559,79 @@ extension ComposeTextView {
     }
   }
 
-  private func processTextAttachmentEnhanced(_ attachment: NSTextAttachment, range: NSRange) {
+private func processTextAttachmentEnhanced(_ attachment: NSTextAttachment, range: NSRange) {
     var finalImage: UIImage?
     var imageSource = "unknown"
 
     if let image = attachment.image {
-      finalImage = image
-      imageSource = "direct_image_property"
+        finalImage = image
+        imageSource = "direct_image_property"
     } else if let fileWrapper = attachment.fileWrapper {
-      if let data = fileWrapper.regularFileContents, let image = UIImage(data: data) {
-        finalImage = image
-        imageSource = "file_wrapper_data"
-      }
+        if let data = fileWrapper.regularFileContents, let image = UIImage(data: data) {
+            finalImage = image
+            imageSource = "file_wrapper_data"
+        }
     } else if #available(iOS 13.0, *) {
-      if let image = attachment.image(
-        forBounds: attachment.bounds,
-        textContainer: textContainer,
-        characterIndex: range.location
-      ) {
-        finalImage = image
-        imageSource = "image_for_bounds"
-      }
+        if let image = attachment.image(
+            forBounds: attachment.bounds,
+            textContainer: textContainer,
+            characterIndex: range.location
+        ) {
+            finalImage = image
+            imageSource = "image_for_bounds"
+        }
     }
 
     guard let image = finalImage else {
-      return
+        return
     }
 
     let imageHash: Int
     if let imageData = image.pngData()?.prefix(1024) {
-      imageHash = imageData.hashValue
+        imageHash = imageData.hashValue
     } else {
-      imageHash = image.description.hashValue
+        imageHash = image.description.hashValue
     }
 
     processingLock.lock()
 
     if recentlySentImageHashes.contains(imageHash) {
-      processingLock.unlock()
-      return
+        processingLock.unlock()
+        return
     }
 
     recentlySentImageHashes.insert(imageHash)
     processingLock.unlock()
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-      self?.processingLock.lock()
-      self?.recentlySentImageHashes.remove(imageHash)
-      self?.processingLock.unlock()
+        self?.processingLock.lock()
+        self?.recentlySentImageHashes.remove(imageHash)
+        self?.processingLock.unlock()
     }
 
     safelyRemoveAttachment(at: range)
 
-    if let composeView {
-      DispatchQueue.main.async { [weak self] in
-        composeView.sendSticker(image)
-        self?.fixFontSizeAfterStickerInsertion()
-      }
-      return
+    if let composeView = self.composeView {
+        ImageProcessor.shared.processImage(image) { [weak self] optimizedImage, _ in
+            guard let self = self else { return }
+            
+            if let finalImage = optimizedImage {
+                DispatchQueue.main.async {
+                    composeView.sendSticker(finalImage)
+                    self.fixFontSizeAfterStickerInsertion()
+                }
+            }
+        }
+        return
     }
 
     NotificationCenter.default.post(
-      name: NSNotification.Name("StickerDetected"),
-      object: nil,
-      userInfo: ["image": image]
+        name: NSNotification.Name("StickerDetected"),
+        object: nil,
+        userInfo: ["image": image]
     )
-  }
+}
+
 
   private func findEnhancedParentComposeView() -> ComposeView? {
     var responder: UIResponder? = self
