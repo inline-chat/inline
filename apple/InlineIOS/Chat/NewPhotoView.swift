@@ -310,6 +310,7 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
   // MARK: - User Interactions
 
   @objc private func handleTap() {
+    guard fullMessage.message.isSticker != true else { return }
     guard imageLocalUrl() != nil || imageCdnUrl() != nil else { return }
 
     let previewController = QLPreviewController()
