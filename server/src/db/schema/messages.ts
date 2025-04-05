@@ -1,4 +1,4 @@
-import { bigint, pgTable, timestamp, unique } from "drizzle-orm/pg-core"
+import { bigint, boolean, pgTable, timestamp, unique } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { text } from "drizzle-orm/pg-core"
 import { chats } from "./chats"
@@ -62,6 +62,9 @@ export const messages = pgTable(
     // Deprecated fields
     // --------------------------------------------------------
     fileId: integer("file_id").references(() => files.id),
+
+    /** if this message is a sticker */
+    isSticker: boolean("is_sticker").default(false),
   },
   (table) => ({
     messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(table.messageId, table.chatId),

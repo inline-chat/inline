@@ -32,6 +32,7 @@ export const sendMessage = async (
       videoId: media?.oneofKind === "video" ? media.video.videoId : undefined,
       documentId: media?.oneofKind === "document" ? media.document.documentId : undefined,
       sendDate: input.temporarySendDate ? Number(input.temporarySendDate) : undefined,
+      isSticker: input.isSticker ?? false,
     },
     {
       currentSessionId: handlerContext.sessionId,

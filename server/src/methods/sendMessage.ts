@@ -61,6 +61,8 @@ export const Input = Type.Object({
       description: "File unique id you received from uploadFile method as a result of uploading media",
     }),
   ),
+
+  isSticker: Optional(Type.Boolean()),
 })
 
 type Input = Static<typeof Input>
@@ -143,6 +145,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         randomId: randomId ?? null,
         fileId: file?.id ?? null,
         date: messageDate,
+        isSticker: input.isSticker ?? false,
       })
       .returning()
 
