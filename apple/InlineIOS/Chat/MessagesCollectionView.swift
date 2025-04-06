@@ -10,7 +10,6 @@ class MessagesCollectionView: UICollectionView {
   private var chatId: Int64
   private var spaceId: Int64
   private var coordinator: Coordinator
-  private var visibleMessagesPrefetchTimer: Timer?
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
     self.peerId = peerId
@@ -45,8 +44,8 @@ class MessagesCollectionView: UICollectionView {
 
     coordinator.setupDataSource(self)
     setupObservers()
-
-    setupImagePrefetching()
+    
+    prefetchDataSource = self
 
     NotificationCenter.default.addObserver(
       self,
@@ -60,50 +59,13 @@ class MessagesCollectionView: UICollectionView {
     updateContentInsets()
   }
 
-  private func setupImagePrefetching() {
-    visibleMessagesPrefetchTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-      self?.prefetchImagesForVisibleMessages()
-    }
-  }
-
-  private func prefetchImagesForVisibleMessages() {
-    let visibleMessages = indexPathsForVisibleItems.compactMap { indexPath -> FullMessage? in
-      guard indexPath.item < coordinator.messages.count else { return nil }
-      return coordinator.messages[indexPath.item]
-    }
-
-    // Get upcoming messages (next 10-15 messages after visible ones)
-    let lastVisibleIndex = indexPathsForVisibleItems.map(\.item).max() ?? 0
-    let nextIndex = lastVisibleIndex + 1
-
-    // Check if we have any upcoming messages to prefetch
-    if nextIndex < coordinator.messages.count {
-      let upcomingRange = nextIndex ..< min(lastVisibleIndex + 15, coordinator.messages.count)
-      let upcomingMessages = upcomingRange.map { coordinator.messages[$0] }
-
-      // Combine visible and upcoming messages for prefetching
-      let messagesToPrefetch = visibleMessages + upcomingMessages
-
-      // Only prefetch messages with photos
-      let messagesWithPhotos = messagesToPrefetch.filter { $0.photoInfo != nil }
-
-      if !messagesWithPhotos.isEmpty {
-        ImagePrefetcher.shared.prefetchImages(for: messagesWithPhotos)
-      }
-    } else {
-      // No upcoming messages to prefetch, just handle visible ones
-      let messagesWithPhotos = visibleMessages.filter { $0.photoInfo != nil }
-
-      if !messagesWithPhotos.isEmpty {
-        ImagePrefetcher.shared.prefetchImages(for: messagesWithPhotos)
-      }
-    }
-  }
-
   deinit {
     NotificationCenter.default.removeObserver(self)
     Log.shared.debug("CollectionView deinit")
-    visibleMessagesPrefetchTimer?.invalidate()
+    
+    Task {
+      await ImagePrefetcher.shared.clearCache()
+    }
   }
 
   func scrollToBottom() {
@@ -330,6 +292,37 @@ class MessagesCollectionView: UICollectionView {
   }
 }
 
+// MARK: - UICollectionViewDataSourcePrefetching
+
+extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
+  func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+    let messagesToPrefetch = indexPaths.compactMap { indexPath -> FullMessage? in
+      guard indexPath.item < coordinator.messages.count else { return nil }
+      return coordinator.messages[indexPath.item]
+    }.filter { $0.photoInfo != nil }
+    
+    if !messagesToPrefetch.isEmpty {
+      // Dispatch to background to avoid blocking the main thread
+      Task.detached(priority: .low) {
+        await ImagePrefetcher.shared.prefetchImages(for: messagesToPrefetch)
+      }
+    }
+  }
+  
+  func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+    let messagesToCancel = indexPaths.compactMap { indexPath -> FullMessage? in
+      guard indexPath.item < coordinator.messages.count else { return nil }
+      return coordinator.messages[indexPath.item]
+    }.filter { $0.photoInfo != nil }
+    
+    if !messagesToCancel.isEmpty {
+      Task.detached(priority: .low) {
+        await ImagePrefetcher.shared.cancelPrefetching(for: messagesToCancel)
+      }
+    }
+  }
+}
+
 // MARK: - Coordinator
 
 private extension MessagesCollectionView {
@@ -420,20 +413,15 @@ private extension MessagesCollectionView {
         case let .added(newMessages, _):
           // get current snapshot and append new items
           var snapshot = dataSource.snapshot()
-          // let existingIds = Set(snapshot.itemIdentifiers)
           let newIds = newMessages.map(\.id)
-          // let missingIds = newIds.filter { !existingIds.contains($0) }
 
-          // guard !missingIds.isEmpty else { return }
           let shouldScroll = newMessages.contains {
             $0.message.fromId == Auth.shared.getCurrentUserId()
           }
 
           if let first = snapshot.itemIdentifiers.first {
-            // snapshot.insertItems(missingIds, beforeItem: first)
             snapshot.insertItems(newIds, beforeItem: first)
           } else {
-            // snapshot.appendItems(missingIds, toSection: .main)
             snapshot.appendItems(newIds, toSection: .main)
           }
 
@@ -459,12 +447,20 @@ private extension MessagesCollectionView {
           snapshot.deleteItems(ids)
           dataSource.apply(snapshot, animatingDifferences: true)
 
-        case let .updated(newMessages, what, animated):
+        case let .updated(newMessages, _, animated):
           var snapshot = dataSource.snapshot()
-          let ids = newMessages.map(\.id)
-          print("RECONFIGURING IDS \(ids)")
-          snapshot.reconfigureItems(ids)
-          dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+          
+          // Only reconfigure if the message content actually changed
+          let idsToReconfigure = newMessages.compactMap { newMessage -> FullMessage.ID? in
+            guard let existingMessage = viewModel.messagesByID[newMessage.id] else { return nil }
+            return existingMessage.isVisuallyEquivalent(to: newMessage) ? nil : newMessage.id
+          }
+          
+          if !idsToReconfigure.isEmpty {
+            Log.shared.debug("Reconfiguring \(idsToReconfigure.count) messages")
+            snapshot.reconfigureItems(idsToReconfigure)
+            dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+          }
 
         case let .reload(animated):
           setInitialData(animated: animated)
@@ -509,7 +505,11 @@ private extension MessagesCollectionView {
       let size = CGSize(width: availableWidth, height: ceil(textHeight) + 24)
 
       if sizeCache.count >= maxCacheSize {
-        sizeCache.removeAll(keepingCapacity: true)
+        // Instead of clearing all, remove oldest entries
+        let keysToRemove = Array(sizeCache.keys.prefix(sizeCache.count / 2))
+        for key in keysToRemove {
+          sizeCache.removeValue(forKey: key)
+        }
       }
       sizeCache[message.id] = size
 
@@ -628,65 +628,6 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     return attributes
   }
 }
-
-//// Add new ImagePrefetchDataSource class
-// private class ImagePrefetchDataSource: NSObject, UICollectionViewDataSourcePrefetching {
-//  private weak var coordinator: MessagesCollectionView.Coordinator?
-//  private let pipeline = ImagePipeline {
-//    $0.imageCache = ImageCache.shared
-//    $0.dataCache = try? DataCache(name: "com.inline.messages.images")
-//    $0.isProgressiveDecodingEnabled = true
-//    $0.isRateLimiterEnabled = true
-//  }
-//
-//  private var pendingPrefetchRequests = Set<ImageRequest.ID>()
-//
-//  init(coordinator: MessagesCollectionView.Coordinator) {
-//    self.coordinator = coordinator
-//    super.init()
-//  }
-//
-//  func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-//    guard let coordinator else { return }
-//
-//    // Limit the number of concurrent prefetch operations
-//    let maxConcurrentPrefetches = 5
-//    var prefetchCount = 0
-//
-//    for indexPath in indexPaths {
-//      guard indexPath.item < coordinator.messages.count, prefetchCount < maxConcurrentPrefetches else { continue }
-//      let message = coordinator.messages[indexPath.item]
-//
-//      if let file = message.file,
-//         let tempUrl = file.temporaryUrl,
-//         let url = URL(string: tempUrl)
-//      {
-//        let request = ImageRequest(
-//          url: url,
-//          processors: [.resize(width: 300)],
-//          priority: .normal // Lower priority for prefetching
-//        )
-//
-//        if ImageCache.shared[ImageCacheKey(request: request)] == nil &&
-//          !pendingPrefetchRequests.contains(request.id)
-//        {
-//          pendingPrefetchRequests.insert(request.id)
-//          prefetchCount += 1
-//
-//          pipeline.loadImage(with: request) { [weak self] _ in
-//            self?.pendingPrefetchRequests.remove(request.id)
-//          }
-//        }
-//      }
-//    }
-//  }
-
-//  func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
-//    // Cancel any in-progress prefetch requests if needed
-//  }
-//
-//  func prefetchIfNeeded() {}
-// }
 
 extension Notification.Name {
   static let scrollToBottomChanged = Notification.Name("scrollToBottomChanged")
