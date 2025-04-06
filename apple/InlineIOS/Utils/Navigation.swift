@@ -7,8 +7,8 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   // MARK: - Destinations
 
-  let pathKey = "persistedNavigationPath"
-  let sheetKey = "persistedActiveSheet"
+  nonisolated static let sheetKey = "persistedActiveSheet"
+  nonisolated static let pathKey = "persistedNavigationPath"
 
   enum Destination: Identifiable, Hashable, Codable {
     case main
@@ -72,22 +72,28 @@ class Navigation: ObservableObject, @unchecked Sendable {
   }
 
   func saveNavigationState() {
-    if let encodedPath = try? JSONEncoder().encode(pathComponents) {
-      UserDefaults.standard.set(encodedPath, forKey: pathKey)
+    let pathComponents_ = pathComponents
+    let activeSheet_ = activeSheet
+    
+    Task.detached(priority: .background) {
+      if let encodedPath = try?  JSONEncoder().encode(pathComponents_) {
+         UserDefaults.standard.set(encodedPath, forKey: Self.pathKey)
+      }
+      if let encodedSheet = try?  JSONEncoder().encode(activeSheet_) {
+         UserDefaults.standard.set(encodedSheet, forKey: Self.sheetKey)
+      }
     }
-    if let encodedSheet = try? JSONEncoder().encode(activeSheet) {
-      UserDefaults.standard.set(encodedSheet, forKey: sheetKey)
-    }
+
   }
 
   func loadNavigationState() {
-    if let pathData = UserDefaults.standard.data(forKey: pathKey),
+    if let pathData = UserDefaults.standard.data(forKey: Self.pathKey),
        let decodedPath = try? JSONDecoder().decode([Destination].self, from: pathData)
     {
       pathComponents = decodedPath
     }
 
-    if let sheetData = UserDefaults.standard.data(forKey: sheetKey),
+    if let sheetData = UserDefaults.standard.data(forKey: Self.sheetKey),
        let decodedSheet = try? JSONDecoder().decode(Destination?.self, from: sheetData)
     {
       activeSheet = decodedSheet
