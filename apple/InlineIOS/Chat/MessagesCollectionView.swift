@@ -449,19 +449,9 @@ private extension MessagesCollectionView {
 
         case let .updated(newMessages, _, animated):
           var snapshot = dataSource.snapshot()
-          
-          // Only reconfigure if the message content actually changed
-          let idsToReconfigure = newMessages.compactMap { newMessage -> FullMessage.ID? in
-            guard let existingMessage = viewModel.messagesByID[newMessage.id] else { return nil }
-            return existingMessage.isVisuallyEquivalent(to: newMessage) ? nil : newMessage.id
-          }
-          
-          if !idsToReconfigure.isEmpty {
-            Log.shared.debug("Reconfiguring \(idsToReconfigure.count) messages")
-            snapshot.reconfigureItems(idsToReconfigure)
-            dataSource.apply(snapshot, animatingDifferences: animated ?? false)
-          }
-
+        let ids = newMessages.map(\.id)
+               snapshot.reconfigureItems(ids)
+               dataSource.apply(snapshot, animatingDifferences: animated ?? false)
         case let .reload(animated):
           setInitialData(animated: animated)
       }
