@@ -296,7 +296,7 @@ class MessagesCollectionView: UICollectionView {
 
 extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
   func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-    let messagesToPrefetch = indexPaths.compactMap { indexPath -> FullMessage? in
+    let messagesToPrefetch : [FullMessage] = indexPaths.compactMap { indexPath in
       guard indexPath.item < coordinator.messages.count else { return nil }
       return coordinator.messages[indexPath.item]
     }.filter { $0.photoInfo != nil }
@@ -310,7 +310,7 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
   }
   
   func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
-    let messagesToCancel = indexPaths.compactMap { indexPath -> FullMessage? in
+    let messagesToCancel : [FullMessage] = indexPaths.compactMap { indexPath  in
       guard indexPath.item < coordinator.messages.count else { return nil }
       return coordinator.messages[indexPath.item]
     }.filter { $0.photoInfo != nil }
