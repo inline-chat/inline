@@ -13,8 +13,15 @@ public actor FileCache: Sendable {
 
   private let database = AppDatabase.shared
   private let log = Log.scoped("FileCache")
-
+  
+   var downloadingPhotos : [Int64: Task<Void, Never>] = [:]
+  
   private init() {}
+  
+  private func removeFromDownloadingPhotos (_ id: Int64 ) {
+      downloadingPhotos[id] = nil
+      log.debug("Removed photo \(id) from downloadingPhotos")
+  }
 
   // MARK: -  Fetches
 
@@ -26,6 +33,13 @@ public actor FileCache: Sendable {
   // MARK: -  Remote downloads
 
   public func download(photo: PhotoInfo, for message: Message) async {
+    
+    guard downloadingPhotos[photo.id] == nil else {
+        log.debug("Photo \(photo.id) is already being downloaded")
+        return
+    }
+
+    
     // TODO: Implement via Nuke for now?
     log.debug("downloading photo \(photo.id) for message \(message.id)")
 
@@ -34,32 +48,38 @@ public actor FileCache: Sendable {
       log.warning("No remote URL found for photo")
       return
     }
+    
 
     let request = ImageRequest(url: URL(string: remoteUrl))
-
-    Task { @MainActor in
-      ImagePipeline.shared.loadData(
-        with: request,
-        progress: { completed, total in
-          Task {
-            self.log.debug("progress \(completed) / \(total)")
-          }
-        },
-        completion: { result in
-          Task { [weak self] in
-            guard let self else { return }
-            switch result {
+    downloadingPhotos[photo.id]  = Task {
+      
+      
+   _ =   await MainActor.run {
+        ImagePipeline.shared.loadData(
+          with: request,
+          progress: { completed, total in
+            Task {
+              self.log.debug("progress \(completed) / \(total)")
+            }
+          },
+          completion: { result in
+            Task.detached { [weak self] in
+              guard let self else { return }
+              
+              await removeFromDownloadingPhotos(photo.id)
+             
+              switch result {
               case let .success(response):
                 log.debug("success \(response)")
-
+                
                 // Generate a new file name
                 let localPath = "IMG" + (photo.bestPhotoSize()?.type ?? "") + String(photo.id) +
-                  photo.photo.format
+                photo.photo.format
                   .toExt()
                 let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
                 do {
                   try response.data.write(to: localUrl, options: .atomic)
-
+                  
                   Task { [weak self] in
                     guard let self else { return }
                     // Update database
@@ -69,18 +89,22 @@ public actor FileCache: Sendable {
                       try matchingSize.save(db)
                       self.log.debug("saved photo size \(matchingSize)")
                     }
-
+                    
                     await triggerMessageReload(message: message)
                   }
                 } catch {
+                  if Task.isCancelled {
+                    log.debug("Downloading photo \(photo.id) was cancelled")
+                  }
                   log.error("error saving image locally \(error)")
                 }
               case let .failure(error):
                 log.error("error \(error)")
+              }
             }
           }
-        }
-      )
+        )
+      }
     }
   }
 

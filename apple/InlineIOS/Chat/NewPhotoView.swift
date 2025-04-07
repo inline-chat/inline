@@ -275,11 +275,15 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
       imageView.url = url
     } else {
       if let photoInfo = fullMessage.photoInfo {
-        Task(priority: .userInitiated) {
-          await FileCache.shared.download(photo: photoInfo, for: fullMessage.message)
-          await MainActor.run {
-            if let newUrl = imageLocalUrl() {
-              imageView.url = newUrl
+    
+        Task.detached(priority: .userInitiated) { [weak self] in
+          guard let self else { return }
+          print("Calling updateImage \(fullMessage.message.messageId)")
+          await FileCache.shared.download(photo: photoInfo, for: self.fullMessage.message)
+          
+          Task { @MainActor in
+            if let newUrl = self.imageLocalUrl() {
+              self.imageView.url = newUrl
             }
           }
         }
