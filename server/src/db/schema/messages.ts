@@ -64,7 +64,7 @@ export const messages = pgTable(
     fileId: integer("file_id").references(() => files.id),
 
     /** if this message is a sticker */
-    isSticker: boolean("is_sticker").default(false),
+    is_sticker: boolean("is_sticker").default(false),
   },
   (table) => ({
     messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(table.messageId, table.chatId),
