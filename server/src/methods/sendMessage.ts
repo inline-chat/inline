@@ -145,7 +145,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         randomId: randomId ?? null,
         fileId: file?.id ?? null,
         date: messageDate,
-        is_sticker: input.isSticker ?? false,
+        isSticker: input.isSticker ?? false,
       })
       .returning()
 
