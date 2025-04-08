@@ -355,7 +355,6 @@ export const encodeMessageInfo = (
       mentioned: false,
       pinned: false,
       photo: photo ? [photo] : undefined,
-      isSticker: message.is_sticker,
     }),
   )
 }
