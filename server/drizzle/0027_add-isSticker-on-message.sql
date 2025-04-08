@@ -1,1 +1,1 @@
-ALTER TABLE "messages" ALTER COLUMN "is_sticker" SET DEFAULT false;
+ALTER TABLE "messages" ADD COLUMN "is_sticker" boolean DEFAULT false;
