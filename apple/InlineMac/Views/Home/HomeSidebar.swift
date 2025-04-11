@@ -22,41 +22,25 @@ struct HomeSidebar: View {
     }
   }
 
-  fileprivate var items: [SideItem] {
-    var items: [SideItem] = []
-
-    items.append(contentsOf: model.fullSpaces.map { .space($0) })
-    items.append(contentsOf: home.chats.map { .user($0) })
-
-    return items
-  }
-
   var body: some View {
-    List {
-      if search.hasResults || (isSearching && search.canSearch) {
-        searchView
-      } else {
-        spacesAndUsersView
+    ScrollView {
+      LazyVStack(spacing: 0) {
+        if search.hasResults || (isSearching && search.canSearch) {
+          searchView
+        } else {
+          spacesAndUsersView
+        }
       }
+      .padding(0)
     }
-//    .toolbar(content: {
-//      ToolbarItemGroup(placement: .automatic) {
-//        Spacer()
-//
-//        Menu("New", systemImage: "plus") {
-//          Button("New Space") {
-//            nav.createSpaceSheetPresented = true
-//          }
-//        }
-//      }
-//    })
-    .listStyle(.sidebar)
     .safeAreaInset(
       edge: .top,
       content: {
         VStack(alignment: .leading, spacing: 0) {
           HStack(alignment: .center, spacing: 0) {
             SelfUser()
+              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while the wrapper view was moving
+              .scaleEffect(1.0)
 
             AlphaCapsule()
           }
@@ -69,7 +53,6 @@ struct HomeSidebar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal) // default side padding
         .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
-        
       }
     )
   }
@@ -98,11 +81,26 @@ struct HomeSidebar: View {
       }
   }
 
+  @State var spacesExpanded = true
+  @State var usersExpanded = true
+
   @ViewBuilder
   var spacesAndUsersView: some View {
-    ForEach(items) { item in
-      renderItem(item)
-    }
+    SidebarGroup(systemImage: "person.2.fill", title: "Groups", isExpanded: $spacesExpanded) {
+      // spaces
+      ForEach(home.spaces) { item in
+        spaceItem(space: item.space)
+      }
+    }.animation(.smoothSnappy, value: usersExpanded)
+      .animation(.smoothSnappy, value: spacesExpanded)
+
+    SidebarGroup(systemImage: "message.fill", title: "Private Chats", isExpanded: $usersExpanded) {
+      // users
+      ForEach(home.chats) { item in
+        userItem(chat: item)
+      }
+    }.animation(.smoothSnappy, value: usersExpanded)
+      .animation(.smoothSnappy, value: spacesExpanded)
   }
 
   @ViewBuilder
@@ -112,9 +110,13 @@ struct HomeSidebar: View {
         userItem(chat: chat)
 
       case let .space(space):
-        SpaceItem(space: space)
-          .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+        spaceItem(space: space)
     }
+  }
+
+  @ViewBuilder
+  func spaceItem(space: InlineKit.Space) -> some View {
+    SpaceItem(space: space)
   }
 
   @ViewBuilder

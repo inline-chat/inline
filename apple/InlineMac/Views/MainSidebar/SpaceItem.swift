@@ -29,8 +29,8 @@ struct SpaceItem: View {
       appearsActive: appearsActive
     ))
     .focused($isFocused)
-    .padding(.horizontal, -Theme.sidebarItemPadding)
-
+    .padding(.horizontal, -Theme.sidebarItemInnerSpacing)
+    
     // Alert for delete confirmation
     .alert("Are you sure?", isPresented: $alertPresented, presenting: pendingAction, actions: { action in
       Button(actionText(action), role: .destructive) {
@@ -55,12 +55,15 @@ struct SpaceItem: View {
           act(.leave)
         }
       }
+      
     }
 
     if #available(macOS 14.0, *) {
       view.focusEffectDisabled()
+        .fixedSize(horizontal: false, vertical: true)
     } else {
       view
+        .fixedSize(horizontal: false, vertical: true)
     }
   }
 
