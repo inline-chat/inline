@@ -1,8 +1,8 @@
 import InlineKit
+import Logger
 import Nuke
 import NukeUI
 import SwiftUI
-import Logger
 
 public struct UserAvatar: View, Equatable {
   public nonisolated static func == (lhs: UserAvatar, rhs: UserAvatar) -> Bool {

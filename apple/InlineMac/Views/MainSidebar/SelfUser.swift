@@ -10,7 +10,7 @@ struct SelfUser: View {
   var currentUser: User {
     rootData.currentUser ?? defaultUser()
   }
-  
+
   var currentUserInfo: UserInfo {
     rootData.currentUserInfo ?? defaultUserInfo()
   }
@@ -24,51 +24,51 @@ struct SelfUser: View {
   }
 
   var body: some View {
-    Button(action: openSelfProfile) {
-      HStack(spacing: 0) {
-        UserAvatar(userInfo: currentUserInfo, size: Theme.sidebarIconSize)
-          .id("user-avatar-in-sidebar")
-          .padding(.trailing, Theme.sidebarIconSpacing)
-        
-        ConnectionStateProvider { connection in
-          // TODO: Extract to a separate view
-          VStack(alignment: .leading, spacing: 0) {
-            // <name>
-            Text(visibleName)
-              .font(Theme.sidebarTopItemFont)
-              +
-              Text(" (you)")
-              .font(Theme.sidebarTopItemFont)
-              .foregroundColor(Color.secondary.opacity(0.7))
+    // Button(action: openSelfProfile) {
+    HStack(spacing: 0) {
+      UserAvatar(userInfo: currentUserInfo, size: Theme.sidebarIconSize)
+        .id("user-avatar-in-sidebar")
+        .padding(.trailing, Theme.sidebarIconSpacing)
 
-            if connection.shouldShow {
-              Text(connection.humanReadable)
-                .lineLimit(1)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .contentTransition(.identity)
-                .padding(.top, -2)
-            }
+      ConnectionStateProvider { connection in
+        // TODO: Extract to a separate view
+        VStack(alignment: .leading, spacing: 0) {
+          // <name>
+          Text(visibleName)
+            .font(Theme.sidebarTopItemFont)
+            +
+            Text(" (you)")
+            .font(Theme.sidebarTopItemFont)
+            .foregroundColor(Color.secondary.opacity(0.7))
+
+          if connection.shouldShow {
+            Text(connection.humanReadable)
+              .lineLimit(1)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .contentTransition(.identity)
+              .padding(.top, -2)
           }
-
-          .animation(.smoothSnappy, value: connection.state)
-          .animation(.smoothSnappy, value: connection.shouldShow)
         }
+
+        .animation(.smoothSnappy, value: connection.state)
+        .animation(.smoothSnappy, value: connection.shouldShow)
       }
     }
-    .buttonStyle(.plain)
+    // }
+    // .buttonStyle(.plain)
     .frame(height: Theme.sidebarTopItemHeight)
     .frame(maxWidth: .infinity, alignment: .leading)
     .id("user-avatar-in-sidebar")
-//    .onTapGesture {
-//      openSelfProfile()
-//    }
+    .onTapGesture {
+      openSelfProfile()
+    }
   }
 
   func defaultUser() -> User {
     User(email: nil, firstName: "You")
   }
-  
+
   func defaultUserInfo() -> UserInfo {
     UserInfo(user: User(email: nil, firstName: "You"))
   }
