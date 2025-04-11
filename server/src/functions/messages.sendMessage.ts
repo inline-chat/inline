@@ -272,6 +272,8 @@ async function sendNotificationToUser({
   if (messageText) {
     // if has text, use text
     body = messageText.substring(0, 240)
+  } else if (messageInfo.message.isSticker) {
+    body = "☕️ Sticker"
   } else if (messageInfo.message.mediaType === "photo") {
     body = "🖼️ Photo"
   } else if (messageInfo.message.mediaType === "video") {
