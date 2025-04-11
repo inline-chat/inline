@@ -13,6 +13,19 @@ enum Theme {
     appearance.name == .darkAqua ? NSColor.black : NSColor.white
   }
 
+  // MARK: - Colors
+
+  static let colorIconGray: NSColor = .init(name: "colorIconGray") { appearance in
+    appearance.name == .darkAqua ?
+      NSColor(red: 146 / 255, green: 146 / 255, blue: 146 / 255, alpha: 1) :
+      NSColor(red: 188 / 255, green: 188 / 255, blue: 188 / 255, alpha: 1)
+  }
+static let colorTitleTextGray: NSColor = .init(name: "colorTitleTextGray") { appearance in
+    appearance.name == .darkAqua ?
+      NSColor(red: 160 / 255, green: 160 / 255, blue: 160 / 255, alpha: 1) :
+      NSColor(red: 158 / 255, green: 158 / 255, blue: 158 / 255, alpha: 1)
+  }
+
   // MARK: - Window
 
   static let windowMinimumSize: CGSize = .init(width: 320, height: 300)
@@ -26,9 +39,6 @@ enum Theme {
   /// 190 is minimum that fits both sidebar collapse button and plus button
   static let minimumSidebarWidth: CGFloat = 200
   static let idealSidebarWidth: CGFloat = 240
-  static let sidebarIconSize: CGFloat = 22
-  static let sidebarItemHeight: CGFloat = 28
-  static let sidebarIconSpacing: CGFloat = 6
   static let sidebarItemRadius: CGFloat = 10
   static let sidebarItemPadding: CGFloat = 7.0
   // extra to above padding. note: weird thing is making this 3.0 fucks up home sidebar.
@@ -36,6 +46,15 @@ enum Theme {
   static let sidebarItemSpacing: CGFloat = 1
   static let sidebarTopItemFont: Font = .body.weight(.regular)
   static let sidebarTopItemHeight: CGFloat = 24
+
+  static let sidebarIconSpacing: CGFloat = 9
+  static let sidebarIconSize: CGFloat = 24
+  static let sidebarItemHeight: CGFloat = 34
+  static let sidebarTitleItemFont: Font = .system(size: 13.0, weight: .medium)
+  static let sidebarItemFont: Font = .system(size: 14.0, weight: .regular)
+  static let sidebarContentSideSpacing: CGFloat = 22.0 // from inner content of item to edge of sidebar
+  static let sidebarItemInnerSpacing: CGFloat = 14.0 // from inner content of item to edge of content active/hover style
+  static let sidebarItemOuterSpacing: CGFloat = Theme.sidebarContentSideSpacing - Theme.sidebarItemInnerSpacing
 
   // MARK: - Message View
 
