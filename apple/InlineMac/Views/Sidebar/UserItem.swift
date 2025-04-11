@@ -62,14 +62,18 @@ struct UserItem: View {
 
         HStack(spacing: 3) {
           text
+            .fixedSize(horizontal: false, vertical: true)
 
           // Should we show this in home? probably not, but in space we need it
           if isCurrentUser, !isSavedMsg {
-            Text("(You)").foregroundStyle(
+            Text("(You)").lineLimit(1).foregroundStyle(
               appearsActive ? .tertiary : .quaternary
             )
+            .fixedSize(horizontal: false, vertical: true)
           }
         }
+        .font(Theme.sidebarItemFont)
+
 //        .transaction { transaction in
 //          transaction.disablesAnimations = true
 //        }
@@ -88,7 +92,7 @@ struct UserItem: View {
       AnimatedUnreadDot(isVisible: hasUnread)
     }
     .focused($isFocused)
-    .padding(.horizontal, -Theme.sidebarItemPadding)
+    .padding(.horizontal, -Theme.sidebarItemInnerSpacing)
 
     // Menu
     .contextMenu(menuItems: {
@@ -116,9 +120,9 @@ struct UserItem: View {
     )
 
     if #available(macOS 14.0, *) {
-      view.focusEffectDisabled()
+      view.focusEffectDisabled().fixedSize(horizontal: false, vertical: true)
     } else {
-      view
+      view.fixedSize(horizontal: false, vertical: true)
     }
   }
 }
@@ -160,8 +164,8 @@ struct UserItemButtonStyle: ButtonStyle {
     configuration.label
       .frame(height: Theme.sidebarItemHeight)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
-      .padding(.trailing, Theme.sidebarItemPadding)
-      .padding(.leading, Theme.sidebarItemPadding + Theme.sidebarItemLeadingGutter) // gutter makes place for unread
+      .padding(.trailing, Theme.sidebarItemInnerSpacing)
+      .padding(.leading, Theme.sidebarItemInnerSpacing) // gutter makes place for unread
       .background {
         Group {
           RoundedRectangle(cornerRadius: Theme.sidebarItemRadius)
