@@ -110,6 +110,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     if let userId = userInfo["userId"] as? Int {
       let peerId = Peer.user(id: Int64(userId))
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // go to home first
+        self.nav.popToRoot()
         self.nav.push(.chat(peer: peerId))
       }
 
