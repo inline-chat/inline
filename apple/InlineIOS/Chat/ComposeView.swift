@@ -15,13 +15,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 {
   // MARK: - Configuration Constants
 
-  static let minHeight: CGFloat = 42.0
+  static let minHeight: CGFloat = 38.0
   private let maxHeight: CGFloat = 600
-  private let buttonSize: CGSize = .init(width: 36, height: 36)
+  private let buttonSize: CGSize = .init(width: 34, height: 34)
   static let textViewVerticalPadding: CGFloat = 0.0
   static let textViewHorizantalPadding: CGFloat = 12.0
   static let textViewHorizantalMargin: CGFloat = 7.0
-  static let textViewVerticalMargin: CGFloat = 7.0
+  static let textViewVerticalMargin: CGFloat = 4.0
 
   // MARK: - Private Properties
 
@@ -179,8 +179,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       
       plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
       plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: -3),
-      plusButton.widthAnchor.constraint(equalToConstant: Self.minHeight - 6),
-      plusButton.heightAnchor.constraint(equalToConstant: Self.minHeight - 6),
+      plusButton.widthAnchor.constraint(equalToConstant:  buttonSize.width - 2 ),
+      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2 ),
       
       textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
       textView.topAnchor.constraint(equalTo: topAnchor),
@@ -192,7 +192,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       sendButtonContainer.widthAnchor.constraint(equalToConstant: buttonSize.width + 20),
       sendButtonContainer.heightAnchor.constraint(equalToConstant: buttonSize.height + 20),
 
-      sendButton.centerXAnchor.constraint(equalTo: sendButtonContainer.centerXAnchor),
+      sendButton.trailingAnchor.constraint(equalTo: sendButtonContainer.trailingAnchor),
       sendButton.centerYAnchor.constraint(equalTo: sendButtonContainer.centerYAnchor),
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
@@ -233,7 +233,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     config.baseForegroundColor = .secondaryLabel
     config.background.backgroundColor = .secondarySystemBackground
     button.configuration = config
-    button.layer.cornerRadius = Self.minHeight / 2
+    button.layer.cornerRadius = 16
     button.clipsToBounds = true
 
     let libraryAction = UIAction(
