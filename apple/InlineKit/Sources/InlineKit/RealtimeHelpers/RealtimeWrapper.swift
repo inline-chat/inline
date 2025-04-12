@@ -202,16 +202,18 @@ public extension Realtime {
 
     let peerId = getChatHistoryInput.peerID.toPeer()
 
-    _ = try db.dbWriter.write { db in
+    Task.detached(priority: .userInitiated) {
+      _ = try self.db.dbWriter.write { db in
       for message in result.messages {
         do {
           _ = try Message.save(db, protocolMessage: message, publishChanges: false) // we reload below
         } catch {
-          log.error("Failed to save message", error: error)
+          self.log.error("Failed to save message", error: error)
         }
       }
     }
-
+    }
+    
     // Publish and reload messages
     Task { @MainActor in
       MessagesPublisher.shared.messagesReload(peer: peerId, animated: false)
