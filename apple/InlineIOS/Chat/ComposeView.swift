@@ -18,7 +18,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   static let minHeight: CGFloat = 42.0
   private let maxHeight: CGFloat = 600
   private let buttonSize: CGSize = .init(width: 36, height: 36)
-  static let textViewVerticalPadding: CGFloat = 9.0
+  static let textViewVerticalPadding: CGFloat = 0.0
   static let textViewHorizantalPadding: CGFloat = 12.0
   static let textViewHorizantalMargin: CGFloat = 7.0
   static let textViewVerticalMargin: CGFloat = 7.0
@@ -99,8 +99,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     if let image = notification.userInfo?["image"] as? UIImage {
       Log.shared.debug("📤 COMPOSE - Received sticker notification with image: \(image.size)")
       // Ensure we're on the main thread
-      DispatchQueue.main.async {
-        self.sendSticker(image)
+      DispatchQueue.main.async { [weak self] in
+        self?.sendSticker(image)
       }
     }
   }
@@ -266,17 +266,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   }
 
   private func updateHeight() {
-    let layoutManager = textView.layoutManager
-    let textContainer = textView.textContainer
-
-    let contentHeight = layoutManager.usedRect(for: textContainer).height
-
-    // Ignore small height changes
-    if abs(prevTextHeight - contentHeight) < 8.0 {
-      return
-    }
-
-    prevTextHeight = contentHeight
+    let size = textView.sizeThatFits(CGSize(
+          width: textView.bounds.width,
+          height: .greatestFiniteMagnitude
+      ))
+      
+      let contentHeight = size.height
 
     let newHeight = textViewHeightByContentHeight(contentHeight)
     guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
@@ -709,7 +704,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 extension ComposeView: UITextViewDelegate {
   func textViewDidChange(_ textView: UITextView) {
     // Height Management
-    UIView.animate(withDuration: 0.2) { self.updateHeight() }
+    UIView.animate(withDuration: 0.1) { self.updateHeight() }
 
     // Placeholder Visibility & Attachment Checks
     let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
