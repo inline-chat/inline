@@ -272,35 +272,52 @@ class MessagesCollectionView: UICollectionView {
     }
   }
 
-  @objc private func handleScrollToBottom() {
-    guard !itemsEmpty else {
+  @objc private func handleScrollToBottom(_ notification: Notification) {
+    if itemsEmpty {
       return
     }
-
     let visibleHeight = bounds.height
 
-    let currentPosition = contentOffset.y
-    let distanceToScroll = currentPosition
+    let targetOffsetY = -contentInset.top
 
+    
+    let currentOffsetY = contentOffset.y
+    let distanceToScroll = abs(currentOffsetY - targetOffsetY)
+
+    
     if distanceToScroll > visibleHeight * 3 {
-      let distanceToJump = distanceToScroll - (visibleHeight * 3)
-      let intermediateY = currentPosition - distanceToJump
 
-      setContentOffset(CGPoint(x: 0, y: intermediateY), animated: false)
+      
+      let intermediateOffsetY = targetOffsetY + (3 * visibleHeight)
 
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-        self.scrollToItem(
-          at: IndexPath(item: 0, section: 0),
-          at: .top,
-          animated: true
-        )
+      if currentOffsetY > intermediateOffsetY {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        setContentOffset(CGPoint(x: 0, y: intermediateOffsetY), animated: false)
+        
+        layoutIfNeeded()
+        CATransaction.commit()
+
+        
+        animateScrollToBottom(duration: 0.14)
+
+      } else {
+        animateScrollToBottom(duration:  0.14)
       }
     } else {
-      scrollToItem(
-        at: IndexPath(item: 0, section: 0),
-        at: .top,
-        animated: true
-      )
+      animateScrollToBottom(duration:  0.14)
+    }
+  }
+
+  private func animateScrollToBottom(duration: TimeInterval) {
+    if let attributes = layoutAttributesForItem(at: IndexPath(item: 0, section: 0)) {
+      let targetOffset = CGPoint(x: 0, y: attributes.frame.minY - contentInset.top)
+      UIView.animate(withDuration: duration,
+                        delay: 0,
+                        options: [.curveEaseOut, .allowUserInteraction],
+                        animations: {
+              self.contentOffset = targetOffset
+          })
     }
   }
 
