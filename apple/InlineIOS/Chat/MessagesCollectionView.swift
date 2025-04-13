@@ -44,7 +44,7 @@ class MessagesCollectionView: UICollectionView {
 
     coordinator.setupDataSource(self)
     setupObservers()
-    
+
     prefetchDataSource = self
 
     NotificationCenter.default.addObserver(
@@ -62,7 +62,7 @@ class MessagesCollectionView: UICollectionView {
   deinit {
     NotificationCenter.default.removeObserver(self)
     Log.shared.debug("CollectionView deinit")
-    
+
     Task {
       await ImagePrefetcher.shared.clearCache()
     }
@@ -273,7 +273,29 @@ class MessagesCollectionView: UICollectionView {
   }
 
   @objc private func handleScrollToBottom() {
-    if !itemsEmpty {
+    guard !itemsEmpty else {
+      return
+    }
+
+    let visibleHeight = bounds.height
+
+    let currentPosition = contentOffset.y
+    let distanceToScroll = currentPosition
+
+    if distanceToScroll > visibleHeight * 3 {
+      let distanceToJump = distanceToScroll - (visibleHeight * 3)
+      let intermediateY = currentPosition - distanceToJump
+
+      setContentOffset(CGPoint(x: 0, y: intermediateY), animated: false)
+
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        self.scrollToItem(
+          at: IndexPath(item: 0, section: 0),
+          at: .top,
+          animated: true
+        )
+      }
+    } else {
       scrollToItem(
         at: IndexPath(item: 0, section: 0),
         at: .top,
@@ -296,11 +318,11 @@ class MessagesCollectionView: UICollectionView {
 
 extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
   func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-    let messagesToPrefetch : [FullMessage] = indexPaths.compactMap { indexPath in
+    let messagesToPrefetch: [FullMessage] = indexPaths.compactMap { indexPath in
       guard indexPath.item < coordinator.messages.count else { return nil }
       return coordinator.messages[indexPath.item]
     }.filter { $0.photoInfo != nil }
-    
+
     if !messagesToPrefetch.isEmpty {
       // Dispatch to background to avoid blocking the main thread
       Task.detached(priority: .low) {
@@ -308,13 +330,13 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
       }
     }
   }
-  
+
   func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
-    let messagesToCancel : [FullMessage] = indexPaths.compactMap { indexPath  in
+    let messagesToCancel: [FullMessage] = indexPaths.compactMap { indexPath in
       guard indexPath.item < coordinator.messages.count else { return nil }
       return coordinator.messages[indexPath.item]
     }.filter { $0.photoInfo != nil }
-    
+
     if !messagesToCancel.isEmpty {
       Task.detached(priority: .low) {
         await ImagePrefetcher.shared.cancelPrefetching(for: messagesToCancel)
@@ -449,9 +471,10 @@ private extension MessagesCollectionView {
 
         case let .updated(newMessages, _, animated):
           var snapshot = dataSource.snapshot()
-        let ids = newMessages.map(\.id)
-               snapshot.reconfigureItems(ids)
-               dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+          let ids = newMessages.map(\.id)
+          snapshot.reconfigureItems(ids)
+          dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+
         case let .reload(animated):
           setInitialData(animated: animated)
       }
