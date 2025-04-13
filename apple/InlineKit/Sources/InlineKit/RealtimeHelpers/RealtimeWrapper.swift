@@ -216,11 +216,11 @@ public extension Realtime {
           }
         }
       }
-    }
 
-    // Publish and reload messages
-    Task { @MainActor in
-      MessagesPublisher.shared.messagesReload(peer: peerId, animated: false)
+      // Publish and reload messages
+      Task.detached(priority: .userInitiated) { @MainActor in
+        MessagesPublisher.shared.messagesReload(peer: peerId, animated: false)
+      }
     }
   }
 }
