@@ -25,26 +25,22 @@ class BlurCircleButton: UIButton {
     backgroundView.backgroundColor = .systemBackground.withAlphaComponent(0.3)
     backgroundView.translatesAutoresizingMaskIntoConstraints = false
     backgroundView.layer.cornerRadius = 22
-    backgroundView.layer.borderWidth = 1
-    backgroundView.layer.borderColor = UIColor.separator.withAlphaComponent(0.1).cgColor
     backgroundView.isUserInteractionEnabled = false
     blurEffect.isUserInteractionEnabled = false
     iconImageView.isUserInteractionEnabled = false
-
+    iconImageView.tintColor = ColorManager.shared.selectedColor
     isUserInteractionEnabled = true
     addSubview(backgroundView)
 
     blurEffect.layer.cornerRadius = 22
     blurEffect.clipsToBounds = true
-    blurEffect.layer.borderWidth = 1
-    blurEffect.layer.borderColor = UIColor.separator.cgColor
     blurEffect.translatesAutoresizingMaskIntoConstraints = false
     addSubview(blurEffect)
 
     let chevronImage = UIImage(systemName: "chevron.down")?
-      .withConfiguration(UIImage.SymbolConfiguration(pointSize: 16, weight: .medium))
+      .withConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .medium))
     iconImageView.image = chevronImage
-    iconImageView.tintColor = .secondaryLabel
+    
     iconImageView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(iconImageView)
 
