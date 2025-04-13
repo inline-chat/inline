@@ -41,7 +41,8 @@ struct HomeToolbarContent: ToolbarContent {
   private var header: some View {
     HStack(spacing: 8) {
       if apiState != .connected {
-        AnimatedDots(dotSize: 6)
+        Spinner(size: 16)
+          .padding(.trailing, 4)
       } else {
         Image(systemName: "house.fill")
           .font(.caption)
@@ -99,6 +100,69 @@ struct HomeToolbarContent: ToolbarContent {
       Image(systemName: "gearshape")
         .tint(Color.secondary)
         .contentShape(Rectangle())
+    }
+  }
+}
+
+struct Spinner: View {
+  @State private var isRotating = false
+  @State private var trimEnd = 0.75
+
+  var color: Color = ColorManager.shared.swiftUIColor
+  var secondaryColor: Color? = nil
+  var lineWidth: CGFloat = 3
+  var size: CGFloat = 50
+
+  var gradient: LinearGradient {
+    if let secondaryColor = secondaryColor {
+      return LinearGradient(
+        gradient: Gradient(colors: [color, secondaryColor]),
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+    } else {
+      return LinearGradient(
+        gradient: Gradient(colors: [color, color.opacity(0.7)]),
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+    }
+  }
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .stroke(
+          gradient.opacity(0.3),
+          lineWidth: lineWidth
+        )
+
+      Circle()
+        .trim(from: 0, to: trimEnd)
+        .stroke(
+          gradient,
+          style: StrokeStyle(
+            lineWidth: lineWidth,
+            lineCap: .round
+          )
+        )
+        .rotationEffect(Angle(degrees: isRotating ? 360 : 0))
+    }
+    .frame(width: size, height: size)
+    .onAppear {
+      withAnimation(
+        Animation.linear(duration: 0.8)
+          .repeatForever(autoreverses: false)
+      ) {
+        isRotating = true
+      }
+
+      withAnimation(
+        Animation.easeInOut(duration: 0.9)
+          .repeatForever(autoreverses: true)
+      ) {
+        trimEnd = 0.6
+      }
     }
   }
 }
