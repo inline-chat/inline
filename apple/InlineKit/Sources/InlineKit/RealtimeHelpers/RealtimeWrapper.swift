@@ -119,7 +119,11 @@ public final actor Realtime: Sendable {
     }
   }
 
-  public func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?, discardIfNotConnected: Bool = false) async throws
+  public func invoke(
+    _ method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    discardIfNotConnected: Bool = false
+  ) async throws
     -> RpcResult.OneOf_Result?
   {
     try await api.invoke(method, input: input, discardIfNotConnected: discardIfNotConnected)
@@ -203,17 +207,17 @@ public extension Realtime {
     let peerId = getChatHistoryInput.peerID.toPeer()
 
     Task.detached(priority: .userInitiated) {
-      _ = try self.db.dbWriter.write { db in
-      for message in result.messages {
-        do {
-          _ = try Message.save(db, protocolMessage: message, publishChanges: false) // we reload below
-        } catch {
-          self.log.error("Failed to save message", error: error)
+      _ = try await self.db.dbWriter.write { db in
+        for message in result.messages {
+          do {
+            _ = try Message.save(db, protocolMessage: message, publishChanges: false) // we reload below
+          } catch {
+            self.log.error("Failed to save message", error: error)
+          }
         }
       }
     }
-    }
-    
+
     // Publish and reload messages
     Task { @MainActor in
       MessagesPublisher.shared.messagesReload(peer: peerId, animated: false)
