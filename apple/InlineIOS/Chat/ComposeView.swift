@@ -16,7 +16,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   // MARK: - Configuration Constants
 
   static let minHeight: CGFloat = 38.0
-  private let maxHeight: CGFloat = 600
+  private let maxHeight: CGFloat = 350
   private let buttonSize: CGSize = .init(width: 34, height: 34)
   static let textViewVerticalPadding: CGFloat = 0.0
   static let textViewHorizantalPadding: CGFloat = 12.0
