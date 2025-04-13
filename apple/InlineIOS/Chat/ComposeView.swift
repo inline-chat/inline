@@ -60,6 +60,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     container.translatesAutoresizingMaskIntoConstraints = false
     container.isUserInteractionEnabled = true
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(sendTapped))
+
     container.addGestureRecognizer(tapGesture)
     container.alpha = 0
     return container
@@ -171,21 +172,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     addSubview(sendButtonContainer)
     sendButtonContainer.addSubview(sendButton)
     addSubview(plusButton)
-    
+
     composeHeightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
-    
+
     NSLayoutConstraint.activate([
       composeHeightConstraint,
-      
+
       plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
       plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: -3),
-      plusButton.widthAnchor.constraint(equalToConstant:  buttonSize.width - 2 ),
-      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2 ),
-      
+      plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
+      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
+
       textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: sendButtonContainer.leadingAnchor, constant: 2),
+      textView.trailingAnchor.constraint(equalTo: sendButtonContainer.leadingAnchor, constant: 12),
 
       sendButtonContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
       sendButtonContainer.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: 7),
@@ -217,8 +218,29 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     config.background.backgroundColor = ColorManager.shared.selectedColor
     config.cornerStyle = .capsule
 
+    button.configurationUpdateHandler = { [weak button] _ in
+      guard let button = button else { return }
+
+      let config = button.configuration
+
+      if button.isHighlighted {
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut], animations: {
+          button.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+        })
+      } else {
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut], animations: {
+          button.transform = .identity
+        })
+      }
+
+      button.configuration = config
+    }
+
     button.configuration = config
-    button.isUserInteractionEnabled = false
+    button.isUserInteractionEnabled = true
+
+    button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
+
     return button
   }
 
@@ -267,11 +289,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 
   private func updateHeight() {
     let size = textView.sizeThatFits(CGSize(
-          width: textView.bounds.width,
-          height: .greatestFiniteMagnitude
-      ))
-      
-      let contentHeight = size.height
+      width: textView.bounds.width,
+      height: .greatestFiniteMagnitude
+    ))
+
+    let contentHeight = size.height
 
     let newHeight = textViewHeightByContentHeight(contentHeight)
     guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
@@ -293,7 +315,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   // MARK: - Button Animation
 
   func buttonDisappear() {
-    UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseIn) {
+    UIView.animate(withDuration: 0.06, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
       self.sendButtonContainer.alpha = 0
       self.sendButtonContainer.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
     }
