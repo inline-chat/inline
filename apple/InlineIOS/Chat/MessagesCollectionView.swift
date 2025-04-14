@@ -305,7 +305,11 @@ class MessagesCollectionView: UICollectionView {
         animateScrollToBottom(duration:  0.14)
       }
     } else {
-      animateScrollToBottom(duration:  0.14)
+      self.scrollToItem(
+        at: IndexPath(item: 0, section: 0),
+        at: .top,
+        animated: true
+      )
     }
   }
 
