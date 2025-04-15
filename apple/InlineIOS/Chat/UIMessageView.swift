@@ -154,8 +154,9 @@ class UIMessageView: UIView {
     fullMessage.message.isSticker == true
   }
 
+
   private var bubbleColor: UIColor {
-      if isEmojiOnlyMessage || isSticker {
+    if isEmojiOnlyMessage || isSticker    {
       UIColor.clear
     } else if outgoing {
       ColorManager.shared.selectedColor
@@ -259,7 +260,7 @@ class UIMessageView: UIView {
     setupPhotoViewIfNeeded()
     setupMessageContainer()
 
-    if message.hasFile, !message.hasText, fullMessage.reactions.isEmpty {
+    if message.hasPhoto, !message.hasText, fullMessage.reactions.isEmpty {
       addFloatingMetadata()
     }
 
@@ -352,7 +353,7 @@ class UIMessageView: UIView {
   }
 
   private func setupMultilineMessage() {
-    if message.hasFile, message.hasText || !fullMessage.reactions.isEmpty {
+    if message.hasPhoto, message.hasText || !fullMessage.reactions.isEmpty {
       let innerContainer = UIStackView()
       innerContainer.axis = .vertical
       innerContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -400,7 +401,7 @@ class UIMessageView: UIView {
 //        reactionsFlowView.widthAnchor.constraint(equalTo: multiLineContainer.widthAnchor).isActive = true
       }
 
-      if !message.hasFile || message.hasText {
+      if !message.hasPhoto || message.hasText {
         setupMultilineMetadata()
         containerStack.addArrangedSubview(multiLineContainer)
         return
@@ -591,7 +592,7 @@ class UIMessageView: UIView {
     ]
 
     let constraints: [NSLayoutConstraint] = switch (
-      message.hasFile,
+      message.hasPhoto,
       message.hasText || !fullMessage.reactions.isEmpty
     ) {
     case (true, false):
@@ -1144,7 +1145,7 @@ extension String {
 }
 
 extension Message {
-  var hasFile: Bool {
+  var hasPhoto: Bool {
     fileId != nil || photoId != nil
   }
 
