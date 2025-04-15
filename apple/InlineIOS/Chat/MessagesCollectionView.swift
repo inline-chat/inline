@@ -95,6 +95,8 @@ class MessagesCollectionView: UICollectionView {
     }
   }
 
+  
+ static let messagesBottomPadding = 6.0
   func updateContentInsets() {
     guard !UIMessageView.contextMenuOpen else {
       return
@@ -109,14 +111,14 @@ class MessagesCollectionView: UICollectionView {
     let topSafeArea = isLandscape ? window.safeAreaInsets.left : window.safeAreaInsets.top
     let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
     let totalTopInset = topSafeArea + navBarHeight
-    let messagesBottomPadding = 12.0
+    
     var bottomInset: CGFloat = 0.0
 
     let chatState = ChatState.shared.getState(peer: peerId)
     let hasEmbed = chatState.replyingMessageId != nil || chatState.editingMessageId != nil
 
     bottomInset += composeHeight + (ComposeView.textViewVerticalMargin * 2)
-    bottomInset += messagesBottomPadding
+    bottomInset += Self.messagesBottomPadding
 
     if hasEmbed {
       bottomInset += composeEmbedViewHeight
@@ -596,7 +598,14 @@ private extension MessagesCollectionView {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-      let isAtBottom = scrollView.contentOffset.y > -60
+      /// Reminder: textViewVerticalMargin in ComposeView affects scrollView.contentOffset.y number
+      /// (textViewVerticalMargin = 7.0  -> contentOffset.y = -64.0 | textViewVerticalMargin = 4.0 -> contentOffset.y = -58.0)
+    
+      let calculatedThreshold = ComposeView.minHeight - ((ComposeView.textViewVerticalMargin * 2) + (MessagesCollectionView.messagesBottomPadding * 2))
+      
+      let isAtBottom = scrollView.contentOffset.y > -calculatedThreshold
+      
+      print("ISATBOTTOm y: \(scrollView.contentOffset.y) - \(calculatedThreshold)")
       if isAtBottom != wasPreviouslyAtBottom, messages.count > 12 {
         NotificationCenter.default.post(
           name: .scrollToBottomChanged,
