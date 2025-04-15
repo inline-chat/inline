@@ -82,13 +82,13 @@ class EmbedMessageView: UIView {
     if message.hasUnsupportedTypes {
       imageIconView.isHidden = true
       messageLabel.text = "Unsupported message"
-    } else if message.hasFile, message.hasText {
+    } else if message.hasPhoto, message.hasText {
       imageIconView.isHidden = false
       messageLabel.text = message.text
-    } else if message.hasFile, !message.hasText {
+    } else if message.hasPhoto, !message.hasText {
       imageIconView.isHidden = false
       messageLabel.text = "Photo"
-    } else if !message.hasFile, message.hasText {
+    } else if !message.hasPhoto, message.hasText {
       imageIconView.isHidden = true
       messageLabel.text = message.text
     } else {
@@ -149,7 +149,7 @@ private extension EmbedMessageView {
   }
 
   func updateColors() {
-    let textColor: UIColor = outgoing && !isOnlyEmoji ?.white : .darkGray
+    let textColor: UIColor = outgoing && !isOnlyEmoji ?.white : .secondaryLabel
     let rectangleColor = outgoing && !isOnlyEmoji ? UIColor.white : .systemGray
     let bgAlpha: CGFloat = outgoing && !isOnlyEmoji ? 0.13 : 0.1
     backgroundColor = outgoing && !isOnlyEmoji ? .white.withAlphaComponent(bgAlpha) : .systemGray.withAlphaComponent(bgAlpha)
