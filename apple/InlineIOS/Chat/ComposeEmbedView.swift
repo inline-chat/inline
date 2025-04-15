@@ -174,13 +174,13 @@ class ComposeEmbedView: UIView {
       if message.hasUnsupportedTypes {
         imageIconView.isHidden = true
         messageLabel.text = "Unsupported message"
-      } else if message.hasFile, message.hasText {
+      } else if message.hasPhoto, message.hasText {
         imageIconView.isHidden = false
         messageLabel.text = message.text
-      } else if message.hasFile, !message.hasText {
+      } else if message.hasPhoto, !message.hasText {
         imageIconView.isHidden = false
         messageLabel.text = "Photo"
-      } else if !message.hasFile, message.hasText {
+      } else if !message.hasPhoto, message.hasText {
         imageIconView.isHidden = true
         messageLabel.text = message.text
       } else {
