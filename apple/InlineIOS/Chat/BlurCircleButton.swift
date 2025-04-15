@@ -18,8 +18,8 @@ class BlurCircleButton: UIButton {
   private func setup() {
     translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
-      widthAnchor.constraint(equalToConstant: 44),
-      heightAnchor.constraint(equalToConstant: 44),
+      widthAnchor.constraint(equalToConstant: 40),
+      heightAnchor.constraint(equalToConstant: 40),
     ])
 
     backgroundView.backgroundColor = .systemBackground.withAlphaComponent(0.3)
