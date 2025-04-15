@@ -30,33 +30,42 @@ public struct TransactionDeleteMessage: Transaction {
       try AppDatabase.shared.dbWriter.write { db in
         let chat = try Chat.fetchOne(db, id: chatId)
 
-        let prevChatLastMsgId = chat?.lastMsgId
+        var prevChatLastMsgId = chat?.lastMsgId
 
+        // Delete messages
         for messageId in messageIds {
-          try Message.filter(Column("messageId") == messageId && Column("chatId") == chatId).deleteAll(db)
+          // Update last message first
+          if prevChatLastMsgId == messageId {
+            let previousMessage = try Message
+              .filter(Column("chatId") == chat?.id)
+              .order(Column("date").desc)
+              .limit(1, offset: 1)
+              .fetchOne(db)
+
+            var updatedChat = chat
+            updatedChat?.lastMsgId = previousMessage?.messageId
+            try updatedChat?.save(db)
+            
+            // update so if next message is deleted, we can use it to update again
+            prevChatLastMsgId = messageId
+          }
+
+          print("Deleting message \(messageId) \(chatId)")
+          // TODO: Optimize this to use keys
+          try Message
+            .filter(Column("messageId") == messageId)
+            .filter(Column("chatId") == chatId)
+            .deleteAll(db)
         }
 
-        // Update last message
-        for messageId in messageIds {
-          guard prevChatLastMsgId == messageId else { continue }
+       
+      }
 
-          let previousMessage = try Message
-            .filter(Column("chatId") == chat?.id)
-            .order(Column("date").desc)
-            .limit(1, offset: 1)
-            .fetchOne(db)
-
-          var updatedChat = chat
-          updatedChat?.lastMsgId = previousMessage?.messageId
-          try updatedChat?.save(db)
-        }
+      DispatchQueue.main.async(qos: .userInitiated) {
+        MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerId)
       }
     } catch {
       Log.shared.error("Failed to delete message \(error)")
-    }
-
-    DispatchQueue.main.async {
-      MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerId)
     }
   }
 
@@ -101,44 +110,9 @@ public struct TransactionDeleteMessage: Transaction {
 
   func didFail(error: Error?) async {
     Log.shared.error("Failed to delete message", error: error)
-
-    try? await AppDatabase.shared.dbWriter.write { db in
-      var chat = try Chat.fetchOne(db, id: chatId)
-    }
-
-    DispatchQueue.main.async {
-      MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerId)
-    }
   }
 
-  func rollback() async {
-    let _ = try? await AppDatabase.shared.dbWriter.write { db in
-      var chat = try Chat.fetchOne(db, id: chatId)
-
-      let prevChatLastMsgId = chat?.lastMsgId
-
-      for messageId in messageIds {
-        try Message.filter(Column("messageId") == messageId && Column("chatId") == chatId).deleteAll(db)
-      }
-
-      // Update last message
-      for messageId in messageIds {
-        guard prevChatLastMsgId == messageId else { continue }
-
-        let previousMessage = try Message
-          .filter(Column("chatId") == chat?.id)
-          .order(Column("date").desc)
-          .limit(1, offset: 1)
-          .fetchOne(db)
-
-        var updatedChat = chat
-        updatedChat?.lastMsgId = previousMessage?.messageId
-        try updatedChat?.save(db)
-
-        break
-      }
-    }
-  }
+  func rollback() async {}
 
   enum DeleteMessageError: Error {
     case failed

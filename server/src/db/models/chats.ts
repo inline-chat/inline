@@ -1,15 +1,19 @@
 import { db } from "@in/server/db"
-import { eq, and, desc } from "drizzle-orm"
+import { eq, and, desc, type ExtractTablesWithRelations } from "drizzle-orm"
 import { chats, messages, type DbChat } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { TPeerInfo } from "@in/server/api-types"
 import { ModelError } from "@in/server/db/models/_errors"
 import type { InputPeer } from "@in/protocol/core"
+import { Log } from "@in/server/utils/log"
+import type { PgTransaction } from "drizzle-orm/pg-core"
+import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js"
 
 export const ChatModel = {
   getChatFromPeer: getChatFromPeer,
   getLastMessageId: getLastMessageId,
   refreshLastMessageId: refreshLastMessageId,
+  refreshLastMessageIdTransaction: refreshLastMessageIdTransaction,
   getChatIdFromInputPeer: getChatIdFromInputPeer,
   getChatFromInputPeer: getChatFromInputPeer,
 }
@@ -169,3 +173,37 @@ async function refreshLastMessageId(chatId: number) {
     return newLastMsgId
   })
 }
+
+/** Updates lastMsgId for a chat by selecting the highest messageId */
+async function refreshLastMessageIdTransaction(chatId: number, transaction: (tx: DrizzleTx) => Promise<void>) {
+  // Use a transaction with FOR UPDATE to lock the row while we're working with it
+  return await db.transaction(async (tx) => {
+    let [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update")
+    if (!chat) {
+      throw ModelError.ChatInvalid
+    }
+
+    // clear first
+    await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chatId))
+
+    await transaction(tx)
+
+    let [message] = await tx
+      .select()
+      .from(messages)
+      .where(eq(messages.chatId, chatId))
+      .orderBy(desc(messages.messageId))
+      .limit(1)
+
+    const newLastMsgId = message?.messageId ?? null
+    await tx.update(chats).set({ lastMsgId: newLastMsgId }).where(eq(chats.id, chatId))
+
+    return newLastMsgId
+  })
+}
+
+type DrizzleTx = PgTransaction<
+  PostgresJsQueryResultHKT,
+  typeof import("/Users/mo/dev/inline/server/src/db/schema/index"),
+  ExtractTablesWithRelations<typeof import("/Users/mo/dev/inline/server/src/db/schema/index")>
+>
