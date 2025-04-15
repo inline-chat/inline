@@ -76,7 +76,9 @@ class MessageViewAppKit: NSView {
   }
 
   private var bubbleBackgroundColor: NSColor {
-    if outgoing {
+    if fullMessage.message.isSticker == true {
+      NSColor.clear
+    } else if outgoing {
       Theme.messageBubblePrimaryBgColor
     } else {
       Theme.messageBubbleSecondaryBgColor

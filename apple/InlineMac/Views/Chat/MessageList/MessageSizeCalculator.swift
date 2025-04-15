@@ -272,8 +272,14 @@ class MessageSizeCalculator {
         width = ceil(CGFloat(photo?.width ?? 0))
         height = ceil(CGFloat(photo?.height ?? 0))
       }
-
-      if message.file?.fileType == .photo || message.photoInfo != nil {
+      if message.message.isSticker == true {
+        photoSize = calculatePhotoSize(
+          width: (width / 2) + 20,
+          height: (height / 2) + 20,
+          parentAvailableWidth: (parentAvailableWidth / 2) + 20,
+          hasCaption: hasText
+        )
+      } else if message.file?.fileType == .photo || message.photoInfo != nil {
         photoSize = calculatePhotoSize(
           width: width,
           height: height,
