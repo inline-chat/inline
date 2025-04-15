@@ -4,11 +4,10 @@ import Logger
 import Nuke
 import NukeExtensions
 import NukeUI
-import QuickLook
 import SwiftUI
 import UIKit
 
-final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
+final class NewPhotoView: UIView {
   // MARK: - Properties
 
   private var fullMessage: FullMessage
@@ -186,33 +185,6 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
     layer.mask = maskLayer
   }
 
-//  private func updateMask() {
-//    let width = bounds.width
-//    let height = bounds.height
-//
-//    let shouldRoundTopCorners = hasText && !hasReply || !fullMessage.reactions.isEmpty
-//    let shouldRoundBottomCorners = hasReply && !hasText || fullMessage.reactions.isEmpty
-//    let shouldRoundAllCorners = !hasText && !hasReply || fullMessage.reactions.isEmpty
-//
-//    let roundingCorners: UIRectCorner = if shouldRoundAllCorners {
-//      .allCorners
-//    } else if shouldRoundTopCorners {
-//      [.topLeft, .topRight]
-//    } else if shouldRoundBottomCorners {
-//      [.bottomLeft, .bottomRight]
-//    } else {
-//      []
-//    }
-//
-//    let bounds = CGRect(x: 0, y: 0, width: width, height: height)
-//    let bezierPath = UIBezierPath(
-//      roundedRect: bounds,
-//      byRoundingCorners: roundingCorners,
-//      cornerRadii: CGSize(width: cornerRadius, height: cornerRadius)
-//    )
-//
-//    maskLayer.path = bezierPath.cgPath
-//  }
 
   private func updateMask() {
     let width = bounds.width
@@ -312,22 +284,21 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
   }
 
   // MARK: - User Interactions
-
   @objc private func handleTap() {
-    guard fullMessage.message.isSticker != true else { return }
-    guard imageLocalUrl() != nil || imageCdnUrl() != nil else { return }
-
-    let previewController = QLPreviewController()
-    previewController.dataSource = self
-    previewController.delegate = self
-    previewController.title = "Photo"
-
-    previewController.modalPresentationStyle = .fullScreen
-
-    if let viewController = findViewController() {
-      viewController.present(previewController, animated: true)
-    }
+      guard fullMessage.message.isSticker != true else { return }
+      guard let url = imageLocalUrl() ?? imageCdnUrl() else { return }
+      
+  
+      let imageViewer = ImageViewerController(
+          imageURL: url,
+          sourceView: imageView,
+          sourceImage: imageView.imageView.image
+      )
+      
+      findViewController()?.present(imageViewer, animated: false)
   }
+
+
 
   @objc func image(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer) {
     if let error {
@@ -354,26 +325,5 @@ final class NewPhotoView: UIView, QLPreviewControllerDataSource, QLPreviewContro
     true
   }
 
-  // MARK: - QLPreviewControllerDataSource
 
-  func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-    1
-  }
-
-  func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-    if let localUrl = imageLocalUrl() {
-      return localUrl as QLPreviewItem
-    } else if let cdnUrl = imageCdnUrl() {
-      return cdnUrl as QLPreviewItem
-    }
-
-    // Return a safe default
-    return URL(fileURLWithPath: "") as QLPreviewItem
-  }
-
-  // MARK: - QLPreviewControllerDelegate
-
-  func previewControllerDidDismiss(_ controller: QLPreviewController) {
-    // Handle dismissal if needed
-  }
 }
