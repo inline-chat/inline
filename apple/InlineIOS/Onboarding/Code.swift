@@ -64,7 +64,6 @@ extension Code {
 
         do {
           try await AppDatabase.authenticated()
-
         } catch {
           Log.shared.error("Failed to setup database or save user", error: error)
         }

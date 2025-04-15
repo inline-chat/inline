@@ -189,26 +189,28 @@ async function deleteMessage(messageId: number, chatId: number) {
 async function deleteMessages(messageIds: bigint[], chatId: number) {
   log.trace("deleteMessages", { messageIds, chatId })
 
-  let deleted = await db
-    .delete(messages)
-    .where(
-      and(
-        eq(messages.chatId, chatId),
-        inArray(
-          messages.messageId,
-          messageIds.map((id) => Number(id)),
+  await ChatModel.refreshLastMessageIdTransaction(chatId, async (tx) => {
+    let deleted = await tx
+      .delete(messages)
+      .where(
+        and(
+          eq(messages.chatId, chatId),
+          inArray(
+            messages.messageId,
+            messageIds.map((id) => Number(id)),
+          ),
         ),
-      ),
-    )
-    .returning()
+      )
+      .returning()
 
-  if (deleted.length === 0) {
-    log.trace("messages not found", { messageIds, chatId })
-    throw ModelError.MessageInvalid
-  }
+    if (deleted.length === 0) {
+      log.trace("messages not found", { messageIds, chatId })
+      throw ModelError.MessageInvalid
+    }
+  })
 
-  await ChatModel.refreshLastMessageId(chatId)
-  log.trace("refreshed last message id after deletion")
+  //await ChatModel.refreshLastMessageId(chatId)
+  //log.trace("refreshed last message id after deletion")
 }
 
 async function editMessage(messageId: number, chatId: number, text: string) {
