@@ -137,8 +137,8 @@ class MessagesCollectionView: UICollectionView {
     layoutIfNeeded()
   }
 
-  let threshold: CGFloat = -60
-  var shouldScrollToBottom: Bool { contentOffset.y < threshold }
+  static let calculatedThreshold = ComposeView.minHeight - ((ComposeView.textViewVerticalMargin * 2) + (MessagesCollectionView.messagesBottomPadding * 2))
+  var shouldScrollToBottom: Bool { contentOffset.y < Self.calculatedThreshold }
   var itemsEmpty: Bool { coordinator.messages.isEmpty }
 
   @objc func orientationDidChange(_ notification: Notification) {
@@ -601,11 +601,11 @@ private extension MessagesCollectionView {
       /// Reminder: textViewVerticalMargin in ComposeView affects scrollView.contentOffset.y number
       /// (textViewVerticalMargin = 7.0  -> contentOffset.y = -64.0 | textViewVerticalMargin = 4.0 -> contentOffset.y = -58.0)
     
-      let calculatedThreshold = ComposeView.minHeight - ((ComposeView.textViewVerticalMargin * 2) + (MessagesCollectionView.messagesBottomPadding * 2))
+   
       
       let isAtBottom = scrollView.contentOffset.y > -calculatedThreshold
       
-      print("ISATBOTTOm y: \(scrollView.contentOffset.y) - \(calculatedThreshold)")
+      
       if isAtBottom != wasPreviouslyAtBottom, messages.count > 12 {
         NotificationCenter.default.post(
           name: .scrollToBottomChanged,
