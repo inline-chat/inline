@@ -41,6 +41,9 @@ final class NewPhotoView: NSView {
     let text = fullMessage.message.text
     let hasText = text != nil && text?.isEmpty == false
 
+    if fullMessage.message.isSticker == true {
+      backgroundView.backgroundColor = .clear
+    }
     // Adjust radius based on text presence
     if hasText {
       topLeftRadius = Theme.messageBubbleCornerRadius - 1
