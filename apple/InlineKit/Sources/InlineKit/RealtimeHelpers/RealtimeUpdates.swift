@@ -170,33 +170,43 @@ extension InlineProtocol.UpdateDeleteMessages {
       return
     }
 
-    let prevChatLastMsgId = chat.lastMsgId
+    do {
+      // let chat = try Chat.fetchOne(db, id: chatId)
+      let chatId = chat.id
+      var prevChatLastMsgId = chat.lastMsgId
 
-    for messageId in messageIds {
-      try Message
-        .filter(Column("messageId") == messageId && Column("chatId") == chat.id)
-        .deleteAll(db)
-    }
+      // Delete messages
+      for messageId in messageIds {
+        // Update last message first
+        if prevChatLastMsgId == messageId {
+          let previousMessage = try Message
+            .filter(Column("chatId") == chat.id)
+            .order(Column("date").desc)
+            .limit(1, offset: 1)
+            .fetchOne(db)
 
-    // Update last message
-    for messageId in messageIds {
-      guard prevChatLastMsgId == messageId else { continue }
+          var updatedChat = chat
+          updatedChat.lastMsgId = previousMessage?.messageId
+          try updatedChat.save(db)
 
-      let previousMessage = try Message
-        .filter(Column("chatId") == chat.id)
-        .order(Column("date").desc)
-        .limit(1, offset: 1)
-        .fetchOne(db)
+          // update so if next message is deleted, we can use it to update again
+          prevChatLastMsgId = messageId
+        }
 
-      var updatedChat = chat
-      updatedChat.lastMsgId = previousMessage?.messageId
-      try updatedChat.save(db)
+        print("Deleting message \(messageId) \(chatId)")
+        // TODO: Optimize this to use keys
+        try Message
+          .filter(Column("messageId") == messageId)
+          .filter(Column("chatId") == chatId)
+          .deleteAll(db)
+      }
 
-      break
-    }
+      Task(priority: .userInitiated) { @MainActor in
+        MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
+      }
 
-    Task { @MainActor in
-      MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
+    } catch {
+      Log.shared.error("Failed to delete messages", error: error)
     }
   }
 }
