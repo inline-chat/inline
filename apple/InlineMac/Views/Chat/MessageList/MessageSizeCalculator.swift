@@ -274,9 +274,9 @@ class MessageSizeCalculator {
       }
       if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
-          width: (width / 2) + 20,
-          height: (height / 2) + 20,
-          parentAvailableWidth: (parentAvailableWidth / 2) + 20,
+          width: min(150, width),
+          height: min(150, height),
+          parentAvailableWidth: parentAvailableWidth,
           hasCaption: hasText
         )
       } else if message.file?.fileType == .photo || message.photoInfo != nil {
@@ -747,6 +747,7 @@ class MessageSizeCalculator {
         mediaWidth = maxMediaSize.width
         mediaHeight = ceil(mediaWidth / aspectRatio)
       }
+      return CGSize(width: mediaWidth, height: mediaHeight)
     }
     // Has caption, maintain reasonable size
 
