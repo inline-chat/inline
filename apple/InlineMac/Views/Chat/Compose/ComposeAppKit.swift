@@ -316,16 +316,36 @@ class ComposeAppKit: NSView {
     }
   }
 
+  private var keyMonitorEscUnsubscribe: (() -> Void)? = nil
+  private func addReplyEscHandler() {
+    keyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .escape,
+      key: "compose_reply_\(peerId)",
+      handler: { [weak self] _ in
+        guard let self else { return }
+        state.clearReplyingToMsgId()
+        removeReplyEscHandler()
+      }
+    )
+  }
+
+  private func removeReplyEscHandler() {
+    keyMonitorEscUnsubscribe?()
+    keyMonitorEscUnsubscribe = nil
+  }
+
   private func updateReplyingView(to replyingToMsgId: Int64?, animate: Bool = false, shouldUpdateHeight: Bool = true) {
     if let replyingToMsgId {
       // Update and show the reply view
       if let message = try? FullMessage.get(messageId: replyingToMsgId, chatId: chatId ?? 0) {
         replyView.update(with: message)
         replyView.open(animated: animate)
+        addReplyEscHandler()
       }
     } else {
       // Hide and remove the reply view
       replyView.close(animated: false)
+      removeReplyEscHandler()
     }
 
     if shouldUpdateHeight {

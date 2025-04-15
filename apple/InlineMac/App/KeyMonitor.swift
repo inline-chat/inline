@@ -6,7 +6,7 @@ import OrderedCollections
 /// Add keyboard handling to the application views for global events that could interfere
 /// This should be initialized per window
 @MainActor
-class KeyMonitor: Sendable {
+public class KeyMonitor: Sendable {
   private let ESCAPE_KEY_CODE: UInt16 = 53
   private let log = Log.scoped("KeyMonitor", enableTracing: false)
   private var escapeHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]

@@ -7,6 +7,7 @@ struct HomeSidebar: View {
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager
   @Environment(\.appDatabase) var db
+  @Environment(\.keyMonitor) var keyMonitor
 
   @EnvironmentStateObject var model: SpaceListViewModel
   @EnvironmentStateObject var home: HomeViewModel
@@ -39,7 +40,8 @@ struct HomeSidebar: View {
         VStack(alignment: .leading, spacing: 0) {
           HStack(alignment: .center, spacing: 0) {
             SelfUser()
-              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while the wrapper view was moving
+              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while the
+              /// wrapper view was moving
               .scaleEffect(1.0)
 
             AlphaCapsule()
@@ -55,6 +57,41 @@ struct HomeSidebar: View {
         .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
       }
     )
+    .onChange(of: nav.currentRoute) { _ in
+      DispatchQueue.main.async {
+        subscribeNavKeyMonitor()
+      }
+    }
+    .onAppear {
+      subscribeNavKeyMonitor()
+    }
+  }
+
+  // MARK: - Key Monitor
+
+  private func subscribeNavKeyMonitor() {
+    if nav.currentRoute != .empty {
+      if keyMonitorNavUnsubscriber == nil {
+        keyMonitorNavUnsubscriber = keyMonitor?.addHandler(for: .escape, key: "nav_search") { _ in
+          nav.handleEsc()
+          unsubcribeNavKeyMonitor()
+        }
+      }
+    } else {
+      unsubcribeNavKeyMonitor()
+    }
+  }
+
+  @State var keyMonitorNavUnsubscriber: (() -> Void)?
+  private func unsubcribeNavKeyMonitor() {
+    keyMonitorNavUnsubscriber?()
+    keyMonitorNavUnsubscriber = nil
+  }
+
+  @State var keyMonitorUnsubscriber: (() -> Void)?
+  private func unsubcribeKeyMonitor() {
+    keyMonitorUnsubscriber?()
+    keyMonitorUnsubscriber = nil
   }
 
   var searchBar: some View {
@@ -63,22 +100,33 @@ struct HomeSidebar: View {
       .onChange(of: search.query) { _ in
         search.search()
       }
-      .background {
-        KeyPressHandler {
-          if $0.keyCode == 53 { // ESC key code
-            if isSearching {
-              search.clear()
-              isSearching = false
-            } else {
-              // Navigate to home root and clear selection
-              nav.handleEsc()
-            }
-            return nil
+      .onChange(of: isSearching) { isSearching in
+        if isSearching {
+          keyMonitorUnsubscriber = keyMonitor?.addHandler(for: .escape, key: "home_search") { _ in
+            search.clear()
+            self.isSearching = false
+            unsubcribeKeyMonitor()
           }
-
-          return $0
+        } else {
+          unsubcribeKeyMonitor()
         }
       }
+//      .background {
+//        KeyPressHandler {
+//          if $0.keyCode == 53 { // ESC key code
+//            if isSearching {
+//              search.clear()
+//              isSearching = false
+//            } else {
+//              // Navigate to home root and clear selection
+//              nav.handleEsc()
+//            }
+//            return nil
+//          }
+//
+//          return $0
+//        }
+//      }
   }
 
   @State var spacesExpanded = true

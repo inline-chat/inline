@@ -214,6 +214,7 @@ extension View {
       .environment(\.realtime, deps.realtime)
       .appDatabase(deps.database)
       .environment(\.logOut, deps.logOut)
+      .environment(\.keyMonitor, deps.keyMonitor)
       .eraseToAnyView()
 
     if let rootData = deps.rootData {
