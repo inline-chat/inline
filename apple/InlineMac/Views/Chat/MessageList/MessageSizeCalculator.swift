@@ -348,9 +348,16 @@ class MessageSizeCalculator {
         )
       }
     }
+    
 
     let textHeight = textSize?.height ?? 0.0
     let textWidth = textSize?.width ?? 0.0
+    
+    // Re-evaluate if we are single line based on space left after the text width
+    if isSingleLine && textWidth > availableWidth - MessageTimeAndState.timeWidth {
+      isSingleLine = false
+    }
+
 
     // MARK: - Layout Plans
 
