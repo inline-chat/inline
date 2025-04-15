@@ -30,6 +30,7 @@ class MessageTimeAndState: NSView {
     let status: MessageSendingStatus
     let isFailed: Bool
     let scaleFactor: CGFloat
+    let isOutgoing: Bool
   }
 
   // MARK: - Layer Setup (Modified)
@@ -74,7 +75,8 @@ class MessageTimeAndState: NSView {
     let cacheKey = CacheKey(
       status: status,
       isFailed: isFailedMessage,
-      scaleFactor: scale
+      scaleFactor: scale,
+      isOutgoing: fullMessage.message.out ?? false
     )
 
     if let cached = Self.imageCache.object(forKey: cacheKey.key) {
