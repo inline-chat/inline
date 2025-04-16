@@ -13,16 +13,17 @@ final class ImageViewerController: UIViewController {
   private lazy var scrollView: UIScrollView = {
     let scrollView = UIScrollView()
     scrollView.delegate = self
-    scrollView.minimumZoomScale = 1.0
-    scrollView.maximumZoomScale = 4.0
     scrollView.showsVerticalScrollIndicator = false
     scrollView.showsHorizontalScrollIndicator = false
     scrollView.contentInsetAdjustmentBehavior = .never
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.backgroundColor = .clear
+    scrollView.minimumZoomScale = 1.0
+    scrollView.maximumZoomScale = 4.0
+    
     return scrollView
   }()
-    
+
   private lazy var imageContainerView: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -38,10 +39,10 @@ final class ImageViewerController: UIViewController {
     activityIndicator.color = .white
     activityIndicator.startAnimating()
     imageView.placeholderView = activityIndicator
-        
+      
     return imageView
   }()
-    
+
   private var imageViewConstraints: [NSLayoutConstraint] = []
   private var transitionImageView: UIImageView?
   private var isControlsVisible = true
@@ -157,23 +158,23 @@ final class ImageViewerController: UIViewController {
         
     setupImageViewConstraints()
   }
-    
+
   private func setupImageViewConstraints() {
     if !imageViewConstraints.isEmpty {
       NSLayoutConstraint.deactivate(imageViewConstraints)
       imageViewConstraints.removeAll()
     }
-        
+     
     imageViewConstraints = [
       imageView.centerXAnchor.constraint(equalTo: imageContainerView.centerXAnchor),
       imageView.centerYAnchor.constraint(equalTo: imageContainerView.centerYAnchor),
       imageView.widthAnchor.constraint(equalTo: imageContainerView.widthAnchor),
       imageView.heightAnchor.constraint(equalTo: imageContainerView.heightAnchor)
     ]
-        
+     
     NSLayoutConstraint.activate(imageViewConstraints)
   }
-    
+
   private func updateImageViewConstraints() {
     guard let image = imageView.imageView.image else { return }
         
@@ -208,20 +209,21 @@ final class ImageViewerController: UIViewController {
   }
     
   private func setupGestures() {
-    let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
-    doubleTapGesture.numberOfTapsRequired = 2
-    scrollView.addGestureRecognizer(doubleTapGesture)
-        
     let singleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
     singleTapGesture.numberOfTapsRequired = 1
-    singleTapGesture.require(toFail: doubleTapGesture)
     view.addGestureRecognizer(singleTapGesture)
-        
+      
+    let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+    doubleTapGesture.numberOfTapsRequired = 2
+    view.addGestureRecognizer(doubleTapGesture)
+      
+    singleTapGesture.require(toFail: doubleTapGesture)
+      
     let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
     panGesture.delegate = self
     view.addGestureRecognizer(panGesture)
   }
-    
+
   private func loadImage() {
     if let sourceImage = sourceImage {
       imageView.imageView.image = sourceImage
@@ -237,17 +239,39 @@ final class ImageViewerController: UIViewController {
       object: nil
     )
   }
-    
+
   @objc private func imageDidLoad(_ notification: Notification) {
     guard let loadedImageView = notification.object as? LazyImageView,
           loadedImageView === imageView
     else {
       return
     }
-        
-    updateImageViewConstraints()
+      
+    // Reset zoom scale when a new image loads
+    scrollView.zoomScale = scrollView.minimumZoomScale
+      
+    // Update content size based on the loaded image
+    if let image = imageView.imageView.image {
+      let imageSize = image.size
+      let containerSize = scrollView.bounds.size
+          
+      // Calculate the appropriate content size
+      if imageSize.width > 0 && imageSize.height > 0 {
+        let widthRatio = containerSize.width / imageSize.width
+        let heightRatio = containerSize.height / imageSize.height
+        let minRatio = min(widthRatio, heightRatio)
+              
+        scrollView.contentSize = CGSize(
+          width: max(containerSize.width, imageSize.width * minRatio),
+          height: max(containerSize.height, imageSize.height * minRatio)
+        )
+      }
+    }
+      
+    // Center the content
+    scrollViewDidZoom(scrollView)
   }
-    
+
   // MARK: - Animations
     
   private func animateImageIn() {
@@ -293,12 +317,11 @@ final class ImageViewerController: UIViewController {
       self.view.backgroundColor = .black
     }, completion: { _ in
             
-
-        self.scrollView.alpha = 1
-        self.controlsContainerView.alpha = 1
+      self.scrollView.alpha = 1
+      self.controlsContainerView.alpha = 1
                 
-        tempImageView.removeFromSuperview()
-        self.transitionImageView = nil
+      tempImageView.removeFromSuperview()
+      self.transitionImageView = nil
     })
   }
     
@@ -321,7 +344,7 @@ final class ImageViewerController: UIViewController {
     tempImageView.contentMode = .scaleAspectFit
     tempImageView.clipsToBounds = true
     tempImageView.image = imageView.imageView.image ?? sourceImage
-    tempImageView.layer.cornerRadius = 0 
+    tempImageView.layer.cornerRadius = 0
     view.addSubview(tempImageView)
       
     // Calculate the proper starting frame
@@ -364,22 +387,27 @@ final class ImageViewerController: UIViewController {
   }
 
   // MARK: - Actions
-    
+
   @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
     if scrollView.zoomScale > scrollView.minimumZoomScale {
+      // If already zoomed in, zoom out
       scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
     } else {
-      let location = gesture.location(in: imageView)
-      let zoomRect = CGRect(
-        x: location.x - (view.bounds.width / 4),
-        y: location.y - (view.bounds.height / 4),
-        width: view.bounds.width / 2,
-        height: view.bounds.height / 2
-      )
-      scrollView.zoom(to: zoomRect, animated: true)
+      // Calculate the point to zoom to
+      let pointInView = gesture.location(in: imageContainerView)
+          
+      // Calculate a zoom rect around the tap point
+      let zoomScale = min(scrollView.maximumZoomScale, 2.5)
+      let width = scrollView.bounds.size.width / zoomScale
+      let height = scrollView.bounds.size.height / zoomScale
+      let x = pointInView.x - (width / 2.0)
+      let y = pointInView.y - (height / 2.0)
+          
+      let rectToZoom = CGRect(x: x, y: y, width: width, height: height)
+      scrollView.zoom(to: rectToZoom, animated: true)
     }
   }
-    
+
   @objc private func handleSingleTap() {
     toggleControlsVisibility()
   }
@@ -504,18 +532,19 @@ final class ImageViewerController: UIViewController {
 
 extension ImageViewerController: UIScrollViewDelegate {
   func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-    return imageView
+    return imageContainerView
   }
     
   func scrollViewDidZoom(_ scrollView: UIScrollView) {
+    // Center the content after zooming
     let offsetX = max((scrollView.bounds.width - scrollView.contentSize.width) * 0.5, 0)
     let offsetY = max((scrollView.bounds.height - scrollView.contentSize.height) * 0.5, 0)
         
-    imageContainerView.frame = CGRect(
-      x: offsetX,
-      y: offsetY,
-      width: scrollView.contentSize.width,
-      height: scrollView.contentSize.height
+    scrollView.contentInset = UIEdgeInsets(
+      top: offsetY,
+      left: offsetX,
+      bottom: offsetY,
+      right: offsetX
     )
   }
 }
@@ -526,7 +555,16 @@ extension ImageViewerController: UIGestureRecognizerDelegate {
   func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
     if let panGesture = gestureRecognizer as? UIPanGestureRecognizer {
       let velocity = panGesture.velocity(in: view)
+      // Only allow vertical panning to dismiss when not zoomed in
       return scrollView.zoomScale == scrollView.minimumZoomScale && abs(velocity.y) > abs(velocity.x)
+    }
+    return true
+  }
+    
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    // Prevent gesture recognizers from triggering when tapping on buttons
+    if touch.view is UIButton {
+      return false
     }
     return true
   }
