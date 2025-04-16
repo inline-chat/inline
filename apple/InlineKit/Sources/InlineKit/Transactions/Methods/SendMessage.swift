@@ -90,8 +90,7 @@ public struct TransactionSendMessage: Transaction {
       isSticker: isSticker
     )
 
-    
-    print("message \(message)")
+
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
     // (mo a few months later) TRADE OFFS BABY
     // Task { @MainActor in
