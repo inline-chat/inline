@@ -327,7 +327,7 @@ final class ImageViewerController: UIViewController {
     
   private func animateImageOut(completion: @escaping () -> Void) {
     guard let sourceView = sourceView else {
-      UIView.animate(withDuration: 0.3, animations: {
+      UIView.animate(withDuration: 0.2, animations: {
         self.view.alpha = 0
       }, completion: { _ in
         completion()
@@ -376,7 +376,7 @@ final class ImageViewerController: UIViewController {
       
     tempImageView.frame = startFrame
       
-    UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseInOut, animations: {
+    UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut, animations: {
       tempImageView.frame = updatedFrame
       tempImageView.layer.cornerRadius = 16
       self.view.backgroundColor = .clear
