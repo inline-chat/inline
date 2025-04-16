@@ -57,7 +57,7 @@ class ComposeTextView: UITextView {
         equalTo: leadingAnchor,
         constant: textContainer.lineFragmentPadding + textContainerInset.left
       ),
-      label.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top)
+      label.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top),
     ])
 
     placeholderLabel = label
@@ -90,56 +90,14 @@ class ComposeTextView: UITextView {
     fixFontSizeAfterStickerInsertion()
   }
 
-  @objc private func keyboardWillShow(_ notification: Notification) {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-      self.handleStickerDetection()
-    }
-  }
+  @objc private func keyboardWillShow(_ notification: Notification) {}
 
   func showPlaceholder(_ show: Bool) {
     placeholderLabel?.alpha = show ? 1 : 0
   }
 
-  override func insertText(_ text: String) {
-    super.insertText(text)
-
-    if text.contains("￼") {
-      handleStickerDetection()
-    }
-  }
-
   override func paste(_ sender: Any?) {
-    let pasteboard = UIPasteboard.general
-    let hadImage = pasteboard.hasImages
-    let originalImage = pasteboard.image
-
     super.paste(sender)
-
-    if hadImage, let image = originalImage {
-      if let imageData = image.pngData() ?? image.jpegData(compressionQuality: 0.9) {
-        DispatchQueue.main.async { [weak self] in
-          self?.sendStickerImage(imageData, metadata: ["source": "direct_pasteboard"])
-
-          if let range = self?.text.range(of: "￼") {
-            let nsRange = NSRange(range, in: self?.text ?? "")
-            self?.safelyRemoveAttachment(at: nsRange)
-          }
-        }
-        return
-      }
-    }
-
-    if text.contains("￼") || attributedText.string.contains("￼") {
-      handleStickerDetection()
-    }
-  }
-
-  override var attributedText: NSAttributedString! {
-    didSet {
-      if attributedText?.string.contains("￼") == true {
-        handleStickerDetection()
-      }
-    }
   }
 
   private func fixFontSizeAfterStickerInsertion() {
@@ -178,12 +136,14 @@ class ComposeTextView: UITextView {
   }
 
   private func handleStickerDetection() {
+    // Do we need these?
+
     NSObject.cancelPreviousPerformRequests(
       withTarget: self,
       selector: #selector(performStickerDetection),
       object: nil
     )
-    perform(#selector(performStickerDetection), with: nil, afterDelay: 0.1)
+    perform(#selector(performStickerDetection), with: nil, afterDelay: 0.0)
   }
 
   @objc private func performStickerDetection() {
@@ -191,7 +151,7 @@ class ComposeTextView: UITextView {
   }
 
   public func checkForNewAttachments() {
-    guard let attributedText = attributedText else { return }
+    guard let attributedText else { return }
 
     let string = attributedText.string
     var rangesToProcess: [NSRange] = []
@@ -204,15 +164,15 @@ class ComposeTextView: UITextView {
     }
 
     if !rangesToProcess.isEmpty {
-      DispatchQueue.main.async { [weak self] in
-        guard let self = self else { return }
+      DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
+        guard let self else { return }
         for range in rangesToProcess {
           if range.location < attributedText.length {
             let attributes = attributedText.attributes(
               at: range.location,
               effectiveRange: nil
             )
-            self.processReplacementCharacter(at: range, attributes: attributes)
+            processReplacementCharacter(at: range, attributes: attributes)
           }
         }
       }
@@ -344,14 +304,14 @@ class ComposeTextView: UITextView {
       "renderImageWithSize:",
       "generateImageWithSize:",
       "imageWithScale:",
-      "imageForScale:"
+      "imageForScale:",
     ]
 
     let sizes = [
       CGSize(width: 200, height: 200),
       CGSize(width: 300, height: 300),
       CGSize(width: 100, height: 100),
-      CGSize(width: 512, height: 512)
+      CGSize(width: 512, height: 512),
     ]
 
     for methodName in singleParamMethods {
@@ -411,7 +371,7 @@ class ComposeTextView: UITextView {
     let propertyNames = [
       "image", "originalImage", "_image", "cachedImage", "renderedImage",
       "imageRepresentation", "imageValue", "displayImage", "previewImage",
-      "thumbnailImage", "fullSizeImage", "scaledImage"
+      "thumbnailImage", "fullSizeImage", "scaledImage",
     ]
 
     for propertyName in propertyNames {
@@ -566,7 +526,7 @@ class ComposeTextView: UITextView {
         )
       )
 
-      DispatchQueue.main.async { [weak self] in
+      DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
         self?.attributedText = attributedString
       }
     }
@@ -614,64 +574,56 @@ extension ComposeTextView {
         finalImage = image
         imageSource = "file_wrapper_data"
       }
-    } else if #available(iOS 13.0, *) {
-      if let image = attachment.image(
-        forBounds: attachment.bounds,
-        textContainer: textContainer,
-        characterIndex: range.location
-      ) {
-        finalImage = image
-        imageSource = "image_for_bounds"
-      }
+    } else {
+      return
     }
 
     guard let image = finalImage else {
       return
     }
 
-    let imageHash: Int
-    if let imageData = image.pngData()?.prefix(1_024) {
-      imageHash = imageData.hashValue
-    } else {
-      imageHash = image.description.hashValue
-    }
-
-    processingLock.lock()
-
-    if recentlySentImageHashes.contains(imageHash) {
-      processingLock.unlock()
-      return
-    }
-
-    recentlySentImageHashes.insert(imageHash)
-    processingLock.unlock()
-
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-      self?.processingLock.lock()
-      self?.recentlySentImageHashes.remove(imageHash)
-      self?.processingLock.unlock()
-    }
+//    let imageHash: Int = if let imageData = image.pngData()?.prefix(1_024) {
+//      imageData.hashValue
+//    } else {
+//      image.description.hashValue
+//    }
+//
+//    processingLock.lock()
+//
+//    if recentlySentImageHashes.contains(imageHash) {
+//      processingLock.unlock()
+//      return
+//    }
+//
+//    recentlySentImageHashes.insert(imageHash)
+//    processingLock.unlock()
+//
+//    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+//      self?.processingLock.lock()
+//      self?.recentlySentImageHashes.remove(imageHash)
+//      self?.processingLock.unlock()
+//    }
 
     safelyRemoveAttachment(at: range)
 
-    if let composeView = composeView {
-      Task {
+    if let composeView {
+      Task(priority: .userInitiated) { @MainActor in
         // Use the actor with async/await
-        let (optimizedImage, _) = await ImageProcessor.shared.processImage(image)
+//        let (optimizedImage, _) = await ImageProcessor.shared.processImage(image)
+//        composeView.sendSticker(optimizedImage)
+        composeView.sendSticker(image)
 
-        DispatchQueue.main.async {
-          composeView.sendSticker(optimizedImage)
-          self.fixFontSizeAfterStickerInsertion()
-        }
+        // ??
+        self.fixFontSizeAfterStickerInsertion()
       }
       return
     }
-
-    NotificationCenter.default.post(
-      name: NSNotification.Name("StickerDetected"),
-      object: nil,
-      userInfo: ["image": image]
-    )
+    // not used
+//    NotificationCenter.default.post(
+//      name: NSNotification.Name("StickerDetected"),
+//      object: nil,
+//      userInfo: ["image": image]
+//    )
   }
 
   private func findEnhancedParentComposeView() -> ComposeView? {
