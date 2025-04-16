@@ -27,7 +27,7 @@ public struct InitialsCircle: View, Equatable {
       .blue,
       .teal,
       .green,
-      //.primary,
+      // .primary,
       .red,
       .indigo,
       .mint,
@@ -99,10 +99,11 @@ public struct InitialsCircle: View, Equatable {
       }
       .frame(width: size, height: size)
       .fixedSize()
-
-    // Looks better without these
-//      .drawingGroup(opaque: true)
-//      .clipShape(Circle())
+      // Looks better without these
+      // but performance is better with them
+      .drawingGroup(opaque: true)
+      .clipShape(Circle())
+      .fixedSize()
   }
 }
 
