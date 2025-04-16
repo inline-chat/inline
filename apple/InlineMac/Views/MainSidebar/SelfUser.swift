@@ -26,9 +26,9 @@ struct SelfUser: View {
   var body: some View {
     // Button(action: openSelfProfile) {
     HStack(spacing: 0) {
-      UserAvatar(userInfo: currentUserInfo, size: Theme.sidebarIconSize)
-        .id("user-avatar-in-sidebar")
+      UserAvatar(userInfo: currentUserInfo, size: Theme.sidebarIconSize, ignoresSafeArea: false)
         .padding(.trailing, Theme.sidebarIconSpacing)
+        .scaleEffect(1.0)
 
       ConnectionStateProvider { connection in
         // TODO: Extract to a separate view

@@ -87,8 +87,10 @@ public struct UserAvatar: View, Equatable {
     InitialsCircle(
       name: nameForInitials,
       size: size
-    ).frame(width: size, height: size).fixedSize()
-      .ignoresSafeArea()
+    )
+    .equatable()
+    .frame(width: size, height: size)
+    .fixedSize()
   }
 
   @Environment(\.colorScheme) private var colorScheme
@@ -192,7 +194,6 @@ public struct UserAvatar: View, Equatable {
           }
         }
       )
-
     } else {
       initials
     }

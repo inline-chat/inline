@@ -24,16 +24,14 @@ struct HomeSidebar: View {
   }
 
   var body: some View {
-    ScrollView {
-      LazyVStack(spacing: 0) {
-        if search.hasResults || (isSearching && search.canSearch) {
-          searchView
-        } else {
-          spacesAndUsersView
-        }
+    List {
+      if search.hasResults || (isSearching && search.canSearch) {
+        searchView
+      } else {
+        spacesAndUsersView
       }
-      .padding(0)
     }
+    .listStyle(.sidebar)
     .safeAreaInset(
       edge: .top,
       content: {
@@ -111,44 +109,23 @@ struct HomeSidebar: View {
           unsubcribeKeyMonitor()
         }
       }
-//      .background {
-//        KeyPressHandler {
-//          if $0.keyCode == 53 { // ESC key code
-//            if isSearching {
-//              search.clear()
-//              isSearching = false
-//            } else {
-//              // Navigate to home root and clear selection
-//              nav.handleEsc()
-//            }
-//            return nil
-//          }
-//
-//          return $0
-//        }
-//      }
   }
-
-  @State var spacesExpanded = true
-  @State var usersExpanded = true
 
   @ViewBuilder
   var spacesAndUsersView: some View {
-    SidebarGroup(systemImage: "person.2.fill", title: "Groups", isExpanded: $spacesExpanded) {
+    Section("Spaces") {
       // spaces
       ForEach(home.spaces) { item in
         spaceItem(space: item.space)
       }
-    }.animation(.smoothSnappy, value: usersExpanded)
-      .animation(.smoothSnappy, value: spacesExpanded)
+    }
 
-    SidebarGroup(systemImage: "message.fill", title: "Private Chats", isExpanded: $usersExpanded) {
+    Section("DMs") {
       // users
       ForEach(home.chats) { item in
         userItem(chat: item)
       }
-    }.animation(.smoothSnappy, value: usersExpanded)
-      .animation(.smoothSnappy, value: spacesExpanded)
+    }
   }
 
   @ViewBuilder
@@ -165,6 +142,7 @@ struct HomeSidebar: View {
   @ViewBuilder
   func spaceItem(space: InlineKit.Space) -> some View {
     SpaceItem(space: space)
+      .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
 
   @ViewBuilder
