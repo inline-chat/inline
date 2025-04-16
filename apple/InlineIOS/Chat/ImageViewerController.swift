@@ -250,23 +250,8 @@ final class ImageViewerController: UIViewController {
     // Reset zoom scale when a new image loads
     scrollView.zoomScale = scrollView.minimumZoomScale
       
-    // Update content size based on the loaded image
-    if let image = imageView.imageView.image {
-      let imageSize = image.size
-      let containerSize = scrollView.bounds.size
-          
-      // Calculate the appropriate content size
-      if imageSize.width > 0 && imageSize.height > 0 {
-        let widthRatio = containerSize.width / imageSize.width
-        let heightRatio = containerSize.height / imageSize.height
-        let minRatio = min(widthRatio, heightRatio)
-              
-        scrollView.contentSize = CGSize(
-          width: max(containerSize.width, imageSize.width * minRatio),
-          height: max(containerSize.height, imageSize.height * minRatio)
-        )
-      }
-    }
+    updateImageViewConstraints()
+
       
     // Center the content
     scrollViewDidZoom(scrollView)
