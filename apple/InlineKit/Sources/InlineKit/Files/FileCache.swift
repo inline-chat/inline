@@ -139,7 +139,7 @@ public actor FileCache: Sendable {
 
   // MARK: - Local Saves
 
-  public static func savePhoto(image: PlatformImage) throws -> InlineKit.PhotoInfo {
+  public static func savePhoto(image: PlatformImage, optimize: Bool = false) throws -> InlineKit.PhotoInfo {
     // Info
     let w = Int(image.size.width)
     let h = Int(image.size.height)
@@ -151,7 +151,7 @@ public actor FileCache: Sendable {
 
     // Save in files
     let directory = FileHelpers.getLocalCacheDirectory(for: .photos)
-    guard let localPath = image.save(to: directory, withName: fileName, format: format)
+    guard let localPath = image.save(to: directory, withName: fileName, format: format, optimize: optimize)
     else { throw FileCacheError.failedToSave }
     let fileURL = directory.appendingPathComponent(
       localPath
