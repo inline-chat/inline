@@ -33,6 +33,7 @@ final class ImageViewerController: UIViewController {
   private lazy var imageView: LazyImageView = {
     let imageView = LazyImageView()
     imageView.contentMode = .scaleAspectFit
+    imageView.imageView.contentMode = .scaleAspectFit 
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.layer.cornerRadius = 18
     let activityIndicator = UIActivityIndicatorView(style: .medium)
@@ -251,8 +252,7 @@ final class ImageViewerController: UIViewController {
     scrollView.zoomScale = scrollView.minimumZoomScale
       
     updateImageViewConstraints()
-
-      
+    
     // Center the content
     scrollViewDidZoom(scrollView)
   }
