@@ -73,7 +73,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 
   deinit {
     NotificationCenter.default.removeObserver(self)
-    Log.shared.debug("ComposeView deinit")
   }
 
   override init(frame: CGRect) {
@@ -98,7 +97,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 
   @objc private func handleStickerDetected(_ notification: Notification) {
     if let image = notification.userInfo?["image"] as? UIImage {
-      Log.shared.debug("📤 COMPOSE - Received sticker notification with image: \(image.size)")
       // Ensure we're on the main thread
       DispatchQueue.main.async { [weak self] in
         self?.sendSticker(image)
@@ -126,7 +124,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   }
 
   public func sendSticker(_ image: UIImage) {
-    Log.shared.debug("📤 COMPOSE - Sending sticker image: \(image.size)")
     guard let peerId else {
       Log.shared.debug("❌ COMPOSE - No peerId available")
       return
@@ -322,12 +319,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   }
 
   func buttonAppear() {
-    Log.shared.debug("📱 UI - buttonAppear called")
     UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseOut) {
       self.sendButtonContainer.alpha = 1
       self.sendButtonContainer.transform = .identity
     } completion: { _ in
-      Log.shared.debug("📱 UI - buttonAppear animation completed, alpha: \(self.sendButtonContainer.alpha)")
     }
   }
 
@@ -730,7 +725,7 @@ extension ComposeView: UITextViewDelegate {
 
     // Placeholder Visibility & Attachment Checks
     let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    Log.shared.debug("📱 UI - textViewDidChange, isEmpty: \(isEmpty)")
+
     (textView as? ComposeTextView)?.showPlaceholder(isEmpty)
     // (textView as? ComposeTextView)?.checkForNewAttachments()
 
