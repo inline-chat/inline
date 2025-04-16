@@ -274,8 +274,8 @@ class MessageSizeCalculator {
       }
       if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
-          width: min(150, width),
-          height: min(150, height),
+          width: min(120, width),
+          height: min(120, height),
           parentAvailableWidth: parentAvailableWidth,
           hasCaption: hasText
         )
