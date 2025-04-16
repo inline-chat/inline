@@ -98,7 +98,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   @objc private func handleStickerDetected(_ notification: Notification) {
     if let image = notification.userInfo?["image"] as? UIImage {
       // Ensure we're on the main thread
-      DispatchQueue.main.async { [weak self] in
+      DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
         self?.sendSticker(image)
       }
     }
@@ -130,20 +130,22 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     }
 
     do {
-      let photoInfo = try FileCache.savePhoto(image: image)
+      Task.detached(priority: .userInitiated) {
+        let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
 
-      Transactions.shared.mutate(
-        transaction: .sendMessage(
-          .init(
-            text: nil,
-            peerId: peerId,
-            chatId: chatId ?? 0,
-            mediaItems: [.photo(photoInfo)],
-            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
-            isSticker: true
+        await Transactions.shared.mutate(
+          transaction: .sendMessage(
+            .init(
+              text: nil,
+              peerId: peerId,
+              chatId: self.chatId ?? 0,
+              mediaItems: [.photo(photoInfo)],
+              replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
+              isSticker: true
+            )
           )
         )
-      )
+      }
 
       ChatState.shared.clearEditingMessageId(peer: peerId)
       ChatState.shared.clearReplyingMessageId(peer: peerId)
@@ -216,18 +218,28 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     config.cornerStyle = .capsule
 
     button.configurationUpdateHandler = { [weak button] _ in
-      guard let button = button else { return }
+      guard let button else { return }
 
       let config = button.configuration
 
       if button.isHighlighted {
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut], animations: {
-          button.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
-        })
+        UIView.animate(
+          withDuration: 0.2,
+          delay: 0,
+          options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut],
+          animations: {
+            button.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+          }
+        )
       } else {
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut], animations: {
-          button.transform = .identity
-        })
+        UIView.animate(
+          withDuration: 0.2,
+          delay: 0,
+          options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut],
+          animations: {
+            button.transform = .identity
+          }
+        )
       }
 
       button.configuration = config
@@ -749,7 +761,7 @@ extension ComposeView: UITextViewDelegate {
 
   func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
     if text.contains("￼") {
-      DispatchQueue.main.async { [weak self] in
+      DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
         self?.textView.checkForNewAttachmentsImmediate()
       }
     }
