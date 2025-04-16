@@ -4,7 +4,7 @@ import Foundation
 actor TransactionsActor {
   // MARK: - Types
 
-  typealias CompletionHandler = (any Transaction) -> Void
+  typealias CompletionHandler = @Sendable (any Transaction) -> Void
 
   // MARK: - Private Properties
 
@@ -82,26 +82,22 @@ actor TransactionsActor {
   }
 
   public func run(transaction: some Transaction) async {
-    do {
-
+    Task.detached { [weak self] in
+      guard let self else { return }
       do {
         let result = try await executeWithRetry(transaction)
 
         await transaction.didSucceed(result: result)
-        completionHandler?(transaction)
+        await completionHandler?(transaction)
       } catch TransactionError.canceled {
         print("Transaction \(transaction.id) was canceled during execution or retry")
         await transaction.rollback()
-        completionHandler?(transaction)
+        await completionHandler?(transaction)
         return
       } catch {
         await transaction.didFail(error: error)
-        completionHandler?(transaction)
+        await completionHandler?(transaction)
       }
-
-    } catch {
-      await transaction.didFail(error: error)
-      completionHandler?(transaction)
     }
   }
 
