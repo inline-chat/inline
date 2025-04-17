@@ -1,7 +1,7 @@
 <!-- LOGO -->
 <h1>
 <p align="center">
-  <img src="https://avatars.githubusercontent.com/u/180324040?s=400&u=aa4552592de525ac7d7b378dcf04bf51ce063d67&v=4" alt="Logo" width="128">
+  <img src="https://assets-cdn.noor.to/inline/AppIcon-256.png" alt="Logo" width="128">
   <br>Inline
 </h1>
   <p align="center">
