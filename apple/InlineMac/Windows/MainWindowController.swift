@@ -49,7 +49,7 @@ class MainWindowController: NSWindowController {
   private lazy var toolbar: NSToolbar = {
     let toolbar = NSToolbar(identifier: "MainToolbar")
     toolbar.delegate = self
-    toolbar.allowsUserCustomization = true
+    toolbar.allowsUserCustomization = false
     toolbar.autosavesConfiguration = true
     toolbar.displayMode = .iconOnly
     return toolbar
