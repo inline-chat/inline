@@ -420,7 +420,7 @@ extension MainWindowController {
     }
 
     // Base
-    items.append(.toggleSidebar)
+    // items.append(.toggleSidebar)
 
     // Sidebar items
     if nav.history.last?.spaceId != nil {
