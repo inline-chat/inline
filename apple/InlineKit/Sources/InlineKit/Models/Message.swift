@@ -359,20 +359,19 @@ public extension ApiMessage {
       message.fileId = existing.fileId
       message.text = existing.text
       message.transactionId = existing.transactionId
+      message.editDate = editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
       // ... anything else?
     } else {
       // attach main photo
       // TODO: handle multiple files
       let file: File? =
-        if let photo = photo?.first
-      {
-        try? File.save(db, apiPhoto: photo)
-      } else {
-        nil
-      }
+        if let photo = photo?.first {
+          try? File.save(db, apiPhoto: photo)
+        } else {
+          nil
+        }
       message.fileId = file?.id
 
-      
       try message.saveMessage(db, publishChanges: false) // publish is below
     }
 
@@ -418,6 +417,7 @@ public extension Message {
       message.documentId = message.documentId ?? existing.documentId
       message.transactionId = message.transactionId ?? existing.transactionId
       message.isSticker = message.isSticker ?? existing.isSticker
+      message.editDate = message.editDate ?? existing.editDate
       // Update media selectively if needed
       if protocolMessage.hasMedia {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)

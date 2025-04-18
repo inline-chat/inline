@@ -154,9 +154,8 @@ class UIMessageView: UIView {
     fullMessage.message.isSticker == true
   }
 
-
   private var bubbleColor: UIColor {
-    if isEmojiOnlyMessage || isSticker    {
+    if isEmojiOnlyMessage || isSticker {
       UIColor.clear
     } else if outgoing {
       ColorManager.shared.selectedColor
@@ -219,9 +218,7 @@ class UIMessageView: UIView {
 
   // MARK: - Initialization
 
-  deinit {
-    
-  }
+  deinit {}
 
   init(fullMessage: FullMessage, spaceId: Int64) {
     self.fullMessage = fullMessage
@@ -1145,6 +1142,10 @@ extension String {
 }
 
 extension Message {
+  var isEdited: Bool {
+    editDate != nil
+  }
+
   var hasPhoto: Bool {
     fileId != nil || photoId != nil
   }
