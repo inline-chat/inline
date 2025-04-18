@@ -35,6 +35,7 @@ public struct TransactionEditMessage: Transaction {
           var message = try Message
             .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
           message?.text = text
+          message?.editDate = Date()
           print("Message text updated to \(message) \(message?.text) \(text)")
           try message?.saveMessage(db)
         }
@@ -102,6 +103,7 @@ public struct TransactionEditMessage: Transaction {
         var message = try Message
           .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
         message?.text = text
+        message?.editDate = Date()
         try message?.saveMessage(db)
       }
 
@@ -121,6 +123,7 @@ public struct TransactionEditMessage: Transaction {
       var message = try Message
         .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
       message?.text = text
+      message?.editDate = Date()
       try message?.saveMessage(db)
     }
   }

@@ -224,6 +224,7 @@ async function editMessage(messageId: number, chatId: number, text: string) {
       textEncrypted: encryptedMessage?.encrypted,
       textIv: encryptedMessage?.iv,
       textTag: encryptedMessage?.authTag,
+      editDate: new Date(),
     })
     .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
     .returning()
