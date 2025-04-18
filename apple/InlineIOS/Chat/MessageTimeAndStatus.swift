@@ -19,7 +19,7 @@ class MessageTimeAndStatus: UIView {
 
   private let dateLabel: UILabel = {
     let label = UILabel()
-    label.font = .italicSystemFont(ofSize: 11)
+    label.font = .systemFont(ofSize: 11)
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
