@@ -39,7 +39,7 @@ class UIMessageView: UIView {
   private lazy var singleLineContainer: UIStackView = {
     let stack = UIStackView()
     stack.axis = .horizontal
-    stack.spacing = 8
+    stack.spacing = 6
     stack.alignment = .center
     stack.distribution = .fill
     stack.translatesAutoresizingMaskIntoConstraints = false
@@ -82,7 +82,7 @@ class UIMessageView: UIView {
   private let bubbleView: UIView = {
     let view = UIView()
     UIView.performWithoutAnimation {
-      view.layer.cornerRadius = 19
+      view.layer.cornerRadius = 18
     }
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -213,7 +213,7 @@ class UIMessageView: UIView {
     return text.count > 24 || text.contains("\n") || !fullMessage.reactions.isEmpty || text.containsEmoji
   }
 
-  private let labelVerticalPadding: CGFloat = 9.0
+  private let labelVerticalPadding: CGFloat = 2.0
   private let labelHorizantalPadding: CGFloat = 12.0
 
   // MARK: - Initialization
@@ -511,9 +511,9 @@ class UIMessageView: UIView {
   }
 
   enum StackPadding {
-    static let top: CGFloat = 9
+    static let top: CGFloat = 8
     static let leading: CGFloat = 12
-    static let bottom: CGFloat = 9
+    static let bottom: CGFloat = 8
     static let trailing: CGFloat = 12
   }
 
