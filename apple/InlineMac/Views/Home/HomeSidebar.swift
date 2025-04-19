@@ -134,6 +134,9 @@ struct HomeSidebar: View {
       case let .user(chat):
         userItem(chat: chat)
 
+      case let .thread(chatItem):
+        threadItem(chatItem: chatItem)
+
       case let .space(space):
         spaceItem(space: space)
     }
@@ -167,6 +170,25 @@ struct HomeSidebar: View {
       rendersSavedMsg: true
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+  }
+
+  @ViewBuilder
+  func threadItem(chatItem: SpaceChatItem) -> some View {
+    if let chat = chatItem.chat {
+      let peerId: Peer = .thread(id: chat.id)
+
+      ThreadItem(
+        thread: chat,
+        action: {
+          nav.open(.chat(peer: peerId))
+        },
+        commandPress: {
+          openInWindow(peerId)
+        },
+        selected: nav.upcomingRoute == .chat(peer: peerId)
+      )
+      .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+    } else {}
   }
 
   // The view when user focuses the search input shows up
@@ -236,9 +258,10 @@ struct HomeSidebar: View {
   }
 }
 
-private enum SideItem: Identifiable {
+enum SideItem: Identifiable {
   case space(InlineKit.Space)
   case user(InlineKit.HomeChatItem)
+  case thread(InlineKit.SpaceChatItem)
 
   var id: Int64 {
     switch self {
@@ -246,6 +269,8 @@ private enum SideItem: Identifiable {
         space.id
       case let .user(chat):
         chat.user.id
+      case let .thread(chat):
+        chat.chat?.id ?? 0
     }
   }
 }
