@@ -62,12 +62,12 @@ public enum FileHelpers {
 
     // Create a subdirectory based on the specified type
     let subdirectoryPath: URL = switch directory {
-      case .photos:
-        documentsDirectory.appendingPathComponent("Photos", isDirectory: true)
-      case .videos:
-        documentsDirectory.appendingPathComponent("Videos", isDirectory: true)
-      case .documents:
-        documentsDirectory.appendingPathComponent("Documents", isDirectory: true)
+    case .photos:
+      documentsDirectory.appendingPathComponent("Photos", isDirectory: true)
+    case .videos:
+      documentsDirectory.appendingPathComponent("Videos", isDirectory: true)
+    case .documents:
+      documentsDirectory.appendingPathComponent("Documents", isDirectory: true)
     }
 
     // Create the directory if it doesn't exist
@@ -124,17 +124,17 @@ public enum FileHelpers {
     byteCountFormatter.allowsNonnumericFormatting = false
     return byteCountFormatter.string(fromByteCount: Int64(bytes))
   }
-  
+
   public static func getMimeType(for url: URL) -> String {
     // Try to get the file extension
     let fileExtension = url.pathExtension.lowercased()
-    
+
     // Check if we have a file URL with a path on disk
     if url.isFileURL, let uti = UTType(filenameExtension: fileExtension) {
       // Get MIME type from the UTType
       return uti.preferredMIMEType ?? "application/octet-stream"
     }
-    
+
     // For non-file URLs or if UTType doesn't work, use a dictionary of common MIME types
     let mimeTypes = [
       "html": "text/html",
@@ -161,8 +161,7 @@ public enum FileHelpers {
       "ppt": "application/vnd.ms-powerpoint",
       "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     ]
-    
+
     return mimeTypes[fileExtension] ?? "application/octet-stream"
   }
-
 }

@@ -8,6 +8,7 @@ import NukeUI
 import SwiftUI
 import UIKit
 
+// TODO: clean up
 class UIMessageView: UIView {
   // MARK: - Properties
 
@@ -29,7 +30,7 @@ class UIMessageView: UIView {
   private lazy var containerStack: UIStackView = {
     let stack = UIStackView()
     stack.axis = .vertical
-    stack.spacing = labelVerticalPadding
+    stack.spacing = 0
     stack.alignment = .fill
     stack.distribution = .fill
     stack.translatesAutoresizingMaskIntoConstraints = false
@@ -146,6 +147,13 @@ class UIMessageView: UIView {
     return view
   }()
 
+  lazy var documentView: DocumentView = {
+    let view = DocumentView(fullMessage: fullMessage, outgoing: outgoing)
+    view.translatesAutoresizingMaskIntoConstraints = false
+
+    return view
+  }()
+
   var outgoing: Bool {
     fullMessage.message.out == true
   }
@@ -197,6 +205,9 @@ class UIMessageView: UIView {
     }
     if message.hasUnsupportedTypes {
       return false
+    }
+    if fullMessage.message.documentId != nil {
+      return true
     }
     if fullMessage.file != nil {
       return true
@@ -255,6 +266,7 @@ class UIMessageView: UIView {
     setupReplyViewIfNeeded()
     setupFileViewIfNeeded()
     setupPhotoViewIfNeeded()
+    setupDocumentViewIfNeeded()
     setupMessageContainer()
 
     if message.hasPhoto, !message.hasText, fullMessage.reactions.isEmpty {
@@ -306,6 +318,25 @@ class UIMessageView: UIView {
     guard fullMessage.photoInfo != nil else { return }
 
     containerStack.addArrangedSubview(newPhotoView)
+  }
+
+  private func setupDocumentViewIfNeeded() {
+    guard fullMessage.documentInfo != nil else { return }
+
+    containerStack.addArrangedSubview(documentView)
+
+    // is this on whole message?
+    let documentTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDocumentTap))
+    bubbleView.addGestureRecognizer(documentTapGesture)
+  }
+
+  @objc private func handleDocumentTap() {
+    print("HANDLE DOCUMENT TAP")
+    NotificationCenter.default.post(
+      name: Notification.Name("DocumentTapped"),
+      object: nil,
+      userInfo: ["fullMessage": fullMessage]
+    )
   }
 
   private func setupReactionsIfNeeded(animatedEmoji: String? = nil) {
@@ -959,15 +990,15 @@ extension UIMessageView: UIContextMenuInteractionDelegate, ContextMenuManagerDel
     guard !links.isEmpty else { return nil }
 
     let textContainer = NSTextContainer(size: messageLabel.bounds.size)
+    textContainer.lineFragmentPadding = 0
+    textContainer.lineBreakMode = messageLabel.lineBreakMode
+    textContainer.maximumNumberOfLines = messageLabel.numberOfLines
+
     let layoutManager = NSLayoutManager()
     let textStorage = NSTextStorage(attributedString: messageLabel.attributedText ?? NSAttributedString())
 
     layoutManager.addTextContainer(textContainer)
     textStorage.addLayoutManager(layoutManager)
-
-    textContainer.lineFragmentPadding = 0
-    textContainer.lineBreakMode = messageLabel.lineBreakMode
-    textContainer.maximumNumberOfLines = messageLabel.numberOfLines
 
     let index = layoutManager.characterIndex(
       for: location,
@@ -1156,7 +1187,7 @@ extension Message {
   }
 
   var hasUnsupportedTypes: Bool {
-    videoId != nil || documentId != nil
+    videoId != nil
   }
 }
 
