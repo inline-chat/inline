@@ -98,6 +98,7 @@ class ComposeTextView: UITextView {
 
   override func paste(_ sender: Any?) {
     super.paste(sender)
+    composeView?.updateHeight()
   }
 
   private func fixFontSizeAfterStickerInsertion() {

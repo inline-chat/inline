@@ -310,6 +310,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     composeHeightConstraint.constant = newHeight
     superview?.layoutIfNeeded()
 
+    DispatchQueue.main.async {
+      let bottomRange = NSRange(location: self.textView.text.count, length: 0)
+      self.textView.scrollRangeToVisible(bottomRange)
+    }
+
     onHeightChange?(newHeight)
   }
 
@@ -510,7 +515,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         buttonAppear()
       }
     }
-    
+
     updateHeight()
   }
 
