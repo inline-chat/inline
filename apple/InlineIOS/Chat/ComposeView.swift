@@ -296,14 +296,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     return newHeight
   }
 
-  private func updateHeight() {
+  func updateHeight() {
     let size = textView.sizeThatFits(CGSize(
       width: textView.bounds.width,
       height: .greatestFiniteMagnitude
     ))
 
+    print("UPDATE HEIGHT size \(size)")
     let contentHeight = size.height
-
     let newHeight = textViewHeightByContentHeight(contentHeight)
     guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
 
@@ -510,6 +510,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         buttonAppear()
       }
     }
+    
+    updateHeight()
   }
 
   // MARK: - Overlay Management
