@@ -466,7 +466,6 @@ class UIMessageView: UIView {
     let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
     doubleTapGesture.numberOfTapsRequired = 2
 
-    // Ensure double tap doesn't interfere with other gestures
     if let interaction {
       doubleTapGesture.delegate = self
       interaction.view?.gestureRecognizers?.forEach { gesture in
@@ -518,26 +517,30 @@ class UIMessageView: UIView {
     }
 
     let checkmarkEmoji = "✔️"
+    let feedbackGenerator = UIImpactFeedbackGenerator(style: .medium)
+    feedbackGenerator.prepare()
 
-    // Check if the user already has this reaction
     if let existingReaction = fullMessage.reactions
       .first(where: { $0.emoji == checkmarkEmoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 })
     {
-      // Remove existing reaction (toggle behavior)
       Transactions.shared.mutate(transaction: .deleteReaction(.init(
         message: message,
         emoji: checkmarkEmoji,
         peerId: message.peerId,
         chatId: message.chatId
       )))
+
+      feedbackGenerator.impactOccurred()
+
     } else {
-      // Add new checkmark reaction
       Transactions.shared.mutate(transaction: .addReaction(.init(
         message: message,
         emoji: checkmarkEmoji,
         userId: Auth.shared.getCurrentUserId() ?? 0,
         peerId: message.peerId
       )))
+
+      feedbackGenerator.impactOccurred()
     }
   }
 
