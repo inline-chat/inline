@@ -202,6 +202,7 @@ class ComposeEmbedView: UIView {
           composeView.buttonDisappear()
 
           composeView.clearDraft()
+          composeView.updateHeight()
         }
     }
   }
