@@ -91,4 +91,14 @@ class ColorManager {
       }
     })
   }
+
+  var gray1: UIColor {
+    UIColor(dynamicProvider: { trait in
+      if trait.userInterfaceStyle == .dark {
+        UIColor(hex: "#3A393E")!
+      } else {
+        UIColor(hex: "#E6E6E6")!
+      }
+    })
+  }
 }
