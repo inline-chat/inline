@@ -95,8 +95,7 @@ class MessagesCollectionView: UICollectionView {
     }
   }
 
-  
- static let messagesBottomPadding = 6.0
+  static let messagesBottomPadding = 6.0
   func updateContentInsets() {
     guard !UIMessageView.contextMenuOpen else {
       return
@@ -111,7 +110,7 @@ class MessagesCollectionView: UICollectionView {
     let topSafeArea = isLandscape ? window.safeAreaInsets.left : window.safeAreaInsets.top
     let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
     let totalTopInset = topSafeArea + navBarHeight
-    
+
     var bottomInset: CGFloat = 0.0
 
     let chatState = ChatState.shared.getState(peer: peerId)
@@ -137,8 +136,12 @@ class MessagesCollectionView: UICollectionView {
     layoutIfNeeded()
   }
 
-  static let calculatedThreshold = ComposeView.minHeight - ((ComposeView.textViewVerticalMargin * 2) + (MessagesCollectionView.messagesBottomPadding * 2))
-  var shouldScrollToBottom: Bool { contentOffset.y < Self.calculatedThreshold }
+  var calculatedThreshold: CGFloat {
+    let baseThreshold = ComposeView.minHeight - ((ComposeView.textViewVerticalMargin * 2) + (MessagesCollectionView.messagesBottomPadding * 2))
+    return isKeyboardVisible ? baseThreshold + keyboardHeight : baseThreshold
+  }
+
+  var shouldScrollToBottom: Bool { contentOffset.y < calculatedThreshold }
   var itemsEmpty: Bool { coordinator.messages.isEmpty }
 
   @objc func orientationDidChange(_ notification: Notification) {
@@ -215,8 +218,8 @@ class MessagesCollectionView: UICollectionView {
     )
   }
 
-  private var isKeyboardVisible: Bool = false
-  private var keyboardHeight: CGFloat = 0
+  var isKeyboardVisible: Bool = false
+  var keyboardHeight: CGFloat = 0
 
   @objc private func keyboardWillShow(_ notification: Notification) {
     isKeyboardVisible = true
@@ -282,32 +285,27 @@ class MessagesCollectionView: UICollectionView {
 
     let targetOffsetY = -contentInset.top
 
-    
     let currentOffsetY = contentOffset.y
     let distanceToScroll = abs(currentOffsetY - targetOffsetY)
 
-    
     if distanceToScroll > visibleHeight * 3 {
-
-      
       let intermediateOffsetY = targetOffsetY + (3 * visibleHeight)
 
       if currentOffsetY > intermediateOffsetY {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         setContentOffset(CGPoint(x: 0, y: intermediateOffsetY), animated: false)
-        
+
         layoutIfNeeded()
         CATransaction.commit()
 
-        
         animateScrollToBottom(duration: 0.14)
 
       } else {
-        animateScrollToBottom(duration:  0.14)
+        animateScrollToBottom(duration: 0.14)
       }
     } else {
-      self.scrollToItem(
+      scrollToItem(
         at: IndexPath(item: 0, section: 0),
         at: .top,
         animated: true
@@ -319,11 +317,11 @@ class MessagesCollectionView: UICollectionView {
     if let attributes = layoutAttributesForItem(at: IndexPath(item: 0, section: 0)) {
       let targetOffset = CGPoint(x: 0, y: attributes.frame.minY - contentInset.top)
       UIView.animate(withDuration: duration,
-                        delay: 0,
-                        options: [.curveEaseOut, .allowUserInteraction],
-                        animations: {
-              self.contentOffset = targetOffset
-          })
+                     delay: 0,
+                     options: [.curveEaseOut, .allowUserInteraction],
+                     animations: {
+                       self.contentOffset = targetOffset
+                     })
     }
   }
 
@@ -600,12 +598,12 @@ private extension MessagesCollectionView {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
       /// Reminder: textViewVerticalMargin in ComposeView affects scrollView.contentOffset.y number
       /// (textViewVerticalMargin = 7.0  -> contentOffset.y = -64.0 | textViewVerticalMargin = 4.0 -> contentOffset.y = -58.0)
-    
-   
-      
-      let isAtBottom = scrollView.contentOffset.y > -calculatedThreshold
-      
-      
+
+      guard let messagesCollectionView = currentCollectionView as? MessagesCollectionView else { return }
+
+      let threshold = messagesCollectionView.calculatedThreshold
+      let isAtBottom = scrollView.contentOffset.y > -threshold
+
       if isAtBottom != wasPreviouslyAtBottom, messages.count > 12 {
         NotificationCenter.default.post(
           name: .scrollToBottomChanged,
