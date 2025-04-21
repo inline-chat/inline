@@ -123,8 +123,4 @@ struct File {
   let fileName: String?
 }
 
-enum FileHelpers {
-  static func getDocumentsDirectory() -> URL {
-    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-  }
-}
+
