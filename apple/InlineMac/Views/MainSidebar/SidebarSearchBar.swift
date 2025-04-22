@@ -55,7 +55,7 @@ struct OutlineField: View {
   var cornerRadius: CGFloat {
     switch size {
       case .regular:
-        10
+        8
     }
   }
 

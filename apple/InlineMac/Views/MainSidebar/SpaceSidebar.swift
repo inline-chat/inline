@@ -9,6 +9,8 @@ struct SpaceSidebar: View {
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
   @Environment(\.openWindow) var openWindow
 
+  @State var searchQuery: String = ""
+
   var spaceId: Int64
 
   init(spaceId: Int64) {
@@ -76,26 +78,31 @@ struct SpaceSidebar: View {
         }
       }
     }
+    .animation(.smoothSnappy, value: items)
     .listRowInsets(EdgeInsets())
     .listRowBackground(Color.clear)
     .listStyle(.sidebar)
-//    .toolbar {
-//      ToolbarItemGroup(placement: .automatic) {
-//        Button("Back to Home", systemImage: "house") {
-//          nav.openHome()
-//        }
-//      }
-//    }
     .safeAreaInset(
       edge: .top,
       content: {
         VStack(alignment: .leading, spacing: 0) {
           HStack(spacing: 0) {
-            ZStack {
-              if let space = fullSpace.space {
-                SpaceAvatar(space: space, size: Theme.sidebarIconSize)
-                  .padding(.trailing, Theme.sidebarIconSpacing)
-              }
+            Button {
+              nav.openHome()
+            } label: {
+              Image(systemName: "chevron.compact.left")
+                .font(.body.bold())
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 6)
+                .contentShape(.interaction, .rect)
+            }
+            .help("Go back to home")
+            .buttonStyle(.plain)
+            .padding(.leading, -8)
+
+            if let space = fullSpace.space {
+              SpaceAvatar(space: space, size: Theme.sidebarTitleIconSize)
+                .padding(.trailing, Theme.sidebarIconSpacing)
             }
 
             Text(fullSpace.space?.name ?? "Loading...")
@@ -105,13 +112,14 @@ struct SpaceSidebar: View {
           }
           .frame(height: Theme.sidebarTopItemHeight)
           .padding(.top, 0)
-          // .frame(maxWidth: .infinity, alignment: .leading)
-          // .padding(.horizontal)
+          .padding(.bottom, 8)
+          .padding(.horizontal, Theme.sidebarContentSideSpacing)
+
+          SidebarSearchBar(text: $searchQuery)
+            .padding(.bottom, 2)
+            .padding(.horizontal, Theme.sidebarItemOuterSpacing)
         }
-        .id("space-in-sidebar")
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal)
-        .padding(.leading, Theme.sidebarItemLeadingGutter)
       }
     )
     .task {
