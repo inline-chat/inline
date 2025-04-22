@@ -5,11 +5,12 @@ import Nuke
 import NukeUI
 import UIKit
 
-class MessagesCollectionView: UICollectionView {
+final class MessagesCollectionView: UICollectionView {
   private let peerId: Peer
   private var chatId: Int64
   private var spaceId: Int64
   private var coordinator: Coordinator
+  
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
     self.peerId = peerId

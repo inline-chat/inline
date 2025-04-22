@@ -327,3 +327,10 @@ final class NewPhotoView: UIView {
 
 
 }
+
+
+extension NewPhotoView {
+  func getCurrentImage() -> UIImage? {
+    imageView.imageView.image
+  }
+}
