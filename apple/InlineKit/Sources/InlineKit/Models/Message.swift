@@ -517,3 +517,22 @@ public extension Message {
     message.documentId = document.documentId
   }
 }
+
+public extension Message {
+  var isEdited: Bool {
+    editDate != nil
+  }
+
+  var hasPhoto: Bool {
+    fileId != nil || photoId != nil
+  }
+
+  var hasText: Bool {
+    guard let text else { return false }
+    return !text.isEmpty
+  }
+
+  var hasUnsupportedTypes: Bool {
+    videoId != nil
+  }
+}
