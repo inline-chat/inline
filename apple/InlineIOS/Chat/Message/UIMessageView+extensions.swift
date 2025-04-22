@@ -120,7 +120,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
 
       let isMessageSending = message.status == .sending
 
-      let copyAction = UIAction(title: "Copy") { _ in
+      let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
         UIPasteboard.general.string = self.message.text
       }
 
@@ -151,7 +151,7 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
       var actions: [UIAction] = [copyAction]
 
       if fullMessage.photoInfo != nil {
-        let copyPhotoAction = UIAction(title: "Copy Photo") { [weak self] _ in
+        let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "photo.fill.on.rectangle")) { [weak self] _ in
           guard let self else { return }
           if let image = newPhotoView.getCurrentImage() {
             UIPasteboard.general.image = image
@@ -165,29 +165,30 @@ extension UIMessageView: UIContextMenuInteractionDelegate {
         actions.append(copyPhotoAction)
       }
 
-      let replyAction = UIAction(title: "Reply") { _ in
+      let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
         ChatState.shared.setReplyingMessageId(peer: self.message.peerId, id: self.message.messageId)
       }
       actions.append(replyAction)
 
       if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText {
-        let editAction = UIAction(title: "Edit") { _ in
+        let editAction = UIAction(title: "Edit", image: UIImage(systemName: "bubble.and.pencil")) { _ in
           ChatState.shared.setEditingMessageId(peer: self.message.peerId, id: self.message.messageId)
         }
         actions.append(editAction)
       }
 
-      let openLinkAction = UIAction(title: "Open Link") { _ in
+      let openLinkAction = UIAction(title: "Open Link", image: UIImage(systemName: "arrow.up.right.square")) { _ in
         if let url = self.getURLAtLocation(location) {
           self.linkTapHandler?(url)
         }
       }
-      if let url = getURLAtLocation(location) {
+      if getURLAtLocation(location) != nil {
         actions.append(openLinkAction)
       }
 
       let deleteAction = UIAction(
         title: "Delete",
+        image: UIImage(systemName: "trash"),
         attributes: .destructive
       ) { _ in
         self.showDeleteConfirmation()
