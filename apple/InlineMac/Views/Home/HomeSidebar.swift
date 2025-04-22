@@ -113,18 +113,32 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var spacesAndUsersView: some View {
-    Section("Spaces") {
+    Section {
       // spaces
       ForEach(home.spaces) { item in
         spaceItem(space: item.space)
       }
+    } header: {
+      SidebarSectionHeader(
+        imageSystemName: "bubble.left.and.bubble.right.fill",
+        title: "Spaces",
+        action: {
+        }
+      )
     }
 
-    Section("DMs") {
+    Section {
       // users
       ForEach(home.chats) { item in
         userItem(chat: item)
       }
+    } header: {
+      SidebarSectionHeader(
+        imageSystemName: "message.fill",
+        title: "DMs",
+        action: {
+        }
+      )
     }
   }
 

@@ -13,12 +13,11 @@ class MainWindowController: NSWindowController {
   private var topLevelRoute: TopLevelRoute {
     dependencies.viewModel.topLevelRoute
   }
+
   private var currentTopLevelRoute: TopLevelRoute? = nil
 
   private var navBackButton: NSButton?
   private var navForwardButton: NSButton?
-//  private var navBackButton: NSToolbarItem?
-//  private var navForwardButton: NSToolbarItem?
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
