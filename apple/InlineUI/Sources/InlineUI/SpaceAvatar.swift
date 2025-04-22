@@ -14,7 +14,7 @@ public struct SpaceAvatar: View {
     InitialsCircle(
       name: space.name,
       size: size,
-      symbol: "person.2.fill"
+      //symbol: "person.2.fill"
     )
   }
 }
