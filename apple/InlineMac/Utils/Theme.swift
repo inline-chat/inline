@@ -46,7 +46,7 @@ static let colorTitleTextGray: NSColor = .init(name: "colorTitleTextGray") { app
   static let sidebarItemSpacing: CGFloat = 1
   static let sidebarTopItemFont: Font = .body.weight(.regular)
   static let sidebarTopItemHeight: CGFloat = 24
-
+  
   static let sidebarIconSpacing: CGFloat = 9
   static let sidebarIconSize: CGFloat = 24
   static let sidebarItemHeight: CGFloat = 34
