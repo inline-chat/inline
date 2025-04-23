@@ -53,9 +53,10 @@ static let colorTitleTextGray: NSColor = .init(name: "colorTitleTextGray") { app
   static let sidebarItemHeight: CGFloat = 34
   static let sidebarTitleItemFont: Font = .system(size: 13.0, weight: .medium)
   static let sidebarItemFont: Font = .system(size: 14.0, weight: .regular)
-  static let sidebarContentSideSpacing: CGFloat = 22.0 // from inner content of item to edge of sidebar
-  static let sidebarItemInnerSpacing: CGFloat = 14.0 // from inner content of item to edge of content active/hover style
+  static let sidebarContentSideSpacing: CGFloat = 17.0 // from inner content of item to edge of sidebar
+  static let sidebarItemInnerSpacing: CGFloat = 11.0 // from inner content of item to edge of content active/hover style
   static let sidebarItemOuterSpacing: CGFloat = Theme.sidebarContentSideSpacing - Theme.sidebarItemInnerSpacing
+  static let sidebarNativeDefaultEdgeInsets: CGFloat = 16.0
 
   // MARK: - Message View
 
