@@ -85,8 +85,9 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     username: nil
   )
 
+  public static let previewUserId: Int64 = 1
   public static let preview = Self(
-    id: -1,
+    id: 1,
     email: "john@acme.com",
     firstName: "John",
     lastName: "Doe",

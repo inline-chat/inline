@@ -37,6 +37,7 @@ public struct UserInfo: Codable, FetchableRecord, PersistableRecord, Hashable, S
   }
 
   public static let deleted = Self(user: .deletedInstance, profilePhotos: nil)
+  public static let preview = Self(user: .preview, profilePhotos: nil)
 }
 
 public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable,

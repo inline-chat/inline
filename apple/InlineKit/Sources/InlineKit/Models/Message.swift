@@ -261,14 +261,36 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     messageId: 1,
     fromId: 1,
     date: Date(),
-    text: "Hello, world!",
+    text: "This is a preview message.",
     peerUserId: 2,
     peerThreadId: nil,
     chatId: 1
   )
 }
 
-// MARK: Helpers
+// MARK: - UI helpers
+
+public extension Message {
+  
+  /// Returns a string representation of the message, including emojis for different media types.
+  var stringRepresentationWithEmoji: String {
+    if let text, !text.isEmpty {
+      text
+    } else if let fileId {
+      "📄 File"
+    } else if let _ = photoId {
+      "🖼️ Photo"
+    } else if let _ = videoId {
+      "🎥 Video"
+    } else if let _ = documentId {
+      "📄 Document"
+    } else {
+      "Message"
+    }
+  }
+}
+
+// MARK: - DB Helpers
 
 public extension Message {
   mutating func saveMessage(
