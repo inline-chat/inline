@@ -104,6 +104,7 @@ class Nav: ObservableObject {
 }
 
 // MARK: - Navigation APIs
+
 extension Nav {
   @MainActor public func openSpace(_ spaceId: Int64) {
     // TODO: Implement a caching for last viewed route in that space and restore that instead of opening .empty
@@ -113,9 +114,12 @@ extension Nav {
     reflectHistoryChange()
   }
 
-  @MainActor public func openHome() {
+  @MainActor public func openHome(replace: Bool? = false) {
     // TODO: Implement a caching for last viewed route in home
     let entry = NavEntry(route: .empty, spaceId: nil)
+    if replace == true {
+      history.removeLast()
+    }
     history.append(entry)
 
     reflectHistoryChange()
