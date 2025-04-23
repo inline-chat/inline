@@ -88,12 +88,36 @@ class MessageListAppKit: NSViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
+  private lazy var toolbarBgView: NSVisualEffectView = {
+    let view = NSVisualEffectView()
+    view.blendingMode = .withinWindow
+    view.state = .active
+    view.material = .headerView
+    view.translatesAutoresizingMaskIntoConstraints = false
+
+    let shadow = NSShadow()
+    shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
+    shadow.shadowOffset = NSSize(width: 0, height: -1)
+    shadow.shadowBlurRadius = 2
+
+    view.shadow = shadow
+
+    return view
+  }()
+
+  private func toggleToolbarVisibility(_ hide: Bool) {
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.08
+      context.allowsImplicitAnimation = true
+
+      toolbarBgView.alphaValue = hide ? 0 : 1
+    }
+  }
+
   private lazy var tableView: NSTableView = {
     let table = NSTableView()
     table.style = .plain
     table.backgroundColor = .clear
-//    table.backgroundColor = .windowBackgroundColor
-    // table.backgroundColor = .controlBackgroundColor
     table.headerView = nil
     table.rowSizeStyle = .custom
     table.selectionHighlightStyle = .none
@@ -213,6 +237,8 @@ class MessageListAppKit: NSViewController {
     // TODO: extract insets logic from bottom here.
   }
 
+  private var toolbarHeight: CGFloat = 52
+
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did
   // layout and it fixes the issue.
   private func updateScrollViewInsets() {
@@ -222,6 +248,7 @@ class MessageListAppKit: NSViewController {
     let windowFrame = window.frame
     let contentFrame = window.contentLayoutRect
     let toolbarHeight = windowFrame.height - contentFrame.height
+    self.toolbarHeight = toolbarHeight
 
     if scrollView.contentInsets.top != toolbarHeight {
       log.trace("Adjusting view's insets")
@@ -280,13 +307,17 @@ class MessageListAppKit: NSViewController {
 
     let atTop = isAtTop()
     isToolbarVisible = !atTop
-    window.titlebarAppearsTransparent = atTop
+    // window.titlebarAppearsTransparent = atTop
+    window.titlebarAppearsTransparent = true
     window.isMovableByWindowBackground = true
     window.titlebarSeparatorStyle = .automatic
+
+    toggleToolbarVisibility(atTop)
   }
 
   private func setupViews() {
     view.addSubview(scrollView)
+    view.addSubview(toolbarBgView)
 
     // Set up constraints
     NSLayoutConstraint.activate([
@@ -294,6 +325,11 @@ class MessageListAppKit: NSViewController {
       scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+      toolbarBgView.topAnchor.constraint(equalTo: view.topAnchor),
+      toolbarBgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      toolbarBgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      toolbarBgView.heightAnchor.constraint(equalToConstant: toolbarHeight),
     ])
 
     // Set column width to match scroll view width
