@@ -23,7 +23,7 @@ class MessageTimeAndState: NSView {
   // MARK: - Layer Setup
 
   // Improved cache with scale awareness and memory management
-  private static let imageCache = NSCache<NSString, CGImage>()
+  private static var imageCache: [CacheKey: CGImage] = [:]
 
   // Key struct for proper cache identity
   fileprivate struct CacheKey: Hashable {
@@ -43,8 +43,8 @@ class MessageTimeAndState: NSView {
     layer.contentsScale = effectiveScaleFactor
     layer.font = Self.font
     layer.fontSize = 10
-    layer.alignmentMode = .left
-    layer.truncationMode = .end
+    layer.alignmentMode = .right
+    layer.truncationMode = .none
     layer.isWrapped = false
     return layer
   }
@@ -79,7 +79,7 @@ class MessageTimeAndState: NSView {
       isOutgoing: fullMessage.message.out ?? false
     )
 
-    if let cached = Self.imageCache.object(forKey: cacheKey.key) {
+    if let cached = Self.imageCache[cacheKey] {
       return cached
     }
 
@@ -89,15 +89,13 @@ class MessageTimeAndState: NSView {
       case .failed: "exclamationmark.triangle"
     }
 
-    // Create a properly scaled configuration
     let config = NSImage.SymbolConfiguration(
-      pointSize: 11 * scale, // Scale the point size
-      weight: .semibold,
+      pointSize: Self.symbolWidth * scale, // Scale the point size
+      weight: .bold,
       scale: .small
     )
     .applying(.init(paletteColors: [color]))
 
-    // Create the symbol image
     let symbolImage = NSImage(
       systemSymbolName: symbolName,
       accessibilityDescription: nil
@@ -105,7 +103,7 @@ class MessageTimeAndState: NSView {
       .withSymbolConfiguration(config)
 
     // Create a new image with the correct dimensions
-    let size = CGSize(width: 12 * scale, height: 12 * scale)
+    let size = CGSize(width: Self.symbolWidth * scale, height: Self.symbolWidth * scale)
     let newImage = NSImage(size: size)
 
     newImage.lockFocus()
@@ -123,7 +121,7 @@ class MessageTimeAndState: NSView {
     let cgImage = newImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
 
     if let cgImage {
-      Self.imageCache.setObject(cgImage, forKey: cacheKey.key)
+      Self.imageCache[cacheKey] = cgImage
     }
 
     return cgImage
@@ -170,6 +168,9 @@ class MessageTimeAndState: NSView {
     super.layout()
 
     let timeWidth = Self.timeWidth
+    let symbolWidth = Self.symbolWidth
+    let totalWidth = timeWidth + symbolWidth
+
     timeLayer.frame = CGRect(
       x: 0,
       y: (bounds.height - Self.timeHeight) / 2,
@@ -179,10 +180,10 @@ class MessageTimeAndState: NSView {
 
     if hasSymbol {
       statusLayer.frame = CGRect(
-        x: timeWidth,
-        y: (bounds.height - 12) / 2,
-        width: 12,
-        height: 12
+        x: timeWidth + 2,
+        y: (bounds.height - symbolWidth + 2 + 1) / 2, // bottom based so + 2, +1 for checkmark alignment
+        width: symbolWidth - 2,
+        height: symbolWidth - 2
       )
     }
   }
@@ -250,12 +251,10 @@ class MessageTimeAndState: NSView {
   }()
 
   static var symbolWidth: CGFloat {
-    14
+    12
   }
 
-  static var font: NSFont = {
-    NSFont.systemFont(ofSize: 10, weight: .regular).withTraits(.italic)
-  }()
+  static var font: NSFont = .systemFont(ofSize: 10, weight: .regular).withTraits(.italic)
 
   static var timeWidth: CGFloat = 0.0
   static var timeHeight: CGFloat = 0.0
@@ -288,12 +287,5 @@ class MessageTimeAndState: NSView {
 
     MessageTimeAndState.timeWidth = ceil(timeWidth)
     MessageTimeAndState.timeHeight = ceil(timeHeight)
-  }
-}
-
-// CacheKey extension for NSCache compatibility
-private extension MessageTimeAndState.CacheKey {
-  var key: NSString {
-    "\(status.rawValue)-\(isFailed)-\(scaleFactor)" as NSString
   }
 }
