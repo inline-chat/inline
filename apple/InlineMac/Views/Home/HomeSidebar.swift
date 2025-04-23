@@ -3,16 +3,38 @@ import Logger
 import SwiftUI
 
 struct HomeSidebar: View {
+  // MARK: - Types
+
+  enum SideItem: Identifiable {
+    case space(InlineKit.Space)
+    case user(InlineKit.HomeChatItem)
+    case thread(InlineKit.SpaceChatItem)
+
+    var id: Int64 {
+      switch self {
+        case let .space(space):
+          space.id
+        case let .user(chat):
+          chat.user.id
+        case let .thread(chat):
+          chat.chat?.id ?? 0
+      }
+    }
+  }
+
+  // MARK: - State
+
+  @Environment(\.appDatabase) var db
+  @Environment(\.keyMonitor) var keyMonitor
   @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager
-  @Environment(\.appDatabase) var db
-  @Environment(\.keyMonitor) var keyMonitor
-
   @EnvironmentStateObject var model: SpaceListViewModel
   @EnvironmentStateObject var home: HomeViewModel
   @StateObject var search = GlobalSearch()
   @FocusState private var isSearching: Bool
+
+  // MARK: - Initializer
 
   init() {
     _model = EnvironmentStateObject { env in
@@ -22,6 +44,17 @@ struct HomeSidebar: View {
       HomeViewModel(db: env.appDatabase)
     }
   }
+
+  // MARK: - Computed
+
+  var items: [SideItem] {
+    let spaces = home.spaces.map { SideItem.space($0.space) }
+    let users = home.chats.map { SideItem.user($0) }
+
+    return users + spaces
+  }
+
+  // MARK: - Views
 
   var body: some View {
     List {
@@ -65,33 +98,7 @@ struct HomeSidebar: View {
     }
   }
 
-  // MARK: - Key Monitor
-
-  private func subscribeNavKeyMonitor() {
-    if nav.currentRoute != .empty {
-      if keyMonitorNavUnsubscriber == nil {
-        keyMonitorNavUnsubscriber = keyMonitor?.addHandler(for: .escape, key: "nav_search") { _ in
-          nav.handleEsc()
-          unsubcribeNavKeyMonitor()
-        }
-      }
-    } else {
-      unsubcribeNavKeyMonitor()
-    }
-  }
-
-  @State var keyMonitorNavUnsubscriber: (() -> Void)?
-  private func unsubcribeNavKeyMonitor() {
-    keyMonitorNavUnsubscriber?()
-    keyMonitorNavUnsubscriber = nil
-  }
-
-  @State var keyMonitorUnsubscriber: (() -> Void)?
-  private func unsubcribeKeyMonitor() {
-    keyMonitorUnsubscriber?()
-    keyMonitorUnsubscriber = nil
-  }
-
+  @ViewBuilder
   var searchBar: some View {
     SidebarSearchBar(text: $search.query)
       .focused($isSearching)
@@ -113,32 +120,8 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var spacesAndUsersView: some View {
-    Section {
-      // spaces
-      ForEach(home.spaces) { item in
-        spaceItem(space: item.space)
-      }
-    } header: {
-      SidebarSectionHeader(
-        imageSystemName: "bubble.left.and.bubble.right.fill",
-        title: "Spaces",
-        action: {
-        }
-      )
-    }
-
-    Section {
-      // users
-      ForEach(home.chats) { item in
-        userItem(chat: item)
-      }
-    } header: {
-      SidebarSectionHeader(
-        imageSystemName: "message.fill",
-        title: "DMs",
-        action: {
-        }
-      )
+    ForEach(items) { item in
+      renderItem(item)
     }
   }
 
@@ -158,8 +141,10 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   func spaceItem(space: InlineKit.Space) -> some View {
-    SpaceItem(space: space)
-      .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+    SidebarSpaceItem(
+      space: space
+    )
+    .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
 
   @ViewBuilder
@@ -168,20 +153,16 @@ struct HomeSidebar: View {
     let user = userInfo.user
     let dialog = chat.dialog
     let chatChat = chat.chat
+    let peerId = Peer.user(id: user.id)
 
-    UserItem(
-      userInfo: userInfo,
+    SidebarItem(
+      type: .user(userInfo, chat: chatChat),
       dialog: dialog,
-      chat: chatChat,
-      action: {
-        userPressed(user: user)
+      lastMessage: chat.message,
+      selected: nav.currentRoute == .chat(peer: peerId),
+      onPress: {
+        nav.open(.chat(peer: peerId))
       },
-      commandPress: {
-        openInWindow(Peer.user(id: user.id))
-      },
-      // selected: nav.currentRoute == .chat(peer: .user(id: user.id)),
-      selected: nav.upcomingRoute == .chat(peer: .user(id: user.id)),
-      rendersSavedMsg: true
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
@@ -242,6 +223,35 @@ struct HomeSidebar: View {
     }
   }
 
+  // MARK: - Key Monitor
+
+  private func subscribeNavKeyMonitor() {
+    if nav.currentRoute != .empty {
+      if keyMonitorNavUnsubscriber == nil {
+        keyMonitorNavUnsubscriber = keyMonitor?.addHandler(for: .escape, key: "nav_search") { _ in
+          nav.handleEsc()
+          unsubcribeNavKeyMonitor()
+        }
+      }
+    } else {
+      unsubcribeNavKeyMonitor()
+    }
+  }
+
+  @State var keyMonitorNavUnsubscriber: (() -> Void)?
+  private func unsubcribeNavKeyMonitor() {
+    keyMonitorNavUnsubscriber?()
+    keyMonitorNavUnsubscriber = nil
+  }
+
+  @State var keyMonitorUnsubscriber: (() -> Void)?
+  private func unsubcribeKeyMonitor() {
+    keyMonitorUnsubscriber?()
+    keyMonitorUnsubscriber = nil
+  }
+
+  // MARK: - Actions
+
   private func remoteUserPressed(user: ApiUser) {
     // Save user
 
@@ -272,77 +282,7 @@ struct HomeSidebar: View {
   }
 }
 
-enum SideItem: Identifiable {
-  case space(InlineKit.Space)
-  case user(InlineKit.HomeChatItem)
-  case thread(InlineKit.SpaceChatItem)
-
-  var id: Int64 {
-    switch self {
-      case let .space(space):
-        space.id
-      case let .user(chat):
-        chat.user.id
-      case let .thread(chat):
-        chat.chat?.id ?? 0
-    }
-  }
-}
-
-struct AlphaCapsule: View {
-  @State private var showingSheet = false
-
-  var body: some View {
-    Text("ALPHA")
-      .monospaced()
-      .foregroundStyle(.primary)
-      .font(.caption)
-      .fontWeight(.semibold)
-      .padding(.horizontal, 6)
-      .padding(.vertical, 1)
-      .background(
-        Capsule()
-          .strokeBorder(.primary, lineWidth: 1.0)
-      )
-      .opacity(0.5)
-      .onTapGesture {
-        showingSheet = true
-      }
-      .sheet(isPresented: $showingSheet) {
-        AlphaInfoSheet()
-      }
-  }
-}
-
-struct AlphaInfoSheet: View {
-  @Environment(\.dismiss) private var dismiss
-  @AppStorage("alphaText") private var text: String = ""
-
-  var body: some View {
-    NavigationStack {
-      VStack(alignment: .leading, spacing: 16) {
-        Text(.init(text))
-          .font(.body)
-      }
-      .padding()
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .frame(height: 320)
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          Button("Done") {
-            dismiss()
-          }
-        }
-      }
-      .task {
-        do {
-          text = try await ApiClient.shared.getAlphaText()
-        } catch {}
-      }
-    }
-    .presentationDetents([.medium])
-  }
-}
+// MARK: - Preview
 
 #Preview {
   NavigationSplitView {
