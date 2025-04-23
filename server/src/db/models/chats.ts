@@ -204,6 +204,6 @@ async function refreshLastMessageIdTransaction(chatId: number, transaction: (tx:
 
 type DrizzleTx = PgTransaction<
   PostgresJsQueryResultHKT,
-  typeof import("/Users/mo/dev/inline/server/src/db/schema/index"),
-  ExtractTablesWithRelations<typeof import("/Users/mo/dev/inline/server/src/db/schema/index")>
+  typeof import("../schema/index"),
+  ExtractTablesWithRelations<typeof import("../schema/index")>
 >
