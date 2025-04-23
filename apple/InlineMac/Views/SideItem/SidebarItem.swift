@@ -19,9 +19,11 @@ struct SidebarItem: View {
   var selected: Bool = false
   var onPress: (() -> Void)?
 
+  private let isCurrentUser: Bool
+
   // MARK: - Constants
 
-  static var avatarSize: CGFloat = 48
+  static var avatarSize: CGFloat = 46
   static var titleFont: Font = .body.weight(.medium)
   static var subtitleFont: Font = .system(size: 12.0)
   static var subtitleColor: Color = .secondary
@@ -35,6 +37,28 @@ struct SidebarItem: View {
 
   @Environment(\.colorScheme) private var colorScheme
   @State private var isHovered: Bool = false
+
+  // MARK: - Initializer
+
+  init(
+    type: SidebarItemType,
+    dialog: Dialog?,
+    lastMessage: Message? = nil,
+    selected: Bool = false,
+    onPress: (() -> Void)? = nil
+  ) {
+    self.type = type
+    self.dialog = dialog
+    self.lastMessage = lastMessage
+    self.selected = selected
+    self.onPress = onPress
+
+    if case let .user(userInfo, _) = type {
+      isCurrentUser = userInfo.user.isCurrentUser()
+    } else {
+      isCurrentUser = false
+    }
+  }
 
   // MARK: - Views
 
@@ -68,7 +92,11 @@ struct SidebarItem: View {
       case let .chat(chat):
         ChatIcon(peer: .chat(chat), size: Self.avatarSize)
       case let .user(userInfo, _):
-        UserAvatar(userInfo: userInfo, size: Self.avatarSize)
+        if isCurrentUser {
+          InitialsCircle(name: userFullName, size: Self.avatarSize, symbol: "bookmark.fill")
+        } else {
+          UserAvatar(userInfo: userInfo, size: Self.avatarSize)
+        }
       case let .space(space):
         SpaceAvatar(space: space, size: Self.avatarSize)
     }
@@ -163,16 +191,36 @@ struct SidebarItem: View {
     }
   }
 
+  var userFullName: String {
+    switch type {
+      case let .user(userInfo, _):
+        if !userInfo.user.fullName.isEmpty {
+          userInfo.user.fullName
+        } else {
+          userInfo.user.firstName ??
+            userInfo.user.lastName ??
+            userInfo.user.username ??
+            userInfo.user.email ?? ""
+        }
+      default:
+        ""
+    }
+  }
+
   var title: String {
     switch type {
       case let .chat(chat):
         chat.title ?? ""
 
       case let .user(userInfo, _):
-        userInfo.user.firstName ??
-          userInfo.user.lastName ??
-          userInfo.user.username ??
-          userInfo.user.email ?? ""
+        if isCurrentUser {
+          "Saved Messages"
+        } else {
+          userInfo.user.firstName ??
+            userInfo.user.lastName ??
+            userInfo.user.username ??
+            userInfo.user.email ?? ""
+        }
 
       case let .space(space):
         space.name
