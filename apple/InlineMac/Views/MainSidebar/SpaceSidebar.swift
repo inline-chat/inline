@@ -32,15 +32,14 @@ struct SpaceSidebar: View {
   func threadItem(_ chat: Chat, _ item: SpaceChatItem) -> some View {
     let peerId: Peer = .thread(id: chat.id)
 
-    ThreadItem(
-      thread: chat,
-      action: {
+    SidebarItem(
+      type: .chat(chat),
+      dialog: item.dialog,
+      lastMessage: item.message,
+      selected: nav.currentRoute == .chat(peer: peerId),
+      onPress: {
         nav.open(.chat(peer: peerId))
       },
-      commandPress: {
-        openWindow(value: peerId)
-      },
-      selected: nav.currentRoute == .chat(peer: peerId)
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
@@ -50,20 +49,23 @@ struct SpaceSidebar: View {
     let peerId: Peer = .user(id: user.id)
     let dialog = item.dialog
     let chat = item.chat
+    let userInfo = item.userInfo ?? .init(user: user)
 
-    UserItem(
-      userInfo: item.userInfo ?? .init(user: user),
+    SidebarItem(
+      type: .user(userInfo, chat: chat),
       dialog: dialog,
-      chat: chat,
-      action: {
+      lastMessage: item.message,
+      selected: nav.currentRoute == .chat(peer: peerId),
+      onPress: {
         nav.open(.chat(peer: peerId))
       },
-      commandPress: {
-        openWindow(value: peerId)
-      },
-      selected: nav.currentRoute == .chat(peer: peerId)
     )
-    .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+    .listRowInsets(.init(
+      top: 0,
+      leading: 0,
+      bottom: 0,
+      trailing: 0
+    ))
   }
 
   var body: some View {
@@ -71,15 +73,16 @@ struct SpaceSidebar: View {
       ForEach(items, id: \.peerId) { item in
         if let user = item.user {
           userItem(user, item)
+
         } else if let chat = item.chat {
           threadItem(chat, item)
+
         } else {
           EmptyView()
         }
       }
     }
     .animation(.smoothSnappy, value: items)
-    .listRowInsets(EdgeInsets())
     .listRowBackground(Color.clear)
     .listStyle(.sidebar)
     .safeAreaInset(
@@ -87,18 +90,9 @@ struct SpaceSidebar: View {
       content: {
         VStack(alignment: .leading, spacing: 0) {
           HStack(spacing: 0) {
-            Button {
-              nav.openHome()
-            } label: {
-              Image(systemName: "chevron.compact.left")
-                .font(.body.bold())
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 6)
-                .contentShape(.interaction, .rect)
-            }
-            .help("Go back to home")
-            .buttonStyle(.plain)
-            .padding(.leading, -8)
+            BackToHomeButton()
+            .padding(.leading, -4)
+            .padding(.trailing, 4)
 
             if let space = fullSpace.space {
               SpaceAvatar(space: space, size: Theme.sidebarTitleIconSize)
@@ -116,8 +110,7 @@ struct SpaceSidebar: View {
           .padding(.horizontal, Theme.sidebarContentSideSpacing)
 
           SidebarSearchBar(text: $searchQuery)
-            .padding(.bottom, 2)
-            .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+            .padding(.horizontal, Theme.sidebarContentSideSpacing)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }
