@@ -71,6 +71,23 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 }
 
+// MARK: - Preview
+
+#if DEBUG
+public extension Chat {
+  static let preview = Self(
+    id: Int64.random(in: 1 ... 50_000),
+    date: Date(),
+    type: .privateChat,
+    title: "Preview Chat",
+    spaceId: nil,
+    peerUserId: nil,
+    lastMsgId: nil,
+    emoji: nil
+  )
+}
+#endif
+
 public extension Chat {
   enum CodingKeys: String, CodingKey {
     case id
@@ -104,17 +121,16 @@ public extension Chat {
     spaceId = from.spaceId
     type = from.type == "private" ? .privateChat : .thread
     peerUserId =
-      if let peer = from.peer
-    {
-      switch peer {
-        case let .user(id):
-          id
-        case .thread:
-          nil
+      if let peer = from.peer {
+        switch peer {
+          case let .user(id):
+            id
+          case .thread:
+            nil
+        }
+      } else {
+        nil
       }
-    } else {
-      nil
-    }
     lastMsgId = from.lastMsgId
     emoji = from.emoji
   }
