@@ -70,6 +70,7 @@ class ComposeTextEditor: NSView {
     scrollView.drawsBackground = false
     scrollView.hasVerticalScroller = true
     scrollView.hasHorizontalRuler = false
+    scrollView.scrollerStyle = .overlay
     scrollView.autoresizingMask = [.width]
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.contentInsets = NSEdgeInsets(top: verticalPadding, left: 8, bottom: verticalPadding, right: 8)
