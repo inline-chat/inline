@@ -5,7 +5,7 @@ import SwiftUI
 struct HomeSidebar: View {
   // MARK: - Types
 
-  enum SideItem: Identifiable {
+  enum SideItem: Identifiable, Equatable {
     case space(InlineKit.Space)
     case user(InlineKit.HomeChatItem)
     case thread(InlineKit.SpaceChatItem)
@@ -49,7 +49,14 @@ struct HomeSidebar: View {
 
   var items: [SideItem] {
     let spaces = home.spaces.map { SideItem.space($0.space) }
-    let users = home.chats.map { SideItem.user($0) }
+    let users = home.chats.sorted(
+      by: {
+        ($0.message?.date.timeIntervalSince1970 ?? $0.chat?.date.timeIntervalSince1970 ?? 0) > (
+          $1.message?.date.timeIntervalSince1970 ?? $1.chat?.date.timeIntervalSince1970 ?? 0
+        )
+      }
+    )
+    .map { SideItem.user($0) }
 
     return users + spaces
   }
@@ -65,6 +72,7 @@ struct HomeSidebar: View {
       }
     }
     .listStyle(.sidebar)
+    .animation(.smoothSnappy, value: items)
     .safeAreaInset(
       edge: .top,
       content: {
@@ -120,7 +128,7 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var spacesAndUsersView: some View {
-    ForEach(items) { item in
+    ForEach(items, id: \.id) { item in
       renderItem(item)
     }
   }
