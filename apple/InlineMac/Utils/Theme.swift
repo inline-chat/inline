@@ -62,7 +62,7 @@ static let colorTitleTextGray: NSColor = .init(name: "colorTitleTextGray") { app
 
   static let messageMaxWidth: CGFloat = 420
   static let messageOuterVerticalPadding: CGFloat = 1.0 // gap between consequetive messages
-  static let messageSidePadding: CGFloat = 20.0
+  static let messageSidePadding: CGFloat = 16.0
   static let messageAvatarSize: CGFloat = 28
   // between avatar and content
   static let messageHorizontalStackSpacing: CGFloat = 8.0

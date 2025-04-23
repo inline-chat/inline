@@ -1086,6 +1086,7 @@ class MessageListAppKit: NSViewController {
             isLastMessage: inputProps.isLastMessage,
             isFirstMessage: inputProps.isFirstMessage,
             isRtl: inputProps.isRtl,
+            isDM: chat?.type == .privateChat,
             index: row,
             layout: plan
           )
@@ -1148,6 +1149,7 @@ class MessageListAppKit: NSViewController {
         firstInGroup: true,
         isLastMessage: true,
         isFirstMessage: true,
+        isDM: chat?.type == .privateChat,
         isRtl: false
       )
     }
@@ -1157,6 +1159,7 @@ class MessageListAppKit: NSViewController {
       firstInGroup: isFirstInGroup(at: row),
       isLastMessage: isLastMessage(at: row),
       isFirstMessage: isFirstMessage(at: row),
+      isDM: chat?.type == .privateChat,
       isRtl: false
     )
   }
@@ -1262,13 +1265,14 @@ extension MessageListAppKit: NSTableViewDelegate {
       isLastMessage: inputProps.isLastMessage,
       isFirstMessage: inputProps.isFirstMessage,
       isRtl: inputProps.isRtl,
+      isDM: chat?.type == .privateChat,
       index: row,
       layout: layoutPlan
     )
 
     cell.setScrollState(scrollState)
     cell.configure(with: message, props: props)
-    
+
     // Store the configured cell in cache
     // cellCache.cacheCell(cell, withType: "MessageCell", messageId: message.id)
 
@@ -1325,7 +1329,7 @@ extension Notification.Name {
 enum MessageListScrollState {
   case scrolling
   case idle
-  
+
   var isScrolling: Bool {
     self == .scrolling
   }
