@@ -382,7 +382,7 @@ class MessageSizeCalculator {
 
     // MARK: - Name
 
-    if props.firstInGroup, !isOutgoing {
+    if props.firstInGroup, !isOutgoing, !props.isDM {
       let nameHeight = Theme.messageNameLabelHeight
       namePlan = LayoutPlan(
         size: CGSize(width: 0, height: nameHeight),

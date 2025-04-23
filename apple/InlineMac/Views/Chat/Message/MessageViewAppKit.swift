@@ -23,9 +23,20 @@ class MessageViewAppKit: NSView {
     fullMessage.message
   }
 
-  private var showsAvatar: Bool { props.layout.hasAvatar }
+  private var isDM: Bool {
+    props.isDM
+  }
+
+  private var chatHasAvatar: Bool {
+    !isDM
+  }
+
+  private var showsAvatar: Bool {
+    chatHasAvatar && props.layout.hasAvatar && !outgoing
+  }
+
   private var showsName: Bool {
-    props.layout.hasName
+    chatHasAvatar && props.layout.hasName
   }
 
   private var outgoing: Bool {
@@ -384,7 +395,7 @@ class MessageViewAppKit: NSView {
       )
     }
 
-    if let name = layout.name {
+    if let name = layout.name, showsName {
       constraints.append(
         contentsOf: [
           nameLabel.leadingAnchor
@@ -435,23 +446,28 @@ class MessageViewAppKit: NSView {
     contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: layout.bubble.size.width)
     contentViewHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: layout.bubble.size.height)
 
+    let sidePadding = Theme.messageSidePadding
+    let contentLeading = chatHasAvatar ? layout.nameAndBubbleLeading : sidePadding
+
+    // Depending on outgoing or incoming message
+    let contentViewSideAnchor =
+      !outgoing ?
+      contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading) :
+      contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding)
+    let bubbleViewSideAnchor =
+      !outgoing ?
+      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading) :
+      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding)
+
     constraints.append(
       contentsOf: [
         bubbleViewHeightConstraint,
         bubbleViewWidthConstraint,
-        bubbleView.leadingAnchor
-          .constraint(
-            equalTo: leadingAnchor,
-            constant: layout.nameAndBubbleLeading
-          ),
+        bubbleViewSideAnchor,
 
         contentViewHeightConstraint,
         contentViewWidthConstraint,
-        contentView.leadingAnchor
-          .constraint(
-            equalTo: leadingAnchor,
-            constant: layout.nameAndBubbleLeading
-          ),
+        contentViewSideAnchor,
       ]
     )
 
@@ -1309,11 +1325,12 @@ struct MessageViewInputProps: Equatable, Codable, Hashable {
   var firstInGroup: Bool
   var isLastMessage: Bool
   var isFirstMessage: Bool
+  var isDM: Bool
   var isRtl: Bool
 
   /// Used in cache key
   func toString() -> String {
-    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")"
+    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")"
   }
 }
 
@@ -1322,6 +1339,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var isLastMessage: Bool
   var isFirstMessage: Bool
   var isRtl: Bool
+  var isDM: Bool = false
   var index: Int?
   var layout: MessageSizeCalculator.LayoutPlans
 
@@ -1329,7 +1347,8 @@ struct MessageViewProps: Equatable, Codable, Hashable {
     firstInGroup == rhs.firstInGroup &&
       isLastMessage == rhs.isLastMessage &&
       isFirstMessage == rhs.isFirstMessage &&
-      isRtl == rhs.isRtl
+      isRtl == rhs.isRtl &&
+      isDM == rhs.isDM
   }
 }
 
