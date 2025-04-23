@@ -204,7 +204,6 @@ class MainWindowController: NSWindowController {
         window?.backgroundColor = .controlBackgroundColor
 
       default:
-        // window?.backgroundColor = .windowBackgroundColor
         window?.backgroundColor = .controlBackgroundColor
         window?.titlebarAppearsTransparent = true
     }

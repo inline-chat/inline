@@ -66,14 +66,14 @@ public struct UserAvatar: View, Equatable {
   public static func getNameForInitials(user: User) -> String {
     let firstName = user.firstName ?? user.email?.components(separatedBy: "@").first ?? "User"
     let lastName = user.lastName
-    let name = "\(firstName) \(lastName ?? "")"
+    let name = "\(firstName)\(lastName != nil ? " \(lastName ?? "")" : "")"
     return name
   }
 
   static func getNameForInitials(user: ApiUser) -> String {
     let firstName = user.firstName ?? user.email?.components(separatedBy: "@").first ?? "User"
     let lastName = user.lastName
-    let name = "\(firstName) \(lastName ?? "")"
+    let name = "\(firstName)\(lastName != nil ? " \(lastName ?? "")" : "")"
     return name
   }
 
