@@ -101,4 +101,14 @@ class ColorManager {
       }
     })
   }
+  
+  var reactionItemColor: UIColor {
+    UIColor(dynamicProvider: { trait in
+      if trait.userInterfaceStyle == .dark {
+        UIColor(hex: "#121212")!
+      } else {
+        UIColor(hex: "#FFFFFF")!
+      }
+    })
+  }
 }

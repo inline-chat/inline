@@ -52,6 +52,17 @@
                ReferencedContainer = "container:Inline.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "B7C067192DB7CC8F00EAADA4"
+               BuildableName = "iMessageUITests.xctest"
+               BlueprintName = "iMessageUITests"
+               ReferencedContainer = "container:Inline.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
