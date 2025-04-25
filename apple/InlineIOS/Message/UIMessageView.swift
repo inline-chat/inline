@@ -7,7 +7,6 @@ import NukeUI
 import SwiftUI
 import UIKit
 
-// TODO: clean up
 class UIMessageView: UIView {
   // MARK: - Properties
 
@@ -74,6 +73,10 @@ class UIMessageView: UIView {
   }
 
   var isMultiline: Bool {
+    if fullMessage.reactions.count > 0 {
+      return true
+    }
+
     if message.hasUnsupportedTypes {
       return false
     }
@@ -109,6 +112,32 @@ class UIMessageView: UIView {
   lazy var newPhotoView = createNewPhotoView()
   lazy var floatingMetadataView = createFloatingMetadataView()
   lazy var documentView = createDocumentView()
+
+  lazy var reactionsFlowView: ReactionsFlowView = {
+    let view = ReactionsFlowView(outgoing: outgoing)
+    view.onReactionTap = { [weak self] emoji in
+      guard let self else { return }
+
+      if let reaction = fullMessage.reactions
+        .filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
+      {
+        Transactions.shared.mutate(transaction: .deleteReaction(.init(
+          message: message,
+          emoji: emoji,
+          peerId: message.peerId,
+          chatId: message.chatId
+        )))
+      } else {
+        Transactions.shared.mutate(transaction: .addReaction(.init(
+          message: message,
+          emoji: emoji,
+          userId: Auth.shared.getCurrentUserId() ?? 0,
+          peerId: message.peerId
+        )))
+      }
+    }
+    return view
+  }()
 
   // MARK: - Initialization
 
@@ -160,7 +189,6 @@ class UIMessageView: UIView {
     setupDoubleTapGestureRecognizer()
     setupAppearance()
     setupConstraints()
-    setupContextMenu()
   }
 
   func addFloatingMetadata() {
@@ -172,6 +200,33 @@ class UIMessageView: UIView {
       floatingMetadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -padding),
       floatingMetadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -padding),
     ])
+  }
+
+   func setupReactionsIfNeeded(animatedEmoji: String? = nil) {
+    guard !fullMessage.reactions.isEmpty else { return }
+
+    var reactionsDict: [String: (count: Int, userIds: [Int64], latestDate: Date)] = [:]
+
+    for reaction in fullMessage.reactions {
+      if let existing = reactionsDict[reaction.emoji] {
+        let newCount = existing.count + 1
+        let newUserIds = existing.userIds + [reaction.userId]
+
+        let mostRecentDate = max(existing.latestDate, reaction.date)
+
+        reactionsDict[reaction.emoji] = (newCount, newUserIds, mostRecentDate)
+      } else {
+        reactionsDict[reaction.emoji] = (1, [reaction.userId], reaction.date)
+      }
+    }
+
+    let sortedReactions = reactionsDict.map {
+      (emoji: $0.key, count: $0.value.count, userIds: $0.value.userIds, date: $0.value.latestDate)
+    }.sorted { $0.date < $1.date }
+
+    reactionsFlowView.configure(
+      with: sortedReactions.map { (emoji: $0.emoji, count: $0.count, userIds: $0.userIds) }
+    )
   }
 
   func setupReplyViewIfNeeded() {
@@ -247,6 +302,12 @@ class UIMessageView: UIView {
 
       innerContainer.addArrangedSubview(messageLabel)
 
+      if fullMessage.reactions.count > 0 {
+        print("Setup reactions")
+        setupReactionsIfNeeded()
+        innerContainer.addArrangedSubview(reactionsFlowView)
+      }
+
       if !fullMessage.attachments.isEmpty {
         setupAttachmentView()
         innerContainer.addArrangedSubview(attachmentView)
@@ -266,6 +327,12 @@ class UIMessageView: UIView {
       if !fullMessage.attachments.isEmpty {
         setupAttachmentView()
         multiLineContainer.addArrangedSubview(attachmentView)
+      }
+
+      if fullMessage.reactions.count > 0 {
+        print("Setup reactions")
+        setupReactionsIfNeeded()
+        multiLineContainer.addArrangedSubview(reactionsFlowView)
       }
 
       if !message.hasPhoto || message.hasText {
@@ -506,13 +573,6 @@ class UIMessageView: UIView {
 
       return (range: match.range, url: url)
     }
-  }
-
-  func setupContextMenu() {
-    let interaction = UIContextMenuInteraction(delegate: self)
-    self.interaction = interaction
-
-    bubbleView.addInteraction(interaction)
   }
 
   func extractListItems(from message: String) -> [String] {
