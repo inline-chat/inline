@@ -144,7 +144,9 @@ private extension EmbedMessageView {
   }
 
   func setupLayer() {
-    layer.cornerRadius = Constants.cornerRadius
+    UIView.performWithoutAnimation {
+      layer.cornerRadius = Constants.cornerRadius
+    }
     layer.masksToBounds = true
   }
 
