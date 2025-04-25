@@ -5,15 +5,10 @@ import UniformTypeIdentifiers
 
 class ComposeTextView: UITextView {
   private var placeholderLabel: UILabel?
-  private var lastText: String = ""
   weak var composeView: ComposeView?
   private var processedRanges = Set<String>()
   private var recentlySentImageHashes = Set<Int>()
   private let processingLock = NSLock()
-  private let textModificationQueue = DispatchQueue(
-    label: "com.app.textview.modification",
-    qos: .userInitiated
-  )
 
   init(composeView: ComposeView) {
     self.composeView = composeView
@@ -30,7 +25,6 @@ class ComposeTextView: UITextView {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
-    Log.shared.debug("ComposeTextView deinit")
   }
 
   private func setupTextView() {
@@ -83,10 +77,10 @@ class ComposeTextView: UITextView {
     showPlaceholder(text.isEmpty)
 
     if text.contains("￼") || attributedText.string.contains("￼") {
+      print("CALLED from textDidChange 1")
       handleStickerDetection()
     }
 
-    lastText = text
     fixFontSizeAfterStickerInsertion()
   }
 
@@ -97,7 +91,11 @@ class ComposeTextView: UITextView {
   }
 
   override func paste(_ sender: Any?) {
-    super.paste(sender)
+    if UIPasteboard.general.image != nil {
+      composeView?.handlePastedImage()
+    } else {
+      super.paste(sender)
+    }
     composeView?.updateHeight()
   }
 
@@ -139,6 +137,7 @@ class ComposeTextView: UITextView {
   private func handleStickerDetection() {
     // Do we need these?
 
+    // Do we need these?
     NSObject.cancelPreviousPerformRequests(
       withTarget: self,
       selector: #selector(performStickerDetection),
@@ -222,11 +221,6 @@ class ComposeTextView: UITextView {
       }
     }
 
-    if finalImage == nil, let pasteboardImage = UIPasteboard.general.image {
-      finalImage = pasteboardImage
-      imageSource = "pasteboard_direct"
-    }
-
     if finalImage == nil {
       var glyphRect = layoutManager.boundingRect(forGlyphRange: range, in: textContainer)
 
@@ -270,14 +264,11 @@ class ComposeTextView: UITextView {
       {
         sendStickerImage(imageData, metadata: ["source": imageSource])
         safelyRemoveAttachment(at: range)
-      } else {
-        captureTextViewForDebug()
-      }
-    } else {
-      captureTextViewForDebug()
+      } 
     }
   }
 
+  // ??? sending char as sticker bug
   private func extractImageFromAdaptiveGlyph(_ adaptiveGlyph: NSObject) -> UIImage? {
     if adaptiveGlyph.responds(to: Selector(("imageContent"))) {
       if let imageContent = adaptiveGlyph.perform(Selector(("imageContent")))?
@@ -365,10 +356,6 @@ class ComposeTextView: UITextView {
       }
     }
 
-    if let pasteboardImage = UIPasteboard.general.image {
-      return pasteboardImage
-    }
-
     let propertyNames = [
       "image", "originalImage", "_image", "cachedImage", "renderedImage",
       "imageRepresentation", "imageValue", "displayImage", "previewImage",
@@ -397,6 +384,7 @@ class ComposeTextView: UITextView {
     return nil
   }
 
+  // ??? sending char as sticker bug
   private func captureTextViewForDebug() {
     let captureRect = bounds.isEmpty ? CGRect(x: 0, y: 0, width: 300, height: 200) : bounds
 
@@ -447,12 +435,6 @@ class ComposeTextView: UITextView {
       }
 
       finalImage = image
-    }
-
-    if finalImage == nil {
-      if let pasteboardImage = UIPasteboard.general.image {
-        finalImage = pasteboardImage
-      }
     }
 
     guard let image = finalImage else {

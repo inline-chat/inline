@@ -96,10 +96,17 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   }
 
   @objc private func handleStickerDetected(_ notification: Notification) {
-    if let image = notification.userInfo?["image"] as? UIImage {
-      // Ensure we're on the main thread
-      DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-        self?.sendSticker(image)
+    print("Received sticker detected notification")
+    if UIPasteboard.general.image != nil {
+      print("Pasted image detected")
+      handlePastedImage()
+    } else {
+      print("No pasted image detected")
+      if let image = notification.userInfo?["image"] as? UIImage {
+        // Ensure we're on the main thread
+        DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
+          self?.sendSticker(image)
+        }
       }
     }
   }
@@ -302,7 +309,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       height: .greatestFiniteMagnitude
     ))
 
-    print("UPDATE HEIGHT size \(size)")
     let contentHeight = size.height
     let newHeight = textViewHeightByContentHeight(contentHeight)
     guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
@@ -694,6 +700,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     sendMessageHaptic()
   }
 
+  
   func handlePastedImage() {
     guard let image = UIPasteboard.general.image else { return }
 
