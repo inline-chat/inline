@@ -32,12 +32,18 @@ final class MessagesCollectionView: UICollectionView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  override func contextMenuAccessories(for interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration) -> [Any]? {
+  override func contextMenuAccessories(
+    for interaction: UIContextMenuInteraction,
+    configuration: UIContextMenuConfiguration
+  ) -> [Any]? {
     guard let indexPath = configuration.identifier as? IndexPath else { return nil }
     return accessoryProvider?(indexPath)
   }
 
-  override func contextMenuStyle(for interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration) -> Any? {
+  override func contextMenuStyle(
+    for interaction: UIContextMenuInteraction,
+    configuration: UIContextMenuConfiguration
+  ) -> Any? {
     let _UIContextMenuStyle = NSClassFromString("_UIContextMenuStyle") as! NSObject.Type
 
     let style = _UIContextMenuStyle.perform(NSSelectorFromString("defaultStyle")).takeUnretainedValue() as! NSObject
@@ -157,7 +163,8 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   var calculatedThreshold: CGFloat {
-    let baseThreshold = ComposeView.minHeight - ((ComposeView.textViewVerticalMargin * 2) + (MessagesCollectionView.messagesBottomPadding * 2))
+    let baseThreshold = ComposeView
+      .minHeight - ((ComposeView.textViewVerticalMargin * 2) + (MessagesCollectionView.messagesBottomPadding * 2))
     return isKeyboardVisible ? baseThreshold + keyboardHeight : baseThreshold
   }
 
@@ -336,12 +343,14 @@ final class MessagesCollectionView: UICollectionView {
   private func animateScrollToBottom(duration: TimeInterval) {
     if let attributes = layoutAttributesForItem(at: IndexPath(item: 0, section: 0)) {
       let targetOffset = CGPoint(x: 0, y: attributes.frame.minY - contentInset.top)
-      UIView.animate(withDuration: duration,
-                     delay: 0,
-                     options: [.curveEaseOut, .allowUserInteraction],
-                     animations: {
-                       self.contentOffset = targetOffset
-                     })
+      UIView.animate(
+        withDuration: duration,
+        delay: 0,
+        options: [.curveEaseOut, .allowUserInteraction],
+        animations: {
+          self.contentOffset = targetOffset
+        }
+      )
     }
   }
 
@@ -389,7 +398,33 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
 // MARK: - Coordinator
 
 private extension MessagesCollectionView {
-  class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
+  class Coordinator: NSObject, UICollectionViewDelegateFlowLayout, UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(
+      _ interaction: UIContextMenuInteraction,
+      configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+      guard let collectionView = currentCollectionView else { return nil }
+
+      // Convert the interaction point to the collection view's coordinate space
+      let locationInCollectionView = interaction.view?.convert(location, to: collectionView) ?? location
+
+      // Find which message cell is at this location
+      guard let indexPath = collectionView.indexPathForItem(at: locationInCollectionView),
+            indexPath.item < messages.count
+      else {
+        return nil
+      }
+
+      // Return a basic configuration that identifies the item
+      // The actual menu items will be handled by the collection view's context menu delegate method
+      // This is primarily to enable the context menu accessories (reaction picker)
+      return UIContextMenuConfiguration(identifier: indexPath as NSIndexPath, previewProvider: nil) { _ in
+        // Return an empty menu - the functionality is in the accessory views that
+        // are handled by setupContextMenuAccessories
+        UIMenu(children: [])
+      }
+    }
+
     private var currentCollectionView: UICollectionView?
     private let viewModel: MessagesProgressiveViewModel
     private let peerId: Peer
@@ -429,6 +464,9 @@ private extension MessagesCollectionView {
         let isFromDifferentSender = isMessageFromDifferentSender(at: indexPath)
 
         cell.configure(with: message, fromOtherSender: isFromDifferentSender, spaceId: spaceId)
+
+        let interaction = UIContextMenuInteraction(delegate: self)
+        cell.messageView?.bubbleView.addInteraction(interaction)
       }
 
       dataSource = UICollectionViewDiffableDataSource<Section, FullMessage.ID>(
@@ -475,51 +513,51 @@ private extension MessagesCollectionView {
 
     func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
       switch update {
-      case let .added(newMessages, _):
-        // get current snapshot and append new items
-        var snapshot = dataSource.snapshot()
-        let newIds = newMessages.map(\.id)
+        case let .added(newMessages, _):
+          // get current snapshot and append new items
+          var snapshot = dataSource.snapshot()
+          let newIds = newMessages.map(\.id)
 
-        let shouldScroll = newMessages.contains {
-          $0.message.fromId == Auth.shared.getCurrentUserId()
-        }
+          let shouldScroll = newMessages.contains {
+            $0.message.fromId == Auth.shared.getCurrentUserId()
+          }
 
-        if let first = snapshot.itemIdentifiers.first {
-          snapshot.insertItems(newIds, beforeItem: first)
-        } else {
-          snapshot.appendItems(newIds, toSection: .main)
-        }
+          if let first = snapshot.itemIdentifiers.first {
+            snapshot.insertItems(newIds, beforeItem: first)
+          } else {
+            snapshot.appendItems(newIds, toSection: .main)
+          }
 
-        // Mark as read if we're at bottom or message is from current user
-        if shouldScroll {
-          updateUnreadIfNeeded()
-        }
+          // Mark as read if we're at bottom or message is from current user
+          if shouldScroll {
+            updateUnreadIfNeeded()
+          }
 
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .curveEaseInOut]) {
-          self.dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
-            if shouldScroll {
-              self?.currentCollectionView?.scrollToItem(
-                at: IndexPath(item: 0, section: 0),
-                at: .top,
-                animated: true
-              )
+          UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .curveEaseInOut]) {
+            self.dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+              if shouldScroll {
+                self?.currentCollectionView?.scrollToItem(
+                  at: IndexPath(item: 0, section: 0),
+                  at: .top,
+                  animated: true
+                )
+              }
             }
           }
-        }
 
-      case let .deleted(ids, _):
-        var snapshot = dataSource.snapshot()
-        snapshot.deleteItems(ids)
-        dataSource.apply(snapshot, animatingDifferences: true)
+        case let .deleted(ids, _):
+          var snapshot = dataSource.snapshot()
+          snapshot.deleteItems(ids)
+          dataSource.apply(snapshot, animatingDifferences: true)
 
-      case let .updated(newMessages, _, animated):
-        var snapshot = dataSource.snapshot()
-        let ids = newMessages.map(\.id)
-        snapshot.reconfigureItems(ids)
-        dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+        case let .updated(newMessages, _, animated):
+          var snapshot = dataSource.snapshot()
+          let ids = newMessages.map(\.id)
+          snapshot.reconfigureItems(ids)
+          dataSource.apply(snapshot, animatingDifferences: animated ?? false)
 
-      case let .reload(animated):
-        setInitialData(animated: animated)
+        case let .reload(animated):
+          setInitialData(animated: animated)
       }
     }
 
@@ -528,7 +566,25 @@ private extension MessagesCollectionView {
     }
 
     private var sizeCache: [FullMessage.ID: CGSize] = [:]
-    private let maxCacheSize = 1000
+    private let maxCacheSize = 1_000
+
+    func contextMenuInteraction(
+      _ interaction: UIContextMenuInteraction,
+      willDisplayMenuFor configuration: UIContextMenuConfiguration,
+      animator: UIContextMenuInteractionAnimating?
+    ) {
+      print("willDisplayMenuFor")
+      MessagesCollectionView.contextMenuOpen = true
+    }
+
+    func contextMenuInteraction(
+      _ interaction: UIContextMenuInteraction,
+      willEndFor configuration: UIContextMenuConfiguration,
+      animator: UIContextMenuInteractionAnimating?
+    ) {
+      print("willEndFor")
+      MessagesCollectionView.contextMenuOpen = false
+    }
 
     func setupContextMenuAccessories() {
       guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
@@ -548,9 +604,9 @@ private extension MessagesCollectionView {
         accessoryView?.frame = CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width - 80, height: 70)
         accessoryView?.backgroundColor = .clear
 
-        if let accessoryView = accessoryView {
+        if let accessoryView {
           let reactionPickerView = self?.createReactionPickerView(for: message.message, at: indexPath)
-          if let reactionPickerView = reactionPickerView {
+          if let reactionPickerView {
             accessoryView.addSubview(reactionPickerView)
 
             reactionPickerView.translatesAutoresizingMaskIntoConstraints = false
@@ -626,7 +682,7 @@ private extension MessagesCollectionView {
       configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 2, bottom: 2, trailing: 2)
       button.configuration = configuration
 
-      button.tag = messageIndex * 1000 + reactionIndex
+      button.tag = messageIndex * 1_000 + reactionIndex
 
       button.layer.cornerRadius = 19
       button.clipsToBounds = true
@@ -657,15 +713,15 @@ private extension MessagesCollectionView {
     }
 
     @objc private func handleReactionButtonTap(_ sender: UIButton) {
-      let fullMessage = messages[sender.tag / 1000]
-      let messageIndex = sender.tag / 1000
-      let reactionIndex = sender.tag % 1000
+      let fullMessage = messages[sender.tag / 1_000]
+      let messageIndex = sender.tag / 1_000
+      let reactionIndex = sender.tag % 1_000
       let message = fullMessage.message
 
       guard let emoji = sender.configuration?.title else { return }
 
       buttonTouchUp(sender)
-      MessagesCollectionView.contextMenuOpen = true
+      MessagesCollectionView.contextMenuOpen = false
 
       if fullMessage.reactions
         .filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first != nil
@@ -756,23 +812,11 @@ private extension MessagesCollectionView {
       0
     }
 
-    func contextMenuInteraction(
-      _ interaction: UIContextMenuInteraction,
-      willDisplayMenuFor configuration: UIContextMenuConfiguration,
-      animator: UIContextMenuInteractionAnimating?
-    ) {
-      MessagesCollectionView.contextMenuOpen = true
-    }
-
-    func contextMenuInteraction(
-      _ interaction: UIContextMenuInteraction,
-      willEndFor configuration: UIContextMenuConfiguration,
-      animator: UIContextMenuInteractionAnimating?
-    ) {
-      MessagesCollectionView.contextMenuOpen = false
-    }
-
-    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath], point: CGPoint) -> UIContextMenuConfiguration? {
+    func collectionView(
+      _ collectionView: UICollectionView,
+      contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+      point: CGPoint
+    ) -> UIContextMenuConfiguration? {
       guard let indexPath = indexPaths.first else { return nil }
       let fullMessage = messages[indexPath.item]
       let message = fullMessage.message
@@ -811,7 +855,8 @@ private extension MessagesCollectionView {
 
         // TODO: Add copy image
 //        if fullMessage.photoInfo != nil {
-//          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "photo.fill.on.rectangle")) { [weak self] _ in
+//          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "photo.fill.on.rectangle")) {
+//          [weak self] _ in
 //            guard let self else { return }
 //            if let image = newPhotoView.getCurrentImage() {
 //              UIPasteboard.general.image = image
@@ -861,7 +906,7 @@ private extension MessagesCollectionView {
     func showDeleteConfirmation(messageId: Int64, peerId: Peer, chatId: Int64) {
       // TODO: we have duplicate code here 2 findViewController func
       func findViewController(from view: UIView?) -> UIViewController? {
-        guard let view = view else { return nil }
+        guard let view else { return nil }
 
         var responder: UIResponder? = view
         while let nextResponder = responder?.next {
@@ -903,12 +948,20 @@ private extension MessagesCollectionView {
 
     // MARK: - UICollectionView
 
-    func collectionView(_ collectionView: UICollectionView, contextMenuConfiguration configuration: UIContextMenuConfiguration, highlightPreviewForItemAt indexPath: IndexPath) -> UITargetedPreview? {
-      return targetedPreview(for: indexPath)
+    func collectionView(
+      _ collectionView: UICollectionView,
+      contextMenuConfiguration configuration: UIContextMenuConfiguration,
+      highlightPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+      targetedPreview(for: indexPath)
     }
 
-    func collectionView(_ collectionView: UICollectionView, contextMenuConfiguration configuration: UIContextMenuConfiguration, dismissalPreviewForItemAt indexPath: IndexPath) -> UITargetedPreview? {
-      return targetedPreview(for: indexPath)
+    func collectionView(
+      _ collectionView: UICollectionView,
+      contextMenuConfiguration configuration: UIContextMenuConfiguration,
+      dismissalPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+      targetedPreview(for: indexPath)
     }
 
     // MARK: - Private
@@ -943,7 +996,8 @@ private extension MessagesCollectionView {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
       /// Reminder: textViewVerticalMargin in ComposeView affects scrollView.contentOffset.y number
-      /// (textViewVerticalMargin = 7.0  -> contentOffset.y = -64.0 | textViewVerticalMargin = 4.0 -> contentOffset.y = -58.0)
+      /// (textViewVerticalMargin = 7.0  -> contentOffset.y = -64.0 | textViewVerticalMargin = 4.0 -> contentOffset.y =
+      /// -58.0)
 
       guard let messagesCollectionView = currentCollectionView as? MessagesCollectionView else { return }
 
