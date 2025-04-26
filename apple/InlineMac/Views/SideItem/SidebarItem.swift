@@ -72,18 +72,18 @@ struct SidebarItem: View {
     .padding(.vertical, Self.verticalPadding)
     .frame(height: Self.height)
     .background(background)
-    .onHover { hovering in
-      isHovered = hovering
-    }
-    .onTapGesture {
-      onPress?()
-    }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(
       .horizontal,
       -Theme.sidebarNativeDefaultEdgeInsets +
         Theme.sidebarItemOuterSpacing
     )
+    .onHover { hovering in
+      isHovered = hovering
+    }
+    .onTapGesture {
+      onPress?()
+    }
   }
 
   @ViewBuilder
