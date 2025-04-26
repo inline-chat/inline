@@ -13,8 +13,8 @@ public struct SpaceAvatar: View {
   public var body: some View {
     InitialsCircle(
       name: space.name,
-      size: size,
-      //symbol: "person.2.fill"
+      size: size
+      // symbol: "person.2.fill"
     )
   }
 }
