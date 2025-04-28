@@ -22,7 +22,7 @@ extension UIMessageView {
   func createContainerStack() -> UIStackView {
     let stack = UIStackView()
     stack.axis = .vertical
-    stack.spacing = 0
+    stack.spacing = 4
     stack.alignment = .fill
     stack.distribution = .fill
     stack.translatesAutoresizingMaskIntoConstraints = false
