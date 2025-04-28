@@ -34,9 +34,12 @@ public struct TransactionEditMessage: Transaction {
         try AppDatabase.shared.dbWriter.write { db in
           var message = try Message
             .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
-          message?.text = text
-          message?.editDate = Date()
-          print("Message text updated to \(message) \(message?.text) \(text)")
+          if let current = message?.text, current == text {
+            message?.editDate = nil
+          } else {
+            message?.editDate = Date()
+            message?.text = text
+          }
           try message?.saveMessage(db)
         }
       } catch {
@@ -102,8 +105,12 @@ public struct TransactionEditMessage: Transaction {
       try? await AppDatabase.shared.dbWriter.write { db in
         var message = try Message
           .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
-        message?.text = text
-        message?.editDate = Date()
+        if let current = message?.text, current == text {
+          message?.editDate = nil
+        } else {
+          message?.editDate = Date()
+          message?.text = text
+        }
         try message?.saveMessage(db)
       }
 
@@ -122,8 +129,12 @@ public struct TransactionEditMessage: Transaction {
     let _ = try? await AppDatabase.shared.dbWriter.write { db in
       var message = try Message
         .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
-      message?.text = text
-      message?.editDate = Date()
+      if let current = message?.text, current == text {
+        message?.editDate = nil
+      } else {
+        message?.editDate = Date()
+        message?.text = text
+      }
       try message?.saveMessage(db)
     }
   }
