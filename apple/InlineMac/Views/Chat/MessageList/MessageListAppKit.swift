@@ -88,22 +88,7 @@ class MessageListAppKit: NSViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private lazy var toolbarBgView: NSVisualEffectView = {
-    let view = NSVisualEffectView()
-    view.blendingMode = .withinWindow
-    view.state = .active
-    view.material = .headerView
-    view.translatesAutoresizingMaskIntoConstraints = false
-
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
-    shadow.shadowOffset = NSSize(width: 0, height: -1)
-    shadow.shadowBlurRadius = 2
-
-    view.shadow = shadow
-
-    return view
-  }()
+  private lazy var toolbarBgView: NSVisualEffectView = ChatToolbarView()
 
   private func toggleToolbarVisibility(_ hide: Bool) {
     NSAnimationContext.runAnimationGroup { context in
@@ -309,8 +294,8 @@ class MessageListAppKit: NSViewController {
     isToolbarVisible = !atTop
     // window.titlebarAppearsTransparent = atTop
     window.titlebarAppearsTransparent = true
-    window.isMovableByWindowBackground = true
     window.titlebarSeparatorStyle = .automatic
+    window.isMovableByWindowBackground = false
 
     toggleToolbarVisibility(atTop)
   }
