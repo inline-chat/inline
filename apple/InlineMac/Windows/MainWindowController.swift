@@ -88,8 +88,8 @@ class MainWindowController: NSWindowController {
     switchViewController(to: OnboardingViewController(dependencies: dependencies))
 
     // configure window
-    window?.isMovableByWindowBackground = true
     window?.titlebarAppearsTransparent = true
+    window?.isMovableByWindowBackground = true
     window?.titleVisibility = .hidden
     window?.backgroundColor = .windowBackgroundColor
     window?.setContentSize(NSSize(width: 780, height: 500))
@@ -206,6 +206,7 @@ class MainWindowController: NSWindowController {
       default:
         window?.backgroundColor = .controlBackgroundColor
         window?.titlebarAppearsTransparent = true
+        window?.isMovableByWindowBackground = false
     }
   }
 
