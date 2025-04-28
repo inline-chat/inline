@@ -45,6 +45,10 @@ class DocumentView: UIView {
   var fileIconWrapperColor: UIColor {
     outgoing ? .white.withAlphaComponent(0.2) : ColorManager.shared.gray1
   }
+  
+  var progressBarColor: UIColor {
+    outgoing ? .white : ColorManager.shared.selectedColor
+  }
 
   // MARK: - Initializers
 
@@ -129,7 +133,7 @@ class DocumentView: UIView {
                                   clockwise: true)
     
     progressLayer.path = circlePath.cgPath
-    progressLayer.strokeColor = ColorManager.shared.selectedColor.cgColor
+    progressLayer.strokeColor = progressBarColor.cgColor
     progressLayer.fillColor = UIColor.clear.cgColor
     progressLayer.lineWidth = 2.0
     progressLayer.strokeEnd = 0.0
