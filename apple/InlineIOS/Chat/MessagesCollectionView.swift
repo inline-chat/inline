@@ -820,6 +820,8 @@ private extension MessagesCollectionView {
       guard let indexPath = indexPaths.first else { return nil }
       let fullMessage = messages[indexPath.item]
       let message = fullMessage.message
+      let cell = currentCollectionView?.cellForItem(at: indexPath) as! MessageCollectionViewCell
+
       return UIContextMenuConfiguration(identifier: indexPath as NSIndexPath, previewProvider: nil) { [weak self] _ in
         guard let self else { return UIMenu(children: []) }
 
@@ -854,21 +856,22 @@ private extension MessagesCollectionView {
         var actions: [UIAction] = [copyAction]
 
         // TODO: Add copy image
-//        if fullMessage.photoInfo != nil {
-//          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "photo.fill.on.rectangle")) {
-//          [weak self] _ in
-//            guard let self else { return }
-//            if let image = newPhotoView.getCurrentImage() {
-//              UIPasteboard.general.image = image
-//              ToastManager.shared.showToast(
-//                "Photo copied to clipboard",
-//                type: .success,
-//                systemImage: "doc.on.clipboard"
-//              )
-//            }
-//          }
-//          actions.append(copyPhotoAction)
-//        }
+        
+        if fullMessage.photoInfo != nil {
+          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "photo.fill.on.rectangle")) {
+          [weak self] _ in
+            guard let self else { return }
+            if let image = cell.messageView?.newPhotoView.getCurrentImage() {
+              UIPasteboard.general.image = image
+              ToastManager.shared.showToast(
+                "Photo copied to clipboard",
+                type: .success,
+                systemImage: "doc.on.clipboard"
+              )
+            }
+          }
+          actions.append(copyPhotoAction)
+        }
 
         let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
           ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
