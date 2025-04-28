@@ -15,6 +15,7 @@ final class AppMenu: NSObject {
     NSApp.mainMenu = mainMenu
 
     setupApplicationMenu()
+    setupFileMenu()
     setupEditMenu()
     setupViewMenu()
     setupWindowMenu()
@@ -102,6 +103,18 @@ final class AppMenu: NSObject {
       withTitle: "Quit \(appName)",
       action: #selector(NSApplication.terminate(_:)),
       keyEquivalent: "q"
+    )
+  }
+
+  private func setupFileMenu() {
+    let fileMenu = NSMenu(title: "File")
+    let fileMenuItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+    fileMenuItem.submenu = fileMenu
+    mainMenu.addItem(fileMenuItem)
+    fileMenu.addItem(
+      withTitle: "Close Window",
+      action: #selector(NSWindow.performClose(_:)),
+      keyEquivalent: "w"
     )
   }
 
