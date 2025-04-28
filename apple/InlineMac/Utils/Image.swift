@@ -3,6 +3,7 @@ import AppKit
 import CoreServices
 import ImageIO
 import InlineKit
+import Logger
 import UniformTypeIdentifiers
 
 // MARK: - Helper Extensions
@@ -160,7 +161,6 @@ extension NSImage {
     let image = self
     // Ensure the image has a valid size
     guard !image.size.width.isZero, !image.size.height.isZero else {
-      print("Image size is zero")
       return false
     }
 
@@ -177,7 +177,7 @@ extension NSImage {
       bytesPerRow: 0,
       bitsPerPixel: 0
     ) else {
-      print("Failed to create bitmap representation")
+      Log.shared.error("Failed to create bitmap representation")
       return false
     }
 

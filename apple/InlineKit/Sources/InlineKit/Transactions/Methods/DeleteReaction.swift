@@ -23,7 +23,6 @@ public struct TransactionDeleteReaction: Transaction {
     self.emoji = emoji
     self.peerId = peerId
     self.chatId = chatId
-    print(" init peerId", peerId)
   }
 
   // Methods
@@ -37,7 +36,6 @@ public struct TransactionDeleteReaction: Transaction {
               Column("messageId") == message.messageId && Column("chatId") == message
                 .chatId && Column("emoji") == emoji && Column("userId") == Auth.shared.getCurrentUserId() ?? 0
             ).deleteAll(db)
-          print("deleted reaction")
         }
       } catch {
         Log.shared.error("Failed to delete reaction \(error)")
@@ -99,7 +97,6 @@ public struct TransactionDeleteReaction: Transaction {
               Column("messageId") == message.messageId && Column("chatId") == message
                 .chatId && Column("emoji") == emoji && Column("userId") == Auth.shared.getCurrentUserId() ?? 0
             ).deleteAll(db)
-          print("deleted reaction")
         }
       } catch {
         Log.shared.error("Failed to delete reaction \(error)")
