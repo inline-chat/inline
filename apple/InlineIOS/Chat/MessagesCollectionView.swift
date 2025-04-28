@@ -398,38 +398,40 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
 // MARK: - Coordinator
 
 private extension MessagesCollectionView {
-  class Coordinator: NSObject, UICollectionViewDelegateFlowLayout, UIContextMenuInteractionDelegate {
-    func contextMenuInteraction(
-      _ interaction: UIContextMenuInteraction,
-      configurationForMenuAtLocation location: CGPoint
-    ) -> UIContextMenuConfiguration? {
-      guard let collectionView = currentCollectionView else { return nil }
-
-      // Convert the interaction point to the collection view's coordinate space
-      let locationInCollectionView = interaction.view?.convert(location, to: collectionView) ?? location
-
-      // Find which message cell is at this location
-      guard let indexPath = collectionView.indexPathForItem(at: locationInCollectionView),
-            indexPath.item < messages.count
-      else {
-        return nil
-      }
-
-      // Return a basic configuration that identifies the item
-      // The actual menu items will be handled by the collection view's context menu delegate method
-      // This is primarily to enable the context menu accessories (reaction picker)
-      return UIContextMenuConfiguration(identifier: indexPath as NSIndexPath, previewProvider: nil) { _ in
-        // Return an empty menu - the functionality is in the accessory views that
-        // are handled by setupContextMenuAccessories
-        UIMenu(children: [])
-      }
-    }
-
+  class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
     private var currentCollectionView: UICollectionView?
     private let viewModel: MessagesProgressiveViewModel
     private let peerId: Peer
     private let chatId: Int64
     private let spaceId: Int64
+    private weak var collectionContextMenu: UIContextMenuInteraction?
+
+    func collectionView(
+      _ collectionView: UICollectionView,
+      willDisplayContextMenu configuration: UIContextMenuConfiguration,
+      animator: UIContextMenuInteractionAnimating?
+    ) {
+      MessagesCollectionView.contextMenuOpen = true
+
+      if collectionContextMenu == nil,
+         let int = collectionView.interactions
+         .first(where: { $0 is UIContextMenuInteraction }) as? UIContextMenuInteraction
+      {
+        collectionContextMenu = int
+      }
+    }
+
+    func collectionView(
+      _ collectionView: UICollectionView,
+      willEndContextMenu configuration: UIContextMenuConfiguration,
+      animator: UIContextMenuInteractionAnimating?
+    ) {
+      MessagesCollectionView.contextMenuOpen = false
+    }
+
+    private func dismissContextMenuIfNeeded() {
+      collectionContextMenu?.dismissMenu()
+    }
 
     enum Section {
       case main
@@ -464,9 +466,6 @@ private extension MessagesCollectionView {
         let isFromDifferentSender = isMessageFromDifferentSender(at: indexPath)
 
         cell.configure(with: message, fromOtherSender: isFromDifferentSender, spaceId: spaceId)
-
-        let interaction = UIContextMenuInteraction(delegate: self)
-        cell.messageView?.bubbleView.addInteraction(interaction)
       }
 
       dataSource = UICollectionViewDiffableDataSource<Section, FullMessage.ID>(
@@ -567,24 +566,6 @@ private extension MessagesCollectionView {
 
     private var sizeCache: [FullMessage.ID: CGSize] = [:]
     private let maxCacheSize = 1_000
-
-    func contextMenuInteraction(
-      _ interaction: UIContextMenuInteraction,
-      willDisplayMenuFor configuration: UIContextMenuConfiguration,
-      animator: UIContextMenuInteractionAnimating?
-    ) {
-      print("willDisplayMenuFor")
-      MessagesCollectionView.contextMenuOpen = true
-    }
-
-    func contextMenuInteraction(
-      _ interaction: UIContextMenuInteraction,
-      willEndFor configuration: UIContextMenuConfiguration,
-      animator: UIContextMenuInteractionAnimating?
-    ) {
-      print("willEndFor")
-      MessagesCollectionView.contextMenuOpen = false
-    }
 
     func setupContextMenuAccessories() {
       guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
@@ -722,7 +703,7 @@ private extension MessagesCollectionView {
 
       buttonTouchUp(sender)
       MessagesCollectionView.contextMenuOpen = false
-
+      dismissContextMenuIfNeeded()
       if fullMessage.reactions
         .filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first != nil
       {
