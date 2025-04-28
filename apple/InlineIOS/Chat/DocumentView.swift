@@ -308,33 +308,33 @@ class DocumentView: UIView {
   }
 
   func openFile() {
-    guard let document = document, let localPath = document.localPath else {
+    guard
+      let document = document,
+      let localPath = document.localPath
+    else {
       Log.shared.error("Cannot open document: No local path available")
       return
     }
-    
+
     let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
     let fileURL = cacheDirectory.appendingPathComponent(localPath)
-    
+
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       Log.shared.error("File does not exist at path: \(fileURL.path)")
       documentState = .needsDownload
       return
     }
-    
+
+    documentURL = fileURL
+
     let previewController = QLPreviewController()
     previewController.dataSource = self
     previewController.delegate = self
-    
-    documentURL = fileURL
-    
     self.previewController = previewController
-    
-    if let viewController = findViewController() {
-      viewController.present(previewController, animated: true)
-    }
+
+    findViewController()?.present(previewController, animated: true)
   }
-  
+
   private func findViewController() -> UIViewController? {
     var responder: UIResponder? = self
     while let nextResponder = responder?.next {
