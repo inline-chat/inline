@@ -148,8 +148,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     guard let url = URL(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
     }
-    print("url: \(url)")
-
+    
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")

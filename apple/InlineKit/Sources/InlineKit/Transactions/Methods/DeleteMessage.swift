@@ -45,20 +45,17 @@ public struct TransactionDeleteMessage: Transaction {
             var updatedChat = chat
             updatedChat?.lastMsgId = previousMessage?.messageId
             try updatedChat?.save(db)
-            
+
             // update so if next message is deleted, we can use it to update again
             prevChatLastMsgId = messageId
           }
 
-          print("Deleting message \(messageId) \(chatId)")
           // TODO: Optimize this to use keys
           try Message
             .filter(Column("messageId") == messageId)
             .filter(Column("chatId") == chatId)
             .deleteAll(db)
         }
-
-       
       }
 
       DispatchQueue.main.async(qos: .userInitiated) {

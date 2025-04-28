@@ -475,7 +475,7 @@ public class DataManager: ObservableObject {
   public func deleteMessage(
     messageId: Int64, chatId: Int64, peerId: Peer
   ) async throws {
-    print("deleteMessage", messageId, chatId, peerId)
+    
     let _ = try await ApiClient.shared.deleteMessage(messageId: messageId, chatId: chatId, peerId: peerId)
 
     try await database.dbWriter.write { db in

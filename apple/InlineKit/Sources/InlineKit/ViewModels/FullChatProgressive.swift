@@ -30,12 +30,11 @@ public class MessagesProgressiveViewModel {
   // internals
   // was 80
   private lazy var initialLimit: Int = // divide window height by 25
-    if let height = ScreenMetrics.height
-  {
-    (Int(height.rounded()) / 24) + 30
-  } else {
-    60
-  }
+    if let height = ScreenMetrics.height {
+      (Int(height.rounded()) / 24) + 30
+    } else {
+      60
+    }
 
   private let log = Log.scoped("MessagesViewModel", enableTracing: false)
   private let db = AppDatabase.shared
@@ -130,7 +129,6 @@ public class MessagesProgressiveViewModel {
       // .messageId, then globalID out for lists
       case let .delete(messageDelete):
         if messageDelete.peer == peer {
-          print("deleting messages: \(messageDelete.messageIds) peer: \(messageDelete.peer)")
           let deletedIndices = messages.enumerated()
             .filter { messageDelete.messageIds.contains($0.element.message.messageId) }
             .map(\.offset)
@@ -380,7 +378,7 @@ public final class MessagesPublisher {
         Log.shared.error("Failed to get full message")
         return
       }
-      print("optimsitic add fullMessage: \(fullMessage)")
+
       publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
     } catch {
       Log.shared.error("Failed to get full message", error: error)
@@ -403,15 +401,14 @@ public final class MessagesPublisher {
     let fullMessage = try? await db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
-        if let messageGlobalId = message.globalId
-      {
-        query
-          .filter(id: messageGlobalId)
-      } else {
-        query
-          .filter(Column("messageId") == message.messageId)
-          .filter(Column("chatId") == message.chatId)
-      }
+        if let messageGlobalId = message.globalId {
+          query
+            .filter(id: messageGlobalId)
+        } else {
+          query
+            .filter(Column("messageId") == message.messageId)
+            .filter(Column("chatId") == message.chatId)
+        }
 
       return try base.fetchOne(db)
     }
@@ -429,19 +426,18 @@ public final class MessagesPublisher {
     let fullMessage = try? db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
-        if let messageGlobalId = message.globalId
-      {
-        query
-          .filter(id: messageGlobalId)
-      } else {
-        query
-          .filter(Column("messageId") == message.messageId)
-          .filter(Column("chatId") == message.chatId)
-      }
+        if let messageGlobalId = message.globalId {
+          query
+            .filter(id: messageGlobalId)
+        } else {
+          query
+            .filter(Column("messageId") == message.messageId)
+            .filter(Column("chatId") == message.chatId)
+        }
 
       return try base.fetchOne(db)
     }
-    print("FULL MESSAGE REACTIONS COUNT \(fullMessage?.reactions.count)")
+
     guard let fullMessage else {
       Log.shared.error("Failed to get full message")
       return

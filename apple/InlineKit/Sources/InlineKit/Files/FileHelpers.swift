@@ -28,7 +28,7 @@ public enum FileHelpers {
           attributes: nil
         )
       } catch {
-        print("Error creating directory: \(error.localizedDescription)")
+        Log.shared.error("Error creating directory: \(error.localizedDescription)")
         // Fall back to documents directory if creation fails
         return applicationSupportDirectory
       }
@@ -79,7 +79,7 @@ public enum FileHelpers {
           attributes: nil
         )
       } catch {
-        print("Error creating directory: \(error.localizedDescription)")
+        Log.shared.error("Error creating directory:", error: error)
         // Fall back to documents directory if creation fails
         return documentsDirectory
       }
