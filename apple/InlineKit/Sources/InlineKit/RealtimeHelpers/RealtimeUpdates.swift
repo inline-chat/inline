@@ -41,7 +41,6 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
           try deleteReaction.apply(db)
 
         case let .editMessage(editMessage):
-          print("EDIT MESSAGE IN UPDATE \(editMessage)")
           try editMessage.apply(db)
 
         default:
@@ -152,8 +151,6 @@ extension InlineProtocol.UpdateComposeAction {
         nil
     }
 
-    print("action: \(action)")
-
     if let action {
       Task { await ComposeActions.shared.addComposeAction(for: peerID.toPeer(), action: action, userId: userID) }
     } else {
@@ -193,7 +190,6 @@ extension InlineProtocol.UpdateDeleteMessages {
           prevChatLastMsgId = messageId
         }
 
-        print("Deleting message \(messageId) \(chatId)")
         // TODO: Optimize this to use keys
         try Message
           .filter(Column("messageId") == messageId)
@@ -240,12 +236,10 @@ extension InlineProtocol.UpdateMessageAttachment {
 
 extension InlineProtocol.UpdateReaction {
   func apply(_ db: Database) throws {
-    print("RECIVED UPDATE FOR REACTON \(reaction)")
     _ = try Reaction.save(db, protocolMessage: reaction, publishChanges: true)
     let message = try Message.filter(Column("messageId") == reaction.messageID).fetchOne(db)
-    print("RECIVED UPDATE FOR REACTON ON MESSAGE \(message)")
+
     if let message {
-      print("TRIGERRING RELOAD")
       db.afterNextTransaction { _ in
         Task(priority: .userInitiated) { @MainActor in
           MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
@@ -266,10 +260,7 @@ extension InlineProtocol.UpdateDeleteReaction {
 
 extension InlineProtocol.UpdateEditMessage {
   func apply(_ db: Database) throws {
-    print("MESSAGE IN UPDATE \(message)")
     let savedMessage = try Message.save(db, protocolMessage: message, publishChanges: true)
-
-    print("SAVED MESSAGE: \(savedMessage)")
 
     db.afterNextTransaction { _ in
       Task { @MainActor in

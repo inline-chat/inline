@@ -90,7 +90,6 @@ actor TransactionsActor {
         await transaction.didSucceed(result: result)
         await completionHandler?(transaction)
       } catch TransactionError.canceled {
-        print("Transaction \(transaction.id) was canceled during execution or retry")
         await transaction.rollback()
         await completionHandler?(transaction)
         return

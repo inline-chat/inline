@@ -77,7 +77,6 @@ class ComposeTextView: UITextView {
     showPlaceholder(text.isEmpty)
 
     if text.contains("￼") || attributedText.string.contains("￼") {
-      print("CALLED from textDidChange 1")
       handleStickerDetection()
     }
 
@@ -264,7 +263,7 @@ class ComposeTextView: UITextView {
       {
         sendStickerImage(imageData, metadata: ["source": imageSource])
         safelyRemoveAttachment(at: range)
-      } 
+      }
     }
   }
 

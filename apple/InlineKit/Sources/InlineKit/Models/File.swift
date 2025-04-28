@@ -212,8 +212,6 @@ public extension File {
       // ... create new
       var file = try File(fromPhoto: photo)
 
-      print("saving file \(file)")
-
       // associate
       if let forMessageLocalId {
         // file.messageLocalId = forMessageLocalId
@@ -262,8 +260,6 @@ public extension File {
     else {
       // ... create new
       var file = try File(from: photo)
-
-      print("saving file \(file)")
 
       // associate
       if let forMessageLocalId {

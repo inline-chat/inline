@@ -270,7 +270,6 @@ class DocumentView: UIView {
 
   func downloadFile() {
     guard let documentInfo = documentInfo, let document = document, let fullMessage = fullMessage else {
-      print("Cannot download document: Missing document info")
       return
     }
     

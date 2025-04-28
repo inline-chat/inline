@@ -104,7 +104,6 @@ extension UIImage {
     compressionQuality: CGFloat = 0.9
   ) -> Bool {
     guard let imageData = format == .png ? png : jpeg else {
-      print("Failed to generate image data")
       return false
     }
 
@@ -122,5 +121,3 @@ struct File {
   let mimeType: String
   let fileName: String?
 }
-
-

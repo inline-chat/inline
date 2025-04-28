@@ -23,7 +23,6 @@ public struct TransactionAddReaction: Transaction {
     self.emoji = emoji
     self.userId = userId
     self.peerId = peerId
-    print(" init peerId", peerId)
   }
 
   // Methods

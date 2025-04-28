@@ -23,7 +23,6 @@ public struct TransactionEditMessage: Transaction {
     self.text = text
     self.chatId = chatId
     self.peerId = peerId
-    print(" init peerId", peerId)
   }
 
   // Methods
