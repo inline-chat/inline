@@ -855,11 +855,9 @@ private extension MessagesCollectionView {
         }
         var actions: [UIAction] = [copyAction]
 
-        // TODO: Add copy image
-        
         if fullMessage.photoInfo != nil {
           let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "photo.fill.on.rectangle")) {
-          [weak self] _ in
+            [weak self] _ in
             guard let self else { return }
             if let image = cell.messageView?.newPhotoView.getCurrentImage() {
               UIPasteboard.general.image = image
