@@ -1,0 +1,1 @@
+ALTER TABLE "link_embed_experimental" ALTER COLUMN "duration" SET DATA TYPE numeric(10, 4);

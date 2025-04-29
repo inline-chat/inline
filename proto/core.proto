@@ -231,7 +231,60 @@ message MessageAttachment {
 
   oneof attachment {
     MessageAttachmentExternalTask external_task = 2;
+    MessageAttachmentLinkEmbed_Experimental link_embed_experimental = 1000;
   }
+}
+
+message MessageAttachmentLinkEmbed_Experimental {
+  // ID of external task in our database
+  int64 id = 101;
+
+  // URL of the link
+  string url = 102;
+
+  // Title of the link
+  string title = 103;
+
+  // Image URL of the link
+  string image_url = 104;
+
+  // Image width of the link
+  int32 image_width = 105;
+
+  // Image height of the link
+  int32 image_height =  106;
+
+  // HTML of the link
+  string html = 107;
+
+  // Date of the link
+  int64 date = 108;
+
+  // Duration of the link
+  float duration = 109;
+
+  // Video ID of the link
+  string video_id = 1010;
+
+  // Provider of the link
+  string provider_name = 1011;
+
+  // Provider URL of the link
+  string provider_url = 1012;
+
+  // Description of the link
+  string description = 1013;  
+
+  // Share URL of the link
+  string share_url = 1014;
+
+  // Type of the link
+  LinkEmbedType type = 1015;
+}
+
+enum LinkEmbedType {
+  LINK = 0;
+  LOOM = 1;
 }
 
 message MessageAttachmentExternalTask {

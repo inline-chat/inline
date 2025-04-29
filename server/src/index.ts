@@ -21,6 +21,7 @@ import { Log } from "@in/server/utils/log"
 import { realtime } from "@in/server/realtime"
 import { integrationsRouter } from "./controllers/integrations/integrationsRouter"
 import type { Server } from "bun"
+import { loomRoutes } from "./controllers/loom"
 
 const port = process.env["PORT"] || 8000
 
@@ -37,6 +38,7 @@ export const app = new Elysia()
   .use(waitlist)
   .use(there)
   .use(integrationsRouter)
+  .use(loomRoutes)
   .use(
     swagger({
       path: "/v1/docs",

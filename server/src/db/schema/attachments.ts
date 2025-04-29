@@ -3,7 +3,32 @@ import { files } from "@in/server/db/schema/files"
 import { messages } from "@in/server/db/schema/messages"
 import { users } from "@in/server/db/schema/users"
 import { relations } from "drizzle-orm"
-import { pgTable, serial, integer, text, bigint } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, text, bigint, varchar, pgEnum, numeric } from "drizzle-orm/pg-core"
+
+
+export const linkEmbedType = pgEnum("link_embed_type", [
+  "link",
+  "loom"
+]);
+
+
+export const linkEmbed_experimental = pgTable("link_embed_experimental", {
+  id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
+  url: text("url").notNull(),
+  type: linkEmbedType("type").default("link").notNull(),
+  providerName: text("provider_name"),
+  providerUrl: text("provider_url"),
+  title: text("title"),
+  description: text("description"),
+  imageUrl: varchar("image_url", { length: 2_048 }),
+  imageWidth: integer("image_width"),
+  imageHeight: integer("image_height"),
+  html: text("html"),
+  date: creationDate,
+  shareUrl: text('share_url').unique().notNull(),
+  videoId: text("video_id"),
+  duration: numeric("duration", {precision: 10, scale: 3}),
+})
 
 export const externalTasks = pgTable("external_tasks", {
   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
@@ -28,6 +53,7 @@ export const messageAttachments = pgTable("message_attachments", {
 
   /** external task id */
   externalTaskId: bigint("external_task_id", { mode: "bigint" }).references(() => externalTasks.id),
+  linkEmbedId: bigint("link_embed_id", {mode:"bigint" }).references(() => linkEmbed_experimental.id)
 })
 
 export const messageAttachmentsRelations = relations(messageAttachments, ({ one }) => ({
@@ -35,6 +61,12 @@ export const messageAttachmentsRelations = relations(messageAttachments, ({ one 
     fields: [messageAttachments.externalTaskId],
     references: [externalTasks.id],
   }),
+
+  linkEmbed: one(linkEmbed_experimental, {
+    fields: [messageAttachments.linkEmbedId],
+    references: [linkEmbed_experimental.id],
+  }),
+
   message: one(messages, {
     fields: [messageAttachments.messageId],
     references: [messages.globalId],
@@ -46,3 +78,7 @@ export type DbNewMessageAttachment = typeof messageAttachments.$inferInsert
 
 export type DbExternalTask = typeof externalTasks.$inferSelect
 export type DbNewExternalTask = typeof externalTasks.$inferInsert
+
+  export type DbLinkEmbed = typeof linkEmbed_experimental.$inferSelect
+  export type DbNewLinkEmbed = typeof linkEmbed_experimental.$inferInsert
+
