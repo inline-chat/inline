@@ -124,6 +124,7 @@ final class MessagesCollectionView: UICollectionView {
   static let messagesBottomPadding = 6.0
   func updateContentInsets() {
     guard !MessagesCollectionView.contextMenuOpen else {
+      print("CONTEXT MENU OPEN IN UPDATECONTENTINSET \(MessagesCollectionView.contextMenuOpen)")
       return
     }
     guard let window else {
@@ -423,7 +424,7 @@ private extension MessagesCollectionView {
 
     func collectionView(
       _ collectionView: UICollectionView,
-      willEndContextMenu configuration: UIContextMenuConfiguration,
+      willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
       animator: UIContextMenuInteractionAnimating?
     ) {
       MessagesCollectionView.contextMenuOpen = false
@@ -695,8 +696,8 @@ private extension MessagesCollectionView {
 
     @objc private func handleReactionButtonTap(_ sender: UIButton) {
       let fullMessage = messages[sender.tag / 1_000]
-      let messageIndex = sender.tag / 1_000
-      let reactionIndex = sender.tag % 1_000
+      _ = sender.tag / 1_000
+      _ = sender.tag % 1_000
       let message = fullMessage.message
 
       guard let emoji = sender.configuration?.title else { return }
