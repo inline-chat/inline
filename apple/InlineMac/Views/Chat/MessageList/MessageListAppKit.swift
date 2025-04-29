@@ -6,6 +6,7 @@ import Throttler
 
 class MessageListAppKit: NSViewController {
   // Data
+  private var dependencies: AppDependencies
   private var peerId: Peer
   private var chat: Chat?
   private var chatId: Int64 { chat?.id ?? 0 }
@@ -37,7 +38,8 @@ class MessageListAppKit: NSViewController {
 
   private var eventMonitorTask: Task<Void, Never>?
 
-  init(peerId: Peer, chat: Chat) {
+  init(dependencies: AppDependencies, peerId: Peer, chat: Chat) {
+    self.dependencies = dependencies
     self.peerId = peerId
     self.chat = chat
     viewModel = MessagesProgressiveViewModel(peer: peerId)
@@ -88,7 +90,7 @@ class MessageListAppKit: NSViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private lazy var toolbarBgView: NSVisualEffectView = ChatToolbarView()
+  private lazy var toolbarBgView: NSVisualEffectView = ChatToolbarView(dependencies: dependencies)
 
   private func toggleToolbarVisibility(_ hide: Bool) {
     NSAnimationContext.runAnimationGroup { context in
@@ -222,7 +224,7 @@ class MessageListAppKit: NSViewController {
     // TODO: extract insets logic from bottom here.
   }
 
-  private var toolbarHeight: CGFloat = 52
+  private var toolbarHeight: CGFloat = 50
 
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did
   // layout and it fixes the issue.
@@ -293,9 +295,9 @@ class MessageListAppKit: NSViewController {
     let atTop = isAtTop()
     isToolbarVisible = !atTop
     // window.titlebarAppearsTransparent = atTop
-    window.titlebarAppearsTransparent = true
-    window.titlebarSeparatorStyle = .automatic
-    window.isMovableByWindowBackground = false
+//    window.titlebarAppearsTransparent = true
+//    window.titlebarSeparatorStyle = .automatic
+//    window.isMovableByWindowBackground = false
 
     toggleToolbarVisibility(atTop)
   }
