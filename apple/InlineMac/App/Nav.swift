@@ -124,6 +124,11 @@ extension Nav {
 
     reflectHistoryChange()
   }
+  
+//  public func openEntry(_ entry: NavEntry) {
+//    history.append(entry)
+//    reflectHistoryChange()
+//  }
 
   public func open(_ route: NavEntry.Route) {
     // optimistic
