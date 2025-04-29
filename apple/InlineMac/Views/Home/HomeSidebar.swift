@@ -73,29 +73,39 @@ struct HomeSidebar: View {
     }
     .listStyle(.sidebar)
     .animation(.smoothSnappy, value: items)
-    .safeAreaInset(
-      edge: .top,
-      content: {
-        VStack(alignment: .leading, spacing: 0) {
-          HStack(alignment: .center, spacing: 0) {
-            SelfUser()
-              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while the
-              /// wrapper view was moving
-              .scaleEffect(1.0)
-
-            AlphaCapsule()
-          }
-          .padding(.top, 0)
-          .padding(.bottom, 8)
-
-          searchBar
-            .padding(.bottom, 2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal) // default side padding
-        .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
-      }
-    )
+    
+//    .safeAreaInset(
+//      edge: .top,
+//      content: {
+//        Color.clear
+//          .frame(height: 12)
+//      }
+//    )
+    
+//    .safeAreaInset(
+//      edge: .top,
+//      content: {
+//        VStack(alignment: .leading, spacing: 0) {
+//          HStack(alignment: .center, spacing: 0) {
+//            SelfUser()
+//              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while the
+//              /// wrapper view was moving
+//              .scaleEffect(1.0)
+//
+//            AlphaCapsule()
+//          }
+//          .padding(.top, 0)
+//          .padding(.bottom, 8)
+//
+//          searchBar
+//            .padding(.bottom, 2)
+//        }
+//        .frame(maxWidth: .infinity, alignment: .leading)
+//        .padding(.horizontal) // default side padding
+//        .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
+//      }
+//    )
+    
     .onChange(of: nav.currentRoute) { _ in
       DispatchQueue.main.async {
         subscribeNavKeyMonitor()

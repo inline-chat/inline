@@ -159,6 +159,18 @@ public extension NSScrollView {
   }
 }
 
+public extension NSAppearance {
+  var isDarkMode: Bool {
+    if #available(macOS 10.14, *) {
+      return name == .darkAqua ||
+      name == .vibrantDark ||
+      name == .accessibilityHighContrastDarkAqua ||
+      name == .accessibilityHighContrastVibrantDark
+    }
+    return false
+  }
+}
+
 public extension NSRange {
   var min: Int {
     location
