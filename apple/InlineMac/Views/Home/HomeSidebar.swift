@@ -22,6 +22,12 @@ struct HomeSidebar: View {
     }
   }
 
+  enum Tab: String {
+    case inbox
+    case archive
+    case search
+  }
+
   // MARK: - State
 
   @Environment(\.appDatabase) var db
@@ -33,6 +39,9 @@ struct HomeSidebar: View {
   @EnvironmentStateObject var home: HomeViewModel
   @StateObject var search = GlobalSearch()
   @FocusState private var isSearching: Bool
+
+  @State private var tab: Tab = .inbox
+  @State private var isScrolledToBottom = false
 
   // MARK: - Initializer
 
@@ -70,10 +79,28 @@ struct HomeSidebar: View {
       } else {
         spacesAndUsersView
       }
+
+      // Add this invisible marker at the end of your list
+      Color.clear
+        .frame(height: 1)
+        .id("bottom")
+        .onAppear {
+          isScrolledToBottom = true
+        }
+        .onDisappear {
+          isScrolledToBottom = false
+        }
     }
     .listStyle(.sidebar)
     .animation(.smoothSnappy, value: items)
-    
+    .safeAreaInset(
+      edge: .bottom,
+      content: {
+        tabs
+          .padding(.top, -8)
+      }
+    )
+
 //    .safeAreaInset(
 //      edge: .top,
 //      content: {
@@ -81,7 +108,7 @@ struct HomeSidebar: View {
 //          .frame(height: 12)
 //      }
 //    )
-    
+
 //    .safeAreaInset(
 //      edge: .top,
 //      content: {
@@ -105,7 +132,7 @@ struct HomeSidebar: View {
 //        .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
 //      }
 //    )
-    
+
     .onChange(of: nav.currentRoute) { _ in
       DispatchQueue.main.async {
         subscribeNavKeyMonitor()
@@ -113,6 +140,57 @@ struct HomeSidebar: View {
     }
     .onAppear {
       subscribeNavKeyMonitor()
+    }
+  }
+
+  @ViewBuilder
+  var tabs: some View {
+    HStack(spacing: 0) {
+      Spacer()
+
+      Button(action: {
+        // Archive tab
+      }) {
+        let isActive = tab == .archive
+        Image(systemName: "archivebox.fill")
+          .font(.system(size: 16, weight: .semibold))
+          .foregroundStyle(isActive ? .primary : .tertiary)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 4)
+      }
+      .buttonStyle(.plain)
+
+      Button(action: {
+        // Inbox tab
+      }) {
+        let isActive = tab == .inbox
+        Image(systemName: "tray.fill")
+          .font(.system(size: 16, weight: .semibold))
+          .foregroundStyle(isActive ? .primary : .tertiary)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 4)
+      }
+      .buttonStyle(.plain)
+
+      Button(action: {
+        // Search tab
+      }) {
+        let isActive = tab == .search
+        Image(systemName: "magnifyingglass")
+          .font(.system(size: 16, weight: .semibold))
+          .foregroundStyle(isActive ? .primary : .tertiary)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 4)
+      }
+      .buttonStyle(.plain)
+
+      Spacer()
+    }
+    .frame(height: 44)
+    .overlay(alignment: .top) {
+      if !isScrolledToBottom {
+        Divider()
+      }
     }
   }
 
@@ -163,6 +241,17 @@ struct HomeSidebar: View {
       space: space
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+
+//    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+//      Button(action: {
+//        nav.openSpace(space.id)
+//      }) {
+//        Image(systemName: "chevron.right")
+//          .font(.system(size: 16, weight: .semibold))
+//          .foregroundStyle(.primary)
+//      }
+//      .tint(.primary)
+//    }
   }
 
   @ViewBuilder
