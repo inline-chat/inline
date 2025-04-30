@@ -53,9 +53,6 @@
     "🫙" : {
 
     },
-    "Accent Color" : {
-
-    },
     "Account" : {
 
     },
@@ -236,9 +233,6 @@
           }
         }
       }
-    },
-    "Hey there! This is how your messages will look" : {
-
     },
     "Integrations" : {
 
@@ -511,7 +505,7 @@
     "Sticker" : {
 
     },
-    "This is a reply message" : {
+    "Themes" : {
 
     },
     "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
