@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ThemeSelectionView: View {
   @StateObject private var themeManager = ThemeManager.shared
-  @State private var sewlectedThemeId: String
+  @State private var selectedThemeId: String
     
   init() {
     _selectedThemeId = State(initialValue: ThemeManager.shared.selected.id)
