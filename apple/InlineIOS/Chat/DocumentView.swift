@@ -47,7 +47,7 @@ class DocumentView: UIView {
   }
   
   var progressBarColor: UIColor {
-    outgoing ? .white : ColorManager.shared.selectedColor
+    outgoing ? .white : ThemeManager.shared.selected.accent
   }
 
   // MARK: - Initializers
@@ -181,12 +181,12 @@ class DocumentView: UIView {
     switch documentState {
     case .needsDownload:
       iconView.image = UIImage(systemName: "arrow.down")
-      iconView.tintColor = outgoing ? .white : ColorManager.shared.selectedColor
+      iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
       
     case .downloading:
       
       iconView.image = UIImage(systemName: "xmark")
-      iconView.tintColor = outgoing ? .white : ColorManager.shared.selectedColor
+      iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
       
     case .locallyAvailable:
       // Show file type icon
