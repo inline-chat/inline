@@ -41,7 +41,8 @@ struct HomeSidebar: View {
   @FocusState private var isSearching: Bool
 
   @State private var tab: Tab = .inbox
-  @State private var isScrolledToBottom = false
+  @State private var isAtTop = false
+  @State private var isAtBottom = false
 
   // MARK: - Initializer
 
@@ -73,7 +74,7 @@ struct HomeSidebar: View {
   // MARK: - Views
 
   var body: some View {
-    List {
+    let view = List {
       if search.hasResults || (isSearching && search.canSearch) {
         searchView
       } else {
@@ -81,16 +82,19 @@ struct HomeSidebar: View {
       }
 
       // Add this invisible marker at the end of your list
-      Color.clear
-        .frame(height: 1)
-        .id("bottom")
-        .onAppear {
-          isScrolledToBottom = true
-        }
-        .onDisappear {
-          isScrolledToBottom = false
-        }
+      // Color.clear
+//      HStack(spacing: 0) {}
+//        .frame(height: 1)
+//        .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+//        .padding(0)
+//        .onAppear {
+//          isScrolledToBottom = true
+//        }
+//        .onDisappear {
+//          isScrolledToBottom = false
+//        }
     }
+    .padding(.bottom, 0)
     .listStyle(.sidebar)
     .animation(.smoothSnappy, value: items)
     .safeAreaInset(
@@ -141,6 +145,28 @@ struct HomeSidebar: View {
     .onAppear {
       subscribeNavKeyMonitor()
     }
+
+    if #available(macOS 15.0, *) {
+      view
+        .overlay(alignment: .top) {
+          if !isAtTop {
+            Divider()
+          }
+        }
+
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+          geometry.contentOffset.y <= 0
+        } action: { _, isBeyondZero in
+          self.isAtTop = isBeyondZero
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+          geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height
+        } action: { _, isBeyondBottom in
+          self.isAtBottom = isBeyondBottom
+        }
+    } else {
+      view
+    }
   }
 
   @ViewBuilder
@@ -188,7 +214,7 @@ struct HomeSidebar: View {
     }
     .frame(height: 44)
     .overlay(alignment: .top) {
-      if !isScrolledToBottom {
+      if !isAtBottom {
         Divider()
       }
     }
