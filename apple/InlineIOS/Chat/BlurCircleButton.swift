@@ -28,7 +28,7 @@ class BlurCircleButton: UIButton {
     backgroundView.isUserInteractionEnabled = false
     blurEffect.isUserInteractionEnabled = false
     iconImageView.isUserInteractionEnabled = false
-    iconImageView.tintColor = ColorManager.shared.selectedColor
+    iconImageView.tintColor = ThemeManager.shared.selected.accent
     isUserInteractionEnabled = true
     addSubview(backgroundView)
 

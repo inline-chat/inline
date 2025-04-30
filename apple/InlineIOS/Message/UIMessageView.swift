@@ -35,9 +35,9 @@ class UIMessageView: UIView {
     if isEmojiOnlyMessage || isSticker {
       UIColor.clear
     } else if outgoing {
-      ColorManager.shared.selectedColor
+      ThemeManager.shared.selected.bubbleBackground
     } else {
-      ColorManager.shared.secondaryColor
+      ThemeManager.shared.selected.incomingBubbleBackground
     }
   }
 
@@ -202,7 +202,7 @@ class UIMessageView: UIView {
     ])
   }
 
-   func setupReactionsIfNeeded(animatedEmoji: String? = nil) {
+  func setupReactionsIfNeeded(animatedEmoji: String? = nil) {
     guard !fullMessage.reactions.isEmpty else { return }
 
     var reactionsDict: [String: (count: Int, userIds: [Int64], latestDate: Date)] = [:]
