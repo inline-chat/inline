@@ -76,7 +76,7 @@ class ChatContainerView: UIView {
   private var composeEmbedBottomConstraint: NSLayoutConstraint?
 
   private func setupViews() {
-    backgroundColor = .systemBackground
+    backgroundColor =  ThemeManager.shared.selected.backgroundColor
 
     addSubview(messagesCollectionView)
     addSubview(blurView)

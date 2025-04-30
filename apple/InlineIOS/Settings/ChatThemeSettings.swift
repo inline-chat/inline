@@ -1,152 +1,137 @@
-// ChatThemeSettings.swift
-import InlineKit
-import InlineUI
+// ThemeSelectionView.swift
 import SwiftUI
 
-struct ThemeSection: View {
+struct ThemeSelectionView: View {
+  @StateObject private var themeManager = ThemeManager.shared
+  @State private var sewlectedThemeId: String
+    
+  init() {
+    _selectedThemeId = State(initialValue: ThemeManager.shared.selected.id)
+  }
+    
   var body: some View {
     List {
-      ChatThemeSettings()
+      ThemePreviewCard(theme: themeManager.selected)
+        .listRowInsets(EdgeInsets())
+        
+      themeGrid
     }
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
     .toolbar {
-      ToolbarItem(id: "appearance", placement: .principal) {
+      ToolbarItem(placement: .principal) {
         HStack {
-          Image(systemName: "paintbrush.fill")
+          Image(systemName: "paintpalette.fill")
             .foregroundColor(.secondary)
             .font(.callout)
-            .padding(.trailing, 4)
-          VStack(alignment: .leading) {
-            Text("Appearance")
-              .font(.body)
-              .fontWeight(.semibold)
+          Text("Themes")
+            .font(.headline)
+        }
+      }
+    }
+    .animation(.spring(response: 0.3), value: selectedThemeId)
+  }
+    
+  private var themeGrid: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      LazyHStack(spacing: 12) {
+        ForEach(ThemeManager.themes, id: \.id) { theme in
+          ThemeCard(
+            theme: theme,
+            isSelected: theme.id == selectedThemeId
+          )
+          .onTapGesture {
+            selectTheme(theme)
           }
         }
       }
+      .padding(.vertical)
     }
+  }
+    
+  private func selectTheme(_ theme: ThemeConfig) {
+    selectedThemeId = theme.id
+    themeManager.switchToTheme(theme)
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
   }
 }
 
-struct ChatThemeSettings: View {
-  @State private var accentColor: UIColor = ColorManager.shared.selectedColor
-
-  var body: some View {
-    Section(header: Text("Accent Color")) {
-      VStack(alignment: .leading, spacing: 16) {
-        MessagePreview(accentColor: accentColor)
-          .background(Color(.systemGray6).opacity(0.5))
-          .cornerRadius(16)
-
-        ThemeColorGrid(selectedColor: $accentColor)
-      }
-      .padding(.vertical, 12)
-      .animation(.spring(response: 0.35, dampingFraction: 0.5), value: accentColor)
-    }
-  }
-}
-
-struct ThemeColorGrid: View {
-  @Binding var selectedColor: UIColor
-
-  private let gridColumns = [
-    GridItem(
-      .adaptive(minimum: Theme.Settings.picker.minWidth),
-      spacing: Theme.Settings.picker.spacing
-    ),
-  ]
-
-  var body: some View {
-    LazyVGrid(columns: gridColumns, spacing: Theme.Settings.picker.spacing) {
-      ForEach(ColorManager.shared.availableColors, id: \.self) { themeColor in
-        ThemeColorButton(
-          color: themeColor,
-          isSelected: themeColor == selectedColor,
-          selectedColor: selectedColor
-        ) {
-          updateThemeColor(themeColor)
-        }
-      }
-    }
-  }
-
-  private func updateThemeColor(_ color: UIColor) {
-    withAnimation {
-      selectedColor = color
-      ColorManager.shared.saveColor(color)
-      UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-  }
-}
-
-struct ThemeColorButton: View {
-  let color: UIColor
+struct ThemeCard: View {
+  let theme: ThemeConfig
   let isSelected: Bool
-  let selectedColor: UIColor
-  let action: () -> Void
-
+    
   var body: some View {
-    ZStack {
+    VStack(alignment: .center) {
       Circle()
-        .fill(Color(uiColor: color))
-        .frame(
-          width: Theme.Settings.picker.buttonSize,
-          height: Theme.Settings.picker.buttonSize
+        .fill(Color(theme.bubbleBackground))
+        .frame(width: 50)
+        .padding(2)
+        .background(
+          Circle()
+            .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
         )
-        .scaleEffect(isSelected ? 1.1 : 1)
-
-      Circle()
-        .stroke(Color(uiColor: selectedColor), lineWidth: isSelected ? 2 : 0)
-        .frame(
-          width: Theme.Settings.picker.borderSize,
-          height: Theme.Settings.picker.borderSize
-        )
-        .opacity(isSelected ? 1 : 0)
+      
+      Text(theme.name)
+        .font(.footnote)
+        .foregroundColor(isSelected ? .primary : .secondary)
+        .lineLimit(1)
     }
-    .buttonStyle(PlainButtonStyle())
-    .onTapGesture(perform: action)
-    .animation(.spring(response: 0.35, dampingFraction: 0.5), value: isSelected)
+    .frame(minWidth: 80)
+  }
+    
+  private func messageBubble(outgoing: Bool, text: String) -> some View {
+    HStack {
+      if outgoing { Spacer() }
+            
+      Text(text)
+        .font(.caption)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+          outgoing ? Color(theme.bubbleBackground) : Color(theme.incomingBubbleBackground)
+        )
+        .foregroundColor(outgoing ? .white : .primary)
+        .cornerRadius(10)
+            
+      if !outgoing { Spacer() }
+    }
   }
 }
 
-struct MessagePreview: View {
-  let accentColor: UIColor
-
+struct ThemePreviewCard: View {
+  let theme: ThemeConfig
+    
   var body: some View {
     VStack(spacing: 12) {
-      outgoingMessageBubble
-      incomingMessageBubble
+      messageBubble(outgoing: false, text: "Hey! Just pushed an update for users! Have you checked it out yet?")
+      messageBubble(outgoing: true, text: "Nice. Cheking it out now.")
     }
     .padding()
+    .background(Color(theme.backgroundColor).ignoresSafeArea())
   }
-
-  private var outgoingMessageBubble: some View {
+    
+  private func messageBubble(outgoing: Bool, text: String) -> some View {
     HStack {
-      Spacer()
-      Text("Hey there! This is how your messages will look")
+      if outgoing { Spacer() }
+            
+      Text(text)
+        .font(.body)
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color(uiColor: accentColor))
-        .foregroundColor(.white)
-        .cornerRadius(16)
-        .padding(.trailing, 8)
-    }
-  }
-
-  private var incomingMessageBubble: some View {
-    HStack {
-      Text("This is a reply message")
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color(.systemGray6))
-        .cornerRadius(16)
-        .padding(.leading, 8)
-      Spacer()
+        .padding(.vertical, 6)
+        .background(
+          outgoing ? Color(theme.bubbleBackground) : Color(theme.incomingBubbleBackground)
+        )
+        .foregroundColor(outgoing ? .white : .primary)
+        .cornerRadius(18)
+        .frame(maxWidth: 260, alignment: outgoing ? .trailing : .leading)
+            
+      if !outgoing { Spacer() }
     }
   }
 }
 
-#Preview("Theme Settings") {
-  ChatThemeSettings()
-    .padding()
+#Preview("Theme Selection") {
+  NavigationView {
+    ThemeSelectionView()
+  }
 }

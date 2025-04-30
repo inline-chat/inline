@@ -52,7 +52,7 @@ struct SettingsView: View {
         }
         .padding(.vertical, 2)
       }
-      NavigationLink(destination: ThemeSection()) {
+      NavigationLink(destination: ThemeSelectionView()) {
         HStack {
           Image(systemName: "paintbrush.fill")
             .foregroundColor(.white)

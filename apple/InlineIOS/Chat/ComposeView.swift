@@ -218,7 +218,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
     )
     config.baseForegroundColor = .white
-    config.background.backgroundColor = ColorManager.shared.selectedColor
+    config.background.backgroundColor = ThemeManager.shared.selected.accent
     config.cornerStyle = .capsule
 
     button.configurationUpdateHandler = { [weak button] _ in
