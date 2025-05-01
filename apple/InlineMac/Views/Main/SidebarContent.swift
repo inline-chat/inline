@@ -30,15 +30,21 @@ struct SidebarContent: View {
           .zIndex(1)
       }
     }
+    .background(
+      Color(nsColor: .controlBackgroundColor)
+        .opacity(0.3)
+        .ignoresSafeArea() // For full coverage
+    )
+
     .onChange(of: nav.currentSpaceId) { newValue in
       if let newSpaceId = newValue {
         // Going to a space
-        withAnimation(.smoothSnappy) {
+        withAnimation(.smoothSnappier) {
           animatingSpaceId = newSpaceId
         }
       } else {
         // Going back to home
-        withAnimation(.smoothSnappy) {
+        withAnimation(.smoothSnappier) {
           animatingSpaceId = nil
         }
       }
