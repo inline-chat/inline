@@ -42,7 +42,7 @@ class UIMessageView: UIView {
   }
 
   var textColor: UIColor {
-    outgoing ? .white : .label
+    outgoing ? .white : ThemeManager.shared.selected.primaryTextColor ?? .label
   }
 
   var message: Message {
