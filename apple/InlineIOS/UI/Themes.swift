@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct Default: ThemeConfig {
+  var primaryTextColor: UIColor?
+
+  var secondaryTextColor: UIColor?
+
   var id: String = "Default"
 
   var name: String = "Default"
@@ -20,6 +24,22 @@ struct Default: ThemeConfig {
 }
 
 struct Lavender: ThemeConfig {
+  var primaryTextColor: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#EAEFFF")!
+    } else {
+      UIColor(hex: "#000000")!
+    }
+  })
+
+  var secondaryTextColor: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#696A85")!
+    } else {
+      UIColor(hex: "#BDC2D1")!
+    }
+  })
+
   var id: String = "lavender"
 
   var name: String = "Lavender"
@@ -32,7 +52,7 @@ struct Lavender: ThemeConfig {
     }
   })
 
-  var bubbleBackground: UIColor = .init(hex: "#8293FF")!
+  var bubbleBackground: UIColor = .init(hex: "#7A8AEF")!
   var incomingBubbleBackground: UIColor = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
       UIColor(hex: "#313244")!
@@ -45,6 +65,10 @@ struct Lavender: ThemeConfig {
 }
 
 struct PeonyPink: ThemeConfig {
+  var primaryTextColor: UIColor?
+
+  var secondaryTextColor: UIColor?
+
   var id: String = "PeonyPink"
 
   var name: String = "Peony Pink"
@@ -64,6 +88,10 @@ struct PeonyPink: ThemeConfig {
 }
 
 struct Orchid: ThemeConfig {
+  var primaryTextColor: UIColor?
+
+  var secondaryTextColor: UIColor?
+
   var id: String = "Orchid"
 
   var name: String = "Orchid"
