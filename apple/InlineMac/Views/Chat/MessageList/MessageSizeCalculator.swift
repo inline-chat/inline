@@ -568,7 +568,8 @@ class MessageSizeCalculator {
       wrapperHeight += namePlan.spacing.verticalTotal
     }
     if props.firstInGroup {
-      wrapperTopSpacing = Theme.messageGroupSpacing
+      /// Remove extra bubble spacing for now
+      // wrapperTopSpacing = Theme.messageGroupSpacing
     }
     if let avatarPlan {
       wrapperWidth += avatarPlan.size.width
