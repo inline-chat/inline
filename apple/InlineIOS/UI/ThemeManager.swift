@@ -8,6 +8,10 @@ protocol ThemeConfig {
   var bubbleBackground: UIColor { get }
   var incomingBubbleBackground: UIColor { get }
 
+  // only for incoming messages for now
+  var primaryTextColor: UIColor? { get }
+  var secondaryTextColor: UIColor? { get }
+
   var id: String { get }
   var name: String { get }
 }
