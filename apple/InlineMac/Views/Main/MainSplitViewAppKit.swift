@@ -8,7 +8,7 @@ class MainSplitViewController: NSSplitViewController {
   private var cancellables = Set<AnyCancellable>()
 
   private enum Metrics {
-    static let sidebarWidthRange = 210.0 ... 400.0
+    static let sidebarWidthRange = 220.0 ... 400.0
     static let contentMinWidth: CGFloat = 300
   }
 
@@ -104,7 +104,7 @@ class SidebarViewController: NSHostingController<AnyView> {
     self.dependencies = dependencies
     super.init(rootView: SidebarContent().environment(dependencies: dependencies))
     sizingOptions = [
-      .minSize,
+//      .minSize,
     ]
   }
 
