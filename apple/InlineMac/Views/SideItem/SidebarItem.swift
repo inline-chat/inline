@@ -84,6 +84,19 @@ struct SidebarItem: View {
     .onTapGesture {
       onPress?()
     }
+    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+      Button(role: .destructive) {
+        if let peerId {
+          // TODO: handle space
+          Task(priority: .userInitiated) {
+            try await DataManager.shared.updateDialog(peerId: peerId, archived: !(dialog?.archived ?? false))
+          }
+        }
+      } label: {
+        Label("Archive", systemImage: "archivebox.fill")
+      }
+      .tint(.purple)
+    }
   }
 
   @ViewBuilder
