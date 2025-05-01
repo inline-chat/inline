@@ -11,6 +11,7 @@ struct ChatView: View {
 
   @State var text: String = ""
   @State var textViewHeight: CGFloat = 36
+  @State private var navBarHeight: CGFloat = 0
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
@@ -66,16 +67,6 @@ struct ChatView: View {
     } else {
       ""
     }
-//    } else if let online = fullChatViewModel.peerUser?.online {
-//      online
-//        ? "online"
-//        : (
-//          fullChatViewModel.peerUser?.lastOnline != nil
-//            ? getLastOnlineText(date: fullChatViewModel.peerUser?.lastOnline) : "offline"
-//        )
-//    } else {
-//      "last seen recently"
-//    }
   }
 
   init(peer: Peer, preview: Bool = false) {
@@ -89,19 +80,44 @@ struct ChatView: View {
   // MARK: - Body
 
   var body: some View {
-    ChatViewUIKit(
-      peerId: peerId,
-      chatId: fullChatViewModel.chat?.id ?? 0,
-      spaceId: fullChatViewModel.chat?.spaceId ?? 0
-    )
-    .edgesIgnoringSafeArea(.all)
+    ZStack {
+      ChatViewUIKit(
+        peerId: peerId,
+        chatId: fullChatViewModel.chat?.id ?? 0,
+        spaceId: fullChatViewModel.chat?.spaceId ?? 0
+      )
+      .edgesIgnoringSafeArea(.all)
+
+      VStack {
+        VariableBlurView()
+          .frame(height: navBarHeight + 10)
+          .allowsHitTesting(false)
+          .background {
+            LinearGradient(
+              gradient: Gradient(colors: [Color(ThemeManager.shared.selected.backgroundColor).opacity(0.2), Color(ThemeManager.shared.selected.backgroundColor).opacity(0)]),
+              startPoint: .top,
+              endPoint: .bottom
+            )
+          }
+        Spacer()
+      }
+      .ignoresSafeArea(.all)
+    }
     .onReceive(timer) { _ in
       currentTime = Date()
     }
+    .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
+      if let height = notification.userInfo?["navBarHeight"] as? CGFloat {
+        self.navBarHeight = height
+      }
+    }
+    .toolbarBackground(.hidden, for: .navigationBar)
+    .toolbarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .principal) {
         header
       }
+
       if let user = fullChatViewModel.peerUserInfo {
         ToolbarItem(placement: .topBarTrailing) {
           UserAvatar(userInfo: user)
@@ -124,9 +140,6 @@ struct ChatView: View {
           .background(.ultraThickMaterial)
       }
     }
-    .navigationBarHidden(false)
-    .toolbarBackground(.visible, for: .navigationBar)
-    .toolbarTitleDisplayMode(.inline)
     .onAppear {
       fetch()
     }
@@ -182,5 +195,32 @@ struct CustomButtonStyle: ButtonStyle {
     configuration.label
       .scaleEffect(configuration.isPressed ? 0.8 : 1.0)
       .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+  }
+}
+
+struct NavBarAccessor: UIViewControllerRepresentable {
+  var callback: (UINavigationBar) -> Void
+  private let proxyController = ViewController()
+
+  func makeUIViewController(context: UIViewControllerRepresentableContext<NavBarAccessor>) ->
+    UIViewController
+  {
+    proxyController.callback = callback
+    return proxyController
+  }
+
+  func updateUIViewController(_ uiViewController: UIViewController, context: UIViewControllerRepresentableContext<NavBarAccessor>) {}
+
+  typealias UIViewControllerType = UIViewController
+
+  private class ViewController: UIViewController {
+    var callback: (UINavigationBar) -> Void = { _ in }
+
+    override func viewWillAppear(_ animated: Bool) {
+      super.viewWillAppear(animated)
+      if let navBar = navigationController {
+        callback(navBar.navigationBar)
+      }
+    }
   }
 }
