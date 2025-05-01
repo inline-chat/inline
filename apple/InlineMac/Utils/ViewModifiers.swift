@@ -93,10 +93,12 @@ extension View {
 
 public extension Animation {
   static var fastFeedback: Animation {
-    .easeOut(duration: 0.08)
+    // .easeOut(duration: 0.06)
+    // .easeInOut(duration: 0.06)
+    .easeIn(duration: 0.04)
   }
-  
- static var smoothSnappy: Animation {
+
+  static var smoothSnappy: Animation {
     .interpolatingSpring(
       duration: 0.25,
       bounce: 0
@@ -108,6 +110,13 @@ public extension Animation {
       response: 0.15,
       dampingFraction: 0.4,
       blendDuration: 0
+    )
+  }
+
+  static var smoothSnappier: Animation {
+    .interpolatingSpring(
+      duration: 0.2,
+      bounce: 0
     )
   }
 }
