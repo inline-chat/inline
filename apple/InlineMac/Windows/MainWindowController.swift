@@ -62,6 +62,7 @@ class MainWindowController: NSWindowController {
     window?.setFrameAutosaveName("MainWindow")
 
     switchTopLevel(topLevelRoute)
+    window?.minSize = NSSize(width: 330, height: 220)
 //    if topLevelRoute == .onboarding {
 //      setupOnboarding()
 //    } else {
