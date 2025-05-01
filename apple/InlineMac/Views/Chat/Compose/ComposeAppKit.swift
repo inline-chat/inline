@@ -99,7 +99,7 @@ class ComposeAppKit: NSView {
     return material
   }()
 
-  var hasTopSeperator: Bool = true
+  var hasTopSeperator: Bool = false
 
   // -------
 
