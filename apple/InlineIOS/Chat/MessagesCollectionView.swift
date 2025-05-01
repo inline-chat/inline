@@ -77,7 +77,7 @@ final class MessagesCollectionView: UICollectionView {
       self,
       selector: #selector(orientationDidChange),
       name: UIDevice.orientationDidChangeNotification,
-      object: nil
+      object: nil,
     )
   }
 
@@ -124,7 +124,6 @@ final class MessagesCollectionView: UICollectionView {
   static let messagesBottomPadding = 6.0
   func updateContentInsets() {
     guard !MessagesCollectionView.contextMenuOpen else {
-      print("CONTEXT MENU OPEN IN UPDATECONTENTINSET \(MessagesCollectionView.contextMenuOpen)")
       return
     }
     guard let window else {
@@ -133,10 +132,22 @@ final class MessagesCollectionView: UICollectionView {
 
     let topContentPadding: CGFloat = 10
     let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
+
     let isLandscape = UIDevice.current.orientation.isLandscape
-    let topSafeArea = isLandscape ? window.safeAreaInsets.left : window.safeAreaInsets.top
-    let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
+
+    // let topSafeArea = isLandscape ? window.safeAreaInsets.left : window.safeAreaInsets.top
+    let topSafeArea = isLandscape ? window.safeAreaInsets.top : window.safeAreaInsets.top
+//    let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
+    let bottomSafeArea = isLandscape ? window.safeAreaInsets.bottom : window.safeAreaInsets.bottom
     let totalTopInset = topSafeArea + navBarHeight
+
+    NotificationCenter.default.post(
+      name: Notification.Name("NavigationBarHeight"),
+      object: nil,
+      userInfo: [
+        "navBarHeight": totalTopInset,
+      ]
+    )
 
     var bottomInset: CGFloat = 0.0
 
@@ -175,9 +186,10 @@ final class MessagesCollectionView: UICollectionView {
   @objc func orientationDidChange(_ notification: Notification) {
     coordinator.clearSizeCache()
     guard !isKeyboardVisible else { return }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-      self.updateContentInsets()
+//    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+    DispatchQueue.main.async {
       UIView.animate(withDuration: 0.3) {
+        self.updateContentInsets()
         if self.shouldScrollToBottom, !self.itemsEmpty {
           self.scrollToItem(
             at: IndexPath(item: 0, section: 0),
