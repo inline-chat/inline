@@ -24,10 +24,10 @@ struct SidebarItem: View {
   // MARK: - Constants
 
   static var avatarSize: CGFloat = 46
-  static var titleFont: Font = .body.weight(.medium)
+  static var titleFont: Font = .system(size: 13.0).weight(.regular)
   static var subtitleFont: Font = .system(size: 12.0)
-  static var subtitleColor: Color = .secondary
-  static var height: CGFloat = 60
+  static var subtitleColor: Color = .secondary.opacity(0.9)
+  static var height: CGFloat = 56
   static var verticalPadding: CGFloat = (Self.height - Self.avatarSize) / 2
   static var gutterWidth: CGFloat = Theme.sidebarItemInnerSpacing
   static var avatarAndContentSpacing: CGFloat = 8
@@ -67,12 +67,12 @@ struct SidebarItem: View {
       gutter
       avatar
       content
-      Spacer()
     }
     .padding(.vertical, Self.verticalPadding)
     .frame(height: Self.height)
     .background(background)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.bottom, 1)
     .padding(
       .horizontal,
       -Theme.sidebarNativeDefaultEdgeInsets +
@@ -108,6 +108,7 @@ struct SidebarItem: View {
       nameView
       lastMessageView
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.leading, Self.avatarAndContentSpacing)
   }
 
@@ -191,6 +192,17 @@ struct SidebarItem: View {
     }
   }
 
+  var peerId: Peer? {
+    switch type {
+      case let .chat(chat):
+        .thread(id: chat.id)
+      case let .user(userInfo, _):
+        .user(id: userInfo.user.id)
+      default:
+        nil
+    }
+  }
+
   var userFullName: String {
     switch type {
       case let .user(userInfo, _):
@@ -232,7 +244,11 @@ struct SidebarItem: View {
   }
 
   var selectedBackgroundColor: Color {
-    colorScheme == .dark ? Color(.controlBackgroundColor) : .white.opacity(0.94)
+    // White style
+    // colorScheme == .dark ? Color(.controlBackgroundColor) : .white.opacity(0.94)
+
+    // Gray style
+    colorScheme == .dark ? .white.opacity(0.1) : .gray.opacity(0.1)
   }
 
   // MARK: - Private Methods
