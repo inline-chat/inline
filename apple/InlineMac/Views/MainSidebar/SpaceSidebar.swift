@@ -5,8 +5,8 @@ import SwiftUI
 struct SpaceSidebar: View {
   @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
-
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
+  @Environment(\.keyMonitor) var keyMonitor
   @Environment(\.openWindow) var openWindow
 
   @State var searchQuery: String = ""
@@ -91,8 +91,8 @@ struct SpaceSidebar: View {
         VStack(alignment: .leading, spacing: 0) {
           HStack(spacing: 0) {
             BackToHomeButton()
-            .padding(.leading, -4)
-            .padding(.trailing, 4)
+              .padding(.leading, -4)
+              .padding(.trailing, 4)
 
             if let space = fullSpace.space {
               SpaceAvatar(space: space, size: Theme.sidebarTitleIconSize)
@@ -106,11 +106,11 @@ struct SpaceSidebar: View {
           }
           .frame(height: Theme.sidebarTopItemHeight)
           .padding(.top, 0)
-          .padding(.bottom, 8)
           .padding(.horizontal, Theme.sidebarContentSideSpacing)
+//          .padding(.bottom, 8)
 
-          SidebarSearchBar(text: $searchQuery)
-            .padding(.horizontal, Theme.sidebarContentSideSpacing)
+//          SidebarSearchBar(text: $searchQuery)
+//            .padding(.horizontal, Theme.sidebarContentSideSpacing)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }
@@ -129,6 +129,29 @@ struct SpaceSidebar: View {
         }
       }
     }
+    .onAppear {
+      DispatchQueue.main.async {
+        subscribeKeyMonitor()
+      }
+    }
+    .onDisappear {
+      unsubscribeKeyMonitor()
+    }
+  }
+
+  private func subscribeKeyMonitor() {
+    let _ = keyMonitor?.addHandler(for: .escape, key: "space_esc") { _ in
+      if nav.currentRoute != .empty {
+        nav.handleEsc()
+      } else {
+        nav.openHome(replace: true)
+        unsubscribeKeyMonitor()
+      }
+    }
+  }
+
+  private func unsubscribeKeyMonitor() {
+    keyMonitor?.removeHandler(for: .escape, key: "space_esc")
   }
 }
 
