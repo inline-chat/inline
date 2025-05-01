@@ -22,11 +22,11 @@ class ChatToolbarView: NSVisualEffectView {
     material = .headerView
     translatesAutoresizingMaskIntoConstraints = false
 
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
-    shadow.shadowOffset = NSSize(width: 0, height: -1)
-    shadow.shadowBlurRadius = 0
-    self.shadow = shadow
+//    let shadow = NSShadow()
+//    shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
+//    shadow.shadowOffset = NSSize(width: 0, height: -1)
+//    shadow.shadowBlurRadius = 0
+//    self.shadow = shadow
   }
 
   override func viewDidChangeEffectiveAppearance() {
