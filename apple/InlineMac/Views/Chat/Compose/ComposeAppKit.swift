@@ -56,7 +56,7 @@ class ComposeAppKit: NSView {
   }()
 
   private lazy var menuButton: ComposeMenuButton = {
-    let view = ComposeMenuButton(frame: .zero)
+    let view = ComposeMenuButton()
     view.delegate = self
     view.translatesAutoresizingMaskIntoConstraints = false
     return view

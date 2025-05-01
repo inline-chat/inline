@@ -14,18 +14,19 @@ class ComposeMenuButton: NSView {
 
   // MARK: - Initialization
 
-  override init(frame: CGRect) {
+  init() {
     button = NSButton(frame: .zero)
     button.bezelStyle = .regularSquare
     button.isBordered = false
     button.translatesAutoresizingMaskIntoConstraints = false
 
-    let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
-      .withSymbolConfiguration(.init(pointSize: size * 0.5, weight: .semibold))
+    //let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+    let image = NSImage(systemSymbolName: "paperclip", accessibilityDescription: nil)?
+      .withSymbolConfiguration(.init(pointSize: size * 0.6, weight: .semibold))
     button.image = image
     button.contentTintColor = .tertiaryLabelColor
 
-    super.init(frame: frame)
+    super.init(frame: .zero)
     setupView()
     setupMenu()
   }
