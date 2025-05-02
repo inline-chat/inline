@@ -1,10 +1,10 @@
 import { Log } from "../utils/log";
 
 
-export interface LoomOEmbed {
+ interface LoomOEmbed {
   type: 'video';
   version: '1.0';
-  videoId: string;
+  // videoId: string;
   thumbnailHeight: number;
   thumbnailWidth: number;
   thumbnailUrl: string;
@@ -21,7 +21,7 @@ export interface LoomOEmbed {
 
 
 // To extract Loom video ID
-export const loomRegex = /https?:\/\/(www\.)?loom\.com\/share\/(\w+)/;
+ const loomRegex = /https?:\/\/(www\.)?loom\.com\/share\/(\w+)/;
 const OEMBED_URL = 'https://www.loom.com/v1/oembed';
 
 /**
@@ -29,7 +29,7 @@ const OEMBED_URL = 'https://www.loom.com/v1/oembed';
  * @param url The Loom share URL
  * @returns The video ID if found, null otherwise
  */
-export function extractLoomVideoId(url: string): string | null {
+ function extractLoomVideoId(url: string): string | null {
   const match = loomRegex.exec(url);
   return match && match[2] ? match[2] : null;
 }
@@ -39,7 +39,7 @@ export function extractLoomVideoId(url: string): string | null {
  * @param url The URL to validate
  * @returns True if valid Loom URL, false otherwise
  */
-export function isValidLoomUrl(url: string): boolean {
+ function isValidLoomUrl(url: string): boolean {
   return loomRegex.test(url);
 }
 
@@ -69,7 +69,7 @@ export async function fetchLoomOembed(url: string): Promise<LoomOEmbed> {
   return {
     type: data.type,
     version: data.version,
-    videoId: extractLoomVideoId(url) || '',
+    // videoId: extractLoomVideoId(url) || '',
     thumbnailHeight: data.thumbnail_height,
     thumbnailWidth: data.thumbnail_width,
     thumbnailUrl: data.thumbnail_url,

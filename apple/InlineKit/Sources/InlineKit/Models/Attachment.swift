@@ -53,7 +53,7 @@ public extension Attachment {
   {
     let message = try Message.filter(Column("messageId") == messageAttachment.messageID).fetchOne(db)
 
-    let attachment = Attachment(messageId: message?.globalId, externalTaskId: messageAttachment.externalTask.id, linkEmbedId: messageAttachment.linkEmbed.id)
+    let attachment = Attachment(messageId: message?.globalId, externalTaskId: messageAttachment.externalTask.id, linkEmbedId: messageAttachment.linkEmbedExperimental.id)
 
     try attachment.save(db)
 

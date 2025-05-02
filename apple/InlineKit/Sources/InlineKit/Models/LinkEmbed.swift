@@ -2,7 +2,6 @@ import Foundation
 import GRDB
 import InlineProtocol
 
-
 public enum LinkEmbedType: String, Codable, Sendable {
   case link
   case loom
@@ -16,40 +15,36 @@ public struct LinkEmbed: FetchableRecord, Identifiable, Codable, Hashable, Persi
   public var url: String
   public var type: LinkEmbedType
   public var providerName: String?
-  public var providerUrl: String?
   public var title: String?
   public var description: String?
   public var imageUrl: String?
-  public var imageWidth: Int?
-  public var imageHeight: Int?
+  public var imageWidth: Int32?
+  public var imageHeight: Int32?
   public var html: String?
   public var date: Date?
-  public var shareUrl: String?
-  public var videoId: String?
-  public var duration: Double?
+
+
+  public var duration: Float?
 
   public init(
     id: Int64? = Int64.random(in: 1 ... 5_000),
     url: String,
     type: LinkEmbedType,
     providerName: String?,
-    providerUrl: String?,
     title: String?,
     description: String?,
     imageUrl: String?,
-    imageWidth: Int?,
-    imageHeight: Int?,
+    imageWidth: Int32?,
+    imageHeight: Int32?,
     html: String?,
     date: Date?,
-    shareUrl: String?,
-    videoId: String?,
-    duration: Double?
+
+    duration: Float?
   ) {
     self.id = id
     self.url = url
     self.type = type
     self.providerName = providerName
-    self.providerUrl = providerUrl
     self.title = title
     self.description = description
     self.imageUrl = imageUrl
@@ -57,35 +52,31 @@ public struct LinkEmbed: FetchableRecord, Identifiable, Codable, Hashable, Persi
     self.imageHeight = imageHeight
     self.html = html
     self.date = date
-    self.shareUrl = shareUrl
-    self.videoId = videoId
+
     self.duration = duration
   }
 }
 
 // Inline Protocol
 public extension LinkEmbed {
-  init(from protocolLinkEmbed: InlineProtocol.MessageAttachmentLinkEmbed) {
-    id = protocolLinkEmbed.id
-    url = protocolLinkEmbed.url
-    type = protocolLinkEmbed.type
-    providerName = protocolLinkEmbed.providerName
-    providerUrl = protocolLinkEmbed.providerUrl
-    title = protocolLinkEmbed.title
-    description = protocolLinkEmbed.description
-    imageUrl = protocolLinkEmbed.imageUrl
-    imageWidth = protocolLinkEmbed.imageWidth
-    imageHeight = protocolLinkEmbed.imageHeight
-    html = protocolLinkEmbed.html
-    date = protocolLinkEmbed.date
-    shareUrl = protocolLinkEmbed.shareUrl
-    videoId = protocolLinkEmbed.videoId
-    duration = protocolLinkEmbed.duration
+  init(from: InlineProtocol.MessageAttachmentLinkEmbed_Experimental) {
+    id = from.id
+    url = from.url
+    type = from.type == .loom ? .loom : .link
+    providerName = from.providerName
+    title = from.title
+    description = from.description_p
+    imageUrl = from.imageURL
+    imageWidth = from.imageWidth
+    imageHeight = from.imageHeight
+    html = from.html
+    date = Date(timeIntervalSince1970: TimeInterval(from.date) / 1_000)
+    duration = from.duration
   }
 
   @discardableResult
   static func save(
-    _ db: Database, linkEmbed protocolLinkEmbed: InlineProtocol.MessageAttachmentLinkEmbed
+    _ db: Database, linkEmbed protocolLinkEmbed: InlineProtocol.MessageAttachmentLinkEmbed_Experimental
   )
     throws -> LinkEmbed
   {

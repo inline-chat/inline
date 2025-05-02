@@ -263,29 +263,13 @@ message MessageAttachmentLinkEmbed_Experimental {
   // Duration of the link
   float duration = 109;
 
-  // Video ID of the link
-  string video_id = 1010;
-
   // Provider of the link
-  string provider_name = 1011;
-
-  // Provider URL of the link
-  string provider_url = 1012;
+  string provider_name = 1010;
 
   // Description of the link
-  string description = 1013;  
-
-  // Share URL of the link
-  string share_url = 1014;
-
-  // Type of the link
-  LinkEmbedType type = 1015;
+  string description = 1011;   
 }
 
-enum LinkEmbedType {
-  LINK = 0;
-  LOOM = 1;
-}
 
 message MessageAttachmentExternalTask {
   // ID of external task in our database

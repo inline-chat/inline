@@ -6,18 +6,12 @@ import { relations } from "drizzle-orm"
 import { pgTable, serial, integer, text, bigint, varchar, pgEnum, numeric } from "drizzle-orm/pg-core"
 
 
-export const linkEmbedType = pgEnum("link_embed_type", [
-  "link",
-  "loom"
-]);
 
 
 export const linkEmbed_experimental = pgTable("link_embed_experimental", {
   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
   url: text("url").notNull(),
-  type: linkEmbedType("type").default("link").notNull(),
   providerName: text("provider_name"),
-  providerUrl: text("provider_url"),
   title: text("title"),
   description: text("description"),
   imageUrl: varchar("image_url", { length: 2_048 }),
@@ -25,8 +19,6 @@ export const linkEmbed_experimental = pgTable("link_embed_experimental", {
   imageHeight: integer("image_height"),
   html: text("html"),
   date: creationDate,
-  shareUrl: text('share_url').unique().notNull(),
-  videoId: text("video_id"),
   duration: numeric("duration", {precision: 10, scale: 3}),
 })
 
@@ -54,6 +46,8 @@ export const messageAttachments = pgTable("message_attachments", {
   /** external task id */
   externalTaskId: bigint("external_task_id", { mode: "bigint" }).references(() => externalTasks.id),
   linkEmbedId: bigint("link_embed_id", {mode:"bigint" }).references(() => linkEmbed_experimental.id)
+
+
 })
 
 export const messageAttachmentsRelations = relations(messageAttachments, ({ one }) => ({
