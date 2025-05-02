@@ -41,9 +41,13 @@ class DocumentView: UIView {
   var textColor: UIColor {
     outgoing ? .white : .label
   }
+  
+  var labelColor: UIColor {
+    outgoing ? .white.withAlphaComponent(0.4) :  ThemeManager.shared.selected.secondaryTextColor ?? .label.withAlphaComponent(0.4)
+  }
 
   var fileIconWrapperColor: UIColor {
-    outgoing ? .white.withAlphaComponent(0.2) : ColorManager.shared.gray1
+    outgoing ? .white.withAlphaComponent(0.2) : .white.withAlphaComponent(0.08)
   }
   
   var progressBarColor: UIColor {
@@ -144,7 +148,7 @@ class DocumentView: UIView {
   func setupContent() {
     // Colors
     fileNameLabel.textColor = textColor
-    fileSizeLabel.textColor = textColor.withAlphaComponent(0.4)
+    fileSizeLabel.textColor = labelColor
     fileIconButton.backgroundColor = fileIconWrapperColor
     
     // Data

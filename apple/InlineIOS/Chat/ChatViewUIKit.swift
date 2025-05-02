@@ -36,7 +36,8 @@ class ChatContainerView: UIView {
   private let blurView: UIVisualEffectView = {
     let effect = UIBlurEffect(style: .regular)
     let view = UIVisualEffectView(effect: effect)
-    view.backgroundColor = .systemBackground.withAlphaComponent(0.6)
+    view.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.6)
+
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -76,7 +77,7 @@ class ChatContainerView: UIView {
   private var composeEmbedBottomConstraint: NSLayoutConstraint?
 
   private func setupViews() {
-    backgroundColor =  ThemeManager.shared.selected.backgroundColor
+    backgroundColor = ThemeManager.shared.selected.backgroundColor
 
     addSubview(messagesCollectionView)
     addSubview(blurView)

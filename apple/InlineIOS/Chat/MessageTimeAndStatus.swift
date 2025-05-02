@@ -44,7 +44,7 @@ class MessageTimeAndStatus: UIView {
   }
 
   var textColor: UIColor {
-    outgoing ? UIColor.white.withAlphaComponent(0.7) : .gray
+    outgoing ? UIColor.white.withAlphaComponent(0.7) : ThemeManager.shared.selected.secondaryTextColor ?? .gray
   }
 
   var imageColor: UIColor {
