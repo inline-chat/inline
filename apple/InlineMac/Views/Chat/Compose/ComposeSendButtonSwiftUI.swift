@@ -6,7 +6,7 @@ struct ComposeSendButtonSwiftUI: View {
   @State private var isHovering = false
 
   private let size: CGFloat = Theme.composeButtonSize
-  private let backgroundColor: Color = .accentColor
+  private let backgroundColor: Color = .accent
   private let hoveredBackgroundColor: Color = .accentColor.opacity(0.8)
 
   var body: some View {
@@ -14,10 +14,8 @@ struct ComposeSendButtonSwiftUI: View {
       if state.canSend {
         Button(action: action) {
           Image(systemName: "arrow.up")
-            .resizable()
-            .scaledToFit()
+            .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(.white)
-            .fontWeight(.semibold)
             .padding(5)
             .frame(width: size, height: size)
             .background(

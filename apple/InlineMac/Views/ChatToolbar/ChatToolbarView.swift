@@ -1,20 +1,20 @@
 import AppKit
+import Logger
 
 class ChatToolbarView: NSVisualEffectView {
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
+  private var dependencies: AppDependencies
+  private var log = Log.scoped("ChatToolbarView")
+
+  init(dependencies: AppDependencies) {
+    self.dependencies = dependencies
+    super.init(frame: .zero)
     setupView()
-    installDoubleClickHandler()
   }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
-//
-//  override var mouseDownCanMoveWindow: Bool {
-//    false
-//  }
 
   private func setupView() {
     blendingMode = .withinWindow
@@ -22,33 +22,37 @@ class ChatToolbarView: NSVisualEffectView {
     material = .headerView
     translatesAutoresizingMaskIntoConstraints = false
 
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
-    shadow.shadowOffset = NSSize(width: 0, height: -1)
-    shadow.shadowBlurRadius = 2
-    self.shadow = shadow
+//    let shadow = NSShadow()
+//    shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
+//    shadow.shadowOffset = NSSize(width: 0, height: -1)
+//    shadow.shadowBlurRadius = 0
+//    self.shadow = shadow
   }
 
-  private func installDoubleClickHandler() {
-//    let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick(_:)))
-//    recognizer.numberOfClicksRequired = 2
-//    addGestureRecognizer(recognizer)
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
   }
 
-  @objc private func handleDoubleClick(_ sender: NSClickGestureRecognizer) {
-    print("i am triggered")
-    guard sender.state == .ended,
-          let window,
-          !window.styleMask.contains(.fullScreen) else { return }
-
+  private func doubleClickAction() {
     let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
 
     switch action {
       case "Minimize":
-        window.performMiniaturize(nil)
+        window?.performMiniaturize(nil)
 
       default:
-        window.performZoom(nil)
+        window?.performZoom(nil)
+    }
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    // Forward to window's title bar handling
+    window?.performDrag(with: event)
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    if event.clickCount == 2 {
+      doubleClickAction()
     }
   }
 }

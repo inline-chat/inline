@@ -56,7 +56,7 @@ class ComposeAppKit: NSView {
   }()
 
   private lazy var menuButton: ComposeMenuButton = {
-    let view = ComposeMenuButton(frame: .zero)
+    let view = ComposeMenuButton()
     view.delegate = self
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -99,7 +99,7 @@ class ComposeAppKit: NSView {
     return material
   }()
 
-  var hasTopSeperator: Bool = true
+  var hasTopSeperator: Bool = false
 
   // -------
 

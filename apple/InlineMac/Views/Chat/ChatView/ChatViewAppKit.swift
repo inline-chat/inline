@@ -42,12 +42,12 @@ class ChatViewAppKit: NSViewController {
 
     // Refetch
     viewModel.refetchChatView()
-    
+
     NotificationCenter.default.addObserver(
       forName: NSApplication.didBecomeActiveNotification,
       object: nil,
       queue: .main
-    ) { [weak self] notification in
+    ) { [weak self] _ in
       self?.viewModel.refetchChatView()
     }
   }
@@ -140,7 +140,7 @@ class ChatViewAppKit: NSViewController {
 
   private func setupChatComponents(chat: Chat) {
     // Message List
-    let messageListVC_ = MessageListAppKit(peerId: peerId, chat: chat)
+    let messageListVC_ = MessageListAppKit(dependencies: dependencies, peerId: peerId, chat: chat)
     addChild(messageListVC_)
     view.addSubview(messageListVC_.view)
     messageListVC_.view.translatesAutoresizingMaskIntoConstraints = false
@@ -230,7 +230,7 @@ class ChatViewAppKit: NSViewController {
 
   deinit {
     clearCurrentViews()
-    
+
     // Remove observer
     NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
 

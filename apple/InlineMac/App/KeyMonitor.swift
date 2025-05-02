@@ -49,6 +49,16 @@ public class KeyMonitor: Sendable {
     }
   }
 
+  func removeHandler(for type: HandlerType, key: String) {
+    self.log.trace("Removing handler for \(type) with key \(key)")
+    switch type {
+      case .escape:
+        self.escapeHandlers.removeValue(forKey: key)
+      case .textInputCatchAll:
+        self.textInputCatchAllHandlers.removeValue(forKey: key)
+    }
+  }
+
   // MARK: - Monitor
 
   private func setupKeyboardMonitoring() {
@@ -65,9 +75,8 @@ public class KeyMonitor: Sendable {
         let handled = callHandler(for: .escape, event: event)
         if handled { return nil }
       }
-      
-      
-      self.log.trace("event: \(event)")
+
+      log.trace("event: \(event)")
 
       // Only handle the event if we should intercept it
       if shouldInterceptKeyEvent(event) == true {
@@ -123,7 +132,7 @@ public class KeyMonitor: Sendable {
     switch type {
       case .escape:
         // last one is most specific, but we'll have to remove it somehow
-      if let last = escapeHandlers.values.last {
+        if let last = escapeHandlers.values.last {
           last(event)
           return true
         } else {

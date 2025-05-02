@@ -22,6 +22,12 @@ struct HomeSidebar: View {
     }
   }
 
+  enum Tab: String {
+    case inbox
+    case archive
+    case search
+  }
+
   // MARK: - State
 
   @Environment(\.appDatabase) var db
@@ -33,6 +39,10 @@ struct HomeSidebar: View {
   @EnvironmentStateObject var home: HomeViewModel
   @StateObject var search = GlobalSearch()
   @FocusState private var isSearching: Bool
+
+  @State private var tab: Tab = .inbox
+  @State private var isAtTop = false
+  @State private var isAtBottom = false
 
   // MARK: - Initializer
 
@@ -48,15 +58,28 @@ struct HomeSidebar: View {
   // MARK: - Computed
 
   var items: [SideItem] {
-    let spaces = home.spaces.map { SideItem.space($0.space) }
-    let users = home.chats.sorted(
+    let sortedChats = home.chats.sorted(
       by: {
         ($0.message?.date.timeIntervalSince1970 ?? $0.chat?.date.timeIntervalSince1970 ?? 0) > (
           $1.message?.date.timeIntervalSince1970 ?? $1.chat?.date.timeIntervalSince1970 ?? 0
         )
       }
     )
-    .map { SideItem.user($0) }
+
+    if tab == .archive {
+      return sortedChats
+        .filter { item in
+          item.dialog.archived == true
+        }
+        .map { SideItem.user($0) }
+    }
+
+    let spaces = home.spaces.map { SideItem.space($0.space) }
+    let users = sortedChats
+      .filter { item in
+        item.dialog.archived != true
+      }
+      .map { SideItem.user($0) }
 
     return users + spaces
   }
@@ -64,6 +87,11 @@ struct HomeSidebar: View {
   // MARK: - Views
 
   var body: some View {
+    list3
+  }
+
+  @ViewBuilder
+  var list: some View {
     List {
       if search.hasResults || (isSearching && search.canSearch) {
         searchView
@@ -71,31 +99,77 @@ struct HomeSidebar: View {
         spacesAndUsersView
       }
     }
+    .padding(.bottom, 0)
     .listStyle(.sidebar)
     .animation(.smoothSnappy, value: items)
+    .animation(.smoothSnappy, value: home.chats)
     .safeAreaInset(
-      edge: .top,
+      edge: .bottom,
       content: {
-        VStack(alignment: .leading, spacing: 0) {
-          HStack(alignment: .center, spacing: 0) {
-            SelfUser()
-              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while the
-              /// wrapper view was moving
-              .scaleEffect(1.0)
-
-            AlphaCapsule()
-          }
-          .padding(.top, 0)
-          .padding(.bottom, 8)
-
-          searchBar
-            .padding(.bottom, 2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal) // default side padding
-        .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
+        tabs
+          .padding(.top, -8)
       }
     )
+
+//    .overlay(alignment: .bottom) {
+//      tabs
+//    }
+
+    //    .safeAreaInset(
+    //      edge: .top,
+    //      content: {
+    //        Color.clear
+    //          .frame(height: 12)
+    //      }
+    //    )
+
+    //    .safeAreaInset(
+    //      edge: .top,
+    //      content: {
+    //        VStack(alignment: .leading, spacing: 0) {
+    //          HStack(alignment: .center, spacing: 0) {
+    //            SelfUser()
+    //              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while
+    //              /the
+    //              /// wrapper view was moving
+    //              .scaleEffect(1.0)
+    //
+    //            AlphaCapsule()
+    //          }
+    //          .padding(.top, 0)
+    //          .padding(.bottom, 8)
+    //
+    //          searchBar
+    //            .padding(.bottom, 2)
+    //        }
+    //        .frame(maxWidth: .infinity, alignment: .leading)
+    //        .padding(.horizontal) // default side padding
+    //        .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
+    //      }
+    //    )
+
+    .safeAreaInset(
+      edge: .top,
+      spacing: 0,
+      content: {
+        VStack(alignment: .leading, spacing: 0) {
+          searchBar
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(
+          .horizontal,
+          Theme.sidebarItemOuterSpacing
+        )
+        .padding(.bottom, 8)
+        .edgesIgnoringSafeArea(.bottom)
+        .background(alignment: .bottom) {
+          if !isAtTop {
+            Divider().opacity(0.4)
+          }
+        }
+      }
+    )
+
     .onChange(of: nav.currentRoute) { _ in
       DispatchQueue.main.async {
         subscribeNavKeyMonitor()
@@ -103,6 +177,109 @@ struct HomeSidebar: View {
     }
     .onAppear {
       subscribeNavKeyMonitor()
+    }
+  }
+
+  @ViewBuilder
+  var list2: some View {
+    if #available(macOS 15.0, *) {
+      list
+//        .overlay(alignment: .top) {
+//          if !isAtTop {
+//            Divider().opacity(0.4)
+//          }
+//        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+          geometry.contentOffset.y <= 0
+        } action: { _, isBeyondZero in
+          self.isAtTop = isBeyondZero
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+          geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height
+        } action: { _, isBeyondBottom in
+          self.isAtBottom = isBeyondBottom
+        }
+    } else {
+      list
+    }
+  }
+
+  @ViewBuilder
+  var list3: some View {
+    if #available(macOS 14.0, *) {
+      list2
+
+      // .contentMargins(.bottom, 44, for: .scrollIndicators)
+      // .safeAreaPadding(.bottom, 40)
+      // .contentMargins(.bottom, 44, for: .scrollContent)
+      // .ignoresSafeArea(edges: .bottom)
+    } else {
+      list2
+    }
+  }
+
+  @ViewBuilder
+  var tabs: some View {
+    ZStack(alignment: .bottom) {
+//      Rectangle()
+//        .fill(.ultraThinMaterial)
+//        .frame(height: 48)
+//        .mask {
+//          LinearGradient(
+//            colors: [Color.black, Color.black, Color.black, Color.black.opacity(0)],
+//            startPoint: .bottom,
+//            endPoint: .top
+//          )
+//        }
+//        .overlay {
+//          LinearGradient(
+//            colors: [Color.white.opacity(0.2), Color.white.opacity(0)],
+//            startPoint: .bottom,
+//            endPoint: .top
+//          )
+//        }
+
+      HStack(spacing: 0) {
+        Spacer()
+
+        Button(action: {
+          // Archive tab
+          tab = .archive
+        }) {
+          let isActive = tab == .archive
+          Image(systemName: "archivebox.fill")
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(isActive ? Color.accent : Color.gray.opacity(0.5))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 3)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+
+        Button(action: {
+          // Inbox tab
+          tab = .inbox
+        }) {
+          let isActive = tab == .inbox
+          // Image(systemName: "tray.fill")
+          Image(systemName: "bubble.left.and.bubble.right.fill")
+            .font(.system(size: 15, weight: .regular))
+            .foregroundStyle(isActive ? Color.accent : Color.gray.opacity(0.5))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 3)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+
+
+        Spacer()
+      }
+      .frame(height: 42)
+      .overlay(alignment: .top) {
+        if !isAtBottom {
+          Divider().opacity(0.4)
+        }
+      }
     }
   }
 
@@ -153,6 +330,17 @@ struct HomeSidebar: View {
       space: space
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+
+//    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+//      Button(action: {
+//        nav.openSpace(space.id)
+//      }) {
+//        Image(systemName: "chevron.right")
+//          .font(.system(size: 16, weight: .semibold))
+//          .foregroundStyle(.primary)
+//      }
+//      .tint(.primary)
+//    }
   }
 
   @ViewBuilder

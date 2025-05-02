@@ -37,7 +37,6 @@ class MainWindowController: NSWindowController {
 
     keyMonitor = KeyMonitor(window: window)
     self.dependencies.keyMonitor = keyMonitor
-
     super.init(window: window)
 
     injectDependencies()
@@ -60,8 +59,15 @@ class MainWindowController: NSWindowController {
     window?.titleVisibility = .hidden
     window?.toolbarStyle = .unified
     window?.setFrameAutosaveName("MainWindow")
+    window?.delegate = self
 
     switchTopLevel(topLevelRoute)
+
+    window?.setContentSize(NSSize(width: 700, height: 600))
+    window?.setFrameUsingName("MainWindow")
+
+    window?.minSize = NSSize(width: 330, height: 220)
+
 //    if topLevelRoute == .onboarding {
 //      setupOnboarding()
 //    } else {
@@ -112,7 +118,7 @@ class MainWindowController: NSWindowController {
 
     window?.titleVisibility = .hidden
     window?.isMovableByWindowBackground = false
-    window?.titlebarAppearsTransparent = false // depends on inner route as well
+    window?.titlebarAppearsTransparent = true
     // window background is set based on current route
 
     setupWindowFor(route: nav.currentRoute)
@@ -423,7 +429,7 @@ extension MainWindowController {
     // Sidebar items
     if nav.history.last?.spaceId != nil {
       items.append(.flexibleSpace)
-      items.append(.backToHome)
+      // items.append(.backToHome)
     } else {
       items.append(.flexibleSpace)
       items.append(.homePlus)
@@ -513,5 +519,16 @@ extension MainWindowController {
       default:
         break
     }
+  }
+}
+
+extension MainWindowController: NSWindowDelegate {
+  func windowDidEndLiveResize(_ notification: Notification) {
+    window?.saveFrame(usingName: "MainWindow")
+  }
+
+  func windowShouldClose(_ sender: NSWindow) -> Bool {
+    sender.saveFrame(usingName: "MainWindow")
+    return true
   }
 }
