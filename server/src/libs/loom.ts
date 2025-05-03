@@ -37,7 +37,7 @@ function extractLoomVideoId(url: string): string | null {
  * @param url The URL to validate
  * @returns True if valid Loom URL, false otherwise
  */
-function isValidLoomUrl(url: string): boolean {
+export function isValidLoomUrl(url: string): boolean {
   return loomRegex.test(url)
 }
 
