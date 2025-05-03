@@ -12,24 +12,22 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
   public var title: String?
   public var description: String?
   public var photoId: Int64?
-  public var date: Date?
   public var duration: Int64?
 
   // Relationship to photo using photoId (server ID)
   static let photo = belongsTo(Photo.self, using: ForeignKey(["photoId"], to: ["photoId"]))
 
   var photo: QueryInterfaceRequest<Photo> {
-    request(for: Message.photo)
+    request(for: UrlPreview.photo)
   }
 
   public init(
-    id: Int64? = Int64.random(in: 1...5_000),
+    id: Int64? = Int64.random(in: 1 ... 5_000),
     url: String,
     siteName: String?,
     title: String?,
     description: String?,
     photoId: Int64?,
-    date: Date?,
     duration: Int64?
   ) {
     self.id = id
@@ -38,26 +36,24 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
     self.title = title
     self.description = description
     self.photoId = photoId
-    self.date = date
     self.duration = duration
   }
 }
 
 // Inline Protocol
-extension UrlPreview {
-  public init(from: InlineProtocol.UrlPreview) {
+public extension UrlPreview {
+  init(from: InlineProtocol.UrlPreview) {
     id = from.id
     url = from.url
     siteName = from.siteName
     title = from.title
     description = from.description_p
-    photoId = from.photo.photoId
-    date = Date(timeIntervalSince1970: TimeInterval(from.date) / 1_000)
+    photoId = from.photo.id
     duration = from.duration
   }
 
   @discardableResult
-  public static func save(
+  static func save(
     _ db: Database,
     linkEmbed protocolLinkEmbed: InlineProtocol.UrlPreview
   )
