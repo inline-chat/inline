@@ -4,6 +4,7 @@ import { getChatHistory } from "@in/server/functions/messages.getChatHistory"
 import { addReaction } from "./messages.addReaction"
 import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
+import { createChat } from "./messages.createChat"
 
 export const Functions = {
   messages: {
@@ -13,5 +14,6 @@ export const Functions = {
     addReaction: addReaction,
     deleteReaction: deleteReaction,
     editMessage: editMessage,
+    createChat: createChat,
   },
 }
