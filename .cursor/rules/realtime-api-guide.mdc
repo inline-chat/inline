@@ -7,6 +7,10 @@ This is codebase for Inline, a chat app.
 
 In server/ module, we have two APIs, one is a REST API using files in methods/ directory and based on Elyisia. The newer one we use more is the realtime API based on protocol buffers which uses web sockets using our RPC format. We compose API in the functions/ directory which are abstracted away from the API. Then we utilize those in our Realtime API handlers (stored in realtime/handlers/) that connect it to the RPC type system. Our database schema is under db/schema/ directory using Drizzle. To use database JSON types in Realtime API, we create an encoder function in encoders/ directory. We use RealtimeRpcError in handlers and functions. 
 
+To interact with database safely, we use server/src/db/models. Some fields are encrypted and should use the server/src/modules/encryption utilities. New database tables should be exported from server/src/db/schema/index.ts. 
+
+To create a new realtime api handler or function, first look at the core.proto file and ensure RPC types are created, then create the function, then create the handler and add the handlers in server/src/realtime/handlers/_rpc.ts file to be known to the API. Add encoder or model files as needed. For using external services, create a file under server/src/libs. External env variables are typechecked in server/src/env.ts. For logging and error capture to Sentry use our server/src/utils/log.ts helper class. 
+
 We use Bun. And Bun test to write our tests. Our tests are in src/__tests__. We intend to slowly add more tests and develope our testing suite so we aren't spending a lot of time here atm.
 
 ../proto/core.proto is my core protocol files [core.proto](mdc:proto/core.proto)
