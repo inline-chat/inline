@@ -60,6 +60,24 @@ export const chats = pgTable(
   }),
 )
 
+export const chatParticipants = pgTable(
+  "chat_participants",
+  {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    chatId: integer("chat_id")
+      .references(() => chats.id)
+      .notNull(),
+    userId: integer("user_id")
+      .references(() => users.id)
+      .notNull(),
+    date: creationDate,
+  },
+  (table) => ({
+    /** Ensure unique participant per chat */
+    uniqueParticipant: unique("unique_participant").on(table.chatId, table.userId),
+  }),
+)
+
 export const chatsRelations = relations(chats, ({ one, many }) => ({
   space: one(spaces, {
     fields: [chats.spaceId],
@@ -72,7 +90,21 @@ export const chatsRelations = relations(chats, ({ one, many }) => ({
   }),
 
   dialogs: many(dialogs),
+  participants: many(chatParticipants),
+}))
+
+export const chatParticipantsRelations = relations(chatParticipants, ({ one }) => ({
+  chat: one(chats, {
+    fields: [chatParticipants.chatId],
+    references: [chats.id],
+  }),
+  user: one(users, {
+    fields: [chatParticipants.userId],
+    references: [users.id],
+  }),
 }))
 
 export type DbChat = typeof chats.$inferSelect
 export type DbNewChat = typeof chats.$inferInsert
+export type DbChatParticipant = typeof chatParticipants.$inferSelect
+export type DbNewChatParticipant = typeof chatParticipants.$inferInsert

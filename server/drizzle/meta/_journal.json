@@ -204,6 +204,13 @@
       "when": 1746269202071,
       "tag": "0028_add_url_preview",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1746284217362,
+      "tag": "0029_chat_participants",
+      "breakpoints": true
     }
   ]
 }
