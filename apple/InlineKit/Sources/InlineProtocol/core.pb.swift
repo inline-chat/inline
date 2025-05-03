@@ -21,40 +21,6 @@ fileprivate struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAP
   typealias Version = _2
 }
 
-public enum LinkEmbedType: SwiftProtobuf.Enum, Swift.CaseIterable {
-  public typealias RawValue = Int
-  case link // = 0
-  case loom // = 1
-  case UNRECOGNIZED(Int)
-
-  public init() {
-    self = .link
-  }
-
-  public init?(rawValue: Int) {
-    switch rawValue {
-    case 0: self = .link
-    case 1: self = .loom
-    default: self = .UNRECOGNIZED(rawValue)
-    }
-  }
-
-  public var rawValue: Int {
-    switch self {
-    case .link: return 0
-    case .loom: return 1
-    case .UNRECOGNIZED(let i): return i
-    }
-  }
-
-  // The compiler won't synthesize support with the UNRECOGNIZED case.
-  public static let allCases: [LinkEmbedType] = [
-    .link,
-    .loom,
-  ]
-
-}
-
 public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
@@ -873,26 +839,26 @@ public struct MessageAttachment: Sendable {
     set {attachment = .externalTask(newValue)}
   }
 
-  public var linkEmbedExperimental: MessageAttachmentLinkEmbed_Experimental {
+  public var urlPreview: UrlPreview {
     get {
-      if case .linkEmbedExperimental(let v)? = attachment {return v}
-      return MessageAttachmentLinkEmbed_Experimental()
+      if case .urlPreview(let v)? = attachment {return v}
+      return UrlPreview()
     }
-    set {attachment = .linkEmbedExperimental(newValue)}
+    set {attachment = .urlPreview(newValue)}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Attachment: Equatable, Sendable {
     case externalTask(MessageAttachmentExternalTask)
-    case linkEmbedExperimental(MessageAttachmentLinkEmbed_Experimental)
+    case urlPreview(UrlPreview)
 
   }
 
   public init() {}
 }
 
-public struct MessageAttachmentLinkEmbed_Experimental: Sendable {
+public struct UrlPreview: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -901,50 +867,75 @@ public struct MessageAttachmentLinkEmbed_Experimental: Sendable {
   public var id: Int64 = 0
 
   /// URL of the link
-  public var url: String = String()
+  public var url: String {
+    get {return _url ?? String()}
+    set {_url = newValue}
+  }
+  /// Returns true if `url` has been explicitly set.
+  public var hasURL: Bool {return self._url != nil}
+  /// Clears the value of `url`. Subsequent reads from it will return its default value.
+  public mutating func clearURL() {self._url = nil}
+
+  /// Site name of the link
+  public var siteName: String {
+    get {return _siteName ?? String()}
+    set {_siteName = newValue}
+  }
+  /// Returns true if `siteName` has been explicitly set.
+  public var hasSiteName: Bool {return self._siteName != nil}
+  /// Clears the value of `siteName`. Subsequent reads from it will return its default value.
+  public mutating func clearSiteName() {self._siteName = nil}
 
   /// Title of the link
-  public var title: String = String()
-
-  /// Image URL of the link
-  public var imageURL: String = String()
-
-  /// Image width of the link
-  public var imageWidth: Int32 = 0
-
-  /// Image height of the link
-  public var imageHeight: Int32 = 0
-
-  /// HTML of the link
-  public var html: String = String()
-
-  /// Date of the link
-  public var date: Int64 = 0
-
-  /// Duration of the link
-  public var duration: Float = 0
-
-  /// Video ID of the link
-  public var videoID: String = String()
-
-  /// Provider of the link
-  public var providerName: String = String()
-
-  /// Provider URL of the link
-  public var providerURL: String = String()
+  public var title: String {
+    get {return _title ?? String()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {return self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
 
   /// Description of the link
-  public var description_p: String = String()
+  public var description_p: String {
+    get {return _description_p ?? String()}
+    set {_description_p = newValue}
+  }
+  /// Returns true if `description_p` has been explicitly set.
+  public var hasDescription_p: Bool {return self._description_p != nil}
+  /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
+  public mutating func clearDescription_p() {self._description_p = nil}
 
-  /// Share URL of the link
-  public var shareURL: String = String()
+  /// Image ID of the link
+  public var photo: Photo {
+    get {return _photo ?? Photo()}
+    set {_photo = newValue}
+  }
+  /// Returns true if `photo` has been explicitly set.
+  public var hasPhoto: Bool {return self._photo != nil}
+  /// Clears the value of `photo`. Subsequent reads from it will return its default value.
+  public mutating func clearPhoto() {self._photo = nil}
 
-  /// Type of the link
-  public var type: LinkEmbedType = .link
+  /// Duration of the content
+  public var duration: Int64 {
+    get {return _duration ?? 0}
+    set {_duration = newValue}
+  }
+  /// Returns true if `duration` has been explicitly set.
+  public var hasDuration: Bool {return self._duration != nil}
+  /// Clears the value of `duration`. Subsequent reads from it will return its default value.
+  public mutating func clearDuration() {self._duration = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _url: String? = nil
+  fileprivate var _siteName: String? = nil
+  fileprivate var _title: String? = nil
+  fileprivate var _description_p: String? = nil
+  fileprivate var _photo: Photo? = nil
+  fileprivate var _duration: Int64? = nil
 }
 
 public struct MessageAttachmentExternalTask: Sendable {
@@ -958,7 +949,7 @@ public struct MessageAttachmentExternalTask: Sendable {
   /// ID of the task in the external application
   public var taskID: String = String()
 
-  /// Application name 
+  /// Application name
   public var application: String = String()
 
   /// Title of the task/issue
@@ -1305,7 +1296,7 @@ public struct PhotoSize: @unchecked Sendable {
   // methods supported on all messages.
 
   ///* Thumbnail type.
-  ///Currently supported: 
+  ///Currently supported:
   ///- "b" - small box 140x140
   ///- "c" - medium box 320x320
   ///- "d" - regular box 800x800
@@ -2409,13 +2400,6 @@ public struct LastOnline: Sendable {
 }
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
-
-extension LinkEmbedType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "LINK"),
-    1: .same(proto: "LOOM"),
-  ]
-}
 
 extension Method: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
@@ -3824,7 +3808,7 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "message_id"),
     2: .standard(proto: "external_task"),
-    1000: .standard(proto: "link_embed_experimental"),
+    3: .standard(proto: "url_preview"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -3847,17 +3831,17 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
           self.attachment = .externalTask(v)
         }
       }()
-      case 1000: try {
-        var v: MessageAttachmentLinkEmbed_Experimental?
+      case 3: try {
+        var v: UrlPreview?
         var hadOneofValue = false
         if let current = self.attachment {
           hadOneofValue = true
-          if case .linkEmbedExperimental(let m) = current {v = m}
+          if case .urlPreview(let m) = current {v = m}
         }
         try decoder.decodeSingularMessageField(value: &v)
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.attachment = .linkEmbedExperimental(v)
+          self.attachment = .urlPreview(v)
         }
       }()
       default: break
@@ -3878,9 +3862,9 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       guard case .externalTask(let v)? = self.attachment else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     }()
-    case .linkEmbedExperimental?: try {
-      guard case .linkEmbedExperimental(let v)? = self.attachment else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1000)
+    case .urlPreview?: try {
+      guard case .urlPreview(let v)? = self.attachment else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
     }()
     case nil: break
     }
@@ -3895,24 +3879,16 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension MessageAttachmentLinkEmbed_Experimental: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = "MessageAttachmentLinkEmbed_Experimental"
+extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UrlPreview"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    101: .same(proto: "id"),
-    102: .same(proto: "url"),
-    103: .same(proto: "title"),
-    104: .standard(proto: "image_url"),
-    105: .standard(proto: "image_width"),
-    106: .standard(proto: "image_height"),
-    107: .same(proto: "html"),
-    108: .same(proto: "date"),
-    109: .same(proto: "duration"),
-    1010: .standard(proto: "video_id"),
-    1011: .standard(proto: "provider_name"),
-    1012: .standard(proto: "provider_url"),
-    1013: .same(proto: "description"),
-    1014: .standard(proto: "share_url"),
-    1015: .same(proto: "type"),
+    1: .same(proto: "id"),
+    2: .same(proto: "url"),
+    3: .standard(proto: "site_name"),
+    4: .same(proto: "title"),
+    5: .same(proto: "description"),
+    6: .same(proto: "photo"),
+    7: .same(proto: "duration"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -3921,91 +3897,55 @@ extension MessageAttachmentLinkEmbed_Experimental: SwiftProtobuf.Message, SwiftP
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 101: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
-      case 102: try { try decoder.decodeSingularStringField(value: &self.url) }()
-      case 103: try { try decoder.decodeSingularStringField(value: &self.title) }()
-      case 104: try { try decoder.decodeSingularStringField(value: &self.imageURL) }()
-      case 105: try { try decoder.decodeSingularInt32Field(value: &self.imageWidth) }()
-      case 106: try { try decoder.decodeSingularInt32Field(value: &self.imageHeight) }()
-      case 107: try { try decoder.decodeSingularStringField(value: &self.html) }()
-      case 108: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
-      case 109: try { try decoder.decodeSingularFloatField(value: &self.duration) }()
-      case 1010: try { try decoder.decodeSingularStringField(value: &self.videoID) }()
-      case 1011: try { try decoder.decodeSingularStringField(value: &self.providerName) }()
-      case 1012: try { try decoder.decodeSingularStringField(value: &self.providerURL) }()
-      case 1013: try { try decoder.decodeSingularStringField(value: &self.description_p) }()
-      case 1014: try { try decoder.decodeSingularStringField(value: &self.shareURL) }()
-      case 1015: try { try decoder.decodeSingularEnumField(value: &self.type) }()
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._url) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._siteName) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._title) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._description_p) }()
+      case 6: try { try decoder.decodeSingularMessageField(value: &self._photo) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self._duration) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.id != 0 {
-      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 101)
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
     }
-    if !self.url.isEmpty {
-      try visitor.visitSingularStringField(value: self.url, fieldNumber: 102)
-    }
-    if !self.title.isEmpty {
-      try visitor.visitSingularStringField(value: self.title, fieldNumber: 103)
-    }
-    if !self.imageURL.isEmpty {
-      try visitor.visitSingularStringField(value: self.imageURL, fieldNumber: 104)
-    }
-    if self.imageWidth != 0 {
-      try visitor.visitSingularInt32Field(value: self.imageWidth, fieldNumber: 105)
-    }
-    if self.imageHeight != 0 {
-      try visitor.visitSingularInt32Field(value: self.imageHeight, fieldNumber: 106)
-    }
-    if !self.html.isEmpty {
-      try visitor.visitSingularStringField(value: self.html, fieldNumber: 107)
-    }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 108)
-    }
-    if self.duration.bitPattern != 0 {
-      try visitor.visitSingularFloatField(value: self.duration, fieldNumber: 109)
-    }
-    if !self.videoID.isEmpty {
-      try visitor.visitSingularStringField(value: self.videoID, fieldNumber: 1010)
-    }
-    if !self.providerName.isEmpty {
-      try visitor.visitSingularStringField(value: self.providerName, fieldNumber: 1011)
-    }
-    if !self.providerURL.isEmpty {
-      try visitor.visitSingularStringField(value: self.providerURL, fieldNumber: 1012)
-    }
-    if !self.description_p.isEmpty {
-      try visitor.visitSingularStringField(value: self.description_p, fieldNumber: 1013)
-    }
-    if !self.shareURL.isEmpty {
-      try visitor.visitSingularStringField(value: self.shareURL, fieldNumber: 1014)
-    }
-    if self.type != .link {
-      try visitor.visitSingularEnumField(value: self.type, fieldNumber: 1015)
-    }
+    try { if let v = self._url {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._siteName {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._title {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._description_p {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._photo {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._duration {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: MessageAttachmentLinkEmbed_Experimental, rhs: MessageAttachmentLinkEmbed_Experimental) -> Bool {
+  public static func ==(lhs: UrlPreview, rhs: UrlPreview) -> Bool {
     if lhs.id != rhs.id {return false}
-    if lhs.url != rhs.url {return false}
-    if lhs.title != rhs.title {return false}
-    if lhs.imageURL != rhs.imageURL {return false}
-    if lhs.imageWidth != rhs.imageWidth {return false}
-    if lhs.imageHeight != rhs.imageHeight {return false}
-    if lhs.html != rhs.html {return false}
-    if lhs.date != rhs.date {return false}
-    if lhs.duration != rhs.duration {return false}
-    if lhs.videoID != rhs.videoID {return false}
-    if lhs.providerName != rhs.providerName {return false}
-    if lhs.providerURL != rhs.providerURL {return false}
-    if lhs.description_p != rhs.description_p {return false}
-    if lhs.shareURL != rhs.shareURL {return false}
-    if lhs.type != rhs.type {return false}
+    if lhs._url != rhs._url {return false}
+    if lhs._siteName != rhs._siteName {return false}
+    if lhs._title != rhs._title {return false}
+    if lhs._description_p != rhs._description_p {return false}
+    if lhs._photo != rhs._photo {return false}
+    if lhs._duration != rhs._duration {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

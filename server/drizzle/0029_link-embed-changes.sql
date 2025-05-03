@@ -1,2 +1,0 @@
-ALTER TABLE "link_embed_experimental" ADD COLUMN "share_url" text NOT NULL;--> statement-breakpoint
-ALTER TABLE "link_embed_experimental" ADD CONSTRAINT "link_embed_experimental_share_url_unique" UNIQUE("share_url");

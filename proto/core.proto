@@ -2,7 +2,7 @@ syntax = "proto3";
 
 // --- Protocol Messages ---
 
-message ClientMessage  { 
+message ClientMessage {
   uint64 id = 1;
   uint32 seq = 2;
 
@@ -36,7 +36,7 @@ message ServerProtocolMessage {
 }
 
 message ServerMessage {
-  reserved 1,2,3;
+  reserved 1, 2, 3;
 
   oneof payload {
     UpdatesPayload update = 4;
@@ -99,7 +99,6 @@ message PeerUser {
   int64 user_id = 1;
 }
 
-
 message User {
   int64 id = 1;
   optional string first_name = 2;
@@ -123,7 +122,6 @@ message UserProfilePhoto {
   // Stripped thumbnail of the photo
   bytes stripped_thumb = 2;
 }
-
 
 message Message {
   int64 id = 1;
@@ -154,10 +152,10 @@ message Message {
 
   // Media of the message
   optional MessageMedia media = 10;
-  
+
   // Date of the last edit if edited
   optional int64 edit_date = 11;
-  
+
   // ID of the grouped message if it's part of an album
   optional int64 grouped_id = 12;
 
@@ -166,7 +164,7 @@ message Message {
 
   // Reactions of the message
   optional MessageReactions reactions = 14;
-  
+
   // Whether the message is a sticker
   optional bool is_sticker = 15;
 }
@@ -174,7 +172,6 @@ message Message {
 message MessageReactions {
   // Reactions of the messageprotocol buffers
   repeated Reaction reactions = 1;
-  
 }
 
 message Reaction {
@@ -231,45 +228,32 @@ message MessageAttachment {
 
   oneof attachment {
     MessageAttachmentExternalTask external_task = 2;
-    MessageAttachmentLinkEmbed_Experimental link_embed_experimental = 1000;
+    UrlPreview url_preview = 3;
   }
 }
 
-message MessageAttachmentLinkEmbed_Experimental {
+message UrlPreview {
   // ID of external task in our database
-  int64 id = 101;
+  int64 id = 1;
 
   // URL of the link
-  string url = 102;
+  optional string url = 2;
+
+  // Site name of the link
+  optional string site_name = 3;
 
   // Title of the link
-  string title = 103;
-
-  // Image URL of the link
-  string image_url = 104;
-
-  // Image width of the link
-  int32 image_width = 105;
-
-  // Image height of the link
-  int32 image_height =  106;
-
-  // HTML of the link
-  string html = 107;
-
-  // Date of the link
-  int64 date = 108;
-
-  // Duration of the link
-  float duration = 109;
-
-  // Provider of the link
-  string provider_name = 1010;
+  optional string title = 4;
 
   // Description of the link
-  string description = 1011;   
-}
+  optional string description = 5;
 
+  // Image ID of the link
+  optional Photo photo = 6;
+
+  // Duration of the content
+  optional int64 duration = 7;
+}
 
 message MessageAttachmentExternalTask {
   // ID of external task in our database
@@ -278,7 +262,7 @@ message MessageAttachmentExternalTask {
   // ID of the task in the external application
   string task_id = 2;
 
-  // Application name 
+  // Application name
   string application = 3;
 
   // Title of the task/issue
@@ -333,7 +317,7 @@ message MessageDocument {
 
 message Video {
   int64 id = 1;
-  
+
   // Date of upload
   int64 date = 2;
 
@@ -379,10 +363,10 @@ message Document {
 message Photo {
   // ID
   int64 id = 1;
-  
+
   // Date of upload
-  int64 date = 2; 
-  
+  int64 date = 2;
+
   repeated PhotoSize sizes = 3;
 
   enum Format {
@@ -393,15 +377,14 @@ message Photo {
 
   // Format of the photo
   Format format = 4;
-  
+
   // Unique identifier of the file
   optional string file_unique_id = 100;
 }
 
-
 message PhotoSize {
   /** Thumbnail type.
-  Currently supported: 
+  Currently supported:
   - "b" - small box 140x140
   - "c" - medium box 320x320
   - "d" - regular box 800x800
@@ -437,12 +420,12 @@ message RpcError {
   Code error_code = 2;
   string message = 3;
   int32 code = 4;
-   
+
   // Type of error
   enum Code {
     UNKNOWN = 0;
     BAD_REQUEST = 1;
-    UNAUTHENTICATED = 2;    
+    UNAUTHENTICATED = 2;
     RATE_LIMIT = 3;
     INTERNAL_ERROR = 4;
     PEER_ID_INVALID = 5;
@@ -478,7 +461,7 @@ message RpcCall {
 
 message RpcResult {
   uint64 req_msg_id = 1;
-  
+
   oneof result {
     GetMeResult getMe = 2;
     GetPeerPhotoResult getPeerPhoto = 3;
@@ -512,7 +495,6 @@ message DeleteMessagesResult {
   repeated Update updates = 1;
 }
 
-
 message EditMessageInput {
   int64 message_id = 1;
   InputPeer peer_id = 2;
@@ -522,7 +504,6 @@ message EditMessageInput {
 message EditMessageResult {
   repeated Update updates = 1;
 }
-
 
 message InputMedia {
   oneof media {
@@ -589,7 +570,7 @@ message GetChatHistoryResult {
 
 //  Updates Subsystem
 message Update {
-  reserved 1,2,3;
+  reserved 1, 2, 3;
 
   oneof update {
     UpdateNewMessage new_message = 4;
@@ -638,7 +619,7 @@ message UpdateComposeAction {
   int64 user_id = 1;
 
   // Peer ID of the peer user is composing the message to
-  Peer peer_id = 2; 
+  Peer peer_id = 2;
 
   // Action of the user (typing, etc)
   ComposeAction action = 3;
@@ -678,16 +659,15 @@ message LastOnline {
   // Date of the last online if exact last online is permitted by the user
   optional int64 date = 1;
 
-//   // Approximate date of the last online
-//   Approximate approximate = 2;
+  //   // Approximate date of the last online
+  //   Approximate approximate = 2;
 
-
-// enum Approximate {
-//   UNSPECIFIED = 0;
-//   RECENTLY = 1;
-//   A_DAY_AGO = 2;
-//   A_WEEK_AGO = 3;
-//   A_MONTH_AGO = 4;
-//   LONG_TIME_AGO = 5;
-// }
+  // enum Approximate {
+  //   UNSPECIFIED = 0;
+  //   RECENTLY = 1;
+  //   A_DAY_AGO = 2;
+  //   A_WEEK_AGO = 3;
+  //   A_MONTH_AGO = 4;
+  //   LONG_TIME_AGO = 5;
+  // }
 }

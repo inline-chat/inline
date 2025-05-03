@@ -201,43 +201,8 @@
     {
       "idx": 28,
       "version": "7",
-      "when": 1745683755839,
-      "tag": "0028_link-embed-experimental",
-      "breakpoints": true
-    },
-    {
-      "idx": 29,
-      "version": "7",
-      "when": 1745839181885,
-      "tag": "0029_link-embed-changes",
-      "breakpoints": true
-    },
-    {
-      "idx": 30,
-      "version": "7",
-      "when": 1745940009715,
-      "tag": "0030_link-embed-add-fields",
-      "breakpoints": true
-    },
-    {
-      "idx": 31,
-      "version": "7",
-      "when": 1745941389402,
-      "tag": "0031_changes",
-      "breakpoints": true
-    },
-    {
-      "idx": 32,
-      "version": "7",
-      "when": 1745941504993,
-      "tag": "0032_changes2",
-      "breakpoints": true
-    },
-    {
-      "idx": 33,
-      "version": "7",
-      "when": 1745941791019,
-      "tag": "0033_changes3",
+      "when": 1746269202071,
+      "tag": "0028_add_url_preview",
       "breakpoints": true
     }
   ]

@@ -558,109 +558,61 @@ export interface MessageAttachment {
          */
         externalTask: MessageAttachmentExternalTask;
     } | {
-        oneofKind: "linkEmbedExperimental";
+        oneofKind: "urlPreview";
         /**
-         * @generated from protobuf field: MessageAttachmentLinkEmbed_Experimental link_embed_experimental = 1000;
+         * @generated from protobuf field: UrlPreview url_preview = 3;
          */
-        linkEmbedExperimental: MessageAttachmentLinkEmbed_Experimental;
+        urlPreview: UrlPreview;
     } | {
         oneofKind: undefined;
     };
 }
 /**
- * @generated from protobuf message MessageAttachmentLinkEmbed_Experimental
+ * @generated from protobuf message UrlPreview
  */
-export interface MessageAttachmentLinkEmbed_Experimental {
+export interface UrlPreview {
     /**
      * ID of external task in our database
      *
-     * @generated from protobuf field: int64 id = 101;
+     * @generated from protobuf field: int64 id = 1;
      */
     id: bigint;
     /**
      * URL of the link
      *
-     * @generated from protobuf field: string url = 102;
+     * @generated from protobuf field: optional string url = 2;
      */
-    url: string;
+    url?: string;
+    /**
+     * Site name of the link
+     *
+     * @generated from protobuf field: optional string site_name = 3;
+     */
+    siteName?: string;
     /**
      * Title of the link
      *
-     * @generated from protobuf field: string title = 103;
+     * @generated from protobuf field: optional string title = 4;
      */
-    title: string;
-    /**
-     * Image URL of the link
-     *
-     * @generated from protobuf field: string image_url = 104;
-     */
-    imageUrl: string;
-    /**
-     * Image width of the link
-     *
-     * @generated from protobuf field: int32 image_width = 105;
-     */
-    imageWidth: number;
-    /**
-     * Image height of the link
-     *
-     * @generated from protobuf field: int32 image_height = 106;
-     */
-    imageHeight: number;
-    /**
-     * HTML of the link
-     *
-     * @generated from protobuf field: string html = 107;
-     */
-    html: string;
-    /**
-     * Date of the link
-     *
-     * @generated from protobuf field: int64 date = 108;
-     */
-    date: bigint;
-    /**
-     * Duration of the link
-     *
-     * @generated from protobuf field: float duration = 109;
-     */
-    duration: number;
-    /**
-     * Video ID of the link
-     *
-     * @generated from protobuf field: string video_id = 1010;
-     */
-    videoId: string;
-    /**
-     * Provider of the link
-     *
-     * @generated from protobuf field: string provider_name = 1011;
-     */
-    providerName: string;
-    /**
-     * Provider URL of the link
-     *
-     * @generated from protobuf field: string provider_url = 1012;
-     */
-    providerUrl: string;
+    title?: string;
     /**
      * Description of the link
      *
-     * @generated from protobuf field: string description = 1013;
+     * @generated from protobuf field: optional string description = 5;
      */
-    description: string;
+    description?: string;
     /**
-     * Share URL of the link
+     * Image ID of the link
      *
-     * @generated from protobuf field: string share_url = 1014;
+     * @generated from protobuf field: optional Photo photo = 6;
      */
-    shareUrl: string;
+    photo?: Photo;
     /**
-     * Type of the link
+     * Duration of the content
      *
-     * @generated from protobuf field: LinkEmbedType type = 1015;
+     * @generated from protobuf field: optional int64 duration = 7;
      */
-    type: LinkEmbedType;
+    duration?: bigint;
 }
 /**
  * @generated from protobuf message MessageAttachmentExternalTask
@@ -1668,19 +1620,6 @@ export interface LastOnline {
      * @generated from protobuf field: optional int64 date = 1;
      */
     date?: bigint;
-}
-/**
- * @generated from protobuf enum LinkEmbedType
- */
-export enum LinkEmbedType {
-    /**
-     * @generated from protobuf enum value: LINK = 0;
-     */
-    LINK = 0,
-    /**
-     * @generated from protobuf enum value: LOOM = 1;
-     */
-    LOOM = 1
 }
 /**
  * @generated from protobuf enum Method
@@ -3284,7 +3223,7 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
         super("MessageAttachment", [
             { no: 1, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "external_task", kind: "message", oneof: "attachment", T: () => MessageAttachmentExternalTask },
-            { no: 1000, name: "link_embed_experimental", kind: "message", oneof: "attachment", T: () => MessageAttachmentLinkEmbed_Experimental }
+            { no: 3, name: "url_preview", kind: "message", oneof: "attachment", T: () => UrlPreview }
         ]);
     }
     create(value?: PartialMessage<MessageAttachment>): MessageAttachment {
@@ -3309,10 +3248,10 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
                         externalTask: MessageAttachmentExternalTask.internalBinaryRead(reader, reader.uint32(), options, (message.attachment as any).externalTask)
                     };
                     break;
-                case /* MessageAttachmentLinkEmbed_Experimental link_embed_experimental */ 1000:
+                case /* UrlPreview url_preview */ 3:
                     message.attachment = {
-                        oneofKind: "linkEmbedExperimental",
-                        linkEmbedExperimental: MessageAttachmentLinkEmbed_Experimental.internalBinaryRead(reader, reader.uint32(), options, (message.attachment as any).linkEmbedExperimental)
+                        oneofKind: "urlPreview",
+                        urlPreview: UrlPreview.internalBinaryRead(reader, reader.uint32(), options, (message.attachment as any).urlPreview)
                     };
                     break;
                 default:
@@ -3333,9 +3272,9 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
         /* MessageAttachmentExternalTask external_task = 2; */
         if (message.attachment.oneofKind === "externalTask")
             MessageAttachmentExternalTask.internalBinaryWrite(message.attachment.externalTask, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
-        /* MessageAttachmentLinkEmbed_Experimental link_embed_experimental = 1000; */
-        if (message.attachment.oneofKind === "linkEmbedExperimental")
-            MessageAttachmentLinkEmbed_Experimental.internalBinaryWrite(message.attachment.linkEmbedExperimental, writer.tag(1000, WireType.LengthDelimited).fork(), options).join();
+        /* UrlPreview url_preview = 3; */
+        if (message.attachment.oneofKind === "urlPreview")
+            UrlPreview.internalBinaryWrite(message.attachment.urlPreview, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3347,96 +3286,50 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
  */
 export const MessageAttachment = new MessageAttachment$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class MessageAttachmentLinkEmbed_Experimental$Type extends MessageType<MessageAttachmentLinkEmbed_Experimental> {
+class UrlPreview$Type extends MessageType<UrlPreview> {
     constructor() {
-        super("MessageAttachmentLinkEmbed_Experimental", [
-            { no: 101, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 102, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 103, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 104, name: "image_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 105, name: "image_width", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 106, name: "image_height", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 107, name: "html", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 108, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 109, name: "duration", kind: "scalar", T: 2 /*ScalarType.FLOAT*/ },
-            { no: 1010, name: "video_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 1011, name: "provider_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 1012, name: "provider_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 1013, name: "description", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 1014, name: "share_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 1015, name: "type", kind: "enum", T: () => ["LinkEmbedType", LinkEmbedType] }
+        super("UrlPreview", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "site_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "photo", kind: "message", T: () => Photo },
+            { no: 7, name: "duration", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
-    create(value?: PartialMessage<MessageAttachmentLinkEmbed_Experimental>): MessageAttachmentLinkEmbed_Experimental {
+    create(value?: PartialMessage<UrlPreview>): UrlPreview {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.id = 0n;
-        message.url = "";
-        message.title = "";
-        message.imageUrl = "";
-        message.imageWidth = 0;
-        message.imageHeight = 0;
-        message.html = "";
-        message.date = 0n;
-        message.duration = 0;
-        message.videoId = "";
-        message.providerName = "";
-        message.providerUrl = "";
-        message.description = "";
-        message.shareUrl = "";
-        message.type = 0;
         if (value !== undefined)
-            reflectionMergePartial<MessageAttachmentLinkEmbed_Experimental>(this, message, value);
+            reflectionMergePartial<UrlPreview>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageAttachmentLinkEmbed_Experimental): MessageAttachmentLinkEmbed_Experimental {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UrlPreview): UrlPreview {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* int64 id */ 101:
+                case /* int64 id */ 1:
                     message.id = reader.int64().toBigInt();
                     break;
-                case /* string url */ 102:
+                case /* optional string url */ 2:
                     message.url = reader.string();
                     break;
-                case /* string title */ 103:
+                case /* optional string site_name */ 3:
+                    message.siteName = reader.string();
+                    break;
+                case /* optional string title */ 4:
                     message.title = reader.string();
                     break;
-                case /* string image_url */ 104:
-                    message.imageUrl = reader.string();
-                    break;
-                case /* int32 image_width */ 105:
-                    message.imageWidth = reader.int32();
-                    break;
-                case /* int32 image_height */ 106:
-                    message.imageHeight = reader.int32();
-                    break;
-                case /* string html */ 107:
-                    message.html = reader.string();
-                    break;
-                case /* int64 date */ 108:
-                    message.date = reader.int64().toBigInt();
-                    break;
-                case /* float duration */ 109:
-                    message.duration = reader.float();
-                    break;
-                case /* string video_id */ 1010:
-                    message.videoId = reader.string();
-                    break;
-                case /* string provider_name */ 1011:
-                    message.providerName = reader.string();
-                    break;
-                case /* string provider_url */ 1012:
-                    message.providerUrl = reader.string();
-                    break;
-                case /* string description */ 1013:
+                case /* optional string description */ 5:
                     message.description = reader.string();
                     break;
-                case /* string share_url */ 1014:
-                    message.shareUrl = reader.string();
+                case /* optional Photo photo */ 6:
+                    message.photo = Photo.internalBinaryRead(reader, reader.uint32(), options, message.photo);
                     break;
-                case /* LinkEmbedType type */ 1015:
-                    message.type = reader.int32();
+                case /* optional int64 duration */ 7:
+                    message.duration = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3449,52 +3342,28 @@ class MessageAttachmentLinkEmbed_Experimental$Type extends MessageType<MessageAt
         }
         return message;
     }
-    internalBinaryWrite(message: MessageAttachmentLinkEmbed_Experimental, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* int64 id = 101; */
+    internalBinaryWrite(message: UrlPreview, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
         if (message.id !== 0n)
-            writer.tag(101, WireType.Varint).int64(message.id);
-        /* string url = 102; */
-        if (message.url !== "")
-            writer.tag(102, WireType.LengthDelimited).string(message.url);
-        /* string title = 103; */
-        if (message.title !== "")
-            writer.tag(103, WireType.LengthDelimited).string(message.title);
-        /* string image_url = 104; */
-        if (message.imageUrl !== "")
-            writer.tag(104, WireType.LengthDelimited).string(message.imageUrl);
-        /* int32 image_width = 105; */
-        if (message.imageWidth !== 0)
-            writer.tag(105, WireType.Varint).int32(message.imageWidth);
-        /* int32 image_height = 106; */
-        if (message.imageHeight !== 0)
-            writer.tag(106, WireType.Varint).int32(message.imageHeight);
-        /* string html = 107; */
-        if (message.html !== "")
-            writer.tag(107, WireType.LengthDelimited).string(message.html);
-        /* int64 date = 108; */
-        if (message.date !== 0n)
-            writer.tag(108, WireType.Varint).int64(message.date);
-        /* float duration = 109; */
-        if (message.duration !== 0)
-            writer.tag(109, WireType.Bit32).float(message.duration);
-        /* string video_id = 1010; */
-        if (message.videoId !== "")
-            writer.tag(1010, WireType.LengthDelimited).string(message.videoId);
-        /* string provider_name = 1011; */
-        if (message.providerName !== "")
-            writer.tag(1011, WireType.LengthDelimited).string(message.providerName);
-        /* string provider_url = 1012; */
-        if (message.providerUrl !== "")
-            writer.tag(1012, WireType.LengthDelimited).string(message.providerUrl);
-        /* string description = 1013; */
-        if (message.description !== "")
-            writer.tag(1013, WireType.LengthDelimited).string(message.description);
-        /* string share_url = 1014; */
-        if (message.shareUrl !== "")
-            writer.tag(1014, WireType.LengthDelimited).string(message.shareUrl);
-        /* LinkEmbedType type = 1015; */
-        if (message.type !== 0)
-            writer.tag(1015, WireType.Varint).int32(message.type);
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* optional string url = 2; */
+        if (message.url !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.url);
+        /* optional string site_name = 3; */
+        if (message.siteName !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.siteName);
+        /* optional string title = 4; */
+        if (message.title !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.title);
+        /* optional string description = 5; */
+        if (message.description !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.description);
+        /* optional Photo photo = 6; */
+        if (message.photo)
+            Photo.internalBinaryWrite(message.photo, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 duration = 7; */
+        if (message.duration !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.duration);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3502,9 +3371,9 @@ class MessageAttachmentLinkEmbed_Experimental$Type extends MessageType<MessageAt
     }
 }
 /**
- * @generated MessageType for protobuf message MessageAttachmentLinkEmbed_Experimental
+ * @generated MessageType for protobuf message UrlPreview
  */
-export const MessageAttachmentLinkEmbed_Experimental = new MessageAttachmentLinkEmbed_Experimental$Type();
+export const UrlPreview = new UrlPreview$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageAttachmentExternalTask$Type extends MessageType<MessageAttachmentExternalTask> {
     constructor() {
