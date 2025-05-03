@@ -52,7 +52,7 @@ export const messageAttachments = pgTable("message_attachments", {
 
   /** external task id */
   externalTaskId: bigint("external_task_id", { mode: "bigint" }).references(() => externalTasks.id),
-  linkEmbedId: bigint("url_preview_id", { mode: "bigint" }).references(() => urlPreview.id),
+  urlPreviewId: bigint("url_preview_id", { mode: "bigint" }).references(() => urlPreview.id),
 })
 
 export const messageAttachmentsRelations = relations(messageAttachments, ({ one }) => ({
@@ -62,7 +62,7 @@ export const messageAttachmentsRelations = relations(messageAttachments, ({ one 
   }),
 
   linkEmbed: one(urlPreview, {
-    fields: [messageAttachments.linkEmbedId],
+    fields: [messageAttachments.urlPreviewId],
     references: [urlPreview.id],
   }),
 
