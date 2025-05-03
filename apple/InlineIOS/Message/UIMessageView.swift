@@ -145,6 +145,8 @@ class UIMessageView: UIView {
 
   init(fullMessage: FullMessage, spaceId: Int64) {
     self.fullMessage = fullMessage
+
+    print("🧁 fullMessage \(fullMessage)")
     self.spaceId = spaceId
 
     // TODO: move to lazy var
