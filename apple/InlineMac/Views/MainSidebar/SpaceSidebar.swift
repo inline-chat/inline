@@ -89,30 +89,17 @@ struct SpaceSidebar: View {
       edge: .top,
       content: {
         VStack(alignment: .leading, spacing: 0) {
-          HStack(spacing: 0) {
-            BackToHomeButton()
-              .padding(.leading, -4)
-              .padding(.trailing, 4)
+          topArea
 
-            if let space = fullSpace.space {
-              SpaceAvatar(space: space, size: Theme.sidebarTitleIconSize)
-                .padding(.trailing, Theme.sidebarIconSpacing)
-            }
-
-            Text(fullSpace.space?.name ?? "Loading...")
-              .font(Theme.sidebarTopItemFont)
-
-            Spacer()
-          }
-          .frame(height: Theme.sidebarTopItemHeight)
-          .padding(.top, 0)
-          .padding(.horizontal, Theme.sidebarContentSideSpacing)
-//          .padding(.bottom, 8)
-
-//          SidebarSearchBar(text: $searchQuery)
-//            .padding(.horizontal, Theme.sidebarContentSideSpacing)
+          SidebarSearchBar(text: $searchQuery)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(
+          .horizontal,
+          Theme.sidebarItemOuterSpacing
+        )
+        .padding(.bottom, 8)
+        .edgesIgnoringSafeArea(.bottom)
       }
     )
     .task {
@@ -138,6 +125,66 @@ struct SpaceSidebar: View {
       unsubscribeKeyMonitor()
     }
   }
+
+  // MARK: - Views
+
+  @ViewBuilder
+  var topArea: some View {
+    HStack(spacing: 0) {
+      BackToHomeButton()
+        .padding(.leading, -4)
+        .padding(.trailing, 4)
+
+      if let space = fullSpace.space {
+        SpaceAvatar(space: space, size: Theme.sidebarTitleIconSize)
+          .padding(.trailing, Theme.sidebarIconSpacing)
+      }
+
+      Text(fullSpace.space?.name ?? "Loading...")
+        .font(Theme.sidebarTopItemFont)
+
+      Spacer()
+
+      plusButton
+    }
+    .padding(.top, -6)
+    .padding(.bottom, 8)
+    .padding(
+      .leading,
+      Theme.sidebarItemInnerSpacing
+    )
+    .padding(
+      .trailing,
+      4
+    )
+  }
+
+  @ViewBuilder
+  var plusButton: some View {
+    Menu {
+      Button {
+        nav.open(.newChat)
+      } label: {
+        Label("New Chat", systemImage: "plus")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundStyle(Color.accent)
+      }
+    } label: {
+      Image(systemName: "plus")
+        .font(.system(size: 15, weight: .medium))
+        .foregroundStyle(.tertiary)
+        .contentShape(.circle)
+        .frame(width: 24, height: 24, alignment: .center)
+//        .background(
+//          Circle()
+//            .foregroundStyle(.gray.opacity(0.1))
+//        )
+    }
+    .menuStyle(.button)
+    .buttonStyle(.plain)
+  }
+
+  // MARK: - Private Methods
 
   private func subscribeKeyMonitor() {
     let _ = keyMonitor?.addHandler(for: .escape, key: "space_esc") { _ in

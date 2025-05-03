@@ -348,6 +348,7 @@ extension MainWindowController: NSToolbarDelegate {
 extension NSToolbarItem.Identifier {
   static let toggleSidebar = Self("ToggleSidebar")
   static let homePlus = Self("HomePlus")
+  static let spacePlus = Self("SpacePlus")
   static let backToHome = Self("BackToHome")
   static let navGroup = Self("NavGroup")
   static let navBack = Self("NavBack")
@@ -429,10 +430,10 @@ extension MainWindowController {
     // Sidebar items
     if nav.history.last?.spaceId != nil {
       items.append(.flexibleSpace)
-      // items.append(.backToHome)
+      // items.append(.spacePlus)
     } else {
       items.append(.flexibleSpace)
-      items.append(.homePlus)
+      // items.append(.homePlus)
     }
 
     // Close sidebar

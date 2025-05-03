@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import Logger
 import SwiftUI
 
@@ -153,6 +154,7 @@ struct HomeSidebar: View {
       spacing: 0,
       content: {
         VStack(alignment: .leading, spacing: 0) {
+          topArea
           searchBar
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -271,7 +273,6 @@ struct HomeSidebar: View {
         }
         .buttonStyle(.plain)
 
-
         Spacer()
       }
       .frame(height: 42)
@@ -380,6 +381,73 @@ struct HomeSidebar: View {
       )
       .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
     } else {}
+  }
+
+  @ViewBuilder
+  var topArea: some View {
+    HStack(spacing: 0) {
+      // Home icon
+      Circle()
+        .fill(
+          LinearGradient(
+            colors: [
+              .accent.adjustLuminosity(by: 0.05),
+              .accent,
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+          )
+        )
+        .overlay {
+          Image(systemName: "house.fill")
+            .foregroundColor(.white)
+            .font(.system(size: 13, weight: .regular))
+        }
+        .frame(width: Theme.sidebarTitleIconSize, height: Theme.sidebarTitleIconSize)
+        .fixedSize()
+        .padding(.trailing, Theme.sidebarIconSpacing)
+
+      Text("Home")
+
+      Spacer()
+
+      plusButton
+    }
+    .padding(.top, -6)
+    .padding(.bottom, 8)
+    .padding(
+      .leading,
+      Theme.sidebarItemInnerSpacing
+    )
+    .padding(
+      .trailing,
+      4
+    )
+  }
+
+  @ViewBuilder
+  var plusButton: some View {
+    Menu {
+      Button {
+        nav.open(.createSpace)
+      } label: {
+        Label("New Space", systemImage: "plus")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundStyle(Color.accent)
+      }
+    } label: {
+      Image(systemName: "plus")
+        .font(.system(size: 15, weight: .medium))
+        .foregroundStyle(.tertiary)
+        .contentShape(.circle)
+        .frame(width: Theme.sidebarTitleIconSize, height: Theme.sidebarTitleIconSize, alignment: .center)
+//        .background(
+//          Circle()
+//            .foregroundStyle(.gray.opacity(0.1))
+//        )
+    }
+    .menuStyle(.button)
+    .buttonStyle(.plain)
   }
 
   // The view when user focuses the search input shows up
