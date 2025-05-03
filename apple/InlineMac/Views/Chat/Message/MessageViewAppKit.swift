@@ -205,6 +205,14 @@ class MessageViewAppKit: NSView {
       textContainer?.widthTracksTextView = false
       textContainer?.heightTracksTextView = false
 
+      // Configure basic text view behavior
+      textView.allowsImageEditing = false
+      textView.isGrammarCheckingEnabled = false
+      textView.isContinuousSpellCheckingEnabled = false
+      textView.isAutomaticQuoteSubstitutionEnabled = false
+      textView.isAutomaticDashSubstitutionEnabled = false
+      textView.isAutomaticTextReplacementEnabled = false
+
       textView.isVerticallyResizable = false
       textView.isHorizontallyResizable = false
       textView.delegate = self
@@ -1318,7 +1326,54 @@ extension MessageViewAppKit {
   }
 }
 
-extension MessageViewAppKit: NSTextViewDelegate {}
+extension MessageViewAppKit: NSTextViewDelegate {
+  func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+    // Create a new menu
+    let customMenu = NSMenu()
+    
+    // Add native Copy at the very top (for selected text) - create a new item
+    let nativeCopyItem = NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    nativeCopyItem.target = textView
+    customMenu.addItem(nativeCopyItem)
+    
+    // Add our custom message actions near the top
+    let copyMessageItem = NSMenuItem(title: "Copy Message", action: #selector(copyMessage), keyEquivalent: "")
+    copyMessageItem.target = self
+    customMenu.addItem(copyMessageItem)
+    
+    let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "")
+    replyItem.target = self
+    customMenu.addItem(replyItem)
+    
+    // Add a separator after our primary items
+    customMenu.addItem(NSMenuItem.separator())
+    
+    // For Look Up and Translate, we'll check for these items in the original menu
+    // and only add them if they exist, because the selectors are private/internal
+    for item in menu.items {
+      if ["Look Up", "Translate"].contains(item.title) {
+        // Create a copy of the item
+        let newItem = NSMenuItem(title: item.title,
+                                 action: item.action,
+                                 keyEquivalent: item.keyEquivalent)
+        newItem.target = item.target
+        customMenu.addItem(newItem)
+      }
+    }
+    
+    // Add a separator before Delete
+    customMenu.addItem(NSMenuItem.separator())
+    
+    // Add Delete as the last item
+    let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "")
+    deleteItem.target = self
+    customMenu.addItem(deleteItem)
+    
+    return customMenu
+  }
+}
+
+
 extension MessageViewAppKit: NSMenuDelegate {}
 
 struct MessageViewInputProps: Equatable, Codable, Hashable {
