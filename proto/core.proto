@@ -234,6 +234,7 @@ message DeleteReactionResult { repeated Update updates = 1; }
 message MessageAttachments { repeated MessageAttachment attachments = 1; }
 
 message MessageAttachment {
+  // todo: deprecated
   int64 message_id = 1;
 
   oneof attachment {
@@ -644,7 +645,11 @@ message UpdateComposeAction {
   ComposeAction action = 3;
 }
 
-message UpdateMessageAttachment { MessageAttachment attachment = 1; }
+message UpdateMessageAttachment {
+  MessageAttachment attachment = 1;
+  int64 message_id = 2;
+  Peer peer_id = 3;
+}
 
 message UpdateReaction { Reaction reaction = 1; }
 
