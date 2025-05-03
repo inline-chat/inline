@@ -9,6 +9,7 @@ public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, Pers
   public var id: Int64?
   public var messageId: Int64?
   public var externalTaskId: Int64?
+public var linkEmbedId: Int64?
 
   public static let externalTask = belongsTo(
     ExternalTask.self,
@@ -19,6 +20,15 @@ public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, Pers
     request(for: Attachment.externalTask)
   }
 
+  public static let linkEmbed = belongsTo(
+    LinkEmbed.self,
+    using: ForeignKey(["linkEmbedId"], to: ["id"])
+  )
+
+  public var linkEmbed: QueryInterfaceRequest<LinkEmbed> {
+    request(for: Attachment.linkEmbed)
+  } 
+
   public static let message = belongsTo(
     Message.self,
     using: ForeignKey(["messageId"], to: ["globalId"])
@@ -27,9 +37,10 @@ public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, Pers
     request(for: Attachment.message)
   }
 
-  public init(messageId: Int64?, externalTaskId: Int64?) {
+  public init(messageId: Int64?, externalTaskId: Int64?, linkEmbedId: Int64?) {
     self.messageId = messageId
     self.externalTaskId = externalTaskId
+    self.linkEmbedId = linkEmbedId
   }
 }
 
@@ -42,7 +53,7 @@ public extension Attachment {
   {
     let message = try Message.filter(Column("messageId") == messageAttachment.messageID).fetchOne(db)
 
-    let attachment = Attachment(messageId: message?.globalId, externalTaskId: messageAttachment.externalTask.id)
+    let attachment = Attachment(messageId: message?.globalId, externalTaskId: messageAttachment.externalTask.id, linkEmbedId: messageAttachment.linkEmbedExperimental.id)
 
     try attachment.save(db)
 

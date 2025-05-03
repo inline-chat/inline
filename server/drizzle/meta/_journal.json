@@ -197,6 +197,13 @@
       "when": 1744130678733,
       "tag": "0027_add-isSticker-on-message",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1746269202071,
+      "tag": "0028_add_url_preview",
+      "breakpoints": true
     }
   ]
 }

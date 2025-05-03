@@ -22,6 +22,7 @@ import { realtime } from "@in/server/realtime"
 import { integrationsRouter } from "./controllers/integrations/integrationsRouter"
 import type { Server } from "bun"
 
+
 const port = process.env["PORT"] || 8000
 
 // Ensure to call this before importing any other modules!
@@ -37,6 +38,7 @@ export const app = new Elysia()
   .use(waitlist)
   .use(there)
   .use(integrationsRouter)
+
   .use(
     swagger({
       path: "/v1/docs",

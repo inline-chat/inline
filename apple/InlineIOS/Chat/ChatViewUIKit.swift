@@ -259,12 +259,10 @@ class ChatContainerView: UIView {
     let state = ChatState.shared.getState(peer: peerId)
     guard let messageId = state.replyingMessageId ?? state.editingMessageId else { return }
 
-    let mode: ComposeEmbedView.Mode = state.editingMessageId != nil ? .edit : .reply
     let newComposeEmbedView = ComposeEmbedView(
       peerId: peerId,
       chatId: chatId ?? 0,
-      messageId: messageId,
-      mode: mode
+      messageId: messageId
     )
     newComposeEmbedView.translatesAutoresizingMaskIntoConstraints = false
     composeEmbedViewWrapper.clipsToBounds = true
