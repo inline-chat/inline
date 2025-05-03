@@ -30,76 +30,106 @@ class ComposeNSTextView: NSTextView {
     super.keyDown(with: event)
   }
 
-//  override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
-//    var types = newTypes
-//    // Make sure image types are included
-//    if !types.contains(.tiff) {
-//      types.append(.tiff)
-//    }
-//    if !types.contains(.png) {
-//      types.append(.png)
-//    }
-//    super.registerForDraggedTypes(types)
-//  }
+  private func logPasteboardTypes(_ pasteboard: NSPasteboard) {
+    print("\n--- PASTEBOARD CONTENT ANALYSIS ---")
 
-  // Override paste operation
-//  override func paste(_ sender: Any?) {
-//    let pasteboard = NSPasteboard.general
-//
-//    print(pasteboard.types)
-//
-//    // First check for files that are images
-//    if let files = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
-//      for file in files {
-//        let fileType = file.pathExtension.lowercased()
-//        // Check if the file is an image
-//        if ["png", "jpg", "jpeg", "gif", "heic"].contains(fileType) {
-//          if let image = NSImage(contentsOf: file) {
-//            // Notify delegate about image paste
-//            if let delegate = delegate as? ComposeTextViewDelegate {
-//              delegate.textView(self, didReceiveImage: image)
-//              return
-//            }
-//          }
-//        }
-//      }
-//    }
-//
-//    // Then check for direct image data in pasteboard
-//    if let image = pasteboard.readObjects(forClasses: [NSImage.self], options: nil)?.first as? NSImage {
-//      // Notify delegate about image paste
-//      if let delegate = delegate as? ComposeTextViewDelegate {
-//        delegate.textView(self, didReceiveImage: image)
-//        return
-//      }
-//    }
-//
-//    // If no image or no delegate, perform default paste
-//    super.paste(sender)
-//  }
+    // 1. Get all available types in the pasteboard
+    if let types = pasteboard.types {
+      print("📋 Available pasteboard types:")
+      for type in types {
+        print("• \(type.rawValue)")
+      }
+      print("")
+    }
 
-  // MARK: - Drag and Drop
+    // 2. Detailed analysis of image types
+    print("🖼 IMAGE ANALYSIS:")
+    let imageTypes: [NSPasteboard.PasteboardType] = [
+      .tiff, .png,
+      NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("public.image"),
+    ]
 
-//  override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
-//    var types = newTypes
-//    types.append(contentsOf: [.fileURL, .tiff, .png])
-//    super.registerForDraggedTypes(types)
-//  }
-//
-//  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-//    .copy
-//  }
-//
-//  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-//    let pasteboard = sender.draggingPasteboard
-//    // Reuse the same logic as in paste: method
-//    return true
-//  }
-//
+    for type in imageTypes {
+      if let data = pasteboard.data(forType: type) {
+        print("Found image data with type: \(type.rawValue)")
 
-  // MARK: - Shared Logic For Drag And Paste
+        if let image = NSImage(data: data) {
+          print("Image dimensions: \(Int(image.size.width))×\(Int(image.size.height))")
+
+          // Analyze representations
+          for (index, rep) in image.representations.enumerated() {
+            print("  Representation #\(index + 1):")
+
+            print("  - Size: \(Int(rep.size.width))×\(Int(rep.size.height))")
+
+            if let bitmapRep = rep as? NSBitmapImageRep {
+              print("  - Bits per pixel: \(bitmapRep.bitsPerPixel)")
+              print("  - Alpha: \(bitmapRep.hasAlpha ? "Yes" : "No")")
+
+              print("  - Color space: \(bitmapRep.colorSpace.localizedName ?? "Unknown")")
+            }
+          }
+        }
+        print("")
+      }
+    }
+
+    // 3. Check for file URLs (common when dragging from browser)
+    print("📁 FILE URL ANALYSIS:")
+    if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+      for (index, url) in urls.enumerated() {
+        print("URL #\(index + 1): \(url.absoluteString)")
+
+        if url.isFileURL {
+          print("- This is a file URL")
+          print("- File extension: \(url.pathExtension)")
+
+          // Get file UTI
+          if #available(macOS 11.0, *) {
+            let fileType = UTType(filenameExtension: url.pathExtension)
+            if let fileType {
+              print("- UTI: \(fileType.identifier)")
+
+              // Check if it's an image
+              if fileType.conforms(to: .image) {
+                print("- This is an image file")
+              }
+            }
+          }
+
+          // Get file attributes
+          if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) {
+            print("- File size: \(attrs[.size] as? NSNumber ?? 0) bytes")
+          }
+        } else {
+          print("- This is a web URL (not a file)")
+        }
+        print("")
+      }
+    }
+
+    // 4. Check for HTML content (browsers often include this)
+    print("🌐 HTML CONTENT ANALYSIS:")
+    let htmlType = NSPasteboard.PasteboardType("public.html")
+    if let htmlString = pasteboard.string(forType: htmlType) {
+      print("HTML content found: \(htmlString.prefix(100))...")
+
+      // Check for image tags in HTML
+      if htmlString.contains("<img") {
+        print("- HTML contains <img> tags")
+      }
+    } else {
+      print("No HTML content found")
+    }
+
+    print("\n--- END OF ANALYSIS ---\n")
+  }
 
   private func handleImageInput(from pasteboard: NSPasteboard) -> Bool {
+    // Log pasteboard types for debugging
+    logPasteboardTypes(pasteboard)
+
     // First check for files that are images
     if let files = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
       var handled = false
@@ -136,12 +166,19 @@ class ComposeNSTextView: NSTextView {
         }
       }
 
-      return handled
+      if handled {
+        return true
+      }
     }
 
     // 2. Handle direct image data
     let imageTypes: [NSPasteboard.PasteboardType] = [
-      .tiff, .png, NSPasteboard.PasteboardType("public.image"),
+      .tiff,
+      .png,
+      NSPasteboard.PasteboardType("public.image"),
+      NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("image/png"),
+      NSPasteboard.PasteboardType("image/jpeg"),
     ]
 
     if let bestType = pasteboard.availableType(from: imageTypes),
@@ -178,7 +215,17 @@ class ComposeNSTextView: NSTextView {
 
   override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
     var types = newTypes
-    types.append(contentsOf: [.fileURL, .tiff, .png])
+    types.append(contentsOf: [
+      .fileURL,
+      .tiff,
+      .png,
+      NSPasteboard.PasteboardType("public.image"),
+      NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("image/png"),
+      NSPasteboard.PasteboardType("image/jpeg"),
+
+    ])
+
     super.registerForDraggedTypes(types)
   }
 
@@ -188,8 +235,23 @@ class ComposeNSTextView: NSTextView {
   }
 
   private func canHandlePasteboard(_ pasteboard: NSPasteboard) -> Bool {
-    pasteboard.canReadObject(forClasses: [NSURL.self], options: nil) ||
-      pasteboard.availableType(from: [.tiff, .png]) != nil
+    // Check for files
+    if pasteboard.canReadObject(forClasses: [NSURL.self], options: nil) {
+      return true
+    }
+
+    // Check for images from browsers
+    let imageTypes: [NSPasteboard.PasteboardType] = [
+      .tiff, .png, .html,
+      NSPasteboard.PasteboardType("public.image"),
+      NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("image/png"),
+      NSPasteboard.PasteboardType("image/jpeg"),
+      NSPasteboard.PasteboardType("image/gif"),
+      NSPasteboard.PasteboardType("image/webp"),
+    ]
+
+    return pasteboard.availableType(from: imageTypes) != nil
   }
 
   override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
