@@ -6,6 +6,8 @@ import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/mod
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { users, type DbMessage } from "@in/server/db/schema"
+import { urlPreview, messageAttachments } from "@in/server/db/schema/attachments"
+import { photos } from "@in/server/db/schema/media"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
@@ -17,6 +19,8 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
 import { and, eq } from "drizzle-orm"
+import { isValidLoomUrl, fetchLoomOembed } from "@in/server/libs/loom"
+import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
 
 type Input = {
   peerId: InputPeer
@@ -78,9 +82,15 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     mediaType: mediaType,
     photoId: dbFullPhoto?.id ?? null,
     videoId: dbFullVideo?.id ?? null,
-     documentId: dbFullDocument?.id ?? null,
+    documentId: dbFullDocument?.id ?? null,
     isSticker: input.isSticker ?? false,
   })
+
+  // Process Loom links in the message if any
+  let urlPreviewId: number | null = null
+  if (input.message) {
+    urlPreviewId = await processLoomLinks(input.message, newMessage.globalId)
+  }
 
   // encode message info
   const messageInfo: MessageInfo = {
@@ -289,4 +299,118 @@ async function sendNotificationToUser({
     title,
     body,
   })
+}
+
+/**
+ * Process Loom links in a message text
+ * @param messageText The decrypted message text
+ * @param messageId The ID of the message
+ * @returns The ID of the created URL preview if a Loom link was found and processed, null otherwise
+ */
+async function processLoomLinks(messageText: string, messageId: bigint): Promise<number | null> {
+  try {
+    // Find Loom links in the message
+    const words = messageText.split(/\s+/)
+    const loomUrl = words.find(word => isValidLoomUrl(word))
+    
+    if (!loomUrl) return null
+    
+    // Fetch Loom oEmbed data
+    const oembed = await fetchLoomOembed(loomUrl)
+    
+    // Encrypt sensitive data
+    const urlEncrypted = encryptMessage(loomUrl)
+    const titleEncrypted = encryptMessage(oembed.title)
+    const descriptionEncrypted = oembed.description ? encryptMessage(oembed.description) : null
+    
+    // Download and save thumbnail
+    let photoId: number | null = null
+    if (oembed.thumbnailUrl) {
+      photoId = await downloadAndSaveThumbnail(oembed.thumbnailUrl, oembed.thumbnailWidth, oembed.thumbnailHeight)
+    }
+    
+    // Create URL preview record
+    const [urlPreviewRecord] = await db.insert(urlPreview).values({
+      url: urlEncrypted.encrypted,
+      urlIv: urlEncrypted.iv,
+      urlTag: urlEncrypted.authTag,
+      siteName: "Loom",
+      title: titleEncrypted.encrypted,
+      titleIv: titleEncrypted.iv,
+      titleTag: titleEncrypted.authTag,
+      description: descriptionEncrypted?.encrypted ?? null,
+      descriptionIv: descriptionEncrypted?.iv ?? null,
+      descriptionTag: descriptionEncrypted?.authTag ?? null,
+      photoId: photoId ? Number(photoId) : null,
+      duration: oembed.duration,
+      date: new Date(),
+    }).returning()
+    
+    if (!urlPreviewRecord) {
+      log.error("Failed to create URL preview record")
+      return null
+    }
+    
+    // Create link between message and URL preview
+    // Using urlPreviewId as per the schema in attachments.ts
+    await db.insert(messageAttachments).values({
+      messageId: messageId,
+      urlPreviewId: BigInt(urlPreviewRecord.id),
+      externalTaskId: null,
+    })
+    
+    return Number(urlPreviewRecord.id)
+  } catch (error) {
+    log.error("Error processing Loom link", { error })
+    return null
+  }
+}
+
+/**
+ * Downloads and saves a thumbnail image from a URL
+ * @param url The URL of the thumbnail image
+ * @param width The width of the thumbnail
+ * @param height The height of the thumbnail
+ * @returns The ID of the saved photo
+ */
+async function downloadAndSaveThumbnail(url: string, width: number, height: number): Promise<number | null> {
+  try {
+    // Download image
+    const response = await fetch(url)
+    if (!response.ok) {
+      log.error(`Failed to download thumbnail: ${response.status}`)
+      return null
+    }
+    
+    // Get image data as buffer
+    const imageBuffer = await response.arrayBuffer()
+    
+    // Convert ArrayBuffer to File for uploadPhoto
+    const fileName = `loom_thumbnail_${Date.now()}.jpg`
+    const thumbnailFile = new File([imageBuffer], fileName, { type: 'image/jpeg' })
+    
+    // Use the uploadPhoto module to handle the file upload properly
+    try {
+      const { photoId } = await uploadPhoto(thumbnailFile, { userId: 0 }) // Using 0 as system user
+      return Number(photoId)
+    } catch (uploadError) {
+      log.error("Error uploading thumbnail via uploadPhoto", { uploadError })
+      
+      // Fallback: If uploadPhoto fails, use the direct DB insert approach
+      const [photo] = await db.insert(photos).values({
+        format: "jpeg",
+        width,
+        height,
+        stripped: Buffer.from(imageBuffer),
+        strippedIv: null,
+        strippedTag: null,
+        date: new Date(),
+      }).returning()
+      
+      return photo ? Number(photo.id) : null
+    }
+  } catch (error) {
+    log.error("Error downloading thumbnail", { error })
+    return null
+  }
 }
