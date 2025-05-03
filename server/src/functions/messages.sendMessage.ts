@@ -21,6 +21,7 @@ import { connectionManager } from "@in/server/ws/connections"
 import { and, eq } from "drizzle-orm"
 import { isValidLoomUrl, fetchLoomOembed } from "@in/server/libs/loom"
 import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
+import { FileTypes } from "@in/server/modules/files/types"
 
 type Input = {
   peerId: InputPeer
@@ -89,7 +90,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // Process Loom links in the message if any
   let urlPreviewId: number | null = null
   if (input.message) {
-    urlPreviewId = await processLoomLinks(input.message, newMessage.globalId)
+    urlPreviewId = await processLoomLinks(input.message, newMessage.globalId, currentUserId)
   }
 
   // encode message info
@@ -307,27 +308,35 @@ async function sendNotificationToUser({
  * @param messageId The ID of the message
  * @returns The ID of the created URL preview if a Loom link was found and processed, null otherwise
  */
-async function processLoomLinks(messageText: string, messageId: bigint): Promise<number | null> {
+async function processLoomLinks(messageText: string, messageId: bigint, currentUserId: number): Promise<number | null> {
   try {
     // Find Loom links in the message
     const words = messageText.split(/\s+/)
     const loomUrl = words.find(word => isValidLoomUrl(word))
     
+    log.debug("🧁🧁🧁 loomUrl", loomUrl)
+    log.debug("🧁🧁🧁 words", words)
     if (!loomUrl) return null
+    log.debug("🧁🧁🧁 loomUrl found")
     
     // Fetch Loom oEmbed data
     const oembed = await fetchLoomOembed(loomUrl)
-    
+    log.debug("🧁🧁🧁 oembed", oembed)
     // Encrypt sensitive data
     const urlEncrypted = encryptMessage(loomUrl)
     const titleEncrypted = encryptMessage(oembed.title)
     const descriptionEncrypted = oembed.description ? encryptMessage(oembed.description) : null
+    log.debug("🧁🧁🧁 url, title, description successfully encrypted")
     
     // Download and save thumbnail
     let photoId: number | null = null
     if (oembed.thumbnailUrl) {
-      photoId = await downloadAndSaveThumbnail(oembed.thumbnailUrl, oembed.thumbnailWidth, oembed.thumbnailHeight)
+      log.debug("🧁🧁🧁 oembed.thumbnailUrl", oembed.thumbnailUrl)
+      photoId = await downloadAndSaveThumbnail(oembed.thumbnailUrl, oembed.thumbnailWidth, oembed.thumbnailHeight, currentUserId)
     }
+
+    log.debug("🧁🧁🧁 photoId downloaded and saved", photoId)
+ 
     
     // Create URL preview record
     const [urlPreviewRecord] = await db.insert(urlPreview).values({
@@ -338,16 +347,19 @@ async function processLoomLinks(messageText: string, messageId: bigint): Promise
       title: titleEncrypted.encrypted,
       titleIv: titleEncrypted.iv,
       titleTag: titleEncrypted.authTag,
-      description: descriptionEncrypted?.encrypted ?? null,
-      descriptionIv: descriptionEncrypted?.iv ?? null,
-      descriptionTag: descriptionEncrypted?.authTag ?? null,
-      photoId: photoId ? Number(photoId) : null,
+      description: descriptionEncrypted?.encrypted ,
+      descriptionIv: descriptionEncrypted?.iv,
+      descriptionTag: descriptionEncrypted?.authTag,
+      photoId: photoId,
       duration: oembed.duration,
       date: new Date(),
     }).returning()
     
+
+    log.debug("🧁🧁🧁 urlPreviewRecord inserted", urlPreviewRecord)
     if (!urlPreviewRecord) {
       log.error("Failed to create URL preview record")
+      log.debug("🧁🧁🧁 Failed to create URL preview record")
       return null
     }
     
@@ -358,6 +370,8 @@ async function processLoomLinks(messageText: string, messageId: bigint): Promise
       urlPreviewId: BigInt(urlPreviewRecord.id),
       externalTaskId: null,
     })
+
+    log.debug("🧁🧁🧁 messageAttachment inserted")
     
     return Number(urlPreviewRecord.id)
   } catch (error) {
@@ -373,43 +387,45 @@ async function processLoomLinks(messageText: string, messageId: bigint): Promise
  * @param height The height of the thumbnail
  * @returns The ID of the saved photo
  */
-async function downloadAndSaveThumbnail(url: string, width: number, height: number): Promise<number | null> {
+async function downloadAndSaveThumbnail(url: string, width: number, height: number, currentUserId: number): Promise<number | null> {
   try {
+    log.debug("🧁🧁🧁 Starting thumbnail download from URL:", url)
+    
     // Download image
     const response = await fetch(url)
     if (!response.ok) {
+      log.debug(`🧁🧁🧁 Failed to download thumbnail: ${response.status}`)
       log.error(`Failed to download thumbnail: ${response.status}`)
       return null
     }
     
+    log.debug("🧁🧁🧁 Successfully downloaded image, getting buffer")
     // Get image data as buffer
     const imageBuffer = await response.arrayBuffer()
+    log.debug("🧁🧁🧁 Image buffer size:", imageBuffer.byteLength)
     
-    // Convert ArrayBuffer to File for uploadPhoto
+    // Convert ArrayBuffer to File object
     const fileName = `loom_thumbnail_${Date.now()}.jpg`
     const thumbnailFile = new File([imageBuffer], fileName, { type: 'image/jpeg' })
+    log.debug("🧁🧁🧁 Created File object with name:", fileName)
     
-    // Use the uploadPhoto module to handle the file upload properly
+    // Create input for uploadFile handler logic
+    log.debug("🧁🧁🧁 Preparing to upload file as PHOTO type")
+    
     try {
-      const { photoId } = await uploadPhoto(thumbnailFile, { userId: 0 }) // Using 0 as system user
-      return Number(photoId)
+      // Use uploadPhoto similarly to how uploadFile's handler does it
+      // We're directly using the same approach as in the uploadFile handler
+      const result = await uploadPhoto(thumbnailFile, { userId: currentUserId }) 
+      
+      log.debug("🧁🧁🧁 Successfully uploaded photo with ID:", result.photoId)
+      return Number(result.photoId)
     } catch (uploadError) {
-      log.error("Error uploading thumbnail via uploadPhoto", { uploadError })
-      
-      // Fallback: If uploadPhoto fails, use the direct DB insert approach
-      const [photo] = await db.insert(photos).values({
-        format: "jpeg",
-        width,
-        height,
-        stripped: Buffer.from(imageBuffer),
-        strippedIv: null,
-        strippedTag: null,
-        date: new Date(),
-      }).returning()
-      
-      return photo ? Number(photo.id) : null
+      log.debug("🧁🧁🧁 Error uploading thumbnail:", uploadError)
+      log.error("Error uploading thumbnail", { uploadError })
+      return null
     }
   } catch (error) {
+    log.debug("🧁🧁🧁 Error in downloadAndSaveThumbnail:", error)
     log.error("Error downloading thumbnail", { error })
     return null
   }

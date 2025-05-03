@@ -2,10 +2,7 @@ import Foundation
 import GRDB
 import InlineProtocol
 
-public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
-  TableRecord,
-  Sendable, Equatable
-{
+public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
   public var id: Int64
   public var url: String
   public var siteName: String?
@@ -22,7 +19,7 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
   }
 
   public init(
-    id: Int64 = Int64.random(in: 1...5_000),
+    id: Int64 = Int64.random(in: 1 ... 5_000),
     url: String,
     siteName: String?,
     title: String?,
@@ -41,8 +38,8 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
 }
 
 // Inline Protocol
-extension UrlPreview {
-  public init(from: InlineProtocol.UrlPreview) {
+public extension UrlPreview {
+  init(from: InlineProtocol.UrlPreview) {
     id = from.id
     url = from.url
     siteName = from.siteName
@@ -53,7 +50,7 @@ extension UrlPreview {
   }
 
   @discardableResult
-  public static func save(
+  static func save(
     _ db: Database,
     linkEmbed protocolLinkEmbed: InlineProtocol.UrlPreview
   )
@@ -63,5 +60,22 @@ extension UrlPreview {
     try linkEmbed.save(db)
 
     return linkEmbed
+  }
+}
+
+public extension UrlPreview {
+  enum CodingKeys: String, CodingKey {
+    case id, url, siteName, title, description, photoId, duration
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(Int64.self, forKey: .id)
+    url = try container.decode(String.self, forKey: .url)
+    siteName = try container.decodeIfPresent(String.self, forKey: .siteName)
+    title = try container.decodeIfPresent(String.self, forKey: .title)
+    description = try container.decodeIfPresent(String.self, forKey: .description)
+    photoId = try container.decodeIfPresent(Int64.self, forKey: .photoId)
+    duration = try container.decodeIfPresent(Int64.self, forKey: .duration)
   }
 }

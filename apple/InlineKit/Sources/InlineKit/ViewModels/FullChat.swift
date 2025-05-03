@@ -13,6 +13,7 @@ public struct FullAttachment: FetchableRecord, Identifiable, Codable, Hashable, 
 
   public var attachment: Attachment
   public var externalTask: ExternalTask?
+  public var linkEmbed: UrlPreview?
   public var user: User?
 }
 
@@ -112,6 +113,11 @@ public extension FullMessage {
           .including(
             optional: Attachment.externalTask
               .including(optional: ExternalTask.assignedUser)
+          )
+          .including(
+            optional: Attachment.urlPreview
+              .including(optional: UrlPreview.photo.forKey("photo")
+                .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes)))
           )
       )
       // Include photo info with sizes
