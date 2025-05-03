@@ -11,6 +11,7 @@ import { relations } from "drizzle-orm"
 import { reactions } from "./reactions"
 import { files } from "@in/server/db/schema/files"
 import { documents, photos, videos } from "@in/server/db/schema/media"
+import { messageAttachments } from "./attachments"
 
 export const messages = pgTable(
   "messages",
@@ -82,6 +83,7 @@ export const messageRelations = relations(messages, ({ one, many }) => ({
   photo: one(photos, { fields: [messages.photoId], references: [photos.id] }),
   video: one(videos, { fields: [messages.videoId], references: [videos.id] }),
   document: one(documents, { fields: [messages.documentId], references: [documents.id] }),
+  messageAttachments: many(messageAttachments),
 }))
 
 export type DbMessage = typeof messages.$inferSelect

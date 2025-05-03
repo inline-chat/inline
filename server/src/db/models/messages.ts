@@ -20,6 +20,7 @@ import {
   type DbReaction,
   type DbUser,
 } from "@in/server/db/schema"
+import { type DbMessageAttachment } from "@in/server/db/schema/attachments"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
@@ -43,6 +44,7 @@ export type DbInputFullMessage = DbMessage & {
   photo: InputDbFullPhoto | null
   video: InputDbFullVideo | null
   document: InputDbFullDocument | null
+  messageAttachments?: DbMessageAttachment[]
 }
 
 export type DbFullMessage = Omit<DbMessage, "textEncrypted" | "textIv" | "textTag"> & {
@@ -51,6 +53,7 @@ export type DbFullMessage = Omit<DbMessage, "textEncrypted" | "textIv" | "textTa
   photo: DbFullPhoto | null
   video: DbFullVideo | null
   document: DbFullDocument | null
+  messageAttachments?: DbMessageAttachment[]
 }
 
 async function getMessages(
@@ -102,6 +105,24 @@ async function getMessages(
           file: true,
         },
       },
+      messageAttachments: {
+        with: {
+          externalTask: true,
+          linkEmbed: {
+            with: {
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   })
 
@@ -122,6 +143,7 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
     photo: message.photo ? FileModel.processFullPhoto(message.photo) : null,
     video: message.video ? FileModel.processFullVideo(message.video) : null,
     document: message.document ? FileModel.processFullDocument(message.document) : null,
+    messageAttachments: message.messageAttachments || [],
   }
 }
 
@@ -269,6 +291,24 @@ async function getMessage(messageId: number, chatId: number): Promise<DbFullMess
       document: {
         with: {
           file: true,
+        },
+      },
+      messageAttachments: {
+        with: {
+          externalTask: true,
+          linkEmbed: {
+            with: {
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },

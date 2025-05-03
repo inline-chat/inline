@@ -1,7 +1,7 @@
 import type { TPeerInfo } from "@in/server/api-types"
 import type { DbFile, DbMessage } from "@in/server/db/schema"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
-import type { InputPeer, Message, MessageMedia, Peer } from "@in/protocol/core"
+import type { InputPeer, Message, MessageMedia, MessageAttachment, MessageAttachments, Peer } from "@in/protocol/core"
 import { encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodePhoto, encodePhotoLegacy } from "@in/server/realtime/encoders/encodePhoto"
 import type { DbFullDocument, DbFullPhoto, DbFullVideo } from "@in/server/db/models/files"
@@ -148,6 +148,56 @@ export const encodeFullMessage = ({
     }
   }
 
+  // Process attachments if they exist
+  let attachments: MessageAttachments | undefined = undefined
+  if (message.messageAttachments && message.messageAttachments.length > 0) {
+    const encodedAttachments = message.messageAttachments.map(attachment => {
+      let messageAttachment: MessageAttachment = {
+        messageId: BigInt(message.messageId),
+        attachment: { oneofKind: undefined }
+      };
+      
+      // Handle external task attachment
+      if (attachment.externalTaskId) {
+        messageAttachment.attachment = {
+          oneofKind: "externalTask",
+          externalTask: {
+            id: BigInt(attachment.externalTaskId),
+            taskId: "", 
+            application: "",
+            title: "",
+            status: 0,
+            assignedUserId: BigInt(0),
+            url: "",
+            number: "",
+            date: BigInt(0)
+          }
+        };
+      } 
+      // Handle URL preview attachment
+      else if (attachment.urlPreviewId) {
+        messageAttachment.attachment = {
+          oneofKind: "urlPreview",
+          urlPreview: {
+            id: BigInt(attachment.urlPreviewId),
+            url: undefined,
+            siteName: undefined,
+            title: undefined,
+            description: undefined,
+            photo: undefined,
+            duration: undefined
+          }
+        };
+      }
+      
+      return messageAttachment;
+    });
+    
+    attachments = {
+      attachments: encodedAttachments.filter(a => a.attachment && a.attachment.oneofKind !== undefined)
+    };
+  }
+
   let messageProto: Message = {
     id: BigInt(message.messageId),
     fromId: BigInt(message.fromId),
@@ -160,6 +210,7 @@ export const encodeFullMessage = ({
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker ?? false,
+    attachments: attachments,
   }
 
   return messageProto
