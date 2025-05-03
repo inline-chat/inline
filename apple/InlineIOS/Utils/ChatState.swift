@@ -6,7 +6,7 @@ import SwiftUI
 final class ChatState: ObservableObject {
   static let shared = ChatState()
 
-  struct State {
+ public struct State {
     var replyingMessageId: Int64?
     var editingMessageId: Int64?
   }
