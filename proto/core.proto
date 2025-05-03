@@ -227,8 +227,8 @@ message MessageAttachment {
   int64 message_id = 1;
 
   oneof attachment {
-    MessageAttachmentExternalTask external_task = 2;
-    UrlPreview url_preview = 3;
+     MessageAttachmentExternalTask external_task = 2;
+     UrlPreview url_preview = 3;
   }
 }
 

@@ -494,6 +494,13 @@ public extension Message {
       default:
         break
     }
+    
+    // Process message attachments if present
+    if protocolMessage.hasAttachments && !protocolMessage.attachments.attachments.isEmpty {
+      for attachment in protocolMessage.attachments.attachments {
+        try Attachment.save(db, attachment: attachment)
+      }
+    }
   }
 
   private static func processPhotoAttachment(

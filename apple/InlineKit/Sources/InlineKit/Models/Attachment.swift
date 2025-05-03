@@ -9,7 +9,7 @@ public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, Pers
   public var id: Int64?
   public var messageId: Int64?
   public var externalTaskId: Int64?
-public var linkEmbedId: Int64?
+  public var urlPreviewId: Int64?
 
   public static let externalTask = belongsTo(
     ExternalTask.self,
@@ -20,14 +20,14 @@ public var linkEmbedId: Int64?
     request(for: Attachment.externalTask)
   }
 
-  public static let linkEmbed = belongsTo(
-    LinkEmbed.self,
-    using: ForeignKey(["linkEmbedId"], to: ["id"])
+  public static let urlPreview = belongsTo(
+    UrlPreview.self,
+    using: ForeignKey(["urlPreviewId"], to: ["id"])
   )
 
-  public var linkEmbed: QueryInterfaceRequest<LinkEmbed> {
-    request(for: Attachment.linkEmbed)
-  } 
+  public var urlPreview: QueryInterfaceRequest<UrlPreview> {
+    request(for: Attachment.urlPreview)
+  }
 
   public static let message = belongsTo(
     Message.self,
@@ -37,23 +37,27 @@ public var linkEmbedId: Int64?
     request(for: Attachment.message)
   }
 
-  public init(messageId: Int64?, externalTaskId: Int64?, linkEmbedId: Int64?) {
+  public init(messageId: Int64?, externalTaskId: Int64?, urlPreviewId: Int64?) {
     self.messageId = messageId
     self.externalTaskId = externalTaskId
-    self.linkEmbedId = linkEmbedId
+    self.urlPreviewId = urlPreviewId
   }
 }
 
 public extension Attachment {
   @discardableResult
   static func save(
-    _ db: Database, messageAttachment: InlineProtocol.MessageAttachment
+    _ db: Database, attachment: InlineProtocol.MessageAttachment
   )
     throws -> Attachment
   {
-    let message = try Message.filter(Column("messageId") == messageAttachment.messageID).fetchOne(db)
+    let message = try Message.filter(Column("messageId") == attachment.messageID).fetchOne(db)
 
-    let attachment = Attachment(messageId: message?.globalId, externalTaskId: messageAttachment.externalTask.id, linkEmbedId: messageAttachment.linkEmbedExperimental.id)
+    let urlPreview = attachment.urlPreview
+
+    try UrlPreview.save(db, linkEmbed: urlPreview)
+
+    let attachment = Attachment(messageId: message?.globalId, externalTaskId: attachment.externalTask.id, urlPreviewId: urlPreview.id)
 
     try attachment.save(db)
 

@@ -221,7 +221,7 @@ extension InlineProtocol.UpdateMessageAttachment {
 
     _ = try ExternalTask.save(db, externalTask: externalTaskAttachment)
 
-    _ = try Attachment.save(db, messageAttachment: attachment)
+    _ = try Attachment.save(db, attachment: attachment)
 
     let message = try Message.filter(Column("messageId") == attachment.messageID).fetchOne(db)
 
