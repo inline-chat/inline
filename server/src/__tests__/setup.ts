@@ -14,11 +14,6 @@ process.env["ENCRYPTION_KEY"] =
 process.env.AMAZON_ACCESS_KEY = process.env.AMAZON_ACCESS_KEY || "test-key"
 process.env.AMAZON_SECRET_ACCESS_KEY = process.env.AMAZON_SECRET_ACCESS_KEY || "test-secret"
 
-// Mock external services
-mock.module("../libs/resend", () => ({
-  sendEmail: mock().mockResolvedValue(true),
-}))
-
 // Test database configuration
 const TEST_DB_NAME = "test_db"
 let originalDbUrl: string
@@ -201,6 +196,11 @@ export const testUtils = {
 
 // Export lifecycle hooks
 export const setupTestLifecycle = () => {
+  // Mock external services
+  mock.module("../libs/resend", () => ({
+    sendEmail: mock().mockResolvedValue(true),
+  }))
+
   beforeAll(setupTestDatabase)
   afterAll(teardownTestDatabase)
   beforeEach(cleanDatabase)
