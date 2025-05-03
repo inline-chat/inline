@@ -6,7 +6,7 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
   TableRecord,
   Sendable, Equatable
 {
-  public var id: Int64?
+  public var id: Int64
   public var url: String
   public var siteName: String?
   public var title: String?
@@ -22,7 +22,7 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
   }
 
   public init(
-    id: Int64? = Int64.random(in: 1 ... 5_000),
+    id: Int64 = Int64.random(in: 1...5_000),
     url: String,
     siteName: String?,
     title: String?,
@@ -41,8 +41,8 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
 }
 
 // Inline Protocol
-public extension UrlPreview {
-  init(from: InlineProtocol.UrlPreview) {
+extension UrlPreview {
+  public init(from: InlineProtocol.UrlPreview) {
     id = from.id
     url = from.url
     siteName = from.siteName
@@ -53,7 +53,7 @@ public extension UrlPreview {
   }
 
   @discardableResult
-  static func save(
+  public static func save(
     _ db: Database,
     linkEmbed protocolLinkEmbed: InlineProtocol.UrlPreview
   )
