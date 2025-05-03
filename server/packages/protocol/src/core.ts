@@ -627,6 +627,8 @@ export interface MessageAttachments {
  */
 export interface MessageAttachment {
     /**
+     * todo: deprecated
+     *
      * @generated from protobuf field: int64 message_id = 1;
      */
     messageId: bigint;
@@ -1698,6 +1700,14 @@ export interface UpdateMessageAttachment {
      * @generated from protobuf field: MessageAttachment attachment = 1;
      */
     attachment?: MessageAttachment;
+    /**
+     * @generated from protobuf field: int64 message_id = 2;
+     */
+    messageId: bigint;
+    /**
+     * @generated from protobuf field: Peer peer_id = 3;
+     */
+    peerId?: Peer;
 }
 /**
  * @generated from protobuf message UpdateReaction
@@ -6161,11 +6171,14 @@ export const UpdateComposeAction = new UpdateComposeAction$Type();
 class UpdateMessageAttachment$Type extends MessageType<UpdateMessageAttachment> {
     constructor() {
         super("UpdateMessageAttachment", [
-            { no: 1, name: "attachment", kind: "message", T: () => MessageAttachment }
+            { no: 1, name: "attachment", kind: "message", T: () => MessageAttachment },
+            { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "peer_id", kind: "message", T: () => Peer }
         ]);
     }
     create(value?: PartialMessage<UpdateMessageAttachment>): UpdateMessageAttachment {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageId = 0n;
         if (value !== undefined)
             reflectionMergePartial<UpdateMessageAttachment>(this, message, value);
         return message;
@@ -6177,6 +6190,12 @@ class UpdateMessageAttachment$Type extends MessageType<UpdateMessageAttachment> 
             switch (fieldNo) {
                 case /* MessageAttachment attachment */ 1:
                     message.attachment = MessageAttachment.internalBinaryRead(reader, reader.uint32(), options, message.attachment);
+                    break;
+                case /* int64 message_id */ 2:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* Peer peer_id */ 3:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -6193,6 +6212,12 @@ class UpdateMessageAttachment$Type extends MessageType<UpdateMessageAttachment> 
         /* MessageAttachment attachment = 1; */
         if (message.attachment)
             MessageAttachment.internalBinaryWrite(message.attachment, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 message_id = 2; */
+        if (message.messageId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.messageId);
+        /* Peer peer_id = 3; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

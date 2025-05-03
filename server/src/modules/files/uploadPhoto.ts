@@ -3,6 +3,7 @@ import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types
 import { photos, photoSizes } from "@in/server/db/schema"
 import { db } from "@in/server/db"
 import { uploadFile } from "./uploadAFile"
+import { Log } from "@in/server/utils/log"
 
 export async function uploadPhoto(file: File, context: { userId: number }): Promise<UploadFileResult> {
   // Get metadata and validate
