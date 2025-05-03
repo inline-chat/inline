@@ -13,6 +13,7 @@ struct NavEntry: Hashable, Codable, Equatable {
     case chatInfo(peer: Peer)
     case createSpace
     case profile(userInfo: UserInfo)
+    case newChat
 
     static func == (lhs: Route, rhs: Route) -> Bool {
       switch (lhs, rhs) {
