@@ -16,9 +16,7 @@ message ClientMessage {
   }
 }
 
-message ConnectionInit {
-  string token = 1;
-}
+message ConnectionInit { string token = 1; }
 
 message ServerProtocolMessage {
   uint64 id = 1;
@@ -38,29 +36,18 @@ message ServerProtocolMessage {
 message ServerMessage {
   reserved 1, 2, 3;
 
-  oneof payload {
-    UpdatesPayload update = 4;
-  }
+  oneof payload { UpdatesPayload update = 4; }
 }
 
-message UpdatesPayload {
-  repeated Update updates = 1;
-}
+message UpdatesPayload { repeated Update updates = 1; }
 
-message Ack {
-  uint64 msg_id = 1;
-}
+message Ack { uint64 msg_id = 1; }
 
-message ConnectionOpen {
-}
+message ConnectionOpen {}
 
-message Ping {
-  uint64 nonce = 1;
-}
+message Ping { uint64 nonce = 1; }
 
-message Pong {
-  uint64 nonce = 1;
-}
+message Pong { uint64 nonce = 1; }
 
 // --- Application Types ---
 
@@ -75,13 +62,9 @@ message InputPeer {
 
 message InputPeerSelf {}
 
-message InputPeerChat {
-  int64 chat_id = 1;
-}
+message InputPeerChat { int64 chat_id = 1; }
 
-message InputPeerUser {
-  int64 user_id = 1;
-}
+message InputPeerUser { int64 user_id = 1; }
 
 message Peer {
   reserved 1;
@@ -91,13 +74,9 @@ message Peer {
   }
 }
 
-message PeerChat {
-  int64 chat_id = 1;
-}
+message PeerChat { int64 chat_id = 1; }
 
-message PeerUser {
-  int64 user_id = 1;
-}
+message PeerUser { int64 user_id = 1; }
 
 message User {
   int64 id = 1;
@@ -113,6 +92,9 @@ message User {
   optional UserStatus status = 8;
 
   optional UserProfilePhoto profile_photo = 9;
+
+  // Last message ID
+  optional int64 last_msg_id = 10;
 }
 
 message UserProfilePhoto {
@@ -121,6 +103,39 @@ message UserProfilePhoto {
 
   // Stripped thumbnail of the photo
   bytes stripped_thumb = 2;
+}
+
+message Dialog {
+  Peer peer = 1;
+  optional bool archived = 3;
+  optional bool pinned = 4;
+  optional int32 read_max_id = 5;
+  optional int32 unread_count = 6;
+}
+
+// A thread
+message Chat {
+  int64 id = 1;
+
+  // Title
+  string title = 2;
+
+  // If it belongs to a space
+  optional int64 space_id = 3;
+
+  // Optional description
+  optional string description = 4;
+
+  // Emoji to show as the icon, can be null
+  optional string emoji = 5;
+
+  // If true, everyone in parent space can accces it
+  optional bool is_public = 6;
+
+  // Last message ID
+  optional int64 last_msg_id = 7;
+
+  reserved 8, 9;
 }
 
 message Message {
@@ -132,7 +147,7 @@ message Message {
   // Peer ID of the recipient
   Peer peer_id = 3;
 
-  // The "chat ID" of the message, for messages in a chat
+  // The "chat ID" of the message, for messages in a chat (deprecated)
   int64 chat_id = 4;
 
   // Message text
@@ -204,9 +219,7 @@ message AddReactionInput {
 }
 
 // Add reaction result
-message AddReactionResult {
-  repeated Update updates = 1;
-}
+message AddReactionResult { repeated Update updates = 1; }
 
 // Delete reaction input
 message DeleteReactionInput {
@@ -215,20 +228,16 @@ message DeleteReactionInput {
   int64 message_id = 3;
 }
 
-message DeleteReactionResult {
-  repeated Update updates = 1;
-}
+message DeleteReactionResult { repeated Update updates = 1; }
 
-message MessageAttachments {
-  repeated MessageAttachment attachments = 1;
-}
+message MessageAttachments { repeated MessageAttachment attachments = 1; }
 
 message MessageAttachment {
   int64 message_id = 1;
 
   oneof attachment {
-     MessageAttachmentExternalTask external_task = 2;
-     UrlPreview url_preview = 3;
+    MessageAttachmentExternalTask external_task = 2;
+    UrlPreview url_preview = 3;
   }
 }
 
@@ -303,17 +312,11 @@ message MessageMedia {
   }
 }
 
-message MessagePhoto {
-  Photo photo = 1;
-}
+message MessagePhoto { Photo photo = 1; }
 
-message MessageVideo {
-  Video video = 1;
-}
+message MessageVideo { Video video = 1; }
 
-message MessageDocument {
-  Document document = 1;
-}
+message MessageDocument { Document document = 1; }
 
 message Video {
   int64 id = 1;
@@ -443,6 +446,7 @@ enum Method {
   ADD_REACTION = 6;
   DELETE_REACTION = 7;
   EDIT_MESSAGE = 8;
+  CREATE_CHAT = 9;
 }
 
 message RpcCall {
@@ -456,6 +460,7 @@ message RpcCall {
     AddReactionInput addReaction = 7;
     DeleteReactionInput deleteReaction = 8;
     EditMessageInput editMessage = 9;
+    CreateChatInput createSpaceChat = 10;
   }
 }
 
@@ -471,29 +476,24 @@ message RpcResult {
     AddReactionResult addReaction = 7;
     DeleteReactionResult deleteReaction = 8;
     EditMessageResult editMessage = 9;
+    CreateChatResult createSpaceChat = 10;
   }
 }
 
 message GetMeInput {}
-message GetMeResult {
-  User user = 1;
-}
+message GetMeResult { User user = 1; }
 
 message GetPeerPhotoInput {
   InputPeer peer_id = 1;
   int64 photo_id = 2;
 }
-message GetPeerPhotoResult {
-  Photo photo = 1;
-}
+message GetPeerPhotoResult { Photo photo = 1; }
 
 message DeleteMessagesInput {
   repeated int64 message_ids = 1;
   InputPeer peer_id = 2;
 }
-message DeleteMessagesResult {
-  repeated Update updates = 1;
-}
+message DeleteMessagesResult { repeated Update updates = 1; }
 
 message EditMessageInput {
   int64 message_id = 1;
@@ -501,9 +501,7 @@ message EditMessageInput {
   string text = 3;
 }
 
-message EditMessageResult {
-  repeated Update updates = 1;
-}
+message EditMessageResult { repeated Update updates = 1; }
 
 message InputMedia {
   oneof media {
@@ -550,9 +548,7 @@ message SendMessageInput {
   optional bool is_sticker = 6;
 }
 
-message SendMessageResult {
-  repeated Update updates = 2;
-}
+message SendMessageResult { repeated Update updates = 2; }
 
 message GetChatHistoryInput {
   InputPeer peer_id = 1;
@@ -564,11 +560,36 @@ message GetChatHistoryInput {
   optional int32 limit = 3;
 }
 
-message GetChatHistoryResult {
-  repeated Message messages = 1;
+message GetChatHistoryResult { repeated Message messages = 1; }
+
+message InputChatParticipant { uint64 user_id = 1; }
+
+message CreateChatInput {
+  // Required title
+  string title = 1;
+
+  // Parent space ID
+  optional int64 space_id = 2;
+
+  // Optional description of the thread
+  optional string description = 3;
+
+  // Emoji to show as the icon, can be null
+  optional string emoji = 4;
+
+  // If true, everyone in parent space can accces it
+  bool is_public = 5;
+
+  // For public threads, it must be an empty list
+  repeated InputChatParticipant participants = 6;
 }
 
-//  Updates Subsystem
+message CreateChatResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
+}
+
+// Updates Subsystem
 message Update {
   reserved 1, 2, 3;
 
@@ -585,13 +606,9 @@ message Update {
   }
 }
 
-message UpdateNewMessage {
-  Message message = 1;
-}
+message UpdateNewMessage { Message message = 1; }
 
-message UpdateEditMessage {
-  Message message = 1;
-}
+message UpdateEditMessage { Message message = 1; }
 
 // Update when messages are deleted
 message UpdateDeleteMessages {
@@ -605,7 +622,8 @@ message UpdateMessageId {
   int64 random_id = 2;
 }
 
-// Update when a user starts or stops composing a message for typing, uploading a photo, etc
+// Update when a user starts or stops composing a message for typing, uploading
+// a photo, etc
 message UpdateComposeAction {
   enum ComposeAction {
     NONE = 0;
@@ -625,13 +643,9 @@ message UpdateComposeAction {
   ComposeAction action = 3;
 }
 
-message UpdateMessageAttachment {
-  MessageAttachment attachment = 1;
-}
+message UpdateMessageAttachment { MessageAttachment attachment = 1; }
 
-message UpdateReaction {
-  Reaction reaction = 1;
-}
+message UpdateReaction { Reaction reaction = 1; }
 
 message UpdateDeleteReaction {
   string emoji = 1;
