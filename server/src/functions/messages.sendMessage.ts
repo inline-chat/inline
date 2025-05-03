@@ -5,23 +5,17 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
-import { users, type DbMessage } from "@in/server/db/schema"
-import { urlPreview, messageAttachments } from "@in/server/db/schema/attachments"
-import { photos } from "@in/server/db/schema/media"
+import { users } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
-import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
-import { Updates } from "@in/server/modules/updates/updates"
+import { getUpdateGroup, getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
-import { and, eq } from "drizzle-orm"
-import { isValidLoomUrl, fetchLoomOembed } from "@in/server/libs/loom"
-import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
-import { FileTypes } from "@in/server/modules/files/types"
+import { processLoomLink } from "@in/server/modules/loom/processLoomLink"
 
 type Input = {
   peerId: InputPeer
@@ -88,9 +82,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   })
 
   // Process Loom links in the message if any
-  let urlPreviewId: number | null = null
   if (input.message) {
-    urlPreviewId = await processLoomLinks(input.message, newMessage.globalId, currentUserId)
+    // Process Loom links in parallel with message sending
+    processLoomLink(input.message, newMessage.globalId, currentUserId, inputPeer)
   }
 
   // encode message info

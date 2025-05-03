@@ -62,7 +62,7 @@ function processFile(file: DbFile): DbFullPlainFile {
 }
 
 /** Filter, normalize and decrypt */
-function processFullPhoto(photo: InputDbFullPhoto): DbFullPhoto {
+export function processFullPhoto(photo: InputDbFullPhoto): DbFullPhoto {
   let processed: DbFullPhoto = {
     ...photo,
     photoSizes: photo.photoSizes
