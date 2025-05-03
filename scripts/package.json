@@ -2,7 +2,7 @@
   "name": "inline-scripts",
   "private": true,
   "scripts": {
-    "proto:generate-ts": "npx protoc --plugin=../node_modules/.bin/protoc-gen-ts --ts_out=../web/protocol/ --ts_out=../server/packages/protocol/src --proto_path ../proto/ ../proto/core.proto",
+    "proto:generate-ts": "npx protoc --plugin=../node_modules/.bin/protoc-gen-ts --ts_out=../server/packages/protocol/src --proto_path ../proto/ ../proto/core.proto",
     "proto:generate-swift": "npx protoc --swift_opt=Visibility=Public --swift_out ../apple/InlineKit/Sources/InlineProtocol/ --proto_path ../proto/ ../proto/core.proto",
     "generate": "bun run proto:generate-ts && bun run proto:generate-swift"
   },
