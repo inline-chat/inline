@@ -7,6 +7,7 @@ import { Chat, Dialog } from "@in/protocol/core"
 import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { dialogs } from "@in/server/db/schema"
 
 export async function createChat(
   input: {
@@ -85,6 +86,19 @@ export async function createChat(
         date: new Date(),
       })),
     )
+  }
+
+  try {
+    // Create a dialog for the chat
+    await db.insert(dialogs).values({
+      chatId: chat[0].id,
+      userId: context.currentUserId,
+      spaceId: spaceId,
+      date: new Date(),
+    })
+  } catch (error) {
+    Log.shared.error(`Failed to create dialog for chat ${chat[0].id}: ${error}`)
+    throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
   }
 
   const dialog: Dialog = {

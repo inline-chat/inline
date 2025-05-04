@@ -6,7 +6,7 @@ import { Method } from "@in/protocol/core"
 
 export const method = Method.CREATE_CHAT
 
-export const handler = async (input: CreateChatInput, handlerContext: HandlerContext): Promise<CreateChatResult> => {
+export const createChat = async (input: CreateChatInput, handlerContext: HandlerContext): Promise<CreateChatResult> => {
   const result = await Functions.messages.createChat(
     {
       title: input.title,

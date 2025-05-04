@@ -11,6 +11,7 @@ import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHis
 import { addReaction } from "./messages.addReactions"
 import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
+import { createChat } from "@in/server/realtime/handlers/messages.createChat"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -72,6 +73,15 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       let result = await editMessage(call.input.editMessage, handlerContext)
       return { oneofKind: "editMessage", editMessage: result }
     }
+
+    case Method.CREATE_CHAT: {
+      if (call.input.oneofKind !== "createChat") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await createChat(call.input.createChat, handlerContext)
+      return { oneofKind: "createChat", createChat: result }
+    }
+
     default:
       Log.shared.error(`Unknown method: ${call.method}`)
       throw RealtimeRpcError.BadRequest
