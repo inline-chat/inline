@@ -267,10 +267,14 @@ public class DataManager: ObservableObject {
       // Fetch
       let result = try await ApiClient.shared.getDialogs(spaceId: spaceId)
 
-      log.debug("fetched dialogs")
+      log.debug("fetched dialogs \(result)")
 
       // Save
       try await database.dbWriter.write { db in
+        // Save users
+        try result.users.forEach { user in
+          try user.saveFull(db)
+        }
 
         // Save chats
         let chats = result.chats.map { chat in
@@ -283,11 +287,6 @@ public class DataManager: ObservableObject {
         }
         try chats.forEach { chat in
           try chat.save(db, onConflict: .replace)
-        }
-
-        // Save users
-        try result.users.forEach { user in
-          try user.saveFull(db)
         }
 
         // Save messages
@@ -451,16 +450,16 @@ public class DataManager: ObservableObject {
         try member.save(db, onConflict: .ignore)
       }
 
-      for dialog in result.dialogs {
-        let dialog = Dialog(from: dialog)
-
-        try dialog.save(db, onConflict: .replace)
-      }
-
-      for chat in result.chats {
-        let chat = Chat(from: chat)
-        try chat.save(db, onConflict: .replace)
-      }
+//      for dialog in result.dialogs {
+//        let dialog = Dialog(from: dialog)
+//
+//        try dialog.save(db, onConflict: .replace)
+//      }
+//
+//      for chat in result.chats {
+//        let chat = Chat(from: chat)
+//        try chat.save(db, onConflict: .replace)
+//      }
     }
   }
 
@@ -475,7 +474,6 @@ public class DataManager: ObservableObject {
   public func deleteMessage(
     messageId: Int64, chatId: Int64, peerId: Peer
   ) async throws {
-    
     let _ = try await ApiClient.shared.deleteMessage(messageId: messageId, chatId: chatId, peerId: peerId)
 
     try await database.dbWriter.write { db in

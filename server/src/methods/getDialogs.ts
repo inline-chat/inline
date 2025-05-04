@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { and, eq, inArray, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, sql } from "drizzle-orm"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -38,7 +38,56 @@ export const Response = Type.Object({
 
 // This API is not paginated and mostly as a placeholder for future specialized methods
 // but until then we don't want to fuck our server with heavy queries
-const MAX_LIMIT = 100
+const MAX_LIMIT = 200
+
+// --- Helper Functions ---
+function dedupeById<T extends { id: number }>(arr: T[]): T[] {
+  return arr.filter((item, index, self) => index === self.findIndex((t) => t.id === item.id))
+}
+
+function pushIfExists<T>(arr: T[], item: T | undefined | null) {
+  if (item) arr.push(item)
+}
+
+function pushMessageAndUser(
+  messages: TMessageInfo[],
+  users: schema.DbUserWithPhoto[],
+  msg: any,
+  currentUserId: number,
+  peerId: any,
+) {
+  if (msg) {
+    messages.push(
+      encodeMessageInfo(msg, {
+        currentUserId,
+        peerId,
+        files: msg.file ? [msg.file] : null,
+      }),
+    )
+    if (msg.from) users.push(msg.from)
+  }
+}
+
+async function createMissingDialogsForPublicChats(publicChats: any[], currentUserId: number, spaceId: number) {
+  return await db.transaction(async (tx) => {
+    const newDialogs: schema.DbDialog[] = []
+    for (const c of publicChats) {
+      if (c.dialogs.length === 0) {
+        const newDialog = await tx
+          .insert(schema.dialogs)
+          .values({
+            chatId: c.id,
+            userId: currentUserId,
+            spaceId: spaceId,
+          })
+          .returning()
+        if (newDialog[0]) newDialogs.push(newDialog[0])
+      }
+    }
+    return newDialogs
+  })
+}
+// --- End Helper Functions ---
 
 export const handler = async (
   input: Static<typeof Input>,
@@ -48,7 +97,6 @@ export const handler = async (
   if (spaceId && isNaN(spaceId)) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-
   const currentUserId = context.currentUserId
 
   // Buckets for results
@@ -57,39 +105,21 @@ export const handler = async (
   let chats: schema.DbChat[] = []
   let messages: TMessageInfo[] = []
 
+  // --- 1. Existing Thread Dialogs ---
   const existingThreadDialogs = await db.query.dialogs.findMany({
     where: and(eq(schema.dialogs.userId, currentUserId), eq(schema.dialogs.spaceId, spaceId)),
     with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
     limit: MAX_LIMIT,
   })
-
-  // Push all dialogs to the arrays
   existingThreadDialogs.forEach((d) => {
     dialogs.push(d)
-
-    if (d.chat?.lastMsg) {
-      messages.push(
-        encodeMessageInfo(d.chat?.lastMsg, {
-          currentUserId,
-          peerId: peerIdFromChat(d.chat, { currentUserId }),
-          files: d.chat?.lastMsg?.file ? [d.chat?.lastMsg?.file] : null,
-        }),
-      )
-    }
-
-    if (d.chat) {
-      chats.push(d.chat)
-    }
-
-    // TODO: Deduplicate users
-    if (d.chat?.lastMsg?.from) {
-      users.push(d.chat?.lastMsg?.from)
-    }
+    if (d.chat) chats.push(d.chat)
+    pushMessageAndUser(messages, users, d.chat?.lastMsg, currentUserId, peerIdFromChat(d.chat, { currentUserId }))
   })
 
-  // Find private dialogs for members of this space
+  // --- 2. Public Chats and Private Dialogs in Space ---
   if (spaceId) {
-    // Check for thread public chats that are not in dialogs
+    // 2a. Public Chats
     const publicChats = await db.query.chats.findMany({
       where: and(
         eq(schema.chats.spaceId, spaceId),
@@ -97,146 +127,131 @@ export const handler = async (
         eq(schema.chats.publicThread, true),
       ),
       with: {
-        dialogs: {
-          where: eq(schema.dialogs.userId, currentUserId),
-        },
+        dialogs: { where: eq(schema.dialogs.userId, currentUserId) },
         lastMsg: { with: { from: true, file: true } },
       },
     })
 
-    // Make dialogs for each public chat that doesn't have one yet
-    let result = await db.transaction(async (tx) => {
-      const newDialogs: schema.DbDialog[] = []
-      for (const c of publicChats) {
-        if (c.dialogs.length === 0) {
-          const newDialog = await tx
-            .insert(schema.dialogs)
-            .values({
-              chatId: c.id,
-              userId: currentUserId,
-              spaceId: spaceId,
-            })
-            .returning()
-          if (newDialog[0]) {
-            newDialogs.push(newDialog[0])
+    // 2a. Private Threads (where user is a participant) - single SQL call
+    const privateThreadChats = await db
+      .select({
+        chat: schema.chats,
+        dialog: schema.dialogs,
+        lastMsg: schema.messages,
+        lastMsgFrom: schema.users,
+        lastMsgFile: schema.files,
+      })
+      .from(schema.chats)
+      .innerJoin(
+        schema.chatParticipants,
+        and(eq(schema.chatParticipants.chatId, schema.chats.id), eq(schema.chatParticipants.userId, currentUserId)),
+      )
+      .leftJoin(
+        schema.dialogs,
+        and(eq(schema.dialogs.chatId, schema.chats.id), eq(schema.dialogs.userId, currentUserId)),
+      )
+      .leftJoin(
+        schema.messages,
+        and(eq(schema.messages.messageId, schema.chats.lastMsgId), eq(schema.messages.chatId, schema.chats.id)),
+      )
+      .leftJoin(schema.users, eq(schema.users.id, schema.messages.fromId))
+      .leftJoin(schema.files, eq(schema.files.id, schema.messages.fileId))
+      .where(
+        and(eq(schema.chats.spaceId, spaceId), eq(schema.chats.type, "thread"), eq(schema.chats.publicThread, false)),
+      )
+
+    // Transform the result to match the previous structure
+    const privateThreadChatsTransformed = privateThreadChats.map((row) => ({
+      ...row.chat,
+      dialogs: row.dialog ? [row.dialog] : [],
+      lastMsg: row.lastMsg
+        ? {
+            ...row.lastMsg,
+            from: row.lastMsgFrom || undefined,
+            file: row.lastMsgFile ? row.lastMsgFile : undefined,
           }
-        }
-      }
-      return newDialogs
-    })
+        : undefined,
+    }))
 
-    // Push newly created dialogs to the arrays
-    result.forEach((d) => {
-      dialogs.push(d)
-    })
-
-    // Push last messages and chats of public chats
+    // Create missing dialogs for public chats
+    const newDialogs = await createMissingDialogsForPublicChats(publicChats, currentUserId, spaceId)
+    newDialogs.forEach((d) => dialogs.push(d))
     publicChats.forEach((c) => {
-      if (c.dialogs[0]) {
-        dialogs.push(c.dialogs[0])
-      }
-      if (c.lastMsg) {
-        messages.push(
-          encodeMessageInfo(c.lastMsg, {
-            currentUserId,
-            peerId: peerIdFromChat(c, { currentUserId }),
-            files: c.lastMsg?.file ? [c.lastMsg?.file] : null,
-          }),
-        )
-        if (c.lastMsg.from) {
-          users.push(c.lastMsg.from)
-        }
-      }
+      if (c.dialogs[0]) dialogs.push(c.dialogs[0])
+      pushMessageAndUser(messages, users, c.lastMsg, currentUserId, peerIdFromChat(c, { currentUserId }))
+      chats.push(c)
+    })
 
-      if (c) {
-        chats.push(c)
+    // Add privateThreadChatsTransformed to results
+    privateThreadChatsTransformed.forEach((c) => {
+      // Add chat
+      chats.push(c)
+      // Add dialog(s)
+      c.dialogs.forEach((d) => dialogs.push(d))
+      // Add last message and user if present
+      if (c.lastMsg) {
+        pushMessageAndUser(messages, users, c.lastMsg, currentUserId, peerIdFromChat(c, { currentUserId }))
       }
     })
 
-    // Find members of this space
+    // 2b. Space Members
     const space = await db.query.spaces.findFirst({
       where: eq(schema.spaces.id, spaceId),
       with: {
         members: {
-          with: {
-            user: {
-              with: {
-                photo: true,
-              },
-            },
-          },
+          with: { user: { with: { photo: true } } },
           limit: MAX_LIMIT,
         },
       },
     })
-
+    // 2c. Private Dialogs with Space Members
     const privateDialogs = await db.query.dialogs.findMany({
       where: and(
         eq(schema.dialogs.userId, currentUserId),
+        // spaceid = nil
+        isNull(schema.dialogs.spaceId),
         inArray(schema.dialogs.peerUserId, space?.members.map((m) => m.user.id) ?? []),
       ),
       with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
       limit: MAX_LIMIT,
     })
-
-    // Push all private dialogs to the arrays
     privateDialogs.forEach((d) => {
       dialogs.push(d)
-
-      // TODO: Deduplicate users
-      // if (d.chat?.lastMsg?.from) {
-      //   users.push(d.chat?.lastMsg?.from)
-      // }
-
-      if (d.chat?.lastMsg) {
-        messages.push(
-          encodeMessageInfo(d.chat?.lastMsg, {
-            currentUserId,
-            peerId: peerIdFromChat(d.chat, { currentUserId }),
-            files: d.chat?.lastMsg?.file ? [d.chat?.lastMsg?.file] : null,
-          }),
-        )
-        if (d.chat?.lastMsg.from) {
-          users.push(d.chat?.lastMsg.from)
-        }
-      }
-      if (d.chat) {
-        chats.push(d.chat)
-      }
+      pushMessageAndUser(messages, users, d.chat?.lastMsg, currentUserId, peerIdFromChat(d.chat, { currentUserId }))
+      if (d.chat) chats.push(d.chat)
     })
-
-    // Push users
-    space?.members.forEach((m) => {
-      users.push(m.user)
-    })
+    // Add all space members as users
+    space?.members.forEach((m) => users.push(m.user))
   }
 
-  // Deduplicate result arrays by id
-  dialogs = dialogs.filter((d, index, self) => index === self.findIndex((t) => t.id === d.id))
-  chats = chats.filter((c, index, self) => index === self.findIndex((t) => t.id === c.id))
-  messages = messages.filter((m, index, self) => index === self.findIndex((t) => t.id === m.id))
-  users = users.filter((u, index, self) => index === self.findIndex((t) => t.id === u.id))
+  // --- 3. Deduplicate Results ---
+  dialogs = dedupeById(dialogs)
+  chats = dedupeById(chats)
+  // IDs are local to the thread, so we don't need to deduplicate
+  //messages = dedupeById(messages)
+  messages = messages
+  users = dedupeById(users)
 
-  // Get unread counts for all dialogs
+  // --- 4. Unread Counts ---
   const dialogsUnreads = await DialogsModel.getBatchUnreadCounts({
     userId: context.currentUserId,
     chatIds: dialogs.map((d) => d.chatId),
   })
-
-  // Merge unread counts with dialog info
   const dialogsEncoded = dialogs.map((dialog) => {
     const unreadCount = dialogsUnreads.find((uc) => uc.chatId === dialog.chatId)?.unreadCount ?? 0
     return encodeDialogInfo({ ...dialog, unreadCount })
   })
 
-  let result = {
+  // --- 5. Final Result ---
+  let finalResult = {
     dialogs: dialogsEncoded,
     chats: chats.map((d) => encodeChatInfo(d, { currentUserId })),
     messages: messages,
     users: users.map(encodeFullUserInfo),
   }
 
-  return result
+  console.log("finalResult", finalResult)
+  return finalResult
 }
 
 import type { StaticEncode } from "@sinclair/typebox/type"
