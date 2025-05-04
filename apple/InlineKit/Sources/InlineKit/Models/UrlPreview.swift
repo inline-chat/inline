@@ -62,11 +62,13 @@ public extension UrlPreview {
   @discardableResult
   static func save(_ db: Database, linkEmbed: InlineProtocol.UrlPreview) throws -> UrlPreview {
     // Save the photo if present
+
     var photoId: Int64? = nil
     if linkEmbed.hasPhoto {
       let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: linkEmbed.photo)
       photoId = savedPhoto.photoId
     }
+
     // Try to find existing UrlPreview by id
     var urlPreview = UrlPreview(
       id: linkEmbed.id != 0 ? linkEmbed.id : Int64.random(in: 1 ... 5_000_000),
@@ -77,12 +79,14 @@ public extension UrlPreview {
       photoId: photoId,
       duration: linkEmbed.hasDuration ? linkEmbed.duration : nil
     )
+
     if let existing = try UrlPreview.filter(Column("id") == urlPreview.id).fetchOne(db) {
       urlPreview.id = existing.id
       try urlPreview.update(db)
     } else {
       urlPreview = try urlPreview.insertAndFetch(db)
     }
+
     return urlPreview
   }
 }

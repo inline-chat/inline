@@ -107,7 +107,6 @@ class UIMessageView: UIView {
   lazy var messageLabel = createMessageLabel()
   lazy var unsupportedLabel = createUnsupportedLabel()
   lazy var embedView = createEmbedView()
-  lazy var attachmentView = createAttachmentView()
   lazy var photoView = createPhotoView()
   lazy var newPhotoView = createNewPhotoView()
   lazy var floatingMetadataView = createFloatingMetadataView()
@@ -183,14 +182,22 @@ class UIMessageView: UIView {
     setupDocumentViewIfNeeded()
     setupMessageContainer()
 
-    if message.hasPhoto, !message.hasText, fullMessage.reactions.isEmpty {
-      addFloatingMetadata()
-    }
-
     addGestureRecognizer()
     setupDoubleTapGestureRecognizer()
     setupAppearance()
     setupConstraints()
+  }
+
+  private func createURLPreviewView(for attachment: FullAttachment) -> URLPreviewView {
+    let previewView = URLPreviewView()
+    previewView.translatesAutoresizingMaskIntoConstraints = false
+    previewView.configure(
+      with: attachment.urlPreview!,
+      photoInfo: attachment.photoInfo,
+      parentViewController: findViewController(),
+      outgoing: outgoing
+    )
+    return previewView
   }
 
   func addFloatingMetadata() {
@@ -304,15 +311,18 @@ class UIMessageView: UIView {
 
       innerContainer.addArrangedSubview(messageLabel)
 
+      // Insert URLPreviewView(s) for attachments with urlPreview
+      for attachment in fullMessage.attachments {
+        if let urlPreview = attachment.urlPreview {
+          let previewView = createURLPreviewView(for: attachment)
+          innerContainer.addArrangedSubview(previewView)
+        }
+      }
+
       if fullMessage.reactions.count > 0 {
         print("Setup reactions")
         setupReactionsIfNeeded()
         innerContainer.addArrangedSubview(reactionsFlowView)
-      }
-
-      if !fullMessage.attachments.isEmpty {
-        setupAttachmentView()
-        innerContainer.addArrangedSubview(attachmentView)
       }
 
       let metadataContainer = UIStackView()
@@ -326,9 +336,12 @@ class UIMessageView: UIView {
     } else {
       multiLineContainer.addArrangedSubview(messageLabel)
 
-      if !fullMessage.attachments.isEmpty {
-        setupAttachmentView()
-        multiLineContainer.addArrangedSubview(attachmentView)
+      // Insert URLPreviewView(s) for attachments with urlPreview
+      for attachment in fullMessage.attachments {
+        if let urlPreview = attachment.urlPreview {
+          let previewView = createURLPreviewView(for: attachment)
+          multiLineContainer.addArrangedSubview(previewView)
+        }
       }
 
       if fullMessage.reactions.count > 0 {
@@ -507,15 +520,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -693,20 +706,6 @@ class UIMessageView: UIView {
         ToastManager.shared.hideToast()
         print("Failed to get integrations \(error)")
       }
-    }
-  }
-
-  func setupAttachmentView() {
-    if let fullAttachment = fullMessage.attachments.first {
-      let userName = Auth.shared.getCurrentUserId() == fullAttachment.user?.id ?
-        "You" : fullAttachment.user?.firstName ?? ""
-      attachmentView.configure(
-        userName: userName,
-        outgoing: outgoing,
-        url: URL(string: fullAttachment.externalTask?.url ?? ""),
-        issueIdentifier: fullAttachment.externalTask?.number,
-        title: fullAttachment.externalTask?.title
-      )
     }
   }
 

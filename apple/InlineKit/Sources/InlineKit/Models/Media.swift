@@ -21,6 +21,18 @@ public struct Photo: Codable, Equatable, Hashable, Sendable, Identifiable, Fetch
     static let date = Column(CodingKeys.date)
     static let format = Column(CodingKeys.format)
   }
+
+  public init(
+    id: Int64? = nil,
+    photoId: Int64,
+    date: Date = Date(),
+    format: ImageFormat
+  ) {
+    self.id = id
+    self.photoId = photoId
+    self.date = date
+    self.format = format
+  }
 }
 
 // MARK: - PhotoSize
@@ -46,6 +58,28 @@ public struct PhotoSize: Codable, Sendable, Equatable, Hashable, Identifiable, F
     static let bytes = Column(CodingKeys.bytes)
     static let cdnUrl = Column(CodingKeys.cdnUrl)
     static let localPath = Column(CodingKeys.localPath)
+  }
+  
+  public init(
+    id: Int64? = nil,
+    photoId: Int64,
+    type: String = "f",
+    width: Int? = nil,
+    height: Int? = nil,
+    size: Int? = nil,
+    bytes: Data? = nil,
+    cdnUrl: String? = nil,
+    localPath: String? = nil
+  ) {
+    self.id = id
+    self.photoId = photoId
+    self.type = type
+    self.width = width
+    self.height = height
+    self.size = size
+    self.bytes = bytes
+    self.cdnUrl = cdnUrl
+    self.localPath = localPath
   }
 }
 
@@ -621,3 +655,5 @@ public extension PhotoSize {
     }
   }
 }
+
+

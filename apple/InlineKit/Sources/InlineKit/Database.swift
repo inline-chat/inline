@@ -346,7 +346,7 @@ public extension AppDatabase {
         t.column("title", .text)
         t.column("description", .text)
         t.column("photoId", .integer)
-          .references("photo", column: "id", onDelete: .setNull)
+          .references("photo", column: "photoId", onDelete: .setNull)
         t.column("duration", .integer)
       }
     }
