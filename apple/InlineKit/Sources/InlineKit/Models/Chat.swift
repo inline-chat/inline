@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 
 public enum ChatType: String, Codable, Sendable {
   case privateChat = "private"
@@ -137,6 +138,19 @@ public extension Chat {
 
   static func fromTimestamp(from: Int) -> Date {
     Date(timeIntervalSince1970: Double(from))
+  }
+}
+
+public extension Chat {
+  init(from: InlineProtocol.Chat) {
+    id = from.id
+    date = Date() // placeholder
+    title = from.title
+    spaceId = from.spaceID
+    type = .thread // Since this is a new chat creation, it's always a thread
+    peerUserId = nil // Threads don't have peer users
+    lastMsgId = from.lastMsgID
+    emoji = from.emoji
   }
 }
 
