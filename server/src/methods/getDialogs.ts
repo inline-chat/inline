@@ -224,7 +224,36 @@ export const handler = async (
     space?.members.forEach((m) => users.push(m.user))
   }
 
-  // --- 3. Deduplicate Results ---
+  // --- 3. Ensure Dialogs Exist for All Chats ---
+  // Find chats that do not have a dialog for the current user
+  const chatIdsWithDialog = new Set(dialogs.map((d) => d.chatId))
+  const missingDialogsChats = chats.filter((c) => !chatIdsWithDialog.has(c.id))
+
+  if (missingDialogsChats.length > 0) {
+    // Create missing dialogs in a single transaction
+    const newDialogs = await db.transaction(async (tx) => {
+      const created: schema.DbDialog[] = []
+      for (const chat of missingDialogsChats) {
+        // Only create if not already present (extra safety)
+        if (!chatIdsWithDialog.has(chat.id)) {
+          const values: any = {
+            chatId: chat.id,
+            userId: currentUserId,
+          }
+          // For thread chats, set spaceId
+          if (chat.type === "thread") {
+            values.spaceId = spaceId
+          }
+          const inserted = await tx.insert(schema.dialogs).values(values).returning()
+          if (inserted[0]) created.push(inserted[0])
+        }
+      }
+      return created
+    })
+    newDialogs.forEach((d) => dialogs.push(d))
+  }
+
+  // --- 4. Deduplicate Results ---
   dialogs = dedupeById(dialogs)
   chats = dedupeById(chats)
   // IDs are local to the thread, so we don't need to deduplicate
@@ -232,7 +261,7 @@ export const handler = async (
   messages = messages
   users = dedupeById(users)
 
-  // --- 4. Unread Counts ---
+  // --- 5. Unread Counts ---
   const dialogsUnreads = await DialogsModel.getBatchUnreadCounts({
     userId: context.currentUserId,
     chatIds: dialogs.map((d) => d.chatId),
@@ -242,7 +271,7 @@ export const handler = async (
     return encodeDialogInfo({ ...dialog, unreadCount })
   })
 
-  // --- 5. Final Result ---
+  // --- 6. Final Result ---
   let finalResult = {
     dialogs: dialogsEncoded,
     chats: chats.map((d) => encodeChatInfo(d, { currentUserId })),
