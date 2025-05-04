@@ -246,7 +246,7 @@ async function sendLoomUpdate(
     }
 
     // Send updates to all relevant users
-    if (updateGroup.type === "users") {
+    if (updateGroup.type === "dmUsers") {
       updateGroup.userIds.forEach((userId: number) => {
         const encodingForUserId = userId
         const encodingForInputPeer: InputPeer =
@@ -264,9 +264,8 @@ async function sendLoomUpdate(
 
         RealtimeUpdates.pushToUser(userId, [update])
       })
-    } else if (updateGroup.type === "space") {
-      const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
-      userIds.forEach((userId: number) => {
+    } else if (updateGroup.type === "threadUsers") {
+      updateGroup.userIds.forEach((userId: number) => {
         const encodingForUserId = userId
 
         let update = encodeMessageAttachmentUpdate({
