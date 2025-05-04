@@ -151,51 +151,57 @@ export const encodeFullMessage = ({
   // Process attachments if they exist
   let attachments: MessageAttachments | undefined = undefined
   if (message.messageAttachments && message.messageAttachments.length > 0) {
-    const encodedAttachments = message.messageAttachments.map(attachment => {
+    const statusMap: Record<string, number> = {
+      backlog: 1,
+      todo: 2,
+      in_progress: 3,
+      done: 4,
+      cancelled: 5,
+    }
+    const encodedAttachments = message.messageAttachments.map((attachment) => {
       let messageAttachment: MessageAttachment = {
-        messageId: BigInt(message.messageId),
-        attachment: { oneofKind: undefined }
-      };
-      
+        attachment: { oneofKind: undefined },
+      }
+
       // Handle external task attachment
-      if (attachment.externalTaskId) {
+      if (attachment.externalTask) {
         messageAttachment.attachment = {
           oneofKind: "externalTask",
           externalTask: {
-            id: BigInt(attachment.externalTaskId),
-            taskId: "", 
-            application: "",
-            title: "",
-            status: 0,
-            assignedUserId: BigInt(0),
-            url: "",
-            number: "",
-            date: BigInt(0)
-          }
-        };
-      } 
+            id: BigInt(attachment.externalTask.id),
+            taskId: attachment.externalTask.taskId ?? "",
+            application: attachment.externalTask.application ?? "",
+            title: attachment.externalTask.title ?? "",
+            status: statusMap[attachment.externalTask.status ?? ""] ?? 0,
+            assignedUserId: BigInt(attachment.externalTask.assignedUserId ?? 0),
+            url: attachment.externalTask.url ?? "",
+            number: attachment.externalTask.number ?? "",
+            date: BigInt(attachment.externalTask.date.getTime() ?? 0),
+          },
+        }
+      }
       // Handle URL preview attachment
-      else if (attachment.urlPreviewId) {
+      else if (attachment.linkEmbed) {
         messageAttachment.attachment = {
           oneofKind: "urlPreview",
           urlPreview: {
-            id: BigInt(attachment.urlPreviewId),
-            url: undefined,
-            siteName: undefined,
-            title: undefined,
-            description: undefined,
-            photo: undefined,
-            duration: undefined
-          }
-        };
+            id: BigInt(attachment.linkEmbed.id),
+            url: attachment.linkEmbed.url ?? undefined,
+            siteName: attachment.linkEmbed.siteName ?? undefined,
+            title: attachment.linkEmbed.title ?? undefined,
+            description: attachment.linkEmbed.description ?? undefined,
+            photo: attachment.linkEmbed.photo ? encodePhoto({ photo: attachment.linkEmbed.photo }) : undefined,
+            duration: BigInt(attachment.linkEmbed.duration ?? 0),
+          },
+        }
       }
-      
-      return messageAttachment;
-    });
-    
+
+      return messageAttachment
+    })
+
     attachments = {
-      attachments: encodedAttachments.filter(a => a.attachment && a.attachment.oneofKind !== undefined)
-    };
+      attachments: encodedAttachments.filter((a) => a.attachment && a.attachment.oneofKind !== undefined),
+    }
   }
 
   let messageProto: Message = {

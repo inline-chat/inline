@@ -33,6 +33,7 @@ type LoomMetadata = {
 export async function processLoomLink(
   messageText: string,
   messageId: bigint,
+  chatId: bigint,
   currentUserId: number,
   inputPeer: InputPeer,
 ): Promise<void> {
@@ -56,7 +57,7 @@ export async function processLoomLink(
     }
 
     // Process the Loom link
-    await processLoomMetadata(metadata, messageId, currentUserId, inputPeer)
+    await processLoomMetadata(metadata, messageId, chatId, currentUserId, inputPeer)
   } catch (error) {
     log.error("Error processing Loom link", { error })
   }
@@ -65,6 +66,7 @@ export async function processLoomLink(
 async function processLoomMetadata(
   metadata: LoomMetadata,
   messageId: bigint,
+  chatId: bigint,
   currentUserId: number,
   inputPeer: InputPeer,
 ): Promise<void> {
@@ -118,7 +120,7 @@ async function processLoomMetadata(
     })
 
     // Create and send update
-    await sendLoomUpdate(metadata, urlPreviewRecord.id, photoId, messageId, inputPeer, currentUserId)
+    await sendLoomUpdate(metadata, urlPreviewRecord.id, photoId, messageId, chatId, inputPeer, currentUserId)
   } catch (error) {
     log.error("Error processing Loom metadata", { error })
   }
@@ -180,6 +182,7 @@ async function sendLoomUpdate(
   urlPreviewId: number,
   photoId: number | null,
   messageId: bigint,
+  chatId: bigint,
   inputPeer: InputPeer,
   currentUserId: number,
 ): Promise<void> {
@@ -209,7 +212,6 @@ async function sendLoomUpdate(
 
     // Create update message
     let attachment: MessageAttachment = {
-      messageId: messageId,
       attachment: {
         oneofKind: "urlPreview",
         urlPreview: {
@@ -235,6 +237,7 @@ async function sendLoomUpdate(
 
         let update = encodeMessageAttachmentUpdate({
           messageId,
+          chatId,
           encodingForUserId,
           encodingForPeer: { inputPeer: encodingForInputPeer },
           attachment,
@@ -249,6 +252,7 @@ async function sendLoomUpdate(
 
         let update = encodeMessageAttachmentUpdate({
           messageId,
+          chatId,
           encodingForUserId,
           encodingForPeer: { inputPeer: inputPeer },
           attachment,
