@@ -25,6 +25,8 @@ import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/en
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, desc, eq, gt, inArray, lt } from "drizzle-orm"
+import { decrypt } from "@in/server/modules/encryption/encryption"
+import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 
 const log = new Log("MessageModel", LogLevel.TRACE)
 
@@ -36,6 +38,12 @@ export const MessageModel = {
   getMessage: getMessage, // 1 msg
   processMessage: processMessage,
   editMessage: editMessage,
+  processAttachments: processAttachments,
+}
+
+export type DbInputFullAttachment = DbMessageAttachment & {
+  externalTask?: DbExternalTask | null
+  linkEmbed?: DbLinkEmbed | null
 }
 
 export type DbInputFullMessage = DbMessage & {
@@ -44,7 +52,7 @@ export type DbInputFullMessage = DbMessage & {
   photo: InputDbFullPhoto | null
   video: InputDbFullVideo | null
   document: InputDbFullDocument | null
-  messageAttachments?: DbMessageAttachment[]
+  messageAttachments?: DbInputFullAttachment[]
 }
 
 export type DbFullMessage = Omit<DbMessage, "textEncrypted" | "textIv" | "textTag"> & {
@@ -53,7 +61,31 @@ export type DbFullMessage = Omit<DbMessage, "textEncrypted" | "textIv" | "textTa
   photo: DbFullPhoto | null
   video: DbFullVideo | null
   document: DbFullDocument | null
-  messageAttachments?: DbMessageAttachment[]
+  messageAttachments?: ProcessedAttachment[]
+}
+
+export type ProcessedExternalTask = Omit<DbExternalTask, "title" | "titleIv" | "titleTag"> & {
+  title: string | null
+}
+
+export type ProcessedLinkEmbed = Omit<
+  DbLinkEmbed,
+  "url" | "urlIv" | "urlTag" | "title" | "titleIv" | "titleTag" | "description" | "descriptionIv" | "descriptionTag"
+> & {
+  url: string | null
+  title: string | null
+  description: string | null
+  photo?: DbFullPhoto | null
+}
+
+export type ProcessedAttachment = Omit<DbMessageAttachment, "externalTask" | "linkEmbed"> & {
+  externalTask?: ProcessedExternalTask | null
+  linkEmbed?: ProcessedLinkEmbed | null
+}
+
+export type ProcessedMessageAttachment = Omit<DbMessageAttachment, "externalTask" | "linkEmbed"> & {
+  externalTask?: ProcessedExternalTask | null
+  linkEmbed?: ProcessedLinkEmbed | null
 }
 
 async function getMessages(
@@ -143,7 +175,7 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
     photo: message.photo ? FileModel.processFullPhoto(message.photo) : null,
     video: message.video ? FileModel.processFullVideo(message.video) : null,
     document: message.document ? FileModel.processFullDocument(message.document) : null,
-    messageAttachments: message.messageAttachments || [],
+    messageAttachments: message.messageAttachments ? processAttachments(message.messageAttachments) : [],
   }
 }
 
@@ -319,4 +351,82 @@ async function getMessage(messageId: number, chatId: number): Promise<DbFullMess
   }
 
   return processMessage(result)
+}
+
+export function processAttachments(
+  attachments: (DbMessageAttachment & {
+    externalTask?: DbExternalTask | null
+    linkEmbed?: (DbLinkEmbed & { photo?: any | null }) | null
+  })[],
+): ProcessedMessageAttachment[] {
+  return attachments.map((attachment) => {
+    // Omit externalTask and linkEmbed from the initial spread
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { externalTask, linkEmbed, ...rest } = attachment
+    let processed: ProcessedMessageAttachment = { ...rest }
+
+    // Process externalTask if present
+    if (attachment.externalTask) {
+      // Omit encrypted fields from the spread
+      const { title, titleIv, titleTag, ...rest } = attachment.externalTask
+      processed.externalTask = {
+        ...rest,
+        title:
+          title && titleIv && titleTag
+            ? decrypt({
+                encrypted: title,
+                iv: titleIv,
+                authTag: titleTag,
+              })
+            : null,
+      }
+    }
+
+    // Process linkEmbed (url preview) if present
+    if (attachment.linkEmbed) {
+      const {
+        url,
+        urlIv,
+        urlTag,
+        title: linkTitle,
+        titleIv: linkTitleIv,
+        titleTag: linkTitleTag,
+        description,
+        descriptionIv,
+        descriptionTag,
+        photo,
+        ...rest
+      } = attachment.linkEmbed
+      processed.linkEmbed = {
+        ...rest,
+        url:
+          url && urlIv && urlTag
+            ? decrypt({
+                encrypted: url,
+                iv: urlIv,
+                authTag: urlTag,
+              })
+            : null,
+        title:
+          linkTitle && linkTitleIv && linkTitleTag
+            ? decrypt({
+                encrypted: linkTitle,
+                iv: linkTitleIv,
+                authTag: linkTitleTag,
+              })
+            : null,
+        description:
+          description && descriptionIv && descriptionTag
+            ? decrypt({
+                encrypted: description,
+                iv: descriptionIv,
+                authTag: descriptionTag,
+              })
+            : null,
+        photo: photo ? FileModel.processFullPhoto(photo) : null,
+      }
+    }
+
+    return processed
+  })
 }
