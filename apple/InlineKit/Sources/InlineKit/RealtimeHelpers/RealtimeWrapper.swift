@@ -151,28 +151,35 @@ public final actor Realtime: Sendable {
 }
 
 public extension Realtime {
-  func invokeWithHandler(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) {
-    Task {
-      do {
-        log.trace("calling \(method)")
-        let response = try await invoke(method, input: input)
+  @discardableResult
+  func invokeWithHandler(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> RpcResult
+    .OneOf_Result?
+  {
+    do {
+      log.trace("calling \(method)")
+      let response = try await invoke(method, input: input)
 
-        switch response {
-          case let .getMe(result):
-            try self.handleResult_getMe(result)
+      switch response {
+        case let .getMe(result):
+          try handleResult_getMe(result)
 
-          case let .deleteMessages(result):
-            try self.handleResult_deleteMessages(result)
+        case let .deleteMessages(result):
+          try handleResult_deleteMessages(result)
 
-          case let .getChatHistory(result):
-            try self.handleResult_getChatHistory(input!, result)
+        case let .getChatHistory(result):
+          try handleResult_getChatHistory(input!, result)
 
-          default:
-            break
-        }
-      } catch {
-        log.error("Failed to invoke \(method) with handler", error: error)
+        case let .createChat(result):
+          try handleResult_createChat(result)
+
+        default:
+          break
       }
+
+      return response
+    } catch {
+      log.error("Failed to invoke \(method) with handler", error: error)
+      throw error
     }
   }
 
@@ -222,5 +229,32 @@ public extension Realtime {
         MessagesPublisher.shared.messagesReload(peer: peerId, animated: false)
       }
     }
+  }
+
+  private func handleResult_createChat(_ result: CreateChatResult) throws {
+    log.trace("createChat result: \(result)")
+
+    do {
+      // Save chat and dialog to database
+      try AppDatabase.shared.dbWriter.write { db in
+        do {
+          let chat = Chat(from: result.chat)
+          try chat.save(db)
+        } catch {
+          Log.shared.error("Failed to save chat", error: error)
+        }
+
+        do {
+          let dialog = Dialog(from: result.dialog)
+          try dialog.save(db)
+        } catch {
+          Log.shared.error("Failed to save dialog", error: error)
+        }
+      }
+    } catch {
+      Log.shared.error("Failed to save chat in transaction", error: error)
+    }
+
+    log.trace("createChat saved")
   }
 }
