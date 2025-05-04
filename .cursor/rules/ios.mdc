@@ -1,0 +1,6 @@
+---
+description: 
+globs: apple/InlineIOS/**/*.swift
+alwaysApply: false
+---
+iOS app uses Nuke and NukeUI to render remote images. 

@@ -1,0 +1,18 @@
+---
+description: Describes how message list and chat view are rendered in UIKit in the iOS app
+globs: 
+alwaysApply: false
+---
+In iOS, we use UIKit for the chat view screen (except for the navigation bar which is in SwiftUI)
+
+# Chat view
+The UIKit root for the chat view is at: apple/InlineIOS/Chat/ChatViewUIKit.swift
+
+# Collection View
+It uses a collection view in apple/InlineIOS/Chat/MessagesCollectionView.swift which is transformed to be upside down to support bottom-up scrolling bahaviour in a chat app. 
+
+# Insets
+It calculates content insets manually considering compose height, safe areas, keyboard, navigation bars, etc. 
+
+# Message View
+It's at apple/InlineIOS/Message/UIMessageView.swift which is wrapped in a collection view cell in apple/InlineIOS/Chat/MessageCollectionViewCell.swift which adds the name and avatar and manages cell reuse. 
