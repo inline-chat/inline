@@ -15,8 +15,8 @@ public struct TransactionCreateChat: Transaction {
 
   // Config
   public var id = UUID().uuidString
-  var config = TransactionConfig.default
-  var date = Date()
+  public var config = TransactionConfig.default
+  public var date = Date()
 
   public init(title: String, emoji: String?, isPublic: Bool, spaceId: Int64, participants: [Int64]) {
     self.title = title
@@ -27,11 +27,11 @@ public struct TransactionCreateChat: Transaction {
   }
 
   // Methods
-  func optimistic() {
+  public func optimistic() {
     // No optimistic updates needed for chat creation
   }
 
-  func execute() async throws -> [InlineProtocol.Update] {
+  public func execute() async throws -> [InlineProtocol.Update] {
     let result = try await Realtime.shared.invoke(
       .createChat,
       input: .createChat(
@@ -48,23 +48,38 @@ public struct TransactionCreateChat: Transaction {
       )
     )
 
+    print("transaction result   = \(result)")
+
     guard case let .createChat(response) = result else {
       throw CreateChatError.failed
     }
+    print("transaction response = \(response)")
 
-    // Save chat and dialog to database
-    try? await AppDatabase.shared.dbWriter.write { db in
-      let chat = Chat(from: response.chat)
-      try chat.save(db)
+    do {
+      // Save chat and dialog to database
+      try await AppDatabase.shared.dbWriter.write { db in
+        do {
+          let chat = Chat(from: response.chat)
+          try chat.save(db)
+        } catch {
+          Log.shared.error("Failed to save chat", error: error)
+        }
 
-      let dialog = Dialog(from: response.dialog)
-      try dialog.save(db)
+        do {
+          let dialog = Dialog(from: response.dialog)
+          try dialog.save(db)
+        } catch {
+          Log.shared.error("Failed to save dialog", error: error)
+        }
+      }
+    } catch {
+      Log.shared.error("Failed to save chat in transaction", error: error)
     }
 
     return []
   }
 
-  func shouldRetryOnFail(error: Error) -> Bool {
+  public func shouldRetryOnFail(error: Error) -> Bool {
     if let error = error as? RealtimeAPIError {
       switch error {
         case let .rpcError(_, _, code):
@@ -74,24 +89,24 @@ public struct TransactionCreateChat: Transaction {
             default:
               return true
           }
-        
+
         default:
           return false
       }
     }
-    
+
     return false
   }
 
-  func didSucceed(result: [InlineProtocol.Update]) async {
+  public func didSucceed(result: [InlineProtocol.Update]) async {
     // No updates to apply
   }
 
-  func didFail(error: Error?) async {
+  public func didFail(error: Error?) async {
     Log.shared.error("Failed to create chat", error: error)
   }
 
-  func rollback() async {
+  public func rollback() async {
     // No rollback needed for chat creation
   }
 

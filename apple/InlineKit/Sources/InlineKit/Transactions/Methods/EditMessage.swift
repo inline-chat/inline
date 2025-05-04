@@ -8,15 +8,15 @@ import RealtimeAPI
 
 public struct TransactionEditMessage: Transaction {
   // Properties
-  var messageId: Int64
-  var text: String
-  var chatId: Int64
-  var peerId: Peer
+  public var messageId: Int64
+  public var text: String
+  public var chatId: Int64
+  public var peerId: Peer
 
   // Config
   public var id = UUID().uuidString
-  var config = TransactionConfig.default
-  var date = Date()
+  public var config = TransactionConfig.default
+  public var date = Date()
 
   public init(messageId: Int64, text: String, chatId: Int64, peerId: Peer) {
     self.messageId = messageId
@@ -26,7 +26,7 @@ public struct TransactionEditMessage: Transaction {
   }
 
   // Methods
-  func optimistic() {
+  public func optimistic() {
     Log.shared.debug("Optimistic edit message \(messageId) \(peerId) \(chatId)")
     Task(priority: .userInitiated) {
       do {
@@ -58,7 +58,7 @@ public struct TransactionEditMessage: Transaction {
     }
   }
 
-  func execute() async throws -> [InlineProtocol.Update] {
+  public func execute() async throws -> [InlineProtocol.Update] {
     let result = try await Realtime.shared.invoke(
       .editMessage,
       input: .editMessage(EditMessageInput.with {
@@ -75,7 +75,7 @@ public struct TransactionEditMessage: Transaction {
     return response.updates
   }
 
-  func shouldRetryOnFail(error: Error) -> Bool {
+  public func shouldRetryOnFail(error: Error) -> Bool {
     if let error = error as? RealtimeAPIError {
       switch error {
         case let .rpcError(_, _, code):
@@ -94,11 +94,11 @@ public struct TransactionEditMessage: Transaction {
     return true
   }
 
-  func didSucceed(result: [InlineProtocol.Update]) async {
+  public func didSucceed(result: [InlineProtocol.Update]) async {
     await Realtime.shared.updates.applyBatch(updates: result)
   }
 
-  func didFail(error: Error?) async {
+  public func didFail(error: Error?) async {
     Log.shared.error("Failed to delete message", error: error)
     Task(priority: .userInitiated) {
       try? await AppDatabase.shared.dbWriter.write { db in
@@ -124,7 +124,7 @@ public struct TransactionEditMessage: Transaction {
     }
   }
 
-  func rollback() async {
+  public func rollback() async {
     let _ = try? await AppDatabase.shared.dbWriter.write { db in
       var message = try Message
         .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)

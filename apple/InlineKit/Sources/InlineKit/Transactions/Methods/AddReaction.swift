@@ -8,15 +8,15 @@ import RealtimeAPI
 
 public struct TransactionAddReaction: Transaction {
   // Properties
-  var message: Message
-  var emoji: String
-  var userId: Int64
-  var peerId: Peer
+  public var message: Message
+  public var emoji: String
+  public var userId: Int64
+  public var peerId: Peer
 
   // Config
   public var id = UUID().uuidString
-  var config = TransactionConfig.default
-  var date = Date()
+  public var config = TransactionConfig.default
+  public var date = Date()
 
   public init(message: Message, emoji: String, userId: Int64, peerId: Peer) {
     self.message = message
@@ -26,7 +26,7 @@ public struct TransactionAddReaction: Transaction {
   }
 
   // Methods
-  func optimistic() {
+  public func optimistic() {
     Log.shared.debug("Optimistic add reaction \(message.messageId) \(peerId) \(message.chatId)")
     Task(priority: .userInitiated) {
       do {
@@ -60,7 +60,7 @@ public struct TransactionAddReaction: Transaction {
     }
   }
 
-  func execute() async throws -> [InlineProtocol.Update] {
+  public func execute() async throws -> [InlineProtocol.Update] {
     let result = try await Realtime.shared.invoke(
       .addReaction,
       input: .addReaction(AddReactionInput.with {
@@ -77,7 +77,7 @@ public struct TransactionAddReaction: Transaction {
     return response.updates
   }
 
-  func shouldRetryOnFail(error: Error) -> Bool {
+  public func shouldRetryOnFail(error: Error) -> Bool {
     if let error = error as? RealtimeAPIError {
       switch error {
         case let .rpcError(_, _, code):
@@ -96,11 +96,11 @@ public struct TransactionAddReaction: Transaction {
     return true
   }
 
-  func didSucceed(result: [InlineProtocol.Update]) async {
+  public func didSucceed(result: [InlineProtocol.Update]) async {
     await Realtime.shared.updates.applyBatch(updates: result)
   }
 
-  func didFail(error: Error?) async {
+  public func didFail(error: Error?) async {
     Log.shared.error("Failed to delete message", error: error)
     Task(priority: .userInitiated) {
       try? await AppDatabase.shared.dbWriter.write { db in
@@ -130,7 +130,7 @@ public struct TransactionAddReaction: Transaction {
     }
   }
 
-  func rollback() async {
+  public func rollback() async {
     let _ = try? await AppDatabase.shared.dbWriter.write { db in
       let existing = try Reaction
         .filter(
