@@ -31,7 +31,7 @@ public struct TransactionCreateChat: Transaction {
     // No optimistic updates needed for chat creation
   }
 
-  public func execute() async throws -> [InlineProtocol.Update] {
+  public func execute() async throws -> CreateChatResult {
     let result = try await Realtime.shared.invoke(
       .createChat,
       input: .createChat(
@@ -55,28 +55,7 @@ public struct TransactionCreateChat: Transaction {
     }
     print("transaction response = \(response)")
 
-    do {
-      // Save chat and dialog to database
-      try await AppDatabase.shared.dbWriter.write { db in
-        do {
-          let chat = Chat(from: response.chat)
-          try chat.save(db)
-        } catch {
-          Log.shared.error("Failed to save chat", error: error)
-        }
-
-        do {
-          let dialog = Dialog(from: response.dialog)
-          try dialog.save(db)
-        } catch {
-          Log.shared.error("Failed to save dialog", error: error)
-        }
-      }
-    } catch {
-      Log.shared.error("Failed to save chat in transaction", error: error)
-    }
-
-    return []
+    return response
   }
 
   public func shouldRetryOnFail(error: Error) -> Bool {
@@ -98,8 +77,27 @@ public struct TransactionCreateChat: Transaction {
     return false
   }
 
-  public func didSucceed(result: [InlineProtocol.Update]) async {
-    // No updates to apply
+  public func didSucceed(result: CreateChatResult) async {
+    do {
+      // Save chat and dialog to database
+      try await AppDatabase.shared.dbWriter.write { db in
+        do {
+          let chat = Chat(from: result.chat)
+          try chat.save(db)
+        } catch {
+          Log.shared.error("Failed to save chat", error: error)
+        }
+
+        do {
+          let dialog = Dialog(from: result.dialog)
+          try dialog.save(db)
+        } catch {
+          Log.shared.error("Failed to save dialog", error: error)
+        }
+      }
+    } catch {
+      Log.shared.error("Failed to save chat in transaction", error: error)
+    }
   }
 
   public func didFail(error: Error?) async {

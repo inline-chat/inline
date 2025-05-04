@@ -30,9 +30,6 @@ public class Transactions: @unchecked Sendable {
 
   private var log = Log.scoped("Transactions")
 
-  // Dictionary to store continuations for waiting transactions
-  private var waitingContinuations: [String: CheckedContinuation<any Transaction, Never>] = [:]
-
   init() {
     // TODO: Fill out actor with persisted transactions from cache
     // TODO: Hook actor to cache via clousure so when a task is finished, we remove it from cache as well
@@ -42,10 +39,6 @@ public class Transactions: @unchecked Sendable {
       await actor.setCompletionHandler { [weak self] transaction in
         guard let self else { return }
         cache.remove(transactionId: transaction.id)
-        // Resume any waiting continuation
-        if let continuation = waitingContinuations.removeValue(forKey: transaction.id) {
-          continuation.resume(returning: transaction)
-        }
       }
 
       for persistedTransaction in cache.transactions {
@@ -96,31 +89,6 @@ public class Transactions: @unchecked Sendable {
     Task {
       await actor.clearAll()
       cache.clearAll()
-    }
-  }
-
-  /// Start a transaction and wait for its execution to complete
-  public func mutateAndWait(transaction transaction_: TransactionType) async throws -> any Transaction {
-    let transaction = transaction_
-    let transactionCopy = transaction.transaction
-
-    log.debug("Mutating and waiting for transaction: \(transaction.id)")
-    transactionCopy.optimistic()
-
-    // First persist to cache
-    do {
-      try cache.add(transaction: transaction)
-    } catch {
-      // TODO: Handle error
-      throw error
-    }
-
-    return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<any Transaction, Error>) in
-      // Store the continuation to be resumed on completion
-      waitingContinuations[transaction.id] = continuation as? CheckedContinuation<any Transaction, Never>
-      Task {
-        await actor.queue(transaction: transactionCopy)
-      }
     }
   }
 }
