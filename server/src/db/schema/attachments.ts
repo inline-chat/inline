@@ -72,6 +72,13 @@ export const messageAttachmentsRelations = relations(messageAttachments, ({ one 
   }),
 }))
 
+export const urlPreviewRelations = relations(urlPreview, ({ one }) => ({
+  photo: one(photos, {
+    fields: [urlPreview.photoId],
+    references: [photos.id],
+  }),
+}))
+
 export type DbMessageAttachment = typeof messageAttachments.$inferSelect
 export type DbNewMessageAttachment = typeof messageAttachments.$inferInsert
 
