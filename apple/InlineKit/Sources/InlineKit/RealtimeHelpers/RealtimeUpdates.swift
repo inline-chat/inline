@@ -214,12 +214,17 @@ extension InlineProtocol.UpdateMessageAttachment {
       return
     }
 
-    guard case let .externalTask(externalTaskAttachment) = messageAttachment else {
-      Log.shared.error("Unsupported attachment type")
-      return
-    }
+    switch messageAttachment {
+      case let .externalTask(externalTaskAttachment):
 
-    _ = try ExternalTask.save(db, externalTask: externalTaskAttachment)
+        _ = try ExternalTask.save(db, externalTask: externalTaskAttachment)
+
+      case let .urlPreview(urlPreview):
+        _ = try UrlPreview.save(db, linkEmbed: urlPreview)
+      default:
+        Log.shared.error("Unsupported attachment type")
+        return
+    }
 
     _ = try Attachment.save(db, attachment: attachment)
 
