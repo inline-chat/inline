@@ -107,6 +107,7 @@ message UserProfilePhoto {
 
 message Dialog {
   Peer peer = 1;
+  optional int64 space_id = 2;
   optional bool archived = 3;
   optional bool pinned = 4;
   optional int64 read_max_id = 5;

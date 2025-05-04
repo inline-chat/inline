@@ -149,8 +149,8 @@ public extension Chat {
     spaceId = from.spaceID
     type = .thread // Since this is a new chat creation, it's always a thread
     peerUserId = nil // Threads don't have peer users
-    lastMsgId = from.lastMsgID
-    emoji = from.emoji
+    lastMsgId = from.hasLastMsgID ? from.lastMsgID : nil
+    emoji = from.hasEmoji ? from.emoji : nil
   }
 }
 

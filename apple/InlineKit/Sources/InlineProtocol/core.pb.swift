@@ -580,6 +580,15 @@ public struct Dialog: Sendable {
   /// Clears the value of `peer`. Subsequent reads from it will return its default value.
   public mutating func clearPeer() {self._peer = nil}
 
+  public var spaceID: Int64 {
+    get {return _spaceID ?? 0}
+    set {_spaceID = newValue}
+  }
+  /// Returns true if `spaceID` has been explicitly set.
+  public var hasSpaceID: Bool {return self._spaceID != nil}
+  /// Clears the value of `spaceID`. Subsequent reads from it will return its default value.
+  public mutating func clearSpaceID() {self._spaceID = nil}
+
   public var archived: Bool {
     get {return _archived ?? false}
     set {_archived = newValue}
@@ -621,6 +630,7 @@ public struct Dialog: Sendable {
   public init() {}
 
   fileprivate var _peer: Peer? = nil
+  fileprivate var _spaceID: Int64? = nil
   fileprivate var _archived: Bool? = nil
   fileprivate var _pinned: Bool? = nil
   fileprivate var _readMaxID: Int64? = nil
@@ -3609,6 +3619,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
   public static let protoMessageName: String = "Dialog"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "peer"),
+    2: .standard(proto: "space_id"),
     3: .same(proto: "archived"),
     4: .same(proto: "pinned"),
     5: .standard(proto: "read_max_id"),
@@ -3622,6 +3633,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peer) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._spaceID) }()
       case 3: try { try decoder.decodeSingularBoolField(value: &self._archived) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self._pinned) }()
       case 5: try { try decoder.decodeSingularInt64Field(value: &self._readMaxID) }()
@@ -3638,6 +3650,9 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     // https://github.com/apple/swift-protobuf/issues/1182
     try { if let v = self._peer {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._spaceID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
     } }()
     try { if let v = self._archived {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
@@ -3656,6 +3671,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
 
   public static func ==(lhs: Dialog, rhs: Dialog) -> Bool {
     if lhs._peer != rhs._peer {return false}
+    if lhs._spaceID != rhs._spaceID {return false}
     if lhs._archived != rhs._archived {return false}
     if lhs._pinned != rhs._pinned {return false}
     if lhs._readMaxID != rhs._readMaxID {return false}
