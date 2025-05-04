@@ -231,7 +231,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
           }
         }
 
-        await Realtime.shared
+        try? await Realtime.shared
           .invokeWithHandler(.getChatHistory, input: .getChatHistory(.with { input in
             input.peerID = peer_.toInputPeer()
           }))
