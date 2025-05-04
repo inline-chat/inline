@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import InlineProtocol
+import Logger
 
 public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
   public var id: Int64
@@ -37,32 +38,6 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
   }
 }
 
-// Inline Protocol
-public extension UrlPreview {
-  init(from: InlineProtocol.UrlPreview) {
-    id = from.id
-    url = from.url
-    siteName = from.siteName
-    title = from.title
-    description = from.description_p
-    photoId = from.photo.id
-    duration = from.duration
-  }
-
-  @discardableResult
-  static func save(
-    _ db: Database,
-    linkEmbed protocolLinkEmbed: InlineProtocol.UrlPreview
-  )
-    throws -> UrlPreview
-  {
-    let linkEmbed = UrlPreview(from: protocolLinkEmbed)
-    try linkEmbed.save(db)
-
-    return linkEmbed
-  }
-}
-
 public extension UrlPreview {
   enum CodingKeys: String, CodingKey {
     case id, url, siteName, title, description, photoId, duration
@@ -77,5 +52,37 @@ public extension UrlPreview {
     description = try container.decodeIfPresent(String.self, forKey: .description)
     photoId = try container.decodeIfPresent(Int64.self, forKey: .photoId)
     duration = try container.decodeIfPresent(Int64.self, forKey: .duration)
+  }
+
+  /// Saves an InlineProtocol.UrlPreview into the database, including its photo if present.
+  /// - Parameters:
+  ///   - db: The database connection
+  ///   - linkEmbed: The InlineProtocol.UrlPreview to save
+  /// - Returns: The saved UrlPreview object
+  @discardableResult
+  static func save(_ db: Database, linkEmbed: InlineProtocol.UrlPreview) throws -> UrlPreview {
+    // Save the photo if present
+    var photoId: Int64? = nil
+    if linkEmbed.hasPhoto {
+      let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: linkEmbed.photo)
+      photoId = savedPhoto.photoId
+    }
+    // Try to find existing UrlPreview by id
+    var urlPreview = UrlPreview(
+      id: linkEmbed.id != 0 ? linkEmbed.id : Int64.random(in: 1 ... 5_000_000),
+      url: linkEmbed.url,
+      siteName: linkEmbed.hasSiteName ? linkEmbed.siteName : nil,
+      title: linkEmbed.hasTitle ? linkEmbed.title : nil,
+      description: linkEmbed.hasDescription_p ? linkEmbed.description_p : nil,
+      photoId: photoId,
+      duration: linkEmbed.hasDuration ? linkEmbed.duration : nil
+    )
+    if let existing = try UrlPreview.filter(Column("id") == urlPreview.id).fetchOne(db) {
+      urlPreview.id = existing.id
+      try urlPreview.update(db)
+    } else {
+      urlPreview = try urlPreview.insertAndFetch(db)
+    }
+    return urlPreview
   }
 }
