@@ -19,8 +19,29 @@ class URLPreviewView: UIView {
     return view
   }()
 
-  private var url: URL?
   private weak var parentViewController: UIViewController?
+  private var previewUrl: URL?
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    setupTapGesture()
+  }
+
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    setupTapGesture()
+  }
+
+  private func setupTapGesture() {
+    let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+    addGestureRecognizer(tap)
+    isUserInteractionEnabled = true
+  }
+
+  @objc private func handleTap() {
+    guard let url = previewUrl else { return }
+    UIApplication.shared.open(url)
+  }
 
   func configure(
     with preview: UrlPreview,
@@ -28,10 +49,11 @@ class URLPreviewView: UIView {
     parentViewController: UIViewController?,
     outgoing: Bool
   ) {
-    url = URL(string: preview.url)
     self.parentViewController = parentViewController
+    previewUrl = URL(string: preview.url)
+
     subviews.forEach { $0.removeFromSuperview() }
-    print("photoInfo is \(photoInfo)")
+
     let maxWidth: CGFloat = 280
     let horizontalPadding: CGFloat = 8
     let verticalPadding: CGFloat = 6
@@ -46,10 +68,11 @@ class URLPreviewView: UIView {
 
     siteNameLabel.text = preview.siteName
     siteNameLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
-    siteNameLabel.textColor = secondaryTextColor
+    siteNameLabel.textColor = primaryTextColor
     siteNameLabel.numberOfLines = 1
     siteNameLabel.isHidden = preview.siteName == nil
     siteNameLabel.translatesAutoresizingMaskIntoConstraints = false
+    siteNameLabel.isUserInteractionEnabled = false
 
     titleLabel.text = preview.title
     titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
@@ -57,6 +80,7 @@ class URLPreviewView: UIView {
     titleLabel.numberOfLines = 0
     titleLabel.isHidden = preview.title == nil
     titleLabel.translatesAutoresizingMaskIntoConstraints = false
+    titleLabel.isUserInteractionEnabled = false
 
     descriptionLabel.text = preview.description
     descriptionLabel.font = UIFont.systemFont(ofSize: 14)
@@ -64,6 +88,7 @@ class URLPreviewView: UIView {
     descriptionLabel.numberOfLines = 0
     descriptionLabel.isHidden = preview.description == nil
     descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
+    descriptionLabel.isUserInteractionEnabled = false
 
     imageView.isHidden = true
     var imageAspect: CGFloat = 2.0 / 3.0 // Default aspect ratio
@@ -77,6 +102,7 @@ class URLPreviewView: UIView {
         imageAspect = CGFloat(height) / CGFloat(width)
       }
     }
+    imageView.isUserInteractionEnabled = false
 
     addSubview(siteNameLabel)
     addSubview(titleLabel)
@@ -115,9 +141,6 @@ class URLPreviewView: UIView {
     backgroundColor = bgColor
     layer.cornerRadius = 8
     layer.masksToBounds = true
-    isUserInteractionEnabled = true
-    let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-    addGestureRecognizer(tap)
   }
 
   // Calculate image size based on available width/height (max 280x180, keep aspect ratio)
@@ -132,30 +155,6 @@ class URLPreviewView: UIView {
       w = h * aspect
     }
     return h
-  }
-
-  @objc private func handleTap() {
-    guard let url, let parentVC = parentViewController else { return }
-
-    let safariConfig = SFSafariViewController.Configuration()
-    safariConfig.entersReaderIfAvailable = false
-    safariConfig.barCollapsingEnabled = true
-
-    let safari = SFSafariViewController(url: url, configuration: safariConfig)
-    safari.preferredControlTintColor = ThemeManager.shared.selected.accent
-    safari.dismissButtonStyle = .close
-    safari.modalPresentationStyle = .pageSheet
-
-    if #available(iOS 15.0, *) {
-      if let sheet = safari.sheetPresentationController {
-        sheet.detents = [.medium(), .large()]
-        sheet.prefersGrabberVisible = true
-        sheet.prefersScrollingExpandsWhenScrolledToEdge = true
-        sheet.prefersEdgeAttachedInCompactHeight = true
-      }
-    }
-
-    parentVC.present(safari, animated: true)
   }
 }
 
