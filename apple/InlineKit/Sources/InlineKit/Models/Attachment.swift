@@ -7,6 +7,7 @@ public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, Pers
   Sendable, Equatable
 {
   public var id: Int64?
+  public var attachmentId: Int64?
   public var messageId: Int64?
   public var externalTaskId: Int64?
   public var urlPreviewId: Int64?
@@ -37,22 +38,24 @@ public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, Pers
     request(for: Attachment.message)
   }
 
-  public init(messageId: Int64?, externalTaskId: Int64?, urlPreviewId: Int64?) {
+  public init(messageId: Int64?, externalTaskId: Int64?, urlPreviewId: Int64?, attachmentId: Int64?) {
     self.messageId = messageId
     self.externalTaskId = externalTaskId
     self.urlPreviewId = urlPreviewId
+    self.attachmentId = attachmentId
   }
 }
 
 public extension Attachment {
+  /// Saves the attachment and any inner items (e.g., UrlPreview) to the database.
+  /// - Parameters:
+  ///   - db: The database connection
+  ///   - attachment: The protocol attachment to save
+  /// - Returns: The saved Attachment object
   @discardableResult
-  static func save(
-    _ db: Database, attachment: InlineProtocol.MessageAttachment
-  )
-    throws -> Attachment
-  {
-    let message = try Message.filter(Column("messageId") == attachment.messageID).fetchOne(db)
-
+  static func saveWithInnerItems(
+    _ db: Database, attachment: InlineProtocol.MessageAttachment, messageClientGlobalId: Int64
+  ) throws -> Attachment {
     var externalTaskId: Int64? = nil
     var urlPreviewId: Int64? = nil
 
@@ -60,17 +63,20 @@ public extension Attachment {
       switch attachmentType {
         case let .externalTask(externalTask):
           externalTaskId = externalTask.id
-        case let .urlPreview(urlPreview):
-          urlPreviewId = urlPreview.id
+        case let .urlPreview(urlPreviewProto):
+          // Save the UrlPreview and use its DB id
+          let savedUrlPreview = try UrlPreview.save(db, linkEmbed: urlPreviewProto)
+          urlPreviewId = savedUrlPreview.id
         default:
           break
       }
     }
 
     let attachment = Attachment(
-      messageId: message?.globalId,
+      messageId: messageClientGlobalId,
       externalTaskId: externalTaskId,
-      urlPreviewId: urlPreviewId
+      urlPreviewId: urlPreviewId,
+      attachmentId: attachment.id
     )
 
     try attachment.save(db)

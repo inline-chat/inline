@@ -160,6 +160,7 @@ export const encodeFullMessage = ({
     }
     const encodedAttachments = message.messageAttachments.map((attachment) => {
       let messageAttachment: MessageAttachment = {
+        id: BigInt(attachment.id ?? 0),
         attachment: { oneofKind: undefined },
       }
 
