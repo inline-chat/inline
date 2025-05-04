@@ -36,7 +36,6 @@ struct HomeSidebar: View {
   @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager
-  @EnvironmentStateObject var model: SpaceListViewModel
   @EnvironmentStateObject var home: HomeViewModel
   @StateObject var search = GlobalSearch()
   @FocusState private var isSearching: Bool
@@ -48,9 +47,6 @@ struct HomeSidebar: View {
   // MARK: - Initializer
 
   init() {
-    _model = EnvironmentStateObject { env in
-      SpaceListViewModel(db: env.appDatabase)
-    }
     _home = EnvironmentStateObject { env in
       HomeViewModel(db: env.appDatabase)
     }
