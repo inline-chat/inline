@@ -985,8 +985,8 @@ public struct MessageAttachment: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// todo: deprecated
-  public var messageID: Int64 = 0
+  /// ID
+  public var id: Int64 = 0
 
   public var attachment: MessageAttachment.OneOf_Attachment? = nil
 
@@ -2533,6 +2533,8 @@ public struct UpdateMessageAttachment: Sendable {
   public var hasPeerID: Bool {return self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
+
+  public var chatID: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4237,7 +4239,7 @@ extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAttachment"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "message_id"),
+    4: .same(proto: "id"),
     2: .standard(proto: "external_task"),
     3: .standard(proto: "url_preview"),
   ]
@@ -4248,7 +4250,6 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
       case 2: try {
         var v: MessageAttachmentExternalTask?
         var hadOneofValue = false
@@ -4275,6 +4276,7 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
           self.attachment = .urlPreview(v)
         }
       }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
       default: break
       }
     }
@@ -4285,9 +4287,6 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.messageID != 0 {
-      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 1)
-    }
     switch self.attachment {
     case .externalTask?: try {
       guard case .externalTask(let v)? = self.attachment else { preconditionFailure() }
@@ -4299,11 +4298,14 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     }()
     case nil: break
     }
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: MessageAttachment, rhs: MessageAttachment) -> Bool {
-    if lhs.messageID != rhs.messageID {return false}
+    if lhs.id != rhs.id {return false}
     if lhs.attachment != rhs.attachment {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -6620,6 +6622,7 @@ extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._Message
     1: .same(proto: "attachment"),
     2: .standard(proto: "message_id"),
     3: .standard(proto: "peer_id"),
+    50: .standard(proto: "chat_id"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -6631,6 +6634,7 @@ extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._Message
       case 1: try { try decoder.decodeSingularMessageField(value: &self._attachment) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
       case 3: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 50: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
       default: break
       }
     }
@@ -6650,6 +6654,9 @@ extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._Message
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
     } }()
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 50)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -6657,6 +6664,7 @@ extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._Message
     if lhs._attachment != rhs._attachment {return false}
     if lhs.messageID != rhs.messageID {return false}
     if lhs._peerID != rhs._peerID {return false}
+    if lhs.chatID != rhs.chatID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

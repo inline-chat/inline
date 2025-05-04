@@ -357,6 +357,25 @@ public extension AppDatabase {
           "urlPreview", column: "id", onDelete: .cascade)
       }
     }
+    
+ 
+
+    migrator.registerMigration("drop attachment table") { db in
+      try db.drop(table: "attachment")
+    }
+
+    migrator.registerMigration("create attachment table v2") { db in
+      try db.create(table: "attachment") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("messageId", .integer).references(
+          "message", column: "globalId", onDelete: .cascade)
+        t.column("externalTaskId", .integer).references(
+          "externalTask", column: "id", onDelete: .cascade)
+        t.column("urlPreviewId", .integer).references(
+          "urlPreview", column: "id", onDelete: .cascade)
+        t.column("attachmentId", .integer).unique().indexed()
+      }
+    }
 
     /// TODOs:
     /// - Add indexes for performance
