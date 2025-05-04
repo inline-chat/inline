@@ -44,16 +44,17 @@ class MainSplitViewController: NSSplitViewController {
 
 extension MainSplitViewController {
   private func fetchData() {
-    Task {
-      await dependencies.realtime.invokeWithHandler(.getMe, input: .getMe(.init()))
+    Task.detached {
+      try await self.dependencies.realtime
+        .invokeWithHandler(.getMe, input: .getMe(.init()))
 
       // wait for our own user to finish fetching
       // TODO: dedup from home sidebar
-      Task {
-        try? await dependencies.data.getSpaces()
+      Task.detached {
+        try? await self.dependencies.data.getSpaces()
       }
-      Task {
-        try? await dependencies.data.getPrivateChats()
+      Task.detached {
+        try? await self.dependencies.data.getPrivateChats()
       }
     }
   }
@@ -104,7 +105,7 @@ class SidebarViewController: NSHostingController<AnyView> {
     self.dependencies = dependencies
     super.init(rootView: SidebarContent().environment(dependencies: dependencies))
     sizingOptions = [
-//      .minSize,
+      //      .minSize,
     ]
   }
 
