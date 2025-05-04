@@ -12,7 +12,7 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
   private let log = Log.scoped("RealtimeUpdates")
 
   public func apply(update: InlineProtocol.Update, db: Database) {
-    log.trace("apply realtime update")
+    self.log.trace("apply realtime update")
 
     do {
       switch update.update {
@@ -47,21 +47,21 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
           break
       }
     } catch {
-      log.error("Failed to apply update", error: error)
+      self.log.error("Failed to apply update", error: error)
     }
   }
 
   public func applyBatch(updates: [InlineProtocol.Update]) {
-    log.debug("applying \(updates.count) updates")
+    self.log.debug("applying \(updates.count) updates")
     do {
-      try database.dbWriter.write { db in
+      try self.database.dbWriter.write { db in
         for update in updates {
           self.apply(update: update, db: db)
         }
       }
     } catch {
       // handle error
-      log.error("Failed to apply updates", error: error)
+      self.log.error("Failed to apply updates", error: error)
     }
   }
 }
@@ -221,6 +221,7 @@ extension InlineProtocol.UpdateMessageAttachment {
 
       case let .urlPreview(urlPreview):
         _ = try UrlPreview.save(db, linkEmbed: urlPreview)
+
       default:
         Log.shared.error("Unsupported attachment type")
         return
@@ -228,12 +229,14 @@ extension InlineProtocol.UpdateMessageAttachment {
 
     _ = try Attachment.save(db, attachment: attachment)
 
-    let message = try Message.filter(Column("messageId") == attachment.messageID).fetchOne(db)
+    
+    let message = try Message.filter(Column("messageId") == self.messageID).fetchOne(db)
 
     if let message {
-      Task { @MainActor in
-        await MessagesPublisher.shared
-          .messageUpdated(message: message, peer: message.peerId, animated: true)
+      db.afterNextTransaction { _ in
+        Task(priority: .userInitiated) { @MainActor in
+          MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
+        }
       }
     }
   }

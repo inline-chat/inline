@@ -77,11 +77,6 @@ extension UIMessageView {
     return view
   }
 
-  func createAttachmentView() -> MessageAttachmentEmbed {
-    let view = MessageAttachmentEmbed()
-    return view
-  }
-
   func createPhotoView() -> PhotoView {
     let view = PhotoView(fullMessage)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -106,8 +101,8 @@ extension UIMessageView {
 
     return view
   }
-
-
+  
+ 
 }
 
 // MARK: - UIGestureRecognizerDelegate
