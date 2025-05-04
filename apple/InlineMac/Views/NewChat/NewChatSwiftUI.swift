@@ -4,9 +4,10 @@ import SwiftUI
 
 struct NewChatSwiftUI: View {
   @Environment(\.appDatabase) var db
+  @Environment(\.realtime) var realtime
   @EnvironmentObject var nav: Nav
   @FormState var formState
-  
+
   private let spaceId: Int64
 
   @State private var chatTitle = ""
@@ -170,24 +171,35 @@ struct NewChatSwiftUI: View {
       do {
         formState.startLoading()
 
-        // Create the transaction
-        let transaction = TransactionCreateChat(
-          title: chatTitle,
-          emoji: selectedEmoji,
-          isPublic: isPublic,
-          spaceId: spaceId,
-          participants: isPublic ? [] : selectedPeople.map { $0 },
-        )
+        let title = chatTitle
+        let emoji = selectedEmoji
+        let isPublic = isPublic
+        let spaceId = spaceId
+        let participants = isPublic ? [] : selectedPeople.map { $0 }
 
-        // Execute the transaction
-        Transactions.shared.mutate(transaction: .createChat(transaction))
+        Task.detached {
+          let result = try await realtime.invokeWithHandler(
+            .createChat,
+            input: .createChat(.with {
+              $0.title = title
+              $0.spaceID = spaceId
+              if let emoji { $0.emoji = emoji }
+              $0.isPublic = isPublic
+              $0.participants = participants
+                .map {
+                  userId in InputChatParticipant.with { $0.userID = Int64(userId) }
+                }
+            })
+          )
 
-        formState.succeeded()
-
-        // Navigate back
-//        DispatchQueue.main.async {
-//          nav.pop()
-//        }
+          if case let .createChat(createChatResult) = result {
+            // Navigate to the new chat using the created chat id
+            DispatchQueue.main.async {
+              formState.succeeded()
+              nav.open(.chat(peer: .thread(id: createChatResult.chat.id)))
+            }
+          }
+        }
       } catch {
         formState.failed(error: error.localizedDescription)
       }
