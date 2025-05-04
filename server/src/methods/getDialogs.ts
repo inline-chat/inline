@@ -250,7 +250,6 @@ export const handler = async (
     users: users.map(encodeFullUserInfo),
   }
 
-  console.log("finalResult", finalResult)
   return finalResult
 }
 
