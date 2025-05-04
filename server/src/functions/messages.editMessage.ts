@@ -23,10 +23,6 @@ type Output = {
 export const editMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
   const currentUserId = context.currentUserId
-  const encodingForInputPeer: InputPeer =
-    currentUserId === currentUserId
-      ? input.peer
-      : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
 
   const message = await MessageModel.editMessage(Number(input.messageId), chatId, input.text)
@@ -69,7 +65,7 @@ const pushUpdates = async ({
 
   let selfUpdates: Update[] = []
 
-  if (updateGroup.type === "users") {
+  if (updateGroup.type === "dmUsers") {
     updateGroup.userIds.forEach((userId) => {
       const encodingForUserId = userId
       const encodingForInputPeer: InputPeer =
@@ -103,12 +99,10 @@ const pushUpdates = async ({
         RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
       }
     })
-  } else if (updateGroup.type === "space") {
-    const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
-    Log.shared.debug(`Sending message to space ${updateGroup.spaceId}`, { userIds })
-    userIds.forEach((userId) => {
+  } else if (updateGroup.type === "threadUsers") {
+    updateGroup.userIds.forEach((userId) => {
       // New updates
-      let newMessageUpdate: Update = {
+      let editMessageUpdate: Update = {
         update: {
           oneofKind: "editMessage",
           editMessage: {
@@ -125,15 +119,15 @@ const pushUpdates = async ({
         // current user gets the message id update and new message update
         RealtimeUpdates.pushToUser(userId, [
           // order matters here
-          newMessageUpdate,
+          editMessageUpdate,
         ])
         selfUpdates = [
           // order matters here
-          newMessageUpdate,
+          editMessageUpdate,
         ]
       } else {
         // other users get the message only
-        RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
+        RealtimeUpdates.pushToUser(userId, [editMessageUpdate])
       }
     })
   }
