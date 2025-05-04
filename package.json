@@ -11,6 +11,7 @@
     "dev:server": "cd server && bun run dev",
     "typecheck": "cd server && bun run typecheck",
     "dev": "cd server && bun run dev",
+    "test": "cd server && bun test",
     "lint": "oxlint"
   },
   "devDependencies": {
