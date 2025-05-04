@@ -1,0 +1,49 @@
+---
+description: 
+globs: *.swift
+alwaysApply: false
+---
+This is Inline, a native Swift chat app. The code for Apple platforms is under /apple/ directory. 
+
+# Subfolders
+- InlineIOS: our SwiftUI/UIKit iOS app
+- InlineMac: our AppKit/SwiftUI macOS app
+- InlineKit: shared logic, database, view models, auth, protocol, realtime API, etc.
+- InlineUI: shared SwiftUI views between platforms
+
+We use GRDB for database, all database logic needs to be shared between platforms. Schema files are under apple/InlineKit/Sources/InlineKit/Models folder. For changes, migrations need to be added in apple/InlineKit/Sources/InlineKit/Database.swift. 
+
+We use AppKit/UIKit elements when SwiftUI falls short for example for our compose view, chat view, message list, etc.
+
+For mutations like sendMessage, we create a transaction under apple/InlineKit/Sources/InlineKit/Transactions/Methods and call it via transactions singleton class. It handles retry, optimistic updates.
+
+
+# Our internal packages:
+- InlineKit
+
+- Logger: Import to use Log.scoped or Log.shared. impl at apple/InlineKit/Sources/Logger/Logger.swift.
+
+- InlineConfig: For global, cross platform configuration options and flags.
+
+- InlineProtocol: Generated protocol buffer from proto/core.proto in apple/InlineKit/Sources/InlineProtocol/core.pb.swift generated using https://github.com/apple/swift-protobuf 
+
+- RealtimeAPI: WebSocket API using binary protocol buffer RPC. We mainly use RealtimeAPI through protocol buffers, previously we used the HTTP methods through ApiClient.swift.
+
+# Example of creating proto buff structs
+```
+// Create a BookInfo object and populate it:
+var info = BookInfo()
+info.id = 1734
+info.title = "Really Interesting Book"
+info.author = "Jane Smith"
+
+// As above, but generating a read-only value:
+let info2 = BookInfo.with {
+  $0.id = 1735
+  $0.title = "Even More Interesting"
+  $0.author = "Jane Q. Smith"
+}
+```
+
+# UI/UX
+Animations, hover & pressed styles, tooltips, etc are important for a high quality user experience. Use minimal subtle custom interaction styles for buttons for example. Capture errors using Logger. Be careful about concurrency, don't do heavy computations on main thread, move expensive work to Tasks, set correct qos on DispatchQueue and priority on Tasks to avoid delays for presenting user actions. 
