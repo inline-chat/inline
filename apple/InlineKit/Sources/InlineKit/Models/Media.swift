@@ -162,6 +162,38 @@ public extension Photo {
       format: proto.format.toImageFormat()
     )
   }
+
+  /// Saves an InlineProtocol.Photo and its associated PhotoSize objects into the database.
+  /// - Parameters:
+  ///   - db: The database connection
+  ///   - photo: The InlineProtocol.Photo to save
+  /// - Returns: The saved Photo object (with local id and server photoId)
+  @discardableResult
+  static func savePhotoFromProtocol(_ db: Database, photo protoPhoto: InlineProtocol.Photo) throws -> Photo {
+    // Create the Photo from protocol and insert or update
+    var photo = Photo.from(proto: protoPhoto)
+    // Try to find existing photo by server photoId
+    if let existing = try Photo.filter(Photo.Columns.photoId == protoPhoto.id).fetchOne(db) {
+      photo.id = existing.id
+      try photo.update(db)
+    } else {
+      photo = try photo.insertAndFetch(db)
+    }
+    // Save associated PhotoSize objects, referencing Photo.id
+    for protoSize in protoPhoto.sizes {
+      var size = PhotoSize.from(proto: protoSize, photoId: photo.id!)
+      // Try to find existing size by photoId (local) and type
+      if let existingSize = try PhotoSize.filter(PhotoSize.Columns.photoId == photo.id!)
+        .filter(PhotoSize.Columns.type == protoSize.type).fetchOne(db)
+      {
+        size.id = existingSize.id
+        try size.update(db)
+      } else {
+        try size.insert(db)
+      }
+    }
+    return photo
+  }
 }
 
 public extension PhotoSize {

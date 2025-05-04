@@ -52,12 +52,22 @@ public extension Attachment {
     throws -> Attachment
   {
     let message = try Message.filter(Column("messageId") == attachment.messageID).fetchOne(db)
+    
+    var externalTaskId: Int64? = nil
+    var urlPreviewId: Int64? = nil
+    
+    if let attachmentType = attachment.attachment {
+      switch attachmentType {
+        case let .externalTask(externalTask):
+          externalTaskId = externalTask.id
+        case let .urlPreview(urlPreview):
+          urlPreviewId = urlPreview.id
+        default:
+          break
+      }
+    }
 
-    let urlPreview = attachment.urlPreview
-
-    try UrlPreview.save(db, linkEmbed: urlPreview)
-
-    let attachment = Attachment(messageId: message?.globalId, externalTaskId: attachment.externalTask.id, urlPreviewId: urlPreview.id)
+    let attachment = Attachment(messageId: message?.globalId, externalTaskId: externalTaskId, urlPreviewId: urlPreviewId)
 
     try attachment.save(db)
 
