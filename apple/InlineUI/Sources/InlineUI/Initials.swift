@@ -6,10 +6,13 @@ public struct InitialsCircle: View, Equatable {
   let name: String
   let size: CGFloat
   let symbol: String?
+  let emoji: String?
 
   public nonisolated static func == (lhs: InitialsCircle, rhs: InitialsCircle) -> Bool {
     lhs.name == rhs.name &&
-      lhs.size == rhs.size
+      lhs.size == rhs.size &&
+      lhs.symbol == rhs.symbol &&
+      lhs.emoji == rhs.emoji
   }
 
   @Environment(\.colorScheme) private var colorScheme
@@ -69,10 +72,11 @@ public struct InitialsCircle: View, Equatable {
     )
   }
 
-  public init(name: String, size: CGFloat = 32, symbol: String? = nil) {
+  public init(name: String, size: CGFloat = 32, symbol: String? = nil, emoji: String? = nil) {
     self.name = name
     self.size = size
     self.symbol = symbol
+    self.emoji = emoji
   }
 
   public var body: some View {
@@ -86,7 +90,11 @@ public struct InitialsCircle: View, Equatable {
           )
       )
       .overlay {
-        if let symbol {
+        if let emoji {
+          Text(emoji)
+            .foregroundColor(foregroundColor.opacity(1.0))
+            .font(.system(size: size * 0.55, weight: .regular))
+        } else if let symbol {
           Image(systemName: symbol)
             .foregroundColor(foregroundColor.opacity(1.0))
             .font(.system(size: size * 0.35, weight: .regular))
