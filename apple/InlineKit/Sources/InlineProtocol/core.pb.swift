@@ -598,7 +598,7 @@ public struct Dialog: Sendable {
   /// Clears the value of `pinned`. Subsequent reads from it will return its default value.
   public mutating func clearPinned() {self._pinned = nil}
 
-  public var readMaxID: Int32 {
+  public var readMaxID: Int64 {
     get {return _readMaxID ?? 0}
     set {_readMaxID = newValue}
   }
@@ -623,7 +623,7 @@ public struct Dialog: Sendable {
   fileprivate var _peer: Peer? = nil
   fileprivate var _archived: Bool? = nil
   fileprivate var _pinned: Bool? = nil
-  fileprivate var _readMaxID: Int32? = nil
+  fileprivate var _readMaxID: Int64? = nil
   fileprivate var _unreadCount: Int32? = nil
 }
 
@@ -1639,12 +1639,12 @@ public struct RpcCall: Sendable {
     set {input = .editMessage(newValue)}
   }
 
-  public var createSpaceChat: CreateChatInput {
+  public var createChat: CreateChatInput {
     get {
-      if case .createSpaceChat(let v)? = input {return v}
+      if case .createChat(let v)? = input {return v}
       return CreateChatInput()
     }
-    set {input = .createSpaceChat(newValue)}
+    set {input = .createChat(newValue)}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1658,7 +1658,7 @@ public struct RpcCall: Sendable {
     case addReaction(AddReactionInput)
     case deleteReaction(DeleteReactionInput)
     case editMessage(EditMessageInput)
-    case createSpaceChat(CreateChatInput)
+    case createChat(CreateChatInput)
 
   }
 
@@ -1738,12 +1738,12 @@ public struct RpcResult: Sendable {
     set {result = .editMessage(newValue)}
   }
 
-  public var createSpaceChat: CreateChatResult {
+  public var createChat: CreateChatResult {
     get {
-      if case .createSpaceChat(let v)? = result {return v}
+      if case .createChat(let v)? = result {return v}
       return CreateChatResult()
     }
-    set {result = .createSpaceChat(newValue)}
+    set {result = .createChat(newValue)}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1757,7 +1757,7 @@ public struct RpcResult: Sendable {
     case addReaction(AddReactionResult)
     case deleteReaction(DeleteReactionResult)
     case editMessage(EditMessageResult)
-    case createSpaceChat(CreateChatResult)
+    case createChat(CreateChatResult)
 
   }
 
@@ -2152,7 +2152,7 @@ public struct InputChatParticipant: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var userID: UInt64 = 0
+  public var userID: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3624,7 +3624,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peer) }()
       case 3: try { try decoder.decodeSingularBoolField(value: &self._archived) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self._pinned) }()
-      case 5: try { try decoder.decodeSingularInt32Field(value: &self._readMaxID) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self._readMaxID) }()
       case 6: try { try decoder.decodeSingularInt32Field(value: &self._unreadCount) }()
       default: break
       }
@@ -3646,7 +3646,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
     } }()
     try { if let v = self._readMaxID {
-      try visitor.visitSingularInt32Field(value: v, fieldNumber: 5)
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
     } }()
     try { if let v = self._unreadCount {
       try visitor.visitSingularInt32Field(value: v, fieldNumber: 6)
@@ -4992,7 +4992,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     7: .same(proto: "addReaction"),
     8: .same(proto: "deleteReaction"),
     9: .same(proto: "editMessage"),
-    10: .same(proto: "createSpaceChat"),
+    10: .same(proto: "createChat"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -5111,12 +5111,12 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         var hadOneofValue = false
         if let current = self.input {
           hadOneofValue = true
-          if case .createSpaceChat(let m) = current {v = m}
+          if case .createChat(let m) = current {v = m}
         }
         try decoder.decodeSingularMessageField(value: &v)
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.input = .createSpaceChat(v)
+          self.input = .createChat(v)
         }
       }()
       default: break
@@ -5165,8 +5165,8 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .editMessage(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     }()
-    case .createSpaceChat?: try {
-      guard case .createSpaceChat(let v)? = self.input else { preconditionFailure() }
+    case .createChat?: try {
+      guard case .createChat(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
     }()
     case nil: break
@@ -5194,7 +5194,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     7: .same(proto: "addReaction"),
     8: .same(proto: "deleteReaction"),
     9: .same(proto: "editMessage"),
-    10: .same(proto: "createSpaceChat"),
+    10: .same(proto: "createChat"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -5313,12 +5313,12 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
         var hadOneofValue = false
         if let current = self.result {
           hadOneofValue = true
-          if case .createSpaceChat(let m) = current {v = m}
+          if case .createChat(let m) = current {v = m}
         }
         try decoder.decodeSingularMessageField(value: &v)
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .createSpaceChat(v)
+          self.result = .createChat(v)
         }
       }()
       default: break
@@ -5367,8 +5367,8 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       guard case .editMessage(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     }()
-    case .createSpaceChat?: try {
-      guard case .createSpaceChat(let v)? = self.result else { preconditionFailure() }
+    case .createChat?: try {
+      guard case .createChat(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
     }()
     case nil: break
@@ -6051,7 +6051,7 @@ extension InputChatParticipant: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.userID) }()
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
       default: break
       }
     }
@@ -6059,7 +6059,7 @@ extension InputChatParticipant: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if self.userID != 0 {
-      try visitor.visitSingularUInt64Field(value: self.userID, fieldNumber: 1)
+      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }

@@ -109,7 +109,7 @@ message Dialog {
   Peer peer = 1;
   optional bool archived = 3;
   optional bool pinned = 4;
-  optional int32 read_max_id = 5;
+  optional int64 read_max_id = 5;
   optional int32 unread_count = 6;
 }
 
@@ -460,7 +460,7 @@ message RpcCall {
     AddReactionInput addReaction = 7;
     DeleteReactionInput deleteReaction = 8;
     EditMessageInput editMessage = 9;
-    CreateChatInput createSpaceChat = 10;
+    CreateChatInput createChat = 10;
   }
 }
 
@@ -476,7 +476,7 @@ message RpcResult {
     AddReactionResult addReaction = 7;
     DeleteReactionResult deleteReaction = 8;
     EditMessageResult editMessage = 9;
-    CreateChatResult createSpaceChat = 10;
+    CreateChatResult createChat = 10;
   }
 }
 
@@ -562,7 +562,7 @@ message GetChatHistoryInput {
 
 message GetChatHistoryResult { repeated Message messages = 1; }
 
-message InputChatParticipant { uint64 user_id = 1; }
+message InputChatParticipant { int64 user_id = 1; }
 
 message CreateChatInput {
   // Required title

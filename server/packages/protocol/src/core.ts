@@ -351,9 +351,9 @@ export interface Dialog {
      */
     pinned?: boolean;
     /**
-     * @generated from protobuf field: optional int32 read_max_id = 5;
+     * @generated from protobuf field: optional int64 read_max_id = 5;
      */
-    readMaxId?: number;
+    readMaxId?: bigint;
     /**
      * @generated from protobuf field: optional int32 unread_count = 6;
      */
@@ -1149,11 +1149,11 @@ export interface RpcCall {
          */
         editMessage: EditMessageInput;
     } | {
-        oneofKind: "createSpaceChat";
+        oneofKind: "createChat";
         /**
-         * @generated from protobuf field: CreateChatInput createSpaceChat = 10;
+         * @generated from protobuf field: CreateChatInput createChat = 10;
          */
-        createSpaceChat: CreateChatInput;
+        createChat: CreateChatInput;
     } | {
         oneofKind: undefined;
     };
@@ -1218,11 +1218,11 @@ export interface RpcResult {
          */
         editMessage: EditMessageResult;
     } | {
-        oneofKind: "createSpaceChat";
+        oneofKind: "createChat";
         /**
-         * @generated from protobuf field: CreateChatResult createSpaceChat = 10;
+         * @generated from protobuf field: CreateChatResult createChat = 10;
          */
-        createSpaceChat: CreateChatResult;
+        createChat: CreateChatResult;
     } | {
         oneofKind: undefined;
     };
@@ -1462,7 +1462,7 @@ export interface GetChatHistoryResult {
  */
 export interface InputChatParticipant {
     /**
-     * @generated from protobuf field: uint64 user_id = 1;
+     * @generated from protobuf field: int64 user_id = 1;
      */
     userId: bigint;
 }
@@ -2849,7 +2849,7 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 1, name: "peer", kind: "message", T: () => Peer },
             { no: 3, name: "archived", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 4, name: "pinned", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 5, name: "read_max_id", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "read_max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "unread_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
@@ -2873,8 +2873,8 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional bool pinned */ 4:
                     message.pinned = reader.bool();
                     break;
-                case /* optional int32 read_max_id */ 5:
-                    message.readMaxId = reader.int32();
+                case /* optional int64 read_max_id */ 5:
+                    message.readMaxId = reader.int64().toBigInt();
                     break;
                 case /* optional int32 unread_count */ 6:
                     message.unreadCount = reader.int32();
@@ -2900,9 +2900,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional bool pinned = 4; */
         if (message.pinned !== undefined)
             writer.tag(4, WireType.Varint).bool(message.pinned);
-        /* optional int32 read_max_id = 5; */
+        /* optional int64 read_max_id = 5; */
         if (message.readMaxId !== undefined)
-            writer.tag(5, WireType.Varint).int32(message.readMaxId);
+            writer.tag(5, WireType.Varint).int64(message.readMaxId);
         /* optional int32 unread_count = 6; */
         if (message.unreadCount !== undefined)
             writer.tag(6, WireType.Varint).int32(message.unreadCount);
@@ -4456,7 +4456,7 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 7, name: "addReaction", kind: "message", oneof: "input", T: () => AddReactionInput },
             { no: 8, name: "deleteReaction", kind: "message", oneof: "input", T: () => DeleteReactionInput },
             { no: 9, name: "editMessage", kind: "message", oneof: "input", T: () => EditMessageInput },
-            { no: 10, name: "createSpaceChat", kind: "message", oneof: "input", T: () => CreateChatInput }
+            { no: 10, name: "createChat", kind: "message", oneof: "input", T: () => CreateChatInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -4523,10 +4523,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         editMessage: EditMessageInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).editMessage)
                     };
                     break;
-                case /* CreateChatInput createSpaceChat */ 10:
+                case /* CreateChatInput createChat */ 10:
                     message.input = {
-                        oneofKind: "createSpaceChat",
-                        createSpaceChat: CreateChatInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createSpaceChat)
+                        oneofKind: "createChat",
+                        createChat: CreateChatInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createChat)
                     };
                     break;
                 default:
@@ -4568,9 +4568,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* EditMessageInput editMessage = 9; */
         if (message.input.oneofKind === "editMessage")
             EditMessageInput.internalBinaryWrite(message.input.editMessage, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
-        /* CreateChatInput createSpaceChat = 10; */
-        if (message.input.oneofKind === "createSpaceChat")
-            CreateChatInput.internalBinaryWrite(message.input.createSpaceChat, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* CreateChatInput createChat = 10; */
+        if (message.input.oneofKind === "createChat")
+            CreateChatInput.internalBinaryWrite(message.input.createChat, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4594,7 +4594,7 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 7, name: "addReaction", kind: "message", oneof: "result", T: () => AddReactionResult },
             { no: 8, name: "deleteReaction", kind: "message", oneof: "result", T: () => DeleteReactionResult },
             { no: 9, name: "editMessage", kind: "message", oneof: "result", T: () => EditMessageResult },
-            { no: 10, name: "createSpaceChat", kind: "message", oneof: "result", T: () => CreateChatResult }
+            { no: 10, name: "createChat", kind: "message", oneof: "result", T: () => CreateChatResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -4661,10 +4661,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         editMessage: EditMessageResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).editMessage)
                     };
                     break;
-                case /* CreateChatResult createSpaceChat */ 10:
+                case /* CreateChatResult createChat */ 10:
                     message.result = {
-                        oneofKind: "createSpaceChat",
-                        createSpaceChat: CreateChatResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createSpaceChat)
+                        oneofKind: "createChat",
+                        createChat: CreateChatResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createChat)
                     };
                     break;
                 default:
@@ -4706,9 +4706,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* EditMessageResult editMessage = 9; */
         if (message.result.oneofKind === "editMessage")
             EditMessageResult.internalBinaryWrite(message.result.editMessage, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
-        /* CreateChatResult createSpaceChat = 10; */
-        if (message.result.oneofKind === "createSpaceChat")
-            CreateChatResult.internalBinaryWrite(message.result.createSpaceChat, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* CreateChatResult createChat = 10; */
+        if (message.result.oneofKind === "createChat")
+            CreateChatResult.internalBinaryWrite(message.result.createChat, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5565,7 +5565,7 @@ export const GetChatHistoryResult = new GetChatHistoryResult$Type();
 class InputChatParticipant$Type extends MessageType<InputChatParticipant> {
     constructor() {
         super("InputChatParticipant", [
-            { no: 1, name: "user_id", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<InputChatParticipant>): InputChatParticipant {
@@ -5580,8 +5580,8 @@ class InputChatParticipant$Type extends MessageType<InputChatParticipant> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* uint64 user_id */ 1:
-                    message.userId = reader.uint64().toBigInt();
+                case /* int64 user_id */ 1:
+                    message.userId = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -5595,9 +5595,9 @@ class InputChatParticipant$Type extends MessageType<InputChatParticipant> {
         return message;
     }
     internalBinaryWrite(message: InputChatParticipant, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* uint64 user_id = 1; */
+        /* int64 user_id = 1; */
         if (message.userId !== 0n)
-            writer.tag(1, WireType.Varint).uint64(message.userId);
+            writer.tag(1, WireType.Varint).int64(message.userId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
