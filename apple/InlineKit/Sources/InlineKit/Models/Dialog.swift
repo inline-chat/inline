@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 
 public struct ApiDialog: Codable, Hashable, Sendable {
   public var peerId: Peer
@@ -86,6 +87,30 @@ public extension Dialog {
     unreadCount = nil
   }
 
+  init(from: InlineProtocol.Dialog) {
+    switch from.peer.type {
+      case let .chat(chat):
+        peerUserId = nil
+        peerThreadId = chat.chatID
+        id = Self.getDialogId(peerThreadId: chat.chatID)
+      case let .user(user):
+        peerUserId = user.userID
+        peerThreadId = nil
+        id = Self.getDialogId(peerUserId: user.userID)
+      case .none:
+        fatalError("Dialog.peer invalid")
+    }
+
+    
+    spaceId = nil
+    unreadCount = Int(from.unreadCount)
+    readInboxMaxId = from.readMaxID
+    readOutboxMaxId = nil
+    pinned = from.pinned
+    archived = from.archived
+    draft = nil
+  }
+
   static func getDialogId(peerUserId: Int64) -> Int64 {
     peerUserId
   }
@@ -149,11 +174,13 @@ public extension Dialog {
     // chat through dialog thread
     including(
       optional: Dialog.peerThread
-        .including(optional: Chat.lastMessage.including(optional: Message.from.forKey("from")
+        .including(optional: Chat.lastMessage.including(
+          optional: Message.from.forKey("from")
             .including(
               all: User.photos
                 .forKey("profilePhoto")
-            )))
+            )
+        ))
     )
     // user info
     .including(
@@ -180,11 +207,13 @@ public extension Dialog {
     // chat through dialog thread
     including(
       optional: Dialog.peerThread
-        .including(optional: Chat.lastMessage.including(optional: Message.from.forKey("from")
+        .including(optional: Chat.lastMessage.including(
+          optional: Message.from.forKey("from")
             .including(
               all: User.photos
                 .forKey("profilePhoto")
-            )))
+            )
+        ))
     )
     .asRequest(of: SpaceChatItem.self)
   }
