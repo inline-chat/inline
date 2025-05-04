@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { handler } from "../../realtime/handlers/messages.createChat"
+import { createChat as handler } from "../../realtime/handlers/messages.createChat"
 import { createChat } from "../../functions/messages.createChat"
 import { CreateChatInput } from "@in/protocol/core"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
