@@ -113,14 +113,31 @@ async function processLoomMetadata(
     }
 
     // Create link between message and URL preview
-    await db.insert(messageAttachments).values({
-      messageId: messageId,
-      urlPreviewId: BigInt(urlPreviewRecord.id),
-      externalTaskId: null,
-    })
+    const [attachment] = await db
+      .insert(messageAttachments)
+      .values({
+        messageId: messageId,
+        urlPreviewId: BigInt(urlPreviewRecord.id),
+        externalTaskId: null,
+      })
+      .returning()
+
+    if (!attachment) {
+      log.error("Failed to create attachment record")
+      return
+    }
 
     // Create and send update
-    await sendLoomUpdate(metadata, urlPreviewRecord.id, photoId, messageId, chatId, inputPeer, currentUserId)
+    await sendLoomUpdate(
+      metadata,
+      urlPreviewRecord.id,
+      photoId,
+      messageId,
+      chatId,
+      inputPeer,
+      currentUserId,
+      BigInt(attachment.id),
+    )
   } catch (error) {
     log.error("Error processing Loom metadata", { error })
   }
@@ -185,6 +202,7 @@ async function sendLoomUpdate(
   chatId: bigint,
   inputPeer: InputPeer,
   currentUserId: number,
+  attachmentId: bigint,
 ): Promise<void> {
   try {
     // Get photo data if exists
@@ -212,6 +230,7 @@ async function sendLoomUpdate(
 
     // Create update message
     let attachment: MessageAttachment = {
+      id: attachmentId,
       attachment: {
         oneofKind: "urlPreview",
         urlPreview: {

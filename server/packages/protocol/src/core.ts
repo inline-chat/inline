@@ -627,6 +627,12 @@ export interface MessageAttachments {
  */
 export interface MessageAttachment {
     /**
+     * ID
+     *
+     * @generated from protobuf field: int64 id = 4;
+     */
+    id: bigint;
+    /**
      * @generated from protobuf oneof: attachment
      */
     attachment: {
@@ -3569,12 +3575,14 @@ export const MessageAttachments = new MessageAttachments$Type();
 class MessageAttachment$Type extends MessageType<MessageAttachment> {
     constructor() {
         super("MessageAttachment", [
+            { no: 4, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "external_task", kind: "message", oneof: "attachment", T: () => MessageAttachmentExternalTask },
             { no: 3, name: "url_preview", kind: "message", oneof: "attachment", T: () => UrlPreview }
         ]);
     }
     create(value?: PartialMessage<MessageAttachment>): MessageAttachment {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
         message.attachment = { oneofKind: undefined };
         if (value !== undefined)
             reflectionMergePartial<MessageAttachment>(this, message, value);
@@ -3585,6 +3593,9 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
+                case /* int64 id */ 4:
+                    message.id = reader.int64().toBigInt();
+                    break;
                 case /* MessageAttachmentExternalTask external_task */ 2:
                     message.attachment = {
                         oneofKind: "externalTask",
@@ -3609,6 +3620,9 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
         return message;
     }
     internalBinaryWrite(message: MessageAttachment, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 4; */
+        if (message.id !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.id);
         /* MessageAttachmentExternalTask external_task = 2; */
         if (message.attachment.oneofKind === "externalTask")
             MessageAttachmentExternalTask.internalBinaryWrite(message.attachment.externalTask, writer.tag(2, WireType.LengthDelimited).fork(), options).join();

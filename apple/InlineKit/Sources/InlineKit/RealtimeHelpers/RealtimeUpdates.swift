@@ -214,24 +214,26 @@ extension InlineProtocol.UpdateMessageAttachment {
       return
     }
 
-    switch messageAttachment {
-      case let .externalTask(externalTaskAttachment):
+//    switch messageAttachment {
+//      case let .externalTask(externalTaskAttachment):
+//
+//        _ = try ExternalTask.save(db, externalTask: externalTaskAttachment)
+//
+//      case let .urlPreview(urlPreview):
+//        _ = try UrlPreview.save(db, linkEmbed: urlPreview)
+//
+//      default:
+//        Log.shared.error("Unsupported attachment type")
+//        return
+//    }
 
-        _ = try ExternalTask.save(db, externalTask: externalTaskAttachment)
-
-      case let .urlPreview(urlPreview):
-        _ = try UrlPreview.save(db, linkEmbed: urlPreview)
-
-      default:
-        Log.shared.error("Unsupported attachment type")
-        return
+    let message = try Message.filter(Column("messageId") == self.messageID)
+      .filter(Column("chatId") == self.chatID)
+      .fetchOne(db)
+    if let message = message {
+      _ = try Attachment.saveWithInnerItems(db, attachment: self.attachment, messageClientGlobalId: message.globalId!)
     }
-
-    _ = try Attachment.save(db, attachment: attachment)
-
     
-    let message = try Message.filter(Column("messageId") == self.messageID).fetchOne(db)
-
     if let message {
       db.afterNextTransaction { _ in
         Task(priority: .userInitiated) { @MainActor in

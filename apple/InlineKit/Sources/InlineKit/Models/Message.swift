@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import InlineProtocol
+import Logger
 
 public struct ApiMessage: Codable, Hashable, Sendable {
   public var id: Int64
@@ -271,7 +272,6 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 // MARK: - UI helpers
 
 public extension Message {
-  
   /// Returns a string representation of the message, including emojis for different media types.
   var stringRepresentationWithEmoji: String {
     if let text, !text.isEmpty {
@@ -293,11 +293,14 @@ public extension Message {
 // MARK: - DB Helpers
 
 public extension Message {
+  // todo create another one for fetching
+
+  @discardableResult
   mutating func saveMessage(
     _ db: Database,
     onConflict: Database.ConflictResolution = .abort,
     publishChanges: Bool = false
-  ) throws {
+  ) throws -> Message {
     var isExisting = false
 
     // Check if message exists
@@ -313,7 +316,7 @@ public extension Message {
     }
 
     // Save the message
-    try save(db, onConflict: .ignore)
+    let message = try saveAndFetch(db, onConflict: .ignore)
 
     // Handle unarchiving for incoming messages
     if !isExisting, out != true {
@@ -337,6 +340,8 @@ public extension Message {
         }
       }
     }
+
+    return message
   }
 
   func unarchiveIncomingMessagesChat(
@@ -423,6 +428,7 @@ public extension Message {
   static func save(
     _ db: Database, protocolMessage: InlineProtocol.Message, publishChanges: Bool = false
   ) throws -> Message {
+    print("CALLED SAVE")
     let id = protocolMessage.id
     let chatId = protocolMessage.chatID
     let existing = try? Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
@@ -440,9 +446,17 @@ public extension Message {
       message.transactionId = message.transactionId ?? existing.transactionId
       message.isSticker = message.isSticker ?? existing.isSticker
       message.editDate = message.editDate ?? existing.editDate
+
       // Update media selectively if needed
       if protocolMessage.hasMedia {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
+      }
+
+      // 2. Then save attachments, using the now-persisted message.globalId
+      if protocolMessage.hasAttachments {
+        for attachment in protocolMessage.attachments.attachments {
+          try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
+        }
       }
 
       try message.saveMessage(db, publishChanges: false) // publish is below
@@ -452,7 +466,13 @@ public extension Message {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
       }
 
-      try message.saveMessage(db, publishChanges: false) // publish is below
+      let message = try message.saveMessage(db, publishChanges: false) // publish is below
+
+      if protocolMessage.hasAttachments {
+        for attachment in protocolMessage.attachments.attachments {
+          try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
+        }
+      }
     }
 
     if publishChanges {
@@ -493,13 +513,6 @@ public extension Message {
 
       default:
         break
-    }
-    
-    // Process message attachments if present
-    if protocolMessage.hasAttachments && !protocolMessage.attachments.attachments.isEmpty {
-      for attachment in protocolMessage.attachments.attachments {
-        try Attachment.save(db, attachment: attachment)
-      }
     }
   }
 
