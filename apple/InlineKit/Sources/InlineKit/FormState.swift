@@ -14,6 +14,17 @@ public class FormStateObject: ObservableObject {
   public var isLoading: Bool {
     state == FormStateData.loading
   }
+  
+  public var error: String? {
+    if case let .error(error) = state {
+      return error
+    }
+    return nil
+  }
+  
+  public var hasSucceeded: Bool {
+    state == FormStateData.succeeded
+  }
 
   public init() {
     state = .idle
