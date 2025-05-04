@@ -16,6 +16,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { processFullPhoto, type DbFullPhoto } from "@in/server/db/models/files"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/encodeMessageAttachment"
+import sharp from "sharp"
 
 const log = new Log("modules.loom")
 
@@ -137,12 +138,33 @@ async function downloadAndSaveThumbnail(
       return null
     }
 
-    // Get image data as buffer
-    const imageBuffer = await response.arrayBuffer()
+    // Check Content-Type header for GIF or MJPEG
+    const contentType = response.headers.get("content-type") || ""
+    let imageBuffer = await response.arrayBuffer()
+    let processedBuffer: Buffer | null = null
+    let fileName = `loom_thumbnail_${Date.now()}.jpg`
+    let fileType = "image/jpeg"
 
-    // Convert ArrayBuffer to File object
-    const fileName = `loom_thumbnail_${Date.now()}.jpg`
-    const thumbnailFile = new File([imageBuffer], fileName, { type: "image/jpeg" })
+    if (
+      contentType.includes("image/gif") ||
+      contentType.includes("image/mjpeg") ||
+      contentType.includes("multipart/x-mixed-replace")
+    ) {
+      // Convert to static JPEG using sharp (extract first frame)
+      try {
+        processedBuffer = await sharp(Buffer.from(imageBuffer)).jpeg().toBuffer()
+        fileType = "image/jpeg"
+        fileName = `loom_thumbnail_static_${Date.now()}.jpg`
+      } catch (err) {
+        log.error("Failed to convert animated image to static JPEG", { error: err })
+        return null
+      }
+    } else {
+      processedBuffer = Buffer.from(imageBuffer)
+    }
+
+    // Convert processedBuffer to File object
+    const thumbnailFile = new File([processedBuffer], fileName, { type: fileType })
 
     // Upload photo to CDN and get photo ID
     const result = await uploadPhoto(thumbnailFile, { userId: currentUserId })
