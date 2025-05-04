@@ -263,7 +263,7 @@ const sendMessageUpdate = async ({
 }) => {
   const updateGroup = await getUpdateGroup(peerId, { currentUserId })
 
-  if (updateGroup.type === "users") {
+  if (updateGroup.type === "dmUsers") {
     updateGroup.userIds.forEach((userId) => {
       let encodingForPeer: TPeerInfo = userId === currentUserId ? peerId : { userId: currentUserId }
 
@@ -304,10 +304,8 @@ const sendMessageUpdate = async ({
         RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
       }
     })
-  } else if (updateGroup.type === "space") {
-    const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
-    Log.shared.debug(`Sending message to space ${updateGroup.spaceId}`, { userIds })
-    userIds.forEach((userId) => {
+  } else if (updateGroup.type === "threadUsers") {
+    updateGroup.userIds.forEach((userId) => {
       // New updates
       let messageIdUpdate: Update = {
         update: {

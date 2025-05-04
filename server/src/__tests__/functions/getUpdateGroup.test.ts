@@ -27,7 +27,7 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const peer: TPeerInfo = { userId: userB.id }
     const context = { currentUserId: userA.id }
     const group = await getUpdateGroup(peer, context)
-    expect(group.type).toBe("users")
+    expect(group.type).toBe("dmUsers")
     expect((group as any).userIds.sort()).toEqual([userA.id, userB.id].sort())
   })
 
@@ -40,7 +40,7 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const peer: TPeerInfo = { userId: user.id }
     const context = { currentUserId: user.id }
     const group = await getUpdateGroup(peer, context)
-    expect(group.type).toBe("users")
+    expect(group.type).toBe("dmUsers")
     expect((group as any).userIds).toEqual([user.id])
   })
 
@@ -57,7 +57,7 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const peer: TPeerInfo = { threadId: chat!.id }
     const context = { currentUserId: users[0].id }
     const group = await getUpdateGroup(peer, context)
-    expect(group.type).toBe("users")
+    expect(group.type).toBe("threadUsers")
     expect((group as any).userIds.sort()).toEqual(users.map((u) => u.id).sort())
   })
 
@@ -77,7 +77,7 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const peer: TPeerInfo = { threadId: chat!.id }
     const context = { currentUserId: users[0].id }
     const group = await getUpdateGroup(peer, context)
-    expect(group.type).toBe("users")
+    expect(group.type).toBe("threadUsers")
     expect((group as any).userIds.sort()).toEqual([users[0].id, users[1].id].sort())
   })
 
@@ -89,7 +89,7 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const inputPeer = makeInputPeerChat(chat!.id)
     const context = { currentUserId: userA.id }
     const group = await getUpdateGroupFromInputPeer(inputPeer, context)
-    expect(group.type).toBe("users")
+    expect(group.type).toBe("dmUsers")
     expect((group as any).userIds.sort()).toEqual([userA.id, userB.id].sort())
   })
 
@@ -101,7 +101,7 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const inputPeer = makeInputPeerChat(chat!.id)
     const context = { currentUserId: users[0].id }
     const group = await getUpdateGroupFromInputPeer(inputPeer, context)
-    expect(group.type).toBe("users")
+    expect(group.type).toBe("threadUsers")
     expect((group as any).userIds.sort()).toEqual(users.map((u) => u.id).sort())
   })
 })

@@ -6,9 +6,9 @@ import { ChatModel, getChatFromPeer } from "@in/server/db/models/chats"
 
 export type UpdateGroup =
   // Used for DMs and non-public threads
-  | { type: "users"; userIds: number[] }
+  | { type: "dmUsers"; userIds: number[] }
   // Used for public threads
-  | { type: "space"; spaceId: number }
+  | { type: "threadUsers"; spaceId: number; userIds: number[] }
 
 import type { TPeerInfo } from "@in/server/api-types"
 import invariant from "tiny-invariant"
@@ -24,10 +24,10 @@ export const getUpdateGroup = async (peerId: TPeerInfo, context: { currentUserId
     invariant(chat.minUserId && chat.maxUserId, "Private chat must have minUserId and maxUserId")
     if (chat.minUserId === chat.maxUserId) {
       // Saved message
-      return { type: "users", userIds: [chat.minUserId] }
+      return { type: "dmUsers", userIds: [chat.minUserId] }
     }
     // DMs
-    return { type: "users", userIds: [chat.minUserId, chat.maxUserId] }
+    return { type: "dmUsers", userIds: [chat.minUserId, chat.maxUserId] }
   } else if (chat.type === "thread") {
     if (!chat.spaceId) {
       throw new InlineError(InlineError.ApiError.PEER_INVALID)
@@ -38,7 +38,7 @@ export const getUpdateGroup = async (peerId: TPeerInfo, context: { currentUserId
 
       // For now, fetch all users in the space
       const users = await db.select({ userId: members.userId }).from(members).where(eq(members.spaceId, chat.spaceId))
-      return { type: "users", userIds: users.map((user) => user.userId) }
+      return { type: "threadUsers", spaceId: chat.spaceId, userIds: users.map((user) => user.userId) }
     } else {
       // get participant ids from chatParticipants
       const participantIds = await db
@@ -47,7 +47,7 @@ export const getUpdateGroup = async (peerId: TPeerInfo, context: { currentUserId
         .where(eq(chatParticipants.chatId, chat.id))
         // TODO: Possible memory OOM issue can happen here for larger chats which will require pagination and batching
         .then((result) => result.map(({ userId }) => userId))
-      return { type: "users", userIds: participantIds }
+      return { type: "threadUsers", spaceId: chat.spaceId, userIds: participantIds }
     }
   }
 
@@ -67,10 +67,10 @@ export const getUpdateGroupFromInputPeer = async (
     invariant(chat.minUserId && chat.maxUserId, "Private chat must have minUserId and maxUserId")
     if (chat.minUserId === chat.maxUserId) {
       // Saved message
-      return { type: "users", userIds: [chat.minUserId] }
+      return { type: "dmUsers", userIds: [chat.minUserId] }
     }
     // DMs
-    return { type: "users", userIds: [chat.minUserId, chat.maxUserId] }
+    return { type: "dmUsers", userIds: [chat.minUserId, chat.maxUserId] }
   } else if (chat.type === "thread") {
     if (!chat.spaceId) {
       throw new InlineError(InlineError.ApiError.PEER_INVALID)
@@ -81,7 +81,7 @@ export const getUpdateGroupFromInputPeer = async (
 
       // For now, fetch all users in the space
       const users = await db.select({ userId: members.userId }).from(members).where(eq(members.spaceId, chat.spaceId))
-      return { type: "users", userIds: users.map((user) => user.userId) }
+      return { type: "threadUsers", spaceId: chat.spaceId, userIds: users.map((user) => user.userId) }
     } else {
       // get participant ids from chatParticipants
       const participantIds = await db
@@ -90,7 +90,7 @@ export const getUpdateGroupFromInputPeer = async (
         .where(eq(chatParticipants.chatId, chat.id))
         // TODO: Possible memory OOM issue can happen here for larger chats which will require pagination and batching
         .then((result) => result.map(({ userId }) => userId))
-      return { type: "users", userIds: participantIds }
+      return { type: "threadUsers", spaceId: chat.spaceId, userIds: participantIds }
     }
   }
 

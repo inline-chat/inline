@@ -114,7 +114,7 @@ const deleteMessageUpdate = async ({
 }) => {
   const updateGroup = await getUpdateGroup(peerId, { currentUserId })
 
-  if (updateGroup.type === "users") {
+  if (updateGroup.type === "dmUsers") {
     updateGroup.userIds.forEach((userId) => {
       let encodingForPeer: TPeerInfo = userId === currentUserId ? peerId : { userId: currentUserId }
 
@@ -131,10 +131,8 @@ const deleteMessageUpdate = async ({
 
       RealtimeUpdates.pushToUser(userId, [messageDeletedUpdate])
     })
-  } else if (updateGroup.type === "space") {
-    const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
-
-    userIds.forEach((userId) => {
+  } else if (updateGroup.type === "threadUsers") {
+    updateGroup.userIds.forEach((userId) => {
       // New updates
       let messageDeletedUpdate: Update = {
         update: {
