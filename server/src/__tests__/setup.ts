@@ -178,6 +178,17 @@ export const testUtils = {
       .returning()
     return chat
   },
+  async createPrivateChat(userA: schema.DbUser, userB: schema.DbUser) {
+    const [chat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "private",
+        minUserId: Math.min(userA.id, userB.id),
+        maxUserId: Math.max(userA.id, userB.id),
+      })
+      .returning()
+    return chat
+  },
 
   // Add participant to chat
   async addParticipant(chatId: number, userId: number) {
