@@ -102,7 +102,7 @@ public extension Dialog {
     }
 
     
-    spaceId = nil
+    spaceId = from.spaceID
     unreadCount = Int(from.unreadCount)
     readInboxMaxId = from.readMaxID
     readOutboxMaxId = nil

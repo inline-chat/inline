@@ -343,6 +343,10 @@ export interface Dialog {
      */
     peer?: Peer;
     /**
+     * @generated from protobuf field: optional int64 space_id = 2;
+     */
+    spaceId?: bigint;
+    /**
      * @generated from protobuf field: optional bool archived = 3;
      */
     archived?: boolean;
@@ -2847,6 +2851,7 @@ class Dialog$Type extends MessageType<Dialog> {
     constructor() {
         super("Dialog", [
             { no: 1, name: "peer", kind: "message", T: () => Peer },
+            { no: 2, name: "space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "archived", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 4, name: "pinned", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 5, name: "read_max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
@@ -2866,6 +2871,9 @@ class Dialog$Type extends MessageType<Dialog> {
             switch (fieldNo) {
                 case /* Peer peer */ 1:
                     message.peer = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peer);
+                    break;
+                case /* optional int64 space_id */ 2:
+                    message.spaceId = reader.int64().toBigInt();
                     break;
                 case /* optional bool archived */ 3:
                     message.archived = reader.bool();
@@ -2894,6 +2902,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* Peer peer = 1; */
         if (message.peer)
             Peer.internalBinaryWrite(message.peer, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 space_id = 2; */
+        if (message.spaceId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.spaceId);
         /* optional bool archived = 3; */
         if (message.archived !== undefined)
             writer.tag(3, WireType.Varint).bool(message.archived);
