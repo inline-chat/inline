@@ -110,6 +110,28 @@ class URLPreviewView: UIView {
     addSubview(imageView)
 
     NSLayoutConstraint.deactivate(constraints)
+
+    
+    var imageConstraints: [NSLayoutConstraint] = []
+    let maxHeight: CGFloat = 200
+    var isPortrait = false
+    var imageWidth: CGFloat = maxWidth
+    var imageHeight: CGFloat = maxHeight
+    if let photoInfo, let bestSize = photoInfo.bestPhotoSize(), let width = bestSize.width,
+       let height = bestSize.height,
+       width > 0, height > 0
+    {
+      isPortrait = height > width
+      if isPortrait {
+        // Portrait: limit by height
+        imageHeight = min(CGFloat(height), maxHeight)
+        imageWidth = min(CGFloat(width) * (imageHeight / CGFloat(height)), maxWidth)
+      } else {
+        // Landscape: limit by width
+        imageWidth = min(CGFloat(width), maxWidth)
+        imageHeight = min(CGFloat(height) * (imageWidth / CGFloat(width)), maxHeight)
+      }
+    }
     NSLayoutConstraint.activate([
       // Site name label
       siteNameLabel.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
@@ -129,8 +151,8 @@ class URLPreviewView: UIView {
       // Image view
       imageView.topAnchor.constraint(equalTo: descriptionLabel.bottomAnchor, constant: verticalPadding),
       imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
-      imageView.widthAnchor.constraint(equalToConstant: maxWidth),
-      imageView.heightAnchor.constraint(equalTo: imageView.widthAnchor, multiplier: imageAspect),
+      imageView.widthAnchor.constraint(equalToConstant: imageWidth),
+      imageView.heightAnchor.constraint(equalToConstant: imageHeight),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
     ])
 
