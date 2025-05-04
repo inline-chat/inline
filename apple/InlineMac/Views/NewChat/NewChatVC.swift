@@ -15,7 +15,7 @@ class NewChatViewController: NSViewController {
   }
 
   private lazy var swiftUIView: some View =
-    NewChatSwiftUI()
+    NewChatSwiftUI(spaceId: self.dependencies.nav.currentSpaceId ?? 0)
       .environment(dependencies: dependencies)
 
   override func loadView() {
