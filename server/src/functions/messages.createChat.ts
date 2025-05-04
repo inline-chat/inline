@@ -104,6 +104,7 @@ export async function createChat(
   const dialog: Dialog = {
     archived: false,
     pinned: false,
+    spaceId: BigInt(spaceId),
     peer: {
       type: {
         oneofKind: "chat",
