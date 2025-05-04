@@ -3,7 +3,7 @@ import { migrateDb } from "../../scripts/helpers/migrate-db"
 import postgres from "postgres"
 import { beforeEach, afterEach, beforeAll, afterAll } from "bun:test"
 import * as schema from "../db/schema"
-import { sql } from "drizzle-orm"
+import { sql, eq } from "drizzle-orm"
 
 // Test database configuration
 const TEST_DB_NAME = "test_db"
@@ -182,6 +182,121 @@ export const testUtils = {
   // Add participant to chat
   async addParticipant(chatId: number, userId: number) {
     await db.insert(schema.chatParticipants).values({ chatId, userId }).execute()
+  },
+
+  // Create a space and add members
+  async createSpaceWithMembers(spaceName: string, userEmails: string[]): Promise<{ space: any; users: any[] }> {
+    const space = await testUtils.createSpace(spaceName)
+    if (!space) throw new Error("Failed to create space")
+    const users = await Promise.all(userEmails.map((email) => testUtils.createUser(email)))
+    const validUsers = users.filter((u) => u)
+    if (validUsers.length !== users.length) throw new Error("Failed to create one or more users")
+    await db
+      .insert(schema.members)
+      .values(validUsers.map((u) => ({ userId: u!.id, spaceId: space.id })))
+      .execute()
+    return { space, users: validUsers }
+  },
+
+  // Create a thread chat (public or private) with dialog and message for a user
+  async createThreadWithDialogAndMessage({
+    spaceId,
+    user,
+    otherUsers = [],
+    title = "Thread Chat",
+    isPublic = true,
+    messageText = "Hello thread",
+    messageFromUser = null,
+  }: {
+    spaceId: number
+    user: any
+    otherUsers?: any[]
+    title?: string
+    isPublic?: boolean
+    messageText?: string
+    messageFromUser?: any | null
+  }): Promise<{ chat: any; msg: any }> {
+    const chat = await testUtils.createChat(spaceId, title, "thread")
+    if (!chat) throw new Error("Failed to create chat")
+    // Set publicThread flag if needed
+    if (isPublic && !chat.publicThread) {
+      await db.update(schema.chats).set({ publicThread: true }).where(eq(schema.chats.id, chat.id)).execute()
+    } else if (!isPublic && chat.publicThread) {
+      await db.update(schema.chats).set({ publicThread: false }).where(eq(schema.chats.id, chat.id)).execute()
+    }
+    // Add participants for private threads
+    if (!isPublic) {
+      await db
+        .insert(schema.chatParticipants)
+        .values([user, ...otherUsers].map((u) => ({ chatId: chat.id, userId: u.id })))
+        .execute()
+    }
+    // Create dialog for user
+    await db.insert(schema.dialogs).values({ userId: user.id, chatId: chat.id, spaceId }).execute()
+    // Create message
+    const fromUser = messageFromUser || user
+    const msg = await db
+      .insert(schema.messages)
+      .values({
+        messageId: 1,
+        chatId: chat.id,
+        fromId: fromUser.id,
+        text: messageText,
+      })
+      .returning()
+      .then((rows) => rows[0])
+    if (!msg) throw new Error("Failed to create message")
+    // Set lastMsgId on chat
+    await db.update(schema.chats).set({ lastMsgId: msg.messageId }).where(eq(schema.chats.id, chat.id)).execute()
+    return { chat, msg }
+  },
+
+  // Create a DM chat with dialog and message for two users in a space
+  async createDMWithDialogAndMessage({
+    spaceId,
+    userA,
+    userB,
+    messageText = "Hey DM!",
+    messageFromUser = null,
+  }: {
+    spaceId: number
+    userA: any
+    userB: any
+    messageText?: string
+    messageFromUser?: any | null
+  }): Promise<{ chat: any; msg: any }> {
+    const chat = await db
+      .insert(schema.chats)
+      .values({
+        type: "private",
+        minUserId: Math.min(userA.id, userB.id),
+        maxUserId: Math.max(userA.id, userB.id),
+        title: "DM Chat",
+      })
+      .returning()
+      .then((rows) => rows[0])
+    if (!chat) throw new Error("Failed to create DM chat")
+    await db
+      .insert(schema.dialogs)
+      .values([
+        { userId: userA.id, chatId: chat.id, peerUserId: userB.id, spaceId },
+        { userId: userB.id, chatId: chat.id, peerUserId: userA.id, spaceId },
+      ])
+      .execute()
+    const fromUser = messageFromUser || userB
+    const msg = await db
+      .insert(schema.messages)
+      .values({
+        messageId: 1,
+        chatId: chat.id,
+        fromId: fromUser.id,
+        text: messageText,
+      })
+      .returning()
+      .then((rows) => rows[0])
+    if (!msg) throw new Error("Failed to create message")
+    await db.update(schema.chats).set({ lastMsgId: msg.messageId }).where(eq(schema.chats.id, chat.id)).execute()
+    return { chat, msg }
   },
 }
 
