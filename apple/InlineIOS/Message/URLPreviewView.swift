@@ -36,11 +36,10 @@ class URLPreviewView: UIView {
     let horizontalPadding: CGFloat = 8
     let verticalPadding: CGFloat = 6
     let interLabelSpacing: CGFloat = 4
-    let imageAspect: CGFloat = 2.0 / 3.0 // 3:2 width:height
 
     let theme = ThemeManager.shared.selected
     let bgColor = outgoing ? .white.withAlphaComponent(0.1) : theme.secondaryTextColor?
-      .withAlphaComponent(0.08) ?? .systemGray5.withAlphaComponent(0.08)
+      .withAlphaComponent(0.2) ?? .systemGray5.withAlphaComponent(0.2)
     let primaryTextColor = outgoing ? UIColor.white : (theme.primaryTextColor ?? .label)
     let secondaryTextColor = outgoing ? UIColor.white
       .withAlphaComponent(0.7) : (theme.secondaryTextColor ?? .secondaryLabel)
@@ -67,13 +66,16 @@ class URLPreviewView: UIView {
     descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
 
     imageView.isHidden = true
+    var imageAspect: CGFloat = 2.0 / 3.0 // Default aspect ratio
     if let photoInfo, let bestSize = photoInfo.bestPhotoSize(), let urlString = bestSize.cdnUrl,
        let imageUrl = URL(string: urlString)
     {
       imageView.isHidden = false
       imageView.backgroundColor = bgColor.withAlphaComponent(0.2)
-
       imageView.url = imageUrl
+      if let width = bestSize.width, let height = bestSize.height, width > 0, height > 0 {
+        imageAspect = CGFloat(height) / CGFloat(width)
+      }
     }
 
     addSubview(siteNameLabel)
@@ -134,8 +136,25 @@ class URLPreviewView: UIView {
 
   @objc private func handleTap() {
     guard let url, let parentVC = parentViewController else { return }
-    let safari = SFSafariViewController(url: url)
+
+    let safariConfig = SFSafariViewController.Configuration()
+    safariConfig.entersReaderIfAvailable = false
+    safariConfig.barCollapsingEnabled = true
+
+    let safari = SFSafariViewController(url: url, configuration: safariConfig)
+    safari.preferredControlTintColor = ThemeManager.shared.selected.accent
+    safari.dismissButtonStyle = .close
     safari.modalPresentationStyle = .pageSheet
+
+    if #available(iOS 15.0, *) {
+      if let sheet = safari.sheetPresentationController {
+        sheet.detents = [.medium(), .large()]
+        sheet.prefersGrabberVisible = true
+        sheet.prefersScrollingExpandsWhenScrolledToEdge = true
+        sheet.prefersEdgeAttachedInCompactHeight = true
+      }
+    }
+
     parentVC.present(safari, animated: true)
   }
 }
