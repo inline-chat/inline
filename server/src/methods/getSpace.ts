@@ -31,8 +31,8 @@ type Context = {
 export const Response = Type.Object({
   space: TSpaceInfo,
   members: Type.Array(TMemberInfo),
-  chats: Type.Array(TChatInfo),
-  dialogs: Type.Array(TDialogInfo),
+  // chats: Type.Array(TChatInfo),
+  // dialogs: Type.Array(TDialogInfo),
 })
 
 type Response = Static<typeof Response>
@@ -55,77 +55,77 @@ export const handler = async (input: Input, context: Context): Promise<Response>
 
     const membersResult = await db.select().from(members).where(eq(members.spaceId, spaceId))
 
-    const chatsResult = await db.select().from(chats).where(eq(chats.spaceId, spaceId))
+    //const chatsResult = await db.select().from(chats).where(eq(chats.spaceId, spaceId))
 
     // Get members dialogs
-    const dialogsResult = await db
-      .select()
-      .from(dialogs)
-      .where(
-        or(
-          and(
-            eq(dialogs.userId, context.currentUserId),
-            inArray(
-              dialogs.peerUserId,
-              membersResult.map((m) => m.userId),
-            ),
-          ),
-          and(
-            eq(dialogs.peerUserId, context.currentUserId),
-            inArray(
-              dialogs.userId,
-              membersResult.map((m) => m.userId),
-            ),
-          ),
-        ),
-      )
+    // const dialogsResult = await db
+    //   .select()
+    //   .from(dialogs)
+    //   .where(
+    //     or(
+    //       and(
+    //         eq(dialogs.userId, context.currentUserId),
+    //         inArray(
+    //           dialogs.peerUserId,
+    //           membersResult.map((m) => m.userId),
+    //         ),
+    //       ),
+    //       and(
+    //         eq(dialogs.peerUserId, context.currentUserId),
+    //         inArray(
+    //           dialogs.userId,
+    //           membersResult.map((m) => m.userId),
+    //         ),
+    //       ),
+    //     ),
+    //   )
 
-    const existingDialogPeerIds = dialogsResult.map((d) =>
-      d.userId === context.currentUserId ? d.peerUserId : d.userId,
-    )
+    // const existingDialogPeerIds = dialogsResult.map((d) =>
+    //   d.userId === context.currentUserId ? d.peerUserId : d.userId,
+    // )
 
     // Get members without dialogs
-    const membersWithoutDialogs = membersResult
-      .filter((m) => m.userId !== context.currentUserId)
-      .filter((m) => !existingDialogPeerIds.includes(m.userId))
+    // const membersWithoutDialogs = membersResult
+    //   .filter((m) => m.userId !== context.currentUserId)
+    //   .filter((m) => !existingDialogPeerIds.includes(m.userId))
 
     // Create dialogs for members without dialogs
-    const newDialogs = membersWithoutDialogs.map((member) => {
-      const dialogId = member.userId
-      return {
-        id: dialogId,
-        draft: null,
-        date: new Date(),
-        userId: context.currentUserId,
-        peerUserId: member.userId,
-        spaceId: null,
-        pinned: false,
-        unreadCount: 0,
-        readInboxMaxId: null,
-        readOutboxMaxId: null,
-        chatId: dialogId,
-        archived: false,
-      }
-    })
+    // const newDialogs = membersWithoutDialogs.map((member) => {
+    //   const dialogId = member.userId
+    //   return {
+    //     id: dialogId,
+    //     draft: null,
+    //     date: new Date(),
+    //     userId: context.currentUserId,
+    //     peerUserId: member.userId,
+    //     spaceId: null,
+    //     pinned: false,
+    //     unreadCount: 0,
+    //     readInboxMaxId: null,
+    //     readOutboxMaxId: null,
+    //     chatId: dialogId,
+    //     archived: false,
+    //   }
+    // })
 
     // Pack dialogs to encode
-    const allDialogs = [...dialogsResult, ...newDialogs]
+    // const allDialogs = [...dialogsResult, ...newDialogs]
 
-    const dialogsUnreads = await DialogsModel.getBatchUnreadCounts({
-      userId: context.currentUserId,
-      chatIds: allDialogs.map((d) => d.chatId),
-    })
+    // const dialogsUnreads = await DialogsModel.getBatchUnreadCounts({
+    //   userId: context.currentUserId,
+    //   chatIds: allDialogs.map((d) => d.chatId),
+    // })
 
-    const dialogsEncoded = allDialogs.map((dialog) => {
-      const unreadCount = dialogsUnreads.find((uc) => uc.chatId === dialog.chatId)?.unreadCount ?? 0
-      return encodeDialogInfo({ ...dialog, unreadCount })
-    })
+    // const dialogsEncoded = allDialogs.map((dialog) => {
+    //   const unreadCount = dialogsUnreads.find((uc) => uc.chatId === dialog.chatId)?.unreadCount ?? 0
+    //   return encodeDialogInfo({ ...dialog, unreadCount })
+    // })
 
     return {
       space: encodeSpaceInfo(spaceResult[0], { currentUserId: context.currentUserId }),
       members: membersResult.map((member) => encodeMemberInfo(member)),
-      chats: chatsResult.map((chat) => encodeChatInfo(chat, { currentUserId: context.currentUserId })),
-      dialogs: dialogsEncoded,
+      // chats: chatsResult.map((chat) => encodeChatInfo(chat, { currentUserId: context.currentUserId })),
+      // dialogs: dialogsEncoded,
     }
   } catch (error) {
     Log.shared.error("Failed to get space", error)

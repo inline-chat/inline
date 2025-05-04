@@ -835,8 +835,8 @@ public struct UploadFileResult: Codable, Sendable {
 public struct GetSpace: Codable, Sendable {
   public let space: ApiSpace
   public let members: [ApiMember]
-  public let chats: [ApiChat]
-  public let dialogs: [ApiDialog]
+//  public let chats: [ApiChat]
+//  public let dialogs: [ApiDialog]
 }
 
 public struct GetDraft: Codable, Sendable {
