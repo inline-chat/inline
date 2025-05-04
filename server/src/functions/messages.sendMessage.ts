@@ -1,20 +1,17 @@
 import { InputPeer, Update } from "@in/protocol/core"
-import type { TPeerInfo } from "@in/server/api-types"
-import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
-import { users } from "@in/server/db/schema"
+import { type DbChat } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
-import { getUpdateGroup, getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
+import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
-import { connectionManager } from "@in/server/ws/connections"
 import { processLoomLink } from "@in/server/modules/loom/processLoomLink"
 
 type Input = {
@@ -41,7 +38,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const fromId = context.currentUserId
   const inputPeer = input.peerId
   const currentUserId = context.currentUserId
-  const chatId = await ChatModel.getChatIdFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chatId = chat.id
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
 
   // encrypt
@@ -103,6 +101,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     updateGroup,
     messageInfo,
     currentUserId,
+    chat,
   })
 
   // return new updates
@@ -140,7 +139,7 @@ const pushUpdates = async ({
 
   let selfUpdates: Update[] = []
 
-  if (updateGroup.type === "users") {
+  if (updateGroup.type === "dmUsers") {
     updateGroup.userIds.forEach((userId) => {
       const encodingForUserId = userId
       const encodingForInputPeer: InputPeer =
@@ -176,10 +175,8 @@ const pushUpdates = async ({
         RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
       }
     })
-  } else if (updateGroup.type === "space") {
-    const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
-    log.debug(`Sending message to space ${updateGroup.spaceId}`, { userIds })
-    userIds.forEach((userId) => {
+  } else if (updateGroup.type === "threadUsers") {
+    updateGroup.userIds.forEach((userId) => {
       // New updates
       let newMessageUpdate: Update = {
         update: {
@@ -224,11 +221,12 @@ type SendPushForMsgInput = {
   updateGroup: UpdateGroup
   messageInfo: MessageInfo
   currentUserId: number
+  chat?: DbChat
 }
 
 /** Send push notifications for this message */
 async function sendNotifications(input: SendPushForMsgInput) {
-  const { updateGroup, messageInfo, currentUserId } = input
+  const { updateGroup, messageInfo, currentUserId, chat } = input
 
   // decrypt message text
   let messageText = ""
@@ -240,20 +238,17 @@ async function sendNotifications(input: SendPushForMsgInput) {
     })
   }
 
-  if (updateGroup.type === "users") {
+  // Handle DMs and threads
+  if (updateGroup.type === "dmUsers" || updateGroup.type === "threadUsers") {
     for (let userId of updateGroup.userIds) {
       if (userId === currentUserId) {
         // Don't send push notifications to yourself
         continue
       }
 
-      sendNotificationToUser({ userId, messageInfo, messageText })
+      sendNotificationToUser({ userId, messageInfo, messageText, chat })
     }
   }
-
-  // if (updateGroup.type === "space") {
-  //   // TODO: Implement
-  // }
 }
 
 /** Send push notifications for this message */
@@ -261,10 +256,12 @@ async function sendNotificationToUser({
   userId,
   messageInfo,
   messageText,
+  chat,
 }: {
   userId: number
   messageInfo: MessageInfo
   messageText: string
+  chat?: DbChat
 }) {
   const userName = await getCachedUserName(messageInfo.message.fromId)
 
@@ -273,8 +270,16 @@ async function sendNotificationToUser({
     return
   }
 
-  const title = userName.firstName ? `${userName.firstName}` : userName.username ?? "Message"
+  let title = userName.firstName ? `${userName.firstName}` : userName.username ?? "Message"
   let body = "New message" // default
+
+  // Only provide chat title for threads not DMs
+  const chatTitle = chat?.type === "thread" ? chat.title ?? undefined : undefined
+
+  if (chatTitle) {
+    // If thread
+    title = chatTitle + " • " + title
+  }
 
   if (messageText) {
     // if has text, use text
