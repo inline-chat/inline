@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
-import { dialogs } from "@in/server/db/schema"
+import { chatParticipants, dialogs, members } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { ChatModel, getChatFromPeer } from "@in/server/db/models/chats"
 
@@ -33,13 +33,18 @@ export const getUpdateGroup = async (peerId: TPeerInfo, context: { currentUserId
       throw new InlineError(InlineError.ApiError.PEER_INVALID)
     }
     if (chat.publicThread) {
-      return { type: "space", spaceId: chat.spaceId }
+      // Legacy
+      //return { type: "space", spaceId: chat.spaceId }
+
+      // For now, fetch all users in the space
+      const users = await db.select({ userId: members.userId }).from(members).where(eq(members.spaceId, chat.spaceId))
+      return { type: "users", userIds: users.map((user) => user.userId) }
     } else {
-      // get participant ids from dialogs
+      // get participant ids from chatParticipants
       const participantIds = await db
-        .select({ userId: dialogs.userId })
-        .from(dialogs)
-        .where(eq(dialogs.chatId, chat.id))
+        .select({ userId: chatParticipants.userId })
+        .from(chatParticipants)
+        .where(eq(chatParticipants.chatId, chat.id))
         // TODO: Possible memory OOM issue can happen here for larger chats which will require pagination and batching
         .then((result) => result.map(({ userId }) => userId))
       return { type: "users", userIds: participantIds }
@@ -71,13 +76,18 @@ export const getUpdateGroupFromInputPeer = async (
       throw new InlineError(InlineError.ApiError.PEER_INVALID)
     }
     if (chat.publicThread) {
-      return { type: "space", spaceId: chat.spaceId }
+      // Legacy
+      //return { type: "space", spaceId: chat.spaceId }
+
+      // For now, fetch all users in the space
+      const users = await db.select({ userId: members.userId }).from(members).where(eq(members.spaceId, chat.spaceId))
+      return { type: "users", userIds: users.map((user) => user.userId) }
     } else {
-      // get participant ids from dialogs
+      // get participant ids from chatParticipants
       const participantIds = await db
-        .select({ userId: dialogs.userId })
-        .from(dialogs)
-        .where(eq(dialogs.chatId, chat.id))
+        .select({ userId: chatParticipants.userId })
+        .from(chatParticipants)
+        .where(eq(chatParticipants.chatId, chat.id))
         // TODO: Possible memory OOM issue can happen here for larger chats which will require pagination and batching
         .then((result) => result.map(({ userId }) => userId))
       return { type: "users", userIds: participantIds }

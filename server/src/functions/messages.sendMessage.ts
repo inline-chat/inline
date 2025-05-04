@@ -257,7 +257,9 @@ async function sendNotifications(input: SendPushForMsgInput) {
     }
   }
 
-  // TODO: handle update for space
+  // if (updateGroup.type === "space") {
+  //   // TODO: Implement
+  // }
 }
 
 /** Send push notifications for this message */
@@ -284,7 +286,7 @@ async function sendNotificationToUser({
     // if has text, use text
     body = messageText.substring(0, 240)
   } else if (messageInfo.message.isSticker) {
-    body = "☕️ Sticker"
+    body = "🖼️ Sticker"
   } else if (messageInfo.message.mediaType === "photo") {
     body = "🖼️ Photo"
   } else if (messageInfo.message.mediaType === "video") {
@@ -312,13 +314,13 @@ async function processLoomLinks(messageText: string, messageId: bigint, currentU
   try {
     // Find Loom links in the message
     const words = messageText.split(/\s+/)
-    const loomUrl = words.find(word => isValidLoomUrl(word))
-    
+    const loomUrl = words.find((word) => isValidLoomUrl(word))
+
     log.debug("🧁🧁🧁 loomUrl", loomUrl)
     log.debug("🧁🧁🧁 words", words)
     if (!loomUrl) return null
     log.debug("🧁🧁🧁 loomUrl found")
-    
+
     // Fetch Loom oEmbed data
     const oembed = await fetchLoomOembed(loomUrl)
     log.debug("🧁🧁🧁 oembed", oembed)
@@ -327,34 +329,40 @@ async function processLoomLinks(messageText: string, messageId: bigint, currentU
     const titleEncrypted = encryptMessage(oembed.title)
     const descriptionEncrypted = oembed.description ? encryptMessage(oembed.description) : null
     log.debug("🧁🧁🧁 url, title, description successfully encrypted")
-    
+
     // Download and save thumbnail
     let photoId: number | null = null
     if (oembed.thumbnailUrl) {
       log.debug("🧁🧁🧁 oembed.thumbnailUrl", oembed.thumbnailUrl)
-      photoId = await downloadAndSaveThumbnail(oembed.thumbnailUrl, oembed.thumbnailWidth, oembed.thumbnailHeight, currentUserId)
+      photoId = await downloadAndSaveThumbnail(
+        oembed.thumbnailUrl,
+        oembed.thumbnailWidth,
+        oembed.thumbnailHeight,
+        currentUserId,
+      )
     }
 
     log.debug("🧁🧁🧁 photoId downloaded and saved", photoId)
- 
-    
+
     // Create URL preview record
-    const [urlPreviewRecord] = await db.insert(urlPreview).values({
-      url: urlEncrypted.encrypted,
-      urlIv: urlEncrypted.iv,
-      urlTag: urlEncrypted.authTag,
-      siteName: "Loom",
-      title: titleEncrypted.encrypted,
-      titleIv: titleEncrypted.iv,
-      titleTag: titleEncrypted.authTag,
-      description: descriptionEncrypted?.encrypted ,
-      descriptionIv: descriptionEncrypted?.iv,
-      descriptionTag: descriptionEncrypted?.authTag,
-      photoId: photoId,
-      duration: oembed.duration,
-      date: new Date(),
-    }).returning()
-    
+    const [urlPreviewRecord] = await db
+      .insert(urlPreview)
+      .values({
+        url: urlEncrypted.encrypted,
+        urlIv: urlEncrypted.iv,
+        urlTag: urlEncrypted.authTag,
+        siteName: "Loom",
+        title: titleEncrypted.encrypted,
+        titleIv: titleEncrypted.iv,
+        titleTag: titleEncrypted.authTag,
+        description: descriptionEncrypted?.encrypted,
+        descriptionIv: descriptionEncrypted?.iv,
+        descriptionTag: descriptionEncrypted?.authTag,
+        photoId: photoId,
+        duration: oembed.duration,
+        date: new Date(),
+      })
+      .returning()
 
     log.debug("🧁🧁🧁 urlPreviewRecord inserted", urlPreviewRecord)
     if (!urlPreviewRecord) {
@@ -362,7 +370,7 @@ async function processLoomLinks(messageText: string, messageId: bigint, currentU
       log.debug("🧁🧁🧁 Failed to create URL preview record")
       return null
     }
-    
+
     // Create link between message and URL preview
     // Using urlPreviewId as per the schema in attachments.ts
     await db.insert(messageAttachments).values({
@@ -372,7 +380,7 @@ async function processLoomLinks(messageText: string, messageId: bigint, currentU
     })
 
     log.debug("🧁🧁🧁 messageAttachment inserted")
-    
+
     return Number(urlPreviewRecord.id)
   } catch (error) {
     log.error("Error processing Loom link", { error })
@@ -387,10 +395,15 @@ async function processLoomLinks(messageText: string, messageId: bigint, currentU
  * @param height The height of the thumbnail
  * @returns The ID of the saved photo
  */
-async function downloadAndSaveThumbnail(url: string, width: number, height: number, currentUserId: number): Promise<number | null> {
+async function downloadAndSaveThumbnail(
+  url: string,
+  width: number,
+  height: number,
+  currentUserId: number,
+): Promise<number | null> {
   try {
     log.debug("🧁🧁🧁 Starting thumbnail download from URL:", url)
-    
+
     // Download image
     const response = await fetch(url)
     if (!response.ok) {
@@ -398,25 +411,25 @@ async function downloadAndSaveThumbnail(url: string, width: number, height: numb
       log.error(`Failed to download thumbnail: ${response.status}`)
       return null
     }
-    
+
     log.debug("🧁🧁🧁 Successfully downloaded image, getting buffer")
     // Get image data as buffer
     const imageBuffer = await response.arrayBuffer()
     log.debug("🧁🧁🧁 Image buffer size:", imageBuffer.byteLength)
-    
+
     // Convert ArrayBuffer to File object
     const fileName = `loom_thumbnail_${Date.now()}.jpg`
-    const thumbnailFile = new File([imageBuffer], fileName, { type: 'image/jpeg' })
+    const thumbnailFile = new File([imageBuffer], fileName, { type: "image/jpeg" })
     log.debug("🧁🧁🧁 Created File object with name:", fileName)
-    
+
     // Create input for uploadFile handler logic
     log.debug("🧁🧁🧁 Preparing to upload file as PHOTO type")
-    
+
     try {
       // Use uploadPhoto similarly to how uploadFile's handler does it
       // We're directly using the same approach as in the uploadFile handler
-      const result = await uploadPhoto(thumbnailFile, { userId: currentUserId }) 
-      
+      const result = await uploadPhoto(thumbnailFile, { userId: currentUserId })
+
       log.debug("🧁🧁🧁 Successfully uploaded photo with ID:", result.photoId)
       return Number(result.photoId)
     } catch (uploadError) {
