@@ -8,11 +8,13 @@ import type { DbMessageAttachment } from "@in/server/db/schema"
 
 export const encodeMessageAttachmentUpdate = ({
   messageId,
+  chatId,
   encodingForUserId,
   encodingForPeer,
   attachment,
 }: {
   messageId: bigint
+  chatId: bigint
   encodingForUserId: number
   encodingForPeer: { inputPeer: InputPeer }
   attachment: MessageAttachment
@@ -22,6 +24,7 @@ export const encodeMessageAttachmentUpdate = ({
       oneofKind: "messageAttachment",
       messageAttachment: {
         messageId,
+        chatId,
         peerId: encodePeerFromInputPeer({
           inputPeer: encodingForPeer.inputPeer,
           currentUserId: encodingForUserId,

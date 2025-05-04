@@ -627,12 +627,6 @@ export interface MessageAttachments {
  */
 export interface MessageAttachment {
     /**
-     * todo: deprecated
-     *
-     * @generated from protobuf field: int64 message_id = 1;
-     */
-    messageId: bigint;
-    /**
      * @generated from protobuf oneof: attachment
      */
     attachment: {
@@ -1708,6 +1702,10 @@ export interface UpdateMessageAttachment {
      * @generated from protobuf field: Peer peer_id = 3;
      */
     peerId?: Peer;
+    /**
+     * @generated from protobuf field: int64 chat_id = 50;
+     */
+    chatId: bigint;
 }
 /**
  * @generated from protobuf message UpdateReaction
@@ -3571,14 +3569,12 @@ export const MessageAttachments = new MessageAttachments$Type();
 class MessageAttachment$Type extends MessageType<MessageAttachment> {
     constructor() {
         super("MessageAttachment", [
-            { no: 1, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "external_task", kind: "message", oneof: "attachment", T: () => MessageAttachmentExternalTask },
             { no: 3, name: "url_preview", kind: "message", oneof: "attachment", T: () => UrlPreview }
         ]);
     }
     create(value?: PartialMessage<MessageAttachment>): MessageAttachment {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.messageId = 0n;
         message.attachment = { oneofKind: undefined };
         if (value !== undefined)
             reflectionMergePartial<MessageAttachment>(this, message, value);
@@ -3589,9 +3585,6 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* int64 message_id */ 1:
-                    message.messageId = reader.int64().toBigInt();
-                    break;
                 case /* MessageAttachmentExternalTask external_task */ 2:
                     message.attachment = {
                         oneofKind: "externalTask",
@@ -3616,9 +3609,6 @@ class MessageAttachment$Type extends MessageType<MessageAttachment> {
         return message;
     }
     internalBinaryWrite(message: MessageAttachment, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* int64 message_id = 1; */
-        if (message.messageId !== 0n)
-            writer.tag(1, WireType.Varint).int64(message.messageId);
         /* MessageAttachmentExternalTask external_task = 2; */
         if (message.attachment.oneofKind === "externalTask")
             MessageAttachmentExternalTask.internalBinaryWrite(message.attachment.externalTask, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
@@ -6173,12 +6163,14 @@ class UpdateMessageAttachment$Type extends MessageType<UpdateMessageAttachment> 
         super("UpdateMessageAttachment", [
             { no: 1, name: "attachment", kind: "message", T: () => MessageAttachment },
             { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "peer_id", kind: "message", T: () => Peer }
+            { no: 3, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 50, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateMessageAttachment>): UpdateMessageAttachment {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.messageId = 0n;
+        message.chatId = 0n;
         if (value !== undefined)
             reflectionMergePartial<UpdateMessageAttachment>(this, message, value);
         return message;
@@ -6196,6 +6188,9 @@ class UpdateMessageAttachment$Type extends MessageType<UpdateMessageAttachment> 
                     break;
                 case /* Peer peer_id */ 3:
                     message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 chat_id */ 50:
+                    message.chatId = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -6218,6 +6213,9 @@ class UpdateMessageAttachment$Type extends MessageType<UpdateMessageAttachment> 
         /* Peer peer_id = 3; */
         if (message.peerId)
             Peer.internalBinaryWrite(message.peerId, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* int64 chat_id = 50; */
+        if (message.chatId !== 0n)
+            writer.tag(50, WireType.Varint).int64(message.chatId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
