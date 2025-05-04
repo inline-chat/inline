@@ -8,14 +8,14 @@ import RealtimeAPI
 
 public struct TransactionDeleteMessage: Transaction {
   // Properties
-  var messageIds: [Int64]
-  var peerId: Peer
-  var chatId: Int64
+  public var messageIds: [Int64]
+  public var peerId: Peer
+  public var chatId: Int64
 
   // Config
   public var id = UUID().uuidString
-  var config = TransactionConfig.default
-  var date = Date()
+  public var config = TransactionConfig.default
+  public var date = Date()
 
   public init(messageIds: [Int64], peerId: Peer, chatId: Int64) {
     self.messageIds = messageIds
@@ -24,7 +24,7 @@ public struct TransactionDeleteMessage: Transaction {
   }
 
   // Methods
-  func optimistic() {
+  public func optimistic() {
     Log.shared.debug("Optimistic delete message \(messageIds) \(peerId) \(chatId)")
     do {
       try AppDatabase.shared.dbWriter.write { db in
@@ -66,7 +66,7 @@ public struct TransactionDeleteMessage: Transaction {
     }
   }
 
-  func execute() async throws -> [InlineProtocol.Update] {
+  public func execute() async throws -> [InlineProtocol.Update] {
     let result = try await Realtime.shared.invoke(
       .deleteMessages,
       input: .deleteMessages(DeleteMessagesInput.with {
@@ -82,7 +82,7 @@ public struct TransactionDeleteMessage: Transaction {
     return response.updates
   }
 
-  func shouldRetryOnFail(error: Error) -> Bool {
+  public func shouldRetryOnFail(error: Error) -> Bool {
     if let error = error as? RealtimeAPIError {
       switch error {
         case let .rpcError(_, _, code):
@@ -101,15 +101,15 @@ public struct TransactionDeleteMessage: Transaction {
     return true
   }
 
-  func didSucceed(result: [InlineProtocol.Update]) async {
+  public func didSucceed(result: [InlineProtocol.Update]) async {
     await Realtime.shared.updates.applyBatch(updates: result)
   }
 
-  func didFail(error: Error?) async {
+  public func didFail(error: Error?) async {
     Log.shared.error("Failed to delete message", error: error)
   }
 
-  func rollback() async {}
+  public func rollback() async {}
 
   enum DeleteMessageError: Error {
     case failed

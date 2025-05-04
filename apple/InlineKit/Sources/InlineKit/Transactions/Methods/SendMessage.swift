@@ -16,23 +16,23 @@ public struct SendMessageAttachment: Codable, Sendable {
 
 public struct TransactionSendMessage: Transaction {
   // Properties
-  var text: String? = nil
-  var peerId: Peer
-  var chatId: Int64
-  var attachments: [SendMessageAttachment]
-  var replyToMsgId: Int64? = nil
-  var isSticker: Bool? = nil
+  public var text: String? = nil
+  public var peerId: Peer
+  public var chatId: Int64
+  public var attachments: [SendMessageAttachment]
+  public var replyToMsgId: Int64? = nil
+  public var isSticker: Bool? = nil
 
   // Config
   public var id = UUID().uuidString
-  var config = TransactionConfig.default
-  var date = Date()
+  public var config = TransactionConfig.default
+  public var date = Date()
 
   // State
-  var randomId: Int64
-  var peerUserId: Int64? = nil
-  var peerThreadId: Int64? = nil
-  var temporaryMessageId: Int64
+  public var randomId: Int64
+  public var peerUserId: Int64? = nil
+  public var peerThreadId: Int64? = nil
+  public var temporaryMessageId: Int64
 
   public init(
     text: String?,
@@ -40,7 +40,7 @@ public struct TransactionSendMessage: Transaction {
     chatId: Int64,
     mediaItems: [FileMediaItem] = [],
     replyToMsgId: Int64? = nil,
-    isSticker: Bool? = nil  
+    isSticker: Bool? = nil
   ) {
     self.text = text
     self.peerId = peerId
@@ -67,7 +67,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   // Methods
-  func optimistic() {
+  public func optimistic() {
     let media = attachments.first?.media
     Log.shared.debug("Optimistic send message \(media.debugDescription)")
     let message = Message(
@@ -89,7 +89,6 @@ public struct TransactionSendMessage: Transaction {
       transactionId: id,
       isSticker: isSticker
     )
-
 
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
     // (mo a few months later) TRADE OFFS BABY
@@ -119,7 +118,7 @@ public struct TransactionSendMessage: Transaction {
     }
   }
 
-  func execute() async throws -> [InlineProtocol.Update] {
+  public func execute() async throws -> [InlineProtocol.Update] {
     // clear typing...
     Task {
       await ComposeActions.shared.stoppedTyping(for: peerId)
@@ -183,7 +182,7 @@ public struct TransactionSendMessage: Transaction {
       $0.randomID = randomId
       $0.temporarySendDate = Int64(date.timeIntervalSince1970.rounded())
       $0.isSticker = isSticker ?? false
-      
+
       if let text { $0.message = text }
       if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
       if let inputMedia { $0.media = inputMedia }
@@ -202,7 +201,7 @@ public struct TransactionSendMessage: Transaction {
     return result.updates
   }
 
-  func shouldRetryOnFail(error: Error) -> Bool {
+  public func shouldRetryOnFail(error: Error) -> Bool {
     if let error = error as? RealtimeAPIError {
       switch error {
         case let .rpcError(ec, msg, code):
@@ -221,11 +220,11 @@ public struct TransactionSendMessage: Transaction {
     return true
   }
 
-  func didSucceed(result: [InlineProtocol.Update]) async {
+  public func didSucceed(result: [InlineProtocol.Update]) async {
     // await Realtime.shared.updates.applyBatch(updates: result)
   }
 
-  func didFail(error: Error?) async {
+  public func didFail(error: Error?) async {
     Log.shared.error("Failed to send message", error: error)
 
     // Mark as failed
@@ -252,7 +251,7 @@ public struct TransactionSendMessage: Transaction {
     }
   }
 
-  func rollback() async {
+  public func rollback() async {
     // Remove from database
     let _ = try? await AppDatabase.shared.dbWriter.write { db in
       try Message

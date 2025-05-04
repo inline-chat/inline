@@ -32,31 +32,29 @@ struct MockMessage {
 }
 
 public struct MockMessageTransaction: Transaction, Codable, Sendable {
-  typealias R = Void
+  public typealias R = Void
 
   public let id: String
-  let text: String
-  var config = TransactionConfig.noRetry
-  var date = Date()
+  public let text: String
+  public var config = TransactionConfig.noRetry
+  public var date = Date()
 
-  let shouldSucceed: Bool
-  let executionDelay: Double
+  public let shouldSucceed: Bool
+  public let executionDelay: Double
 
-  init(
+  public init(
     id: String,
     text: String,
-
     shouldSucceed: Bool = true,
     executionDelay: Double = 0
   ) {
     self.id = id
     self.text = text
-
     self.shouldSucceed = shouldSucceed
     self.executionDelay = executionDelay
   }
 
-  func optimistic() {
+  public func optimistic() {
     MockMessageCache.shared.add(
       MockMessage(
         id: id,
@@ -66,7 +64,7 @@ public struct MockMessageTransaction: Transaction, Codable, Sendable {
     )
   }
 
-  func execute() async throws {
+  public func execute() async throws {
     if executionDelay > 0 {
       try await Task.sleep(nanoseconds: UInt64(executionDelay * 1_000_000_000))
     }
@@ -76,19 +74,19 @@ public struct MockMessageTransaction: Transaction, Codable, Sendable {
     }
   }
 
-  func shouldRetryOnFail(error: Error) -> Bool {
+  public func shouldRetryOnFail(error: Error) -> Bool {
     true
   }
-  
-  func didSucceed(result: Void) async {
+
+  public func didSucceed(result: Void) async {
     MockMessageCache.shared.update(id: id, status: .sent)
   }
 
-  func didFail(error: Error?) async {
+  public func didFail(error: Error?) async {
     MockMessageCache.shared.update(id: id, status: .failed)
   }
 
-  func rollback() async {
+  public func rollback() async {
     MockMessageCache.shared.remove(id: id)
   }
 }
