@@ -265,67 +265,70 @@ const messageAttachmentUpdate = async ({
 
     const updateGroup = await getUpdateGroup(peerId, { currentUserId })
 
-    if (updateGroup.type === "users") {
-      updateGroup.userIds.forEach((userId: number) => {
-        // New updates
-        let messageAttachmentUpdate: Update = {
-          update: {
-            oneofKind: "messageAttachment",
-            messageAttachment: {
-              attachment: {
-                messageId: BigInt(messageId),
-                attachment: {
-                  oneofKind: "externalTask",
-                  externalTask: {
-                    id: BigInt(externalTask.id),
-                    application: "linear",
-                    taskId: externalTask.taskId,
-                    title: decryptedTitle,
-                    status: MessageAttachmentExternalTask_Status.TODO,
-                    assignedUserId: BigInt(currentUserId),
-                    number: externalTask.number ?? "",
-                    url: externalTask.url ?? "",
-                    date: BigInt(Date.now().toString()),
-                  },
-                },
-              },
-            },
-          },
-        }
-        RealtimeUpdates.pushToUser(userId, [messageAttachmentUpdate])
-      })
-    } else if (updateGroup.type === "space") {
-      const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
+    // TODO: Fix this
+    // if (updateGroup.type === "users") {
+    //   updateGroup.userIds.forEach((userId: number) => {
+    //     // New updates
+    //     let messageAttachmentUpdate: Update = {
+    //       update: {
+    //         oneofKind: "messageAttachment",
+    //         messageAttachment: {
 
-      userIds.forEach((userId) => {
-        let messageAttachmentUpdate: Update = {
-          update: {
-            oneofKind: "messageAttachment",
-            messageAttachment: {
-              attachment: {
-                messageId: BigInt(messageId),
-                attachment: {
-                  oneofKind: "externalTask",
-                  externalTask: {
-                    id: BigInt(externalTask.id),
-                    application: "linear",
-                    taskId: externalTask.taskId,
-                    title: decryptedTitle,
-                    status: MessageAttachmentExternalTask_Status.TODO,
-                    assignedUserId: BigInt(currentUserId),
-                    number: externalTask.number ?? "",
-                    url: externalTask.url ?? "",
-                    date: BigInt(Date.now().toString()),
-                  },
-                },
-              },
-            },
-          },
-        }
+    //           attachment: {
+    //             // TODO: Fix this
+    //             id: BigInt(0),
+    //             attachment: {
+    //               oneofKind: "externalTask",
+    //               externalTask: {
+    //                 id: BigInt(externalTask.id),
+    //                 application: "linear",
+    //                 taskId: externalTask.taskId,
+    //                 title: decryptedTitle,
+    //                 status: MessageAttachmentExternalTask_Status.TODO,
+    //                 assignedUserId: BigInt(currentUserId),
+    //                 number: externalTask.number ?? "",
+    //                 url: externalTask.url ?? "",
+    //                 date: BigInt(Date.now().toString()),
+    //               },
+    //             },
+    //           },
+    //         },
+    //       },
+    //     }
+    //     RealtimeUpdates.pushToUser(userId, [messageAttachmentUpdate])
+    //   })
+    // } else if (updateGroup.type === "space") {
+    //   const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
 
-        RealtimeUpdates.pushToUser(userId, [messageAttachmentUpdate])
-      })
-    }
+    //   userIds.forEach((userId) => {
+    //     let messageAttachmentUpdate: Update = {
+    //       update: {
+    //         oneofKind: "messageAttachment",
+    //         messageAttachment: {
+    //           attachment: {
+    //             messageId: BigInt(messageId),
+    //             attachment: {
+    //               oneofKind: "externalTask",
+    //               externalTask: {
+    //                 id: BigInt(externalTask.id),
+    //                 application: "linear",
+    //                 taskId: externalTask.taskId,
+    //                 title: decryptedTitle,
+    //                 status: MessageAttachmentExternalTask_Status.TODO,
+    //                 assignedUserId: BigInt(currentUserId),
+    //                 number: externalTask.number ?? "",
+    //                 url: externalTask.url ?? "",
+    //                 date: BigInt(Date.now().toString()),
+    //               },
+    //             },
+    //           },
+    //         },
+    //       },
+    //     }
+
+    //     RealtimeUpdates.pushToUser(userId, [messageAttachmentUpdate])
+    //   })
+    // }
   } catch (error) {
     Log.shared.error("Failed to update message attachment", { error })
   }
