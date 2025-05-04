@@ -100,6 +100,7 @@ public enum TransactionType: Codable {
   case addReaction(TransactionAddReaction)
   case deleteReaction(TransactionDeleteReaction)
   case editMessage(TransactionEditMessage)
+  case createChat(TransactionCreateChat)
 
   var id: String {
     transaction.id
@@ -122,6 +123,8 @@ public enum TransactionType: Codable {
       case let .deleteReaction(t):
         t
       case let .editMessage(t):
+        t
+      case let .createChat(t):
         t
     }
   }
@@ -163,6 +166,9 @@ public enum TransactionType: Codable {
         try container.encode(transaction, forKey: .transaction)
       case let .editMessage(transaction):
         try container.encode("editMessage", forKey: .type)
+        try container.encode(transaction, forKey: .transaction)
+      case let .createChat(transaction):
+        try container.encode("createChat", forKey: .type)
         try container.encode(transaction, forKey: .transaction)
     }
   }
