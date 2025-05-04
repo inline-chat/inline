@@ -234,8 +234,11 @@ message DeleteReactionResult { repeated Update updates = 1; }
 message MessageAttachments { repeated MessageAttachment attachments = 1; }
 
 message MessageAttachment {
-  // todo: deprecated
-  int64 message_id = 1;
+  // was message id
+  reserved 1;
+
+  // ID
+  int64 id = 4;
 
   oneof attachment {
     MessageAttachmentExternalTask external_task = 2;
@@ -649,6 +652,7 @@ message UpdateMessageAttachment {
   MessageAttachment attachment = 1;
   int64 message_id = 2;
   Peer peer_id = 3;
+  int64 chat_id = 50;
 }
 
 message UpdateReaction { Reaction reaction = 1; }
