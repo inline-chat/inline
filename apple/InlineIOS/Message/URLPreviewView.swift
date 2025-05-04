@@ -111,7 +111,6 @@ class URLPreviewView: UIView {
 
     NSLayoutConstraint.deactivate(constraints)
 
-    
     var imageConstraints: [NSLayoutConstraint] = []
     let maxHeight: CGFloat = 200
     var isPortrait = false
@@ -150,7 +149,7 @@ class URLPreviewView: UIView {
 
       // Image view
       imageView.topAnchor.constraint(equalTo: descriptionLabel.bottomAnchor, constant: verticalPadding),
-      imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
+      imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
       imageView.widthAnchor.constraint(equalToConstant: imageWidth),
       imageView.heightAnchor.constraint(equalToConstant: imageHeight),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
