@@ -8,6 +8,8 @@ import { twilio } from "@in/server/libs/twilio"
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
+import { prelude } from "@in/server/libs/prelude"
+import parsePhoneNumber from "libphonenumber-js"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -16,6 +18,7 @@ export const Input = Type.Object({
 export const Response = Type.Object({
   existingUser: Type.Boolean(),
   phoneNumber: Type.String(),
+  formattedPhoneNumber: Type.String(),
 })
 
 export const handler = async (
@@ -24,29 +27,25 @@ export const handler = async (
 ): Promise<Static<typeof Response>> => {
   try {
     // verify formatting
-    if (isValidPhoneNumber(input.phoneNumber) === false) {
+    // if (isValidPhoneNumber(input.phoneNumber) === false) {
+    //   throw new InlineError(InlineError.ApiError.PHONE_INVALID)
+    // }
+
+    // parse phone number
+    const phoneNumber = parsePhoneNumber(input.phoneNumber)
+    if (!phoneNumber?.isValid()) {
       throw new InlineError(InlineError.ApiError.PHONE_INVALID)
     }
 
-    // validate phone number via twilio lookups
-    const lookup = await twilio.lookups.phoneNumbers(input.phoneNumber)
-    if (lookup.valid === false) {
-      throw new InlineError(InlineError.ApiError.PHONE_INVALID)
-    }
-
-    // lookup.phone_number is in E.164 format
+    let formattedPhoneNumber = phoneNumber.number
 
     // send sms code
-    let response = await twilio.verify.sendVerificationToken(lookup.phone_number, "sms")
+    let response = await prelude.sendCode(formattedPhoneNumber)
 
-    if (response?.status !== "pending") {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
-    }
-
-    Log.shared.debug("sending sms code to", { phoneNumber: lookup.phone_number })
+    Log.shared.debug("sending sms code to", { phoneNumber: formattedPhoneNumber })
 
     let existingUser = await db.query.users.findFirst({
-      where: eq(users.phoneNumber, lookup.phone_number),
+      where: eq(users.phoneNumber, formattedPhoneNumber),
       columns: {
         id: true,
         phoneNumber: true,
@@ -56,7 +55,9 @@ export const handler = async (
     return {
       existingUser: !!existingUser,
       // pass back valid formatting for number
-      phoneNumber: lookup.phone_number,
+      phoneNumber: formattedPhoneNumber,
+      // human readable phone number
+      formattedPhoneNumber: phoneNumber.formatInternational(),
     }
   } catch (error) {
     Log.shared.error("Failed to send sms code", error)
