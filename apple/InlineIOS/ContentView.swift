@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct ContentView: View {
@@ -70,8 +71,12 @@ extension ContentView {
   func sheetContent(for destination: Navigation.Destination) -> some View {
     switch destination {
       case let .createThread(spaceId):
-        CreateThread(spaceId: spaceId)
-          .presentationCornerRadius(18)
+        CreateChatView(spaceId: spaceId) { chatId in
+          nav.push(.chat(peer: .thread(id: chatId)))
+        }
+        
+      
+        .presentationCornerRadius(18)
 
       case .createSpace:
         CreateSpace()

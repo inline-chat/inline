@@ -1,4 +1,6 @@
 import AppKit
+import InlineKit
+import InlineUI
 import SwiftUI
 
 class NewChatViewController: NSViewController {
@@ -15,8 +17,10 @@ class NewChatViewController: NSViewController {
   }
 
   private lazy var swiftUIView: some View =
-    NewChatSwiftUI(spaceId: self.dependencies.nav.currentSpaceId ?? 0)
-      .environment(dependencies: dependencies)
+    CreateChatView(spaceId: self.dependencies.nav.currentSpaceId ?? 0) { chatId in
+      self.dependencies.nav.open(.chat(peer: Peer.thread(id: chatId)))
+    }
+    .environment(dependencies: dependencies)
 
   override func loadView() {
     let controller = NSHostingController(
