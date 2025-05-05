@@ -12,6 +12,8 @@ import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
 import { ipinfo } from "@in/server/libs/ipinfo"
 import { generateToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
+import parsePhoneNumber from "libphonenumber-js"
+import { prelude } from "@in/server/libs/prelude"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -37,20 +39,28 @@ export const handler = async (
 ): Promise<Static<typeof Response>> => {
   try {
     // verify formatting
-    if (isValidPhoneNumber(input.phoneNumber) === false) {
+    // if (isValidPhoneNumber(input.phoneNumber) === false) {
+    //   throw new InlineError(InlineError.ApiError.PHONE_INVALID)
+    // }
+
+    // parse phone number
+    const phoneNumber = parsePhoneNumber(input.phoneNumber)
+    if (!phoneNumber?.isValid()) {
       throw new InlineError(InlineError.ApiError.PHONE_INVALID)
     }
 
-    // send sms code
-    let response = await twilio.verify.checkVerificationToken(input.phoneNumber, input.code)
+    let formattedPhoneNumber = phoneNumber.number
 
-    if (response?.status !== "approved" || response?.valid === false || !response.to) {
+    // send sms code
+    let response = await prelude.checkCode(formattedPhoneNumber, input.code)
+
+    if (response?.status !== "success") {
       throw new InlineError(InlineError.ApiError.SMS_CODE_INVALID)
     }
 
     // Formatted in E.164 format. It's important to use this format for phone numbers.
     // Otherwise, we'll endup with duplicates.
-    const phoneNumber = response.to
+    // const phoneNumber = response.to
 
     // make session
     let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
@@ -68,7 +78,7 @@ export const handler = async (
     let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? undefined : undefined
 
     // create or fetch user by email
-    let user = await getUserByPhoneNumber(phoneNumber)
+    let user = await getUserByPhoneNumber(formattedPhoneNumber)
 
     if (!user) {
       Log.shared.error("Failed to verify sms code", { phoneNumber })

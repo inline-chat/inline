@@ -23,6 +23,8 @@ export const R2_SECRET_ACCESS_KEY = process.env["R2_SECRET_ACCESS_KEY"] as strin
 export const R2_BUCKET = process.env["R2_BUCKET"] as string
 export const R2_ENDPOINT = process.env["R2_ENDPOINT"] as string
 
+export const PRELUDE_API_TOKEN = process.env["PRELUDE_API_TOKEN"] as string
+
 // OPTIONAL
 export const IPINFO_TOKEN = process.env["IPINFO_TOKEN"]
 export const OPENAI_API_KEY = process.env["OPENAI_API_KEY"]
@@ -46,6 +48,7 @@ const requiredProductionVariables = [
   "R2_SECRET_ACCESS_KEY",
   "R2_BUCKET",
   "R2_ENDPOINT",
+  "PRELUDE_API_TOKEN",
 ]
 
 for (const variable of requiredProductionVariables) {

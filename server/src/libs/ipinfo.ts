@@ -29,7 +29,7 @@ export const ipinfo = async (ip: string): Promise<IPInfoResponse | undefined> =>
   }
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 3000)
+  const timeout = setTimeout(() => controller.abort(), 1500)
 
   try {
     let result = await fetch(`https://ipinfo.io/${ip}?token=${IPINFO_TOKEN}`, {
