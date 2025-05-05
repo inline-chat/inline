@@ -72,6 +72,24 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 }
 
+public extension Chat {
+  var peerId: InlineProtocol.Peer {
+    if let peerUserId {
+      .with { $0.user.userID = peerUserId }
+    } else {
+      .with { $0.chat.chatID = id }
+    }
+  }
+
+  var inputPeerId: InlineProtocol.InputPeer {
+    if let peerUserId {
+      .with { $0.user.userID = peerUserId }
+    } else {
+      .with { $0.chat.chatID = id }
+    }
+  }
+}
+
 // MARK: - Preview
 
 #if DEBUG
@@ -168,6 +186,28 @@ public extension Chat {
           // Fetch thread chat
           try Chat.filter(Column("id") == id).fetchOne(db)
       }
+    }
+  }
+}
+
+public extension Chat {
+  /// Deletes this chat and its dialog from the local database.
+  /// - Throws: Any database error.
+  @discardableResult
+  func deleteFromLocalDatabase() async throws {
+    try await AppDatabase.shared.dbWriter.write { db in
+
+      var chat = self
+      chat.lastMsgId = nil
+      try chat.save(db)
+
+      // Delete all messages for this chat (should be handled by cascade, but explicit for clarity)
+      try Message.filter(Column("chatId") == self.id).deleteAll(db)
+      // Delete the dialog for this chat (by peerId)
+      let dialogId = Dialog.getDialogId(peerId: self.peerId.toPeer())
+      try Dialog.filter(Column("id") == dialogId).deleteAll(db)
+      // Delete the chat itself
+      try Chat.filter(Column("id") == self.id).deleteAll(db)
     }
   }
 }

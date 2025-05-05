@@ -175,6 +175,9 @@ public extension Realtime {
         case let .getSpaceMembers(result):
           try await handleResult_getSpaceMembers(result)
 
+        case .deleteChat:
+          try await handleResult_deleteChat()
+
         default:
           break
       }
@@ -274,5 +277,9 @@ public extension Realtime {
       }
     }
     log.trace("getSpaceMembers saved")
+  }
+
+  private func handleResult_deleteChat() async throws {
+    log.trace("deleteChat done")
   }
 }
