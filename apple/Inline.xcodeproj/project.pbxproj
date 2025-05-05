@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B77EE8082DC91CFD00C42B9E /* iPhoneNumberField in Frameworks */ = {isa = PBXBuildFile; productRef = B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */; };
 		B7C0676B2DB7F44900EAADA4 /* iMessageUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; };
 		B7C0676C2DB7F44900EAADA4 /* iMessageUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
@@ -136,6 +137,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C3AEE6AC2D4FCDD0005D1179 /* NukeUI in Frameworks */,
+				B77EE8082DC91CFD00C42B9E /* iPhoneNumberField in Frameworks */,
 				C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */,
 				C3AE72D02D1B0ED0009F70D8 /* ContextMenuAuxiliaryPreview in Frameworks */,
 				C3AEE6AA2D4FCDC9005D1179 /* Nuke in Frameworks */,
@@ -275,6 +277,7 @@
 				C3AEE6AB2D4FCDD0005D1179 /* NukeUI */,
 				C3C1F2C22D539F550039BCA8 /* NukeExtensions */,
 				C37F343F2D5A4D4800D7D7CC /* MCEmojiPicker */,
+				B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -367,6 +370,7 @@
 				CD4D56CB2D2D4393006072AE /* XCRemoteSwiftPackageReference "Throttler" */,
 				CDB123D32D3E8066001AFC1A /* XCRemoteSwiftPackageReference "Nuke" */,
 				C37F343E2D5A4D4800D7D7CC /* XCRemoteSwiftPackageReference "MCEmojiPicker" */,
+				B77EE8062DC91CFD00C42B9E /* XCRemoteSwiftPackageReference "iPhoneNumberField" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -993,6 +997,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		B77EE8062DC91CFD00C42B9E /* XCRemoteSwiftPackageReference "iPhoneNumberField" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/MojtabaHs/iPhoneNumberField.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.10.4;
+			};
+		};
 		C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/getsentry/sentry-cocoa";
@@ -1068,6 +1080,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B77EE8062DC91CFD00C42B9E /* XCRemoteSwiftPackageReference "iPhoneNumberField" */;
+			productName = iPhoneNumberField;
+		};
 		C35092C92CAEA7DB00AE3E23 /* Sentry */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;

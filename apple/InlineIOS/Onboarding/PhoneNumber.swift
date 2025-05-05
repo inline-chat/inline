@@ -1,4 +1,5 @@
 import InlineKit
+import iPhoneNumberField
 import SwiftUI
 
 struct PhoneNumber: View {
@@ -22,7 +23,10 @@ struct PhoneNumber: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       AnimatedLabel(animate: $animate, text: "Enter your phone number")
-      TextField(placeHolder, text: $phoneNumber)
+      iPhoneNumberField("+0 0000 000000", text: $phoneNumber)
+        .flagHidden(false)
+        .flagSelectable(true)
+        .prefixHidden(false)
         .focused($isFocused)
         .keyboardType(.phonePad)
         .textInputAutocapitalization(.never)
@@ -75,14 +79,22 @@ struct PhoneNumber: View {
   }
 
   private let phoneRegex = "^\\+?[1-9]\\d{1,14}$"
+  private let minPhoneLength = 10 // Adjust as needed for your use case
 
   private func validateInput() {
-    errorMsg = ""
     let phonePredicate = NSPredicate(format: "SELF MATCHES %@", phoneRegex)
-    isInputValid = !phoneNumber.isEmpty && phonePredicate.evaluate(with: phoneNumber)
+
+    let digits = phoneNumber.filter(\.isNumber)
+    isInputValid = !phoneNumber.isEmpty && phonePredicate.evaluate(with: phoneNumber) && digits.count >= minPhoneLength
   }
 
   func submit() {
+    validateInput()
+    if !isInputValid {
+      OnboardingUtils.shared.showPhoneNumberError(errorMsg: $errorMsg)
+      return
+    }
+    errorMsg = ""
     Task {
       do {
         formState.startLoading()
