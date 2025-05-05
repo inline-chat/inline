@@ -178,6 +178,11 @@ class ComposeEmbedViewContent: UIView {
       if message.hasUnsupportedTypes {
         imageIconView.isHidden = true
         messageLabel.text = "Unsupported message"
+      } else if message.isSticker == true {
+        let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+        imageIconView.image = UIImage(systemName: "face.smiling", withConfiguration: config)
+        imageIconView.isHidden = false
+        messageLabel.text = "Sticker"
       } else if message.hasPhoto, message.hasText {
         imageIconView.isHidden = false
         messageLabel.text = message.text
