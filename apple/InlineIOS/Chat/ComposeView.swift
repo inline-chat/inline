@@ -516,6 +516,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         textView.text = message.message.text
         textView.showPlaceholder(false)
         buttonAppear()
+        DispatchQueue.main.async { [weak self] in
+          self?.updateHeight()
+        }
       }
     }
 
