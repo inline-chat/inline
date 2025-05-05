@@ -1,5 +1,5 @@
 {
-  "originHash" : "d2135d1e3d2f3c452515b17685dfcaab135cab0982a131427038d9f051a12e53",
+  "originHash" : "b76ca3a0768d854ede487b0ba69f9b122ca88692d9a1344fd8c21401e5650dd8",
   "pins" : [
     {
       "identity" : "contextmenuauxiliarypreview",
@@ -47,6 +47,15 @@
       }
     },
     {
+      "identity" : "iphonenumberfield",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/MojtabaHs/iPhoneNumberField.git",
+      "state" : {
+        "revision" : "cd961621559393c5220c6c955690ecc52318e753",
+        "version" : "0.10.4"
+      }
+    },
+    {
       "identity" : "keychain-swift",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/evgenyneu/keychain-swift",
@@ -80,6 +89,15 @@
       "state" : {
         "revision" : "0ead44350d2737db384908569c012fe67c421e4d",
         "version" : "12.8.0"
+      }
+    },
+    {
+      "identity" : "phonenumberkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/marmelroy/PhoneNumberKit",
+      "state" : {
+        "revision" : "c107075aa8d394be7aced273a46e944afe8b321b",
+        "version" : "3.8.0"
       }
     },
     {
