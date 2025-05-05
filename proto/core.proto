@@ -207,6 +207,38 @@ message Reaction {
   int64 date = 5;
 }
 
+message Member {
+  enum Role {
+    OWNER = 0;
+    ADMIN = 1;
+    MEMBER = 2;
+  }
+
+  int64 id = 1;
+  int64 space_id = 2;
+  int64 user_id = 3;
+  optional Role role = 4;
+
+  // Date of joining
+  int64 date = 5;
+}
+
+message Space {
+  // ID
+  int64 id = 1;
+
+  // Name of the space
+  string name = 2;
+}
+
+message ChatParticipant {
+  // User ID
+  int64 user_id = 1;
+
+  // Date of joining
+  int64 date = 2;
+}
+
 // Add reaction input
 message AddReactionInput {
   // Emoji of the reaction
@@ -452,6 +484,7 @@ enum Method {
   DELETE_REACTION = 7;
   EDIT_MESSAGE = 8;
   CREATE_CHAT = 9;
+  GET_SPACE_MEMBERS = 10;
 }
 
 message RpcCall {
@@ -466,6 +499,7 @@ message RpcCall {
     DeleteReactionInput deleteReaction = 8;
     EditMessageInput editMessage = 9;
     CreateChatInput createChat = 10;
+    GetSpaceMembersInput getSpaceMembers = 11;
   }
 }
 
@@ -482,6 +516,7 @@ message RpcResult {
     DeleteReactionResult deleteReaction = 8;
     EditMessageResult editMessage = 9;
     CreateChatResult createChat = 10;
+    GetSpaceMembersResult getSpaceMembers = 11;
   }
 }
 
@@ -594,6 +629,14 @@ message CreateChatResult {
   Dialog dialog = 2;
 }
 
+message GetSpaceMembersInput { int64 space_id = 1; }
+
+message GetSpaceMembersResult {
+  repeated Member members = 1;
+  repeated User users = 2;
+}
+
+/// ------------------------------
 // Updates Subsystem
 message Update {
   reserved 1, 2, 3;
