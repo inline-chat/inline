@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import InlineProtocol
+import Logger
 
 public struct Attachment: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
@@ -62,11 +63,21 @@ public extension Attachment {
     if let attachmentType = attachment.attachment {
       switch attachmentType {
         case let .externalTask(externalTask):
-          externalTaskId = externalTask.id
+          do {
+            externalTaskId = externalTask.id
+          } catch {
+            Log.shared.error("Failed to assign externalTaskId: \(error)")
+            throw error
+          }
         case let .urlPreview(urlPreviewProto):
-          // Save the UrlPreview and use its DB id
-          let savedUrlPreview = try UrlPreview.save(db, linkEmbed: urlPreviewProto)
-          urlPreviewId = savedUrlPreview.id
+          do {
+            // Save the UrlPreview and use its DB id
+            let savedUrlPreview = try UrlPreview.save(db, linkEmbed: urlPreviewProto)
+            urlPreviewId = savedUrlPreview.id
+          } catch {
+            Log.shared.error("Failed to save UrlPreview: \(error)")
+            throw error
+          }
         default:
           break
       }
@@ -79,6 +90,12 @@ public extension Attachment {
       attachmentId: attachment.id
     )
 
+    if let attachmentId = attachment.attachmentId {
+      if let existing = try Attachment.filter(Column("attachmentId") == attachmentId).fetchOne(db) {
+        print("existing: \(existing)")
+        return existing
+      }
+    }
     try attachment.save(db)
 
     return attachment
