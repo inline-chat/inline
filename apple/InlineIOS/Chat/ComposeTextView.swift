@@ -92,10 +92,27 @@ class ComposeTextView: UITextView {
   override func paste(_ sender: Any?) {
     if UIPasteboard.general.image != nil {
       composeView?.handlePastedImage()
+    } else if let string = UIPasteboard.general.string {
+      // Insert plain text only
+      let range = selectedRange
+      let newText = (text as NSString).replacingCharacters(in: range, with: string)
+      text = newText
+      // Reset attributes
+      fixFontSizeAfterStickerInsertion()
+      showPlaceholder(text.isEmpty)
+      composeView?.updateHeight()
+      if !text.isEmpty {
+        composeView?.buttonAppear()
+      }
     } else {
       super.paste(sender)
+      fixFontSizeAfterStickerInsertion()
+      showPlaceholder(text.isEmpty)
+      composeView?.updateHeight()
+      if !text.isEmpty {
+        composeView?.buttonAppear()
+      }
     }
-    composeView?.updateHeight()
   }
 
   private func fixFontSizeAfterStickerInsertion() {
