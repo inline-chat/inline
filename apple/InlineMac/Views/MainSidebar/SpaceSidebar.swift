@@ -47,14 +47,10 @@ struct SpaceSidebar: View {
   func threadItem(_ chat: Chat, _ item: SpaceChatItem) -> some View {
     let peerId: Peer = .thread(id: chat.id)
 
-    SidebarItem(
-      type: .chat(chat),
+    SidebarThreadItem(
+      chat: chat,
       dialog: item.dialog,
       lastMessage: item.message,
-      selected: nav.currentRoute == .chat(peer: peerId),
-      onPress: {
-        nav.open(.chat(peer: peerId))
-      },
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
