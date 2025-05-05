@@ -5,6 +5,7 @@ import { styleText } from "node:util"
 const isProd = process.env.NODE_ENV === "production"
 
 export enum LogLevel {
+  NONE = -1,
   ERROR = 0,
   WARN = 1,
   INFO = 2,
@@ -15,6 +16,7 @@ export enum LogLevel {
 // Global log level configs
 const productionDefaultLogLevel = LogLevel.WARN
 const developmentDefaultLogLevel = LogLevel.DEBUG
+const testDefaultLogLevel = LogLevel.NONE
 
 // scope -> log level
 const globalLogLevel: Record<string, LogLevel> = {

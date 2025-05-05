@@ -13,7 +13,7 @@ export function encodeMember(member: DbMember): Member {
   } else if (member.role === "owner") {
     protocolRole = Member_Role.OWNER
   } else {
-    protocolRole = Member_Role.UNKNOWN
+    protocolRole = Member_Role.MEMBER
   }
 
   return {

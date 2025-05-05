@@ -34,6 +34,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case editMessage // = 8
   case createChat // = 9
   case getSpaceMembers // = 10
+  case deleteChat // = 11
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -53,6 +54,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 8: self = .editMessage
     case 9: self = .createChat
     case 10: self = .getSpaceMembers
+    case 11: self = .deleteChat
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -70,6 +72,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .editMessage: return 8
     case .createChat: return 9
     case .getSpaceMembers: return 10
+    case .deleteChat: return 11
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -87,6 +90,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .editMessage,
     .createChat,
     .getSpaceMembers,
+    .deleteChat,
   ]
 
 }
@@ -1770,6 +1774,14 @@ public struct RpcCall: Sendable {
     set {input = .getSpaceMembers(newValue)}
   }
 
+  public var deleteChat: DeleteChatInput {
+    get {
+      if case .deleteChat(let v)? = input {return v}
+      return DeleteChatInput()
+    }
+    set {input = .deleteChat(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -1783,6 +1795,7 @@ public struct RpcCall: Sendable {
     case editMessage(EditMessageInput)
     case createChat(CreateChatInput)
     case getSpaceMembers(GetSpaceMembersInput)
+    case deleteChat(DeleteChatInput)
 
   }
 
@@ -1878,6 +1891,14 @@ public struct RpcResult: Sendable {
     set {result = .getSpaceMembers(newValue)}
   }
 
+  public var deleteChat: DeleteChatResult {
+    get {
+      if case .deleteChat(let v)? = result {return v}
+      return DeleteChatResult()
+    }
+    set {result = .deleteChat(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -1891,6 +1912,7 @@ public struct RpcResult: Sendable {
     case editMessage(EditMessageResult)
     case createChat(CreateChatResult)
     case getSpaceMembers(GetSpaceMembersResult)
+    case deleteChat(DeleteChatResult)
 
   }
 
@@ -2836,6 +2858,37 @@ public struct LastOnline: Sendable {
   fileprivate var _date: Int64? = nil
 }
 
+public struct DeleteChatInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public struct DeleteChatResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 extension Method: SwiftProtobuf._ProtoNameProviding {
@@ -2851,6 +2904,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     8: .same(proto: "EDIT_MESSAGE"),
     9: .same(proto: "CREATE_CHAT"),
     10: .same(proto: "GET_SPACE_MEMBERS"),
+    11: .same(proto: "DELETE_CHAT"),
   ]
 }
 
@@ -5319,6 +5373,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     9: .same(proto: "editMessage"),
     10: .same(proto: "createChat"),
     11: .same(proto: "getSpaceMembers"),
+    12: .same(proto: "deleteChat"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -5458,6 +5513,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .getSpaceMembers(v)
         }
       }()
+      case 12: try {
+        var v: DeleteChatInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .deleteChat(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .deleteChat(v)
+        }
+      }()
       default: break
       }
     }
@@ -5512,6 +5580,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .getSpaceMembers(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
     }()
+    case .deleteChat?: try {
+      guard case .deleteChat(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -5539,6 +5611,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     9: .same(proto: "editMessage"),
     10: .same(proto: "createChat"),
     11: .same(proto: "getSpaceMembers"),
+    12: .same(proto: "deleteChat"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -5678,6 +5751,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
           self.result = .getSpaceMembers(v)
         }
       }()
+      case 12: try {
+        var v: DeleteChatResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .deleteChat(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .deleteChat(v)
+        }
+      }()
       default: break
       }
     }
@@ -5731,6 +5817,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     case .getSpaceMembers?: try {
       guard case .getSpaceMembers(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+    }()
+    case .deleteChat?: try {
+      guard case .deleteChat(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
     }()
     case nil: break
     }
@@ -7273,6 +7363,61 @@ extension LastOnline: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
 
   public static func ==(lhs: LastOnline, rhs: LastOnline) -> Bool {
     if lhs._date != rhs._date {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension DeleteChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "DeleteChatInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DeleteChatInput, rhs: DeleteChatInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension DeleteChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "DeleteChatResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DeleteChatResult, rhs: DeleteChatResult) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
