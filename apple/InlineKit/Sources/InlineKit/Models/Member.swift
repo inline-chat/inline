@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 
 public enum MemberRole: String, Codable, Hashable, Sendable {
   case owner, admin, member
@@ -72,6 +73,25 @@ public extension Member {
 }
 
 public extension Member {
+  init(from: InlineProtocol.Member) {
+    id = from.id
+    date = Date(timeIntervalSince1970: Double(from.date))
+    userId = from.userID
+    spaceId = from.spaceID
+    role = switch from.role {
+      case .owner:
+        .owner
+      case .admin:
+        .admin
+      case .member:
+        .member
+      case .UNRECOGNIZED:
+        .member
+    }
+  }
+}
+
+public extension Member {
   static func spaceChatItemRequest() -> QueryInterfaceRequest<SpaceChatItem> {
     including(
       optional:
@@ -85,11 +105,13 @@ public extension Member {
     )
     .including(
       optional: Member.chat
-        .including(optional: Chat.lastMessage.including(optional: Message.from.forKey("from")
+        .including(optional: Chat.lastMessage.including(
+          optional: Message.from.forKey("from")
             .including(
               all: User.photos
                 .forKey("profilePhoto")
-            )))
+            )
+        ))
     )
     .including(optional: Member.dialog)
     .asRequest(of: SpaceChatItem.self)
