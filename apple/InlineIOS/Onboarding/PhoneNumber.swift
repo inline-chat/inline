@@ -9,9 +9,9 @@ struct PhoneNumber: View {
   @State private var animate: Bool = false
   @State var errorMsg: String = ""
   @FormState var formState
-  @State private var isInputValid: Bool = false
 
   private var placeHolder: String = "+1 555 555 5555"
+  private let minPhoneLength = 10
 
   @EnvironmentObject var nav: OnboardingNavigation
   @EnvironmentObject var api: ApiClient
@@ -23,7 +23,7 @@ struct PhoneNumber: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       AnimatedLabel(animate: $animate, text: "Enter your phone number")
-      iPhoneNumberField("+0 0000 000000", text: $phoneNumber)
+      iPhoneNumberField(placeHolder, text: $phoneNumber)
         .flagHidden(false)
         .flagSelectable(true)
         .prefixHidden(false)
@@ -42,13 +42,6 @@ struct PhoneNumber: View {
             animate = newValue
           }
         }
-        .onChange(of: isInputValid) {
-          DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            withAnimation {
-              isInputValid = true
-            }
-          }
-        }
       Text(errorMsg)
         .font(.callout)
         .foregroundColor(.red)
@@ -63,35 +56,23 @@ struct PhoneNumber: View {
       .frame(maxWidth: .infinity)
       .padding(.horizontal, OnboardingUtils.shared.hPadding)
       .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-      .disabled(!isInputValid || formState.isLoading)
-      .opacity((!isInputValid || formState.isLoading) ? 0.5 : 1)
+      .disabled(phoneNumber.count < minPhoneLength || formState.isLoading)
+      .opacity((phoneNumber.count < minPhoneLength || formState.isLoading) ? 0.5 : 1)
     }
     .onAppear {
       if let prevPhoneNumber {
         phoneNumber = prevPhoneNumber
       }
       isFocused = true
-      validateInput()
     }
     .onChange(of: phoneNumber) { _, _ in
-      validateInput()
+      // Removed validateInput()
     }
-  }
-
-  private let phoneRegex = "^\\+?[1-9]\\d{1,14}$"
-  private let minPhoneLength = 10 // Adjust as needed for your use case
-
-  private func validateInput() {
-    let phonePredicate = NSPredicate(format: "SELF MATCHES %@", phoneRegex)
-
-    let digits = phoneNumber.filter(\.isNumber)
-    isInputValid = !phoneNumber.isEmpty && phonePredicate.evaluate(with: phoneNumber) && digits.count >= minPhoneLength
   }
 
   func submit() {
-    validateInput()
-    if !isInputValid {
-      OnboardingUtils.shared.showPhoneNumberError(errorMsg: $errorMsg)
+    if phoneNumber.count < minPhoneLength {
+      errorMsg = "Phone number must be at least \(minPhoneLength) digits."
       return
     }
     errorMsg = ""
@@ -104,9 +85,8 @@ struct PhoneNumber: View {
         formState.reset()
         nav.push(.phoneNumberCode(phoneNumber: phoneNumber))
       } catch let error as APIError {
-        OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isEmail: false)
+        OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isPhoneNumber: true)
         formState.reset()
-        isInputValid = false
       }
     }
   }
