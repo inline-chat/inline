@@ -97,7 +97,7 @@ public struct InitialsCircle: View, Equatable {
         } else if let symbol {
           Image(systemName: symbol)
             .foregroundColor(foregroundColor.opacity(1.0))
-            .font(.system(size: size * 0.35, weight: .regular))
+            .font(.system(size: size * 0.46, weight: .regular))
         } else {
           Text(initials)
             .foregroundColor(foregroundColor.opacity(1.0))
