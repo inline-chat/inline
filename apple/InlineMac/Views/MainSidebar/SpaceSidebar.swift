@@ -8,10 +8,19 @@ struct SpaceSidebar: View {
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
   @Environment(\.keyMonitor) var keyMonitor
   @Environment(\.openWindow) var openWindow
+  @Environment(\.realtime) var realtime
 
   @State var searchQuery: String = ""
 
   var spaceId: Int64
+
+  enum Tab: String, Hashable {
+    case archive
+    case chats
+    case members
+  }
+
+  @State private var tab: Tab = .chats
 
   init(spaceId: Int64) {
     self.spaceId = spaceId
@@ -21,11 +30,17 @@ struct SpaceSidebar: View {
   }
 
   var items: [SpaceChatItem] {
-    (fullSpace.chats + fullSpace.memberChats).sorted(
+    let items = (fullSpace.chats + fullSpace.memberChats).sorted(
       by: {
         ($0.message?.date ?? $0.chat?.date ?? Date()) > ($1.message?.date ?? $1.chat?.date ?? Date())
       }
     )
+
+    if tab == .archive {
+      return items.filter { $0.dialog.archived == true }
+    } else {
+      return items.filter { $0.dialog.archived != true }
+    }
   }
 
   @ViewBuilder
@@ -70,15 +85,23 @@ struct SpaceSidebar: View {
 
   var body: some View {
     List {
-      ForEach(items, id: \.peerId) { item in
-        if let user = item.user {
-          userItem(user, item)
-
-        } else if let chat = item.chat {
-          threadItem(chat, item)
-
-        } else {
-          EmptyView()
+      if tab == .archive || tab == .chats {
+        ForEach(items, id: \ .peerId) { item in
+          if let user = item.user {
+            userItem(user, item)
+          } else if let chat = item.chat {
+            threadItem(chat, item)
+          } else {
+            EmptyView()
+          }
+        }
+      } else if tab == .members {
+        ForEach(fullSpace.memberChats) { item in
+          if let user = item.user {
+            userItem(user, item)
+          } else {
+            EmptyView()
+          }
         }
       }
     }
@@ -86,11 +109,18 @@ struct SpaceSidebar: View {
     .listRowBackground(Color.clear)
     .listStyle(.sidebar)
     .safeAreaInset(
+      edge: .bottom,
+      content: {
+        tabs
+          .padding(.top, -8)
+      }
+    )
+
+    .safeAreaInset(
       edge: .top,
       content: {
         VStack(alignment: .leading, spacing: 0) {
           topArea
-
           SidebarSearchBar(text: $searchQuery)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -103,17 +133,22 @@ struct SpaceSidebar: View {
       }
     )
     .task {
-      Task {
+      Task.detached {
         do {
           try await data.getDialogs(spaceId: spaceId)
         } catch {}
       }
-
-      Task {
+      Task.detached {
         do {
           // this one gets members
           try await data.getSpace(spaceId: spaceId)
         }
+      }
+      Task.detached {
+        try await realtime
+          .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+            $0.spaceID = spaceId
+          }))
       }
     }
     .onAppear {
@@ -127,6 +162,27 @@ struct SpaceSidebar: View {
   }
 
   // MARK: - Views
+
+  @ViewBuilder
+  var tabs: some View {
+    SidebarTabView<Tab>(
+      tabs: [
+        .init(value: .archive, systemImage: "archivebox.fill", accessibilityLabel: "Archive"),
+
+        .init(
+          value: .chats,
+          systemImage: "bubble.left.and.bubble.right.fill",
+          fontSize: 15,
+          accessibilityLabel: "Chats"
+        ),
+
+        .init(value: .members, systemImage: "person.2.fill", accessibilityLabel: "Members"),
+      ],
+      selected: tab,
+      showDivider: true,
+      onSelect: { tab = $0 }
+    )
+  }
 
   @ViewBuilder
   var topArea: some View {

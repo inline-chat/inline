@@ -23,7 +23,7 @@ struct HomeSidebar: View {
     }
   }
 
-  enum Tab: String {
+  enum Tab: String, Hashable {
     case inbox
     case archive
     case search
@@ -218,66 +218,16 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var tabs: some View {
-    ZStack(alignment: .bottom) {
-//      Rectangle()
-//        .fill(.ultraThinMaterial)
-//        .frame(height: 48)
-//        .mask {
-//          LinearGradient(
-//            colors: [Color.black, Color.black, Color.black, Color.black.opacity(0)],
-//            startPoint: .bottom,
-//            endPoint: .top
-//          )
-//        }
-//        .overlay {
-//          LinearGradient(
-//            colors: [Color.white.opacity(0.2), Color.white.opacity(0)],
-//            startPoint: .bottom,
-//            endPoint: .top
-//          )
-//        }
-
-      HStack(spacing: 0) {
-        Spacer()
-
-        Button(action: {
-          // Archive tab
-          tab = .archive
-        }) {
-          let isActive = tab == .archive
-          Image(systemName: "archivebox.fill")
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(isActive ? Color.accent : Color.gray.opacity(0.5))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 3)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-
-        Button(action: {
-          // Inbox tab
-          tab = .inbox
-        }) {
-          let isActive = tab == .inbox
-          // Image(systemName: "tray.fill")
-          Image(systemName: "bubble.left.and.bubble.right.fill")
-            .font(.system(size: 15, weight: .regular))
-            .foregroundStyle(isActive ? Color.accent : Color.gray.opacity(0.5))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 3)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-
-        Spacer()
-      }
-      .frame(height: 42)
-      .overlay(alignment: .top) {
-        if !isAtBottom {
-          Divider().opacity(0.4)
-        }
-      }
-    }
+    SidebarTabView<Tab>(
+      tabs: [
+        .init(value: .archive, systemImage: "archivebox.fill"),
+        .init(value: .inbox, systemImage: "bubble.left.and.bubble.right.fill", fontSize: 15),
+      ],
+      selected: tab,
+      showDivider: !isAtBottom,
+      onSelect: { tab = $0 }
+    )
+    .padding(.top, -8)
   }
 
   @ViewBuilder
