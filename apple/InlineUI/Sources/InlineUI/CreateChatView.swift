@@ -2,13 +2,14 @@ import InlineKit
 import InlineProtocol
 import SwiftUI
 
-struct NewChatSwiftUI: View {
+public struct CreateChatView: View {
   @Environment(\.appDatabase) var db
   @Environment(\.realtime) var realtime
-  @EnvironmentObject var nav: Nav
+
   @FormState var formState
 
   private let spaceId: Int64
+  let onChatCreated: (Int64) -> Void
 
   @State private var chatTitle = ""
   @State private var selectedEmoji: String? = nil
@@ -22,17 +23,18 @@ struct NewChatSwiftUI: View {
   // Space view model
   @StateObject private var spaceViewModel: FullSpaceViewModel
 
-  init(spaceId: Int64) {
+  public init(spaceId: Int64, onChatCreated: @escaping (Int64) -> Void) {
     self.spaceId = spaceId
+    self.onChatCreated = onChatCreated
     _spaceViewModel = StateObject(wrappedValue: FullSpaceViewModel(db: AppDatabase.shared, spaceId: spaceId))
   }
 
-  var body: some View {
+  public var body: some View {
     mainForm
       .formStyle(.grouped)
       .padding()
       .scrollContentBackground(.hidden)
-      .frame(width: 500, height: 600)
+      .frame(width: 400, height: 600)
       .navigationTitle("Create Group Chat")
   }
 
@@ -61,7 +63,7 @@ struct NewChatSwiftUI: View {
       prompt: Text("Enter chat title")
     )
     .textFieldStyle(.automatic)
-    .font(.system(size: 14))
+    .font(.body)
   }
 
   private var iconPicker: some View {
@@ -73,11 +75,11 @@ struct NewChatSwiftUI: View {
       }) {
         if let selectedEmoji {
           Text(selectedEmoji)
-            .font(.system(size: 18))
+            .font(.title)
             .frame(width: 28, height: 28)
         } else {
           Image(systemName: "message.fill")
-            .font(.system(size: 14))
+            .font(.body)
             .frame(width: 28, height: 28)
             .background(Circle().fill(Color.gray.opacity(0.2)))
         }
@@ -85,6 +87,9 @@ struct NewChatSwiftUI: View {
       .buttonStyle(PlainButtonStyle())
       .popover(isPresented: $showEmojiPicker) {
         emojiPickerView
+        #if os(iOS)
+        .presentationCompactAdaptation(.popover)
+        #endif
       }
     }
   }
@@ -170,12 +175,11 @@ struct NewChatSwiftUI: View {
 
       do {
         formState.startLoading()
-
         let title = chatTitle
         let emoji = selectedEmoji
         let isPublic = isPublic
         let spaceId = spaceId
-        let participants = isPublic ? [] : selectedPeople.map { $0 }
+        let participants = isPublic ? [] : selectedPeople.map(\.self)
 
         Task.detached {
           let result = try await realtime.invokeWithHandler(
@@ -193,10 +197,9 @@ struct NewChatSwiftUI: View {
           )
 
           if case let .createChat(createChatResult) = result {
-            // Navigate to the new chat using the created chat id
             DispatchQueue.main.async {
               formState.succeeded()
-              nav.open(.chat(peer: .thread(id: createChatResult.chat.id)))
+              onChatCreated(createChatResult.chat.id)
             }
           }
         }
@@ -208,6 +211,6 @@ struct NewChatSwiftUI: View {
 }
 
 #Preview {
-  NewChatSwiftUI(spaceId: 1)
+  CreateChatView(spaceId: 1) { _ in }
     .previewsEnvironment(.empty)
 }
