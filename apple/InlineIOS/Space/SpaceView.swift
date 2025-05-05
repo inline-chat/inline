@@ -21,7 +21,6 @@ struct SpaceView: View {
     }
   }
 
-  @State var openCreateThreadSheet = false
   @State var openAddMemberSheet = false
 
   var currentUserMember: Member? {
@@ -64,7 +63,7 @@ struct SpaceView: View {
         ToolbarItem(placement: .navigationBarTrailing) {
           Menu {
             Button(action: {
-              openCreateThreadSheet = true
+              nav.push(.createThread(spaceId: spaceId))
             }) {
               Label("New Chat", systemImage: "plus.message.fill")
             }
@@ -90,11 +89,6 @@ struct SpaceView: View {
           }
         }
       }
-    }
-    .sheet(isPresented: $openCreateThreadSheet) {
-      CreateThread(spaceId: spaceId)
-        .presentationBackground(.thinMaterial)
-        .presentationCornerRadius(28)
     }
     .sheet(isPresented: $openAddMemberSheet) {
       AddMember(showSheet: $openAddMemberSheet, spaceId: spaceId)
