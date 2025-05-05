@@ -603,7 +603,8 @@ class UIMessageView: UIView {
       guard let url = match.url else { return nil }
 
       let linkAttributes: [NSAttributedString.Key: Any] = [
-        .foregroundColor: outgoing ? UIColor.white.withAlphaComponent(0.9) : .systemBlue,
+        .foregroundColor: outgoing ? UIColor.white.withAlphaComponent(0.9) : ThemeManager.shared.selected
+          .primaryTextColor ?? .label,
         .underlineStyle: NSUnderlineStyle.single.rawValue,
       ]
       attributedString.addAttributes(linkAttributes, range: match.range)
