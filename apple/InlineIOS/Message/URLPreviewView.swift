@@ -5,6 +5,13 @@ import SafariServices
 import UIKit
 
 class URLPreviewView: UIView {
+  private let rectangleView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.layer.mask = CAShapeLayer()
+    return view
+  }()
+
   private let siteNameLabel = UILabel()
   private let titleLabel = UILabel()
   private let descriptionLabel = UILabel()
@@ -58,6 +65,9 @@ class URLPreviewView: UIView {
     let horizontalPadding: CGFloat = 8
     let verticalPadding: CGFloat = 6
     let interLabelSpacing: CGFloat = 4
+    let rectangleWidth: CGFloat = 4
+    let contentSpacing: CGFloat = 8
+    let cornerRadius: CGFloat = 8
 
     let theme = ThemeManager.shared.selected
     let bgColor = outgoing ? .white.withAlphaComponent(0.1) : theme.secondaryTextColor?
@@ -65,6 +75,7 @@ class URLPreviewView: UIView {
     let primaryTextColor = outgoing ? UIColor.white : (theme.primaryTextColor ?? .label)
     let secondaryTextColor = outgoing ? UIColor.white
       .withAlphaComponent(0.7) : (theme.primaryTextColor?.withAlphaComponent(0.7) ?? .secondaryLabel)
+    let rectangleColor = outgoing ? UIColor.white : (theme.accent ?? .systemBlue)
 
     siteNameLabel.text = preview.siteName
     siteNameLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
@@ -104,6 +115,8 @@ class URLPreviewView: UIView {
     }
     imageView.isUserInteractionEnabled = false
 
+    rectangleView.backgroundColor = rectangleColor
+    addSubview(rectangleView)
     addSubview(siteNameLabel)
     addSubview(titleLabel)
     addSubview(descriptionLabel)
@@ -111,7 +124,6 @@ class URLPreviewView: UIView {
 
     NSLayoutConstraint.deactivate(constraints)
 
-    var imageConstraints: [NSLayoutConstraint] = []
     let maxHeight: CGFloat = 200
     var isPortrait = false
     var imageWidth: CGFloat = maxWidth
@@ -132,24 +144,30 @@ class URLPreviewView: UIView {
       }
     }
     NSLayoutConstraint.activate([
+      // Rectangle accent line
+      rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      rectangleView.widthAnchor.constraint(equalToConstant: rectangleWidth),
+      rectangleView.topAnchor.constraint(equalTo: topAnchor),
+      rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
       // Site name label
       siteNameLabel.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
-      siteNameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
+      siteNameLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
       siteNameLabel.widthAnchor.constraint(equalToConstant: maxWidth),
 
       // Title label
       titleLabel.topAnchor.constraint(equalTo: siteNameLabel.bottomAnchor, constant: interLabelSpacing),
-      titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
+      titleLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
       titleLabel.widthAnchor.constraint(equalToConstant: maxWidth),
 
       // Description label
       descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: interLabelSpacing),
-      descriptionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
+      descriptionLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
       descriptionLabel.widthAnchor.constraint(equalToConstant: maxWidth),
 
       // Image view
       imageView.topAnchor.constraint(equalTo: descriptionLabel.bottomAnchor, constant: verticalPadding),
-      imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+      imageView.centerXAnchor.constraint(equalTo: centerXAnchor, constant: rectangleWidth / 2),
       imageView.widthAnchor.constraint(equalToConstant: imageWidth),
       imageView.heightAnchor.constraint(equalToConstant: imageHeight),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
@@ -160,8 +178,21 @@ class URLPreviewView: UIView {
     }
 
     backgroundColor = bgColor
-    layer.cornerRadius = 8
+    layer.cornerRadius = cornerRadius
     layer.masksToBounds = true
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    // Add rounded corners to the accent line
+    let path = UIBezierPath(
+      roundedRect: rectangleView.bounds,
+      byRoundingCorners: [.topLeft, .bottomLeft],
+      cornerRadii: CGSize(width: 8, height: 8)
+    )
+    if let mask = rectangleView.layer.mask as? CAShapeLayer {
+      mask.path = path.cgPath
+    }
   }
 
   // Calculate image size based on available width/height (max 280x180, keep aspect ratio)
