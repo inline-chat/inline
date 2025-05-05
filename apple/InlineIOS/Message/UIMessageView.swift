@@ -436,6 +436,28 @@ class UIMessageView: UIView {
     if message.status == .sending {
       return
     }
+    let checkmark = "✔️"
+    let currentUserId = Auth.shared.getCurrentUserId() ?? 0
+    let hasCheckmark = fullMessage.reactions.contains { $0.emoji == checkmark && $0.userId == currentUserId }
+    // Heavy haptic
+    let generator = UIImpactFeedbackGenerator(style: .heavy)
+    generator.prepare()
+    generator.impactOccurred()
+    if hasCheckmark {
+      Transactions.shared.mutate(transaction: .deleteReaction(.init(
+        message: message,
+        emoji: checkmark,
+        peerId: message.peerId,
+        chatId: message.chatId
+      )))
+    } else {
+      Transactions.shared.mutate(transaction: .addReaction(.init(
+        message: message,
+        emoji: checkmark,
+        userId: currentUserId,
+        peerId: message.peerId
+      )))
+    }
   }
 
   enum StackPadding {
