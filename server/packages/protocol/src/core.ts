@@ -550,6 +550,84 @@ export interface Reaction {
     date: bigint;
 }
 /**
+ * @generated from protobuf message Member
+ */
+export interface Member {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: int64 space_id = 2;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 3;
+     */
+    userId: bigint;
+    /**
+     * @generated from protobuf field: optional Member.Role role = 4;
+     */
+    role?: Member_Role;
+    /**
+     * Date of joining
+     *
+     * @generated from protobuf field: int64 date = 5;
+     */
+    date: bigint;
+}
+/**
+ * @generated from protobuf enum Member.Role
+ */
+export enum Member_Role {
+    /**
+     * @generated from protobuf enum value: OWNER = 0;
+     */
+    OWNER = 0,
+    /**
+     * @generated from protobuf enum value: ADMIN = 1;
+     */
+    ADMIN = 1,
+    /**
+     * @generated from protobuf enum value: MEMBER = 2;
+     */
+    MEMBER = 2
+}
+/**
+ * @generated from protobuf message Space
+ */
+export interface Space {
+    /**
+     * ID
+     *
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * Name of the space
+     *
+     * @generated from protobuf field: string name = 2;
+     */
+    name: string;
+}
+/**
+ * @generated from protobuf message ChatParticipant
+ */
+export interface ChatParticipant {
+    /**
+     * User ID
+     *
+     * @generated from protobuf field: int64 user_id = 1;
+     */
+    userId: bigint;
+    /**
+     * Date of joining
+     *
+     * @generated from protobuf field: int64 date = 2;
+     */
+    date: bigint;
+}
+/**
  * Add reaction input
  *
  * @generated from protobuf message AddReactionInput
@@ -1161,6 +1239,12 @@ export interface RpcCall {
          */
         createChat: CreateChatInput;
     } | {
+        oneofKind: "getSpaceMembers";
+        /**
+         * @generated from protobuf field: GetSpaceMembersInput getSpaceMembers = 11;
+         */
+        getSpaceMembers: GetSpaceMembersInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1229,6 +1313,12 @@ export interface RpcResult {
          * @generated from protobuf field: CreateChatResult createChat = 10;
          */
         createChat: CreateChatResult;
+    } | {
+        oneofKind: "getSpaceMembers";
+        /**
+         * @generated from protobuf field: GetSpaceMembersResult getSpaceMembers = 11;
+         */
+        getSpaceMembers: GetSpaceMembersResult;
     } | {
         oneofKind: undefined;
     };
@@ -1527,6 +1617,29 @@ export interface CreateChatResult {
     dialog?: Dialog;
 }
 /**
+ * @generated from protobuf message GetSpaceMembersInput
+ */
+export interface GetSpaceMembersInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message GetSpaceMembersResult
+ */
+export interface GetSpaceMembersResult {
+    /**
+     * @generated from protobuf field: repeated Member members = 1;
+     */
+    members: Member[];
+    /**
+     * @generated from protobuf field: repeated User users = 2;
+     */
+    users: User[];
+}
+/**
+ * / ------------------------------
  * Updates Subsystem
  *
  * @generated from protobuf message Update
@@ -1836,7 +1949,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: CREATE_CHAT = 9;
      */
-    CREATE_CHAT = 9
+    CREATE_CHAT = 9,
+    /**
+     * @generated from protobuf enum value: GET_SPACE_MEMBERS = 10;
+     */
+    GET_SPACE_MEMBERS = 10
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -3307,6 +3424,194 @@ class Reaction$Type extends MessageType<Reaction> {
  */
 export const Reaction = new Reaction$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class Member$Type extends MessageType<Member> {
+    constructor() {
+        super("Member", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "role", kind: "enum", opt: true, T: () => ["Member.Role", Member_Role] },
+            { no: 5, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Member>): Member {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.spaceId = 0n;
+        message.userId = 0n;
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<Member>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Member): Member {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* int64 space_id */ 2:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 3:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* optional Member.Role role */ 4:
+                    message.role = reader.int32();
+                    break;
+                case /* int64 date */ 5:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Member, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* int64 space_id = 2; */
+        if (message.spaceId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.spaceId);
+        /* int64 user_id = 3; */
+        if (message.userId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.userId);
+        /* optional Member.Role role = 4; */
+        if (message.role !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.role);
+        /* int64 date = 5; */
+        if (message.date !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Member
+ */
+export const Member = new Member$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Space$Type extends MessageType<Space> {
+    constructor() {
+        super("Space", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Space>): Space {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.name = "";
+        if (value !== undefined)
+            reflectionMergePartial<Space>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Space): Space {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* string name */ 2:
+                    message.name = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Space, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* string name = 2; */
+        if (message.name !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.name);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Space
+ */
+export const Space = new Space$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChatParticipant$Type extends MessageType<ChatParticipant> {
+    constructor() {
+        super("ChatParticipant", [
+            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatParticipant>): ChatParticipant {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userId = 0n;
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ChatParticipant>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatParticipant): ChatParticipant {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* int64 date */ 2:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatParticipant, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.userId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.userId);
+        /* int64 date = 2; */
+        if (message.date !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatParticipant
+ */
+export const ChatParticipant = new ChatParticipant$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class AddReactionInput$Type extends MessageType<AddReactionInput> {
     constructor() {
         super("AddReactionInput", [
@@ -4481,7 +4786,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 7, name: "addReaction", kind: "message", oneof: "input", T: () => AddReactionInput },
             { no: 8, name: "deleteReaction", kind: "message", oneof: "input", T: () => DeleteReactionInput },
             { no: 9, name: "editMessage", kind: "message", oneof: "input", T: () => EditMessageInput },
-            { no: 10, name: "createChat", kind: "message", oneof: "input", T: () => CreateChatInput }
+            { no: 10, name: "createChat", kind: "message", oneof: "input", T: () => CreateChatInput },
+            { no: 11, name: "getSpaceMembers", kind: "message", oneof: "input", T: () => GetSpaceMembersInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -4554,6 +4860,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         createChat: CreateChatInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createChat)
                     };
                     break;
+                case /* GetSpaceMembersInput getSpaceMembers */ 11:
+                    message.input = {
+                        oneofKind: "getSpaceMembers",
+                        getSpaceMembers: GetSpaceMembersInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpaceMembers)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4596,6 +4908,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* CreateChatInput createChat = 10; */
         if (message.input.oneofKind === "createChat")
             CreateChatInput.internalBinaryWrite(message.input.createChat, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceMembersInput getSpaceMembers = 11; */
+        if (message.input.oneofKind === "getSpaceMembers")
+            GetSpaceMembersInput.internalBinaryWrite(message.input.getSpaceMembers, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4619,7 +4934,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 7, name: "addReaction", kind: "message", oneof: "result", T: () => AddReactionResult },
             { no: 8, name: "deleteReaction", kind: "message", oneof: "result", T: () => DeleteReactionResult },
             { no: 9, name: "editMessage", kind: "message", oneof: "result", T: () => EditMessageResult },
-            { no: 10, name: "createChat", kind: "message", oneof: "result", T: () => CreateChatResult }
+            { no: 10, name: "createChat", kind: "message", oneof: "result", T: () => CreateChatResult },
+            { no: 11, name: "getSpaceMembers", kind: "message", oneof: "result", T: () => GetSpaceMembersResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -4692,6 +5008,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         createChat: CreateChatResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createChat)
                     };
                     break;
+                case /* GetSpaceMembersResult getSpaceMembers */ 11:
+                    message.result = {
+                        oneofKind: "getSpaceMembers",
+                        getSpaceMembers: GetSpaceMembersResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpaceMembers)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4734,6 +5056,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* CreateChatResult createChat = 10; */
         if (message.result.oneofKind === "createChat")
             CreateChatResult.internalBinaryWrite(message.result.createChat, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceMembersResult getSpaceMembers = 11; */
+        if (message.result.oneofKind === "getSpaceMembers")
+            GetSpaceMembersResult.internalBinaryWrite(message.result.getSpaceMembers, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5770,6 +6095,108 @@ class CreateChatResult$Type extends MessageType<CreateChatResult> {
  * @generated MessageType for protobuf message CreateChatResult
  */
 export const CreateChatResult = new CreateChatResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceMembersInput$Type extends MessageType<GetSpaceMembersInput> {
+    constructor() {
+        super("GetSpaceMembersInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceMembersInput>): GetSpaceMembersInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceMembersInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceMembersInput): GetSpaceMembersInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceMembersInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceMembersInput
+ */
+export const GetSpaceMembersInput = new GetSpaceMembersInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceMembersResult$Type extends MessageType<GetSpaceMembersResult> {
+    constructor() {
+        super("GetSpaceMembersResult", [
+            { no: 1, name: "members", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Member },
+            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceMembersResult>): GetSpaceMembersResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.members = [];
+        message.users = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceMembersResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceMembersResult): GetSpaceMembersResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Member members */ 1:
+                    message.members.push(Member.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated User users */ 2:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceMembersResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Member members = 1; */
+        for (let i = 0; i < message.members.length; i++)
+            Member.internalBinaryWrite(message.members[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated User users = 2; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceMembersResult
+ */
+export const GetSpaceMembersResult = new GetSpaceMembersResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Update$Type extends MessageType<Update> {
     constructor() {
