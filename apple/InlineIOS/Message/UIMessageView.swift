@@ -534,9 +534,9 @@ class UIMessageView: UIView {
     NSLayoutConstraint.activate(baseConstraints + constraints)
 
     if outgoing {
-      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8).isActive = true
+      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2).isActive = true
     } else {
-      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8).isActive = true
+      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2).isActive = true
     }
   }
 

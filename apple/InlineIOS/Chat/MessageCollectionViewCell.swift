@@ -253,14 +253,14 @@ extension MessageCollectionViewCell {
       if fromOtherSender, let avatarView = avatarHostingController?.view {
         newMessageView.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: -2)
       } else {
-        newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 32)
+        newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10)
       }
     } else {
       newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
     }
 
     let trailingConstraint: NSLayoutConstraint = if isThread, !outgoing {
-      newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -32)
+      newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10)
     } else {
       newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
     }
@@ -301,7 +301,7 @@ extension MessageCollectionViewCell {
       NSLayoutConstraint.activate([
         nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
         nameLabel.heightAnchor.constraint(equalToConstant: 16),
-        nameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 42),
+        nameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
       ])
     }
   }
