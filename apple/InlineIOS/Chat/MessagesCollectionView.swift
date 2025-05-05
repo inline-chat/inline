@@ -637,7 +637,23 @@ private extension MessagesCollectionView {
       blurView.contentView.addSubview(stackView)
 
       for (index, reaction) in reactions.enumerated() {
-        let button = createReactionButton(reaction: reaction, messageIndex: indexPath.item, reactionIndex: index)
+        let button: UIButton
+        if reaction == "✔️" || reaction == "✓" {
+          button = UIButton(type: .system)
+          button.translatesAutoresizingMaskIntoConstraints = false
+          let config = UIImage.SymbolConfiguration(pointSize: 22, weight: .medium)
+          let image = UIImage(systemName: "checkmark", withConfiguration: config)?
+            .withTintColor(UIColor(hex: "#2AAC28")!, renderingMode: .alwaysOriginal)
+          button.setImage(image, for: .normal)
+          button.tag = indexPath.item * 1_000 + index
+          button.layer.cornerRadius = 19
+          button.clipsToBounds = true
+          button.addTarget(self, action: #selector(handleReactionButtonTap(_:)), for: .touchUpInside)
+          button.addTarget(self, action: #selector(buttonTouchDown(_:)), for: .touchDown)
+          button.addTarget(self, action: #selector(buttonTouchUp(_:)), for: [.touchUpOutside, .touchCancel])
+        } else {
+          button = createReactionButton(reaction: reaction, messageIndex: indexPath.item, reactionIndex: index)
+        }
         stackView.addArrangedSubview(button)
       }
 
