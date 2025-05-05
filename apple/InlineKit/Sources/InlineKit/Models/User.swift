@@ -211,6 +211,7 @@ public extension User {
     firstName = user.firstName
     lastName = user.lastName
     username = user.username
+    date = Date() // unused field
 
     if !min {
       email = user.email
