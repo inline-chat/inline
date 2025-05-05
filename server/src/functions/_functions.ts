@@ -5,6 +5,7 @@ import { addReaction } from "./messages.addReaction"
 import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
 import { createChat } from "./messages.createChat"
+import { getSpaceMembers } from "./space.getSpaceMembers"
 
 export const Functions = {
   messages: {
@@ -15,5 +16,8 @@ export const Functions = {
     deleteReaction: deleteReaction,
     editMessage: editMessage,
     createChat: createChat,
+  },
+  spaces: {
+    getSpaceMembers: getSpaceMembers,
   },
 }
