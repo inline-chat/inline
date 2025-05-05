@@ -64,7 +64,7 @@ class URLPreviewView: UIView {
       .withAlphaComponent(0.2) ?? .systemGray5.withAlphaComponent(0.2)
     let primaryTextColor = outgoing ? UIColor.white : (theme.primaryTextColor ?? .label)
     let secondaryTextColor = outgoing ? UIColor.white
-      .withAlphaComponent(0.7) : (theme.secondaryTextColor ?? .secondaryLabel)
+      .withAlphaComponent(0.7) : (theme.primaryTextColor?.withAlphaComponent(0.7) ?? .secondaryLabel)
 
     siteNameLabel.text = preview.siteName
     siteNameLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
