@@ -43,6 +43,7 @@ struct DirectChatItem: View {
   }
 
   @ObservedObject var composeActions: ComposeActions = .shared
+  @Environment(\.colorScheme) private var colorScheme
 
   private func currentComposeAction() -> ApiComposeAction? {
     composeActions.getComposeAction(for: Peer(userId: userInfo?.user.id ?? 0))?.action
@@ -69,7 +70,15 @@ struct DirectChatItem: View {
   @ViewBuilder
   var userProfile: some View {
     if let userInfo {
-      UserAvatar(userInfo: userInfo, size: 58)
+      if userInfo.user.id == Auth.shared.getCurrentUserId() {
+        InitialsCircle(
+          name: UserAvatar.getNameForInitials(user: userInfo.user),
+          size: 58,
+          symbol: "bookmark.fill"
+        )
+      } else {
+        UserAvatar(userInfo: userInfo, size: 58)
+      }
     }
   }
 
@@ -87,15 +96,9 @@ struct DirectChatItem: View {
   @ViewBuilder
   var title: some View {
     HStack(spacing: 4) {
-      Text(userInfo?.user.firstName ?? "")
+      Text(userInfo?.user.id == Auth.shared.getCurrentUserId() ? "Saved Message" : userInfo?.user.firstName ?? "")
         .font(.customTitle())
         .foregroundColor(.primary)
-      if userInfo?.user.id == Auth.shared.getCurrentUserId() {
-        Text("(you)")
-          .font(.customCaption())
-          .foregroundColor(.secondary)
-          .fontWeight(.medium)
-      }
     }
   }
 
@@ -112,19 +115,19 @@ struct DirectChatItem: View {
       }
       .padding(.top, 1)
 
-  } else if lastMsg?.isSticker == true {
-    HStack(spacing: 4) {
-      Image(systemName: "cup.and.saucer.fill")
-        .font(.customCaption())
-        .foregroundColor(.secondary)
-      Text("Sticker")
-        .font(.customCaption())
-        .foregroundColor(.secondary)
-        .lineLimit(2)
-        .truncationMode(.tail)
-    }
-    .padding(.top, 1)
-  } else  if lastMsg?.photoId != nil || lastMsg?.fileId != nil {
+    } else if lastMsg?.isSticker == true {
+      HStack(spacing: 4) {
+        Image(systemName: "cup.and.saucer.fill")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+        Text("Sticker")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+          .lineLimit(2)
+          .truncationMode(.tail)
+      }
+      .padding(.top, 1)
+    } else if lastMsg?.photoId != nil || lastMsg?.fileId != nil {
       HStack {
         Image(systemName: "photo.fill")
           .font(.customCaption())
