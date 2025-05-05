@@ -42,5 +42,10 @@ public class OnboardingUtils: @unchecked Sendable {
     }
   }
 
+  public func showPhoneNumberError(errorMsg: Binding<String>) {
+    errorMsg.wrappedValue = "Please enter a valid phone number."
+    Log.shared.error("Invalid phone number format")
+  }
+
   public init() {}
 }
