@@ -101,7 +101,6 @@ public extension Dialog {
         fatalError("Dialog.peer invalid")
     }
 
-    
     spaceId = from.spaceID
     unreadCount = Int(from.unreadCount)
     readInboxMaxId = from.readMaxID
@@ -136,6 +135,38 @@ public extension Dialog {
     } else {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
+  }
+}
+
+public extension Dialog {
+  static var previewDm: Self {
+    Self(
+      id: 1,
+      peerUserId: 1,
+      peerThreadId: nil,
+      spaceId: nil,
+      unreadCount: nil,
+      readInboxMaxId: nil,
+      readOutboxMaxId: nil,
+      pinned: false,
+      draft: nil,
+      archived: false
+    )
+  }
+
+  static var previewThread: Self {
+    Self(
+      id: 1,
+      peerUserId: nil,
+      peerThreadId: 1,
+      spaceId: nil,
+      unreadCount: nil,
+      readInboxMaxId: nil,
+      readOutboxMaxId: nil,
+      pinned: false,
+      draft: nil,
+      archived: false
+    )
   }
 }
 
@@ -216,5 +247,24 @@ public extension Dialog {
         ))
     )
     .asRequest(of: SpaceChatItem.self)
+  }
+}
+
+public extension Dialog {
+  /// Deletes this dialog and its associated chat (and all messages) from the local database.
+  /// - Throws: Any database error.
+  @discardableResult
+  func deleteFromLocalDatabase() async throws {
+    try await AppDatabase.shared.dbWriter.write { db in
+      // Use peerId to fetch the associated chat
+      if var chat = try Chat.getByPeerId(peerId: self.peerId) {
+        chat.lastMsgId = nil
+        try chat.save(db)
+        try Message.filter(Column("chatId") == chat.id).deleteAll(db)
+        try Chat.filter(Column("id") == chat.id).deleteAll(db)
+      }
+      // Delete the dialog itself
+      try Dialog.filter(Column("id") == self.id).deleteAll(db)
+    }
   }
 }
