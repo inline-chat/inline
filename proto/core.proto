@@ -485,6 +485,7 @@ enum Method {
   EDIT_MESSAGE = 8;
   CREATE_CHAT = 9;
   GET_SPACE_MEMBERS = 10;
+  DELETE_CHAT = 11;
 }
 
 message RpcCall {
@@ -500,6 +501,7 @@ message RpcCall {
     EditMessageInput editMessage = 9;
     CreateChatInput createChat = 10;
     GetSpaceMembersInput getSpaceMembers = 11;
+    DeleteChatInput deleteChat = 12;
   }
 }
 
@@ -517,6 +519,7 @@ message RpcResult {
     EditMessageResult editMessage = 9;
     CreateChatResult createChat = 10;
     GetSpaceMembersResult getSpaceMembers = 11;
+    DeleteChatResult deleteChat = 12;
   }
 }
 
@@ -738,3 +741,7 @@ message LastOnline {
   //   LONG_TIME_AGO = 5;
   // }
 }
+
+message DeleteChatInput { InputPeer peer_id = 1; }
+
+message DeleteChatResult {}
