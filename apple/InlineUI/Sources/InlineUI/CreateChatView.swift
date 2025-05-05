@@ -5,6 +5,7 @@ import SwiftUI
 public struct CreateChatView: View {
   @Environment(\.appDatabase) var db
   @Environment(\.realtime) var realtime
+  @Environment(\.dismiss) private var dismiss
 
   @FormState var formState
 
@@ -16,6 +17,8 @@ public struct CreateChatView: View {
   @State private var isPublic = true
   @State private var showEmojiPicker = false
   @State private var selectedPeople: Set<Int64> = []
+
+  @FocusState private var isTitleFocused: Bool
 
   // Sample emoji collection
   let emojis = ["👥", "💬", "🎯", "🛍️", "🛒", "💵", "🎧", "📚", "🍕", "📈", "⚙️", "🚧", "🏪", "🏡", "🎪", "🌴", "📁", "🤝", "🛖"]
@@ -34,7 +37,7 @@ public struct CreateChatView: View {
       .formStyle(.grouped)
       .padding()
       .scrollContentBackground(.hidden)
-      .frame(width: 400, height: 600)
+      .frame(width: 480, height: 600)
       .navigationTitle("Create Group Chat")
   }
 
@@ -64,6 +67,8 @@ public struct CreateChatView: View {
     )
     .textFieldStyle(.automatic)
     .font(.body)
+    .focused($isTitleFocused)
+    .onAppear { isTitleFocused = true }
   }
 
   private var iconPicker: some View {
@@ -200,6 +205,7 @@ public struct CreateChatView: View {
             DispatchQueue.main.async {
               formState.succeeded()
               onChatCreated(createChatResult.chat.id)
+              dismiss()
             }
           }
         }
