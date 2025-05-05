@@ -12,7 +12,7 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
   private let log = Log.scoped("RealtimeUpdates")
 
   public func apply(update: InlineProtocol.Update, db: Database) {
-    self.log.trace("apply realtime update")
+    log.trace("apply realtime update")
 
     do {
       switch update.update {
@@ -47,21 +47,21 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
           break
       }
     } catch {
-      self.log.error("Failed to apply update", error: error)
+      log.error("Failed to apply update", error: error)
     }
   }
 
   public func applyBatch(updates: [InlineProtocol.Update]) {
-    self.log.debug("applying \(updates.count) updates")
+    log.debug("applying \(updates.count) updates")
     do {
-      try self.database.dbWriter.write { db in
+      try database.dbWriter.write { db in
         for update in updates {
           self.apply(update: update, db: db)
         }
       }
     } catch {
       // handle error
-      self.log.error("Failed to apply updates", error: error)
+      log.error("Failed to apply updates", error: error)
     }
   }
 }
@@ -214,26 +214,13 @@ extension InlineProtocol.UpdateMessageAttachment {
       return
     }
 
-//    switch messageAttachment {
-//      case let .externalTask(externalTaskAttachment):
-//
-//        _ = try ExternalTask.save(db, externalTask: externalTaskAttachment)
-//
-//      case let .urlPreview(urlPreview):
-//        _ = try UrlPreview.save(db, linkEmbed: urlPreview)
-//
-//      default:
-//        Log.shared.error("Unsupported attachment type")
-//        return
-//    }
-
-    let message = try Message.filter(Column("messageId") == self.messageID)
-      .filter(Column("chatId") == self.chatID)
+    let message = try Message.filter(Column("messageId") == messageID).filter(Column("chatId") == chatID)
       .fetchOne(db)
-    if let message = message {
-      _ = try Attachment.saveWithInnerItems(db, attachment: self.attachment, messageClientGlobalId: message.globalId!)
+
+    if let message {
+      _ = try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
     }
-    
+
     if let message {
       db.afterNextTransaction { _ in
         Task(priority: .userInitiated) { @MainActor in

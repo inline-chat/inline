@@ -82,7 +82,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // Process Loom links in the message if any
   if (input.message) {
     // Process Loom links in parallel with message sending
-    processLoomLink(input.message, newMessage.globalId, BigInt(chatId), currentUserId, inputPeer)
+    processLoomLink(newMessage, input.message, BigInt(chatId), currentUserId, inputPeer)
   }
 
   // encode message info
