@@ -158,14 +158,8 @@ extension UIColor {
   static let reactionBackgroundOutgoingSelf = UIColor(.white).withAlphaComponent(0.4)
 
   /// Background color for reactions on incoming messages by the current user
-  static let reactionBackgroundIncomingSelf = UIColor { traitCollection in
-    traitCollection.userInterfaceStyle == .dark ?
-      UIColor(hex: "#4F4E52")! : UIColor(hex: "#DCDCDC")!
-  }
+  static let reactionBackgroundIncomingSelf = ThemeManager.shared.selected.secondaryTextColor?.withAlphaComponent(0.4) ?? .systemGray6.withAlphaComponent(0.5)
 
   /// Background color for reactions on incoming messages by others
-  static let reactionBackgroundIncoming = UIColor { traitCollection in
-    traitCollection.userInterfaceStyle == .dark ?
-      UIColor(hex: "#414044")! : UIColor(hex: "#EBEBEB")!
-  }
+  static let reactionBackgroundIncoming = ThemeManager.shared.selected.secondaryTextColor?.withAlphaComponent(0.2) ?? .systemGray6.withAlphaComponent(0.2)
 }

@@ -3,7 +3,7 @@ import { isValidLoomUrl, fetchLoomOembed } from "@in/server/libs/loom"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { db } from "@in/server/db"
 import { urlPreview, messageAttachments } from "@in/server/db/schema/attachments"
-import { photos, photoSizes } from "@in/server/db/schema"
+import { photos, photoSizes, type DbMessage } from "@in/server/db/schema"
 import { uploadPhoto } from "../files/uploadPhoto"
 import { eq } from "drizzle-orm"
 import { InputPeer, Photo_Format, Photo, MessageAttachment } from "@in/protocol/core"
@@ -31,8 +31,8 @@ type LoomMetadata = {
 }
 
 export async function processLoomLink(
+  message: DbMessage,
   messageText: string,
-  messageId: bigint,
   chatId: bigint,
   currentUserId: number,
   inputPeer: InputPeer,
@@ -57,15 +57,15 @@ export async function processLoomLink(
     }
 
     // Process the Loom link
-    await processLoomMetadata(metadata, messageId, chatId, currentUserId, inputPeer)
+    await processLoomMetadata(message, metadata, chatId, currentUserId, inputPeer)
   } catch (error) {
     log.error("Error processing Loom link", { error })
   }
 }
 
 async function processLoomMetadata(
+  message: DbMessage,
   metadata: LoomMetadata,
-  messageId: bigint,
   chatId: bigint,
   currentUserId: number,
   inputPeer: InputPeer,
@@ -116,7 +116,7 @@ async function processLoomMetadata(
     const [attachment] = await db
       .insert(messageAttachments)
       .values({
-        messageId: messageId,
+        messageId: message.globalId,
         urlPreviewId: BigInt(urlPreviewRecord.id),
         externalTaskId: null,
       })
@@ -132,7 +132,7 @@ async function processLoomMetadata(
       metadata,
       urlPreviewRecord.id,
       photoId,
-      messageId,
+      message,
       chatId,
       inputPeer,
       currentUserId,
@@ -198,7 +198,7 @@ async function sendLoomUpdate(
   metadata: LoomMetadata,
   urlPreviewId: number,
   photoId: number | null,
-  messageId: bigint,
+  message: DbMessage,
   chatId: bigint,
   inputPeer: InputPeer,
   currentUserId: number,
@@ -255,7 +255,7 @@ async function sendLoomUpdate(
             : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
 
         let update = encodeMessageAttachmentUpdate({
-          messageId,
+          messageId: BigInt(message.messageId),
           chatId,
           encodingForUserId,
           encodingForPeer: { inputPeer: encodingForInputPeer },
@@ -269,7 +269,7 @@ async function sendLoomUpdate(
         const encodingForUserId = userId
 
         let update = encodeMessageAttachmentUpdate({
-          messageId,
+          messageId: BigInt(message.messageId),
           chatId,
           encodingForUserId,
           encodingForPeer: { inputPeer: inputPeer },
