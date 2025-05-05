@@ -9,18 +9,23 @@ public class OnboardingUtils: @unchecked Sendable {
   public var hPadding: CGFloat = 50
   public var buttonBottomPadding: CGFloat = 18
 
-  public func showError(error: APIError, errorMsg: Binding<String>, isEmail: Bool = false) {
+  public func showError(
+    error: APIError,
+    errorMsg: Binding<String>,
+    isEmail: Bool = false,
+    isPhoneNumber: Bool = false
+  ) {
     switch error {
       case .invalidURL:
         Log.shared.error("Failed invalidURL", error: error)
       case .invalidResponse:
         errorMsg.wrappedValue =
-          "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
+          "Your \(isPhoneNumber ? "phone number" : isEmail ? "email" : "code") is incorrect. Please try again."
         Log.shared.error("Failed invalidResponse", error: error)
       case let .httpError(statusCode):
         if statusCode == 500 {
           errorMsg.wrappedValue =
-            "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
+            "Your \(isPhoneNumber ? "phone number" : isEmail ? "email" : "code") is incorrect. Please try again."
           Log.shared.error("Failed httpError \(statusCode)", error: error)
 
         } else {
@@ -28,7 +33,7 @@ public class OnboardingUtils: @unchecked Sendable {
         }
       case .decodingError:
         errorMsg.wrappedValue =
-          "Your \(isEmail ? "email" : "code") is incorrect. Please try again."
+          "Your \(isPhoneNumber ? "phone number" : isEmail ? "email" : "code") is incorrect. Please try again."
         Log.shared.error("Failed decodingError", error: error)
       case .networkError:
         errorMsg.wrappedValue = "Please check your connection."
@@ -40,11 +45,6 @@ public class OnboardingUtils: @unchecked Sendable {
         errorMsg.wrappedValue = description ?? "Unknown error"
         Log.shared.error("Failed error \(error_)", error: error)
     }
-  }
-
-  public func showPhoneNumberError(errorMsg: Binding<String>) {
-    errorMsg.wrappedValue = "Please enter a valid phone number."
-    Log.shared.error("Invalid phone number format")
   }
 
   public init() {}
