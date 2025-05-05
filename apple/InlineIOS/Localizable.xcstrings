@@ -107,6 +107,12 @@
     "Continue" : {
 
     },
+    "Continue with Email" : {
+
+    },
+    "Continue with Phone Number" : {
+
+    },
     "Create" : {
 
     },
@@ -141,6 +147,7 @@
 
     },
     "Get Started" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -488,6 +495,9 @@
 
     },
     "Searching..." : {
+
+    },
+    "Select Country" : {
 
     },
     "Sending Code..." : {

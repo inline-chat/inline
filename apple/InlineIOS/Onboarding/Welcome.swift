@@ -82,11 +82,21 @@ extension Welcome {
 
   @ViewBuilder
   var bottomArea: some View {
-    Button("Get Started") {
-      submit()
+    VStack {
+      Button("Continue with Email") {
+        submitToEmailRoute()
+      }
+      .buttonStyle(SimpleButtonStyle())
+      
+      .frame(maxWidth: .infinity)
+
+      Button("Continue with Phone Number") {
+        submitToPhoneNumberRoute()
+      }
+      .buttonStyle(SimpleWhiteButtonStyle())
+      
+      .frame(maxWidth: .infinity)
     }
-    .buttonStyle(SimpleButtonStyle())
-    .frame(maxWidth: .infinity)
     .padding(.horizontal, OnboardingUtils.shared.hPadding)
     .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
   }
@@ -107,13 +117,22 @@ extension Welcome {
 // MARK: - Helper Methods
 
 extension Welcome {
-  private func submit() {
+  private func submitToEmailRoute() {
     hasRunAnimation = true
 
     stopHapticEngine()
 
     displayedText = ""
     nav.push(.email())
+  }
+
+  private func submitToPhoneNumberRoute() {
+    hasRunAnimation = true
+
+    stopHapticEngine()
+
+    displayedText = ""
+    nav.push(.phoneNumber())
   }
 
   private func animateText() {
@@ -162,7 +181,7 @@ extension Welcome {
       // Add engine reset handler
       engine?.resetHandler = { [self] in
         do {
-          try self.engine?.start()
+          try engine?.start()
         } catch {
           print("Failed to restart the engine: \(error.localizedDescription)")
         }
@@ -181,7 +200,7 @@ extension Welcome {
 
   private func stopHapticEngine() {
     engine?.stop(completionHandler: { error in
-      if let error = error {
+      if let error {
         print("Error stopping haptic engine: \(error.localizedDescription)")
       }
     })

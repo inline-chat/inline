@@ -10,7 +10,7 @@ struct SimpleWhiteButtonStyle: ButtonStyle {
       .fontWeight(.semibold)
       .frame(height: 52)
       .frame(maxWidth: .infinity)
-      .background(.white.opacity(0.96))
+      .background(colorScheme == .light ? Color(.systemGray6) : .white.opacity(0.96))
       .cornerRadius(12)
       .opacity(configuration.isPressed ? 0.8 : 1)
       .scaleEffect(configuration.isPressed ? 0.9 : 1)

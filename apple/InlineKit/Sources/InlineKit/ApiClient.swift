@@ -57,6 +57,8 @@ public enum Path: String {
   case createLinearIssue
   case getIntegrations
   case getAlphaText
+  case sendSmsCode
+  case verifySmsCode
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -148,7 +150,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     guard let url = URL(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
     }
-    
+
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -196,6 +198,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
   }
 
+  public func sendSmsCode(phoneNumber: String) async throws -> SendSmsCode {
+    try await postRequest(
+      .sendSmsCode,
+      body: ["phoneNumber": phoneNumber],
+      includeToken: false
+    )
+  }
+
   public func verifyCode(code: String, email: String) async throws -> VerifyCode {
     var queryItems: [URLQueryItem] = [
       URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
@@ -215,6 +225,30 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     return try await request(
       .verifyCode,
       queryItems: queryItems,
+      includeToken: false
+    )
+  }
+
+  public func verifySmsCode(code: String, phoneNumber: String) async throws -> VerifySmsCode {
+    var body: [String: Any] = [
+      "code": code,
+      "phoneNumber": phoneNumber,
+    ]
+
+    if let sessionInfo = await SessionInfo.get() {
+      body["clientType"] = sessionInfo.clientType
+      body["clientVersion"] = sessionInfo.clientVersion
+      body["osVersion"] = sessionInfo.osVersion
+      body["deviceName"] = sessionInfo.deviceName
+      body["timezone"] = sessionInfo.timezone
+    }
+
+    let deviceId = try await DeviceIdentifier.shared.getIdentifier()
+    body["deviceId"] = deviceId
+
+    return try await postRequest(
+      .verifySmsCode,
+      body: body,
       includeToken: false
     )
   }
@@ -363,9 +397,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     if let fileUniqueId {
       body["fileUniqueId"] = fileUniqueId
- }
+    }
 
-    if let isSticker   {
+    if let isSticker {
       body["isSticker"] = isSticker
     }
 
@@ -924,4 +958,16 @@ public enum ApiComposeAction: String, Codable, Sendable {
 
 public struct LinearAuthUrl: Codable, Sendable {
   public let url: String
+}
+
+public struct SendSmsCode: Codable, Sendable {
+  public let existingUser: Bool?
+  public let phoneNumber: String
+  public let formattedPhoneNumber: String
+}
+
+public struct VerifySmsCode: Codable, Sendable {
+  public let userId: Int64
+  public let token: String
+  public let user: ApiUser
 }

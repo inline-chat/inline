@@ -18,6 +18,10 @@ struct OnboardingView: View {
               Welcome()
             case .main:
               HomeView()
+            case let .phoneNumber(prevPhoneNumber):
+              PhoneNumber(prevPhoneNumber: prevPhoneNumber)
+            case let .phoneNumberCode(phoneNumber):
+              PhoneNumberCode(phoneNumber: phoneNumber)
           }
         }
     }
