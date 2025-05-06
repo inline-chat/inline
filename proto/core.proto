@@ -229,6 +229,12 @@ message Space {
 
   // Name of the space
   string name = 2;
+
+  // Whether the current user is the creator of the space
+  bool creator = 3;
+
+  // Date of creation
+  int64 date = 4;
 }
 
 // Add reaction input
