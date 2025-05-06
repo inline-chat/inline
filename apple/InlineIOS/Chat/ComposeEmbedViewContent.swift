@@ -162,8 +162,7 @@ class ComposeEmbedViewContent: UIView {
   }
 
   func updateContent() {
-    let name = Auth.shared.getCurrentUserId() == viewModel.fullMessage?.message.fromId ?
-      "You" : viewModel.fullMessage?.from?.firstName ?? "User"
+    let name = viewModel.fullMessage?.from?.firstName ?? "User"
 
     switch mode {
       case .reply:
