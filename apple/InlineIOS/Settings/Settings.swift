@@ -16,104 +16,84 @@ struct SettingsView: View {
   @State private var showClearCacheError = false
 
   var body: some View {
-    ZStack{
-      List {
-        UserProfileSection(currentUser: currentUser)
-        Section {
-          Button {
-            fileUploadViewModel.showImagePicker = true
-          } label: {
-            HStack {
-              Image(systemName: "camera.fill")
-                .font(.callout)
-                .foregroundColor(.white)
-                .frame(width: 25, height: 25)
-                .background(Color.orange)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-              Text("Change Profile Photo")
-                .foregroundColor(.primary)
-                .padding(.leading, 4)
-              Spacer()
-            }
-            .padding(.vertical, 2)
-          }
-        }
-        
-        NavigationLink(destination: IntegrationsView()) {
+    List {
+      UserProfileSection(currentUser: currentUser)
+      Section {
+        Button {
+          fileUploadViewModel.showImagePicker = true
+        } label: {
           HStack {
-            Image(systemName: "app.connected.to.app.below.fill")
+            Image(systemName: "camera.fill")
+              .font(.callout)
               .foregroundColor(.white)
               .frame(width: 25, height: 25)
-              .background(Color.purple)
+              .background(Color.orange)
               .clipShape(RoundedRectangle(cornerRadius: 6))
-            Text("Integrations")
+            Text("Change Profile Photo")
               .foregroundColor(.primary)
               .padding(.leading, 4)
             Spacer()
           }
           .padding(.vertical, 2)
         }
-        NavigationLink(destination: ThemeSelectionView()) {
+      }
+        
+      NavigationLink(destination: IntegrationsView()) {
+        HStack {
+          Image(systemName: "app.connected.to.app.below.fill")
+            .foregroundColor(.white)
+            .frame(width: 25, height: 25)
+            .background(Color.purple)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+          Text("Integrations")
+            .foregroundColor(.primary)
+            .padding(.leading, 4)
+          Spacer()
+        }
+        .padding(.vertical, 2)
+      }
+      NavigationLink(destination: ThemeSelectionView()) {
+        HStack {
+          Image(systemName: "paintbrush.fill")
+            .foregroundColor(.white)
+            .frame(width: 25, height: 25)
+            .background(Color.blue)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+          Text("Appearance")
+            .foregroundColor(.primary)
+            .padding(.leading, 4)
+          Spacer()
+        }
+        .padding(.vertical, 2)
+      }
+        
+      Section {
+        Button {
+          showClearCacheAlert = true
+        } label: {
           HStack {
-            Image(systemName: "paintbrush.fill")
+            Image(systemName: "eraser.fill")
               .foregroundColor(.white)
               .frame(width: 25, height: 25)
-              .background(Color.blue)
+              .background(Color.red)
               .clipShape(RoundedRectangle(cornerRadius: 6))
-            Text("Appearance")
+            Text("Clear Cache")
               .foregroundColor(.primary)
               .padding(.leading, 4)
             Spacer()
+            if isClearing {
+              ProgressView()
+                .padding(.trailing, 8)
+            }
           }
           .padding(.vertical, 2)
         }
-        
-        Section {
-          Button {
-            showClearCacheAlert = true
-          } label: {
-            HStack {
-              Image(systemName: "eraser.fill")
-                .foregroundColor(.white)
-                .frame(width: 25, height: 25)
-                .background(Color.red)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-              Text("Clear Cache")
-                .foregroundColor(.primary)
-                .padding(.leading, 4)
-              Spacer()
-              if isClearing {
-                ProgressView()
-                  .padding(.trailing, 8)
-              }
-            }
-            .padding(.vertical, 2)
-          }
-          .disabled(isClearing)
-        }
-        
-        LogoutSection()
+        .disabled(isClearing)
       }
-      
-      VStack {
-        VariableBlurView()
-          .frame(height: 110)
-          .allowsHitTesting(false)
-          .background {
-            LinearGradient(
-              gradient: Gradient(colors: [
-                Color(ThemeManager.shared.selected.backgroundColor).opacity(0.2),
-                Color(ThemeManager.shared.selected.backgroundColor).opacity(0),
-              ]),
-              startPoint: .top,
-              endPoint: .bottom
-            )
-          }
-        Spacer()
-      }
-      .ignoresSafeArea(.all)
+        
+      LogoutSection()
     }
-    .toolbarBackground(.hidden, for: .navigationBar)
+      
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
     .toolbar {
