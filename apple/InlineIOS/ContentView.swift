@@ -71,12 +71,8 @@ extension ContentView {
   func sheetContent(for destination: Navigation.Destination) -> some View {
     switch destination {
       case let .createThread(spaceId):
-        CreateChatView(spaceId: spaceId) { chatId in
-          nav.push(.chat(peer: .thread(id: chatId)))
-        }
-        
-      
-        .presentationCornerRadius(18)
+        CreateChatIOSView(spaceId: spaceId)
+          .presentationCornerRadius(18)
 
       case .createSpace:
         CreateSpace()
