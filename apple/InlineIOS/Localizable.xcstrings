@@ -80,6 +80,9 @@
     "Chat Title" : {
 
     },
+    "Chat Type" : {
+
+    },
     "Clear" : {
 
     },
@@ -242,6 +245,9 @@
 
     },
     "Invite Member" : {
+
+    },
+    "Invite People" : {
 
     },
     "It's an all new way to chat with your team." : {
@@ -479,10 +485,16 @@
     "Please search a username or start a new chat or message                               , or create a new space by clicking the + button" : {
 
     },
+    "Private" : {
+
+    },
     "Profile" : {
 
     },
     "Profile photo" : {
+
+    },
+    "Public" : {
 
     },
     "Search by username" : {
