@@ -59,14 +59,21 @@ async function createUserChatAndDialog(input: {
       throw ModelError.Failed
     }
 
-    let [dialog] = await tx
-      .insert(dialogs)
-      .values({
-        chatId: chat.id,
-        userId: input.currentUserId,
-        peerUserId: input.peerUserId,
-      })
-      .returning()
+    // check if dialog already exists
+    let dialog = await tx.query.dialogs.findFirst({
+      where: and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, input.currentUserId)),
+    })
+
+    if (!dialog) {
+      ;[dialog] = await tx
+        .insert(dialogs)
+        .values({
+          chatId: chat.id,
+          userId: input.currentUserId,
+          peerUserId: input.peerUserId,
+        })
+        .returning()
+    }
 
     if (!dialog) {
       log.error("Failed to create dialog", { input })
