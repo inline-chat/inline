@@ -57,7 +57,7 @@ struct SpaceView: View {
       .animation(.default, value: fullSpaceViewModel.chats)
       .animation(.default, value: fullSpaceViewModel.memberChats)
     }
-
+    
     .frame(maxWidth: .infinity)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
@@ -66,6 +66,7 @@ struct SpaceView: View {
           if let space = fullSpaceViewModel.space {
             SpaceAvatar(space: space, size: 28)
               .padding(.trailing, 4)
+              
           } else {
             Image(systemName: "person.2.fill")
               .foregroundColor(.secondary)
@@ -78,38 +79,63 @@ struct SpaceView: View {
               .fontWeight(.semibold)
           }
         }
+        
       }
     }
     .toolbarRole(.editor)
     .toolbar {
       Group {
-        ToolbarItem(placement: .navigationBarTrailing) {
-          Menu {
-            Button(action: {
-              nav.push(.createThread(spaceId: spaceId))
-            }) {
-              Label("New Chat", systemImage: "plus.message.fill")
-            }
-            Button(action: {
-              openAddMemberSheet = true
-            }) {
-              Label("Invite Member", systemImage: "person.badge.plus.fill")
-            }
-            Divider()
-            Button(role: .destructive, action: {
-              setupAndPresentAlert(spaceId: spaceId, isCreator: isCreator)
-            }) {
-              if isCreator {
-                Label("Delete Space", systemImage: "trash.fill")
-
-              } else {
-                Label("Leave Space", systemImage: "rectangle.portrait.and.arrow.right.fill")
+        
+          ToolbarItem(placement: .navigationBarTrailing) {
+            Menu {
+              Button(action: {
+                nav.push(.createThread(spaceId: spaceId))
+              }) {
+                Label("New Chat", systemImage: "plus.message.fill")
               }
+              Button(action: {
+                openAddMemberSheet = true
+              }) {
+                Label("Invite Member", systemImage: "person.badge.plus.fill")
+              }
+            } label: {
+              Image(systemName: "plus")
+                .tint(Color.secondary)
+                .contentShape(Rectangle())
+
             }
-          } label: {
-            Image(systemName: "ellipsis")
-              .tint(Color.secondary)
           }
+          
+          ToolbarItem(placement: .navigationBarTrailing) {
+            Menu {
+              Button(action: {
+                nav.push(.createThread(spaceId: spaceId))
+              }) {
+                Label("New Chat", systemImage: "plus.message.fill")
+              }
+              Button(action: {
+                openAddMemberSheet = true
+              }) {
+                Label("Invite Member", systemImage: "person.badge.plus.fill")
+              }
+              Divider()
+              Button(role: .destructive, action: {
+                setupAndPresentAlert(spaceId: spaceId, isCreator: isCreator)
+              }) {
+                if isCreator {
+                  Label("Delete Space", systemImage: "trash.fill")
+                  
+                } else {
+                  Label("Leave Space", systemImage: "rectangle.portrait.and.arrow.right.fill")
+                }
+              }
+            } label: {
+              Image(systemName: "ellipsis")
+                .tint(Color.secondary)
+                .contentShape(Rectangle())
+
+            }
+          
         }
       }
     }

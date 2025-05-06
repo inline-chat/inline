@@ -153,7 +153,20 @@ struct AddMember: View {
     Task {
       do {
         formState.startLoading()
-        try await dataManager.addMember(spaceId: spaceId, userId: user.id)
+//        try await dataManager.addMember(spaceId: spaceId, userId: user.id)
+        Task.detached {
+          do { try await Realtime.shared.invokeWithHandler(
+            .inviteToSpace,
+            input: .inviteToSpace(.with { input in
+              input.via = .userID(user.id)
+              input.spaceID = spaceId
+              input.role = .member
+            })
+          )
+          } catch {
+            Log.shared.error("Error adding member", error: error)
+          }
+        }
         formState.succeeded()
         showSheet = false
       } catch {
