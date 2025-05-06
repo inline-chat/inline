@@ -97,7 +97,7 @@ export const inviteToSpace = async (
   return {
     user: Encoders.user({ user: inviteInfo.user, min: false }),
     member: Encoders.member(member),
-    chat: Encoders.chat(chat),
+    chat: Encoders.chat(chat, { encodingForUserId: context.currentUserId }),
     dialog: Encoders.dialog(dialog, { unreadCount: 0 }),
   }
 }

@@ -125,7 +125,7 @@ export async function createChat(
   await pushUpdates({ chat: chat[0], currentUserId: context.currentUserId })
 
   return {
-    chat: encodeChat(chat[0]),
+    chat: encodeChat(chat[0], { encodingForUserId: context.currentUserId }),
     dialog,
   }
 }
@@ -147,19 +147,20 @@ const pushUpdates = async ({
 
   let selfUpdates: Update[] = []
 
-  // Prepare the update
-  const newChatUpdate: Update = {
-    update: {
-      oneofKind: "newChat",
-      newChat: {
-        chat: Encoders.chat(chat),
-      },
-    },
-  }
-
   // Broadcast to all users in the update group
   updateGroup.userIds.forEach((userId) => {
+    // Prepare the update
+    const newChatUpdate: Update = {
+      update: {
+        oneofKind: "newChat",
+        newChat: {
+          chat: Encoders.chat(chat, { encodingForUserId: userId }),
+        },
+      },
+    }
+
     RealtimeUpdates.pushToUser(userId, [newChatUpdate])
+
     if (userId === currentUserId) {
       selfUpdates = [newChatUpdate]
     }

@@ -167,6 +167,11 @@ public extension Chat {
     peerUserId = nil // Threads don't have peer users
     lastMsgId = from.hasLastMsgID ? from.lastMsgID : nil
     emoji = from.hasEmoji ? from.emoji : nil
+    peerUserId = if case let .user(peerUser) = from.peerID.type {
+      peerUser.userID
+    } else {
+      nil
+    }
   }
 }
 

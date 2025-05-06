@@ -1,6 +1,7 @@
 import InlineKit
 import InlineUI
 import SwiftUI
+import Logger
 
 struct SpaceSidebar: View {
   @EnvironmentObject var nav: Nav
@@ -131,20 +132,25 @@ struct SpaceSidebar: View {
     .task {
       Task.detached {
         do {
-          try await data.getDialogs(spaceId: spaceId)
-        } catch {}
-      }
-      Task.detached {
-        do {
           // this one gets members
           try await data.getSpace(spaceId: spaceId)
+        } catch {
+          Log.shared.error("failed to get space", error: error)
         }
-      }
-      Task.detached {
-        try await realtime
-          .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-            $0.spaceID = spaceId
-          }))
+        
+        Task.detached {
+          try await realtime
+            .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+              $0.spaceID = spaceId
+            }))
+        }
+        Task.detached {
+          do {
+            try await data.getDialogs(spaceId: spaceId)
+          } catch {
+            Log.shared.error("failed to get dialogs for space", error: error)
+          }
+        }
       }
     }
     .onAppear {
