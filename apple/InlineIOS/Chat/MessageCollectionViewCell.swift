@@ -98,6 +98,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     attributes.frame.size = size
     return attributes
   }
+
   public func highlightBubble() {
     guard let bubble = messageView?.bubbleView else { return }
     let originalColor = bubble.backgroundColor ?? .systemGray6
@@ -324,7 +325,7 @@ extension MessageCollectionViewCell {
     } else {
       topConstraint = newMessageView.topAnchor.constraint(
         equalTo: contentView.topAnchor,
-        constant: (isThread && fromOtherSender) ? 12 : 2
+        constant: fromOtherSender ? 12 : 2
       )
       var leadingAnchor = contentView.leadingAnchor
       var leadingConstant: CGFloat = 0
