@@ -98,6 +98,29 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     attributes.frame.size = size
     return attributes
   }
+  public func highlightBubble() {
+    guard let bubble = messageView?.bubbleView else { return }
+    let originalColor = bubble.backgroundColor ?? .systemGray6
+    let isEmojiOrSticker = messageView?.isEmojiOnlyMessage == true || messageView?.isSticker == true
+    let highlightColor: UIColor = if isEmojiOrSticker {
+      UIColor.systemGray3.withAlphaComponent(0.45)
+    } else {
+      originalColor.lighten(by: 0.18)
+    }
+    UIView.animate(withDuration: 0.18, animations: {
+      bubble.backgroundColor = highlightColor
+    }) { _ in
+      UIView.animate(withDuration: 0.5, delay: 0.2, options: [], animations: {
+        bubble.backgroundColor = originalColor
+      }, completion: nil)
+    }
+  }
+
+  public func clearHighlight() {
+    guard let bubble = messageView?.bubbleView else { return }
+    bubble.layer.removeAllAnimations()
+    bubble.backgroundColor = messageView?.bubbleColor
+  }
 }
 
 extension MessageCollectionViewCell {
@@ -344,5 +367,18 @@ extension MessageCollectionViewCell {
       avatarSpacerView?.removeFromSuperview()
       avatarSpacerView = nil
     }
+  }
+}
+
+extension UIColor {
+  func lighten(by percentage: CGFloat) -> UIColor {
+    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+    guard getRed(&r, green: &g, blue: &b, alpha: &a) else { return self }
+    return UIColor(
+      red: min(r + (1 - r) * percentage, 1.0),
+      green: min(g + (1 - g) * percentage, 1.0),
+      blue: min(b + (1 - b) * percentage, 1.0),
+      alpha: a
+    )
   }
 }

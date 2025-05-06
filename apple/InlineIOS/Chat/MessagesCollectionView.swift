@@ -257,6 +257,12 @@ final class MessagesCollectionView: UICollectionView {
       name: .scrollToBottom,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleScrollToRepliedMessage(_:)),
+      name: Notification.Name("ScrollToRepliedMessage"),
+      object: nil
+    )
   }
 
   var isKeyboardVisible: Bool = false
@@ -375,6 +381,33 @@ final class MessagesCollectionView: UICollectionView {
     layout.scrollDirection = .vertical
     layout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
     return layout
+  }
+
+  // TODO: Handle far reply scroll
+  // TODO: Add ensure message
+  @objc private func handleScrollToRepliedMessage(_ notification: Notification) {
+    guard let userInfo = notification.userInfo,
+          let repliedToMessageId = userInfo["repliedToMessageId"] as? Int64,
+          let chatId = userInfo["chatId"] as? Int64,
+          chatId == self.chatId else { return }
+    // Find the index of the message with this messageId
+    if let index = coordinator.messages.firstIndex(where: { $0.message.messageId == repliedToMessageId }) {
+      let indexPath = IndexPath(item: index, section: 0)
+      scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+      // Highlight the cell after scrolling
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        guard let self else { return }
+        // Clear highlight on all visible cells first
+        for cell in visibleCells {
+          if let cell = cell as? MessageCollectionViewCell {
+            cell.clearHighlight()
+          }
+        }
+        if let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell {
+          cell.highlightBubble()
+        }
+      }
+    }
   }
 }
 
