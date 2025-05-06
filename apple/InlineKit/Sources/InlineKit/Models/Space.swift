@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 
 public struct ApiSpace: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   @unchecked Sendable
@@ -62,6 +63,13 @@ public extension Space {
     name = apiSpace.name
     creator = apiSpace.creator
     date = Self.fromTimestamp(from: apiSpace.date)
+  }
+
+  init(from: InlineProtocol.Space) {
+    id = from.id
+    name = from.name
+    creator = from.creator
+    date = Date(timeIntervalSince1970: Double(from.date))
   }
 
   static func fromTimestamp(from: Int) -> Date {

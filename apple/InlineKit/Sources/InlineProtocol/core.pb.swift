@@ -979,6 +979,12 @@ public struct Space: Sendable {
   /// Name of the space
   public var name: String = String()
 
+  /// Whether the current user is the creator of the space
+  public var creator: Bool = false
+
+  /// Date of creation
+  public var date: Int64 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -4747,6 +4753,8 @@ extension Space: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "id"),
     2: .same(proto: "name"),
+    3: .same(proto: "creator"),
+    4: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4757,6 +4765,8 @@ extension Space: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.creator) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -4769,12 +4779,20 @@ extension Space: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
     if !self.name.isEmpty {
       try visitor.visitSingularStringField(value: self.name, fieldNumber: 2)
     }
+    if self.creator != false {
+      try visitor.visitSingularBoolField(value: self.creator, fieldNumber: 3)
+    }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Space, rhs: Space) -> Bool {
     if lhs.id != rhs.id {return false}
     if lhs.name != rhs.name {return false}
+    if lhs.creator != rhs.creator {return false}
+    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
