@@ -1160,7 +1160,7 @@ class MessageViewAppKit: NSView {
       // Position the animation view
       if let animView = swipeAnimationView {
         let yPosition = bubbleView.bounds.midY - animView.bounds.height / 2
-        animView.frame.origin = NSPoint(x: bounds.width - animView.bounds.width - 10, y: yPosition)
+        animView.frame.origin = NSPoint(x: bounds.width, y: yPosition)
       }
     }
 
@@ -1328,51 +1328,46 @@ extension MessageViewAppKit {
 
 extension MessageViewAppKit: NSTextViewDelegate {
   func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
-    // Create a new menu
     let customMenu = NSMenu()
-    
-    // Add native Copy at the very top (for selected text) - create a new item
+
+    // Add native Copy at the very top (for selected text)
     let nativeCopyItem = NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
     nativeCopyItem.target = textView
     customMenu.addItem(nativeCopyItem)
-    
-    // Add our custom message actions near the top
+
+    // Add our custom message actions
     let copyMessageItem = NSMenuItem(title: "Copy Message", action: #selector(copyMessage), keyEquivalent: "")
     copyMessageItem.target = self
     customMenu.addItem(copyMessageItem)
-    
+
     let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "")
     replyItem.target = self
     customMenu.addItem(replyItem)
-    
+
     // Add a separator after our primary items
     customMenu.addItem(NSMenuItem.separator())
-    
-    // For Look Up and Translate, we'll check for these items in the original menu
-    // and only add them if they exist, because the selectors are private/internal
+
+    // Insert native "Look Up" and "Translate" items from the original menu
     for item in menu.items {
-      if ["Look Up", "Translate"].contains(item.title) {
-        // Create a copy of the item
-        let newItem = NSMenuItem(title: item.title,
-                                 action: item.action,
-                                 keyEquivalent: item.keyEquivalent)
-        newItem.target = item.target
+      // The native items usually start with "Look Up" or "Translate"
+      if item.title.hasPrefix("Look Up") || item.title.hasPrefix("Translate") {
+        // Copy the item (including its action, target, etc.)
+        let newItem = item.copy() as! NSMenuItem
         customMenu.addItem(newItem)
       }
     }
-    
+
     // Add a separator before Delete
     customMenu.addItem(NSMenuItem.separator())
-    
+
     // Add Delete as the last item
     let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "")
     deleteItem.target = self
     customMenu.addItem(deleteItem)
-    
+
     return customMenu
   }
 }
-
 
 extension MessageViewAppKit: NSMenuDelegate {}
 
