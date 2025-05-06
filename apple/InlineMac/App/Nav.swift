@@ -14,6 +14,7 @@ struct NavEntry: Hashable, Codable, Equatable {
     case createSpace
     case profile(userInfo: UserInfo)
     case newChat
+    case inviteToSpace
 
     static func == (lhs: Route, rhs: Route) -> Bool {
       switch (lhs, rhs) {
@@ -26,6 +27,10 @@ struct NavEntry: Hashable, Codable, Equatable {
         case let (.profile(lhsUser), .profile(rhsUser)):
           lhsUser == rhsUser
         case (.createSpace, .createSpace):
+          true
+        case (.newChat, .newChat):
+          true
+        case (.inviteToSpace, .inviteToSpace):
           true
         default:
           false
@@ -125,7 +130,7 @@ extension Nav {
 
     reflectHistoryChange()
   }
-  
+
 //  public func openEntry(_ entry: NavEntry) {
 //    history.append(entry)
 //    reflectHistoryChange()
