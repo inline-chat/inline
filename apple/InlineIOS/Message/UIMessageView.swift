@@ -251,6 +251,8 @@ class UIMessageView: UIView {
         outgoing: outgoing,
         isOnlyEmoji: isEmojiOnlyMessage
       )
+    } else {
+      embedView.showNotLoaded(outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)
     }
   }
 
@@ -541,15 +543,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)

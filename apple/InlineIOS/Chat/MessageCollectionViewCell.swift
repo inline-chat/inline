@@ -301,12 +301,12 @@ extension MessageCollectionViewCell {
     } else {
       topConstraint = newMessageView.topAnchor.constraint(
         equalTo: contentView.topAnchor,
-        constant: fromOtherSender ? 12 : 2
+        constant: (isThread && fromOtherSender) ? 12 : 2
       )
       var leadingAnchor = contentView.leadingAnchor
       var leadingConstant: CGFloat = 0
       // Add spacer for incoming messages that are not fromOtherSender
-      if !outgoing, !fromOtherSender {
+      if isThread, !outgoing, !fromOtherSender {
         let avatarSize: CGFloat = 32
         let avatarLeading: CGFloat = 2
         let spacer = UIView()
@@ -334,13 +334,15 @@ extension MessageCollectionViewCell {
     messageView = newMessageView
   }
 
-      // Add avatar if we have user info
+  // Add avatar if we have user info
   func resetCell() {
     messageView?.removeFromSuperview()
-    nameLabel.removeFromSuperview()
-    avatarHostingController?.view.removeFromSuperview()
-    avatarHostingController = nil
-    avatarSpacerView?.removeFromSuperview()
-    avatarSpacerView = nil
+    if isThread {
+      nameLabel.removeFromSuperview()
+      avatarHostingController?.view.removeFromSuperview()
+      avatarHostingController = nil
+      avatarSpacerView?.removeFromSuperview()
+      avatarSpacerView = nil
+    }
   }
 }
