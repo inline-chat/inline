@@ -9,6 +9,8 @@ export type UpdateGroup =
   | { type: "dmUsers"; userIds: number[] }
   // Used for public threads
   | { type: "threadUsers"; spaceId: number; userIds: number[] }
+  // Used for spaces
+  | { type: "spaceUsers"; spaceId: number; userIds: number[] }
 
 import type { TPeerInfo } from "@in/server/api-types"
 import invariant from "tiny-invariant"
@@ -95,4 +97,12 @@ export const getUpdateGroupFromInputPeer = async (
   }
 
   throw new InlineError(InlineError.ApiError.PEER_INVALID)
+}
+
+export const getUpdateGroupForSpace = async (
+  spaceId: number,
+  context: { currentUserId: number },
+): Promise<UpdateGroup> => {
+  const users = await db.select({ userId: members.userId }).from(members).where(eq(members.spaceId, spaceId))
+  return { type: "spaceUsers", spaceId, userIds: users.map((user) => user.userId) }
 }

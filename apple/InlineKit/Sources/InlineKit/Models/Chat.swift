@@ -92,7 +92,6 @@ public extension Chat {
 
 // MARK: - Preview
 
-
 public extension Chat {
   static let preview = Self(
     id: Int64.random(in: 1 ... 50_000),

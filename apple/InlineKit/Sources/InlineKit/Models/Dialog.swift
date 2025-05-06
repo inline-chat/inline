@@ -87,6 +87,21 @@ public extension Dialog {
     unreadCount = nil
   }
 
+  init(optimisticForChat chat: Chat) {
+    peerUserId = nil
+    peerThreadId = chat.id
+    id = Self.getDialogId(peerThreadId: chat.id)
+
+    spaceId = chat.spaceId
+    unreadCount = nil
+    readInboxMaxId = nil
+    readOutboxMaxId = nil
+    pinned = nil
+    draft = nil
+    archived = nil
+    unreadCount = nil
+  }
+
   init(from: InlineProtocol.Dialog) {
     switch from.peer.type {
       case let .chat(chat):
