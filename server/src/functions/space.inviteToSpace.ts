@@ -250,7 +250,7 @@ const pushUpdateForInvitedUser = async ({
     update: {
       oneofKind: "joinSpace",
       joinSpace: {
-        space: Encoders.space(space),
+        space: Encoders.space(space, { encodingForUserId: inviteUserId }),
         member: Encoders.member(member),
       },
     },

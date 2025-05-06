@@ -46,6 +46,12 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
         case let .newChat(newChat):
           try newChat.apply(db)
 
+        case let .spaceMemberAdd(spaceMemberAdd):
+          try spaceMemberAdd.apply(db)
+
+        case let .joinSpace(joinSpace):
+          try joinSpace.apply(db)
+
         default:
           break
       }
@@ -281,5 +287,23 @@ extension InlineProtocol.UpdateNewChat {
     try chat.save(db)
     let dialog = Dialog(optimisticForChat: chat)
     try dialog.save(db)
+  }
+}
+
+extension InlineProtocol.UpdateSpaceMemberAdd {
+  func apply(_ db: Database) throws {
+    let user = User(from: user)
+    try user.save(db)
+    let member = Member(from: member)
+    try member.save(db)
+  }
+}
+
+extension InlineProtocol.UpdateJoinSpace {
+  func apply(_ db: Database) throws {
+    let space = Space(from: space)
+    try space.save(db)
+    let member = Member(from: member)
+    try member.save(db)
   }
 }

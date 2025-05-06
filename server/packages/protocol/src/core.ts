@@ -609,6 +609,18 @@ export interface Space {
      * @generated from protobuf field: string name = 2;
      */
     name: string;
+    /**
+     * Whether the current user is the creator of the space
+     *
+     * @generated from protobuf field: bool creator = 3;
+     */
+    creator: boolean;
+    /**
+     * Date of creation
+     *
+     * @generated from protobuf field: int64 date = 4;
+     */
+    date: bigint;
 }
 /**
  * Add reaction input
@@ -3828,13 +3840,17 @@ class Space$Type extends MessageType<Space> {
     constructor() {
         super("Space", [
             { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "creator", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<Space>): Space {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.id = 0n;
         message.name = "";
+        message.creator = false;
+        message.date = 0n;
         if (value !== undefined)
             reflectionMergePartial<Space>(this, message, value);
         return message;
@@ -3849,6 +3865,12 @@ class Space$Type extends MessageType<Space> {
                     break;
                 case /* string name */ 2:
                     message.name = reader.string();
+                    break;
+                case /* bool creator */ 3:
+                    message.creator = reader.bool();
+                    break;
+                case /* int64 date */ 4:
+                    message.date = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3868,6 +3890,12 @@ class Space$Type extends MessageType<Space> {
         /* string name = 2; */
         if (message.name !== "")
             writer.tag(2, WireType.LengthDelimited).string(message.name);
+        /* bool creator = 3; */
+        if (message.creator !== false)
+            writer.tag(3, WireType.Varint).bool(message.creator);
+        /* int64 date = 4; */
+        if (message.date !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.date);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
