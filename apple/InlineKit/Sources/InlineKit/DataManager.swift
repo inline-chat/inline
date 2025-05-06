@@ -45,10 +45,22 @@ public class DataManager: ObservableObject {
       let result = try await ApiClient.shared.createSpace(name: name)
       let space = Space(from: result.space)
       try await database.dbWriter.write { db in
-        try space.save(db)
-        try Member(from: result.member).save(db)
-        try result.chats.forEach { chat in
-          try Chat(from: chat).save(db)
+        do {
+          try space.save(db)
+        } catch {
+          Log.shared.error("Failed to save space", error: error)
+        }
+        do {
+          try Member(from: result.member).save(db)
+        } catch {
+          Log.shared.error("Failed to save member", error: error)
+        }
+        do {
+          try result.chats.forEach { chat in
+            try Chat(from: chat).save(db)
+          }
+        } catch {
+          Log.shared.error("Failed to save chat", error: error)
         }
       }
       return space.id
