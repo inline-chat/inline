@@ -624,7 +624,7 @@ private extension MessagesCollectionView {
     }
 
     func createReactionPickerView(for message: Message, at indexPath: IndexPath) -> UIView {
-      let reactions = ["🥹", "❤️", "🫡", "👍", "👎", "🆒", "✔️"]
+      let reactions = ["🥹", "❤️", "🫡", "👍", "👎", "💯", "😂"] // ✔️
 
       let containerView = UIView()
       containerView.translatesAutoresizingMaskIntoConstraints = false
