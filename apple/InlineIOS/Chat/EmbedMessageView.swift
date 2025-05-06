@@ -23,6 +23,15 @@ class EmbedMessageView: UIView {
     return label
   }()
 
+  private lazy var messageLabel: UILabel = {
+    let label = UILabel()
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .systemFont(ofSize: 14)
+    label.numberOfLines = 1
+
+    return label
+  }()
+
   private lazy var imageIconView: UIImageView = {
     let imageView = UIImageView()
     let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
@@ -31,14 +40,6 @@ class EmbedMessageView: UIView {
     imageView.setContentHuggingPriority(.required, for: .horizontal)
     imageView.translatesAutoresizingMaskIntoConstraints = false
     return imageView
-  }()
-
-  private lazy var messageLabel: UILabel = {
-    let label = UILabel()
-    label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 14)
-    label.numberOfLines = 1
-    return label
   }()
 
   private lazy var messageStackView: UIStackView = {
@@ -74,6 +75,17 @@ class EmbedMessageView: UIView {
     updateRectangleMask()
   }
 
+  func showNotLoaded(outgoing: Bool, isOnlyEmoji: Bool) {
+    self.outgoing = outgoing
+    self.isOnlyEmoji = isOnlyEmoji
+    headerLabel.text = nil
+    messageLabel.text = "Message not loaded"
+    let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+    imageIconView.image = UIImage(systemName: "exclamationmark.circle", withConfiguration: config)
+    imageIconView.isHidden = false
+    updateColors()
+  }
+
   func configure(message: Message, senderName: String, outgoing: Bool, isOnlyEmoji: Bool) {
     self.outgoing = outgoing
     self.isOnlyEmoji = isOnlyEmoji
@@ -91,15 +103,13 @@ class EmbedMessageView: UIView {
       imageIconView.isHidden = false
       messageLabel.text = message.text
     } else if message.hasPhoto, !message.hasText {
-      imageIconView.isHidden = false
+      imageIconView.isHidden = true
       messageLabel.text = "Photo"
     } else if !message.hasPhoto, message.hasText {
       imageIconView.isHidden = true
       messageLabel.text = message.text
-    } else {
-      imageIconView.isHidden = true
-      messageLabel.text = "Not loaded"
     }
+
     updateColors()
   }
 }
@@ -143,8 +153,6 @@ private extension EmbedMessageView {
         constant: -Constants.verticalPadding
       ),
 
-      imageIconView.widthAnchor.constraint(equalToConstant: Constants.imageIconSize),
-      imageIconView.heightAnchor.constraint(equalToConstant: Constants.imageIconSize),
     ])
   }
 
@@ -164,8 +172,9 @@ private extension EmbedMessageView {
 
     headerLabel.textColor = textColor
     messageLabel.textColor = textColor
-    imageIconView.tintColor = textColor
     rectangleView.backgroundColor = rectangleColor
+    imageIconView.tintColor = textColor
+
   }
 }
 
