@@ -344,7 +344,7 @@ class ComposeAppKit: NSView {
       }
     } else {
       // Hide and remove the reply view
-      replyView.close(animated: false)
+      replyView.close(animated: true)
       removeReplyEscHandler()
     }
 
