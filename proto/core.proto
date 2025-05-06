@@ -470,6 +470,14 @@ message RpcError {
     INTERNAL_ERROR = 4;
     PEER_ID_INVALID = 5;
     MESSAGE_ID_INVALID = 6;
+    USER_ID_INVALID = 7;
+    USER_ALREADY_MEMBER = 8;
+    SPACE_ID_INVALID = 9;
+    CHAT_ID_INVALID = 10;
+    EMAIL_INVALID = 11;
+    PHONE_NUMBER_INVALID = 12;
+    SPACE_ADMIN_REQUIRED = 13;
+    SPACE_OWNER_REQUIRED = 14;
   }
 }
 
@@ -486,6 +494,7 @@ enum Method {
   CREATE_CHAT = 9;
   GET_SPACE_MEMBERS = 10;
   DELETE_CHAT = 11;
+  INVITE_TO_SPACE = 12;
 }
 
 message RpcCall {
@@ -502,6 +511,7 @@ message RpcCall {
     CreateChatInput createChat = 10;
     GetSpaceMembersInput getSpaceMembers = 11;
     DeleteChatInput deleteChat = 12;
+    InviteToSpaceInput inviteToSpace = 13;
   }
 }
 
@@ -520,6 +530,7 @@ message RpcResult {
     CreateChatResult createChat = 10;
     GetSpaceMembersResult getSpaceMembers = 11;
     DeleteChatResult deleteChat = 12;
+    InviteToSpaceResult inviteToSpace = 13;
   }
 }
 
@@ -728,20 +739,34 @@ message UserStatus {
 message LastOnline {
   // Date of the last online if exact last online is permitted by the user
   optional int64 date = 1;
-
-  //   // Approximate date of the last online
-  //   Approximate approximate = 2;
-
-  // enum Approximate {
-  //   UNSPECIFIED = 0;
-  //   RECENTLY = 1;
-  //   A_DAY_AGO = 2;
-  //   A_WEEK_AGO = 3;
-  //   A_MONTH_AGO = 4;
-  //   LONG_TIME_AGO = 5;
-  // }
 }
 
 message DeleteChatInput { InputPeer peer_id = 1; }
 
 message DeleteChatResult {}
+
+message InviteToSpaceInput {
+  // ID of the space to invite to
+  int64 space_id = 1;
+
+  // Role of the user to invite
+  Member.Role role = 2;
+
+  oneof via {
+    // ID of the user to invite
+    int64 user_id = 3;
+
+    // Email of the user to invite
+    string email = 4;
+
+    // Phone number of the user to invite
+    string phone_number = 5;
+  }
+}
+
+message InviteToSpaceResult {
+  User user = 1;
+  Member member = 2;
+  Chat chat = 3;
+  Dialog dialog = 4;
+}

@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { eq, and, desc, type ExtractTablesWithRelations } from "drizzle-orm"
-import { chats, messages, type DbChat } from "@in/server/db/schema"
+import { chats, dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { TPeerInfo } from "@in/server/api-types"
 import { ModelError } from "@in/server/db/models/_errors"
@@ -9,6 +9,8 @@ import { Log } from "@in/server/utils/log"
 import type { PgTransaction } from "drizzle-orm/pg-core"
 import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js"
 
+const log = new Log("chats")
+
 export const ChatModel = {
   getChatFromPeer: getChatFromPeer,
   getLastMessageId: getLastMessageId,
@@ -16,6 +18,65 @@ export const ChatModel = {
   refreshLastMessageIdTransaction: refreshLastMessageIdTransaction,
   getChatIdFromInputPeer: getChatIdFromInputPeer,
   getChatFromInputPeer: getChatFromInputPeer,
+  createUserChatAndDialog: createUserChatAndDialog,
+}
+
+/**
+ * Creates a chat and dialog for a target user
+ *
+ * @param input - The input
+ * @returns The chat and dialog
+ */
+async function createUserChatAndDialog(input: {
+  peerUserId: number
+  currentUserId: number
+}): Promise<{ chat: DbChat; dialog: DbDialog }> {
+  let minUserId = Math.min(input.peerUserId, input.currentUserId)
+  let maxUserId = Math.max(input.peerUserId, input.currentUserId)
+
+  const result = await db.transaction(async (tx) => {
+    let chat: DbChat | undefined
+
+    // Check if already a chat, fetch it
+    chat = await tx.query.chats.findFirst({
+      where: and(eq(chats.type, "private"), eq(chats.minUserId, minUserId), eq(chats.maxUserId, maxUserId)),
+    })
+
+    if (!chat) {
+      // Create chat
+      ;[chat] = await tx
+        .insert(chats)
+        .values({
+          type: "private",
+          minUserId,
+          maxUserId,
+        })
+        .returning()
+    }
+
+    if (!chat) {
+      log.error("Failed to create chat", { input })
+      throw ModelError.Failed
+    }
+
+    let [dialog] = await tx
+      .insert(dialogs)
+      .values({
+        chatId: chat.id,
+        userId: input.currentUserId,
+        peerUserId: input.peerUserId,
+      })
+      .returning()
+
+    if (!dialog) {
+      log.error("Failed to create dialog", { input })
+      throw ModelError.Failed
+    }
+
+    return { chat, dialog }
+  })
+
+  return result
 }
 
 async function getChatIdFromInputPeer(peer: InputPeer, context: { currentUserId: number }): Promise<number> {

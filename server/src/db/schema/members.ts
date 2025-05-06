@@ -6,6 +6,7 @@ import { serial } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm"
 
 export const rolesEnum = pgEnum("member_roles", ["owner", "admin", "member"])
+export type DbMemberRole = (typeof rolesEnum.enumValues)[number]
 
 export const members = pgTable(
   "members",
@@ -28,6 +29,10 @@ export const members = pgTable(
     // archivedAt: timestamp("archived_at"),
     // lastInteractionDate: timestamp("last_interaction_date"),
 
+    invitedBy: integer("invited_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+
     date: creationDate,
   },
   (table) => ({ uniqueUserInSpace: unique().on(table.userId, table.spaceId) }),
@@ -41,6 +46,10 @@ export const membersRelations = relations(members, ({ one }) => ({
   space: one(spaces, {
     fields: [members.spaceId],
     references: [spaces.id],
+  }),
+  invitedBy: one(users, {
+    fields: [members.invitedBy],
+    references: [users.id],
   }),
 }))
 

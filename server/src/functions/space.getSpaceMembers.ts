@@ -1,6 +1,3 @@
-// TODO: Use generated protocol types when available
-// Inline types for now
-
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { members } from "@in/server/db/schema"

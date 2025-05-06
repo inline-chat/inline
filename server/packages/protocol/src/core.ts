@@ -1171,7 +1171,39 @@ export enum RpcError_Code {
     /**
      * @generated from protobuf enum value: MESSAGE_ID_INVALID = 6;
      */
-    MESSAGE_ID_INVALID = 6
+    MESSAGE_ID_INVALID = 6,
+    /**
+     * @generated from protobuf enum value: USER_ID_INVALID = 7;
+     */
+    USER_ID_INVALID = 7,
+    /**
+     * @generated from protobuf enum value: USER_ALREADY_MEMBER = 8;
+     */
+    USER_ALREADY_MEMBER = 8,
+    /**
+     * @generated from protobuf enum value: SPACE_ID_INVALID = 9;
+     */
+    SPACE_ID_INVALID = 9,
+    /**
+     * @generated from protobuf enum value: CHAT_ID_INVALID = 10;
+     */
+    CHAT_ID_INVALID = 10,
+    /**
+     * @generated from protobuf enum value: EMAIL_INVALID = 11;
+     */
+    EMAIL_INVALID = 11,
+    /**
+     * @generated from protobuf enum value: PHONE_NUMBER_INVALID = 12;
+     */
+    PHONE_NUMBER_INVALID = 12,
+    /**
+     * @generated from protobuf enum value: SPACE_ADMIN_REQUIRED = 13;
+     */
+    SPACE_ADMIN_REQUIRED = 13,
+    /**
+     * @generated from protobuf enum value: SPACE_OWNER_REQUIRED = 14;
+     */
+    SPACE_OWNER_REQUIRED = 14
 }
 /**
  * @generated from protobuf message RpcCall
@@ -1250,6 +1282,12 @@ export interface RpcCall {
          * @generated from protobuf field: DeleteChatInput deleteChat = 12;
          */
         deleteChat: DeleteChatInput;
+    } | {
+        oneofKind: "inviteToSpace";
+        /**
+         * @generated from protobuf field: InviteToSpaceInput inviteToSpace = 13;
+         */
+        inviteToSpace: InviteToSpaceInput;
     } | {
         oneofKind: undefined;
     };
@@ -1331,6 +1369,12 @@ export interface RpcResult {
          * @generated from protobuf field: DeleteChatResult deleteChat = 12;
          */
         deleteChat: DeleteChatResult;
+    } | {
+        oneofKind: "inviteToSpace";
+        /**
+         * @generated from protobuf field: InviteToSpaceResult inviteToSpace = 13;
+         */
+        inviteToSpace: InviteToSpaceResult;
     } | {
         oneofKind: undefined;
     };
@@ -1933,6 +1977,74 @@ export interface DeleteChatInput {
 export interface DeleteChatResult {
 }
 /**
+ * @generated from protobuf message InviteToSpaceInput
+ */
+export interface InviteToSpaceInput {
+    /**
+     * ID of the space to invite to
+     *
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * Role of the user to invite
+     *
+     * @generated from protobuf field: Member.Role role = 2;
+     */
+    role: Member_Role;
+    /**
+     * @generated from protobuf oneof: via
+     */
+    via: {
+        oneofKind: "userId";
+        /**
+         * ID of the user to invite
+         *
+         * @generated from protobuf field: int64 user_id = 3;
+         */
+        userId: bigint;
+    } | {
+        oneofKind: "email";
+        /**
+         * Email of the user to invite
+         *
+         * @generated from protobuf field: string email = 4;
+         */
+        email: string;
+    } | {
+        oneofKind: "phoneNumber";
+        /**
+         * Phone number of the user to invite
+         *
+         * @generated from protobuf field: string phone_number = 5;
+         */
+        phoneNumber: string;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message InviteToSpaceResult
+ */
+export interface InviteToSpaceResult {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+    /**
+     * @generated from protobuf field: Member member = 2;
+     */
+    member?: Member;
+    /**
+     * @generated from protobuf field: Chat chat = 3;
+     */
+    chat?: Chat;
+    /**
+     * @generated from protobuf field: Dialog dialog = 4;
+     */
+    dialog?: Dialog;
+}
+/**
  * @generated from protobuf enum Method
  */
 export enum Method {
@@ -1983,7 +2095,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: DELETE_CHAT = 11;
      */
-    DELETE_CHAT = 11
+    DELETE_CHAT = 11,
+    /**
+     * @generated from protobuf enum value: INVITE_TO_SPACE = 12;
+     */
+    INVITE_TO_SPACE = 12
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -4818,7 +4934,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 9, name: "editMessage", kind: "message", oneof: "input", T: () => EditMessageInput },
             { no: 10, name: "createChat", kind: "message", oneof: "input", T: () => CreateChatInput },
             { no: 11, name: "getSpaceMembers", kind: "message", oneof: "input", T: () => GetSpaceMembersInput },
-            { no: 12, name: "deleteChat", kind: "message", oneof: "input", T: () => DeleteChatInput }
+            { no: 12, name: "deleteChat", kind: "message", oneof: "input", T: () => DeleteChatInput },
+            { no: 13, name: "inviteToSpace", kind: "message", oneof: "input", T: () => InviteToSpaceInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -4903,6 +5020,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         deleteChat: DeleteChatInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteChat)
                     };
                     break;
+                case /* InviteToSpaceInput inviteToSpace */ 13:
+                    message.input = {
+                        oneofKind: "inviteToSpace",
+                        inviteToSpace: InviteToSpaceInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).inviteToSpace)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4951,6 +5074,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DeleteChatInput deleteChat = 12; */
         if (message.input.oneofKind === "deleteChat")
             DeleteChatInput.internalBinaryWrite(message.input.deleteChat, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
+        /* InviteToSpaceInput inviteToSpace = 13; */
+        if (message.input.oneofKind === "inviteToSpace")
+            InviteToSpaceInput.internalBinaryWrite(message.input.inviteToSpace, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4976,7 +5102,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 9, name: "editMessage", kind: "message", oneof: "result", T: () => EditMessageResult },
             { no: 10, name: "createChat", kind: "message", oneof: "result", T: () => CreateChatResult },
             { no: 11, name: "getSpaceMembers", kind: "message", oneof: "result", T: () => GetSpaceMembersResult },
-            { no: 12, name: "deleteChat", kind: "message", oneof: "result", T: () => DeleteChatResult }
+            { no: 12, name: "deleteChat", kind: "message", oneof: "result", T: () => DeleteChatResult },
+            { no: 13, name: "inviteToSpace", kind: "message", oneof: "result", T: () => InviteToSpaceResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -5061,6 +5188,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         deleteChat: DeleteChatResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteChat)
                     };
                     break;
+                case /* InviteToSpaceResult inviteToSpace */ 13:
+                    message.result = {
+                        oneofKind: "inviteToSpace",
+                        inviteToSpace: InviteToSpaceResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).inviteToSpace)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5109,6 +5242,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DeleteChatResult deleteChat = 12; */
         if (message.result.oneofKind === "deleteChat")
             DeleteChatResult.internalBinaryWrite(message.result.deleteChat, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
+        /* InviteToSpaceResult inviteToSpace = 13; */
+        if (message.result.oneofKind === "inviteToSpace")
+            InviteToSpaceResult.internalBinaryWrite(message.result.inviteToSpace, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7051,3 +7187,156 @@ class DeleteChatResult$Type extends MessageType<DeleteChatResult> {
  * @generated MessageType for protobuf message DeleteChatResult
  */
 export const DeleteChatResult = new DeleteChatResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InviteToSpaceInput$Type extends MessageType<InviteToSpaceInput> {
+    constructor() {
+        super("InviteToSpaceInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "role", kind: "enum", T: () => ["Member.Role", Member_Role] },
+            { no: 3, name: "user_id", kind: "scalar", oneof: "via", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "email", kind: "scalar", oneof: "via", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "phone_number", kind: "scalar", oneof: "via", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InviteToSpaceInput>): InviteToSpaceInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.role = 0;
+        message.via = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<InviteToSpaceInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InviteToSpaceInput): InviteToSpaceInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* Member.Role role */ 2:
+                    message.role = reader.int32();
+                    break;
+                case /* int64 user_id */ 3:
+                    message.via = {
+                        oneofKind: "userId",
+                        userId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* string email */ 4:
+                    message.via = {
+                        oneofKind: "email",
+                        email: reader.string()
+                    };
+                    break;
+                case /* string phone_number */ 5:
+                    message.via = {
+                        oneofKind: "phoneNumber",
+                        phoneNumber: reader.string()
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InviteToSpaceInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* Member.Role role = 2; */
+        if (message.role !== 0)
+            writer.tag(2, WireType.Varint).int32(message.role);
+        /* int64 user_id = 3; */
+        if (message.via.oneofKind === "userId")
+            writer.tag(3, WireType.Varint).int64(message.via.userId);
+        /* string email = 4; */
+        if (message.via.oneofKind === "email")
+            writer.tag(4, WireType.LengthDelimited).string(message.via.email);
+        /* string phone_number = 5; */
+        if (message.via.oneofKind === "phoneNumber")
+            writer.tag(5, WireType.LengthDelimited).string(message.via.phoneNumber);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InviteToSpaceInput
+ */
+export const InviteToSpaceInput = new InviteToSpaceInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InviteToSpaceResult$Type extends MessageType<InviteToSpaceResult> {
+    constructor() {
+        super("InviteToSpaceResult", [
+            { no: 1, name: "user", kind: "message", T: () => User },
+            { no: 2, name: "member", kind: "message", T: () => Member },
+            { no: 3, name: "chat", kind: "message", T: () => Chat },
+            { no: 4, name: "dialog", kind: "message", T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<InviteToSpaceResult>): InviteToSpaceResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<InviteToSpaceResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InviteToSpaceResult): InviteToSpaceResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* Member member */ 2:
+                    message.member = Member.internalBinaryRead(reader, reader.uint32(), options, message.member);
+                    break;
+                case /* Chat chat */ 3:
+                    message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
+                    break;
+                case /* Dialog dialog */ 4:
+                    message.dialog = Dialog.internalBinaryRead(reader, reader.uint32(), options, message.dialog);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InviteToSpaceResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Member member = 2; */
+        if (message.member)
+            Member.internalBinaryWrite(message.member, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* Chat chat = 3; */
+        if (message.chat)
+            Chat.internalBinaryWrite(message.chat, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* Dialog dialog = 4; */
+        if (message.dialog)
+            Dialog.internalBinaryWrite(message.dialog, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InviteToSpaceResult
+ */
+export const InviteToSpaceResult = new InviteToSpaceResult$Type();
