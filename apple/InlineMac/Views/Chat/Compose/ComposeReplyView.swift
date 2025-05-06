@@ -98,7 +98,8 @@ class ComposeReplyView: NSView {
   // MARK: - Actions
 
   @objc private func handleClose() {
-    close()
+    close(animated: true)
+    self.onClose()
   }
 
   // MARK: - Public Methods
@@ -129,7 +130,7 @@ class ComposeReplyView: NSView {
     }
   }
 
-  func close(animated: Bool = false, completion: (() -> Void)? = nil) {
+  func close(animated: Bool = false, completion: (() -> Void)? = nil, callOnClose: Bool = true) {
     guard alphaValue == 1 else { return }
 
     if animated {
@@ -137,7 +138,9 @@ class ComposeReplyView: NSView {
         context.duration = 0.2
         context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         context.completionHandler = {
-          self.onClose()
+          if callOnClose {
+            self.onClose()
+          }
           completion?()
         }
 
@@ -151,7 +154,9 @@ class ComposeReplyView: NSView {
 
         heightConstraint.constant = 0
         alphaValue = 0
-        onClose()
+        if callOnClose {
+          onClose()
+        }
         completion?()
       }
     }
