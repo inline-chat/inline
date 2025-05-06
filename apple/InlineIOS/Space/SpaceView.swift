@@ -55,8 +55,27 @@ struct SpaceView: View {
       .animation(.default, value: fullSpaceViewModel.memberChats)
     }
     .frame(maxWidth: .infinity)
-    .navigationBarTitleDisplayMode(.large)
-    .navigationTitle(fullSpaceViewModel.space?.name ?? "")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(id: "space", placement: .principal) {
+        HStack {
+          if let space = fullSpaceViewModel.space {
+            SpaceAvatar(space: space, size: 28)
+              .padding(.trailing, 4)
+          } else {
+            Image(systemName: "person.2.fill")
+              .foregroundColor(.secondary)
+              .font(.callout)
+              .padding(.trailing, 4)
+          }
+          VStack(alignment: .leading) {
+            Text(fullSpaceViewModel.space?.name ?? "Space")
+              .font(.body)
+              .fontWeight(.semibold)
+          }
+        }
+      }
+    }
     .toolbarRole(.editor)
     .toolbar {
       Group {
