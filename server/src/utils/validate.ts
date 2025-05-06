@@ -66,3 +66,24 @@ export const validateIanaTimezone = (timezone: string): boolean => {
 
   return validRegex.test(timezone) || etcRegex.test(timezone)
 }
+
+export const isValidSpaceId = (spaceId: number | string | undefined | null): boolean => {
+  if (!spaceId) {
+    return false
+  }
+
+  if (typeof spaceId === "string") {
+    const id = Number(spaceId)
+    if (isNaN(id) || id <= 0) {
+      return false
+    }
+  }
+
+  if (typeof spaceId === "number") {
+    if (isNaN(spaceId) || spaceId <= 0) {
+      return false
+    }
+  }
+
+  return true
+}

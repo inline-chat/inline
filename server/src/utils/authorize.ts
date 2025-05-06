@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { and, eq } from "drizzle-orm"
-import { members, spaces } from "@in/server/db/schema"
+import { members, spaces, type DbMember } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 
 /** Check if user is creator of space */
@@ -21,15 +21,17 @@ const spaceCreator = async (spaceId: number, currentUserId: number) => {
 }
 
 /** Check if user is member of space */
-const spaceMember = async (spaceId: number, currentUserId: number) => {
-  const space = await db.query.members.findFirst({
+const spaceMember = async (spaceId: number, currentUserId: number): Promise<{ member: DbMember }> => {
+  const member = await db.query.members.findFirst({
     where: and(eq(members.spaceId, spaceId), eq(members.userId, currentUserId)),
   })
 
   // Check if space that we are trying to use as member exists
-  if (space === undefined) {
+  if (member === undefined) {
     throw new InlineError(InlineError.ApiError.USER_NOT_PARTICIPANT)
   }
+
+  return { member }
 }
 
 export const Authorize = {

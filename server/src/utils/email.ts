@@ -5,18 +5,19 @@ import { sendEmail as sendEmailViaResend } from "@in/server/libs/resend"
 import { isProd } from "@in/server/env"
 import { styleText } from "node:util"
 import { Log } from "@in/server/utils/log"
+import type { UserName } from "@in/server/modules/cache/userNames"
 type SendEmailInput = {
   to: string
   content: SendEmailContent
 }
 
-type SendEmailContent = CodeTemplateInput
-// | {
-//     template: "..."
-//     variables: {
-//       // ...
-//     }
-//   }
+/**
+ * The content of the email to send
+ *
+ * @see CodeTemplateInput
+ * @see InvitedToSpaceTemplateInput
+ */
+type SendEmailContent = CodeTemplateInput | InvitedToSpaceTemplateInput
 
 export const sendEmail = async (input: SendEmailInput) => {
   const template = getTemplate(input.content)
@@ -81,17 +82,32 @@ const getTemplate = (content: SendEmailContent): TextTemplate => {
   switch (content.template) {
     case "code":
       return CodeTemplate(content.variables)
+
+    case "invitedToSpace":
+      return InvitedToSpaceTemplate(content.variables)
   }
 }
 
 interface CodeTemplateInput extends TemplateInput {
   template: "code"
-  variables: { 
-    code: string; 
-    firstName: string | undefined;
-    isExistingUser: boolean;
+  variables: {
+    code: string
+    firstName: string | undefined
+    isExistingUser: boolean
   }
 }
+
+interface InvitedToSpaceTemplateInput extends TemplateInput {
+  template: "invitedToSpace"
+  variables: {
+    email: string
+    spaceName: string
+    isExistingUser: boolean
+    firstName: string | undefined
+    invitedByUserName: UserName | undefined
+  }
+}
+
 function CodeTemplate({ code, firstName, isExistingUser }: CodeTemplateInput["variables"]): TextTemplate {
   const codeType = isExistingUser ? "login" : "signup"
   const subject = `Your Inline ${codeType} code: ${code}`
@@ -99,6 +115,40 @@ function CodeTemplate({ code, firstName, isExistingUser }: CodeTemplateInput["va
 Hey ${firstName ? `${firstName},` : "–"}
 
 Here's your verification code for Inline ${codeType}: ${code}
+
+Inline Team
+  `.trim()
+  return { subject, text }
+}
+
+function InvitedToSpaceTemplate({
+  email,
+  spaceName,
+  isExistingUser,
+  firstName,
+  invitedByUserName,
+}: InvitedToSpaceTemplateInput["variables"]): TextTemplate {
+  const subject = `You've been invited to "${spaceName}"`
+  const invitedByName = invitedByUserName
+    ? `by "${invitedByUserName.firstName ?? invitedByUserName.username ?? invitedByUserName.email}"`
+    : ""
+  const text = `
+Hey ${firstName ? `${firstName},` : "–"}
+
+You've been invited to join "${spaceName}" ${invitedByName} on Inline.
+
+${
+  isExistingUser
+    ? `You can start chatting by opening the Inline app. Make sure you're logged in with the email: ${email}.`
+    : `
+To start chatting, get the app from TestFlight from one of the links below. Then, sign up via your email: "${email}".
+
+iOS: https://testflight.apple.com/join/FkC3f7fz
+macOS: https://testflight.apple.com/join/Z8zUcWZH
+    `
+}
+
+Inline is a chat app for teams. 
 
 Inline Team
   `.trim()
