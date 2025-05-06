@@ -13,8 +13,6 @@ const encodePhotoSize = (size: DbFullPhotoSize): PhotoSize | null => {
   const path = file.path
   const url = path ? getSignedUrl(path) : null
 
-  console.log("🧁🧁🧁 encodePhotoSize", { file, size, path, url })
-
   let proto: PhotoSize = {
     type: size.size ?? "f",
     w: file.width ?? 0,
