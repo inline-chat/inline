@@ -43,6 +43,9 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
         case let .editMessage(editMessage):
           try editMessage.apply(db)
 
+        case let .newChat(newChat):
+          try newChat.apply(db)
+
         default:
           break
       }
@@ -269,5 +272,14 @@ extension InlineProtocol.UpdateEditMessage {
         )
       }
     }
+  }
+}
+
+extension InlineProtocol.UpdateNewChat {
+  func apply(_ db: Database) throws {
+    let chat = Chat(from: chat)
+    try chat.save(db)
+    let dialog = Dialog(optimisticForChat: chat)
+    try dialog.save(db)
   }
 }
