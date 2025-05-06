@@ -8,7 +8,6 @@ import UIKit
 enum EmbedType: String {
   case edit
   case reply
-  case link
 }
 
 class ComposeEmbedView: UIView {

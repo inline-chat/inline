@@ -244,8 +244,7 @@ class UIMessageView: UIView {
     containerStack.addArrangedSubview(embedView)
 
     if let repliedMessage = fullMessage.repliedToMessage {
-      let senderName = Auth.shared.getCurrentUserId() == fullMessage.repliedToMessage?.fromId ?
-        "You" : fullMessage.replyToMessageSender?.firstName ?? ""
+      let senderName = fullMessage.replyToMessageSender?.firstName ?? "User"
       embedView.configure(
         message: repliedMessage,
         senderName: senderName,
@@ -542,15 +541,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-      case (true, false):
-        // File only
-        withFileConstraints
-      case (true, true):
-        // File with text
-        withFileAndTextConstraints
-      default:
-        // Text only
-        withoutFileConstraints
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
