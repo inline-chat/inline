@@ -53,8 +53,10 @@ struct SidebarTabView<Tab: Hashable>: View {
         Spacer()
       }
       .frame(height: height)
-      if showDivider {
-        Divider().opacity(0.4).frame(maxHeight: 1).offset(y: -height / 2 + 1)
+      .overlay(alignment: .top) {
+        if showDivider {
+          Divider().opacity(0.4)
+        }
       }
     }
   }

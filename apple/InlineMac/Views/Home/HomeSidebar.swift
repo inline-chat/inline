@@ -227,7 +227,6 @@ struct HomeSidebar: View {
       showDivider: !isAtBottom,
       onSelect: { tab = $0 }
     )
-    .padding(.top, -8)
   }
 
   @ViewBuilder
