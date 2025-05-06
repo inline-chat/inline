@@ -39,44 +39,25 @@ struct SpaceView: View {
   }
 
   var body: some View {
-    ZStack {
-      VStack {
-        List {
-          Section {
-            ForEach(getCombinedItems(), id: \.id) { item in
-              combinedItemRow(for: item)
-                .listRowInsets(.init(
-                  top: 9,
-                  leading: 16,
-                  bottom: 2,
-                  trailing: 0
-                ))
-            }
+    VStack {
+      List {
+        Section {
+          ForEach(getCombinedItems(), id: \.id) { item in
+            combinedItemRow(for: item)
+              .listRowInsets(.init(
+                top: 9,
+                leading: 16,
+                bottom: 2,
+                trailing: 0
+              ))
           }
         }
-        .listStyle(.plain)
-        .animation(.default, value: fullSpaceViewModel.chats)
-        .animation(.default, value: fullSpaceViewModel.memberChats)
       }
-      VStack {
-        VariableBlurView()
-          .frame(height: 110)
-          .allowsHitTesting(false)
-          .background {
-            LinearGradient(
-              gradient: Gradient(colors: [
-                Color(ThemeManager.shared.selected.backgroundColor).opacity(0.2),
-                Color(ThemeManager.shared.selected.backgroundColor).opacity(0),
-              ]),
-              startPoint: .top,
-              endPoint: .bottom
-            )
-          }
-        Spacer()
-      }
-      .ignoresSafeArea(.all)
+      .listStyle(.plain)
+      .animation(.default, value: fullSpaceViewModel.chats)
+      .animation(.default, value: fullSpaceViewModel.memberChats)
     }
-    .toolbarBackground(.hidden, for: .navigationBar)
+
     .frame(maxWidth: .infinity)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
