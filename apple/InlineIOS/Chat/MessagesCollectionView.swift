@@ -5,6 +5,7 @@ import InlineKit
 import Logger
 import Nuke
 import NukeUI
+import Photos
 import UIKit
 
 final class MessagesCollectionView: UICollectionView {
@@ -870,7 +871,7 @@ private extension MessagesCollectionView {
         var actions: [UIAction] = [copyAction]
 
         if fullMessage.photoInfo != nil {
-          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "photo.fill.on.rectangle")) {
+          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
             [weak self] _ in
             guard let self else { return }
             if let image = cell.messageView?.newPhotoView.getCurrentImage() {
@@ -883,6 +884,28 @@ private extension MessagesCollectionView {
             }
           }
           actions.append(copyPhotoAction)
+
+          let savePhotoAction = UIAction(
+            title: "Save Photo",
+            image: UIImage(systemName: "square.and.arrow.down")
+          ) { [weak self] _ in
+            guard let self else { return }
+            if let image = cell.messageView?.newPhotoView.getCurrentImage() {
+              UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+              ToastManager.shared.showToast(
+                "Photo saved to Photos Library",
+                type: .success,
+                systemImage: "photo"
+              )
+            } else {
+              ToastManager.shared.showToast(
+                "Failed to save photo",
+                type: .error,
+                systemImage: "exclamationmark.triangle"
+              )
+            }
+          }
+          actions.append(savePhotoAction)
         }
 
         let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in

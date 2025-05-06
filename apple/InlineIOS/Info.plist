@@ -18,8 +18,6 @@
 	</array>
 	<key>DEV_HOST</key>
 	<string>$(DEV_HOST)</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 	<key>UIAppFonts</key>
 	<array/>
 	<key>USE_PRODUCTION_API</key>
