@@ -79,7 +79,11 @@ public extension Reaction {
     userId = from.userID
     chatId = from.chatID
     emoji = from.emoji
-    date = Date(timeIntervalSince1970: TimeInterval(from.date) / 1_000)
+    // Handle both milliseconds (old format) and seconds (new format)
+    // If the timestamp is large (> 10^12), it's likely in milliseconds
+    date = from.date > 1_000_000_000_000
+      ? Date(timeIntervalSince1970: TimeInterval(from.date) / 1_000)
+      : Date(timeIntervalSince1970: TimeInterval(from.date))
   }
 
   static func save(
