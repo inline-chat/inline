@@ -8,6 +8,12 @@ import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { dialogs } from "@in/server/db/schema"
+import { Update } from "@in/protocol/core"
+import { getUpdateGroup } from "@in/server/modules/updates"
+import { RealtimeUpdates } from "@in/server/realtime/message"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
+import type { UpdateGroup } from "@in/server/modules/updates"
+import type { DbChat } from "@in/server/db/schema"
 
 export async function createChat(
   input: {
@@ -115,8 +121,49 @@ export async function createChat(
     },
   }
 
+  // Broadcast the new chat update
+  await pushUpdates({ chat: chat[0], currentUserId: context.currentUserId })
+
   return {
     chat: encodeChat(chat[0]),
     dialog,
   }
+}
+
+// ------------------------------------------------------------
+// Updates
+// ------------------------------------------------------------
+
+/** Push updates for new chat creation */
+const pushUpdates = async ({
+  chat,
+  currentUserId,
+}: {
+  chat: DbChat
+  currentUserId: number
+}): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
+  // Use getUpdateGroup with the new chat info
+  const updateGroup = await getUpdateGroup({ threadId: chat.id }, { currentUserId })
+
+  let selfUpdates: Update[] = []
+
+  // Prepare the update
+  const newChatUpdate: Update = {
+    update: {
+      oneofKind: "newChat",
+      newChat: {
+        chat: Encoders.chat(chat),
+      },
+    },
+  }
+
+  // Broadcast to all users in the update group
+  updateGroup.userIds.forEach((userId) => {
+    RealtimeUpdates.pushToUser(userId, [newChatUpdate])
+    if (userId === currentUserId) {
+      selfUpdates = [newChatUpdate]
+    }
+  })
+
+  return { selfUpdates, updateGroup }
 }

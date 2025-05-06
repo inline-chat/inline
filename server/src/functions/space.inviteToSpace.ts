@@ -1,11 +1,12 @@
 import { db } from "@in/server/db"
 import { and, eq } from "drizzle-orm"
-import { members, type DbChat, type DbDialog, type DbMember, type DbUser } from "@in/server/db/schema"
+import { members, type DbChat, type DbDialog, type DbMember, type DbSpace, type DbUser } from "@in/server/db/schema"
 import { UsersModel } from "@in/server/db/models/users"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
 import {
   Member_Role,
+  Update,
   type InviteToSpaceInput,
   type InviteToSpaceResult,
   type Member,
@@ -23,6 +24,8 @@ import { SpaceModel } from "@in/server/db/models/spaces"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { Log } from "@in/server/utils/log"
+import { getUpdateGroup, getUpdateGroupForSpace } from "@in/server/modules/updates"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 
 const log = new Log("space.inviteToSpace")
 
@@ -33,6 +36,13 @@ export const inviteToSpace = async (
   const spaceId = Number(input.spaceId)
   if (!isValidSpaceId(spaceId)) {
     throw RealtimeRpcError.BadRequest
+  }
+
+  // Get space
+  const space = await SpaceModel.getSpaceById(spaceId)
+
+  if (!space) {
+    throw RealtimeRpcError.SpaceIdInvalid
   }
 
   // Validate our permission in this space and maximum role we can assign
@@ -71,13 +81,17 @@ export const inviteToSpace = async (
   let { chat, dialog } = await createChat(inviteInfo.user.id, context)
 
   // Send invite
-  sendInvite(inviteInfo.user, spaceId, input, context)
+  sendInvite(inviteInfo.user, space, input, context)
     .then(() => {
       log.info("Invite sent", { spaceId, userId: inviteInfo.user.id })
     })
     .catch((error) => {
       log.error(error, "Failed to send invite", { spaceId, userId: inviteInfo.user.id })
     })
+
+  // Send updates
+  pushUpdateForInvitedUser({ space, member, inviteUserId: inviteInfo.user.id })
+  pushUpdatesForSpace({ spaceId, member, user: inviteInfo.user, currentUserId: context.currentUserId })
 
   return {
     user: Encoders.user({ user: inviteInfo.user, min: false }),
@@ -184,8 +198,7 @@ async function createChat(userId: number, context: FunctionContext): Promise<{ c
   return { chat, dialog }
 }
 
-async function sendInvite(user: DbUser, spaceId: number, input: InviteToSpaceInput, context: FunctionContext) {
-  const space = await SpaceModel.getSpaceById(spaceId)
+async function sendInvite(user: DbUser, space: DbSpace, input: InviteToSpaceInput, context: FunctionContext) {
   const userName = await getCachedUserName(user.id)
 
   // Send invite to email or via push notification
@@ -212,9 +225,64 @@ async function sendInvite(user: DbUser, spaceId: number, input: InviteToSpaceInp
     await Notifications.sendToUser({
       userId: user.id,
       senderUserId: context.currentUserId,
-      threadId: `invite_${spaceId}`,
+      threadId: `invite_${space.id}`,
       title: `${inviterName ?? "Someone"} added you to "${space?.name ?? "Unnamed"}" space`,
       body: `Open the app, tap on the space name to start chatting.`,
     })
   }
+}
+
+// ------------------------------------------------------------
+// Updates
+
+const pushUpdateForInvitedUser = async ({
+  space,
+  member,
+  inviteUserId,
+}: {
+  inviteUserId: number
+  space: DbSpace
+  member: DbMember
+}) => {
+  // Update for the person who was invited
+  const update: Update = {
+    update: {
+      oneofKind: "joinSpace",
+      joinSpace: {
+        space: Encoders.space(space),
+        member: Encoders.member(member),
+      },
+    },
+  }
+
+  RealtimeUpdates.pushToUser(inviteUserId, [update])
+}
+
+const pushUpdatesForSpace = async ({
+  spaceId,
+  member,
+  user,
+  currentUserId,
+}: {
+  spaceId: number
+  member: DbMember
+  user: DbUser
+  currentUserId: number
+}) => {
+  const update: Update = {
+    update: {
+      oneofKind: "spaceMemberAdd",
+      spaceMemberAdd: {
+        member: Encoders.member(member),
+        user: Encoders.user({ user, min: false }),
+      },
+    },
+  }
+
+  // Update for the space
+  const updateGroup = await getUpdateGroupForSpace(spaceId, { currentUserId })
+
+  updateGroup.userIds.forEach((userId) => {
+    RealtimeUpdates.pushToUser(userId, [update])
+  })
 }

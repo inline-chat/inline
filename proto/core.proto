@@ -231,14 +231,6 @@ message Space {
   string name = 2;
 }
 
-message ChatParticipant {
-  // User ID
-  int64 user_id = 1;
-
-  // Date of joining
-  int64 date = 2;
-}
-
 // Add reaction input
 message AddReactionInput {
   // Emoji of the reaction
@@ -665,11 +657,71 @@ message Update {
     UpdateMessageAttachment message_attachment = 10;
     UpdateReaction update_reaction = 11;
     UpdateDeleteReaction delete_reaction = 12;
+    UpdateChatParticipantAdd participant_add = 13;
+    UpdateChatParticipantDelete participant_delete = 14;
+    UpdateNewChat new_chat = 15;
+    UpdateDeleteChat delete_chat = 16;
+    UpdateSpaceMemberAdd space_member_add = 17;
+    UpdateSpaceMemberDelete space_member_delete = 18;
+    UpdateJoinSpace join_space = 19;
+    UpdateReadMaxId update_read_max_id = 20;
   }
 }
 
+// Update when a new space member is added
+message UpdateSpaceMemberAdd {
+  Member member = 1;
+  User user = 2;
+}
+
+// Update when a space member is removed
+message UpdateSpaceMemberDelete {
+  // todo
+}
+
+// Update when we joined a space
+message UpdateJoinSpace {
+  Space space = 1;
+  Member member = 2;
+}
+
+// Update when we read up to a certain message ID
+message UpdateReadMaxId {
+  // Peer ID
+  Peer peer_id = 1;
+
+  // Chat ID
+  // int64 chat_id = 2;
+
+  // Read max ID
+  int64 read_max_id = 3;
+
+  // Still unread count
+  int32 unread_count = 4;
+}
+
+// Update when a new chat is created either in space or a private chat
+message UpdateNewChat {
+  // Chat
+  Chat chat = 1;
+
+  // Dialog for the chat
+  // Dialog dialog = 2;
+
+  // If private chat
+  optional User user = 3;
+}
+
+// Update when a chat is deleted
+message UpdateDeleteChat {
+  // Peer ID
+  Peer peer_id = 1;
+}
+
+// Update when a new message is created
 message UpdateNewMessage { Message message = 1; }
 
+// Update when a message is edited
 message UpdateEditMessage { Message message = 1; }
 
 // Update when messages are deleted
@@ -723,6 +775,21 @@ message UpdateDeleteReaction {
 message UpdateUserStatus {
   int64 user_id = 1;
   UserStatus status = 2;
+}
+
+message ChatParticipant {
+  int64 user_id = 1;
+  int64 date = 2;
+}
+
+message UpdateChatParticipantAdd {
+  int64 chat_id = 1;
+  ChatParticipant participant = 2;
+}
+
+message UpdateChatParticipantDelete {
+  int64 chat_id = 1;
+  int64 user_id = 2;
 }
 
 message UserStatus {
