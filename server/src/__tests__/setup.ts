@@ -204,7 +204,7 @@ export const testUtils = {
     if (validUsers.length !== users.length) throw new Error("Failed to create one or more users")
     await db
       .insert(schema.members)
-      .values(validUsers.map((u) => ({ userId: u!.id, spaceId: space.id })))
+      .values(validUsers.map((u) => ({ userId: u!.id, spaceId: space.id, role: "member" as const })))
       .execute()
     return { space, users: validUsers }
   },

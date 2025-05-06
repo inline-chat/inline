@@ -2,7 +2,7 @@ import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 
-type UserName = {
+export type UserName = {
   firstName: string | null
   lastName: string | null
   username: string | null
