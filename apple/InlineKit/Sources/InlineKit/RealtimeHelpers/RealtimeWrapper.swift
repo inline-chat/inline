@@ -175,6 +175,9 @@ public extension Realtime {
         case let .getSpaceMembers(result):
           try await handleResult_getSpaceMembers(result)
 
+        case let .inviteToSpace(result):
+          try await handleResult_inviteToSpace(result)
+
         case .deleteChat:
           try await handleResult_deleteChat()
 
@@ -277,6 +280,38 @@ public extension Realtime {
       }
     }
     log.trace("getSpaceMembers saved")
+  }
+
+  private func handleResult_inviteToSpace(_ result: InviteToSpaceResult) async throws {
+    log.trace("inviteToSpace result: \(result)")
+    try await db.dbWriter.write { db in
+      do {
+        let user = User(from: result.user)
+        try user.save(db)
+      } catch {
+        Log.shared.error("Failed to save user", error: error)
+      }
+      do {
+        let member = Member(from: result.member)
+        try member.save(db)
+      } catch {
+        Log.shared.error("Failed to save member", error: error)
+      }
+
+      do {
+        let dialog = Dialog(from: result.dialog)
+        try dialog.save(db)
+      } catch {
+        Log.shared.error("Failed to save dialog", error: error)
+      }
+
+      do {
+        let chat = Chat(from: result.chat)
+        try chat.save(db)
+      } catch {
+        Log.shared.error("Failed to save chat", error: error)
+      }
+    }
   }
 
   private func handleResult_deleteChat() async throws {
