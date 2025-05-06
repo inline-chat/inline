@@ -299,17 +299,17 @@ public extension Realtime {
       }
 
       do {
-        let dialog = Dialog(from: result.dialog)
-        try dialog.save(db)
-      } catch {
-        Log.shared.error("Failed to save dialog", error: error)
-      }
-
-      do {
         let chat = Chat(from: result.chat)
         try chat.save(db)
       } catch {
         Log.shared.error("Failed to save chat", error: error)
+      }
+
+      do {
+        let dialog = Dialog(from: result.dialog)
+        try dialog.save(db)
+      } catch {
+        Log.shared.error("Failed to save dialog", error: error)
       }
     }
   }
