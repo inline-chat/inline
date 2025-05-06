@@ -243,6 +243,11 @@ class UIMessageView: UIView {
 
     containerStack.addArrangedSubview(embedView)
 
+    // Add tap gesture to embedView for scroll-to-reply
+    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEmbedViewTap))
+    embedView.isUserInteractionEnabled = true
+    embedView.addGestureRecognizer(tapGesture)
+
     if let repliedMessage = fullMessage.repliedToMessage {
       let senderName = fullMessage.replyToMessageSender?.firstName ?? "User"
       embedView.configure(
@@ -254,6 +259,15 @@ class UIMessageView: UIView {
     } else {
       embedView.showNotLoaded(outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)
     }
+  }
+
+  @objc func handleEmbedViewTap() {
+    guard let repliedId = message.repliedToMessageId else { return }
+    NotificationCenter.default.post(
+      name: Notification.Name("ScrollToRepliedMessage"),
+      object: nil,
+      userInfo: ["repliedToMessageId": repliedId, "chatId": message.chatId]
+    )
   }
 
   func setupFileViewIfNeeded() {
