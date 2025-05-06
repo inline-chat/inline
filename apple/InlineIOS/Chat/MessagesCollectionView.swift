@@ -478,7 +478,11 @@ private extension MessagesCollectionView {
         guard let self, let message = viewModel.messagesByID[messageId] else { return }
         let isFromDifferentSender = isMessageFromDifferentSender(at: indexPath)
 
-        cell.configure(with: message, fromOtherSender: isFromDifferentSender, spaceId: spaceId)
+        cell.configure(
+          with: message,
+          fromOtherSender: isFromDifferentSender,
+          spaceId: spaceId
+        )
       }
 
       dataSource = UICollectionViewDiffableDataSource<Section, FullMessage.ID>(
