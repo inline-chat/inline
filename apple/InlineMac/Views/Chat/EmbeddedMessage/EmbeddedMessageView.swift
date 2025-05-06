@@ -188,6 +188,8 @@ class EmbeddedMessageView: NSView {
       messageLabel.stringValue = text
     } else if let file {
       messageLabel.stringValue = file.fileType == .photo ? "🖼️ Photo" : "📄 File"
+    } else if message.isSticker == true {
+      messageLabel.stringValue = "🖼️ Sticker"
     } else if let _ = message.photoId {
       messageLabel.stringValue = "🖼️ Photo"
     } else if let _ = message.videoId {
