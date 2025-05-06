@@ -409,6 +409,12 @@ export interface Chat {
      * @generated from protobuf field: optional int64 last_msg_id = 7;
      */
     lastMsgId?: bigint;
+    /**
+     * ID of the peer that this chat belongs to
+     *
+     * @generated from protobuf field: Peer peer_id = 8;
+     */
+    peerId?: Peer;
 }
 /**
  * @generated from protobuf message Message
@@ -3402,7 +3408,8 @@ class Chat$Type extends MessageType<Chat> {
             { no: 4, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "is_public", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 7, name: "last_msg_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 7, name: "last_msg_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "peer_id", kind: "message", T: () => Peer }
         ]);
     }
     create(value?: PartialMessage<Chat>): Chat {
@@ -3439,6 +3446,9 @@ class Chat$Type extends MessageType<Chat> {
                 case /* optional int64 last_msg_id */ 7:
                     message.lastMsgId = reader.int64().toBigInt();
                     break;
+                case /* Peer peer_id */ 8:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3472,6 +3482,9 @@ class Chat$Type extends MessageType<Chat> {
         /* optional int64 last_msg_id = 7; */
         if (message.lastMsgId !== undefined)
             writer.tag(7, WireType.Varint).int64(message.lastMsgId);
+        /* Peer peer_id = 8; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

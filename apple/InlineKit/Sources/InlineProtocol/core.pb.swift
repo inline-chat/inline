@@ -710,6 +710,16 @@ public struct Chat: Sendable {
   /// Clears the value of `lastMsgID`. Subsequent reads from it will return its default value.
   public mutating func clearLastMsgID() {self._lastMsgID = nil}
 
+  /// ID of the peer that this chat belongs to
+  public var peerID: Peer {
+    get {return _peerID ?? Peer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -719,6 +729,7 @@ public struct Chat: Sendable {
   fileprivate var _emoji: String? = nil
   fileprivate var _isPublic: Bool? = nil
   fileprivate var _lastMsgID: Int64? = nil
+  fileprivate var _peerID: Peer? = nil
 }
 
 public struct Message: @unchecked Sendable {
@@ -4342,6 +4353,7 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     5: .same(proto: "emoji"),
     6: .standard(proto: "is_public"),
     7: .standard(proto: "last_msg_id"),
+    8: .standard(proto: "peer_id"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4357,6 +4369,7 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       case 5: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self._isPublic) }()
       case 7: try { try decoder.decodeSingularInt64Field(value: &self._lastMsgID) }()
+      case 8: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       default: break
       }
     }
@@ -4388,6 +4401,9 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     try { if let v = self._lastMsgID {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
     } }()
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -4399,6 +4415,7 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     if lhs._emoji != rhs._emoji {return false}
     if lhs._isPublic != rhs._isPublic {return false}
     if lhs._lastMsgID != rhs._lastMsgID {return false}
+    if lhs._peerID != rhs._peerID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

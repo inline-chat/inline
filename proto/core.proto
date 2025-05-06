@@ -136,7 +136,8 @@ message Chat {
   // Last message ID
   optional int64 last_msg_id = 7;
 
-  reserved 8, 9;
+  // ID of the peer that this chat belongs to
+  Peer peer_id = 8;
 }
 
 message Message {

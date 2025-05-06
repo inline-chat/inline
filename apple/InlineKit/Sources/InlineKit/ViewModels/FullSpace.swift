@@ -52,6 +52,7 @@ public final class FullSpaceViewModel: ObservableObject {
 
   private var spaceSancellable: AnyCancellable?
   private var membersSancellable: AnyCancellable?
+  private var membersChatsSancellable: AnyCancellable?
   private var chatsSancellable: AnyCancellable?
 
   private var db: AppDatabase
@@ -74,7 +75,9 @@ public final class FullSpaceViewModel: ObservableObject {
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
-          receiveCompletion: { _ in /* ignore error */ },
+          receiveCompletion: { error in
+            Log.shared.error("failed to fetch space in space view model. error: \(error)")
+          },
           receiveValue: { [weak self] space in
             self?.space = space
           }
@@ -83,7 +86,7 @@ public final class FullSpaceViewModel: ObservableObject {
 
   public func fetchMembersChats() {
     let spaceId = spaceId
-    membersSancellable =
+    membersChatsSancellable =
       ValueObservation
         .tracking { db in
           try Member
@@ -97,6 +100,7 @@ public final class FullSpaceViewModel: ObservableObject {
             Log.shared.error("failed to fetch members in space view model. error: \(error)")
           },
           receiveValue: { [weak self] members in
+            Log.shared.debug("got list of members chats \(members)")
             self?.memberChats = members
           }
         )
@@ -115,6 +119,7 @@ public final class FullSpaceViewModel: ObservableObject {
         .sink(
           receiveCompletion: { _ in /* ignore error */ },
           receiveValue: { [weak self] members in
+            Log.shared.debug("got list of members \(members)")
             self?.members = members
           }
         )
