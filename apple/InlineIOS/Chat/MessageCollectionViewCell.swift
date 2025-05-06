@@ -12,6 +12,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   var messageView: UIMessageView?
   var avatarHostingController: UIHostingController<UserAvatar>?
+  var avatarSpacerView: UIView?
 
   var isThread: Bool = false
   var outgoing: Bool = false
@@ -66,7 +67,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     nameLabel.text = message.from?.firstName ?? "USER"
 
-    setupIncomingThreadMessage()
+    setupThreadHeaderViewsIfNeeded(fromOtherSender: fromOtherSender)
     setupBaseMessageConstraints()
 
     contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
@@ -238,31 +239,90 @@ extension MessageCollectionViewCell {
     contentView.setContentHuggingPriority(.defaultLow, for: .horizontal)
   }
 
+  func setupThreadHeaderViewsIfNeeded(fromOtherSender: Bool) {
+    guard isThread, !outgoing else { return }
+
+    let avatarSize: CGFloat = 32
+    let avatarLeading: CGFloat = 2
+    let nameLabelLeading: CGFloat = 6
+    let nameLabelTop: CGFloat = 14
+
+    let avatarOrSpacer: UIView
+    if fromOtherSender, let from = message.senderInfo {
+      let avatar = UserAvatar(userInfo: from, size: CGFloat(avatarSize), ignoresSafeArea: true)
+      let hostingController = UIHostingController(rootView: avatar)
+      avatarHostingController = hostingController
+      hostingController.view.backgroundColor = .clear
+      hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+      avatarOrSpacer = hostingController.view
+    } else {
+      let spacer = UIView()
+      spacer.translatesAutoresizingMaskIntoConstraints = false
+      avatarOrSpacer = spacer
+    }
+    avatarSpacerView = avatarOrSpacer
+    contentView.addSubview(avatarOrSpacer)
+
+    NSLayoutConstraint.activate([
+      avatarOrSpacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 34),
+      avatarOrSpacer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: avatarLeading),
+      avatarOrSpacer.widthAnchor.constraint(equalToConstant: avatarSize),
+      avatarOrSpacer.heightAnchor.constraint(equalToConstant: avatarSize),
+    ])
+
+    if fromOtherSender {
+      contentView.addSubview(nameLabel)
+      NSLayoutConstraint.activate([
+        nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: nameLabelTop),
+        nameLabel.heightAnchor.constraint(equalToConstant: 16),
+        nameLabel.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: nameLabelLeading),
+      ])
+    }
+  }
+
   func setupBaseMessageConstraints() {
     let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId)
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     contentView.addSubview(newMessageView)
 
-    let topConstraint: NSLayoutConstraint = if isThread, fromOtherSender, !outgoing {
-      newMessageView.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2)
-    } else {
-      newMessageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: fromOtherSender ? 12 : 2)
-    }
+    let topConstraint: NSLayoutConstraint
+    let leadingConstraint: NSLayoutConstraint
+    let trailingConstraint: NSLayoutConstraint
 
-    let leadingConstraint: NSLayoutConstraint = if isThread, !outgoing {
-      if fromOtherSender, let avatarView = avatarHostingController?.view {
-        newMessageView.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: -2)
+    if isThread, fromOtherSender, !outgoing {
+      topConstraint = newMessageView.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2)
+      if let avatarOrSpacer = avatarSpacerView {
+        leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: 6)
       } else {
-        newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10)
+        leadingConstraint = newMessageView.leadingAnchor
+          .constraint(equalTo: contentView.leadingAnchor, constant: 44)
       }
+      trailingConstraint = newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10)
     } else {
-      newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
-    }
-
-    let trailingConstraint: NSLayoutConstraint = if isThread, !outgoing {
-      newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10)
-    } else {
-      newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
+      topConstraint = newMessageView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: fromOtherSender ? 12 : 2
+      )
+      var leadingAnchor = contentView.leadingAnchor
+      var leadingConstant: CGFloat = 0
+      // Add spacer for incoming messages that are not fromOtherSender
+      if !outgoing, !fromOtherSender {
+        let avatarSize: CGFloat = 32
+        let avatarLeading: CGFloat = 2
+        let spacer = UIView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(spacer)
+        NSLayoutConstraint.activate([
+          spacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 34),
+          spacer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: avatarLeading),
+          spacer.widthAnchor.constraint(equalToConstant: avatarSize),
+          spacer.heightAnchor.constraint(equalToConstant: avatarSize),
+        ])
+        leadingAnchor = spacer.trailingAnchor
+        leadingConstant = 6
+      }
+      leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingConstant)
+      trailingConstraint = newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
     }
     NSLayoutConstraint.activate([
       leadingConstraint,
@@ -274,42 +334,13 @@ extension MessageCollectionViewCell {
     messageView = newMessageView
   }
 
-  func setupIncomingThreadMessage() {
-    if isThread, fromOtherSender, !outgoing {
-      contentView.addSubview(nameLabel)
-
       // Add avatar if we have user info
-      if let from = message.senderInfo {
-        let avatar = UserAvatar(userInfo: from, size: 32)
-        let hostingController = UIHostingController(rootView: avatar)
-        avatarHostingController = hostingController
-        hostingController.view.backgroundColor = .clear
-        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(hostingController.view)
-
-        NSLayoutConstraint.activate([
-          hostingController.view.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 34),
-          hostingController.view.widthAnchor.constraint(equalToConstant: 32),
-          hostingController.view.heightAnchor.constraint(equalToConstant: 32),
-          hostingController.view.leadingAnchor.constraint(
-            equalTo: contentView.leadingAnchor,
-            constant: 2
-          ),
-        ])
-      }
-
-      NSLayoutConstraint.activate([
-        nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
-        nameLabel.heightAnchor.constraint(equalToConstant: 16),
-        nameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-      ])
-    }
-  }
-
   func resetCell() {
     messageView?.removeFromSuperview()
     nameLabel.removeFromSuperview()
     avatarHostingController?.view.removeFromSuperview()
     avatarHostingController = nil
+    avatarSpacerView?.removeFromSuperview()
+    avatarSpacerView = nil
   }
 }
