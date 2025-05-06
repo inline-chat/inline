@@ -5,6 +5,7 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { Updates } from "@in/server/modules/updates/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { ReactionModel } from "../db/models/reactions"
+import { encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 type Input = {
   emoji: string
@@ -18,7 +19,7 @@ type Output = {
 
 export const addReaction = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
-  console.log("context of function", context)
+
   const reactions = await ReactionModel.insertReaction({
     messageId: Number(input.messageId),
     chatId: chatId,
@@ -27,8 +28,6 @@ export const addReaction = async (input: Input, context: FunctionContext): Promi
     date: new Date(),
   })
 
-  console.log("reactions", reactions)
-  console.log("input", input)
   const update: Update = {
     update: {
       oneofKind: "updateReaction",
@@ -38,7 +37,7 @@ export const addReaction = async (input: Input, context: FunctionContext): Promi
           messageId: input.messageId,
           chatId: BigInt(chatId),
           userId: BigInt(context.currentUserId),
-          date: BigInt(Date.now()),
+          date: encodeDateStrict(new Date()),
         },
       },
     },
