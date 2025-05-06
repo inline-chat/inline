@@ -214,12 +214,12 @@ struct SpaceSidebar: View {
   @ViewBuilder
   var plusButton: some View {
     Menu {
-      Button {
+      Button("New Chat") {
         nav.open(.newChat)
-      } label: {
-        Label("New Chat", systemImage: "plus")
-          .font(.system(size: 14, weight: .medium))
-          .foregroundStyle(Color.accent)
+      }
+
+      Button("Invite to Space") {
+        nav.open(.inviteToSpace)
       }
     } label: {
       Image(systemName: "plus")
