@@ -131,6 +131,13 @@ struct SpaceView: View {
         try await data.getSpace(spaceId: spaceId)
         fullSpaceViewModel.fetchMembersChats()
       }
+
+      Task.detached {
+        try await realtime
+          .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+            $0.spaceID = spaceId
+          }))
+      }
     }
   }
 

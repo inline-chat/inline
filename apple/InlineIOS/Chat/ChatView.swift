@@ -32,6 +32,8 @@ struct ChatView: View {
 
   @State var apiState: RealtimeAPIState = .connecting
 
+  @State var isChatInfoPresented = false
+
   let timer = Timer.publish(
     every: 60, // 1 minute
     on: .main,
@@ -90,16 +92,19 @@ struct ChatView: View {
 
       VStack {
         VariableBlurView()
-        /// +15 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
+          /// +15 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
           .frame(height: navBarHeight + 15)
-          .allowsHitTesting(false)
-          .background {
+          .contentShape(Rectangle())
+          .background(
             LinearGradient(
-              gradient: Gradient(colors: [Color(ThemeManager.shared.selected.backgroundColor).opacity(0.2), Color(ThemeManager.shared.selected.backgroundColor).opacity(0)]),
+              gradient: Gradient(colors: [
+                Color(ThemeManager.shared.selected.backgroundColor).opacity(0.2),
+                Color(ThemeManager.shared.selected.backgroundColor).opacity(0),
+              ]),
               startPoint: .top,
               endPoint: .bottom
             )
-          }
+          )
         Spacer()
       }
       .ignoresSafeArea(.all)
@@ -109,14 +114,20 @@ struct ChatView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
       if let height = notification.userInfo?["navBarHeight"] as? CGFloat {
-        self.navBarHeight = height
+        navBarHeight = height
       }
     }
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .principal) {
-        header
+        Button(action: {
+          isChatInfoPresented = true
+        }) {
+          header
+        }
+        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
       }
 
       if let user = fullChatViewModel.peerUserInfo {
@@ -155,6 +166,19 @@ struct ChatView: View {
       }
     }
     .environmentObject(fullChatViewModel)
+    .sheet(isPresented: $isChatInfoPresented) {
+      if isPrivateChat, let userInfo = fullChatViewModel.peerUserInfo {
+        NavigationStack {
+          List {
+            Section {
+              ProfileRow(userInfo: userInfo, isChatInfo: true)
+                .navigationTitle("Chat Info")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+          }
+        }
+      }
+    }
   }
 
   @ViewBuilder
@@ -162,6 +186,7 @@ struct ChatView: View {
     VStack(spacing: 0) {
       Text(title)
         .fontWeight(.semibold)
+        .foregroundStyle(.primary)
 
       if !isCurrentUser, isPrivateChat, !subtitle.isEmpty {
         HStack {
@@ -198,4 +223,3 @@ struct CustomButtonStyle: ButtonStyle {
       .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
   }
 }
-

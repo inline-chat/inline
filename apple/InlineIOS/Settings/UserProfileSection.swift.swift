@@ -24,25 +24,36 @@ struct ProfileRow: View {
     userInfo.user
   }
 
+  var isChatInfo: Bool = false
+
   private var fullName: String {
     [user.firstName, user.lastName]
       .compactMap { $0 }
       .joined(separator: " ")
   }
 
+  init(userInfo: UserInfo, isChatInfo: Bool = false) {
+    self.userInfo = userInfo
+    self.isChatInfo = isChatInfo
+  }
   var body: some View {
     HStack {
       UserAvatar(userInfo: userInfo, size: 42)
         .padding(.trailing, 6)
 
-      VStack(alignment: .leading) {
+      VStack(alignment: .leading, spacing: 0) {
         Text(fullName)
           .font(.body)
           .fontWeight(.medium)
-
-        Text(user.email ?? "")
-          .font(.callout)
-          .foregroundColor(.secondary)
+        if !isChatInfo {
+          Text(user.email ?? "")
+            .font(.callout)
+            .foregroundColor(.secondary)
+        } else {
+          Text(user.username ?? "")
+            .font(.callout)
+            .foregroundColor(.secondary)
+        }
       }
     }
   }
