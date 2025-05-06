@@ -92,7 +92,7 @@ public extension Chat {
 
 // MARK: - Preview
 
-#if DEBUG
+
 public extension Chat {
   static let preview = Self(
     id: Int64.random(in: 1 ... 50_000),
@@ -105,7 +105,6 @@ public extension Chat {
     emoji: nil
   )
 }
-#endif
 
 public extension Chat {
   enum CodingKeys: String, CodingKey {
