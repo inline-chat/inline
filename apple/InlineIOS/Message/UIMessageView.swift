@@ -145,7 +145,6 @@ class UIMessageView: UIView {
   init(fullMessage: FullMessage, spaceId: Int64) {
     self.fullMessage = fullMessage
 
-    print("🧁 fullMessage \(fullMessage)")
     self.spaceId = spaceId
 
     // TODO: move to lazy var
@@ -557,15 +556,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-      case (true, false):
-        // File only
-        withFileConstraints
-      case (true, true):
-        // File with text
-        withFileAndTextConstraints
-      default:
-        // Text only
-        withoutFileConstraints
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
