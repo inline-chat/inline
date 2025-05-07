@@ -122,7 +122,7 @@ struct SpaceView: View {
             Button(action: {
               nav.push(.createThread(spaceId: spaceId))
             }) {
-              Label("New Chat", systemImage: "plus.message.fill")
+              Label("New Group Chat", systemImage: "plus.message.fill")
             }
             Button(action: {
               openAddMemberSheet = true
