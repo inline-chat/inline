@@ -4,10 +4,30 @@ import InlineKit
 import InlineUI
 import Logger
 import SwiftUI
+import UIKit
+
+enum Tabs {
+  case chats
+  case archived
+
+  var title: String {
+    switch self {
+      case .chats: "Chats"
+      case .archived: "Archived"
+    }
+  }
+
+  var icon: String {
+    switch self {
+      case .chats: "bubble.left.and.bubble.right.fill"
+      case .archived: "archivebox.fill"
+    }
+  }
+}
 
 struct HomeView: View {
   // MARK: - Environment
-  
+
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var onboardingNav: OnboardingNavigation
   @EnvironmentObject private var api: ApiClient
@@ -16,22 +36,25 @@ struct HomeView: View {
   @EnvironmentObject private var mainViewRouter: MainViewRouter
   @EnvironmentObject private var home: HomeViewModel
   @EnvironmentObject var data: DataManager
-  
+
   @Environment(\.realtime) var realtime
   @Environment(\.appDatabase) private var database
   @Environment(\.auth) private var auth
   @Environment(\.scenePhase) var scenePhase
-  
+
   // MARK: - State
-  
+
   @State private var text = ""
   @State private var searchResults: [UserInfo] = []
   @State private var isSearchingState = false
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
-  
+  @State private var selectedTab: Tabs = .chats
+
   var chatItems: [HomeChatItem] {
     home.chats.filter {
-      $0.dialog.archived == nil || $0.dialog.archived == false
+      selectedTab == .chats ?
+        ($0.dialog.archived == nil || $0.dialog.archived == false) :
+        $0.dialog.archived == true
     }.sorted { (item1: HomeChatItem, item2: HomeChatItem) in
       let pinned1 = item1.dialog.pinned ?? false
       let pinned2 = item2.dialog.pinned ?? false
@@ -39,121 +62,112 @@ struct HomeView: View {
       return item1.message?.date ?? item1.chat?.date ?? Date.now > item2.message?.date ?? item2.chat?.date ?? Date.now
     }
   }
-  
+
+  private func playTabHaptic() {
+    let generator = UIImpactFeedbackGenerator(style: .soft)
+    generator.impactOccurred(intensity: 0.5)
+  }
+
   var body: some View {
-    Group {
-      if !searchResults.isEmpty {
-        searchResultsView
-      } else if home.chats.isEmpty && home.spaces.isEmpty {
-        EmptyHomeView()
-      } else {
-        List {
-          if !home.spaces.isEmpty {
-            ScrollView(.horizontal) {
-              LazyHStack {
-                ForEach(home.spaces.sorted(by: { s1, s2 in
-                  s1.space.date > s2.space.date
-                }), id: \.id) { space in
-                  RectangleSpaceItem(spaceItem: space)
-                }
-              }
-            }
-            .scrollIndicators(.hidden)
-            .contentMargins(.horizontal, 16, for: .scrollContent)
-            .listRowInsets(.init(
-              top: 0,
-              leading: 0,
-              bottom: 16,
-              trailing: 0
-            ))
-            .listRowSeparator(.hidden)
-          }
-          if !home.chats.filter({ $0.dialog.archived == true }).isEmpty {
-            Button {
-              nav.push(.archivedChats)
-            } label: {
-              HStack(alignment: .top, spacing: 14) {
-                Circle()
-                  .fill(
-                    LinearGradient(
-                      colors: [
-                        Color(.systemGray3).adjustLuminosity(by: 0.2),
-                        Color(.systemGray5).adjustLuminosity(by: 0),
-                      ],
-                      startPoint: .top,
-                      endPoint: .bottom
-                    )
-                  )
-                  .frame(width: 58, height: 58)
-                  .overlay {
-                    Image(systemName: "tray.full.fill")
-                      .font(.title)
-                      .foregroundColor(.secondary)
-                  }
-                
-                VStack(alignment: .leading, spacing: 1) {
-                  Text("Archived Chats")
-                    .font(.customTitle())
-                    .foregroundColor(.primary)
-                  Text("\(home.chats.filter { $0.dialog.archived == true }.count) chats")
-                    .font(.customCaption())
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .contentTransition(.numericText())
-                }
-                .animation(.default, value: home.chats.filter { $0.dialog.archived == true }.count)
+    VStack(spacing: 0) {
+      ZStack {
+        Group {
+          if !searchResults.isEmpty {
+            searchResultsView
+          } else if home.chats.isEmpty, home.spaces.isEmpty {
+            EmptyHomeView()
+          } else {
+            if selectedTab == .archived, home.chats.filter({ $0.dialog.archived == true }).isEmpty {
+              VStack {
+                Spacer()
+                Image(systemName: "tray.fill")
+                  .foregroundColor(.secondary)
+                  .font(.title)
+                  .padding(.bottom, 6)
+                Text("No archived chats")
+                  .font(.title3)
                 Spacer()
               }
-              .frame(height: 70)
-              .frame(maxWidth: .infinity)
-            }
-            .listRowInsets(.init(
-              top: 9,
-              leading: 18,
-              bottom: 2,
-              trailing: 0
-            ))
-          }
-          
-          ForEach(chatItems, id: \.id) { item in
-            chatView(for: item)
-            
-              .listRowInsets(.init(
-                top: 9,
-                leading: 16,
-                bottom: 2,
-                trailing: 0
-              ))
-              .contextMenu {
-                Button {
-                  nav.push(.chat(peer: .user(id: item.user.id)))
-                } label: {
-                  Label("Open Chat", systemImage: "bubble.left")
+            } else {
+              List {
+                if selectedTab == .chats, !home.spaces.isEmpty {
+                  ScrollView(.horizontal) {
+                    LazyHStack {
+                      ForEach(home.spaces.sorted(by: { s1, s2 in
+                        s1.space.date > s2.space.date
+                      }), id: \.id) { space in
+                        RectangleSpaceItem(spaceItem: space)
+                      }
+                    }
+                  }
+                  .scrollIndicators(.hidden)
+                  .contentMargins(.horizontal, 16, for: .scrollContent)
+                  .listRowInsets(.init(
+                    top: 0,
+                    leading: 0,
+                    bottom: 16,
+                    trailing: 0
+                  ))
+                  .listRowSeparator(.hidden)
                 }
-              } preview: {
-                ChatView(peer: .user(id: item.user.id), preview: true)
-                  .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-                  .environmentObject(nav)
-                  .environmentObject(data)
-                  .environment(\.realtime, realtime)
-                  .environment(\.appDatabase, database)
+                ForEach(chatItems, id: \.id) { item in
+                  chatView(for: item)
+                    .listRowInsets(.init(
+                      top: 9,
+                      leading: 16,
+                      bottom: 2,
+                      trailing: 0
+                    ))
+                    .contextMenu {
+                      Button {
+                        nav.push(.chat(peer: .user(id: item.user.id)))
+                      } label: {
+                        Label("Open Chat", systemImage: "bubble.left")
+                      }
+                    } preview: {
+                      ChatView(peer: .user(id: item.user.id), preview: true)
+                        .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+                        .environmentObject(nav)
+                        .environmentObject(data)
+                        .environment(\.realtime, realtime)
+                        .environment(\.appDatabase, database)
+                    }
+                }
               }
+              .listStyle(.plain)
+              .animation(.default, value: home.chats)
+              .animation(.default, value: home.spaces)
+            }
           }
         }
-        .listStyle(.plain)
-        .animation(.default, value: home.chats)
-        .animation(.default, value: home.spaces)
+        .overlay {
+          SearchedView(textIsEmpty: text.isEmpty, isSearchResultsEmpty: searchResults.isEmpty)
+        }
       }
+      .id(selectedTab)
+      .transition(.asymmetric(
+        insertion: .move(edge: selectedTab == .archived ? .trailing : .leading).combined(with: .opacity),
+        removal: .move(edge: selectedTab == .archived ? .leading : .trailing).combined(with: .opacity)
+      ))
+      .animation(.easeInOut(duration: 0.18), value: selectedTab)
     }
-    .overlay {
-      SearchedView(textIsEmpty: text.isEmpty, isSearchResultsEmpty: searchResults.isEmpty)
-    }
-    
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
     .toolbar {
       HomeToolbarContent()
+      ToolbarItem(placement: .bottomBar) {
+        BottomTabBar(
+          tabs: [Tabs.archived, .chats],
+          selected: selectedTab,
+          onSelect: { tab in
+            playTabHaptic()
+
+            withAnimation {
+              selectedTab = tab
+            }
+          }
+        )
+      }
     }
     .searchable(text: $text, prompt: "Find")
     .onChange(of: text) { _, newValue in
@@ -167,25 +181,25 @@ struct HomeView: View {
       await initalFetch()
     }
   }
-  
+
   private func searchUsers(query: String) {
     guard !query.isEmpty else {
       searchResults = []
       isSearchingState = false
       return
     }
-    
+
     isSearchingState = true
     Task {
       do {
         let result = try await api.searchContacts(query: query)
-        
+
         try await database.dbWriter.write { db in
           for apiUser in result.users {
             try apiUser.saveFull(db)
           }
         }
-        
+
         try await database.reader.read { db in
           searchResults =
             try User
@@ -194,7 +208,7 @@ struct HomeView: View {
               .asRequest(of: UserInfo.self)
               .fetchAll(db)
         }
-        
+
         await MainActor.run {
           isSearchingState = false
         }
@@ -207,7 +221,7 @@ struct HomeView: View {
       }
     }
   }
-  
+
   private func initalFetch() async {
     notificationHandler.setAuthenticated(value: true)
     do {
@@ -216,21 +230,21 @@ struct HomeView: View {
       Log.shared.error("Failed to getMe", error: error)
       return
     }
-    
+
     // Continue with existing tasks if user exists
     do {
       try await dataManager.getPrivateChats()
     } catch {
       Log.shared.error("Failed to getPrivateChats", error: error)
     }
-    
+
     do {
       try await dataManager.getSpaces()
     } catch {
       Log.shared.error("Failed to getSpaces", error: error)
     }
   }
-  
+
   private var searchResultsView: some View {
     List(searchResults) { userInfo in
       Button(action: {
@@ -246,7 +260,7 @@ struct HomeView: View {
     }
     .listStyle(.plain)
   }
-  
+
   private func navigateToUser(_ userId: Int64) {
     Task {
       do {
@@ -257,7 +271,7 @@ struct HomeView: View {
       }
     }
   }
-  
+
   @ViewBuilder
   func chatView(for item: HomeChatItem) -> some View {
     if item.chat?.peerUserId != nil {
@@ -284,7 +298,7 @@ struct HomeView: View {
           Image(systemName: "tray.and.arrow.down.fill")
         }
         .tint(Color(.systemGray2))
-        
+
         Button {
           Task {
             try await dataManager.updateDialog(
@@ -348,5 +362,30 @@ struct SearchedView: View {
         .transition(.opacity)
       }
     }
+  }
+}
+
+struct BottomTabBar: View {
+  let tabs: [Tabs]
+  let selected: Tabs
+  let onSelect: (Tabs) -> Void
+  var body: some View {
+    HStack(spacing: 0) {
+      ForEach(tabs, id: \.self) { tab in
+        VStack {
+          Image(systemName: tab == .chats ? "bubble.left.and.bubble.right.fill" : "archivebox.fill")
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundColor(selected == tab ? Color(ThemeManager.shared.selected.accent) : Color(.systemGray4))
+            .frame(width: 100, height: 36)
+            .animation(.bouncy(duration: 0.08), value: selected == tab)
+            .contentShape(Rectangle())
+        }
+        .frame(maxWidth: .infinity)
+        .onTapGesture {
+          onSelect(tab)
+        }
+      }
+    }
+    .frame(maxWidth: .infinity)
   }
 }
