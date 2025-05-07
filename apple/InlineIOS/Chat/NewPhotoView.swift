@@ -185,7 +185,6 @@ final class NewPhotoView: UIView {
     layer.mask = maskLayer
   }
 
-
   private func updateMask() {
     let width = bounds.width
     let height = bounds.height
@@ -244,18 +243,25 @@ final class NewPhotoView: UIView {
 
   private func updateImage() {
     if let url = imageLocalUrl() {
-      imageView.url = url
+      imageView.request = ImageRequest(
+        url: url,
+        processors: [.resize(width: 300)],
+        priority: .high
+      )
     } else {
       if let photoInfo = fullMessage.photoInfo {
-    
         Task.detached(priority: .userInitiated) { [weak self] in
           guard let self else { return }
-          print("Calling updateImage \(fullMessage.message.messageId)")
+
           await FileCache.shared.download(photo: photoInfo, for: self.fullMessage.message)
-          
+
           Task { @MainActor in
             if let newUrl = self.imageLocalUrl() {
-              self.imageView.url = newUrl
+              self.imageView.request = ImageRequest(
+                url: newUrl,
+                processors: [.resize(width: 300)],
+                priority: .high
+              )
             }
           }
         }
@@ -284,21 +290,19 @@ final class NewPhotoView: UIView {
   }
 
   // MARK: - User Interactions
+
   @objc private func handleTap() {
-      guard fullMessage.message.isSticker != true else { return }
-      guard let url = imageLocalUrl() ?? imageCdnUrl() else { return }
-      
-  
-      let imageViewer = ImageViewerController(
-          imageURL: url,
-          sourceView: imageView,
-          sourceImage: imageView.imageView.image
-      )
-      
-      findViewController()?.present(imageViewer, animated: false)
+    guard fullMessage.message.isSticker != true else { return }
+    guard let url = imageLocalUrl() ?? imageCdnUrl() else { return }
+
+    let imageViewer = ImageViewerController(
+      imageURL: url,
+      sourceView: imageView,
+      sourceImage: imageView.imageView.image
+    )
+
+    findViewController()?.present(imageViewer, animated: false)
   }
-
-
 
   @objc func image(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer) {
     if let error {
@@ -324,10 +328,7 @@ final class NewPhotoView: UIView {
   override var canBecomeFirstResponder: Bool {
     true
   }
-
-
 }
-
 
 extension NewPhotoView {
   func getCurrentImage() -> UIImage? {
