@@ -17,6 +17,7 @@ public struct ApiChat: Codable, Hashable, Sendable {
   public var peer: Peer?
   public var lastMsgId: Int64?
   public var emoji: String?
+  public var publicThread: Bool?
 }
 
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -28,6 +29,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var peerUserId: Int64?
   public var lastMsgId: Int64?
   public var emoji: String?
+  public var isPublic: Bool?
 
   public static let space = belongsTo(Space.self)
   public var space: QueryInterfaceRequest<Space> {
@@ -106,28 +108,28 @@ public extension Chat {
 }
 
 public extension Chat {
-  enum CodingKeys: String, CodingKey {
-    case id
-    case date
-    case type
-    case title
-    case spaceId
-    case peerUserId
-    case lastMsgId
-    case emoji
-  }
-
-  init(from decoder: Decoder) throws {
-    let container = try decoder.container(keyedBy: CodingKeys.self)
-    id = try container.decode(Int64.self, forKey: .id)
-    date = try container.decode(Date.self, forKey: .date)
-    type = try container.decode(ChatType.self, forKey: .type)
-    title = try container.decodeIfPresent(String.self, forKey: .title)
-    spaceId = try container.decodeIfPresent(Int64.self, forKey: .spaceId)
-    peerUserId = try container.decodeIfPresent(Int64.self, forKey: .peerUserId)
-    lastMsgId = try container.decodeIfPresent(Int64.self, forKey: .lastMsgId)
-    emoji = try container.decodeIfPresent(String.self, forKey: .emoji)
-  }
+//  enum CodingKeys: String, CodingKey {
+//    case id
+//    case date
+//    case type
+//    case title
+//    case spaceId
+//    case peerUserId
+//    case lastMsgId
+//    case emoji
+//  }
+//
+//  init(from decoder: Decoder) throws {
+//    let container = try decoder.container(keyedBy: CodingKeys.self)
+//    id = try container.decode(Int64.self, forKey: .id)
+//    date = try container.decode(Date.self, forKey: .date)
+//    type = try container.decode(ChatType.self, forKey: .type)
+//    title = try container.decodeIfPresent(String.self, forKey: .title)
+//    spaceId = try container.decodeIfPresent(Int64.self, forKey: .spaceId)
+//    peerUserId = try container.decodeIfPresent(Int64.self, forKey: .peerUserId)
+//    lastMsgId = try container.decodeIfPresent(Int64.self, forKey: .lastMsgId)
+//    emoji = try container.decodeIfPresent(String.self, forKey: .emoji)
+//  }
 }
 
 public extension Chat {
@@ -135,6 +137,7 @@ public extension Chat {
     id = from.id
     date = Self.fromTimestamp(from: from.date)
     title = from.title
+    isPublic = from.publicThread
     spaceId = from.spaceId
     type = from.type == "private" ? .privateChat : .thread
     peerUserId =
@@ -165,7 +168,8 @@ public extension Chat {
     spaceId = from.hasSpaceID ? from.spaceID : nil
     lastMsgId = from.hasLastMsgID ? from.lastMsgID : nil
     emoji = from.hasEmoji ? from.emoji : nil
-    
+    isPublic = from.hasIsPublic ? from.isPublic : nil
+
     if case let .user(peerUser) = from.peerID.type {
       peerUserId = peerUser.userID
       type = .privateChat
