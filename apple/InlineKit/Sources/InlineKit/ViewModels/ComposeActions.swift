@@ -109,24 +109,30 @@ public extension ComposeActions {
 
     // Mark this peer as having an active upload
     _activeUploads.insert(peerId)
+    lastTypingSent[peerId] = Date()
+
+    // Send initial status immediately
+    Task.detached(priority: .userInitiated) {
+      try await self.sendComposeAction(for: peerId, action: action)
+    }
 
     // Create a repeating task that sends the uploading status every 3 seconds
-    let uploadTask = Task {
+    let uploadTask = Task.detached(priority: .userInitiated) {
       do {
-        // Send initial status immediately
-        try await sendComposeAction(for: peerId, action: action)
-        lastTypingSent[peerId] = Date()
-
         // Keep sending status updates every 3 seconds until cancelled
         while !Task.isCancelled {
           try await Task.sleep(for: .seconds(3))
           if !Task.isCancelled {
-            try await sendComposeAction(for: peerId, action: action)
-            lastTypingSent[peerId] = Date()
+            try await self.sendComposeAction(for: peerId, action: action)
+            await MainActor.run {
+              self.lastTypingSent[peerId] = Date()
+            }
+          } else {
+            break
           }
         }
       } catch {
-        log.error("Failed to send \(action) status: \(error)")
+        await self.log.error("Failed to send \(action) status: \(error)")
       }
     }
 
@@ -136,19 +142,22 @@ public extension ComposeActions {
     // Return a completion function
     return {
       Task { @MainActor in
-        uploadTask.cancel()
-        cancelTasks[peerId] = nil
+        // Cancel the task first
+        self.cancelTasks[peerId]?.cancel()
+        self.cancelTasks[peerId] = nil
 
         // Remove from active uploads
         self._activeUploads.remove(peerId)
 
         // Send the "stopped uploading" status
-        do {
-          try await self.sendComposeAction(for: peerId, action: nil)
-          self.lastTypingSent[peerId] = nil
-        } catch {
-          self.log.error("Failed to send stop \(action) status: \(error)")
+        Task.detached(priority: .userInitiated) {
+          do {
+            try await self.sendComposeAction(for: peerId, action: nil)
+          } catch {
+            await self.log.error("Failed to send stop \(action) status: \(error)")
+          }
         }
+        self.lastTypingSent[peerId] = nil
       }
     }
   }
