@@ -5,6 +5,28 @@ import Logger
 import SwiftUI
 import UIKit
 
+private enum Tabs {
+  case archived
+  case chats
+  case members
+
+  var title: String {
+    switch self {
+      case .archived: "Archived"
+      case .chats: "Chats"
+      case .members: "Members"
+    }
+  }
+
+  var icon: String {
+    switch self {
+      case .archived: "archivebox.fill"
+      case .chats: "bubble.left.and.bubble.right.fill"
+      case .members: "person.2.fill"
+    }
+  }
+}
+
 struct SpaceView: View {
   var spaceId: Int64
 
@@ -16,6 +38,7 @@ struct SpaceView: View {
   @EnvironmentStateObject var fullSpaceViewModel: FullSpaceViewModel
 
   @State private var navBarHeight: CGFloat = 0
+  @State private var selectedTab: Tabs = .chats
 
   init(spaceId: Int64) {
     self.spaceId = spaceId
@@ -38,26 +61,36 @@ struct SpaceView: View {
     }
   }
 
+  private func playTabHaptic() {
+    let generator = UIImpactFeedbackGenerator(style: .soft)
+    generator.impactOccurred(intensity: 0.5)
+  }
+
   var body: some View {
     VStack {
-      List {
-        Section {
-          ForEach(getCombinedItems(), id: \.id) { item in
-            combinedItemRow(for: item)
-              .listRowInsets(.init(
-                top: 9,
-                leading: 16,
-                bottom: 2,
-                trailing: 0
-              ))
+      if selectedTab == .archived {
+        ArchivedChatsView(type: .space(spaceId: spaceId))
+          .environmentObject(fullSpaceViewModel)
+      } else {
+        List {
+          Section {
+            ForEach(getCombinedItems(), id: \.id) { item in
+              combinedItemRow(for: item)
+                .listRowInsets(.init(
+                  top: 9,
+                  leading: 16,
+                  bottom: 2,
+                  trailing: 0
+                ))
+            }
           }
         }
+        .listStyle(.plain)
+        .animation(.default, value: fullSpaceViewModel.chats)
+        .animation(.default, value: fullSpaceViewModel.memberChats)
       }
-      .listStyle(.plain)
-      .animation(.default, value: fullSpaceViewModel.chats)
-      .animation(.default, value: fullSpaceViewModel.memberChats)
     }
-
+    .id(selectedTab)
     .frame(maxWidth: .infinity)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
@@ -120,6 +153,19 @@ struct SpaceView: View {
               .tint(Color.secondary)
               .contentShape(Rectangle())
           }
+        }
+
+        ToolbarItem(placement: .bottomBar) {
+          BottomTabBar(
+            tabs: [Tabs.archived, .chats, .members],
+            selected: selectedTab,
+            onSelect: { tab in
+              playTabHaptic()
+              withAnimation(.snappy(duration: 0.1)) {
+                selectedTab = tab
+              }
+            }
+          )
         }
       }
     }
@@ -193,13 +239,41 @@ struct SpaceView: View {
     let memberItems = fullSpaceViewModel.filteredMemberChats.map { SpaceCombinedItem.member($0) }
     let chatItems = fullSpaceViewModel.filteredChats.map { SpaceCombinedItem.chat($0) }
 
-    return (memberItems + chatItems).sorted { item1, item2 in
-
+    let allItems = (memberItems + chatItems).sorted { item1, item2 in
       let pinned1 = item1.isPinned
       let pinned2 = item2.isPinned
       if pinned1 != pinned2 { return pinned1 }
-
       return item1.date > item2.date
+    }
+
+    switch selectedTab {
+      case .archived:
+        return allItems.filter { item in
+          switch item {
+            case let .member(memberChat):
+              memberChat.dialog.archived == true
+            case let .chat(chat):
+              chat.dialog.archived == true
+          }
+        }
+      case .chats:
+        return allItems.filter { item in
+          switch item {
+            case let .member(memberChat):
+              memberChat.dialog.archived != true
+            case let .chat(chat):
+              chat.dialog.archived != true
+          }
+        }
+      case .members:
+        return allItems.filter { item in
+          switch item {
+            case let .member(memberChat):
+              memberChat.dialog.archived != true
+            case .chat:
+              false
+          }
+        }
     }
   }
 
@@ -217,6 +291,31 @@ struct SpaceView: View {
             message: memberChat.message,
             from: memberChat.from?.user
           ))
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+          Button(role: .destructive) {
+            Task {
+              try await data.updateDialog(
+                peerId: .user(id: memberChat.user?.id ?? 0),
+                archived: true
+              )
+            }
+          } label: {
+            Image(systemName: "tray.and.arrow.down.fill")
+          }
+          .tint(Color(.systemGray2))
+
+          Button {
+            Task {
+              try await data.updateDialog(
+                peerId: .user(id: memberChat.user?.id ?? 0),
+                pinned: !(memberChat.dialog.pinned ?? false)
+              )
+            }
+          } label: {
+            Image(systemName: memberChat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+          }
+          .tint(.indigo)
         }
         .contextMenu {
           Button {
@@ -245,8 +344,19 @@ struct SpaceView: View {
             from: chat.from
           ))
         }
-
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+          Button(role: .destructive) {
+            Task {
+              try await data.updateDialog(
+                peerId: chat.peerId,
+                archived: true
+              )
+            }
+          } label: {
+            Image(systemName: "tray.and.arrow.down.fill")
+          }
+          .tint(Color(.systemGray2))
+
           Button {
             Task {
               try await data.updateDialog(
@@ -257,8 +367,8 @@ struct SpaceView: View {
           } label: {
             Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
           }
+          .tint(.indigo)
         }
-        .tint(.indigo)
         .contextMenu {
           Button {
             Task {
@@ -278,7 +388,6 @@ struct SpaceView: View {
           } label: {
             Label("Open Chat", systemImage: "bubble.left")
           }
-
         } preview: {
           ChatView(peer: chat.peerId, preview: true)
             .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
@@ -317,6 +426,31 @@ private enum SpaceCombinedItem: Identifiable {
       case let .member(item): item.dialog.pinned ?? false
       case let .chat(item): item.dialog.pinned ?? false
     }
+  }
+}
+
+private struct BottomTabBar: View {
+  let tabs: [Tabs]
+  let selected: Tabs
+  let onSelect: (Tabs) -> Void
+  var body: some View {
+    HStack(spacing: 0) {
+      ForEach(tabs, id: \.self) { tab in
+        VStack {
+          Image(systemName: tab.icon)
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundColor(selected == tab ? Color(ThemeManager.shared.selected.accent) : Color(.systemGray4))
+            .frame(width: 100, height: 36)
+            .animation(.bouncy(duration: 0.08), value: selected == tab)
+            .contentShape(Rectangle())
+        }
+        .frame(maxWidth: .infinity)
+        .onTapGesture {
+          onSelect(tab)
+        }
+      }
+    }
+    .frame(maxWidth: .infinity)
   }
 }
 
