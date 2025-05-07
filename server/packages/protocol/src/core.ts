@@ -310,12 +310,15 @@ export interface User {
      * @generated from protobuf field: optional UserProfilePhoto profile_photo = 9;
      */
     profilePhoto?: UserProfilePhoto;
+    // Last message ID
+    // optional int64 last_msg_id = 10;
+
     /**
-     * Last message ID
+     * If true, the user has not completed the setup process
      *
-     * @generated from protobuf field: optional int64 last_msg_id = 10;
+     * @generated from protobuf field: optional bool pending_setup = 11;
      */
-    lastMsgId?: bigint;
+    pendingSetup?: boolean;
 }
 /**
  * @generated from protobuf message UserProfilePhoto
@@ -3165,7 +3168,7 @@ class User$Type extends MessageType<User> {
             { no: 7, name: "min", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 8, name: "status", kind: "message", T: () => UserStatus },
             { no: 9, name: "profile_photo", kind: "message", T: () => UserProfilePhoto },
-            { no: 10, name: "last_msg_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 11, name: "pending_setup", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<User>): User {
@@ -3207,8 +3210,8 @@ class User$Type extends MessageType<User> {
                 case /* optional UserProfilePhoto profile_photo */ 9:
                     message.profilePhoto = UserProfilePhoto.internalBinaryRead(reader, reader.uint32(), options, message.profilePhoto);
                     break;
-                case /* optional int64 last_msg_id */ 10:
-                    message.lastMsgId = reader.int64().toBigInt();
+                case /* optional bool pending_setup */ 11:
+                    message.pendingSetup = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3249,9 +3252,9 @@ class User$Type extends MessageType<User> {
         /* optional UserProfilePhoto profile_photo = 9; */
         if (message.profilePhoto)
             UserProfilePhoto.internalBinaryWrite(message.profilePhoto, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
-        /* optional int64 last_msg_id = 10; */
-        if (message.lastMsgId !== undefined)
-            writer.tag(10, WireType.Varint).int64(message.lastMsgId);
+        /* optional bool pending_setup = 11; */
+        if (message.pendingSetup !== undefined)
+            writer.tag(11, WireType.Varint).bool(message.pendingSetup);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

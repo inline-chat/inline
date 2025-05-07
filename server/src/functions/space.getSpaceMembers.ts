@@ -25,6 +25,8 @@ export const getSpaceMembers = async (
 
   return {
     members: members_.map((member) => Encoders.member(member)),
-    users: usersWithPhotos.map((u) => Encoders.user({ user: u.user, min: true })),
+
+    // TODO: min should be true when space is public or user is guest or something we need to take care of this later.
+    users: usersWithPhotos.map((u) => Encoders.user({ user: u.user, min: false })),
   }
 }

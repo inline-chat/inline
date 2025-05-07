@@ -116,6 +116,8 @@ export const TUserInfo = Type.Object({
   lastName: Optional(Type.String()),
   username: Optional(Type.String()),
   email: Optional(Type.String()),
+  phoneNumber: Optional(Type.String()),
+  pendingSetup: Optional(Type.Boolean()),
   online: Optional(Type.Boolean()),
   lastOnline: Optional(TimestampMs),
   date: TimestampMs,
