@@ -77,7 +77,19 @@ struct DirectChatItem: View {
           symbol: "bookmark.fill"
         )
       } else {
-        UserAvatar(userInfo: userInfo, size: 58)
+        ZStack(alignment: .bottomTrailing) {
+          UserAvatar(userInfo: userInfo, size: 58)
+          if userInfo.user.online == true {
+            Circle()
+              .fill(Color.green)
+              .frame(width: 14, height: 14)
+              .overlay(
+                Circle()
+                  .stroke(Color(ThemeManager.shared.selected.backgroundColor), lineWidth: 3)
+              )
+              .offset(x: 1, y: -3)
+          }
+        }
       }
     }
   }
