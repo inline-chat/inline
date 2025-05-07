@@ -121,6 +121,10 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
     return Self.nameFormatter.string(from: nameComponents)
   }
+
+  public var displayName: String {
+    firstName != nil ? fullName : (username ?? email ?? phoneNumber ?? "User")
+  }
 }
 
 public extension User {
