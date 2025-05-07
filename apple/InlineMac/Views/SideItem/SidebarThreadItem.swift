@@ -9,6 +9,7 @@ struct SidebarThreadItem: View {
   var chat: Chat
   var dialog: Dialog?
   var lastMessage: Message?
+  var lastMessageSender: UserInfo?
 
   // MARK: - State
 
@@ -34,6 +35,7 @@ struct SidebarThreadItem: View {
       type: .chat(chat),
       dialog: dialog,
       lastMessage: lastMessage,
+      lastMessageSender: lastMessageSender,
       selected: isSelected,
       onPress: {
         nav.open(.chat(peer: peerId))
