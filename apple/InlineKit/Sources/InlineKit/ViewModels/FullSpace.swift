@@ -108,7 +108,7 @@ public final class FullSpaceViewModel: ObservableObject {
             Log.shared.error("failed to fetch members in space view model. error: \(error)")
           },
           receiveValue: { [weak self] members in
-            Log.shared.debug("got list of members chats \(members)")
+            // Log.shared.debug("got list of members chats \(members)")
             self?.memberChats = members
 //              .filter { chat in
 //              // For now, filter chats with users who are pending setup
@@ -131,7 +131,7 @@ public final class FullSpaceViewModel: ObservableObject {
         .sink(
           receiveCompletion: { _ in /* ignore error */ },
           receiveValue: { [weak self] members in
-            Log.shared.debug("got list of members \(members)")
+            // Log.shared.debug("got list of members \(members)")
             self?.members = members
           }
         )

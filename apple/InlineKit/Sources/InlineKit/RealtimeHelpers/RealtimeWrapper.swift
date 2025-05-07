@@ -268,7 +268,7 @@ public extension Realtime {
   }
 
   private func handleResult_getSpaceMembers(_ result: GetSpaceMembersResult) async throws {
-    log.trace("getSpaceMembers result: \(result)")
+    // log.trace("getSpaceMembers result: \(result)")
     try await db.dbWriter.write { db in
       for member in result.members {
         let member = Member(from: member)
