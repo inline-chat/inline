@@ -381,10 +381,20 @@ public extension AppDatabase {
         t.add(column: "pendingSetup", .boolean).defaults(to: false)
       }
     }
-    
+
     migrator.registerMigration("chat is public") { db in
       try db.alter(table: "chat") { t in
         t.add(column: "isPublic", .boolean)
+      }
+    }
+
+    migrator.registerMigration("chat participants") { db in
+      try db.create(table: "chatParticipant") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("chatId", .integer).references("chat", column: "id", onDelete: .cascade)
+        t.column("userId", .integer).references("user", column: "id", onDelete: .cascade)
+        t.column("date", .datetime).notNull()
+        t.uniqueKey(["chatId", "userId"], onConflict: .replace)
       }
     }
 

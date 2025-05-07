@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { and, eq } from "drizzle-orm"
-import { members, spaces, type DbMember } from "@in/server/db/schema"
+import { members, spaces, type DbMember, chatParticipants } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 
 /** Check if user is creator of space */
@@ -34,7 +34,22 @@ const spaceMember = async (spaceId: number, currentUserId: number): Promise<{ me
   return { member }
 }
 
+/** Check if user is chat participant */
+const chatParticipant = async (chatId: number, currentUserId: number) => {
+  const participant = await db.query.chatParticipants.findFirst({
+    where: and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, currentUserId)),
+  })
+
+  // Check if user is a participant in the chat
+  if (participant === undefined) {
+    throw new InlineError(InlineError.ApiError.USER_NOT_PARTICIPANT)
+  }
+
+  return { participant }
+}
+
 export const Authorize = {
   spaceCreator,
   spaceMember,
+  chatParticipant,
 }
