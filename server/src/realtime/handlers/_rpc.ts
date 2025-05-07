@@ -15,6 +15,7 @@ import { createChat } from "@in/server/realtime/handlers/messages.createChat"
 import { getSpaceMembers } from "@in/server/realtime/handlers/space.getSpaceMembers"
 import { deleteChatHandler } from "@in/server/realtime/handlers/messages.deleteChat"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
+import { getChatParticipants } from "./messages.getChatParticipants"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -110,6 +111,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
         currentSessionId: handlerContext.sessionId,
       })
       return { oneofKind: "inviteToSpace", inviteToSpace: result }
+    }
+
+    case Method.GET_CHAT_PARTICIPANTS: {
+      if (call.input.oneofKind !== "getChatParticipants") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await getChatParticipants(call.input.getChatParticipants, handlerContext)
+      return { oneofKind: "getChatParticipants", getChatParticipants: result }
     }
 
     default:
