@@ -200,7 +200,7 @@ async function createChat(userId: number, context: FunctionContext): Promise<{ c
 }
 
 async function sendInvite(user: DbUser, space: DbSpace, input: InviteToSpaceInput, context: FunctionContext) {
-  const userName = await getCachedUserName(user.id)
+  const invitedByUserName = await getCachedUserName(context.currentUserId)
 
   // Send invite to email or via push notification
   if (user.email) {
@@ -213,14 +213,16 @@ async function sendInvite(user: DbUser, space: DbSpace, input: InviteToSpaceInpu
           spaceName: space?.name ?? "Unnamed Space",
           isExistingUser: user.pendingSetup ?? false,
           firstName: user.firstName ?? undefined,
-          invitedByUserName: userName,
+          invitedByUserName: invitedByUserName,
         },
       },
     })
   }
 
   if (!user.pendingSetup) {
-    let inviterName = userName?.firstName ?? (userName?.username ? `@${userName.username}` : userName?.email)
+    let inviterName =
+      invitedByUserName?.firstName ??
+      (invitedByUserName?.username ? `@${invitedByUserName.username}` : invitedByUserName?.email)
 
     // Now send push notification
     await Notifications.sendToUser({
