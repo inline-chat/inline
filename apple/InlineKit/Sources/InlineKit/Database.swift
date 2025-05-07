@@ -27,7 +27,7 @@ public extension AppDatabase {
     var migrator = DatabaseMigrator()
 
     #if DEBUG
-      migrator.eraseDatabaseOnSchemaChange = true
+    migrator.eraseDatabaseOnSchemaChange = true
     #endif
 
     migrator.registerMigration("v1") { db in
@@ -357,8 +357,6 @@ public extension AppDatabase {
           "urlPreview", column: "id", onDelete: .cascade)
       }
     }
-    
- 
 
     migrator.registerMigration("drop attachment table") { db in
       try db.drop(table: "attachment")
@@ -374,6 +372,13 @@ public extension AppDatabase {
         t.column("urlPreviewId", .integer).references(
           "urlPreview", column: "id", onDelete: .cascade)
         t.column("attachmentId", .integer).unique().indexed()
+      }
+    }
+
+    migrator.registerMigration("add pending setup and phone number") { db in
+      try db.alter(table: "user") { t in
+        t.add(column: "phoneNumber", .text)
+        t.add(column: "pendingSetup", .boolean).defaults(to: false)
       }
     }
 
@@ -396,7 +401,7 @@ public extension AppDatabase {
 
       if let token = Auth.shared.getToken() {
         #if DEBUG
-          log.debug("Database passphrase: \(token)")
+        log.debug("Database passphrase: \(token)")
         #endif
         try db.usePassphrase(token)
       } else {

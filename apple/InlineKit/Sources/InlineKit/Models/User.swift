@@ -9,6 +9,8 @@ public struct ApiUser: Codable, Hashable, Sendable {
   public var firstName: String?
   public var lastName: String?
   public var online: Bool?
+  public var pendingSetup: Bool?
+  public var phoneNumber: String?
   public var lastOnline: Int?
   public var date: Int
   public var username: String?
@@ -37,6 +39,8 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var lastName: String?
   public var date: Date?
   public var username: String?
+  public var phoneNumber: String?
+  public var pendingSetup: Bool?
   public var online: Bool?
   public var lastOnline: Date?
 
@@ -129,6 +133,8 @@ public extension User {
     date = Self.fromTimestamp(from: apiUser.date)
     online = apiUser.online
     lastOnline = apiUser.lastOnline.map(Self.fromTimestamp(from:))
+    pendingSetup = apiUser.pendingSetup ?? false
+    phoneNumber = apiUser.phoneNumber ?? nil
   }
 
   static func fromTimestamp(from: Int) -> Date {
@@ -212,10 +218,11 @@ public extension User {
     lastName = user.hasLastName ? user.lastName : nil
     username = user.hasUsername ? user.username : nil
     date = Date() // unused field
+    pendingSetup = user.hasPendingSetup ? user.pendingSetup : nil
 
     if !min {
-      email = user.email
-      // phoneNumber = user.phoneNumber
+      email = user.hasEmail ? user.email : nil
+      phoneNumber = user.hasPhoneNumber ? user.phoneNumber : nil
 
       if user.hasStatus {
         online = user.status.online == .online
