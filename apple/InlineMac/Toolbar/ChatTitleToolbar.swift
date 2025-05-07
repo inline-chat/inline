@@ -96,7 +96,7 @@ class ChatTitleToolbar: NSToolbarItem {
       if user.user.isCurrentUser() {
         "Saved Messages"
       } else {
-        user.user.displayName 
+        user.user.displayName
       }
     } else if let chat {
       chat.title ?? "Untitled"
@@ -208,8 +208,15 @@ final class ChatStatusView: NSView {
       return connectionState.toHumanReadable()
     }
 
-    if chat != nil {
-      return "public"
+    if let chat {
+      if chat.isPublic == true {
+        return "public"
+      } else if chat.isPublic == false {
+        // TODO: show participant count here
+        return "private"
+      } else {
+        return ""
+      }
     }
 
     guard let user else { return "" }
