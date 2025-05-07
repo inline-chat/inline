@@ -41,7 +41,7 @@ class ChatTitleToolbar: NSToolbarItem {
     )
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 2
+    stack.spacing = 0
     return stack
   }()
 
@@ -121,10 +121,10 @@ final class ChatStatusView: NSView {
   private var connectionState: RealtimeAPIState = .connected
   private var connectionStateSubscription: AnyCancellable?
 
-  private let label: NSTextField = {
+  private lazy var label: NSTextField = {
     let tf = NSTextField(labelWithString: "")
     tf.font = .systemFont(ofSize: 11)
-    tf.textColor = .secondaryLabelColor
+    tf.textColor = subtitleColor
     tf.translatesAutoresizingMaskIntoConstraints = false
     return tf
   }()
@@ -230,9 +230,18 @@ final class ChatStatusView: NSView {
     }
     return ""
   }
+  
+  private var subtitleColor: NSColor {
+    if let action = currentComposeAction {
+      .accent
+    } else {
+      .secondaryLabelColor
+    }
+  }
 
   private func updateLabel() {
     label.stringValue = currentLabel
+    label.textColor = subtitleColor
 
     // Hide the entire status view if there's no text to display
     isHidden = currentLabel.isEmpty
