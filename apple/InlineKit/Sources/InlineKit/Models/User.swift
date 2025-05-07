@@ -225,7 +225,7 @@ public extension User {
     lastName = user.hasLastName ? user.lastName : nil
     username = user.hasUsername ? user.username : nil
     date = Date() // unused field
-    pendingSetup = user.hasPendingSetup ? user.pendingSetup : nil
+    // don't preserve pendingSetup
 
     if !min {
       email = user.hasEmail ? user.email : nil
@@ -252,7 +252,7 @@ public extension User {
       user.date = existing.date
       user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
       user.email = user.email ?? existing.email
-      user.pendingSetup = user.pendingSetup ?? existing.pendingSetup
+      // don't preserve pendingSetup
       try user.save(db)
     } else {
       // Backward compat as the new API doesn't send date for users

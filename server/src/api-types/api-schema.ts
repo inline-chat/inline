@@ -106,6 +106,7 @@ export const TMinUserInfo = Type.Object({
   username: Optional(Type.String()),
   online: Optional(Type.Boolean()),
   lastOnline: Optional(TimestampMs),
+  pendingSetup: Optional(Type.Boolean()),
   date: TimestampMs,
   photo: Optional(Type.Array(PhotoInfo)),
 })
