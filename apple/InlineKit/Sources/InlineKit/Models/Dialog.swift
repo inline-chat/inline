@@ -130,7 +130,11 @@ public extension Dialog {
   }
 
   static func getDialogId(peerThreadId: Int64) -> Int64 {
-    peerThreadId
+    if peerThreadId < 1000 {
+      peerThreadId
+    } else {
+      peerThreadId * -1
+    }
   }
 
   static func getDialogId(peerId: Peer) -> Int64 {
