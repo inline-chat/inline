@@ -22,15 +22,29 @@ export const handler = async (
     let text = `
 **Welcome to Inline Alpha**
 
-It's exciting to have you as the first few users here. This app is still in an incomplete state but we're aiming to ship new releases every day. Expect bugs and missing features. Please send us issues you see and things we should prioritize for you. Send a message to @mo or @dena here.
+You're one of the very first users of Inline. Exciting to build the future of work chat with you! 
 
-Things we're working on:
-- Sending video and files
-- Private chats 
-- Inviting by phone number
-- Showing local time in chat view
-- @mention in chats
-- Bug fixes
+Things we'll be working on next (in no particular order):
+- API to send messages 
+- Faster image sending and loading
+- Sending video 
+- Managing private group chat participants
+- Better representaion of spaces (supergroups) in the home UI 
+- Sync for more events (eg. deleting messages)
+- "Will Do" to create tasks in Notion via AI
+- Magic translate via AI 
+- Edit profile and photo on macOS 
+- Edit message on macOS 
+- Reactions on macOS 
+- Translation for the app in Chinese 
+- @mentions 
+
+What we recently shipped:
+- Group chats 
+- Sign up via SMS 
+- Invite via email, phone number, or username
+
+Message to @mo or @dena if you hit a bug or need a feature.
 `
 
     return text
