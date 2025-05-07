@@ -66,6 +66,12 @@ struct ChatView: View {
       getStatusTextForChatHeader(realtime.apiState)
     } else if let composeAction = currentComposeAction() {
       composeAction.toHumanReadableForIOS()
+    } else if !isCurrentUser, isPrivateChat, let user = fullChatViewModel.peerUserInfo?.user {
+      if user.online == true {
+        "online"
+      } else {
+        getLastOnlineText(date: user.lastOnline)
+      }
     } else {
       ""
     }
@@ -144,10 +150,10 @@ struct ChatView: View {
           .frame(maxWidth: .infinity)
           .buttonStyle(.plain)
         }
-      } else if let emoji = fullChatViewModel.chat?.emoji, isThreadChat {
+      } else if isThreadChat {
         ToolbarItem(placement: .topBarTrailing) {
           Text(
-            String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "")
+            String(describing: fullChatViewModel.chat?.emoji ?? "💬").replacingOccurrences(of: "Optional(\"", with: "")
               .replacingOccurrences(of: "\")", with: "")
           )
           .font(.customTitle())
@@ -168,9 +174,14 @@ struct ChatView: View {
     .onChange(of: scenePhase) { _, scenePhase_ in
       switch scenePhase_ {
         case .active:
-
           fetch()
-
+          Task {
+            try? await data.updateStatus(online: true)
+          }
+        case .inactive, .background:
+          Task {
+            try? await data.updateStatus(online: false)
+          }
         default:
           break
       }
