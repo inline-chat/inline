@@ -94,7 +94,10 @@ message User {
   optional UserProfilePhoto profile_photo = 9;
 
   // Last message ID
-  optional int64 last_msg_id = 10;
+  // optional int64 last_msg_id = 10;
+
+  // If true, the user has not completed the setup process
+  optional bool pending_setup = 11;
 }
 
 message UserProfilePhoto {

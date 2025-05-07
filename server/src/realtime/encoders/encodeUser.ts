@@ -10,6 +10,7 @@ export const encodeUser = ({ user, min = false }: { user: DbUser; min?: boolean 
     lastName: user.lastName ?? undefined,
     email: min ? undefined : user.email ?? undefined,
     phoneNumber: min ? undefined : user.phoneNumber ?? undefined,
+    pendingSetup: min ? undefined : user.pendingSetup === true ? true : undefined,
     min: min ?? false,
     status: min
       ? undefined
