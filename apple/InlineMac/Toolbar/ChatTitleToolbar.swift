@@ -96,7 +96,7 @@ class ChatTitleToolbar: NSToolbarItem {
       if user.user.isCurrentUser() {
         "Saved Messages"
       } else {
-        user.user.fullName
+        user.user.displayName 
       }
     } else if let chat {
       chat.title ?? "Untitled"
