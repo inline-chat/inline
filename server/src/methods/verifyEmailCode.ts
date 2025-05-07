@@ -162,7 +162,9 @@ const getUserByEmail = async (email: string) => {
         .values({
           email,
           emailVerified: true,
-          // pending setup
+
+          // For now. ideally it should switch when user sets name
+          pendingSetup: false,
         })
         .returning()
     )[0]
