@@ -51,11 +51,11 @@ public final class FullSpaceViewModel: ObservableObject {
   @Published public private(set) var members: [Member] = []
 
   public var filteredMemberChats: [SpaceChatItem] {
-    memberChats.filter { $0.dialog.archived == nil || $0.dialog.archived == false }
+    memberChats
   }
 
   public var filteredChats: [SpaceChatItem] {
-    chats.filter { $0.dialog.archived == nil || $0.dialog.archived == false }
+    chats
   }
 
   private var spaceSancellable: AnyCancellable?
