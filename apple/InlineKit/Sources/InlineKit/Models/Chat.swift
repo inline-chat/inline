@@ -162,15 +162,16 @@ public extension Chat {
     id = from.id
     date = Date() // placeholder
     title = from.title
-    spaceId = from.spaceID
-    type = .thread // Since this is a new chat creation, it's always a thread
-    peerUserId = nil // Threads don't have peer users
+    spaceId = from.hasSpaceID ? from.spaceID : nil
     lastMsgId = from.hasLastMsgID ? from.lastMsgID : nil
     emoji = from.hasEmoji ? from.emoji : nil
-    peerUserId = if case let .user(peerUser) = from.peerID.type {
-      peerUser.userID
+    
+    if case let .user(peerUser) = from.peerID.type {
+      peerUserId = peerUser.userID
+      type = .privateChat
     } else {
-      nil
+      peerUserId = nil
+      type = .thread
     }
   }
 }

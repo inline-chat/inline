@@ -208,9 +208,9 @@ public extension User {
     let min = user.hasMin && user.min == true
 
     id = user.id
-    firstName = user.firstName
-    lastName = user.lastName
-    username = user.username
+    firstName = user.hasFirstName ? user.firstName : nil
+    lastName = user.hasLastName ? user.lastName : nil
+    username = user.hasUsername ? user.username : nil
     date = Date() // unused field
 
     if !min {

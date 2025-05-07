@@ -116,9 +116,9 @@ public extension Dialog {
         fatalError("Dialog.peer invalid")
     }
 
-    spaceId = from.spaceID
+    spaceId = from.hasSpaceID ? from.spaceID : nil
     unreadCount = Int(from.unreadCount)
-    readInboxMaxId = from.readMaxID
+    readInboxMaxId = from.hasReadMaxID ? from.readMaxID : nil
     readOutboxMaxId = nil
     pinned = from.pinned
     archived = from.archived
