@@ -20,6 +20,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case archivedChats
     case profile(userInfo: UserInfo)
     case alphaSheet
+    case chatInfo(chatItem: SpaceChatItem)
 
     // MARK: - Identifiable Conformance
 
@@ -34,6 +35,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
         case .archivedChats: "archivedChats"
         case let .profile(userInfo): "profile-\(userInfo.id)"
         case .alphaSheet: "alphaSheet"
+        case let .chatInfo(chatItem): "chatInfo-\(chatItem.id)"
       }
     }
   }
@@ -74,16 +76,15 @@ class Navigation: ObservableObject, @unchecked Sendable {
   func saveNavigationState() {
     let pathComponents_ = pathComponents
     let activeSheet_ = activeSheet
-    
+
     Task.detached(priority: .background) {
-      if let encodedPath = try?  JSONEncoder().encode(pathComponents_) {
-         UserDefaults.standard.set(encodedPath, forKey: Self.pathKey)
+      if let encodedPath = try? JSONEncoder().encode(pathComponents_) {
+        UserDefaults.standard.set(encodedPath, forKey: Self.pathKey)
       }
-      if let encodedSheet = try?  JSONEncoder().encode(activeSheet_) {
-         UserDefaults.standard.set(encodedSheet, forKey: Self.sheetKey)
+      if let encodedSheet = try? JSONEncoder().encode(activeSheet_) {
+        UserDefaults.standard.set(encodedSheet, forKey: Self.sheetKey)
       }
     }
-
   }
 
   func loadNavigationState() {

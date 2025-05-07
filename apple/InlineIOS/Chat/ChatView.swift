@@ -122,7 +122,9 @@ struct ChatView: View {
     .toolbar {
       ToolbarItem(placement: .principal) {
         Button(action: {
-          isChatInfoPresented = true
+          if let chatItem = fullChatViewModel.chatItem {
+            nav.push(.chatInfo(chatItem: chatItem))
+          }
         }) {
           header
         }
@@ -132,7 +134,15 @@ struct ChatView: View {
 
       if let user = fullChatViewModel.peerUserInfo {
         ToolbarItem(placement: .topBarTrailing) {
-          UserAvatar(userInfo: user)
+          Button(action: {
+            if let chatItem = fullChatViewModel.chatItem {
+              nav.push(.chatInfo(chatItem: chatItem))
+            }
+          }) {
+            UserAvatar(userInfo: user)
+          }
+          .frame(maxWidth: .infinity)
+          .buttonStyle(.plain)
         }
       } else if let emoji = fullChatViewModel.chat?.emoji, isThreadChat {
         ToolbarItem(placement: .topBarTrailing) {
@@ -166,19 +176,6 @@ struct ChatView: View {
       }
     }
     .environmentObject(fullChatViewModel)
-    .sheet(isPresented: $isChatInfoPresented) {
-      if isPrivateChat, let userInfo = fullChatViewModel.peerUserInfo {
-        NavigationStack {
-          List {
-            Section {
-              ProfileRow(userInfo: userInfo, isChatInfo: true)
-                .navigationTitle("Chat Info")
-                .navigationBarTitleDisplayMode(.inline)
-            }
-          }
-        }
-      }
-    }
   }
 
   @ViewBuilder
