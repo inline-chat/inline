@@ -202,41 +202,65 @@ final class ChatStatusView: NSView {
     ComposeActions.shared.getComposeAction(for: peer)?.action
   }
 
-  private var currentLabel: String {
-    // connecting... or waiting for network
-    if connectionState != .connected {
-      return connectionState.toHumanReadable()
-    }
+  private enum StatusState {
+    case connecting(String)
+    case publicChat
+    case privateChat
+    case composing(ApiComposeAction)
+    case empty
 
-    if let chat {
-      if chat.isPublic == true {
-        return "public"
-      } else if chat.isPublic == false {
-        // TODO: show participant count here
-        return "private"
-      } else {
-        return ""
+    var label: String {
+      switch self {
+        case let .connecting(message): message
+        case .publicChat: "public"
+        case .privateChat: "private"
+        case let .composing(action): action.toHumanReadable()
+        case .empty: ""
       }
     }
 
-    guard let user else { return "" }
-
-    if user.isCurrentUser() {
-      return ""
+    var color: NSColor {
+      switch self {
+        case .composing: .accent
+        default: .secondaryLabelColor
+      }
     }
-
-    if let action = currentComposeAction {
-      return action.toHumanReadable()
-    }
-    return ""
   }
-  
-  private var subtitleColor: NSColor {
-    if let action = currentComposeAction {
-      .accent
-    } else {
-      .secondaryLabelColor
+
+  private var statusState: StatusState {
+    // Check connection state first
+    if connectionState != .connected {
+      return .connecting(connectionState.toHumanReadable())
     }
+
+    // Check chat state
+    if let chat {
+      if chat.isPublic == true {
+        return .publicChat
+      } else if chat.isPublic == false {
+        return .privateChat
+      }
+      return .empty
+    }
+
+    // Check user state
+    guard let user else { return .empty }
+    if user.isCurrentUser() { return .empty }
+
+    // Check compose action
+    if let action = currentComposeAction {
+      return .composing(action)
+    }
+
+    return .empty
+  }
+
+  private var currentLabel: String {
+    statusState.label
+  }
+
+  private var subtitleColor: NSColor {
+    statusState.color
   }
 
   private func updateLabel() {
