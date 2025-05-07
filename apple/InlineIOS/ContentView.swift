@@ -64,6 +64,8 @@ extension ContentView {
         EmptyView()
       case .alphaSheet:
         EmptyView()
+      case let .chatInfo(chatItem):
+        ChatInfoView(chatItem: chatItem)
     }
   }
 
