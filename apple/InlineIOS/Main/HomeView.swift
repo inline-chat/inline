@@ -6,7 +6,7 @@ import Logger
 import SwiftUI
 import UIKit
 
-enum Tabs {
+private enum Tabs {
   case chats
   case archived
 
@@ -74,70 +74,57 @@ struct HomeView: View {
         Group {
           if !searchResults.isEmpty {
             searchResultsView
-          } else if home.chats.isEmpty, home.spaces.isEmpty {
-            EmptyHomeView()
+          } else if selectedTab == .archived {
+            ArchivedChatsView(type: .home)
           } else {
-            if selectedTab == .archived, home.chats.filter({ $0.dialog.archived == true }).isEmpty {
-              VStack {
-                Spacer()
-                Image(systemName: "tray.fill")
-                  .foregroundColor(.secondary)
-                  .font(.title)
-                  .padding(.bottom, 6)
-                Text("No archived chats")
-                  .font(.title3)
-                Spacer()
-              }
-            } else {
-              List {
-                if selectedTab == .chats, !home.spaces.isEmpty {
-                  ScrollView(.horizontal) {
-                    LazyHStack {
-                      ForEach(home.spaces.sorted(by: { s1, s2 in
-                        s1.space.date > s2.space.date
-                      }), id: \.id) { space in
-                        RectangleSpaceItem(spaceItem: space)
-                      }
+            List {
+              if selectedTab == .chats, !home.spaces.isEmpty {
+                ScrollView(.horizontal) {
+                  LazyHStack {
+                    ForEach(home.spaces.sorted(by: { s1, s2 in
+                      s1.space.date > s2.space.date
+                    }), id: \.id) { space in
+                      RectangleSpaceItem(spaceItem: space)
                     }
                   }
-                  .scrollIndicators(.hidden)
-                  .contentMargins(.horizontal, 16, for: .scrollContent)
+                }
+                .scrollIndicators(.hidden)
+                .contentMargins(.horizontal, 16, for: .scrollContent)
+                .listRowInsets(.init(
+                  top: 0,
+                  leading: 0,
+                  bottom: 16,
+                  trailing: 0
+                ))
+                .listRowSeparator(.hidden)
+              }
+              ForEach(chatItems, id: \.id) { item in
+                chatView(for: item)
                   .listRowInsets(.init(
-                    top: 0,
-                    leading: 0,
-                    bottom: 16,
+                    top: 9,
+                    leading: 16,
+                    bottom: 2,
                     trailing: 0
                   ))
-                  .listRowSeparator(.hidden)
-                }
-                ForEach(chatItems, id: \.id) { item in
-                  chatView(for: item)
-                    .listRowInsets(.init(
-                      top: 9,
-                      leading: 16,
-                      bottom: 2,
-                      trailing: 0
-                    ))
-                    .contextMenu {
-                      Button {
-                        nav.push(.chat(peer: .user(id: item.user.id)))
-                      } label: {
-                        Label("Open Chat", systemImage: "bubble.left")
-                      }
-                    } preview: {
-                      ChatView(peer: .user(id: item.user.id), preview: true)
-                        .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-                        .environmentObject(nav)
-                        .environmentObject(data)
-                        .environment(\.realtime, realtime)
-                        .environment(\.appDatabase, database)
+                  .contextMenu {
+                    Button {
+                      nav.push(.chat(peer: .user(id: item.user.id)))
+                    } label: {
+                      Label("Open Chat", systemImage: "bubble.left")
                     }
-                }
+                  } preview: {
+                    ChatView(peer: .user(id: item.user.id), preview: true)
+                      .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+                      .environmentObject(nav)
+                      .environmentObject(data)
+                      .environment(\.realtime, realtime)
+                      .environment(\.appDatabase, database)
+                  }
               }
-              .listStyle(.plain)
-              .animation(.default, value: home.chats)
-              .animation(.default, value: home.spaces)
             }
+            .listStyle(.plain)
+            .animation(.default, value: home.chats)
+            .animation(.default, value: home.spaces)
           }
         }
         .overlay {
@@ -145,11 +132,6 @@ struct HomeView: View {
         }
       }
       .id(selectedTab)
-      .transition(.asymmetric(
-        insertion: .move(edge: selectedTab == .archived ? .trailing : .leading).combined(with: .opacity),
-        removal: .move(edge: selectedTab == .archived ? .leading : .trailing).combined(with: .opacity)
-      ))
-      .animation(.easeInOut(duration: 0.18), value: selectedTab)
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
@@ -162,7 +144,7 @@ struct HomeView: View {
           onSelect: { tab in
             playTabHaptic()
 
-            withAnimation {
+            withAnimation(.snappy(duration:  0.1)) {
               selectedTab = tab
             }
           }
@@ -365,7 +347,7 @@ struct SearchedView: View {
   }
 }
 
-struct BottomTabBar: View {
+private struct BottomTabBar: View {
   let tabs: [Tabs]
   let selected: Tabs
   let onSelect: (Tabs) -> Void
