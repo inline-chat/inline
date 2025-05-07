@@ -163,16 +163,18 @@ class MessageListAppKit: NSViewController {
   }()
 
   private var scrollToBottomBottomConstraint: NSLayoutConstraint!
-  private lazy var scrollToBottomButton: ScrollToBottomButton = {
-    let scrollToBottomButton = ScrollToBottomButton()
+  private lazy var scrollToBottomButton: ScrollToBottomButtonHostingView = {
+    let scrollToBottomButton = ScrollToBottomButtonHostingView()
     scrollToBottomButton.onClick = { [weak self] in
       guard let weakSelf = self else { return }
       // self?.scrollToBottom(animated: true)
       weakSelf.scrollToIndex(weakSelf.tableView.numberOfRows - 1, position: .bottom, animated: true)
       weakSelf.scrollToBottomButton.setVisibility(false)
     }
-    scrollToBottomButton.alphaValue = 0
     scrollToBottomButton.translatesAutoresizingMaskIntoConstraints = false
+    scrollToBottomButton.setVisibility(false)
+    //scrollToBottomButton.alphaValue = 0
+    //scrollToBottomButton.wantsLayer = true
 
     return scrollToBottomButton
   }()
