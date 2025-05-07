@@ -16,6 +16,7 @@ struct SidebarItem: View {
   var type: SidebarItemType
   var dialog: Dialog?
   var lastMessage: Message?
+  var lastMessageSender: UserInfo?
   var selected: Bool = false
   var onPress: (() -> Void)?
 
@@ -44,12 +45,14 @@ struct SidebarItem: View {
     type: SidebarItemType,
     dialog: Dialog?,
     lastMessage: Message? = nil,
+    lastMessageSender: UserInfo? = nil,
     selected: Bool = false,
     onPress: (() -> Void)? = nil
   ) {
     self.type = type
     self.dialog = dialog
     self.lastMessage = lastMessage
+    self.lastMessageSender = lastMessageSender
     self.selected = selected
     self.onPress = onPress
 
@@ -119,6 +122,9 @@ struct SidebarItem: View {
   var content: some View {
     VStack(alignment: .leading, spacing: 0) {
       nameView
+      if showsMessageSender {
+        lastMessageSenderView
+      }
       lastMessageView
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -140,9 +146,29 @@ struct SidebarItem: View {
     Text(lastMessageText)
       .font(Self.subtitleFont)
       .foregroundColor(Self.subtitleColor)
-      .lineLimit(2)
+      .lineLimit(showsMessageSender ? 1 : 2)
       .truncationMode(.tail)
       .fixedSize(horizontal: false, vertical: true)
+  }
+
+  @ViewBuilder
+  var lastMessageSenderView: some View {
+    if let lastMessageSender {
+      HStack(spacing: 3) {
+        UserAvatar(
+          userInfo: lastMessageSender,
+          size: 13
+        )
+        Text(lastMessageSender.user.shortDisplayName)
+          .font(Self.subtitleFont)
+          .foregroundColor(Self.subtitleColor)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .fixedSize(horizontal: false, vertical: true)
+      }.padding(.top, 1)
+    } else {
+      EmptyView()
+    }
   }
 
   @ViewBuilder
@@ -213,6 +239,15 @@ struct SidebarItem: View {
         .user(id: userInfo.user.id)
       default:
         nil
+    }
+  }
+
+  var showsMessageSender: Bool {
+    switch type {
+      case .user:
+        false
+      case .space, .chat:
+        true
     }
   }
 
