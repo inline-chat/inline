@@ -247,7 +247,7 @@ public extension User {
     var user = User(from: protocolUser)
 
     if let existing {
-      // keep exitsing values
+      // keep existing values
       user.profileFileId = existing.profileFileId
       user.date = existing.date
       user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
@@ -255,7 +255,7 @@ public extension User {
       // don't preserve pendingSetup
       try user.save(db)
     } else {
-      // Backward compat as the new API doesn't send date for users
+      // Backward compatible as the new API doesn't send date for users
       user.date = Date()
       try user.save(db)
     }
