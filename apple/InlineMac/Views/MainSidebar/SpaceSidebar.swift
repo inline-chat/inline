@@ -220,7 +220,8 @@ struct SpaceSidebar: View {
   @ViewBuilder
   var plusButton: some View {
     Menu {
-      Button("New Chat") {
+      // Button("New Chat") {
+      Button("New Group Chat") {
         nav.open(.newChat)
       }
 
