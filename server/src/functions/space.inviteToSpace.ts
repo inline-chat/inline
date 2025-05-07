@@ -211,7 +211,7 @@ async function sendInvite(user: DbUser, space: DbSpace, input: InviteToSpaceInpu
         variables: {
           email: user.email,
           spaceName: space?.name ?? "Unnamed Space",
-          isExistingUser: user.pendingSetup ?? false,
+          isExistingUser: user.pendingSetup === false || user.emailVerified == true || user.phoneVerified == true,
           firstName: user.firstName ?? undefined,
           invitedByUserName: invitedByUserName,
         },

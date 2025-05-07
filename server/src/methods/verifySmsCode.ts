@@ -126,6 +126,9 @@ const getUserByPhoneNumber = async (phoneNumber: string) => {
         .values({
           phoneNumber,
           phoneVerified: true,
+
+          // For now. ideally it should switch when user sets name
+          pendingSetup: false,
         })
         .returning()
     )[0]
