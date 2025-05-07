@@ -287,12 +287,14 @@ public extension Realtime {
     try await db.dbWriter.write { db in
       do {
         let user = User(from: result.user)
+        // print("user: \(user)")
         try user.save(db)
       } catch {
         Log.shared.error("Failed to save user", error: error)
       }
       do {
         let member = Member(from: result.member)
+        // print("member: \(member)")
         try member.save(db)
       } catch {
         Log.shared.error("Failed to save member", error: error)
@@ -300,6 +302,7 @@ public extension Realtime {
 
       do {
         let chat = Chat(from: result.chat)
+        // print("chat: \(chat)")
         try chat.save(db)
       } catch {
         Log.shared.error("Failed to save chat", error: error)
@@ -307,6 +310,7 @@ public extension Realtime {
 
       do {
         let dialog = Dialog(from: result.dialog)
+        // print("dialog: \(dialog)")
         try dialog.save(db)
       } catch {
         Log.shared.error("Failed to save dialog", error: error)
