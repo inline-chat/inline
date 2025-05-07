@@ -181,6 +181,9 @@ public extension Realtime {
         case .deleteChat:
           try await handleResult_deleteChat()
 
+        case let .getChatParticipants(result):
+          try await handleResult_getChatParticipants(input!, result)
+
         default:
           break
       }
@@ -316,6 +319,29 @@ public extension Realtime {
         Log.shared.error("Failed to save dialog", error: error)
       }
     }
+  }
+
+  private func handleResult_getChatParticipants(
+    _ input: RpcCall.OneOf_Input,
+    _ result: GetChatParticipantsResult
+  ) async throws {
+    log.trace("getChatParticipants result: \(result)")
+
+    guard case let .getChatParticipants(getChatParticipantsInput) = input else {
+      log.error("could not infer chatId")
+      return
+    }
+
+    try await db.dbWriter.write { db in
+      for participant in result.participants {
+        do {
+          ChatParticipant.save(db, from: participant, chatId: getChatParticipantsInput.chatID)
+        } catch {
+          Log.shared.error("Failed to save chat participant", error: error)
+        }
+      }
+    }
+    log.trace("getChatParticipants saved")
   }
 
   private func handleResult_deleteChat() async throws {
