@@ -279,7 +279,7 @@ public class DataManager: ObservableObject {
       // Fetch
       let result = try await ApiClient.shared.getDialogs(spaceId: spaceId)
 
-      log.debug("fetched dialogs \(result)")
+      // log.debug("fetched dialogs \(result)")
 
       // Save
       try await database.dbWriter.write { db in

@@ -428,7 +428,6 @@ public extension Message {
   static func save(
     _ db: Database, protocolMessage: InlineProtocol.Message, publishChanges: Bool = false
   ) throws -> Message {
-    print("CALLED SAVE")
     let id = protocolMessage.id
     let chatId = protocolMessage.chatID
     let existing = try? Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
