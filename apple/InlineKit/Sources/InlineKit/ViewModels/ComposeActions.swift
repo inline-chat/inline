@@ -14,12 +14,11 @@ public class ComposeActions: ObservableObject {
 
   // for now support only one action per chat (peer)
   @Published public var actions: [Peer: ComposeActionInfo] = [:]
+  private var _activeUploads: Set<Peer> = []
 
   private var cancelTasks: [Peer: Task<Void, Never>] = [:]
   private var log = Log.scoped("ComposeActions", enableTracing: true)
-
-  // Track active uploads
-  private var activeUploads: Set<Peer> = []
+  private var lastTypingSent: [Peer: Date] = [:]
 
   public init() {}
 
@@ -30,6 +29,7 @@ public class ComposeActions: ObservableObject {
   public func addComposeAction(for peer: Peer, action: ApiComposeAction, userId: Int64) {
     log.trace("action added for \(peer)")
     cancelTasks[peer]?.cancel()
+    cancelTasks[peer] = nil
 
     actions[peer] = ComposeActionInfo(userId: userId, action: action, expiresAt: Date().addingTimeInterval(6))
 
@@ -38,7 +38,9 @@ public class ComposeActions: ObservableObject {
       self.log.trace("typing action expired for \(peer)")
       try? await Task.sleep(for: .seconds(6))
       guard !Task.isCancelled else { return }
-      removeComposeAction(for: peer)
+      await MainActor.run {
+        self.removeComposeAction(for: peer)
+      }
     }
   }
 
@@ -46,6 +48,7 @@ public class ComposeActions: ObservableObject {
     log.trace("removed action for \(peer)")
     actions[peer] = nil
     cancelTasks[peer]?.cancel()
+    cancelTasks[peer] = nil
   }
 
   // Sending side
@@ -53,11 +56,9 @@ public class ComposeActions: ObservableObject {
     let _ = try await ApiClient.shared.sendComposeAction(peerId: peerId, action: action)
   }
 
-  private var lastTypingSent: [Peer: Date] = [:]
-
   public func startedTyping(for peerId: Peer) async {
     // Don't clear an active upload with typing
-    if activeUploads.contains(peerId) {
+    if _activeUploads.contains(peerId) {
       return
     }
 
@@ -66,19 +67,19 @@ public class ComposeActions: ObservableObject {
       return
     }
 
-    // Send stop typing action immediately
+    // Send typing action immediately
     do {
       lastTypingSent[peerId] = Date()
       log.trace("sending typing status for \(peerId)")
       try await sendComposeAction(for: peerId, action: .typing)
     } catch {
-      log.error("Failed to send stop typing status: \(error)")
+      log.error("Failed to send typing status: \(error)")
     }
   }
 
   public func stoppedTyping(for peerId: Peer) async {
     // Don't clear an active upload with stop typing
-    if activeUploads.contains(peerId) {
+    if _activeUploads.contains(peerId) {
       return
     }
 
@@ -107,18 +108,18 @@ public extension ComposeActions {
     }
 
     // Mark this peer as having an active upload
-    activeUploads.insert(peerId)
+    _activeUploads.insert(peerId)
 
-    // Create a repeating task that sends the uploading status every 5 seconds
+    // Create a repeating task that sends the uploading status every 3 seconds
     let uploadTask = Task {
       do {
         // Send initial status immediately
         try await sendComposeAction(for: peerId, action: action)
         lastTypingSent[peerId] = Date()
 
-        // Keep sending status updates every 5 seconds until cancelled
+        // Keep sending status updates every 3 seconds until cancelled
         while !Task.isCancelled {
-          try await Task.sleep(for: .seconds(5))
+          try await Task.sleep(for: .seconds(3))
           if !Task.isCancelled {
             try await sendComposeAction(for: peerId, action: action)
             lastTypingSent[peerId] = Date()
@@ -136,9 +137,10 @@ public extension ComposeActions {
     return {
       Task { @MainActor in
         uploadTask.cancel()
+        cancelTasks[peerId] = nil
 
         // Remove from active uploads
-        self.activeUploads.remove(peerId)
+        self._activeUploads.remove(peerId)
 
         // Send the "stopped uploading" status
         do {
