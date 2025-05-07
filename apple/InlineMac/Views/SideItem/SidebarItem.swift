@@ -225,6 +225,7 @@ struct SidebarItem: View {
           userInfo.user.firstName ??
             userInfo.user.lastName ??
             userInfo.user.username ??
+            userInfo.user.phoneNumber ??
             userInfo.user.email ?? ""
         }
       default:
@@ -244,6 +245,7 @@ struct SidebarItem: View {
           userInfo.user.firstName ??
             userInfo.user.lastName ??
             userInfo.user.username ??
+            userInfo.user.phoneNumber ??
             userInfo.user.email ?? ""
         }
 

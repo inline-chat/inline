@@ -110,6 +110,10 @@ public final class FullSpaceViewModel: ObservableObject {
           receiveValue: { [weak self] members in
             Log.shared.debug("got list of members chats \(members)")
             self?.memberChats = members
+//              .filter { chat in
+//              // For now, filter chats with users who are pending setup
+//              chat.userInfo?.user.pendingSetup != true
+//            }
           }
         )
   }

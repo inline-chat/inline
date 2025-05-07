@@ -137,7 +137,10 @@ public final class HomeViewModel: ObservableObject {
           Log.shared.error("Failed to get home chats \(error)")
         },
         receiveValue: { [weak self] chats in
-          self?.chats = chats
+          self?.chats = chats.filter { chat in
+            // For now, filter chats with users who are pending setup
+            chat.user.user.pendingSetup != true
+          }
         }
       )
   }
