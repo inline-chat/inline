@@ -11,7 +11,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   static let reuseIdentifier = "MessageCell"
 
   var messageView: UIMessageView?
-  var avatarHostingController: UIHostingController<UserAvatar>?
+  var avatarView: UserAvatarView?
   var avatarSpacerView: UIView?
 
   var isThread: Bool = false
@@ -173,7 +173,7 @@ extension MessageCollectionViewCell {
 
     messageView?.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
     nameLabel.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
-    avatarHostingController?.view.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
+    avatarView?.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
 
     replyIndicator.isHidden = false
     replyIndicator.updateProgress(progress)
@@ -200,7 +200,7 @@ extension MessageCollectionViewCell {
       UIView.animate(withDuration: 0.4) {
         self.messageView?.transform = .identity
         self.nameLabel.transform = .identity
-        self.avatarHostingController?.view.transform = .identity
+        self.avatarView?.transform = .identity
       }
       resetSwipeState()
       return
@@ -216,7 +216,7 @@ extension MessageCollectionViewCell {
     UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5) {
       self.messageView?.transform = .identity
       self.nameLabel.transform = .identity
-      self.avatarHostingController?.view.transform = .identity
+      self.avatarView?.transform = .identity
       self.replyIndicator.alpha = 0
     } completion: { _ in
       if shouldTrigger {
@@ -235,7 +235,7 @@ extension MessageCollectionViewCell {
 
     messageView?.transform = .identity
     nameLabel.transform = .identity
-    avatarHostingController?.view.transform = .identity
+    avatarView?.transform = .identity
   }
 
   func setupReplyIndicator() {
@@ -273,12 +273,11 @@ extension MessageCollectionViewCell {
 
     let avatarOrSpacer: UIView
     if fromOtherSender, let from = message.senderInfo {
-      let avatar = UserAvatar(userInfo: from, size: CGFloat(avatarSize), ignoresSafeArea: true)
-      let hostingController = UIHostingController(rootView: avatar)
-      avatarHostingController = hostingController
-      hostingController.view.backgroundColor = .clear
-      hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-      avatarOrSpacer = hostingController.view
+      let avatar = UserAvatarView()
+      avatar.configure(with: from, size: avatarSize)
+      avatar.translatesAutoresizingMaskIntoConstraints = false
+      avatarView = avatar
+      avatarOrSpacer = avatar
     } else {
       let spacer = UIView()
       spacer.translatesAutoresizingMaskIntoConstraints = false
@@ -363,8 +362,8 @@ extension MessageCollectionViewCell {
     messageView?.removeFromSuperview()
     if isThread {
       nameLabel.removeFromSuperview()
-      avatarHostingController?.view.removeFromSuperview()
-      avatarHostingController = nil
+      avatarView?.removeFromSuperview()
+      avatarView = nil
       avatarSpacerView?.removeFromSuperview()
       avatarSpacerView = nil
     }
