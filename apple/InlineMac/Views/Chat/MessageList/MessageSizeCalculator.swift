@@ -228,7 +228,7 @@ class MessageSizeCalculator {
   }
 
   private var singleLineDiff = 4.0
-  
+
   func calculateSize(
     for message: FullMessage,
     with props: MessageViewInputProps,
@@ -348,16 +348,14 @@ class MessageSizeCalculator {
         )
       }
     }
-    
 
     let textHeight = textSize?.height ?? 0.0
     let textWidth = textSize?.width ?? 0.0
-    
+
     // Re-evaluate if we are single line based on space left after the text width
-    if isSingleLine && textWidth > availableWidth - MessageTimeAndState.timeWidth {
+    if isSingleLine, textWidth > availableWidth - MessageTimeAndState.timeWidth {
       isSingleLine = false
     }
-
 
     // MARK: - Layout Plans
 
@@ -738,6 +736,7 @@ class MessageSizeCalculator {
       height: min(320, ceil(parentAvailableWidth))
     )
     let minMediaSize = CGSize(width: 40.0, height: 40.0)
+    let isLandscape = width > height
 
     guard width > 0, height > 0 else {
       return minMediaSize
@@ -752,8 +751,13 @@ class MessageSizeCalculator {
         mediaWidth = width
         mediaHeight = height
       } else {
-        mediaWidth = maxMediaSize.width
-        mediaHeight = ceil(mediaWidth / aspectRatio)
+        if isLandscape {
+          mediaWidth = maxMediaSize.width
+          mediaHeight = ceil(mediaWidth / aspectRatio)
+        } else {
+          mediaHeight = maxMediaSize.height
+          mediaWidth = ceil(mediaHeight * aspectRatio)
+        }
       }
       return CGSize(width: mediaWidth, height: mediaHeight)
     }
