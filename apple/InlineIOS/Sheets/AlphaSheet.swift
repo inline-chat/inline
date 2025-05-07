@@ -10,14 +10,13 @@ struct AlphaSheet: View {
         Text(.init(text))
       }
       .padding(.horizontal, 18)
+      .animation(.easeInOut(duration: 0.3), value: text)
     }
 
     .onAppear {
       Task {
-        if text.isEmpty {
-          if let newText = try? await ApiClient.shared.getAlphaText() {
-            text = newText
-          }
+        if let newText = try? await ApiClient.shared.getAlphaText() {
+          text = newText
         }
       }
     }
