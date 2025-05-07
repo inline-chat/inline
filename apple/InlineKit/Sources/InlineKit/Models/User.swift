@@ -125,6 +125,10 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var displayName: String {
     firstName != nil ? fullName : (username ?? email ?? phoneNumber ?? "User")
   }
+  
+  public var shortDisplayName: String {
+    firstName != nil ? firstName! : (username ?? email ?? phoneNumber ?? "User")
+  }
 }
 
 public extension User {

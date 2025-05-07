@@ -1,7 +1,7 @@
 import InlineKit
 import InlineUI
-import SwiftUI
 import Logger
+import SwiftUI
 
 struct SpaceSidebar: View {
   @EnvironmentObject var nav: Nav
@@ -52,6 +52,7 @@ struct SpaceSidebar: View {
       chat: chat,
       dialog: item.dialog,
       lastMessage: item.message,
+      lastMessageSender: item.from,
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
@@ -137,7 +138,7 @@ struct SpaceSidebar: View {
         } catch {
           Log.shared.error("failed to get space", error: error)
         }
-        
+
         Task.detached {
           try await realtime
             .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
