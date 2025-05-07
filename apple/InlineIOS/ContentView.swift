@@ -39,6 +39,16 @@ struct ContentView: View {
     .environmentObject(home)
     .environmentObject(fileUploadViewModel)
     .toastView()
+    .onChange(of: scene) { _, newPhase in
+      switch newPhase {
+        case .active:
+          markAsOnline()
+        case .inactive, .background:
+          markAsOffline()
+        @unknown default:
+          break
+      }
+    }
   }
 }
 
