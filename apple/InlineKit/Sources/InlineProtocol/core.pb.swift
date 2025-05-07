@@ -537,15 +537,15 @@ public struct User: Sendable {
   /// Clears the value of `profilePhoto`. Subsequent reads from it will return its default value.
   public mutating func clearProfilePhoto() {self._profilePhoto = nil}
 
-  /// Last message ID
-  public var lastMsgID: Int64 {
-    get {return _lastMsgID ?? 0}
-    set {_lastMsgID = newValue}
+  /// If true, the user has not completed the setup process
+  public var pendingSetup: Bool {
+    get {return _pendingSetup ?? false}
+    set {_pendingSetup = newValue}
   }
-  /// Returns true if `lastMsgID` has been explicitly set.
-  public var hasLastMsgID: Bool {return self._lastMsgID != nil}
-  /// Clears the value of `lastMsgID`. Subsequent reads from it will return its default value.
-  public mutating func clearLastMsgID() {self._lastMsgID = nil}
+  /// Returns true if `pendingSetup` has been explicitly set.
+  public var hasPendingSetup: Bool {return self._pendingSetup != nil}
+  /// Clears the value of `pendingSetup`. Subsequent reads from it will return its default value.
+  public mutating func clearPendingSetup() {self._pendingSetup = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -559,7 +559,7 @@ public struct User: Sendable {
   fileprivate var _min: Bool? = nil
   fileprivate var _status: UserStatus? = nil
   fileprivate var _profilePhoto: UserProfilePhoto? = nil
-  fileprivate var _lastMsgID: Int64? = nil
+  fileprivate var _pendingSetup: Bool? = nil
 }
 
 public struct UserProfilePhoto: @unchecked Sendable {
@@ -4161,7 +4161,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     7: .same(proto: "min"),
     8: .same(proto: "status"),
     9: .standard(proto: "profile_photo"),
-    10: .standard(proto: "last_msg_id"),
+    11: .standard(proto: "pending_setup"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4179,7 +4179,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       case 7: try { try decoder.decodeSingularBoolField(value: &self._min) }()
       case 8: try { try decoder.decodeSingularMessageField(value: &self._status) }()
       case 9: try { try decoder.decodeSingularMessageField(value: &self._profilePhoto) }()
-      case 10: try { try decoder.decodeSingularInt64Field(value: &self._lastMsgID) }()
+      case 11: try { try decoder.decodeSingularBoolField(value: &self._pendingSetup) }()
       default: break
       }
     }
@@ -4217,8 +4217,8 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     try { if let v = self._profilePhoto {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     } }()
-    try { if let v = self._lastMsgID {
-      try visitor.visitSingularInt64Field(value: v, fieldNumber: 10)
+    try { if let v = self._pendingSetup {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 11)
     } }()
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -4233,7 +4233,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     if lhs._min != rhs._min {return false}
     if lhs._status != rhs._status {return false}
     if lhs._profilePhoto != rhs._profilePhoto {return false}
-    if lhs._lastMsgID != rhs._lastMsgID {return false}
+    if lhs._pendingSetup != rhs._pendingSetup {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
