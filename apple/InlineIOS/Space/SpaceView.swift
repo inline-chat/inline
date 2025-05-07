@@ -190,8 +190,8 @@ struct SpaceView: View {
   }
 
   private func getCombinedItems() -> [SpaceCombinedItem] {
-    let memberItems = fullSpaceViewModel.memberChats.map { SpaceCombinedItem.member($0) }
-    let chatItems = fullSpaceViewModel.chats.map { SpaceCombinedItem.chat($0) }
+    let memberItems = fullSpaceViewModel.filteredMemberChats.map { SpaceCombinedItem.member($0) }
+    let chatItems = fullSpaceViewModel.filteredChats.map { SpaceCombinedItem.chat($0) }
 
     return (memberItems + chatItems).sorted { item1, item2 in
 
