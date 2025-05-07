@@ -364,7 +364,7 @@ class UIMessageView: UIView {
         multiLineContainer.addArrangedSubview(reactionsFlowView)
       }
 
-      if !message.hasPhoto || message.hasText {
+      if !message.hasPhoto || message.hasText || isSticker {
         setupMultilineMetadata()
         containerStack.addArrangedSubview(multiLineContainer)
         return
@@ -376,7 +376,7 @@ class UIMessageView: UIView {
     let metadataContainer = UIStackView()
     metadataContainer.axis = .horizontal
     metadataContainer.addArrangedSubview(UIView()) // Spacer
-    metadataContainer.addArrangedSubview(isEmojiOnlyMessage ? floatingMetadataView : metadataView)
+    metadataContainer.addArrangedSubview(isEmojiOnlyMessage || isSticker ? floatingMetadataView : metadataView)
     multiLineContainer.addArrangedSubview(metadataContainer)
   }
 
@@ -556,15 +556,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
