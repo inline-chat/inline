@@ -38,6 +38,7 @@ struct SidebarItem: View {
 
   @Environment(\.colorScheme) private var colorScheme
   @State private var isHovered: Bool = false
+  @State private var currentComposeAction: ApiComposeAction?
 
   // MARK: - Initializer
 
@@ -100,6 +101,9 @@ struct SidebarItem: View {
       }
       .tint(.purple)
     }
+
+    // Listeners
+    .onReceive(ComposeActions.shared.$actions, perform: onComposeActionReceive)
   }
 
   @ViewBuilder
@@ -122,13 +126,20 @@ struct SidebarItem: View {
   var content: some View {
     VStack(alignment: .leading, spacing: 0) {
       nameView
-      if showsMessageSender {
-        lastMessageSenderView
+
+      if hasComposeAction {
+        typingView
+      } else {
+        if showsMessageSender {
+          lastMessageSenderView
+        }
+        lastMessageView
       }
-      lastMessageView
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.leading, Self.avatarAndContentSpacing)
+    // doesn't work for some reason
+    // .animation(.fastFeedback, value: hasComposeAction)
   }
 
   @ViewBuilder
@@ -149,6 +160,20 @@ struct SidebarItem: View {
       .lineLimit(showsMessageSender ? 1 : 2)
       .truncationMode(.tail)
       .fixedSize(horizontal: false, vertical: true)
+  }
+
+  @ViewBuilder
+  var typingView: some View {
+    if let currentComposeAction {
+      Text(currentComposeAction.toHumanReadable())
+        .font(Self.subtitleFont)
+        .foregroundColor(Self.subtitleColor)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .fixedSize(horizontal: false, vertical: true)
+    } else {
+      EmptyView()
+    }
   }
 
   @ViewBuilder
@@ -176,6 +201,7 @@ struct SidebarItem: View {
     HStack(spacing: 0) {
       unreadIndicator
     }
+    .animation(.fastFeedback, value: unreadCount > 0)
     .frame(width: Self.gutterWidth, height: Self.avatarSize)
   }
 
@@ -251,6 +277,10 @@ struct SidebarItem: View {
     }
   }
 
+  var hasComposeAction: Bool {
+    currentComposeAction != nil
+  }
+
   var userFullName: String {
     switch type {
       case let .user(userInfo, _):
@@ -302,6 +332,24 @@ struct SidebarItem: View {
   }
 
   // MARK: - Private Methods
+
+  private func setComposeAction() {
+    guard let peerId else { return }
+
+    currentComposeAction = ComposeActions.shared.getComposeAction(for: peerId)?.action
+  }
+
+  /// Called when the compose action changes, check if it is the same
+  private func onComposeActionReceive(actions: [Peer: ComposeActionInfo]) {
+    guard let peerId else { return }
+
+    // If changed
+    if actions[peerId]?.action != currentComposeAction {
+      DispatchQueue.main.async {
+        setComposeAction()
+      }
+    }
+  }
 
   // TODO...
 }
