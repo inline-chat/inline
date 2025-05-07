@@ -203,7 +203,7 @@ public struct UserAvatar: View, Equatable {
     if ignoresSafeArea {
       avatar
         // Important so the toolbar safe area doesn't affect it
-        .ignoresSafeArea()
+        .ignoresSafeArea(.all)
     } else {
       avatar
     }
