@@ -381,6 +381,12 @@ public extension AppDatabase {
         t.add(column: "pendingSetup", .boolean).defaults(to: false)
       }
     }
+    
+    migrator.registerMigration("chat is public") { db in
+      try db.alter(table: "chat") { t in
+        t.add(column: "isPublic", .boolean)
+      }
+    }
 
     /// TODOs:
     /// - Add indexes for performance
