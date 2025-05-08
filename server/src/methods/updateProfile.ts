@@ -37,22 +37,32 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
       if (input.firstName && input.firstName.length < 1) {
         throw new InlineError(InlineError.ApiError.FIRST_NAME_INVALID)
       }
-      props.firstName = input.firstName ?? null
+      if (input.firstName) {
+        props.firstName = input.firstName
+      }
     }
-    if ("lastName" in input) props.lastName = input.lastName ?? null
+    if ("lastName" in input) {
+      if (input.lastName) {
+        props.lastName = input.lastName
+      }
+    }
     if ("username" in input) {
       if (input.username && input.username.length < 2) {
         throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
       }
-      props.username = input.username ?? null
+      if (input.username) {
+        props.username = input.username
+      }
     }
     if ("timeZone" in input) {
       if (input.timeZone && !validateIanaTimezone(input.timeZone)) {
         Log.shared.error("Invalid timeZone", { timeZone: input.timeZone })
         throw new InlineError(InlineError.ApiError.INTERNAL)
       }
-      Log.shared.info("Setting timeZone", { timeZone: input.timeZone })
-      props.timeZone = input.timeZone ?? null
+      if (input.timeZone) {
+        Log.shared.info("Setting timeZone", { timeZone: input.timeZone })
+        props.timeZone = input.timeZone
+      }
     }
 
     let user = await db.update(users).set(props).where(eq(users.id, context.currentUserId)).returning()
