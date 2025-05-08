@@ -176,6 +176,13 @@ const getUserByEmail = async (email: string) => {
     }
 
     return user
+  } else {
+    try {
+      // update pending setup to false
+      await db.update(users).set({ pendingSetup: false }).where(eq(users.email, email))
+    } catch (error) {
+      Log.shared.error("Failed to update pending setup to false", error)
+    }
   }
 
   return user

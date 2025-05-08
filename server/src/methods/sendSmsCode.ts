@@ -47,13 +47,14 @@ export const handler = async (
     let existingUser = await db.query.users.findFirst({
       where: eq(users.phoneNumber, formattedPhoneNumber),
       columns: {
+        pendingSetup: true,
         id: true,
         phoneNumber: true,
       },
     })
 
     return {
-      existingUser: !!existingUser,
+      existingUser: existingUser ? existingUser.pendingSetup !== true : false,
       // pass back valid formatting for number
       phoneNumber: formattedPhoneNumber,
       // human readable phone number
