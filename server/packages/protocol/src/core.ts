@@ -319,6 +319,10 @@ export interface User {
      * @generated from protobuf field: optional bool pending_setup = 11;
      */
     pendingSetup?: boolean;
+    /**
+     * @generated from protobuf field: optional string time_zone = 12;
+     */
+    timeZone?: string;
 }
 /**
  * @generated from protobuf message UserProfilePhoto
@@ -3274,7 +3278,8 @@ class User$Type extends MessageType<User> {
             { no: 7, name: "min", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 8, name: "status", kind: "message", T: () => UserStatus },
             { no: 9, name: "profile_photo", kind: "message", T: () => UserProfilePhoto },
-            { no: 11, name: "pending_setup", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 11, name: "pending_setup", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 12, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<User>): User {
@@ -3319,6 +3324,9 @@ class User$Type extends MessageType<User> {
                 case /* optional bool pending_setup */ 11:
                     message.pendingSetup = reader.bool();
                     break;
+                case /* optional string time_zone */ 12:
+                    message.timeZone = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3361,6 +3369,9 @@ class User$Type extends MessageType<User> {
         /* optional bool pending_setup = 11; */
         if (message.pendingSetup !== undefined)
             writer.tag(11, WireType.Varint).bool(message.pendingSetup);
+        /* optional string time_zone = 12; */
+        if (message.timeZone !== undefined)
+            writer.tag(12, WireType.LengthDelimited).string(message.timeZone);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

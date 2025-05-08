@@ -18,5 +18,6 @@ export const encodeUser = ({ user, min = false }: { user: DbUser; min?: boolean 
           online: user.online ? UserStatus_Status.ONLINE : UserStatus_Status.OFFLINE,
           lastOnline: { date: user.lastOnline ? encodeDate(user.lastOnline) : undefined },
         },
+    timeZone: user.timeZone ?? undefined,
   }
 }

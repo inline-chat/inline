@@ -121,6 +121,7 @@ export const TUserInfo = Type.Object({
   pendingSetup: Optional(Type.Boolean()),
   online: Optional(Type.Boolean()),
   lastOnline: Optional(TimestampMs),
+  timeZone: Optional(Type.String()),
   date: TimestampMs,
   photo: Optional(Type.Array(PhotoInfo)),
 })
