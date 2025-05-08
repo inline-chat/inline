@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { and, eq, inArray, isNull, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -220,6 +220,79 @@ export const handler = async (
       pushMessageAndUser(messages, users, d.chat?.lastMsg, currentUserId, peerIdFromChat(d.chat, { currentUserId }))
       if (d.chat) chats.push(d.chat)
     })
+
+    // Create private chats and dialogs for members that don't have them
+    if (space?.members) {
+      const memberIds = space.members.map((m) => m.user.id)
+      const existingPrivateChats = await db.query.chats.findMany({
+        where: and(
+          eq(schema.chats.type, "private"),
+          or(
+            and(eq(schema.chats.minUserId, currentUserId), inArray(schema.chats.maxUserId, memberIds)),
+            and(eq(schema.chats.maxUserId, currentUserId), inArray(schema.chats.minUserId, memberIds)),
+          ),
+        ),
+      })
+
+      const existingChatMemberIds = new Set(
+        existingPrivateChats.map((c) => (c.minUserId === currentUserId ? c.maxUserId : c.minUserId)),
+      )
+
+      const membersWithoutChats = space.members
+        .filter((m) => m.user.id !== currentUserId)
+        .filter((m) => !existingChatMemberIds.has(m.user.id))
+
+      if (membersWithoutChats.length > 0) {
+        // Create new private chats
+        const newChats = await db.transaction(async (tx) => {
+          const created: schema.DbChat[] = []
+          for (const member of membersWithoutChats) {
+            const [minUserId, maxUserId] = [
+              Math.min(currentUserId, member.user.id),
+              Math.max(currentUserId, member.user.id),
+            ]
+            const [chat] = await tx
+              .insert(schema.chats)
+              .values({
+                type: "private",
+                minUserId,
+                maxUserId,
+                date: new Date(),
+              })
+              .returning()
+            if (chat) created.push(chat)
+          }
+          return created
+        })
+
+        // Create dialogs for new chats
+        const newDialogs = await db.transaction(async (tx) => {
+          const created: schema.DbDialog[] = []
+          for (const chat of newChats) {
+            const [dialog] = await tx
+              .insert(schema.dialogs)
+              .values({
+                chatId: chat.id,
+                peerUserId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId,
+                userId: currentUserId,
+                date: new Date(),
+              })
+              .returning()
+            if (dialog) created.push(dialog)
+          }
+          return created
+        })
+
+        // Add new chats and dialogs to results
+        newChats.forEach((c) => {
+          chats.push(c)
+          // No last message for new chats
+          pushMessageAndUser(messages, users, null, currentUserId, peerIdFromChat(c, { currentUserId }))
+        })
+        newDialogs.forEach((d) => dialogs.push(d))
+      }
+    }
+
     // Add all space members as users
     space?.members.forEach((m) => users.push(m.user))
   }

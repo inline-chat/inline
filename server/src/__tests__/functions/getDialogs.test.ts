@@ -3,7 +3,7 @@ import { handler as getDialogsHandler } from "../../methods/getDialogs"
 import { testUtils, defaultTestContext, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import * as schema from "../../db/schema"
-import { eq, and } from "drizzle-orm"
+import { eq, and, or } from "drizzle-orm"
 
 // Helper to create a HandlerContext
 const makeHandlerContext = (userId: number): any => ({
@@ -253,5 +253,186 @@ describe("getDialogs", () => {
     expect(dialogThreadIds).not.toContain(chat.id)
     const chatIds = result.chats.map((c) => c.id)
     expect(chatIds).not.toContain(chat.id)
+  })
+
+  test("creates private chats for space members without dialogs", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("PrivateChatSpace", [
+      "userA3@example.com",
+      "userB3@example.com",
+      "userC3@example.com",
+    ])
+    const [userA, userB, userC] = users
+
+    // Create a private chat between userA and userB only
+    const existingChat = await db
+      .insert(schema.chats)
+      .values({
+        type: "private",
+        minUserId: Math.min(userA.id, userB.id),
+        maxUserId: Math.max(userA.id, userB.id),
+        date: new Date(),
+      })
+      .returning()
+      .then((rows) => rows[0])
+
+    if (!existingChat) throw new Error("Chat was not created")
+
+    // Create dialog for userA
+    await db
+      .insert(schema.dialogs)
+      .values({
+        chatId: existingChat.id,
+        userId: userA.id,
+        peerUserId: userB.id,
+        date: new Date(),
+      })
+      .execute()
+
+    // Sanity: ensure no private chat exists between userA and userC
+    const chatsBefore = await db.query.chats.findMany({
+      where: and(
+        eq(schema.chats.type, "private"),
+        or(
+          and(
+            eq(schema.chats.minUserId, Math.min(userA.id, userC.id)),
+            eq(schema.chats.maxUserId, Math.max(userA.id, userC.id)),
+          ),
+          and(
+            eq(schema.chats.minUserId, Math.max(userA.id, userC.id)),
+            eq(schema.chats.maxUserId, Math.min(userA.id, userC.id)),
+          ),
+        ),
+      ),
+    })
+    expect(chatsBefore.length).toBe(0)
+
+    // Call handler for userA
+    const input = { spaceId: space.id }
+    const context = makeHandlerContext(userA.id)
+    const result = await getDialogsHandler(input, context)
+
+    // Should now have a private chat between userA and userC
+    const chatsAfter = await db.query.chats.findMany({
+      where: and(
+        eq(schema.chats.type, "private"),
+        or(
+          and(
+            eq(schema.chats.minUserId, Math.min(userA.id, userC.id)),
+            eq(schema.chats.maxUserId, Math.max(userA.id, userC.id)),
+          ),
+          and(
+            eq(schema.chats.minUserId, Math.max(userA.id, userC.id)),
+            eq(schema.chats.maxUserId, Math.min(userA.id, userC.id)),
+          ),
+        ),
+      ),
+    })
+    expect(chatsAfter.length).toBe(1)
+
+    // Should have a dialog for userA with userC
+    const dialogsAfter = await db.query.dialogs.findMany({
+      where: and(eq(schema.dialogs.userId, userA.id), eq(schema.dialogs.peerUserId, userC.id)),
+    })
+    expect(dialogsAfter.length).toBe(1)
+
+    // Should be returned in the result
+    const dialogPeerIds = result.dialogs.map((d) => (d.peerId && "userId" in d.peerId ? d.peerId.userId : undefined))
+    expect(dialogPeerIds).toContain(userC.id)
+
+    // Should include all users
+    const userEmails = result.users.map((u) => u.email)
+    expect(userEmails).toContain("userA3@example.com")
+    expect(userEmails).toContain("userB3@example.com")
+    expect(userEmails).toContain("userC3@example.com")
+  })
+
+  test("does not create duplicate private chats for existing conversations", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("DuplicateChatSpace", [
+      "userA4@example.com",
+      "userB4@example.com",
+    ])
+    const [userA, userB] = users
+
+    // Create an existing private chat between userA and userB
+    const existingChat = await db
+      .insert(schema.chats)
+      .values({
+        type: "private",
+        minUserId: Math.min(userA.id, userB.id),
+        maxUserId: Math.max(userA.id, userB.id),
+        date: new Date(),
+      })
+      .returning()
+      .then((rows) => rows[0])
+
+    if (!existingChat) throw new Error("Chat was not created")
+
+    // Create dialog for userA
+    await db
+      .insert(schema.dialogs)
+      .values({
+        chatId: existingChat.id,
+        userId: userA.id,
+        peerUserId: userB.id,
+        date: new Date(),
+      })
+      .execute()
+
+    // Count existing chats before
+    const chatsBefore = await db.query.chats.findMany({
+      where: and(
+        eq(schema.chats.type, "private"),
+        or(
+          and(
+            eq(schema.chats.minUserId, Math.min(userA.id, userB.id)),
+            eq(schema.chats.maxUserId, Math.max(userA.id, userB.id)),
+          ),
+          and(
+            eq(schema.chats.minUserId, Math.max(userA.id, userB.id)),
+            eq(schema.chats.maxUserId, Math.min(userA.id, userB.id)),
+          ),
+        ),
+      ),
+    })
+    const initialChatCount = chatsBefore.length
+
+    // Call handler for userA
+    const input = { spaceId: space.id }
+    const context = makeHandlerContext(userA.id)
+    const result = await getDialogsHandler(input, context)
+
+    // Should still have the same number of chats
+    const chatsAfter = await db.query.chats.findMany({
+      where: and(
+        eq(schema.chats.type, "private"),
+        or(
+          and(
+            eq(schema.chats.minUserId, Math.min(userA.id, userB.id)),
+            eq(schema.chats.maxUserId, Math.max(userA.id, userB.id)),
+          ),
+          and(
+            eq(schema.chats.minUserId, Math.max(userA.id, userB.id)),
+            eq(schema.chats.maxUserId, Math.min(userA.id, userB.id)),
+          ),
+        ),
+      ),
+    })
+    expect(chatsAfter.length).toBe(initialChatCount)
+
+    // Should have exactly one dialog for userA with userB
+    const dialogsAfter = await db.query.dialogs.findMany({
+      where: and(eq(schema.dialogs.userId, userA.id), eq(schema.dialogs.peerUserId, userB.id)),
+    })
+    expect(dialogsAfter.length).toBe(1)
+
+    // Should return the existing dialog in the result
+    const dialogPeerIds = result.dialogs.map((d) => (d.peerId && "userId" in d.peerId ? d.peerId.userId : undefined))
+    expect(dialogPeerIds).toContain(userB.id)
+    expect(dialogPeerIds.filter((id) => id === userB.id).length).toBe(1) // Should appear exactly once
+
+    // Should include both users
+    const userEmails = result.users.map((u) => u.email)
+    expect(userEmails).toContain("userA4@example.com")
+    expect(userEmails).toContain("userB4@example.com")
   })
 })
