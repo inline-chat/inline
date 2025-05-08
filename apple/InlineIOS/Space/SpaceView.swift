@@ -176,23 +176,31 @@ struct SpaceView: View {
     .task {
       do {
         try await data.getSpace(spaceId: spaceId)
-        try await data.getDialogs(spaceId: spaceId)
-
       } catch {
-        Log.shared.error("Failed to getPrivateChats", error: error)
+        Log.shared.error("Failed to getSpace", error: error)
       }
+      
+      do {
+        try await data.getDialogs(spaceId: spaceId)
+      } catch {
+        Log.shared.error("Failed to getDialogs", error: error)
+      }
+      
     }
     .onAppear {
       Task {
         try await data.getSpace(spaceId: spaceId)
-        fullSpaceViewModel.fetchMembersChats()
       }
 
       Task.detached {
-        try await realtime
-          .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-            $0.spaceID = spaceId
-          }))
+        do {
+          try await realtime
+            .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+              $0.spaceID = spaceId
+            }))
+        } catch {
+          Log.shared.error("Failed to get space members", error: error)
+        }
       }
     }
   }
