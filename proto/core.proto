@@ -498,6 +498,8 @@ enum Method {
   DELETE_CHAT = 11;
   INVITE_TO_SPACE = 12;
   GET_CHAT_PARTICIPANTS = 13;
+  ADD_CHAT_PARTICIPANT = 14;
+  REMOVE_CHAT_PARTICIPANT = 15;
 }
 
 message RpcCall {
@@ -516,6 +518,8 @@ message RpcCall {
     DeleteChatInput deleteChat = 12;
     InviteToSpaceInput inviteToSpace = 13;
     GetChatParticipantsInput getChatParticipants = 14;
+    AddChatParticipantInput addChatParticipant = 15;
+    RemoveChatParticipantInput removeChatParticipant = 16;
   }
 }
 
@@ -536,6 +540,8 @@ message RpcResult {
     DeleteChatResult deleteChat = 12;
     InviteToSpaceResult inviteToSpace = 13;
     GetChatParticipantsResult getChatParticipants = 14;
+    AddChatParticipantResult addChatParticipant = 15;
+    RemoveChatParticipantResult removeChatParticipant = 16;
   }
 }
 
@@ -854,3 +860,17 @@ message InviteToSpaceResult {
 message GetChatParticipantsInput { int64 chat_id = 1; }
 
 message GetChatParticipantsResult { repeated ChatParticipant participants = 1; }
+
+message AddChatParticipantInput {
+  int64 chat_id = 1;
+  int64 user_id = 2;
+}
+
+message AddChatParticipantResult { ChatParticipant participant = 1; }
+
+message RemoveChatParticipantInput {
+  int64 chat_id = 1;
+  int64 user_id = 2;
+}
+
+message RemoveChatParticipantResult {}
