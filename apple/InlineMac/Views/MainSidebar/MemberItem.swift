@@ -184,7 +184,7 @@ struct MemberItem: View {
   }
 
   var alternativeSubtitleText: String? {
-    if let timeZone = user.timeZone {
+    if let timeZone = user.timeZone, timeZone != TimeZone.current.identifier {
       TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone) ?? nil
     } else {
       nil
