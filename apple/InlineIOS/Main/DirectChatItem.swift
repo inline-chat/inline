@@ -107,11 +107,27 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var title: some View {
-    HStack(spacing: 4) {
-      Text(userInfo?.user.id == Auth.shared.getCurrentUserId() ? "Saved Message" : userInfo?.user.firstName ?? "")
+    if let userInfo = userInfo {
+      Text(displayName(for: userInfo))
+        .font(.customTitle())
+        .foregroundColor(.primary)
+    } else {
+      Text("Unknown User")
         .font(.customTitle())
         .foregroundColor(.primary)
     }
+  }
+
+  private func displayName(for userInfo: UserInfo) -> String {
+    if userInfo.user.id == Auth.shared.getCurrentUserId() {
+      return "Saved Message"
+    }
+
+    return userInfo.user.firstName
+      ?? userInfo.user.username
+      ?? userInfo.user.email
+      ?? userInfo.user.phoneNumber
+      ?? "Invited User"
   }
 
   @ViewBuilder

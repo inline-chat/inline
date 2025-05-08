@@ -1,8 +1,8 @@
+import Auth
 import Combine
 import InlineKit
 import InlineUI
 import SwiftUI
-import Auth
 
 extension ChatView {
   var isCurrentUser: Bool {
@@ -11,7 +11,7 @@ extension ChatView {
 
   var title: String {
     if case .user = peerId {
-      isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser?.firstName ?? ""
+      isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser?.firstName ?? fullChatViewModel.peerUser?.username ?? fullChatViewModel.peerUser?.email ?? fullChatViewModel.peerUser?.phoneNumber ?? "Invited User"
     } else {
       fullChatViewModel.chat?.title ?? ""
     }
