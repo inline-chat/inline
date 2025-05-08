@@ -1299,6 +1299,18 @@ export interface RpcCall {
          */
         getChatParticipants: GetChatParticipantsInput;
     } | {
+        oneofKind: "addChatParticipant";
+        /**
+         * @generated from protobuf field: AddChatParticipantInput addChatParticipant = 15;
+         */
+        addChatParticipant: AddChatParticipantInput;
+    } | {
+        oneofKind: "removeChatParticipant";
+        /**
+         * @generated from protobuf field: RemoveChatParticipantInput removeChatParticipant = 16;
+         */
+        removeChatParticipant: RemoveChatParticipantInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1391,6 +1403,18 @@ export interface RpcResult {
          * @generated from protobuf field: GetChatParticipantsResult getChatParticipants = 14;
          */
         getChatParticipants: GetChatParticipantsResult;
+    } | {
+        oneofKind: "addChatParticipant";
+        /**
+         * @generated from protobuf field: AddChatParticipantResult addChatParticipant = 15;
+         */
+        addChatParticipant: AddChatParticipantResult;
+    } | {
+        oneofKind: "removeChatParticipant";
+        /**
+         * @generated from protobuf field: RemoveChatParticipantResult removeChatParticipant = 16;
+         */
+        removeChatParticipant: RemoveChatParticipantResult;
     } | {
         oneofKind: undefined;
     };
@@ -2272,6 +2296,46 @@ export interface GetChatParticipantsResult {
     participants: ChatParticipant[];
 }
 /**
+ * @generated from protobuf message AddChatParticipantInput
+ */
+export interface AddChatParticipantInput {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 2;
+     */
+    userId: bigint;
+}
+/**
+ * @generated from protobuf message AddChatParticipantResult
+ */
+export interface AddChatParticipantResult {
+    /**
+     * @generated from protobuf field: ChatParticipant participant = 1;
+     */
+    participant?: ChatParticipant;
+}
+/**
+ * @generated from protobuf message RemoveChatParticipantInput
+ */
+export interface RemoveChatParticipantInput {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 2;
+     */
+    userId: bigint;
+}
+/**
+ * @generated from protobuf message RemoveChatParticipantResult
+ */
+export interface RemoveChatParticipantResult {
+}
+/**
  * @generated from protobuf enum Method
  */
 export enum Method {
@@ -2330,7 +2394,15 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_CHAT_PARTICIPANTS = 13;
      */
-    GET_CHAT_PARTICIPANTS = 13
+    GET_CHAT_PARTICIPANTS = 13,
+    /**
+     * @generated from protobuf enum value: ADD_CHAT_PARTICIPANT = 14;
+     */
+    ADD_CHAT_PARTICIPANT = 14,
+    /**
+     * @generated from protobuf enum value: REMOVE_CHAT_PARTICIPANT = 15;
+     */
+    REMOVE_CHAT_PARTICIPANT = 15
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -5135,7 +5207,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 11, name: "getSpaceMembers", kind: "message", oneof: "input", T: () => GetSpaceMembersInput },
             { no: 12, name: "deleteChat", kind: "message", oneof: "input", T: () => DeleteChatInput },
             { no: 13, name: "inviteToSpace", kind: "message", oneof: "input", T: () => InviteToSpaceInput },
-            { no: 14, name: "getChatParticipants", kind: "message", oneof: "input", T: () => GetChatParticipantsInput }
+            { no: 14, name: "getChatParticipants", kind: "message", oneof: "input", T: () => GetChatParticipantsInput },
+            { no: 15, name: "addChatParticipant", kind: "message", oneof: "input", T: () => AddChatParticipantInput },
+            { no: 16, name: "removeChatParticipant", kind: "message", oneof: "input", T: () => RemoveChatParticipantInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -5232,6 +5306,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getChatParticipants: GetChatParticipantsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getChatParticipants)
                     };
                     break;
+                case /* AddChatParticipantInput addChatParticipant */ 15:
+                    message.input = {
+                        oneofKind: "addChatParticipant",
+                        addChatParticipant: AddChatParticipantInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).addChatParticipant)
+                    };
+                    break;
+                case /* RemoveChatParticipantInput removeChatParticipant */ 16:
+                    message.input = {
+                        oneofKind: "removeChatParticipant",
+                        removeChatParticipant: RemoveChatParticipantInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).removeChatParticipant)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5286,6 +5372,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetChatParticipantsInput getChatParticipants = 14; */
         if (message.input.oneofKind === "getChatParticipants")
             GetChatParticipantsInput.internalBinaryWrite(message.input.getChatParticipants, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
+        /* AddChatParticipantInput addChatParticipant = 15; */
+        if (message.input.oneofKind === "addChatParticipant")
+            AddChatParticipantInput.internalBinaryWrite(message.input.addChatParticipant, writer.tag(15, WireType.LengthDelimited).fork(), options).join();
+        /* RemoveChatParticipantInput removeChatParticipant = 16; */
+        if (message.input.oneofKind === "removeChatParticipant")
+            RemoveChatParticipantInput.internalBinaryWrite(message.input.removeChatParticipant, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5313,7 +5405,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 11, name: "getSpaceMembers", kind: "message", oneof: "result", T: () => GetSpaceMembersResult },
             { no: 12, name: "deleteChat", kind: "message", oneof: "result", T: () => DeleteChatResult },
             { no: 13, name: "inviteToSpace", kind: "message", oneof: "result", T: () => InviteToSpaceResult },
-            { no: 14, name: "getChatParticipants", kind: "message", oneof: "result", T: () => GetChatParticipantsResult }
+            { no: 14, name: "getChatParticipants", kind: "message", oneof: "result", T: () => GetChatParticipantsResult },
+            { no: 15, name: "addChatParticipant", kind: "message", oneof: "result", T: () => AddChatParticipantResult },
+            { no: 16, name: "removeChatParticipant", kind: "message", oneof: "result", T: () => RemoveChatParticipantResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -5410,6 +5504,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getChatParticipants: GetChatParticipantsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getChatParticipants)
                     };
                     break;
+                case /* AddChatParticipantResult addChatParticipant */ 15:
+                    message.result = {
+                        oneofKind: "addChatParticipant",
+                        addChatParticipant: AddChatParticipantResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).addChatParticipant)
+                    };
+                    break;
+                case /* RemoveChatParticipantResult removeChatParticipant */ 16:
+                    message.result = {
+                        oneofKind: "removeChatParticipant",
+                        removeChatParticipant: RemoveChatParticipantResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).removeChatParticipant)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5464,6 +5570,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetChatParticipantsResult getChatParticipants = 14; */
         if (message.result.oneofKind === "getChatParticipants")
             GetChatParticipantsResult.internalBinaryWrite(message.result.getChatParticipants, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
+        /* AddChatParticipantResult addChatParticipant = 15; */
+        if (message.result.oneofKind === "addChatParticipant")
+            AddChatParticipantResult.internalBinaryWrite(message.result.addChatParticipant, writer.tag(15, WireType.LengthDelimited).fork(), options).join();
+        /* RemoveChatParticipantResult removeChatParticipant = 16; */
+        if (message.result.oneofKind === "removeChatParticipant")
+            RemoveChatParticipantResult.internalBinaryWrite(message.result.removeChatParticipant, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8189,3 +8301,184 @@ class GetChatParticipantsResult$Type extends MessageType<GetChatParticipantsResu
  * @generated MessageType for protobuf message GetChatParticipantsResult
  */
 export const GetChatParticipantsResult = new GetChatParticipantsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AddChatParticipantInput$Type extends MessageType<AddChatParticipantInput> {
+    constructor() {
+        super("AddChatParticipantInput", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AddChatParticipantInput>): AddChatParticipantInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<AddChatParticipantInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AddChatParticipantInput): AddChatParticipantInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 2:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AddChatParticipantInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 user_id = 2; */
+        if (message.userId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AddChatParticipantInput
+ */
+export const AddChatParticipantInput = new AddChatParticipantInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AddChatParticipantResult$Type extends MessageType<AddChatParticipantResult> {
+    constructor() {
+        super("AddChatParticipantResult", [
+            { no: 1, name: "participant", kind: "message", T: () => ChatParticipant }
+        ]);
+    }
+    create(value?: PartialMessage<AddChatParticipantResult>): AddChatParticipantResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AddChatParticipantResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AddChatParticipantResult): AddChatParticipantResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ChatParticipant participant */ 1:
+                    message.participant = ChatParticipant.internalBinaryRead(reader, reader.uint32(), options, message.participant);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AddChatParticipantResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ChatParticipant participant = 1; */
+        if (message.participant)
+            ChatParticipant.internalBinaryWrite(message.participant, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AddChatParticipantResult
+ */
+export const AddChatParticipantResult = new AddChatParticipantResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RemoveChatParticipantInput$Type extends MessageType<RemoveChatParticipantInput> {
+    constructor() {
+        super("RemoveChatParticipantInput", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RemoveChatParticipantInput>): RemoveChatParticipantInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<RemoveChatParticipantInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RemoveChatParticipantInput): RemoveChatParticipantInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 2:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RemoveChatParticipantInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 user_id = 2; */
+        if (message.userId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RemoveChatParticipantInput
+ */
+export const RemoveChatParticipantInput = new RemoveChatParticipantInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RemoveChatParticipantResult$Type extends MessageType<RemoveChatParticipantResult> {
+    constructor() {
+        super("RemoveChatParticipantResult", []);
+    }
+    create(value?: PartialMessage<RemoveChatParticipantResult>): RemoveChatParticipantResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<RemoveChatParticipantResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RemoveChatParticipantResult): RemoveChatParticipantResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: RemoveChatParticipantResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RemoveChatParticipantResult
+ */
+export const RemoveChatParticipantResult = new RemoveChatParticipantResult$Type();
