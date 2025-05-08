@@ -134,6 +134,13 @@ const getUserByPhoneNumber = async (phoneNumber: string) => {
     )[0]
 
     return user
+  } else {
+    // update pending setup to false
+    try {
+      await db.update(users).set({ pendingSetup: false }).where(eq(users.phoneNumber, phoneNumber))
+    } catch (error) {
+      Log.shared.error("Failed to update pending setup to false", error)
+    }
   }
 
   return user
