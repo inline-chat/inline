@@ -3,6 +3,7 @@ import InlineConfig
 import InlineKit
 import Sentry
 import UIKit
+import Auth
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
