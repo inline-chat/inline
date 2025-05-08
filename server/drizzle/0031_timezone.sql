@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "time_zone" varchar(256);

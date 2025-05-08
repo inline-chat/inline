@@ -37,6 +37,7 @@ export const users = pgTable(
     date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
     photoFileId: integer("photo_file_id").references((): AnyPgColumn => files.id),
     pendingSetup: boolean("pending_setup").default(false),
+    timeZone: varchar("time_zone", { length: 256 }),
   },
   (table) => ({
     users_username_unique: uniqueIndex("users_username_unique").on(lower(table.username)),

@@ -7,11 +7,13 @@ import { type Static, Type } from "@sinclair/typebox"
 import { TUserInfo, encodeUserInfo } from "@in/server/api-types"
 import { checkUsernameAvailable } from "@in/server/methods/checkUsername"
 import type { HandlerContext } from "@in/server/controllers/helpers"
+import { validateIanaTimezone } from "@in/server/utils/validate"
 
 export const Input = Type.Object({
   firstName: Type.Optional(Type.String()),
   lastName: Type.Optional(Type.String()),
   username: Type.Optional(Type.String()),
+  timeZone: Type.Optional(Type.String()),
 })
 
 type Input = Static<typeof Input>
@@ -43,6 +45,14 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
         throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
       }
       props.username = input.username ?? null
+    }
+    if ("timeZone" in input) {
+      if (input.timeZone && !validateIanaTimezone(input.timeZone)) {
+        Log.shared.error("Invalid timeZone", { timeZone: input.timeZone })
+        throw new InlineError(InlineError.ApiError.INTERNAL)
+      }
+      Log.shared.info("Setting timeZone", { timeZone: input.timeZone })
+      props.timeZone = input.timeZone ?? null
     }
 
     let user = await db.update(users).set(props).where(eq(users.id, context.currentUserId)).returning()
