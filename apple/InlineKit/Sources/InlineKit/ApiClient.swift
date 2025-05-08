@@ -259,7 +259,12 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func updateProfile(firstName: String?, lastName: String?, username: String?) async throws
+  public func updateProfile(
+    firstName: String?,
+    lastName: String?,
+    username: String?,
+    timeZone: String? = nil
+  ) async throws
     -> UpdateProfile
   {
     var queryItems: [URLQueryItem] = []
@@ -272,6 +277,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
     if let username {
       queryItems.append(URLQueryItem(name: "username", value: username))
+    }
+    if let timeZone {
+      queryItems.append(URLQueryItem(name: "timeZone", value: timeZone))
     }
 
     return try await request(.updateProfile, queryItems: queryItems, includeToken: true)

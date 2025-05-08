@@ -464,7 +464,7 @@ public class DataManager: ObservableObject {
 //      }
       //  } catch {
       // // todo handle error
-    //}
+      // }
 
 //      for dialog in result.dialogs {
 //        let dialog = Dialog(from: dialog)
@@ -515,6 +515,29 @@ public class DataManager: ObservableObject {
 
     Task { @MainActor in
       MessagesPublisher.shared.messagesDeleted(messageIds: [messageId], peer: peerId)
+    }
+  }
+
+  public func updateTimezone() async throws {
+    log.debug("updateTimezone")
+    let timeZone = TimeZone.current.identifier
+
+    do {
+      // Update on server
+      let result = try await ApiClient.shared.updateProfile(
+        firstName: nil,
+        lastName: nil,
+        username: nil,
+        timeZone: timeZone
+      )
+
+      // Update local database
+      try await database.dbWriter.write { db in
+        try result.user.saveFull(db)
+      }
+    } catch {
+      log.error("Failed to update timezone", error: error)
+      throw error
     }
   }
 }

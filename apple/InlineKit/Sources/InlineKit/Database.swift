@@ -398,6 +398,12 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("time zone") { db in
+      try db.alter(table: "user") { t in
+        t.add(column: "timeZone", .text)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

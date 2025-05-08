@@ -23,8 +23,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationWillFinishLaunching(_ notification: Notification) {
     // Disable native tabbing
     NSWindow.allowsAutomaticWindowTabbing = false
-    
-    // Disable the bug with TableView https://christiantietze.de/posts/2022/11/nstableview-variable-row-heights-broken-macos-ventura-13-0/
+
+    // Disable the bug with TableView
+    // https://christiantietze.de/posts/2022/11/nstableview-variable-row-heights-broken-macos-ventura-13-0/
     UserDefaults.standard.set(false, forKey: "NSTableViewCanEstimateRowHeights")
 
     // Setup Notifications Delegate
@@ -37,6 +38,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     initializeServices()
     setupMainWindow()
     setupMainMenu()
+
+    // Send timezone to server
+    Task {
+      if Auth.shared.isLoggedIn {
+        try? await DataManager.shared.updateTimezone()
+      }
+    }
   }
 
   func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
