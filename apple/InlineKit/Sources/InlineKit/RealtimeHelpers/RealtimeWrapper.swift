@@ -8,6 +8,7 @@
 import Auth
 import Combine
 import Foundation
+import GRDB
 import InlineProtocol
 import Logger
 import RealtimeAPI
@@ -184,6 +185,12 @@ public extension Realtime {
         case let .getChatParticipants(result):
           try await handleResult_getChatParticipants(input!, result)
 
+        case let .addChatParticipant(result):
+          try await handleResult_addChatParticipant(result, input: input!)
+
+        case let .removeChatParticipant(result):
+          try await handleResult_removeChatParticipant(result, input: input!)
+
         default:
           break
       }
@@ -343,6 +350,41 @@ public extension Realtime {
       }
     }
     log.trace("getChatParticipants saved")
+  }
+
+  private func handleResult_addChatParticipant(
+    _ result: AddChatParticipantResult,
+    input: RpcCall.OneOf_Input
+  ) async throws {
+    log.trace("addChatParticipant result: \(result)")
+
+    guard case let .addChatParticipant(addInput) = input else {
+      log.error("could not infer chatId")
+      return
+    }
+
+    try await db.dbWriter.write { db in
+      try ChatParticipant.save(db, from: result.participant, chatId: addInput.chatID)
+    }
+  }
+
+  private func handleResult_removeChatParticipant(
+    _ result: RemoveChatParticipantResult,
+    input: RpcCall.OneOf_Input
+  ) async throws {
+    log.trace("removeChatParticipant result: \(result)")
+
+    guard case let .removeChatParticipant(removeInput) = input else {
+      log.error("could not infer chatId and userId")
+      return
+    }
+
+    try await db.dbWriter.write { db in
+      let participant = try ChatParticipant
+        .filter(Column("chatId") == removeInput.chatID)
+        .filter(Column("userId") == removeInput.userID)
+        .deleteAll(db)
+    }
   }
 
   private func handleResult_deleteChat() async throws {
