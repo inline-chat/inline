@@ -10,7 +10,7 @@ import { generateToken, MAX_LOGIN_ATTEMPTS } from "@in/server/utils/auth"
 import { Optional, type Static, Type } from "@sinclair/typebox"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
 import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
-import { ipinfo } from "@in/server/libs/ipinfo"
+import { ipinfo, type IPInfoResponse } from "@in/server/libs/ipinfo"
 import { SessionsModel } from "@in/server/db/models/sessions"
 
 export const Input = Type.Object({
@@ -57,7 +57,9 @@ export const handler = async (
   await verifyCode(email, input.code)
 
   // make session
-  let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
+  //let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
+  // Note(@mo): diable  for now it's so slow and adds false negatives
+  let ipInfo = undefined as IPInfoResponse | undefined
   let ip = requestIp ?? undefined
   let country = ipInfo?.country ?? undefined
   let region = ipInfo?.region ?? undefined
