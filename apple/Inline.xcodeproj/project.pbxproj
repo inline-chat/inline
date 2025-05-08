@@ -345,18 +345,6 @@
 				Base,
 				"zh-Hans",
 				"zh-Hant",
-				fa,
-				ja,
-				de,
-				fr,
-				ar,
-				es,
-				ru,
-				it,
-				tr,
-				vi,
-				ko,
-				pl,
 			);
 			mainGroup = CD2660FB2CA01CAE00EB186F;
 			minimizedProjectReferenceProxies = 1;
