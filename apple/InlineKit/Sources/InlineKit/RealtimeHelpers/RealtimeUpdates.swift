@@ -13,6 +13,7 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
 
   public func apply(update: InlineProtocol.Update, db: Database) {
     log.trace("apply realtime update")
+    log.debug("Received update type: \(update.update)")
 
     do {
       switch update.update {
@@ -51,6 +52,14 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
 
         case let .joinSpace(joinSpace):
           try joinSpace.apply(db)
+
+        case let .participantAdd(participantAdd):
+          log.debug("Processing participantAdd update")
+          try participantAdd.apply(db)
+
+        case let .participantDelete(participantDelete):
+          log.debug("Processing participantDelete update")
+          try participantDelete.apply(db)
 
         default:
           break
@@ -305,5 +314,51 @@ extension InlineProtocol.UpdateJoinSpace {
     try space.save(db)
     let member = Member(from: member)
     try member.save(db)
+  }
+}
+
+extension InlineProtocol.UpdateChatParticipantAdd {
+  func apply(_ db: Database) throws {
+    // todo
+    Log.shared.debug("update chat participant add \(chatID) \(participant.userID)")
+    do {
+      try ChatParticipant.save(db, from: participant, chatId: chatID)
+    } catch {
+      Log.shared.error("Failed to save chat participant", error: error)
+    }
+  }
+}
+
+extension InlineProtocol.UpdateChatParticipantDelete {
+  func apply(_ db: Database) throws {
+    print("Applying participantDelete update for chat \(chatID) and user \(userID)")
+    // todo
+    Log.shared.debug("update chat participant delete \(chatID) \(userID)")
+
+    do {
+      try ChatParticipant.filter(Column("chatId") == chatID).filter(Column("userId") == userID).deleteAll(db)
+    } catch {
+      Log.shared.error("Failed to delete chat participant", error: error)
+    }
+
+    if userID == Auth.shared.getCurrentUserId() {
+      do {
+        try Message.filter(Column("chatId") == chatID).deleteAll(db)
+      } catch {
+        Log.shared.error("Failed to delete chat", error: error)
+      }
+      
+      do {
+        try Dialog.filter(Column("peerThreadId") == chatID).deleteAll(db)
+      } catch {
+        Log.shared.error("Failed to delete dialog", error: error)
+      }
+
+      do {
+        try Chat.filter(Column("id") == chatID).deleteAll(db)
+      } catch {
+        Log.shared.error("Failed to delete chat", error: error)
+      }
+    }
   }
 }
