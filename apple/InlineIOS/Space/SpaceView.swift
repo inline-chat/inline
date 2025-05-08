@@ -49,8 +49,14 @@ struct SpaceView: View {
 
   @State var openAddMemberSheet = false
 
+  var currentUserMemberItem: FullMemberItem? {
+    fullSpaceViewModel.members.first { fullMember in
+      fullMember.userInfo.user.id == Auth.shared.getCurrentUserId()
+    }
+  }
+
   var currentUserMember: Member? {
-    fullSpaceViewModel.members.first(where: { $0.userId == Auth.shared.getCurrentUserId() })
+    currentUserMemberItem?.member
   }
 
   var isCreator: Bool {
@@ -180,7 +186,6 @@ struct SpaceView: View {
         Log.shared.error("Failed to getSpace", error: error)
       }
 
-      
       // order matters here
       // @mo: please do not change ⚠️⚠️⚠️
       do {
