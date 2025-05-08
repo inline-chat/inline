@@ -207,6 +207,8 @@ final class ChatStatusView: NSView {
     case publicChat
     case privateChat
     case composing(ApiComposeAction)
+    case online(User)
+    case offline(User)
     case empty
 
     var label: String {
@@ -215,6 +217,8 @@ final class ChatStatusView: NSView {
         case .publicChat: "public"
         case .privateChat: "private"
         case let .composing(action): action.toHumanReadable()
+        case let .online(user): getOnlineText(user: user)
+        case let .offline(user): getOfflineText(user: user)
         case .empty: ""
       }
     }
@@ -223,6 +227,26 @@ final class ChatStatusView: NSView {
       switch self {
         case .composing: .accent
         default: .secondaryLabelColor
+      }
+    }
+
+    func getOnlineText(user: User) -> String {
+      if let timeZone = user.timeZone, timeZone != TimeZone.current.identifier {
+        return TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone) ?? ""
+      }
+
+      return "online"
+    }
+
+    func getOfflineText(user: User) -> String {
+      if let timeZone = user.timeZone, timeZone != TimeZone.current.identifier {
+        return TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone) ?? ""
+      }
+
+      if let lastOnline = user.lastOnline {
+        return ChatStatusView.getLastOnlineText(date: lastOnline)
+      } else {
+        return "offline"
       }
     }
   }
@@ -250,6 +274,12 @@ final class ChatStatusView: NSView {
     // Check compose action
     if let action = currentComposeAction {
       return .composing(action)
+    }
+
+    if user.online == true {
+      return .online(user)
+    } else if let _ = user.lastOnline {
+      return .offline(user)
     }
 
     return .empty
@@ -285,7 +315,7 @@ final class ChatStatusView: NSView {
 
   static let formatter = RelativeDateTimeFormatter()
 
-  private func getLastOnlineText(date: Date?, _ currentTime: Date = Date()) -> String {
+  static func getLastOnlineText(date: Date?, _ currentTime: Date = Date()) -> String {
     guard let date else { return "" }
 
     let diffSeconds = currentTime.timeIntervalSince(date)
