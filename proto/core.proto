@@ -98,6 +98,8 @@ message User {
 
   // If true, the user has not completed the setup process
   optional bool pending_setup = 11;
+
+  optional string time_zone = 12;
 }
 
 message UserProfilePhoto {
