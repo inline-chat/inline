@@ -309,6 +309,64 @@ export const testUtils = {
     await db.update(schema.chats).set({ lastMsgId: msg.messageId }).where(eq(schema.chats.id, chat.id)).execute()
     return { chat, msg }
   },
+
+  // Create a private chat with optional dialog for specific users
+  async createPrivateChatWithOptionalDialog({
+    userA,
+    userB,
+    createDialogForUserA = true,
+    createDialogForUserB = false,
+  }: {
+    userA: any
+    userB: any
+    createDialogForUserA?: boolean
+    createDialogForUserB?: boolean
+  }): Promise<{ chat: any; dialogA?: any; dialogB?: any }> {
+    const chat = await db
+      .insert(schema.chats)
+      .values({
+        type: "private",
+        minUserId: Math.min(userA.id, userB.id),
+        maxUserId: Math.max(userA.id, userB.id),
+        date: new Date(),
+      })
+      .returning()
+      .then((rows) => rows[0])
+    if (!chat) throw new Error("Failed to create private chat")
+
+    const dialogs = []
+    if (createDialogForUserA) {
+      const [dialogA] = await db
+        .insert(schema.dialogs)
+        .values({
+          chatId: chat.id,
+          userId: userA.id,
+          peerUserId: userB.id,
+          date: new Date(),
+        })
+        .returning()
+      if (dialogA) dialogs.push(dialogA)
+    }
+
+    if (createDialogForUserB) {
+      const [dialogB] = await db
+        .insert(schema.dialogs)
+        .values({
+          chatId: chat.id,
+          userId: userB.id,
+          peerUserId: userA.id,
+          date: new Date(),
+        })
+        .returning()
+      if (dialogB) dialogs.push(dialogB)
+    }
+
+    return {
+      chat,
+      dialogA: dialogs.find((d) => d.userId === userA.id),
+      dialogB: dialogs.find((d) => d.userId === userB.id),
+    }
+  },
 }
 
 // Export lifecycle hooks
