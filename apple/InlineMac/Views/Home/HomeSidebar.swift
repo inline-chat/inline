@@ -376,7 +376,7 @@ struct HomeSidebar: View {
       Button {
         nav.open(.createSpace)
       } label: {
-        Label("New Space", systemImage: "plus")
+        Label("New Supergroup (Team)", systemImage: "plus")
           .font(.system(size: 14, weight: .medium))
           .foregroundStyle(Color.accent)
       }
