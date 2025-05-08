@@ -498,4 +498,61 @@ describe("getDialogs", () => {
     const chatIds = result.chats.map((c) => c.id)
     expect(chatIds).toContain(chat.id)
   })
+
+  test("should not return private threads where user is not a participant", async () => {
+    // Create a space with two users
+    const { space, users } = await testUtils.createSpaceWithMembers("Test Space", ["user1@ex.com", "user2@ex.com"])
+    const [user1, user2] = users
+
+    // Create a private thread chat
+    const { chat } = await testUtils.createThreadWithDialogAndMessage({
+      spaceId: space.id,
+      user: user1,
+      otherUsers: [user2],
+      title: "Private Thread",
+      isPublic: false,
+      messageText: "Hello private thread",
+    })
+
+    // Call getDialogs as user1 (who is a participant)
+    const result1 = await getDialogsHandler({ spaceId: space.id }, makeHandlerContext(user1.id))
+    const hasThread = result1.dialogs.some((d) => {
+      if ("threadId" in d.peerId) {
+        return d.peerId.threadId === chat.id
+      }
+      return false
+    })
+    expect(hasThread).toBe(true)
+
+    // Create a third user who is NOT a participant but IS in the space
+    const user3 = await testUtils.createUser("user3@ex.com")
+    if (!user3) throw new Error("Failed to create user3")
+
+    // Create a dialog for this user
+    await db
+      .insert(schema.dialogs)
+      .values({
+        chatId: chat.id,
+        userId: user3.id,
+        spaceId: space.id,
+      })
+      .execute()
+
+    // Add user3 to the space
+    await db
+      .insert(schema.members)
+      .values({ userId: user3.id, spaceId: space.id, role: "member" as const })
+      .execute()
+
+    // Call getDialogs as user3 (who is in the space but not a thread participant)
+    const result3 = await getDialogsHandler({ spaceId: space.id }, makeHandlerContext(user3.id))
+    const hasThread3 = result3.dialogs.some((d) => {
+      if ("threadId" in d.peerId) {
+        return d.peerId.threadId === chat.id
+      }
+      return false
+    })
+    console.log("🌴 result3", result3)
+    expect(hasThread3).toBe(false)
+  })
 })

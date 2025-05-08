@@ -166,14 +166,19 @@ export const testUtils = {
   },
 
   // Create a test chat
-  async createChat(spaceId: number, title: string = "Test Chat", type: "private" | "thread" = "thread") {
+  async createChat(
+    spaceId: number,
+    title: string = "Test Chat",
+    type: "private" | "thread" = "thread",
+    publicThread: boolean = true,
+  ) {
     const [chat] = await db
       .insert(schema.chats)
       .values({
         type,
         title,
         spaceId,
-        publicThread: type === "thread",
+        publicThread,
       })
       .returning()
     return chat
@@ -227,14 +232,9 @@ export const testUtils = {
     messageText?: string
     messageFromUser?: any | null
   }): Promise<{ chat: any; msg: any }> {
-    const chat = await testUtils.createChat(spaceId, title, "thread")
+    const chat = await testUtils.createChat(spaceId, title, "thread", isPublic)
     if (!chat) throw new Error("Failed to create chat")
-    // Set publicThread flag if needed
-    if (isPublic && !chat.publicThread) {
-      await db.update(schema.chats).set({ publicThread: true }).where(eq(schema.chats.id, chat.id)).execute()
-    } else if (!isPublic && chat.publicThread) {
-      await db.update(schema.chats).set({ publicThread: false }).where(eq(schema.chats.id, chat.id)).execute()
-    }
+
     // Add participants for private threads
     if (!isPublic) {
       await db

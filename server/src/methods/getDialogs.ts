@@ -112,6 +112,17 @@ export const handler = async (
     limit: MAX_LIMIT,
   })
   existingThreadDialogs.forEach((d) => {
+    // 🎯 IMPORTANT IMPORTANT IMPORTANT
+    // We need to check if the chat is a private thread and if the user is a participant
+    // If so, we need to add the chat to the results
+    // Otherwise, we need to skip it
+    // 🎯 IMPORTANT IMPORTANT IMPORTANT
+    // TODO: This is a hack to filter out private threads that the user is not a participant of
+    // We need to find a better way to do this
+    if (d.chat?.type === "thread" && d.chat?.publicThread === false) {
+      return
+    }
+
     dialogs.push(d)
     if (d.chat) chats.push(d.chat)
     pushMessageAndUser(messages, users, d.chat?.lastMsg, currentUserId, peerIdFromChat(d.chat, { currentUserId }))
@@ -157,9 +168,14 @@ export const handler = async (
       .leftJoin(schema.users, eq(schema.users.id, schema.messages.fromId))
       .leftJoin(schema.files, eq(schema.files.id, schema.messages.fileId))
       .where(
-        and(eq(schema.chats.spaceId, spaceId), eq(schema.chats.type, "thread"), eq(schema.chats.publicThread, false)),
+        and(
+          eq(schema.chats.spaceId, spaceId),
+          eq(schema.chats.type, "thread"),
+          eq(schema.chats.publicThread, false),
+          eq(schema.chatParticipants.userId, currentUserId),
+        ),
       )
-
+    // console.log("🌴 privateThreadChats", privateThreadChats)
     // Transform the result to match the previous structure
     const privateThreadChatsTransformed = privateThreadChats.map((row) => ({
       ...row.chat,
@@ -351,6 +367,8 @@ export const handler = async (
     messages: messages,
     users: users.map(encodeFullUserInfo),
   }
+
+  // console.log("🌴 finalResult", finalResult)
 
   return finalResult
 }
