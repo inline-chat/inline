@@ -559,6 +559,15 @@ public struct User: Sendable {
   /// Clears the value of `pendingSetup`. Subsequent reads from it will return its default value.
   public mutating func clearPendingSetup() {self._pendingSetup = nil}
 
+  public var timeZone: String {
+    get {return _timeZone ?? String()}
+    set {_timeZone = newValue}
+  }
+  /// Returns true if `timeZone` has been explicitly set.
+  public var hasTimeZone: Bool {return self._timeZone != nil}
+  /// Clears the value of `timeZone`. Subsequent reads from it will return its default value.
+  public mutating func clearTimeZone() {self._timeZone = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -572,6 +581,7 @@ public struct User: Sendable {
   fileprivate var _status: UserStatus? = nil
   fileprivate var _profilePhoto: UserProfilePhoto? = nil
   fileprivate var _pendingSetup: Bool? = nil
+  fileprivate var _timeZone: String? = nil
 }
 
 public struct UserProfilePhoto: @unchecked Sendable {
@@ -4314,6 +4324,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     8: .same(proto: "status"),
     9: .standard(proto: "profile_photo"),
     11: .standard(proto: "pending_setup"),
+    12: .standard(proto: "time_zone"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4332,6 +4343,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       case 8: try { try decoder.decodeSingularMessageField(value: &self._status) }()
       case 9: try { try decoder.decodeSingularMessageField(value: &self._profilePhoto) }()
       case 11: try { try decoder.decodeSingularBoolField(value: &self._pendingSetup) }()
+      case 12: try { try decoder.decodeSingularStringField(value: &self._timeZone) }()
       default: break
       }
     }
@@ -4372,6 +4384,9 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     try { if let v = self._pendingSetup {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 11)
     } }()
+    try { if let v = self._timeZone {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 12)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -4386,6 +4401,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     if lhs._status != rhs._status {return false}
     if lhs._profilePhoto != rhs._profilePhoto {return false}
     if lhs._pendingSetup != rhs._pendingSetup {return false}
+    if lhs._timeZone != rhs._timeZone {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

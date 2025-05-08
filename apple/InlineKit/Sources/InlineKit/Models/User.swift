@@ -43,6 +43,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var pendingSetup: Bool?
   public var online: Bool?
   public var lastOnline: Date?
+  public var timeZone: String?
 
   public var profileFileId: String?
 
@@ -206,6 +207,7 @@ public extension ApiUser {
       user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
       user.email = user.email ?? existing.email
       user.pendingSetup = user.pendingSetup ?? existing.pendingSetup
+      user.timeZone = user.timeZone ?? existing.timeZone
       try user.save(db)
       // ... anything else?
     } else {
@@ -228,6 +230,7 @@ public extension User {
     firstName = user.hasFirstName ? user.firstName : nil
     lastName = user.hasLastName ? user.lastName : nil
     username = user.hasUsername ? user.username : nil
+    timeZone = user.hasTimeZone ? user.timeZone : nil
     date = Date() // unused field
     // don't preserve pendingSetup
 
@@ -259,6 +262,7 @@ public extension User {
       user.date = existing.date
       user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
       user.email = user.email ?? existing.email
+      user.timeZone = user.timeZone ?? existing.timeZone
       // don't preserve pendingSetup
       try user.save(db)
     } else {
