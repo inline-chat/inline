@@ -5,6 +5,10 @@ import SwiftUI
 class Navigation: ObservableObject, @unchecked Sendable {
   static let shared = Navigation()
 
+  // MARK: - Notification Names
+
+  static let chatDeletedNotification = Notification.Name("chatDeletedNotification")
+
   // MARK: - Destinations
 
   nonisolated static let sheetKey = "persistedActiveSheet"

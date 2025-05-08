@@ -186,6 +186,16 @@ struct ChatView: View {
           break
       }
     }
+    .onReceive(
+      NotificationCenter.default
+        .publisher(for: Notification.Name("chatDeletedNotification"))
+    ) { notification in
+      if let chatId = notification.userInfo?["chatId"] as? Int64,
+         chatId == fullChatViewModel.chat?.id ?? 0
+      {
+        nav.pop()
+      }
+    }
     .environmentObject(fullChatViewModel)
   }
 
