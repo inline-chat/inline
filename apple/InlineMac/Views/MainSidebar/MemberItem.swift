@@ -108,12 +108,14 @@ struct MemberItem: View {
   @ViewBuilder
   var subtitleView: some View {
     if !subtitleText.isEmpty {
-      Text(subtitleText)
+      let text = isHovered ? alternativeSubtitleText ?? subtitleText : subtitleText
+      Text(text)
         .font(Self.subtitleFont)
         .foregroundColor(Self.subtitleColor)
         .lineLimit(1)
         .truncationMode(.tail)
         .fixedSize(horizontal: false, vertical: true)
+        .animation(.fastFeedback, value: text)
     }
   }
 
@@ -181,6 +183,14 @@ struct MemberItem: View {
     }
   }
 
+  var alternativeSubtitleText: String? {
+    if let timeZone = user.timeZone {
+      TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone) ?? nil
+    } else {
+      nil
+    }
+  }
+
   var selectedBackgroundColor: Color {
     // White style
     // colorScheme == .dark ? Color(.controlBackgroundColor) : .white.opacity(0.94)
@@ -205,7 +215,7 @@ struct MemberItem: View {
       return "just now"
     }
 
-    return "last seen \(Self.lastSeenFormatter.localizedString(for: date, relativeTo: Date()))"
+    return "\(Self.lastSeenFormatter.localizedString(for: date, relativeTo: Date()))"
   }
 
   // TODO...
