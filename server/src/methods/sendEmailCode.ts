@@ -54,7 +54,7 @@ const getLoginCode = async (
   // new codes preventing user from logging in
 
   let existingUsers = await db.select().from(users).where(eq(users.email, email)).limit(1)
-  let existingUser = Boolean(existingUsers[0])
+  let existingUser = existingUsers[0] ? existingUsers[0].pendingSetup !== true : false
   let firstName = existingUsers[0]?.firstName ?? undefined
 
   // check
