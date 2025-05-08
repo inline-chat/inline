@@ -59,6 +59,9 @@
     "Add Member" : {
 
     },
+    "Add Participant" : {
+
+    },
     "ALPHA" : {
 
     },
@@ -497,6 +500,9 @@
     "Public" : {
 
     },
+    "Remove" : {
+
+    },
     "Search by username" : {
 
     },
@@ -525,6 +531,9 @@
 
     },
     "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
+
+    },
+    "Type a username to find someone to add. eg. dena, mo" : {
 
     },
     "Type a username to find someone to chat with. eg. dena, mo" : {

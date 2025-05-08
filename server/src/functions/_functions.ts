@@ -9,6 +9,9 @@ import { getSpaceMembers } from "./space.getSpaceMembers"
 import { deleteChat } from "./messages.deleteChat"
 import { inviteToSpace } from "./space.inviteToSpace"
 import { getChatParticipants } from "./messages.getChatParticipants"
+import { removeChatParticipant } from "./messages.removeChatParticipant"
+import { addChatParticipant } from "./messages.addChatParticipant"
+
 export const Functions = {
   messages: {
     deleteMessage: deleteMessage,
@@ -20,6 +23,8 @@ export const Functions = {
     createChat: createChat,
     deleteChat: deleteChat,
     getChatParticipants: getChatParticipants,
+    addChatParticipant: addChatParticipant,
+    removeChatParticipant: removeChatParticipant,
   },
   spaces: {
     getSpaceMembers: getSpaceMembers,

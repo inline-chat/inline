@@ -15,8 +15,9 @@ import { createChat } from "@in/server/realtime/handlers/messages.createChat"
 import { getSpaceMembers } from "@in/server/realtime/handlers/space.getSpaceMembers"
 import { deleteChatHandler } from "@in/server/realtime/handlers/messages.deleteChat"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
-import { getChatParticipants } from "./messages.getChatParticipants"
-
+import { getChatParticipants } from "@in/server/realtime/handlers/messages.getChatParticipants"
+import { addChatParticipant } from "@in/server/realtime/handlers/messages.addChatParticipant"
+import { removeChatParticipant } from "@in/server/realtime/handlers/messages.removeChatParticipant"
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
   Log.shared.debug("rpc call", call.method)
@@ -121,6 +122,21 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "getChatParticipants", getChatParticipants: result }
     }
 
+    case Method.ADD_CHAT_PARTICIPANT: {
+      if (call.input.oneofKind !== "addChatParticipant") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await addChatParticipant(call.input.addChatParticipant, handlerContext)
+      return { oneofKind: "addChatParticipant", addChatParticipant: result }
+    }
+
+    case Method.REMOVE_CHAT_PARTICIPANT: {
+      if (call.input.oneofKind !== "removeChatParticipant") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await removeChatParticipant(call.input.removeChatParticipant, handlerContext)
+      return { oneofKind: "removeChatParticipant", removeChatParticipant: result }
+    }
     default:
       Log.shared.error(`Unknown method: ${call.method}`)
       throw RealtimeRpcError.BadRequest

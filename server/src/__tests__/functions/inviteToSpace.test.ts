@@ -10,7 +10,6 @@ function makeFunctionContext(userId: number) {
   }
 }
 
-process.env["DEBUG"] = "1"
 describe("inviteToSpace", () => {
   setupTestLifecycle()
 
