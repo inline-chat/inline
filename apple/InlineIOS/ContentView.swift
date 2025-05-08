@@ -49,6 +49,9 @@ struct ContentView: View {
           break
       }
     }
+    .onAppear{
+      markAsOnline()
+    }
   }
 }
 
