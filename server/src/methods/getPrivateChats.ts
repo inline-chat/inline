@@ -44,31 +44,31 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
   // -------------------------------------------------------------------------------------------------------------------
   // Recover from issues with self chat
 
-  // NOTE(@mo): Commented out to disable auto creation of saved messages
-  // if (!selfChat) {
-  //   const [newSelfChat] = await db
-  //     .insert(chats)
-  //     .values({
-  //       type: "private",
-  //       date: new Date(),
-  //       minUserId: currentUserId,
-  //       maxUserId: currentUserId,
-  //       title: "Saved Messages",
-  //     })
-  //     .returning()
-  //   selfChat = newSelfChat
-  // }
-  // if (!selfChatDialog && selfChat) {
-  //   const [newSelfChatDialog] = await db
-  //     .insert(dialogs)
-  //     .values({
-  //       chatId: selfChat.id,
-  //       peerUserId: currentUserId,
-  //       userId: currentUserId,
-  //     })
-  //     .returning()
-  //   selfChatDialog = newSelfChatDialog
-  // }
+  // NOTE(@mo): have to re-enable this so members don't error on missing chat or dialog client side
+  if (!selfChat) {
+    const [newSelfChat] = await db
+      .insert(chats)
+      .values({
+        type: "private",
+        date: new Date(),
+        minUserId: currentUserId,
+        maxUserId: currentUserId,
+        title: "Saved Messages",
+      })
+      .returning()
+    selfChat = newSelfChat
+  }
+  if (!selfChatDialog && selfChat) {
+    const [newSelfChatDialog] = await db
+      .insert(dialogs)
+      .values({
+        chatId: selfChat.id,
+        peerUserId: currentUserId,
+        userId: currentUserId,
+      })
+      .returning()
+    selfChatDialog = newSelfChatDialog
+  }
 
   // -------------------------------------------------------------------------------------------------------------------
   // Get all private chats
