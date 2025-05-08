@@ -457,10 +457,14 @@ public class DataManager: ObservableObject {
       let space = Space(from: result.space)
       try space.save(db, onConflict: .replace)
 
-      for member in result.members {
-        let member = Member(from: member)
-        try member.save(db, onConflict: .ignore)
-      }
+//      do {
+//      for member in result.members {
+//        let member = Member(from: member)
+//        try member.save(db, onConflict: .ignore)
+//      }
+      //  } catch {
+      // // todo handle error
+    //}
 
 //      for dialog in result.dialogs {
 //        let dialog = Dialog(from: dialog)
