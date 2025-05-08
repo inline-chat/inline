@@ -435,4 +435,67 @@ describe("getDialogs", () => {
     expect(userEmails).toContain("userA4@example.com")
     expect(userEmails).toContain("userB4@example.com")
   })
+
+  test("creates dialog for public thread when new user joins space", async () => {
+    // Create initial space with one user and a public thread
+    const {
+      space,
+      users: [initialUser],
+    } = await testUtils.createSpaceWithMembers("ThreadSpace", ["initial@example.com"])
+
+    // Create a public thread in the space
+    const chat = await testUtils.createChat(space.id, "Public Thread", "thread")
+    if (!chat) throw new Error("Failed to create chat")
+
+    // Add a message to the thread from the initial user
+    const msg = await db
+      .insert(schema.messages)
+      .values({
+        messageId: 1,
+        chatId: chat.id,
+        fromId: initialUser.id,
+        text: "Initial message",
+      })
+      .returning()
+      .then((rows) => rows[0])
+
+    if (!msg) throw new Error("Failed to create message")
+    await db.update(schema.chats).set({ lastMsgId: msg.messageId }).where(eq(schema.chats.id, chat.id)).execute()
+
+    // Create and add new user to the space
+    const newUser = await testUtils.createUser("newuser@example.com")
+    if (!newUser) throw new Error("Failed to create new user")
+
+    await db
+      .insert(schema.members)
+      .values({ userId: newUser.id, spaceId: space.id, role: "member" as const })
+      .execute()
+
+    // Verify no dialog exists for new user
+    const dialogsBefore = await db.query.dialogs.findMany({
+      where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, newUser.id)),
+    })
+    expect(dialogsBefore.length).toBe(0)
+
+    // Call getDialogs for new user
+    const input = { spaceId: space.id }
+    const context = makeHandlerContext(newUser.id)
+    const result = await getDialogsHandler(input, context)
+
+    // Verify dialog was created
+    const dialogsAfter = await db.query.dialogs.findMany({
+      where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, newUser.id)),
+    })
+    expect(dialogsAfter.length).toBe(1)
+
+    // Verify the dialog is included in the result
+    const dialogThreadIds = result.dialogs.map((d) =>
+      d.peerId && "threadId" in d.peerId ? d.peerId.threadId : undefined,
+    )
+    expect(dialogThreadIds).toContain(chat.id)
+
+    // Verify the chat is included in the result
+    const chatIds = result.chats.map((c) => c.id)
+    expect(chatIds).toContain(chat.id)
+  })
 })
