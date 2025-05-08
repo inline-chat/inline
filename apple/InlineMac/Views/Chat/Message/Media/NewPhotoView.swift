@@ -1,4 +1,3 @@
-
 import AppKit
 import InlineKit
 import Logger
@@ -571,7 +570,25 @@ extension NewPhotoView {
     guard let image = imageView.image else { return }
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
+
+    // Add the image with a custom type that will be recognized by our paste handler
+    pasteboard.declareTypes([
+      .tiff,
+      .png,
+      NSPasteboard.PasteboardType("public.image"),
+      NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("image/png"),
+      NSPasteboard.PasteboardType("image/jpeg"),
+      .fileURL,
+    ], owner: nil)
+
+    // Write the image data
     pasteboard.writeObjects([image])
+
+    // If we have a local URL, add it too
+    if let url = imageLocalUrl() {
+      pasteboard.writeObjects([url as NSURL])
+    }
   }
 
   @objc func saveImage() {
