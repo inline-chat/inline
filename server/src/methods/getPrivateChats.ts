@@ -93,6 +93,35 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
     .leftJoin(messages, and(eq(chats.lastMsgId, messages.messageId), eq(messages.chatId, chats.id)))
     .leftJoin(files, eq(files.id, messages.fileId))
 
+  // Create missing dialogs for chats that don't have them
+  const chatsWithoutDialogs = result.filter((r) => !r.dialog).map((r) => r.chat)
+  if (chatsWithoutDialogs.length > 0) {
+    const newDialogs = await db.transaction(async (tx) => {
+      const created: (typeof dialogs.$inferSelect)[] = []
+      for (const chat of chatsWithoutDialogs) {
+        const [dialog] = await tx
+          .insert(dialogs)
+          .values({
+            chatId: chat.id,
+            userId: currentUserId,
+            peerUserId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId,
+            date: new Date(),
+          })
+          .returning()
+        if (dialog) created.push(dialog)
+      }
+      return created
+    })
+
+    // Add new dialogs to the result
+    newDialogs.forEach((dialog) => {
+      const chat = result.find((r) => r.chat.id === dialog.chatId)
+      if (chat) {
+        chat.dialog = dialog
+      }
+    })
+  }
+
   const peerUsers = await db.query.users.findMany({
     where: inArray(
       users.id,
