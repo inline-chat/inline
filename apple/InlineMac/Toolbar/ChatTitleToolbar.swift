@@ -235,7 +235,9 @@ final class ChatStatusView: NSView {
         return TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone) ?? ""
       }
 
-      return "online"
+      // For now disabled
+      return ""
+      // return "online"
     }
 
     func getOfflineText(user: User) -> String {
@@ -243,11 +245,13 @@ final class ChatStatusView: NSView {
         return TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone) ?? ""
       }
 
-      if let lastOnline = user.lastOnline {
-        return ChatStatusView.getLastOnlineText(date: lastOnline)
-      } else {
-        return "offline"
-      }
+      // For now disabled
+      return ""
+      // if let lastOnline = user.lastOnline {
+      //   return ChatStatusView.getLastOnlineText(date: lastOnline)
+      // } else {
+      //   return "offline"
+      // }
     }
   }
 
