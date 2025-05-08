@@ -179,28 +179,74 @@ struct SpaceView: View {
       } catch {
         Log.shared.error("Failed to getSpace", error: error)
       }
+
       
+      // order matters here
+      // @mo: please do not change ⚠️⚠️⚠️
       do {
         try await data.getDialogs(spaceId: spaceId)
       } catch {
         Log.shared.error("Failed to getDialogs", error: error)
       }
-      
+
+      do {
+        try await realtime
+          .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+            $0.spaceID = spaceId
+          }))
+      } catch {
+        Log.shared.error("Failed to get space members", error: error)
+      }
     }
     .onAppear {
-      Task {
-        try await data.getSpace(spaceId: spaceId)
-      }
-
+      // order matters here
+      // @mo: please do not change ⚠️⚠️⚠️
       Task.detached {
         do {
-          try await realtime
-            .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-              $0.spaceID = spaceId
-            }))
+          try await data.getSpace(spaceId: spaceId)
         } catch {
-          Log.shared.error("Failed to get space members", error: error)
+          Log.shared.error("Failed to getSpace", error: error)
         }
+
+//        Task.detached {
+//          do {
+//            try await realtime
+//              .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+//                $0.spaceID = spaceId
+//              }))
+//          } catch {
+//            Log.shared.error("Failed to get space members", error: error)
+//          }
+//        }
+
+//        Task.detached {
+//          do {
+//            try await data.getDialogs(spaceId: spaceId)
+//          } catch {
+//            Log.shared.error("Failed to getDialogs", error: error)
+//          }
+//        }
+
+//      Task {
+//        try await data.getSpace(spaceId: spaceId)
+//      }
+//
+//      Task.detached {
+//        do {
+//          try await realtime
+//            .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+//              $0.spaceID = spaceId
+//            }))
+//        } catch {
+//          Log.shared.error("Failed to get space members", error: error)
+//        }
+//
+//        // TODO: reduce over fetching
+//        do {
+//          try await data.getDialogs(spaceId: spaceId)
+//        } catch {
+//          Log.shared.error("Failed to getDialogs", error: error)
+//        }
       }
     }
   }
