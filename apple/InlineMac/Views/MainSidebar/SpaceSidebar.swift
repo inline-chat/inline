@@ -81,9 +81,29 @@ struct SpaceSidebar: View {
     ))
   }
 
-  var body: some View {
-    List {
-      if tab == .archive || tab == .chats {
+  @ViewBuilder
+  func memberItem(_ item: FullMemberItem) -> some View {
+    let peerId: Peer = .user(id: item.userInfo.user.id)
+
+    MemberItem(
+      member: item,
+      selected: nav.currentRoute == .chat(peer: peerId),
+      onPress: {
+        nav.open(.chat(peer: peerId))
+      },
+    )
+    .listRowInsets(.init(
+      top: 0,
+      leading: 0,
+      bottom: 0,
+      trailing: 0
+    ))
+  }
+
+  @ViewBuilder
+  var list: some View {
+    if tab == .archive || tab == .chats {
+      List {
         ForEach(items, id: \ .peerId) { item in
           if let user = item.user {
             userItem(user, item)
@@ -93,75 +113,79 @@ struct SpaceSidebar: View {
             EmptyView()
           }
         }
-      } else if tab == .members {
-        ForEach(fullSpace.memberChats) { item in
-          if let user = item.user {
-            userItem(user, item)
-          } else {
-            EmptyView()
+      }
+    } else if tab == .members {
+      List {
+        Section("Members") {
+          ForEach(fullSpace.members) { item in
+            memberItem(item)
           }
         }
       }
     }
-    .animation(.smoothSnappy, value: items)
-    .listRowBackground(Color.clear)
-    .listStyle(.sidebar)
-    .safeAreaInset(
-      edge: .bottom,
-      content: {
-        tabs
-          .padding(.top, -8)
-      }
-    )
+  }
 
-    .safeAreaInset(
-      edge: .top,
-      content: {
-        VStack(alignment: .leading, spacing: 0) {
-          topArea
-          SidebarSearchBar(text: $searchQuery)
+  var body: some View {
+    list
+      .animation(.smoothSnappy, value: items)
+      .listRowBackground(Color.clear)
+      .listStyle(.sidebar)
+      .safeAreaInset(
+        edge: .bottom,
+        content: {
+          tabs
+            .padding(.top, -8)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(
-          .horizontal,
-          Theme.sidebarItemOuterSpacing
-        )
-        .padding(.bottom, 8)
-        .edgesIgnoringSafeArea(.bottom)
-      }
-    )
-    .task {
-      Task.detached {
-        do {
-          // this one gets members
-          try await data.getSpace(spaceId: spaceId)
-        } catch {
-          Log.shared.error("failed to get space", error: error)
-        }
+      )
 
-        Task.detached {
-          try await realtime
-            .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-              $0.spaceID = spaceId
-            }))
+      .safeAreaInset(
+        edge: .top,
+        content: {
+          VStack(alignment: .leading, spacing: 0) {
+            topArea
+            SidebarSearchBar(text: $searchQuery)
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(
+            .horizontal,
+            Theme.sidebarItemOuterSpacing
+          )
+          .padding(.bottom, 8)
+          .edgesIgnoringSafeArea(.bottom)
         }
+      )
+      .task {
         Task.detached {
           do {
-            try await data.getDialogs(spaceId: spaceId)
+            // this one gets members
+            try await data.getSpace(spaceId: spaceId)
           } catch {
-            Log.shared.error("failed to get dialogs for space", error: error)
+            Log.shared.error("failed to get space", error: error)
+          }
+
+          Task.detached {
+            try await realtime
+              .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+                $0.spaceID = spaceId
+              }))
+          }
+          Task.detached {
+            do {
+              try await data.getDialogs(spaceId: spaceId)
+            } catch {
+              Log.shared.error("failed to get dialogs for space", error: error)
+            }
           }
         }
       }
-    }
-    .onAppear {
-      DispatchQueue.main.async {
-        subscribeKeyMonitor()
+      .onAppear {
+        DispatchQueue.main.async {
+          subscribeKeyMonitor()
+        }
       }
-    }
-    .onDisappear {
-      unsubscribeKeyMonitor()
-    }
+      .onDisappear {
+        unsubscribeKeyMonitor()
+      }
   }
 
   // MARK: - Views
