@@ -42,13 +42,24 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
   }
 }
 
+public struct FullMemberItem: Codable, FetchableRecord, PersistableRecord, Sendable, Hashable,
+  Identifiable
+{
+  public var member: Member
+  public var userInfo: UserInfo
+
+  public var id: Int64 {
+    member.id
+  }
+}
+
 // Used for space home sidebar
 public final class FullSpaceViewModel: ObservableObject {
   /// The spaces to display.
   @Published public private(set) var space: Space?
   @Published public private(set) var memberChats: [SpaceChatItem] = []
   @Published public private(set) var chats: [SpaceChatItem] = []
-  @Published public private(set) var members: [Member] = []
+  @Published public private(set) var members: [FullMemberItem] = []
 
   public var filteredMemberChats: [SpaceChatItem] {
     memberChats
@@ -124,6 +135,7 @@ public final class FullSpaceViewModel: ObservableObject {
       ValueObservation
         .tracking { db in
           try Member
+            .fullMemberQuery()
             .filter(Column("spaceId") == spaceId)
             .fetchAll(db)
         }

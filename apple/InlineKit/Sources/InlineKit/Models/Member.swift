@@ -116,4 +116,17 @@ public extension Member {
     .including(optional: Member.dialog)
     .asRequest(of: SpaceChatItem.self)
   }
+
+  // use for array fetches
+  static func fullMemberQuery() -> QueryInterfaceRequest<FullMemberItem> {
+    // user info
+    including(
+      optional: Member.user.forKey("userInfo")
+        .including(
+          all: User.photos
+            .forKey("profilePhoto")
+        )
+    )
+    .asRequest(of: FullMemberItem.self)
+  }
 }

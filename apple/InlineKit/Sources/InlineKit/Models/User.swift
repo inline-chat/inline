@@ -125,7 +125,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var displayName: String {
     firstName != nil ? fullName : (username ?? email ?? phoneNumber ?? "User")
   }
-  
+
   public var shortDisplayName: String {
     firstName != nil ? firstName! : (username ?? email ?? phoneNumber ?? "User")
   }
@@ -237,7 +237,10 @@ public extension User {
 
       if user.hasStatus {
         online = user.status.online == .online
-        lastOnline = Date(timeIntervalSince1970: Double(user.status.lastOnline.date))
+        lastOnline = user.status.hasLastOnline ? Date(
+          timeIntervalSince1970: Double(user.status.lastOnline.date)
+        )
+          : nil
       }
     }
   }
