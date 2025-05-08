@@ -25,10 +25,18 @@ describe("getPrivateChats", () => {
     const result = await handler({}, makeTestContext(user.id))
 
     // Verify empty results
-    expect(result.chats).toEqual([])
-    expect(result.dialogs).toEqual([])
-    expect(result.messages).toEqual([])
-    expect(result.peerUsers).toEqual([])
+    // expect(result.chats).toEqual([])
+    // expect(result.dialogs).toEqual([])
+    // expect(result.messages).toEqual([])
+    // expect(result.peerUsers).toEqual([])
+
+    // with saved message
+    expect(result.chats.length).toEqual(1)
+    // @ts-ignore
+    expect(result.chats[0]?.peer.userId).toEqual(user.id)
+    expect(result.dialogs.length).toEqual(1)
+    expect(result.messages.length).toEqual(0)
+    expect(result.peerUsers.length).toEqual(1)
   })
 
   test("creates missing dialog for private chat when user is a participant", async () => {
@@ -173,7 +181,9 @@ describe("getPrivateChats", () => {
     // Chat should still be returned
     expect(result.chats.some((c) => c.id === chat.id)).toBe(true)
     // Dialog should still exist
-    expect(result.dialogs.length).toBe(1)
+    //expect(result.dialogs.length).toBe(1)
+    // with saved message
+    expect(result.dialogs.length).toBe(2)
     // Peer user should still be in the result even though they are marked as deleted
     expect(result.peerUsers.some((u) => u.id === userB.id)).toBe(true)
   })
