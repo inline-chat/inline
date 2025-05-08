@@ -93,7 +93,7 @@ public final class Log: @unchecked Sendable {
       level: level.osLogType,
       "\(level.rawValue, privacy: .public) |  \(scope_, privacy: .public) | \(logMessage, privacy: .public)"
     )
-    //#endif
+    // #endif
 
     let level_ = level
 
@@ -105,14 +105,20 @@ public final class Log: @unchecked Sendable {
             error,
             message: message,
             scope: scope_,
-            level: level_
+            level: level_,
+            file: file,
+            function: function,
+            line: line
           )
         } else {
           await SentryReporter.shared.reportMessage(
             message,
             scope: scope_,
             level: level_,
-            error: error
+            error: error,
+            file: file,
+            function: function,
+            line: line
           )
         }
       }
@@ -177,18 +183,40 @@ extension Log: Logging {
 private actor SentryReporter {
   static let shared = SentryReporter()
 
-  func reportError(_ error: Error, message: String, scope: String, level: LogLevel) {
+  func reportError(
+    _ error: Error,
+    message: String,
+    scope: String,
+    level: LogLevel,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
+  ) {
     SentrySDK.capture(error: error) { sentryScope in
       sentryScope.setLevel(level.sentryLevel)
       sentryScope.setTag(value: scope, key: "scope")
       sentryScope.setExtra(value: message, key: "message")
+      sentryScope.setExtra(value: file, key: "file")
+      sentryScope.setExtra(value: function, key: "function")
+      sentryScope.setExtra(value: line, key: "line")
     }
   }
 
-  func reportMessage(_ message: String, scope: String, level: LogLevel, error: Error?) {
+  func reportMessage(
+    _ message: String,
+    scope: String,
+    level: LogLevel,
+    error: Error?,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
+  ) {
     SentrySDK.capture(message: message) { sentryScope in
       sentryScope.setLevel(level.sentryLevel)
       sentryScope.setTag(value: scope, key: "scope")
+      sentryScope.setExtra(value: file, key: "file")
+      sentryScope.setExtra(value: function, key: "function")
+      sentryScope.setExtra(value: line, key: "line")
       if let error {
         sentryScope.setExtra(value: error.localizedDescription, key: "error")
       }
