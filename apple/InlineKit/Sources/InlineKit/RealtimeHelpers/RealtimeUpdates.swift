@@ -54,11 +54,9 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
           try joinSpace.apply(db)
 
         case let .participantAdd(participantAdd):
-          log.debug("Processing participantAdd update")
           try participantAdd.apply(db)
 
         case let .participantDelete(participantDelete):
-          log.debug("Processing participantDelete update")
           try participantDelete.apply(db)
 
         default:
@@ -319,20 +317,14 @@ extension InlineProtocol.UpdateJoinSpace {
 
 extension InlineProtocol.UpdateChatParticipantAdd {
   func apply(_ db: Database) throws {
-    // todo
     Log.shared.debug("update chat participant add \(chatID) \(participant.userID)")
-    do {
-      try ChatParticipant.save(db, from: participant, chatId: chatID)
-    } catch {
-      Log.shared.error("Failed to save chat participant", error: error)
-    }
+
+    ChatParticipant.save(db, from: participant, chatId: chatID)
   }
 }
 
 extension InlineProtocol.UpdateChatParticipantDelete {
   func apply(_ db: Database) throws {
-    print("Applying participantDelete update for chat \(chatID) and user \(userID)")
-    // todo
     Log.shared.debug("update chat participant delete \(chatID) \(userID)")
 
     do {
@@ -347,7 +339,7 @@ extension InlineProtocol.UpdateChatParticipantDelete {
       } catch {
         Log.shared.error("Failed to delete chat", error: error)
       }
-      
+
       do {
         try Dialog.filter(Column("peerThreadId") == chatID).deleteAll(db)
       } catch {
@@ -358,6 +350,15 @@ extension InlineProtocol.UpdateChatParticipantDelete {
         try Chat.filter(Column("id") == chatID).deleteAll(db)
       } catch {
         Log.shared.error("Failed to delete chat", error: error)
+      }
+
+      // Post notification to pop chat route
+      Task.detached {
+        NotificationCenter.default.post(
+          name: Notification.Name("chatDeletedNotification"),
+          object: nil,
+          userInfo: ["chatId": chatID]
+        )
       }
     }
   }
