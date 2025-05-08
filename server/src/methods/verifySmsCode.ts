@@ -9,7 +9,7 @@ import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
 import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
-import { ipinfo } from "@in/server/libs/ipinfo"
+import { ipinfo, type IPInfoResponse } from "@in/server/libs/ipinfo"
 import { generateToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import parsePhoneNumber from "libphonenumber-js"
@@ -63,7 +63,9 @@ export const handler = async (
     // const phoneNumber = response.to
 
     // make session
-    let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
+    //    let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
+    // Note(@mo): diable  for now it's so slow and adds false negatives
+    let ipInfo = undefined as IPInfoResponse | undefined
     let ip = requestIp ?? undefined
     let country = ipInfo?.country ?? undefined
     let region = ipInfo?.region ?? undefined

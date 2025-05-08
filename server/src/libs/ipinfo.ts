@@ -1,7 +1,7 @@
 import { IPINFO_TOKEN } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
 
-interface IPInfoResponse {
+export interface IPInfoResponse {
   ip: string
   hostname: string
   city: string
