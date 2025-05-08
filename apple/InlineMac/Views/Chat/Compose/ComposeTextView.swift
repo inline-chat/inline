@@ -1,4 +1,5 @@
 import AppKit
+import Logger
 import UniformTypeIdentifiers
 
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
@@ -45,9 +46,12 @@ class ComposeNSTextView: NSTextView {
     // 2. Detailed analysis of image types
     print("🖼 IMAGE ANALYSIS:")
     let imageTypes: [NSPasteboard.PasteboardType] = [
-      .tiff, .png,
-      NSPasteboard.PasteboardType("public.jpeg"),
+      .tiff,
+      .png,
       NSPasteboard.PasteboardType("public.image"),
+      NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("image/png"),
+      NSPasteboard.PasteboardType("image/jpeg"),
     ]
 
     for type in imageTypes {
@@ -129,20 +133,55 @@ class ComposeNSTextView: NSTextView {
   private func handleImageInput(from pasteboard: NSPasteboard) -> Bool {
     // Log pasteboard types for debugging
     logPasteboardTypes(pasteboard)
+    Log.shared.debug("Attempting to handle image input from pasteboard")
 
-    // First check for files that are images
+    // Handle direct image data
+    let imageTypes: [NSPasteboard.PasteboardType] = [
+      .tiff,
+      .png,
+      NSPasteboard.PasteboardType("public.image"),
+      NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("image/png"),
+      NSPasteboard.PasteboardType("image/jpeg"),
+    ]
+
+    if let bestType = pasteboard.availableType(from: imageTypes),
+       let data = pasteboard.data(forType: bestType),
+       let image = NSImage(data: data)
+    {
+      Log.shared.debug("Found direct image data with type: \(bestType.rawValue)")
+      notifyDelegateAboutImage(image)
+      return true
+    }
+
+    // Check for files that are images
     if let files = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
       var handled = false
 
       for file in files {
         let fileType = file.pathExtension.lowercased()
         // Check if the file is an image
-        if ["png", "jpg", "jpeg", "gif", "heic"].contains(fileType) {
+        // if ["png", "jpg", "jpeg", "gif", "heic"].contains(fileType) {
+        let fileType2 = UTType(filenameExtension: file.pathExtension)
+        if let fileType2, fileType2.conforms(to: .image) {
+          let _ = file.startAccessingSecurityScopedResource()
+  
           if let image = NSImage(contentsOf: file) {
+            Log.shared.debug("Found image file: \(file.path)")
             // Notify delegate about image paste
             notifyDelegateAboutImage(image)
             handled = true
+            file.stopAccessingSecurityScopedResource()
             continue
+          } else {
+            if let image = NSImage(pasteboard: .general) {
+              Log.shared.debug("Found image from pasteboard: \(file.path)")
+              notifyDelegateAboutImage(image)
+              handled = true
+              continue
+            }
+
+            Log.shared.debug("Failed to create image from file: \(file.path)")
           }
         }
 
@@ -171,28 +210,12 @@ class ComposeNSTextView: NSTextView {
       }
     }
 
-    // 2. Handle direct image data
-    let imageTypes: [NSPasteboard.PasteboardType] = [
-      .tiff,
-      .png,
-      NSPasteboard.PasteboardType("public.image"),
-      NSPasteboard.PasteboardType("public.jpeg"),
-      NSPasteboard.PasteboardType("image/png"),
-      NSPasteboard.PasteboardType("image/jpeg"),
-    ]
-
-    if let bestType = pasteboard.availableType(from: imageTypes),
-       let data = pasteboard.data(forType: bestType),
-       let image = NSImage(data: data)
-    {
-      notifyDelegateAboutImage(image)
-      return true
-    }
-
+    Log.shared.debug("No image data found in pasteboard")
     return false
   }
 
   private func notifyDelegateAboutImage(_ image: NSImage) {
+    Log.shared.debug("Notifying delegate about image paste")
     (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveImage: image)
   }
 
@@ -207,7 +230,12 @@ class ComposeNSTextView: NSTextView {
   // MARK: - Paste Handling
 
   override func paste(_ sender: Any?) {
-    guard !handleImageInput(from: .general) else { return }
+    Log.shared.debug("Paste event received in ComposeNSTextView")
+    guard !handleImageInput(from: .general) else {
+      Log.shared.debug("Image paste handled by custom handler")
+      return
+    }
+    Log.shared.debug("Falling back to default paste handler")
     super.paste(sender)
   }
 
