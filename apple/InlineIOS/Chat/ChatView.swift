@@ -41,17 +41,6 @@ struct ChatView: View {
   ).autoconnect()
 
   static let formatter = RelativeDateTimeFormatter()
-  func getLastOnlineText(date: Date?) -> String {
-    guard let date else { return "" }
-
-    let diffSeconds = Date().timeIntervalSince(date)
-    if diffSeconds < 60 {
-      return "last seen just now"
-    }
-
-    Self.formatter.dateTimeStyle = .named
-    return "last seen \(Self.formatter.localizedString(for: date, relativeTo: Date()))"
-  }
 
   var isPrivateChat: Bool {
     fullChatViewModel.peer.isPrivate
@@ -66,12 +55,6 @@ struct ChatView: View {
       getStatusTextForChatHeader(realtime.apiState)
     } else if let composeAction = currentComposeAction() {
       composeAction.toHumanReadableForIOS()
-    } else if !isCurrentUser, isPrivateChat, let user = fullChatViewModel.peerUserInfo?.user {
-      if user.online == true {
-        "online"
-      } else {
-        getLastOnlineText(date: user.lastOnline)
-      }
     } else {
       ""
     }
