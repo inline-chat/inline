@@ -131,12 +131,12 @@ public struct TransactionSendMessage: Transaction {
     if let attachment = attachments.first {
       switch attachment.media {
         case let .photo(photoInfo):
-          let clearUploadState = await ComposeActions.shared.startPhotoUpload(for: peerId)
-          defer {
-            Task { @MainActor in
-              clearUploadState()
-            }
-          }
+//          let clearUploadState = await ComposeActions.shared.startPhotoUpload(for: peerId)
+//          defer {
+//            Task { @MainActor in
+//              clearUploadState()
+//            }
+//          }
 
           let localPhotoId = try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
           if let photoServerId = try await FileUploader.shared.waitForUpload(photoLocalId: localPhotoId)?.photoId {
@@ -145,12 +145,12 @@ public struct TransactionSendMessage: Transaction {
 
         case let .video(videoInfo):
           // Start video upload status
-          let clearUploadState = await ComposeActions.shared.startVideoUpload(for: peerId)
-          defer {
-            Task { @MainActor in
-              clearUploadState()
-            }
-          }
+//          let clearUploadState = await ComposeActions.shared.startVideoUpload(for: peerId)
+//          defer {
+//            Task { @MainActor in
+//              clearUploadState()
+//            }
+//          }
 
           let localVideoId = try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
           if let videoServerId = try await FileUploader.shared.waitForUpload(videoLocalId: localVideoId)?.videoId {
@@ -159,13 +159,13 @@ public struct TransactionSendMessage: Transaction {
 
         case let .document(documentInfo):
           // Start document upload status
-          let clearUploadState = await ComposeActions.shared.startDocumentUpload(for: peerId)
-          defer {
-            // Clear the upload status
-            Task { @MainActor in
-              clearUploadState()
-            }
-          }
+//          let clearUploadState = await ComposeActions.shared.startDocumentUpload(for: peerId)
+//          defer {
+//            // Clear the upload status
+//            Task { @MainActor in
+//              clearUploadState()
+//            }
+//          }
 
           let localDocumentId = try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
           if let documentServerId = try await FileUploader.shared.waitForUpload(documentLocalId: localDocumentId)?
