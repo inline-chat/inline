@@ -40,19 +40,15 @@ final class NewPhotoView: UIView {
     view.contentMode = .scaleAspectFit
     view.clipsToBounds = true
     view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
 
-  private lazy var progressView: CircularProgressView = {
-    let view = CircularProgressView(size: 40, lineWidth: 3)
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.backgroundColor = .clear
-    view.isHidden = true
+    let activityIndicator = UIActivityIndicatorView(style: .medium)
+    activityIndicator.startAnimating()
+    view.placeholderView = activityIndicator
+
     return view
   }()
 
   private var imageConstraints: [NSLayoutConstraint] = []
-  private var isLoading = false
 
   // MARK: - Initialization
 
@@ -172,12 +168,6 @@ final class NewPhotoView: UIView {
 
   private func setupViews() {
     addSubview(imageView)
-    addSubview(progressView)
-
-    NSLayoutConstraint.activate([
-      progressView.centerXAnchor.constraint(equalTo: centerXAnchor),
-      progressView.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
 
     setupImageConstraints()
     setupGestures()
@@ -252,88 +242,32 @@ final class NewPhotoView: UIView {
   }
 
   private func updateImage() {
-    // Check if image is already uploaded by checking if it has a photoId
-    let isUploaded = fullMessage.photoInfo?.photo.id != nil &&
-      fullMessage.photoInfo?.photo.photoId != nil
-
     if let url = imageLocalUrl() {
-      // Local image exists, load it
-      showLoadingState(false)
       imageView.request = ImageRequest(
         url: url,
         processors: [.resize(width: 300)],
         priority: .high
       )
     } else {
-      // Need to download or upload the image
       if let photoInfo = fullMessage.photoInfo {
-        showLoadingState(true)
-
         Task.detached(priority: .userInitiated) { [weak self] in
           guard let self else { return }
 
-          // Check if we need to upload or download
-          if !isUploaded, photoInfo.bestPhotoSize()?.cdnUrl == nil {
-            // Image needs to be uploaded
-            do {
-              // Wait for upload to complete
-              _ = try await FileUploader.shared.waitForUpload(photoLocalId: photoInfo.photo.id ?? 0)
+          await FileCache.shared.download(photo: photoInfo, for: fullMessage.message)
 
-              Task { @MainActor in
-                self.showLoadingState(false, animated: true)
-              }
-            } catch {
-              Log.shared.error("Error waiting for upload: \(error)")
-              Task { @MainActor in
-                self.showLoadingState(false)
-              }
-            }
-          } else {
-            // Image needs to be downloaded
-            await FileCache.shared.download(photo: photoInfo, for: fullMessage.message)
-
-            Task { @MainActor in
-              if let newUrl = self.imageLocalUrl() {
-                self.imageView.request = ImageRequest(
-                  url: newUrl,
-                  processors: [.resize(width: 300)],
-                  priority: .high
-                )
-                self.showLoadingState(false, animated: true)
-              }
+          Task { @MainActor in
+            if let newUrl = self.imageLocalUrl() {
+              self.imageView.request = ImageRequest(
+                url: newUrl,
+                processors: [.resize(width: 300)],
+                priority: .high
+              )
             }
           }
         }
       }
 
       imageView.url = nil
-    }
-  }
-
-  private func showLoadingState(_ loading: Bool, animated: Bool = false) {
-    guard loading != isLoading else { return }
-    isLoading = loading
-
-    if animated {
-      if !loading {
-        UIView.animate(withDuration: 0.3, animations: {
-          self.progressView.alpha = 0
-        }, completion: { _ in
-          self.progressView.isHidden = true
-          self.progressView.alpha = 1
-          self.progressView.resetProgress()
-        })
-      } else {
-        progressView.isHidden = false
-        progressView.startIndeterminateAnimation()
-      }
-    } else {
-      progressView.isHidden = !loading
-      if loading {
-        progressView.startIndeterminateAnimation()
-      } else {
-        progressView.resetProgress()
-      }
     }
   }
 
@@ -399,156 +333,5 @@ final class NewPhotoView: UIView {
 extension NewPhotoView {
   func getCurrentImage() -> UIImage? {
     imageView.imageView.image
-  }
-}
-
-// MARK: - CircularProgressView
-
-class CircularProgressView: UIView {
-  private let progressLayer = CAShapeLayer()
-  private let backgroundLayer = CAShapeLayer()
-  private var animationLayer: CAShapeLayer?
-  private let size: CGFloat
-  private let lineWidth: CGFloat
-
-  private var rotationAnimation: CABasicAnimation?
-  private var dashAnimation: CABasicAnimation?
-
-  init(size: CGFloat, lineWidth: CGFloat) {
-    self.size = size
-    self.lineWidth = lineWidth
-    super.init(frame: CGRect(x: 0, y: 0, width: size, height: size))
-    setupLayers()
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  private func setupLayers() {
-    let center = CGPoint(x: bounds.midX, y: bounds.midY)
-    let radius = (size - lineWidth) / 2
-
-    let circlePath = UIBezierPath(
-      arcCenter: center,
-      radius: radius,
-      startAngle: -(CGFloat.pi / 2),
-      endAngle: 2 * CGFloat.pi - (CGFloat.pi / 2),
-      clockwise: true
-    )
-
-    // Background track
-    backgroundLayer.path = circlePath.cgPath
-    backgroundLayer.fillColor = UIColor.clear.cgColor
-    backgroundLayer.strokeColor = UIColor.lightGray.withAlphaComponent(0.2).cgColor
-    backgroundLayer.lineWidth = lineWidth
-    backgroundLayer.strokeEnd = 1.0
-    layer.addSublayer(backgroundLayer)
-
-    // Progress layer
-    progressLayer.path = circlePath.cgPath
-    progressLayer.fillColor = UIColor.clear.cgColor
-    progressLayer.strokeColor = UIColor.white.cgColor
-    progressLayer.lineWidth = lineWidth
-    progressLayer.strokeEnd = 0
-    progressLayer.lineCap = .round
-    layer.addSublayer(progressLayer)
-  }
-
-  func setProgress(_ progress: CGFloat, animated: Bool = true) {
-    stopIndeterminateAnimation()
-
-    if animated {
-      let animation = CABasicAnimation(keyPath: "strokeEnd")
-      animation.fromValue = progressLayer.strokeEnd
-      animation.toValue = progress
-      animation.duration = 0.3
-      animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-      progressLayer.strokeEnd = progress
-      progressLayer.add(animation, forKey: "progressAnimation")
-    } else {
-      progressLayer.strokeEnd = progress
-    }
-  }
-
-  func startIndeterminateAnimation() {
-    stopIndeterminateAnimation()
-
-    // Create animation layer if needed
-    if animationLayer == nil {
-      let center = CGPoint(x: bounds.midX, y: bounds.midY)
-      let radius = (size - lineWidth) / 2
-
-      let circlePath = UIBezierPath(
-        arcCenter: center,
-        radius: radius,
-        startAngle: -(CGFloat.pi / 2),
-        endAngle: 2 * CGFloat.pi - (CGFloat.pi / 2),
-        clockwise: true
-      )
-
-      let animLayer = CAShapeLayer()
-      animLayer.path = circlePath.cgPath
-      animLayer.fillColor = UIColor.clear.cgColor
-      animLayer.strokeColor = UIColor.white.cgColor
-      animLayer.lineWidth = lineWidth
-      animLayer.lineCap = .round
-      animLayer.strokeEnd = 0.25
-      layer.addSublayer(animLayer)
-
-      animationLayer = animLayer
-    }
-
-    // Hide regular progress
-    progressLayer.isHidden = true
-
-    // Create rotation animation
-    rotationAnimation = CABasicAnimation(keyPath: "transform.rotation.z")
-    rotationAnimation?.fromValue = 0
-    rotationAnimation?.toValue = 2 * CGFloat.pi
-    rotationAnimation?.duration = 1.5
-    rotationAnimation?.repeatCount = .infinity
-    rotationAnimation?.timingFunction = CAMediaTimingFunction(name: .linear)
-
-    animationLayer?.add(rotationAnimation!, forKey: "rotationAnimation")
-  }
-
-  func stopIndeterminateAnimation() {
-    if let animLayer = animationLayer {
-      animLayer.removeAllAnimations()
-      animLayer.removeFromSuperlayer()
-      animationLayer = nil
-    }
-
-    progressLayer.isHidden = false
-  }
-
-  func resetProgress() {
-    stopIndeterminateAnimation()
-    progressLayer.strokeEnd = 0
-  }
-
-  override func layoutSubviews() {
-    super.layoutSubviews()
-
-    backgroundLayer.frame = bounds
-    progressLayer.frame = bounds
-    animationLayer?.frame = bounds
-
-    let center = CGPoint(x: bounds.midX, y: bounds.midY)
-    let radius = (bounds.width - lineWidth) / 2
-
-    let circlePath = UIBezierPath(
-      arcCenter: center,
-      radius: radius,
-      startAngle: -(CGFloat.pi / 2),
-      endAngle: 2 * CGFloat.pi - (CGFloat.pi / 2),
-      clockwise: true
-    )
-
-    backgroundLayer.path = circlePath.cgPath
-    progressLayer.path = circlePath.cgPath
-    animationLayer?.path = circlePath.cgPath
   }
 }
