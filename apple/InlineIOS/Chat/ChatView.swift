@@ -117,7 +117,6 @@ struct ChatView: View {
         }) {
           header
         }
-        .frame(maxWidth: .infinity)
         .buttonStyle(.plain)
       }
 
@@ -130,7 +129,6 @@ struct ChatView: View {
           }) {
             UserAvatar(userInfo: user)
           }
-          .frame(maxWidth: .infinity)
           .buttonStyle(.plain)
         }
       } else if isThreadChat {
@@ -147,7 +145,6 @@ struct ChatView: View {
       if preview {
         header
           .frame(height: 45)
-          .frame(maxWidth: .infinity)
           .background(.ultraThickMaterial)
       }
     }
