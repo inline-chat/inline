@@ -356,12 +356,44 @@ class ComposeAppKit: NSView {
 
   // MARK: - Actions
 
+  private func shouldSendAsFile(_ image: NSImage) -> Bool {
+    // Too narrow
+    let ratio = max(image.size.width / image.size.height, image.size.height / image.size.width)
+    if ratio > 20 {
+      return true
+    }
+
+    // Too small
+    if image.size.width < 50 || image.size.height < 50 {
+      return true
+    }
+
+    return false
+  }
+
   func addImage(_ image: NSImage, _ url: URL? = nil) {
+    // Format
+    let preferredImageFormat: ImageFormat? = if let url {
+      url.pathExtension.lowercased() == "png" ? ImageFormat.png : ImageFormat.jpeg
+    } else { nil }
+
+    // Check aspect ratio
+    if shouldSendAsFile(image) {
+      let tempDir = FileHelpers.getTrueTemporaryDirectory()
+      let result = try? image.save(
+        to: tempDir,
+        withName: url?.pathComponents.last ?? "image\(preferredImageFormat?.toExt() ?? ".jpg")",
+        format: preferredImageFormat ?? .jpeg
+      )
+      if let (_, url) = result {
+        addFile(url)
+      }
+      return
+    }
+
     do {
       // Save
-      let preferredImageFormat: ImageFormat? = if let url {
-        url.pathExtension.lowercased() == "png" ? ImageFormat.png : ImageFormat.jpeg
-      } else { nil }
+
       let photoInfo = try FileCache.savePhoto(image: image, preferredFormat: preferredImageFormat)
       let mediaItem = FileMediaItem.photo(photoInfo)
       let uniqueId = mediaItem.getItemUniqueId()
@@ -578,8 +610,8 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     return true // handled
   }
 
-  func textView(_ textView: NSTextView, didReceiveImage image: NSImage) {
-    handleImageDropOrPaste(image)
+  func textView(_ textView: NSTextView, didReceiveImage image: NSImage, url: URL? = nil) {
+    handleImageDropOrPaste(image, url)
   }
 
   func textView(_ textView: NSTextView, didReceiveFile url: URL) {
