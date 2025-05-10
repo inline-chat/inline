@@ -11,7 +11,7 @@ class ShareState: ObservableObject {
   private let log = Log.scoped("ShareState")
 
   func loadSharedData() {
-    log.info("Loading shared data...")
+    // log.info("Loading shared data...")
     let sharedContainerIdentifier = "group.chat.inline"
 
     guard let containerURL = FileManager.default
@@ -52,7 +52,7 @@ class ShareState: ObservableObject {
     let fileName = "shared_image_\(Date().timeIntervalSince1970).jpg"
     let mimeType = MIMEType.imageJpeg
 
-    log.info("Preparing to upload image: \(fileName) with size: \(imageData.count) bytes")
+    // log.info("Preparing to upload image: \(fileName) with size: \(imageData.count) bytes")
 
     isSending = true
     uploadProgress = 0
