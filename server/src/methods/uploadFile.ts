@@ -8,6 +8,9 @@ import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types
 import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
 import { uploadDocument } from "@in/server/modules/files/uploadDocument"
 import { uploadVideo } from "@in/server/modules/files/uploadVideo"
+import { Log } from "@in/server/utils/log"
+
+const log = new Log("methods/uploadFile")
 
 export const Input = Type.Object({
   type: Type.Enum(FileTypes),
@@ -41,33 +44,66 @@ export const Response = Type.Object({
 })
 
 const handler = async (input: Static<typeof Input>, context: HandlerContext): Promise<Static<typeof Response>> => {
-  let result: UploadFileResult
+  try {
+    log.info("Starting file upload request", {
+      type: input.type,
+      fileSize: input.file.size,
+      userId: context.currentUserId,
+    })
 
-  switch (input.type) {
-    case FileTypes.PHOTO:
-      result = await uploadPhoto(input.file, { userId: context.currentUserId })
-      break
-    case FileTypes.VIDEO:
-      result = await uploadVideo(
-        input.file,
-        {
-          width: input.width ?? 1280,
-          height: input.height ?? 720,
-          duration: input.duration ?? 0,
-        },
-        { userId: context.currentUserId },
-      )
-      break
-    case FileTypes.DOCUMENT:
-      result = await uploadDocument(input.file, undefined, { userId: context.currentUserId })
-      break
-  }
+    // Validate video metadata if present
+    if (input.type === FileTypes.VIDEO) {
+      if (!input.width || !input.height || !input.duration) {
+        log.error("Missing video metadata", {
+          hasWidth: !!input.width,
+          hasHeight: !!input.height,
+          hasDuration: !!input.duration,
+        })
+        throw new Error("Missing required video metadata")
+      }
+    }
 
-  return {
-    fileUniqueId: result.fileUniqueId,
-    photoId: result.photoId,
-    videoId: result.videoId,
-    documentId: result.documentId,
+    let result: UploadFileResult
+    try {
+      switch (input.type) {
+        case FileTypes.PHOTO:
+          result = await uploadPhoto(input.file, { userId: context.currentUserId })
+          break
+        case FileTypes.VIDEO:
+          result = await uploadVideo(
+            input.file,
+            {
+              width: input.width ?? 1280,
+              height: input.height ?? 720,
+              duration: input.duration ?? 0,
+            },
+            { userId: context.currentUserId },
+          )
+          break
+        case FileTypes.DOCUMENT:
+          result = await uploadDocument(input.file, undefined, { userId: context.currentUserId })
+          break
+      }
+    } catch (error) {
+      log.error("File upload failed", { error, type: input.type, userId: context.currentUserId })
+      throw error
+    }
+
+    log.info("File upload completed successfully", {
+      type: input.type,
+      fileUniqueId: result.fileUniqueId,
+      userId: context.currentUserId,
+    })
+
+    return {
+      fileUniqueId: result.fileUniqueId,
+      photoId: result.photoId,
+      videoId: result.videoId,
+      documentId: result.documentId,
+    }
+  } catch (error) {
+    log.error("File upload request failed", { error, type: input.type, userId: context.currentUserId })
+    throw error
   }
 }
 
@@ -76,18 +112,25 @@ const response = TMakeApiResponse(Response)
 export const uploadFileRoute = new Elysia({ tags: ["POST"] }).use(authenticate).post(
   "/uploadFile",
   async ({ body: input, store, server, request }) => {
-    const ip =
-      request.headers.get("x-forwarded-for") ??
-      request.headers.get("cf-connecting-ip") ??
-      request.headers.get("x-real-ip") ??
-      server?.requestIP(request)?.address
-    const context = {
-      currentUserId: store.currentUserId,
-      currentSessionId: store.currentSessionId,
-      ip,
+    try {
+      const ip =
+        request.headers.get("x-forwarded-for") ??
+        request.headers.get("cf-connecting-ip") ??
+        request.headers.get("x-real-ip") ??
+        server?.requestIP(request)?.address
+
+      const context = {
+        currentUserId: store.currentUserId,
+        currentSessionId: store.currentSessionId,
+        ip,
+      }
+
+      let result = await handler(input, context)
+      return { ok: true, result } as any
+    } catch (error) {
+      log.error("Upload file route error", { error })
+      throw error
     }
-    let result = await handler(input, context)
-    return { ok: true, result } as any
   },
   {
     type: "multipart/form-data",
