@@ -1,5 +1,6 @@
 import Foundation
 import InlineProtocol
+import UniformTypeIdentifiers
 
 #if os(iOS)
 public typealias PlatformImage = UIImage
@@ -134,27 +135,42 @@ extension NSImage: ImageSaving {
     let path = fileName.isEmpty ? UUID().uuidString + "." + format.fileExtension : fileName
     let fileUrl = directory.appendingPathComponent(path)
 
-    guard let data = tiffRepresentation,
-          let bitmap = NSBitmapImageRep(data: data)
-    else {
+    // Get the CGImage representation
+    guard let cgImage = cgImage(forProposedRect: nil, context: nil, hints: nil) else {
       return nil
     }
 
-    let imageData = switch format {
-      case .png:
-        bitmap.representation(
-          using: .png,
-          properties: optimize ? [.compressionFactor: 0.8] : [:]
-        )
-      case .jpeg:
-        bitmap.representation(
-          using: .jpeg,
-          properties: optimize ? [.compressionFactor: 0.8] : [:]
-        )
+    // Create a mutable data object to hold the image data
+    let data = NSMutableData()
+
+    let type = format == .png ? UTType.png.identifier as CFString : UTType.jpeg.identifier as CFString
+
+    // Create image destination
+    guard let destination = CGImageDestinationCreateWithData(
+      data as CFMutableData,
+      type,
+      1,
+      nil
+    ) else {
+      return nil
     }
 
-    // guard let data = imageData else { return nil }
+    // Set properties based on format and optimization
+    let properties: [CFString: Any] = [
+      kCGImageDestinationOptimizeColorForSharing: true,
+      kCGImagePropertyHasAlpha: hasAlphaChannel(image: self),
+      kCGImageDestinationLossyCompressionQuality: optimize ? 0.87 : 1.0,
+    ]
 
+    // Add the image to the destination
+    CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+
+    // Finalize the destination
+    guard CGImageDestinationFinalize(destination) else {
+      return nil
+    }
+
+    // Write the data to file
     do {
       try data.write(to: fileUrl)
       return path
