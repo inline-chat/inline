@@ -14,6 +14,7 @@ struct PersistedTransaction: Codable {
 /// Stores transactions and persists them to disk
 class TransactionsCache {
   private var log = Log.scoped("TransactionsCache")
+  private let queue = DispatchQueue(label: "com.app.TransactionsCache", attributes: [])
 
   private(set) var transactions: [PersistedTransaction] = []
   private(set) var maxOrder: Int = 0
@@ -26,29 +27,35 @@ class TransactionsCache {
   }
 
   public func add(transaction: TransactionType) throws {
-    guard !transactions.contains(where: { $0.transaction.id == transaction.id }) else {
-      throw TransactionError.duplicate
-    }
-
-    maxOrder += 1
-
-    transactions.append(
-      PersistedTransaction(
-        transaction: transaction,
-        order: maxOrder,
-        date: Date()
+    try queue.sync {
+      guard !transactions.contains(where: { $0.transaction.id == transaction.id }) else {
+        throw TransactionError.duplicate
+      }
+      
+      maxOrder += 1
+      
+      transactions.append(
+        PersistedTransaction(
+          transaction: transaction,
+          order: maxOrder,
+          date: Date()
+        )
       )
-    )
-
-    persistAll()
+      
+      persistAll()
+    }
   }
 
   public func remove(transactionId: String) {
-    transactions.removeAll { persistedTransaction in
-      persistedTransaction.transaction.id == transactionId
+    queue.sync {
+      
+      // FIXME: has thread issues
+      transactions.removeAll { persistedTransaction in
+        persistedTransaction.transaction.id == transactionId
+      }
+      
+      persistAll()
     }
-
-    persistAll()
   }
 
   // MARK: - Private
@@ -89,7 +96,10 @@ class TransactionsCache {
   }
 
   func clearAll() {
-    transactions = []
-    persistAll()
+    queue.sync {
+      
+      transactions = []
+      persistAll()
+    }
   }
 }
