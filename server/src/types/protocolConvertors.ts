@@ -1,4 +1,5 @@
-import { Member_Role } from "@in/protocol/core"
+import { InputPeer, Member_Role } from "@in/protocol/core"
+import type { TPeerInfo } from "@in/server/api-types"
 import { type DbMemberRole } from "@in/server/db/schema"
 
 export const ProtocolConvertors = {
@@ -22,5 +23,31 @@ export const ProtocolConvertors = {
       case Member_Role.MEMBER:
         return "member"
     }
+  },
+
+  zodPeerToProtocolInputPeer: (peer: TPeerInfo): InputPeer => {
+    if ("userId" in peer) {
+      return {
+        type: {
+          oneofKind: "user",
+          user: {
+            userId: BigInt(peer.userId),
+          },
+        },
+      }
+    }
+
+    if ("threadId" in peer) {
+      return {
+        type: {
+          oneofKind: "user",
+          user: {
+            userId: BigInt(peer.threadId),
+          },
+        },
+      }
+    }
+
+    throw new Error("Invalid peer")
   },
 }
