@@ -3111,6 +3111,8 @@ public struct UpdateDeleteReaction: Sendable {
 
   public var messageID: Int64 = 0
 
+  public var userID: Int64 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -8402,6 +8404,7 @@ extension UpdateDeleteReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     1: .same(proto: "emoji"),
     2: .standard(proto: "chat_id"),
     3: .standard(proto: "message_id"),
+    4: .standard(proto: "user_id"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8413,6 +8416,7 @@ extension UpdateDeleteReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       case 1: try { try decoder.decodeSingularStringField(value: &self.emoji) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
       case 3: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
       default: break
       }
     }
@@ -8428,6 +8432,9 @@ extension UpdateDeleteReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if self.messageID != 0 {
       try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 3)
     }
+    if self.userID != 0 {
+      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -8435,6 +8442,7 @@ extension UpdateDeleteReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if lhs.emoji != rhs.emoji {return false}
     if lhs.chatID != rhs.chatID {return false}
     if lhs.messageID != rhs.messageID {return false}
+    if lhs.userID != rhs.userID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
