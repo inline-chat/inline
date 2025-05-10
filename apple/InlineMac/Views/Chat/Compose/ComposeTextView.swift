@@ -6,7 +6,7 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool
   // Add new delegate method for image paste
-  func textView(_ textView: NSTextView, didReceiveImage image: NSImage)
+  func textView(_ textView: NSTextView, didReceiveImage image: NSImage, url: URL?)
   func textView(_ textView: NSTextView, didReceiveFile url: URL)
   func textView(_ textView: NSTextView, didReceiveVideo url: URL)
 }
@@ -156,14 +156,14 @@ class ComposeNSTextView: NSTextView {
           if let image = NSImage(contentsOf: file) {
             Log.shared.debug("Found image file: \(file.path)")
             // Notify delegate about image paste
-            notifyDelegateAboutImage(image)
+            notifyDelegateAboutImage(image, file)
             handled = true
             file.stopAccessingSecurityScopedResource()
             continue
           } else {
             if let image = NSImage(pasteboard: .general) {
               Log.shared.debug("Found image from pasteboard: \(file.path)")
-              notifyDelegateAboutImage(image)
+              notifyDelegateAboutImage(image, file)
               handled = true
               continue
             }
@@ -220,9 +220,9 @@ class ComposeNSTextView: NSTextView {
     return false
   }
 
-  private func notifyDelegateAboutImage(_ image: NSImage) {
+  private func notifyDelegateAboutImage(_ image: NSImage, _ url: URL? = nil) {
     Log.shared.debug("Notifying delegate about image paste")
-    (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveImage: image)
+    (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveImage: image, url: url)
   }
 
   private func notifyDelegateAboutFile(_ file: URL) {
