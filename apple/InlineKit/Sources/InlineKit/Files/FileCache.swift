@@ -150,7 +150,7 @@ public actor FileCache: Sendable {
 
     // Save in files
     let directory = FileHelpers.getLocalCacheDirectory(for: .photos)
-    guard let localPath = image.save(to: directory, withName: fileName, format: format, optimize: optimize)
+    guard let (localPath, _) = try? image.save(to: directory, withName: fileName, format: format, optimize: optimize)
     else { throw FileCacheError.failedToSave }
     let fileURL = directory.appendingPathComponent(
       localPath

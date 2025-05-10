@@ -129,7 +129,7 @@ final class UserAvatarView: UIView {
           if let image = try? await ImagePipeline.shared.image(for: remoteUrl) {
             let directory = FileHelpers.getDocumentsDirectory()
             let fileName = photo.fileName ?? ""
-            if let pathString = image.save(
+            if let (pathString, _) = try? image.save(
               to: directory,
               withName: fileName,
               format: photo.imageFormat
