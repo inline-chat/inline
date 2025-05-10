@@ -192,7 +192,7 @@ message Message {
 }
 
 message MessageReactions {
-  // Reactions of the messageprotocol buffers
+  // Reactions of the message
   repeated Reaction reactions = 1;
 }
 
