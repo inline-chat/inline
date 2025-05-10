@@ -139,11 +139,15 @@ public actor FileCache: Sendable {
 
   // MARK: - Local Saves
 
-  public static func savePhoto(image: PlatformImage, optimize: Bool = false) throws -> InlineKit.PhotoInfo {
+  public static func savePhoto(
+    image: PlatformImage,
+    preferredFormat: ImageFormat? = nil,
+    optimize: Bool = false
+  ) throws -> InlineKit.PhotoInfo {
     // Info
     let w = Int(image.size.width)
     let h = Int(image.size.height)
-    let format: ImageFormat = hasAlphaChannel(image: image) ? .png : .jpeg
+    let format: ImageFormat = preferredFormat ?? (hasAlphaChannel(image: image) ? .png : .jpeg)
     let protoFormat = format.toProtocol()
     let ext = protoFormat.toExtension()
     let mimeType = protoFormat.toMimeType()

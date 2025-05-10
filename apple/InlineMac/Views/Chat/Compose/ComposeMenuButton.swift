@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import InlineKit
 import UniformTypeIdentifiers
 
 class ComposeMenuButton: NSView {
@@ -20,7 +21,7 @@ class ComposeMenuButton: NSView {
     button.isBordered = false
     button.translatesAutoresizingMaskIntoConstraints = false
 
-    //let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+    // let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
     let image = NSImage(systemSymbolName: "paperclip", accessibilityDescription: nil)?
       .withSymbolConfiguration(.init(pointSize: size * 0.6, weight: .semibold))
     button.image = image
@@ -122,7 +123,7 @@ class ComposeMenuButton: NSView {
 
       for url in panel.urls {
         if let image = NSImage(contentsOf: url) {
-          delegate?.composeMenuButton(self, didSelectImage: image)
+          delegate?.composeMenuButton(self, didSelectImage: image, url: url)
         }
       }
     }
@@ -463,7 +464,7 @@ extension CameraViewController: AVCapturePhotoCaptureDelegate {
 // MARK: - Delegate Protocol
 
 protocol ComposeMenuButtonDelegate: AnyObject {
-  func composeMenuButton(_ button: ComposeMenuButton, didSelectImage image: NSImage)
+  func composeMenuButton(_ button: ComposeMenuButton, didSelectImage image: NSImage, url: URL)
   func composeMenuButton(_ button: ComposeMenuButton, didSelectFiles urls: [URL])
   func composeMenuButton(didCaptureImage image: NSImage)
 }

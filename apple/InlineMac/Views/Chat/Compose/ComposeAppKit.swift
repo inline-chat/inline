@@ -356,10 +356,13 @@ class ComposeAppKit: NSView {
 
   // MARK: - Actions
 
-  func addImage(_ image: NSImage) {
+  func addImage(_ image: NSImage, _ url: URL? = nil) {
     do {
       // Save
-      let photoInfo = try FileCache.savePhoto(image: image)
+      let preferredImageFormat: ImageFormat? = if let url {
+        url.pathExtension.lowercased() == "png" ? ImageFormat.png : ImageFormat.jpeg
+      } else { nil }
+      let photoInfo = try FileCache.savePhoto(image: image, preferredFormat: preferredImageFormat)
       let mediaItem = FileMediaItem.photo(photoInfo)
       let uniqueId = mediaItem.getItemUniqueId()
 
@@ -554,8 +557,8 @@ extension ComposeAppKit {
     }
   }
 
-  func handleImageDropOrPaste(_ image: NSImage) {
-    addImage(image)
+  func handleImageDropOrPaste(_ image: NSImage, _ url: URL? = nil) {
+    addImage(image, url)
   }
 }
 
@@ -658,8 +661,8 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 // MARK: ComposeMenuButtonDelegate
 
 extension ComposeAppKit: ComposeMenuButtonDelegate {
-  func composeMenuButton(_ button: ComposeMenuButton, didSelectImage image: NSImage) {
-    handleImageDropOrPaste(image)
+  func composeMenuButton(_ button: ComposeMenuButton, didSelectImage image: NSImage, url: URL) {
+    handleImageDropOrPaste(image, url)
   }
 
   func composeMenuButton(_ button: ComposeMenuButton, didSelectFiles urls: [URL]) {
