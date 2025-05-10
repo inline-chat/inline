@@ -38,6 +38,7 @@ class ShareState: ObservableObject {
     }
   }
 
+//
   func sendMessage(caption: String, selectedChat: SharedChat, completion: @escaping () -> Void) {
     guard !sharedImages.isEmpty,
           let image = sharedImages.first,
