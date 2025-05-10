@@ -60,6 +60,15 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     senderInfo?.user
   }
 
+  /// Grouped reactions by emoji
+  public var groupedReactions: [GroupedReaction] {
+    let groupedDictionary = Dictionary(grouping: reactions, by: { $0.emoji })
+    return groupedDictionary.enumerated().map { _, item in
+      let (emoji, reactions) = item
+      return GroupedReaction(emoji: emoji, reactions: reactions)
+    }.sorted { $0.maxDate < $1.maxDate }
+  }
+
   // stable id
   public var id: Int64 {
     message.globalId ?? message.id
@@ -83,6 +92,15 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     self.reactions = reactions
     self.repliedToMessage = repliedToMessage
     self.attachments = attachments
+
+    // Group reactions and store on a property
+//    if reactions.count > 0 {
+//      let groupedDictionary = Dictionary(grouping: reactions, by: { $0.emoji })
+//      groupedReactions = groupedDictionary.enumerated().map { _, item in
+//        let (emoji, reactions) = item
+//        return GroupedReaction(emoji: emoji, reactions: reactions)
+//      }
+//    }
   }
 }
 

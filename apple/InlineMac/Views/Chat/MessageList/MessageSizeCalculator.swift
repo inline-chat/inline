@@ -129,10 +129,16 @@ class MessageSizeCalculator {
     /// reply is always above text
     var reply: LayoutPlan?
 
+    /// reactions
+    var reactions: LayoutPlan?
+
+    /// layout for each reaction
+    var reactionItems: [String: LayoutPlan]
+
     /// time can be beside text or below it. it doesn't define vertical spacing.
     var time: LayoutPlan?
 
-    // used for determining if the message is single line for time view positioning
+    /// used for determining if the message is single line for time view positioning
     var singleLine: Bool
 
     // computed
@@ -154,6 +160,7 @@ class MessageSizeCalculator {
     var hasName: Bool { name != nil }
     var hasReply: Bool { reply != nil }
     var hasDocument: Bool { document != nil }
+    var hasReactions: Bool { reactions != nil }
 
     // used as edge inset for content view stack
     var topMostContentTopSpacing: CGFloat {
@@ -172,10 +179,14 @@ class MessageSizeCalculator {
 
     // used as edge inset for content view stack
     var bottomMostContentBottomSpacing: CGFloat {
-      if let text {
+      if let reactions {
+        reactions.spacing.bottom
+      } else if let text {
         text.spacing.bottom
       } else if let photo {
         photo.spacing.bottom
+      } else if let document {
+        document.spacing.bottom
       } else {
         0.0
       }
@@ -215,6 +226,23 @@ class MessageSizeCalculator {
       return top
     }
 
+    var reactionsViewTop: CGFloat {
+      var top: CGFloat = reactions?.spacing.top ?? 0
+      if let reply {
+        top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      if let photo {
+        top += photo.spacing.top + photo.size.height + photo.spacing.bottom
+      }
+      if let document {
+        top += document.spacing.top + document.size.height + document.spacing.bottom
+      }
+      if let text {
+        top += text.spacing.top + text.size.height + text.spacing.bottom
+      }
+      return top
+    }
+
     var nameAndBubbleLeading: CGFloat {
       Theme.messageAvatarSize + Theme.messageHorizontalStackSpacing + Theme.messageSidePadding
     }
@@ -243,6 +271,7 @@ class MessageSizeCalculator {
     let hasMedia = message.hasMedia
     let hasDocument = message.documentInfo != nil
     let hasReply = message.message.repliedToMessageId != nil
+    let hasReactions = message.reactions.count > 0
     let isOutgoing = message.message.out == true
     var isSingleLine = false
     var textSize: CGSize?
@@ -357,6 +386,11 @@ class MessageSizeCalculator {
       isSingleLine = false
     }
 
+    // For now, just switch to multiline, later we can fit a few reactions beside the time label
+    if isSingleLine, hasReactions {
+      isSingleLine = false
+    }
+
     // MARK: - Layout Plans
 
     // we prepare our plans and after done with calculations we will use them to calculate the final size
@@ -376,6 +410,8 @@ class MessageSizeCalculator {
     var photoPlan: LayoutPlan?
     var documentPlan: LayoutPlan?
     var replyPlan: LayoutPlan?
+    var reactionsPlan: LayoutPlan?
+    var reactionItemsPlan: [String: LayoutPlan] = [:]
     var timePlan: LayoutPlan?
 
     // MARK: - Name
@@ -487,7 +523,67 @@ class MessageSizeCalculator {
 
     // MARK: - Reactions
 
-    // todo
+    if hasReactions {
+      reactionsPlan = LayoutPlan(
+        size: .zero,
+        spacing: NSEdgeInsets(
+          top: 8.0,
+          left: 8.0,
+          bottom: 8.0,
+          right: 8.0
+        )
+      )
+
+      let reactionsSpacing = 6.0
+      let reactionSpacing = NSEdgeInsets(
+        top: reactionsSpacing,
+        left: 0,
+        bottom: reactionsSpacing,
+        right: reactionsSpacing
+      )
+
+      // line index of reactions row
+      var reactionsCurrentLine = 0
+      var currentLineWidth: CGFloat = 0
+
+      // layout each reaction item
+      for reaction in message.groupedReactions {
+        let emoji = reaction.emoji
+        let reactions = reaction.reactions
+        // Get reaction size - this will be replaced with actual calculation later
+        let reactionSize = ReactionItem.size(group: reaction)
+
+        // Check if we need to move to next line
+        if currentLineWidth + reactionSize.width + reactionsSpacing > availableWidth {
+          // go to next line
+          reactionsCurrentLine += 1
+          currentLineWidth = 0
+        }
+
+        // Calculate absolute position in grid based on final line position
+        let spacing = NSEdgeInsets(
+          top: CGFloat(reactionsCurrentLine) * (reactionSize.height + reactionsSpacing), // Row offset
+          left: currentLineWidth, // Column offset
+          bottom: 0,
+          right: 0
+        )
+
+        let reactionPlan = LayoutPlan(
+          size: reactionSize,
+          spacing: spacing
+        )
+        reactionItemsPlan[emoji] = reactionPlan
+
+        // Add this reaction to current line
+        currentLineWidth += reactionSize.width + reactionsSpacing
+
+        // Update reactions container size
+        reactionsPlan!.size.width = max(reactionsPlan!.size.width, currentLineWidth)
+        reactionsPlan!.size.height = CGFloat(reactionsCurrentLine + 1) * (reactionSize.height + reactionsSpacing)
+      }
+      
+      print("reactionsPlan width:\(reactionsPlan!.size.width) height:\(reactionsPlan!.size.height)")
+    }
 
     // MARK: - Time Size
 
@@ -545,6 +641,11 @@ class MessageSizeCalculator {
       bubbleHeight += documentPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, documentPlan.size.width + documentPlan.spacing.horizontalTotal)
     }
+    if let reactionsPlan {
+      bubbleHeight += reactionsPlan.size.height
+      bubbleHeight += reactionsPlan.spacing.bottom
+      bubbleWidth = max(bubbleWidth, reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal)
+    }
     if let timePlan {
       if !isSingleLine, hasText {
         bubbleHeight += timePlan.size.height
@@ -596,6 +697,8 @@ class MessageSizeCalculator {
       photo: photoPlan,
       document: documentPlan,
       reply: replyPlan,
+      reactions: reactionsPlan,
+      reactionItems: reactionItemsPlan,
       time: timePlan,
       singleLine: isSingleLine
     )
