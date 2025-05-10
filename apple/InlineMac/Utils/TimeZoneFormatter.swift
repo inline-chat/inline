@@ -22,8 +22,12 @@ final class TimeZoneFormatter {
     let localTime = dateFormatter.string(from: Date())
 
     let hourDifference = (Double(userTimeZone.secondsFromGMT()) - Double(TimeZone.current.secondsFromGMT())) / 3_600.0
-    let timeDiff = hourDifference >= 0 ? "+\(hourDifference)" : "\(hourDifference)"
+    let timeDiff = if hourDifference >= 0 {
+      "+\(String(format: "%.1f", hourDifference).replacingOccurrences(of: ".0", with: ""))"
+    } else {
+      "\(String(format: "%.1f", hourDifference).replacingOccurrences(of: ".0", with: ""))"
+    }
 
-    return "\(localTime) (\(timeDiff) hrs)"
+    return "\(localTime) (\(timeDiff) hr)"
   }
 }
