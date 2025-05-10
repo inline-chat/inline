@@ -179,7 +179,7 @@ public struct UserAvatar: View, Equatable {
                   if var file {
                     let directory = FileHelpers.getDocumentsDirectory()
                     let fileName = file.fileName ?? ""
-                    if let pathString = nsImage.save(
+                    if let (pathString, _) = try? nsImage.save(
                       to: directory, withName: fileName, format: file.imageFormat
                     ) {
                       file.localPath = pathString
