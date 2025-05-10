@@ -608,6 +608,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       throw APIError.invalidURL
     }
 
+    log.debug("[uploadFile] Uploading a file with type \(type) and filename \(filename) with size \(data.count) bytes")
+
     let multipartFormData = try MultipartFormData.Builder.build(
       with: [
         (
