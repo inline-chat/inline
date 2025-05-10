@@ -9,6 +9,7 @@ import { encodeVideo } from "@in/server/realtime/encoders/encodeVideo"
 import { encodeDocument } from "@in/server/realtime/encoders/encodeDocument"
 import type { DbFullMessage } from "@in/server/db/models/messages"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { encodeReaction } from "@in/server/realtime/encoders/encodeReaction"
 
 export const encodeMessage = ({
   message,
@@ -205,6 +206,8 @@ export const encodeFullMessage = ({
     }
   }
 
+  const hasReactions = message.reactions.length > 0
+
   let messageProto: Message = {
     id: BigInt(message.messageId),
     fromId: BigInt(message.fromId),
@@ -218,6 +221,11 @@ export const encodeFullMessage = ({
     media: media,
     isSticker: message.isSticker ?? false,
     attachments: attachments,
+    reactions: hasReactions
+      ? {
+          reactions: message.reactions.map((reaction) => encodeReaction({ reaction })),
+        }
+      : undefined,
   }
 
   return messageProto
