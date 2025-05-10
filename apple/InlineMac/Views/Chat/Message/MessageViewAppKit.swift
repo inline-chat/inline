@@ -350,8 +350,6 @@ class MessageViewAppKit: NSView {
 
     addSubview(bubbleView)
 
-    addSubview(timeAndStateView)
-
     if showsAvatar {
       addSubview(avatarView)
     }
@@ -388,6 +386,8 @@ class MessageViewAppKit: NSView {
     if hasReactions {
       setupReactions()
     }
+
+    addSubview(timeAndStateView)
 
     setupMessageText()
     setupContextMenu()
@@ -479,7 +479,6 @@ class MessageViewAppKit: NSView {
       reactionsViewModel?.offsets = props.layout.reactionItems
       reactionsViewModel?.reactions = next.groupedReactions
       reactionsViewModel?.fullMessage = next
-      
     }
   }
 

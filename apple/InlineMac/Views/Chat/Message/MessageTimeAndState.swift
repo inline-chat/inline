@@ -8,8 +8,16 @@ class MessageTimeAndState: NSView {
   private var fullMessage: FullMessage
   private var currentState: MessageSendingStatus = .sent
 
+  private var isOverlay: Bool {
+    fullMessage.message.text == nil || fullMessage.message.text?.isEmpty == true
+  }
+
   private var textColor: NSColor {
-    fullMessage.message.out == true ? .white.withAlphaComponent(0.6) : .tertiaryLabelColor
+    if isOverlay {
+      .white.withAlphaComponent(0.8)
+    } else {
+      fullMessage.message.out == true ? .white.withAlphaComponent(0.5) : .tertiaryLabelColor
+    }
   }
 
   private var hasSymbol: Bool {
@@ -31,12 +39,15 @@ class MessageTimeAndState: NSView {
     let isFailed: Bool
     let scaleFactor: CGFloat
     let isOutgoing: Bool
+    let isOverlay: Bool
+    let isDarkMode: Bool
   }
 
   // MARK: - Layer Setup (Modified)
 
   private lazy var timeLayer: CATextLayer = createTextLayer()
   private lazy var statusLayer: CALayer = createStatusLayer()
+  private lazy var backgroundLayer: CALayer = createBackgroundLayer()
 
   private func createTextLayer() -> CATextLayer {
     let layer = CATextLayer()
@@ -61,6 +72,17 @@ class MessageTimeAndState: NSView {
     return layer
   }
 
+  private func createBackgroundLayer() -> CALayer {
+    let layer = CALayer()
+    layer.contentsScale = effectiveScaleFactor
+    layer.cornerRadius = 6
+    layer.backgroundColor = NSColor.black.withAlphaComponent(0.5).cgColor
+    layer.isHidden = !isOverlay
+    return layer
+  }
+
+  private var timeWidth: CGFloat = 0.0
+
   // Dynamic scale factor handling
   private var effectiveScaleFactor: CGFloat {
     window?.backingScaleFactor ?? window?.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1.0
@@ -76,7 +98,9 @@ class MessageTimeAndState: NSView {
       status: status,
       isFailed: isFailedMessage,
       scaleFactor: scale,
-      isOutgoing: fullMessage.message.out ?? false
+      isOutgoing: fullMessage.message.out ?? false,
+      isOverlay: isOverlay,
+      isDarkMode: NSApp.effectiveAppearance.isDarkMode
     )
 
     if let cached = Self.imageCache[cacheKey] {
@@ -157,6 +181,7 @@ class MessageTimeAndState: NSView {
   private func configureLayerSetup() {
     wantsLayer = true
     layer?.masksToBounds = true
+    layer?.addSublayer(backgroundLayer)
     layer?.addSublayer(timeLayer)
     layer?.addSublayer(statusLayer)
     statusLayer.isHidden = !hasSymbol
@@ -167,21 +192,34 @@ class MessageTimeAndState: NSView {
   override func layout() {
     super.layout()
 
-    let timeWidth = Self.timeWidth
+    let maxTimeWidth = Self.timeWidth
     let symbolWidth = Self.symbolWidth
-    let totalWidth = timeWidth + symbolWidth
+    let totalWidth = maxTimeWidth + (hasSymbol ? symbolWidth : 0.0)
+    let padding = (maxTimeWidth - timeWidth) / 2
+    let paddingV = 2.0
+
+    if isOverlay {
+      backgroundLayer.frame = CGRect(
+        x: 0,
+        y: 0,
+        width: totalWidth,
+        height: bounds.height
+      )
+    } else {
+      backgroundLayer.frame = .zero
+    }
 
     timeLayer.frame = CGRect(
-      x: 0,
-      y: (bounds.height - Self.timeHeight) / 2,
+      x: padding,
+      y: (bounds.height - Self.timeHeight) / 2 - paddingV,
       width: timeWidth,
-      height: Self.timeHeight // timeLayer.preferredFrameSize().height
+      height: Self.timeHeight
     )
 
     if hasSymbol {
       statusLayer.frame = CGRect(
-        x: timeWidth + 2,
-        y: (bounds.height - symbolWidth + 2 + 1) / 2, // bottom based so + 2, +1 for checkmark alignment
+        x: padding + timeWidth + 2,
+        y: (bounds.height - symbolWidth + 2 + 1) / 2,
         width: symbolWidth - 2,
         height: symbolWidth - 2
       )
@@ -194,6 +232,7 @@ class MessageTimeAndState: NSView {
     let oldStatus = self.fullMessage.message.status
     let oldDate = self.fullMessage.message.date
     let oldOut = self.fullMessage.message.out
+    let oldIsOverlay = isOverlay
 
     self.fullMessage = fullMessage
 
@@ -209,6 +248,10 @@ class MessageTimeAndState: NSView {
       updateColorStyles()
     }
 
+    if oldIsOverlay != isOverlay {
+      backgroundLayer.isHidden = !isOverlay
+    }
+
     needsLayout = true
   }
 
@@ -220,13 +263,16 @@ class MessageTimeAndState: NSView {
 
   private func updateTimeContent() {
     let string = isFailedMessage ? "Failed" : Self.formatter.string(from: fullMessage.message.date)
-    timeLayer.string = NSAttributedString(
+    let attributedString = NSAttributedString(
       string: string,
       attributes: [
         .font: Self.font,
         .foregroundColor: textColor,
       ]
     )
+    timeLayer.string = attributedString
+    let size = attributedString.size()
+    timeWidth = size.width.rounded(.up)
   }
 
   private func updateStatusContent() {
@@ -285,7 +331,7 @@ class MessageTimeAndState: NSView {
     let timeWidth = size.width.rounded(.up)
     let timeHeight = size.height.rounded(.up)
 
-    MessageTimeAndState.timeWidth = ceil(timeWidth)
-    MessageTimeAndState.timeHeight = ceil(timeHeight)
+    MessageTimeAndState.timeWidth = ceil(timeWidth) + 4.0
+    MessageTimeAndState.timeHeight = ceil(timeHeight) + 4.0
   }
 }
