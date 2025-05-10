@@ -64,7 +64,7 @@ actor WebSocketTransport: NSObject, Sendable {
   // Internals
   private var stateObservers: [StateObserverFn] = []
   private var messageHandler: ((ServerProtocolMessage) -> Void)? = nil
-  private var log = Log.scoped("Realtime_TransportWS", enableTracing: true)
+  private var log = Log.scoped("Realtime_TransportWS", enableTracing: false)
   private var pathMonitor: NWPathMonitor?
   private let reconnectionInProgress = ManagedAtomic<Bool>(false)
 

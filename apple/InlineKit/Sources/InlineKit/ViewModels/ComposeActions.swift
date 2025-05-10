@@ -17,7 +17,7 @@ public class ComposeActions: ObservableObject {
   private var _activeUploads: Set<Peer> = []
 
   private var cancelTasks: [Peer: Task<Void, Never>] = [:]
-  private var log = Log.scoped("ComposeActions", enableTracing: true)
+  private var log = Log.scoped("ComposeActions", enableTracing: false)
   private var lastTypingSent: [Peer: Date] = [:]
 
   public init() {}
