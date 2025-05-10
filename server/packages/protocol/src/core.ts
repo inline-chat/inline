@@ -2105,6 +2105,10 @@ export interface UpdateDeleteReaction {
      * @generated from protobuf field: int64 message_id = 3;
      */
     messageId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 4;
+     */
+    userId: bigint;
 }
 /**
  * @generated from protobuf message UpdateUserStatus
@@ -7619,7 +7623,8 @@ class UpdateDeleteReaction$Type extends MessageType<UpdateDeleteReaction> {
         super("UpdateDeleteReaction", [
             { no: 1, name: "emoji", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 3, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateDeleteReaction>): UpdateDeleteReaction {
@@ -7627,6 +7632,7 @@ class UpdateDeleteReaction$Type extends MessageType<UpdateDeleteReaction> {
         message.emoji = "";
         message.chatId = 0n;
         message.messageId = 0n;
+        message.userId = 0n;
         if (value !== undefined)
             reflectionMergePartial<UpdateDeleteReaction>(this, message, value);
         return message;
@@ -7644,6 +7650,9 @@ class UpdateDeleteReaction$Type extends MessageType<UpdateDeleteReaction> {
                     break;
                 case /* int64 message_id */ 3:
                     message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 4:
+                    message.userId = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -7666,6 +7675,9 @@ class UpdateDeleteReaction$Type extends MessageType<UpdateDeleteReaction> {
         /* int64 message_id = 3; */
         if (message.messageId !== 0n)
             writer.tag(3, WireType.Varint).int64(message.messageId);
+        /* int64 user_id = 4; */
+        if (message.userId !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.userId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
