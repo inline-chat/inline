@@ -109,6 +109,7 @@ final class UserAvatarView: UIView {
 
     // Load image if available
     if var photo = userInfo.profilePhoto?.first {
+      initialsLabel.isHidden = true
       if let localUrl = photo.getLocalURL() {
         imageView.request = ImageRequest(
           url: localUrl,
@@ -143,6 +144,7 @@ final class UserAvatarView: UIView {
         }
       }
     } else {
+      initialsLabel.isHidden = false
       imageView.url = nil
     }
   }
