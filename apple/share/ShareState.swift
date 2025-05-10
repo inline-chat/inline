@@ -2,7 +2,6 @@ import Logger
 import MultipartFormDataKit
 import SwiftUI
 
-
 class ShareState: ObservableObject {
   @Published var sharedImages: [UIImage] = []
   @Published var sharedData: SharedData?
@@ -75,7 +74,7 @@ class ShareState: ObservableObject {
           }
         )
 
-        log.info("File upload successful, fileUniqueId: \(uploadResult.fileUniqueId)")
+        log.info("File upload successful, photoId: \(uploadResult.photoId)")
         uploadProgress = 1.0
 
         // Send message
@@ -84,11 +83,7 @@ class ShareState: ObservableObject {
           peerUserId: selectedChat.peerUserId != nil ? Int64(selectedChat.peerUserId!) : nil,
           peerThreadId: selectedChat.peerThreadId != nil ? Int64(selectedChat.peerThreadId!) : nil,
           text: caption,
-          randomId: nil,
-          repliedToMessageId: nil,
-          date: nil,
-          fileUniqueId: uploadResult.fileUniqueId,
-          isSticker: false
+          photoId: uploadResult.photoId,
         )
 
         log.info("Message sent successfully")
