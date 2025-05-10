@@ -130,29 +130,16 @@ class ComposeNSTextView: NSTextView {
     print("\n--- END OF ANALYSIS ---\n")
   }
 
+  /// It needs to handle for images
+  /// - drop image from Arc/Chrome
+  /// - drop image from Finder
+  /// - paste image from clipboard
+  /// - drag and drop image from other apps
+  /// - paste image file URL into text view
   private func handleImageInput(from pasteboard: NSPasteboard) -> Bool {
     // Log pasteboard types for debugging
     logPasteboardTypes(pasteboard)
     Log.shared.debug("Attempting to handle image input from pasteboard")
-
-    // Handle direct image data
-    let imageTypes: [NSPasteboard.PasteboardType] = [
-      .tiff,
-      .png,
-      NSPasteboard.PasteboardType("public.image"),
-      NSPasteboard.PasteboardType("public.jpeg"),
-      NSPasteboard.PasteboardType("image/png"),
-      NSPasteboard.PasteboardType("image/jpeg"),
-    ]
-
-    if let bestType = pasteboard.availableType(from: imageTypes),
-       let data = pasteboard.data(forType: bestType),
-       let image = NSImage(data: data)
-    {
-      Log.shared.debug("Found direct image data with type: \(bestType.rawValue)")
-      notifyDelegateAboutImage(image)
-      return true
-    }
 
     // Check for files that are images
     if let files = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
@@ -165,7 +152,7 @@ class ComposeNSTextView: NSTextView {
         let fileType2 = UTType(filenameExtension: file.pathExtension)
         if let fileType2, fileType2.conforms(to: .image) {
           let _ = file.startAccessingSecurityScopedResource()
-  
+
           if let image = NSImage(contentsOf: file) {
             Log.shared.debug("Found image file: \(file.path)")
             // Notify delegate about image paste
@@ -208,6 +195,25 @@ class ComposeNSTextView: NSTextView {
       if handled {
         return true
       }
+    }
+
+    // Handle direct image data
+    let imageTypes: [NSPasteboard.PasteboardType] = [
+      .tiff,
+      .png,
+      NSPasteboard.PasteboardType("public.image"),
+      NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("image/png"),
+      NSPasteboard.PasteboardType("image/jpeg"),
+    ]
+
+    if let bestType = pasteboard.availableType(from: imageTypes),
+       let data = pasteboard.data(forType: bestType),
+       let image = NSImage(data: data)
+    {
+      Log.shared.debug("Found direct image data with type: \(bestType.rawValue)")
+      notifyDelegateAboutImage(image)
+      return true
     }
 
     Log.shared.debug("No image data found in pasteboard")
