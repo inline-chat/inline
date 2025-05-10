@@ -1,9 +1,9 @@
+import Auth
 import Foundation
 import InlineConfig
 import InlineKit
 import Sentry
 import UIKit
-import Auth
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
@@ -16,7 +16,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // Set up notification delegate here to not miss anything
     let notificationCenter = UNUserNotificationCenter.current()
     notificationCenter.delegate = self
-
+    print("👽 AppDelegate method setupAppDataUpdater called")
+    setupAppDataUpdater()
     return true
   }
 
