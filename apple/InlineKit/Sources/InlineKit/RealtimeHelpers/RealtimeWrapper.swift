@@ -18,7 +18,7 @@ public final actor Realtime: Sendable {
   public static let shared = Realtime()
 
   private let db = AppDatabase.shared
-  private let log = Log.scoped("RealtimeWrapper", enableTracing: true)
+  private let log = Log.scoped("RealtimeWrapper", enableTracing: false)
   public var updates: UpdatesEngine
   private var api: RealtimeAPI
   private var eventsTask: Task<Void, Never>?
