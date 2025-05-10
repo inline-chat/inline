@@ -552,7 +552,7 @@ describe("getDialogs", () => {
       }
       return false
     })
-    console.log("🌴 result3", result3)
+
     expect(hasThread3).toBe(false)
   })
 })

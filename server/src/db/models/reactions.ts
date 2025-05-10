@@ -10,7 +10,6 @@ export const ReactionModel = {
 
 async function insertReaction(reaction: DbNewReaction) {
   const result = await db.insert(reactions).values(reaction).returning()
-  console.log("result", result)
   return result[0]
 }
 
@@ -33,6 +32,6 @@ async function deleteReaction(messageId: bigint, chatId: number, emoji: string, 
       ),
     )
     .returning()
-  console.log("result", result)
+
   return result
 }

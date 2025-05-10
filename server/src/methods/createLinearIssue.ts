@@ -156,7 +156,6 @@ export const handler = async (
     let [senderUser] = await db.select().from(users).where(eq(users.id, fromId))
 
     if (senderUser && fromId !== currentUserId) {
-      console.log("sending notification to user", fromId)
       sendNotificationToUser({
         userId: fromId,
         userName: senderUser.firstName ?? "User",
