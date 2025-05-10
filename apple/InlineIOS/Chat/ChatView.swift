@@ -55,6 +55,11 @@ struct ChatView: View {
       getStatusTextForChatHeader(realtime.apiState)
     } else if let composeAction = currentComposeAction() {
       composeAction.toHumanReadableForIOS()
+    } else if let user = fullChatViewModel.peerUserInfo?.user,
+              let timeZone = user.timeZone,
+              timeZone != TimeZone.current.identifier
+    {
+      TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone) ?? ""
     } else {
       ""
     }
@@ -194,7 +199,7 @@ struct ChatView: View {
 
           Text(subtitle.lowercased())
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary.opacity(0.7))
         }
         .padding(.top, -2)
         .fixedSize()
