@@ -25,7 +25,6 @@ export async function getChatParticipants(
     if (!participants || participants.length === 0) {
       return []
     }
-    console.log(participants)
 
     return participants.map((participant) => ({
       userId: BigInt(participant.userId),

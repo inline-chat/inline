@@ -175,7 +175,7 @@ export const handler = async (
           eq(schema.chatParticipants.userId, currentUserId),
         ),
       )
-    // console.log("🌴 privateThreadChats", privateThreadChats)
+
     // Transform the result to match the previous structure
     const privateThreadChatsTransformed = privateThreadChats.map((row) => ({
       ...row.chat,
@@ -367,8 +367,6 @@ export const handler = async (
     messages: messages,
     users: users.map(encodeFullUserInfo),
   }
-
-  // console.log("🌴 finalResult", finalResult)
 
   return finalResult
 }

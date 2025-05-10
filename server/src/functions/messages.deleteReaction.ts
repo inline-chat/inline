@@ -20,9 +20,7 @@ export const deleteReaction = async (input: Input, context: FunctionContext): Pr
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
 
   const result = await ReactionModel.deleteReaction(input.messageId, chatId, input.emoji, context.currentUserId)
-  console.log("deleteReaction result", result)
 
-  console.log("input", input)
   const update: Update = {
     update: {
       oneofKind: "deleteReaction",
