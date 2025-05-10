@@ -11,9 +11,9 @@ import Throttler
 
 class MessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
-  private let log = Log.scoped("MessageView", enableTracing: false)
+  private let log = Log.scoped("MessageView", enableTracing: true)
   static let avatarSize: CGFloat = Theme.messageAvatarSize
-  private var fullMessage: FullMessage
+  private(set) var fullMessage: FullMessage
   private var props: MessageViewProps
   private var from: User {
     fullMessage.from ?? User.deletedInstance
@@ -37,6 +37,10 @@ class MessageViewAppKit: NSView {
 
   private var showsName: Bool {
     chatHasAvatar && props.layout.hasName
+  }
+
+  private var hasReactions: Bool {
+    props.layout.hasReactions
   }
 
   private var outgoing: Bool {
@@ -113,6 +117,9 @@ class MessageViewAppKit: NSView {
 
   // State
   private var isMouseInside = false
+
+  // Add gesture recognizer property
+  private var longPressGesture: NSPressGestureRecognizer?
 
   // MARK: Views
 
@@ -285,6 +292,21 @@ class MessageViewAppKit: NSView {
     }
   }()
 
+  private var reactionsViewModel: ReactionsViewModel?
+  // private var reactionsView: NSHostingView<ReactionsView>?
+  private var reactionsView: NSView?
+
+//  private var reactionItems: [ReactionItemView] = []
+//
+//  private struct ReactionItemConstraints {
+//    let top: NSLayoutConstraint
+//    let leading: NSLayoutConstraint
+//    let width: NSLayoutConstraint
+//    let height: NSLayoutConstraint
+//  }
+//
+//  private var reactionItemConstraints: [ReactionItemView: ReactionItemConstraints] = [:]
+
   // MARK: - Initialization
 
   init(fullMessage: FullMessage, props: MessageViewProps, isScrolling: Bool = false) {
@@ -363,8 +385,122 @@ class MessageViewAppKit: NSView {
       contentView.addSubview(textView)
     }
 
+    if hasReactions {
+      setupReactions()
+    }
+
     setupMessageText()
     setupContextMenu()
+    setupGestureRecognizers()
+  }
+
+  // MARK: - Reactions UI
+
+  private func setupReactions() {
+    // View model
+    reactionsViewModel = ReactionsViewModel(
+      reactions: fullMessage.groupedReactions,
+      offsets: props.layout.reactionItems,
+      fullMessage: fullMessage,
+      width: props.layout.reactions?.size.width ?? 0,
+      height: props.layout.reactions?.size.height ?? 0,
+    )
+
+    if let oldView = reactionsView {
+      oldView.removeFromSuperview()
+    }
+
+    // View
+    let view = NSHostingView<ReactionsView>(rootView: ReactionsView(viewModel: reactionsViewModel!))
+    view.translatesAutoresizingMaskIntoConstraints = false
+    reactionsView = view
+
+    // debug
+//    let view = NSView()
+//    view.translatesAutoresizingMaskIntoConstraints = false
+//    view.wantsLayer = true
+//    view.layer?.backgroundColor = NSColor.red.cgColor
+//    reactionsView = view
+
+    contentView.addSubview(reactionsView!)
+
+    // Reactions
+    if let reactionsPlan = props.layout.reactions, let reactionsView {
+      reactionViewHeightConstraint = reactionsView.heightAnchor.constraint(
+        equalToConstant: reactionsPlan.size.height
+      )
+      reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
+        equalToConstant: reactionsPlan.size.width
+      )
+      reactionViewTopConstraint = reactionsView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: props.layout.reactionsViewTop
+      )
+
+      NSLayoutConstraint.activate(
+        [
+          reactionViewHeightConstraint,
+          reactionViewWidthConstraint,
+          reactionViewTopConstraint,
+          reactionsView.leadingAnchor.constraint(
+            equalTo: contentView.leadingAnchor,
+            constant: reactionsPlan.spacing.left
+          ),
+        ]
+      )
+    }
+  }
+
+  private func updateReactionsSizes() {
+    // Update
+    reactionsViewModel?.reactions = fullMessage.groupedReactions
+    reactionsViewModel?.offsets = props.layout.reactionItems
+    reactionsViewModel?.width = props.layout.reactions?.size.width ?? 0
+    reactionsViewModel?.height = props.layout.reactions?.size.height ?? 0
+  }
+
+  private func updateReactions(prev: FullMessage, next: FullMessage, props: MessageViewProps) {
+    if reactionsView == nil, next.reactions.count > 0 {
+      log.trace("Adding reactions view \(props.layout.reactions)")
+      // Added
+      setupReactions()
+      needsUpdateConstraints = true
+      layoutSubtreeIfNeeded()
+    } else if reactionsView != nil, next.reactions.count == 0 {
+      log.trace("Removing reactions view")
+      // Remove
+      reactionsView?.removeFromSuperview()
+      reactionsView = nil
+    } else {
+      log.trace("Updating reactions view")
+      // Update
+      reactionsViewModel?.width = props.layout.reactions?.size.width ?? 0
+      reactionsViewModel?.height = props.layout.reactions?.size.height ?? 0
+      reactionsViewModel?.offsets = props.layout.reactionItems
+      reactionsViewModel?.reactions = next.groupedReactions
+      reactionsViewModel?.fullMessage = next
+      
+    }
+  }
+
+  private func setupGestureRecognizers() {
+    // Add long press gesture recognizer
+    longPressGesture = NSPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+    longPressGesture?.minimumPressDuration = 0.5
+    longPressGesture?.allowableMovement = 10
+    if let gesture = longPressGesture {
+      addGestureRecognizer(gesture)
+    }
+  }
+
+  @objc private func handleLongPress(_ gesture: NSPressGestureRecognizer) {
+    if gesture.state == .began {
+      // Provide haptic feedback
+      NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+
+      // Show reaction overlay
+      showReactionOverlay()
+    }
   }
 
   private func setupConstraints() {
@@ -506,6 +642,32 @@ class MessageViewAppKit: NSView {
       // TODO: Handle RTL
     }
 
+    // Reactions
+    if let reactionsPlan = layout.reactions, let reactionsView {
+      reactionViewHeightConstraint = reactionsView.heightAnchor.constraint(
+        equalToConstant: reactionsPlan.size.height
+      )
+      reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
+        equalToConstant: reactionsPlan.size.width
+      )
+      reactionViewTopConstraint = reactionsView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: layout.reactionsViewTop
+      )
+
+      constraints.append(
+        contentsOf: [
+          reactionViewHeightConstraint,
+          reactionViewWidthConstraint,
+          reactionViewTopConstraint,
+          reactionsView.leadingAnchor.constraint(
+            equalTo: contentView.leadingAnchor,
+            constant: reactionsPlan.spacing.left
+          ),
+        ]
+      )
+    }
+
     // Time
     if let time = layout.time {
       constraints.append(
@@ -592,6 +754,10 @@ class MessageViewAppKit: NSView {
   private var replyViewTopConstraint: NSLayoutConstraint?
 
   private var documentViewTopConstraint: NSLayoutConstraint?
+
+  private var reactionViewWidthConstraint: NSLayoutConstraint!
+  private var reactionViewHeightConstraint: NSLayoutConstraint!
+  private var reactionViewTopConstraint: NSLayoutConstraint!
 
   private var contentViewWidthConstraint: NSLayoutConstraint!
   private var contentViewHeightConstraint: NSLayoutConstraint!
@@ -689,6 +855,66 @@ class MessageViewAppKit: NSView {
         contentViewHeightConstraint.constant = bubble.size.height
       }
     }
+
+    // Update reaction constraints
+    if let reactionsPlan = props.layout.reactions,
+       let reactionViewWidthConstraint,
+       let reactionViewHeightConstraint,
+       let reactionViewTopConstraint
+    {
+      log.trace("Updating reactions view constraints for message \(reactionsPlan.size)")
+      if reactionViewWidthConstraint.constant != reactionsPlan.size.width {
+        reactionViewWidthConstraint.constant = reactionsPlan.size.width
+      }
+
+      if reactionViewHeightConstraint.constant != reactionsPlan.size.height {
+        reactionViewHeightConstraint.constant = reactionsPlan.size.height
+      }
+
+      if reactionViewTopConstraint.constant != props.layout.reactionsViewTop {
+        reactionViewTopConstraint.constant = props.layout.reactionsViewTop
+      }
+    } else if let reactionsView, let reactionsPlan = props.layout.reactions {
+      // setup
+      reactionViewHeightConstraint = reactionsView.heightAnchor.constraint(
+        equalToConstant: reactionsPlan.size.height
+      )
+      reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
+        equalToConstant: reactionsPlan.size.width
+      )
+      reactionViewTopConstraint = reactionsView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: props.layout.reactionsViewTop
+      )
+      NSLayoutConstraint.activate([
+        reactionViewHeightConstraint,
+        reactionViewWidthConstraint,
+        reactionViewTopConstraint,
+        reactionsView.leadingAnchor.constraint(
+          equalTo: contentView.leadingAnchor,
+          constant: reactionsPlan.spacing.left
+        ),
+      ])
+    }
+//    if hasReactions {
+//      for (index, reaction) in reactionItems.enumerated() {
+//        if let constraints = reactionItemConstraints[reaction] {
+//          let newLeadingConstant = CGFloat(index) *
+//            (props.layout.reactionsSize.width + props.layout.reactionsSpacing.left)
+//          if constraints.leading.constant != newLeadingConstant {
+//            constraints.leading.constant = newLeadingConstant
+//          }
+//
+//          if constraints.width.constant != props.layout.reactionsSize.width {
+//            constraints.width.constant = props.layout.reactionsSize.width
+//          }
+//
+//          if constraints.height.constant != props.layout.reactionsSize.height {
+//            constraints.height.constant = props.layout.reactionsSize.height
+//          }
+//        }
+//      }
+//    }
 
     super.updateConstraints()
   }
@@ -963,103 +1189,62 @@ class MessageViewAppKit: NSView {
 
   // MARK: - View Updates
 
-  private func updatePropsAndUpdateLayout(props: MessageViewProps, disableTextRelayout: Bool = false) {
-    // save for comparison
-//    let prevProps = self.props
-
+  private func updatePropsAndUpdateLayout(
+    props: MessageViewProps,
+    disableTextRelayout: Bool = false,
+    animate: Bool = false
+  ) {
     // update internal props (must update so contentView is recalced)
     self.props = props
 
-    // less granular
-    // guard props != self.props else { return }
-
     if textView.textContainer?.size != props.layout.text?.size ?? .zero {
       log.trace("updating size for text in msg \(message.id)")
-//      textViewWidthConstraint?.constant = props.layout.text?.size.width ?? .zero
-//      textViewHeightConstraint?.constant = props.layout.text?.size.height ?? .zero
       textView.textContainer?.size = props.layout.text?.size ?? .zero
-//      textView.textContainer?.containerSize = props.layout.text?.size ?? .zero
-//      needsLayout = true
-//      layoutSubtreeIfNeeded()
-//      textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
-//      textView.layout()
-//      textView.display()
     }
-    // if useTextKit2, !disableTextRelayout {
-//      textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
-//      textView.layoutSubtreeIfNeeded()
-//      textView.displayIfNeeded()
-    // }
+
+    layoutSubtreeIfNeeded()
 
     needsUpdateConstraints = true
 
-//    if prevProps.layout.bubble != props.layout.bubble {
-//      contentViewWidthConstraint.constant = props.layout.bubble.size.width
-//      bubbleViewWidthConstraint.constant = props.layout.bubble.size.width
-//      bubbleViewHeightConstraint.constant = props.layout.bubble.size.height
-//    }
-//
-//    let hasTextSizeChanged =
-//      prevProps.layout.text != props.layout.text
-//    let hasPhotoSizeChanged =
-//      prevProps.layout.photo != props.layout.photo
-//    let singleLineChanged =
-//      prevProps.layout.singleLine != props.layout.singleLine
-//
-//    if singleLineChanged {
-//      // TODO: Update time position
-//    }
-//
-//    // only proceed if text size or photo size has changed
-//    // Fun fact: I wasted too much time on || being &&
-//    guard hasTextSizeChanged || hasPhotoSizeChanged
-//    else { return }
-//
-//    // # Update sizes
-//    // Text
-//    if let text = props.layout.text {
-//      textViewWidthConstraint?.constant = text.size.width
-//
-//      // Text size
-//      if hasTextSizeChanged {
-//        textViewHeightConstraint?.constant = text.size.height
-//
-//        // This helps refresh the layout for textView
-//        // textView.textContainer?.containerSize = CGSize(width: text.size.width, height: text.size.height)
-//
-//        // very subtle fix:
-//        // ensure the change is reflected even if it was offscreen when live resize started
-//        if useTextKit2, !disableTextRelayout {
-    ////          textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
-    ////          textView.layoutSubtreeIfNeeded()
-    ////          textView.displayIfNeeded()
-//        }
-//      }
-//    }
-//
-//    // photo size
-//    if hasPhotoSizeChanged,
-//       let photoViewHeightConstraint,
-//       let photoViewWidthConstraint,
-//       let photo = props.layout.photo
-//    {
-//      photoViewHeightConstraint.constant = photo.size.height
-//      photoViewWidthConstraint.constant = photo.size.width
-//    }
+    if animate {
+      // Animate the changes
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.2
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        context.allowsImplicitAnimation = true
+
+        // self.animator().layoutSubtreeIfNeeded()
+        self.layoutSubtreeIfNeeded()
+      } completionHandler: { [weak self] in
+        // Completion block
+        DispatchQueue.main.async {
+          // Fixes text display issues going blank
+          self?.textView.textLayoutManager?.textViewportLayoutController
+            .layoutViewport()
+        }
+      }
+    }
   }
 
-  public func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps) {
+  public func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps, animate: Bool = false) {
     log.trace(
       "Updating message view content. from: \(self.fullMessage.message.messageId) to: \(fullMessage.message.messageId)"
     )
 
-    // update internal props
-    self.fullMessage = fullMessage
+    let prev = self.fullMessage
 
     prevInViewport = false
 
+    // update internal props
+    self.fullMessage = fullMessage
+
     // Update props and reflect changes
-    updatePropsAndUpdateLayout(props: props, disableTextRelayout: true)
+    updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)
+
+    // Reactions
+    // if hasReactions {
+    updateReactions(prev: prev, next: fullMessage, props: props)
+    // }
 
     // Text
     setupMessageText()
@@ -1092,6 +1277,10 @@ class MessageViewAppKit: NSView {
       // disableTextRelayout: props.layout.singleLine // Quick hack to reduce such re-layouts
       disableTextRelayout: true
     )
+
+    // if hasReactions {
+    updateReactionsSizes()
+    // }
   }
 
   private func setTimeAndStateVisibility(visible: Bool) {

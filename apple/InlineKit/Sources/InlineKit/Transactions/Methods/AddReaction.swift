@@ -78,22 +78,8 @@ public struct TransactionAddReaction: Transaction {
   }
 
   public func shouldRetryOnFail(error: Error) -> Bool {
-    if let error = error as? RealtimeAPIError {
-      switch error {
-        case let .rpcError(_, _, code):
-          switch code {
-            case 400, 401:
-              return false
-
-            default:
-              return true
-          }
-        default:
-          return true
-      }
-    }
-
-    return true
+    // disable retry
+    false
   }
 
   public func didSucceed(result: [InlineProtocol.Update]) async {
