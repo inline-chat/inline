@@ -1,6 +1,6 @@
 import { InputPeer, Member_Role } from "@in/protocol/core"
-import type { TPeerInfo } from "@in/server/api-types"
 import { type DbMemberRole } from "@in/server/db/schema"
+import type { TPeerInfo } from "../api-types"
 
 export const ProtocolConvertors = {
   dbMemberRoleToProtocol: (dbMemberRole: DbMemberRole): Member_Role => {
