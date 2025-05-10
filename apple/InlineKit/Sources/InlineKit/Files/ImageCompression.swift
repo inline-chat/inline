@@ -100,7 +100,7 @@ public actor ImageCompressor {
     // Get the data in the specified format with optimized properties
     let properties: [NSBitmapImageRep.PropertyKey: Any] = [
       .compressionFactor: options.compressionQuality,
-      .interlaced: false
+      .interlaced: false,
     ]
 
     guard let imageData = bitmapRep.representation(
