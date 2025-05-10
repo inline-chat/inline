@@ -11,6 +11,11 @@ class ComposeReplyView: NSView {
   private var heightConstraint: NSLayoutConstraint!
   private let defaultHeight: CGFloat = Theme.embeddedMessageHeight
   private let buttonSize: CGFloat = Theme.composeButtonSize
+  
+  // MARK: - Constants
+  
+  private let hiddenAlpha: CGFloat = 0.8
+  private let visibleAlpha: CGFloat = 1.0
 
   // MARK: - Views
 
@@ -79,7 +84,7 @@ class ComposeReplyView: NSView {
     ])
 
     // Initially hidden
-    alphaValue = 0
+    alphaValue = hiddenAlpha
     heightConstraint.constant = 0
   }
 
@@ -114,29 +119,29 @@ class ComposeReplyView: NSView {
   }
 
   func open(animated: Bool = true) {
-    guard alphaValue == 0 else { return }
+    guard alphaValue == hiddenAlpha else { return }
 
     if animated {
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.2
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        context.duration = 0.15
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
 
         heightConstraint.animator().constant = defaultHeight
-        animator().alphaValue = 1
+        animator().alphaValue = visibleAlpha
       }
     } else {
       heightConstraint.constant = defaultHeight
-      alphaValue = 1
+      alphaValue = visibleAlpha
     }
   }
 
   func close(animated: Bool = false, completion: (() -> Void)? = nil, callOnClose: Bool = true) {
-    guard alphaValue == 1 else { return }
+    guard alphaValue == visibleAlpha else { return }
 
     if animated {
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.2
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        context.duration = 0.15
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         context.completionHandler = {
           if callOnClose {
             self.onClose()
@@ -145,7 +150,7 @@ class ComposeReplyView: NSView {
         }
 
         heightConstraint.animator().constant = 0
-        animator().alphaValue = 0
+        animator().alphaValue = hiddenAlpha
       }
     } else {
       NSAnimationContext.runAnimationGroup { context in
@@ -153,7 +158,7 @@ class ComposeReplyView: NSView {
         context.allowsImplicitAnimation = false
 
         heightConstraint.constant = 0
-        alphaValue = 0
+        alphaValue = hiddenAlpha
         if callOnClose {
           onClose()
         }
@@ -163,6 +168,6 @@ class ComposeReplyView: NSView {
   }
 
   var isOpen: Bool {
-    alphaValue == 1
+    alphaValue == visibleAlpha
   }
 }
