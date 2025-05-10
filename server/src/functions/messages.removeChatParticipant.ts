@@ -22,14 +22,12 @@ export async function removeChatParticipant(
     const chat = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
 
     if (!chat || chat.length === 0) {
-      console.log("chat not found")
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
     }
 
     // Check if user exists
     const user = await db.select().from(users).where(eq(users.id, input.userId)).limit(1)
     if (!user || user.length === 0) {
-      console.log("user not found")
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `User with ID ${input.userId} not found`, 404)
     }
 
@@ -40,7 +38,6 @@ export async function removeChatParticipant(
       .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, input.userId)))
 
     if (!participant) {
-      console.log("participant not found")
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "User is not a participant of this chat", 404)
     }
 
@@ -51,11 +48,8 @@ export async function removeChatParticipant(
       .returning()
 
     if (!deletedParticipant) {
-      console.log("failed to remove chat participant")
       throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to remove chat participant", 500)
     }
-
-    console.log("pushing updates")
 
     pushUpdates({
       chatId: input.chatId,
@@ -83,7 +77,6 @@ const pushUpdates = async ({
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroup({ threadId: chatId }, { currentUserId })
 
-  console.log("🌴 updateGroup", updateGroup)
   let selfUpdates: Update[] = []
 
   const chatParticipantDelete: Update = {
@@ -96,8 +89,6 @@ const pushUpdates = async ({
     },
   }
   updateGroup.userIds.forEach((updateUserId) => {
-    console.log("🌴 pushing to user", updateUserId)
-    console.log("🌴 chatParticipantDelete", chatParticipantDelete)
     RealtimeUpdates.pushToUser(updateUserId, [chatParticipantDelete])
 
     if (updateUserId === currentUserId) {

@@ -22,12 +22,10 @@ export const handler = async (input: Static<typeof Input>, _: HandlerContext): P
   try {
     const spaceId = Number(input.spaceId)
     if (isNaN(spaceId)) {
-      console.log("spaceId is not a number")
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
     const userId = Number(input.userId)
     if (isNaN(userId)) {
-      console.log("userId is not a number")
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
