@@ -187,11 +187,7 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     peerUserId: Int64?,
     peerThreadId: Int64?,
     text: String?,
-    randomId: Int64?,
-    repliedToMessageId: Int64?,
-    date: Double?,
-    fileUniqueId: String? = nil,
-    isSticker: Bool? = nil
+    photoId: Int64?,
   ) async throws -> EmptyPayload {
     print("Preparing to send message")
     var body: [String: Any] = [
@@ -206,23 +202,12 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
       body["peerThreadId"] = peerThreadId
     }
 
-    if let randomId {
-      body["randomId"] = "\(randomId)"
-    }
-
-    if let repliedToMessageId {
-      body["replyToMessageId"] = repliedToMessageId
-    }
-
-    if let fileUniqueId {
-      body["fileUniqueId"] = fileUniqueId
-    }
-
-    if let isSticker {
-      body["isSticker"] = isSticker
+    if let photoId {
+      body["photoId"] = photoId
     }
 
     print("Message body prepared: \(body)")
+
     return try await postRequest(
       .sendMessage20250509,
       body: body,
