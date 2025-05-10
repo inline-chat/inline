@@ -421,7 +421,7 @@ public final class MessagesPublisher {
   }
 
   public func messageUpdatedSync(message: Message, peer: Peer, animated: Bool?) {
-    //    Log.shared.debug("Message updated: \(message)")
+        Log.shared.debug("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? db.reader.read { db in
       let query = FullMessage.queryRequest()
