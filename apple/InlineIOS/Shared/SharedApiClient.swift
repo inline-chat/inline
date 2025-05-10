@@ -34,11 +34,11 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     }
 
     #if targetEnvironment(simulator)
-    return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://172.20.10.6:8000/v1"
     #elseif DEBUG && os(iOS)
-    return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://172.20.10.6:8000/v1"
     #elseif DEBUG && os(macOS)
-    return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://172.20.10.6:8000/v1"
     #else
     return "https://api.inline.chat/v1"
     #endif
