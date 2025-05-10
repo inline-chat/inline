@@ -67,19 +67,15 @@ class BridgeManager {
   // Save data from main app to be shared with extension
   func saveSharedData(chats: [SharedChat], users: [SharedUser]) {
     let shareExtensionData = ShareExtensionData(chats: chats, users: users)
-    print("👽 Saving shared data extension: \(shareExtensionData)")
+
     let sharedData = SharedData(shareExtensionData: [shareExtensionData], lastUpdate: Date())
-    print("👽 Saving sharedData: \(shareExtensionData)")
 
     do {
       let encoder = JSONEncoder()
       let data = try encoder.encode(sharedData)
       try data.write(to: sharedDataURL)
 
-      print("👽 Shared data saved successfully")
-    } catch {
-      print("👽 Error saving shared data: \(error)")
-    }
+    } catch {}
   }
 
   // Load shared data (used by both app and extension)
@@ -87,11 +83,9 @@ class BridgeManager {
     do {
       let data = try Data(contentsOf: sharedDataURL)
       let decoder = JSONDecoder()
-      print("👽 Loaded data saved successfully")
 
       return try decoder.decode(SharedData.self, from: data)
     } catch {
-      print("👽 Error loading shared data: \(error)")
       return nil
     }
   }
