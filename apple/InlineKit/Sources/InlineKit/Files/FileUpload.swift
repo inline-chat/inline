@@ -27,6 +27,7 @@ private struct UploadTaskInfo {
 
 public enum UploadStatus {
   case notFound
+  case processing
   case inProgress(progress: Double)
   case completed
 }
@@ -132,6 +133,17 @@ public actor FileUploader {
     let fileName = localPath.components(separatedBy: "/").last ?? "" + ext
     let mimeType = format.toMimeType()
 
+    let uploadId = getUploadId(photoId: photoInfo.photo.id!)
+
+    // Update status to processing
+    if let handler = progressHandlers[uploadId] {
+      Task { @MainActor in
+        await MainActor.run {
+          handler(-1) // Special value to indicate processing
+        }
+      }
+    }
+
     try startUpload(
       media: .photo(photoInfo),
       localUrl: localUrl,
@@ -212,8 +224,25 @@ public actor FileUploader {
 
       Log.shared.debug("[FileUploader] Starting upload for \(uploadId)")
 
+      // Compress image if it's a photo
+      let uploadUrl: URL
+      if case .photo = media {
+        do {
+          let options = mimeType.lowercased().contains("png") ?
+            ImageCompressionOptions.defaultPNG :
+            ImageCompressionOptions.defaultPhoto
+          uploadUrl = try await ImageCompressor.shared.compressImage(at: localUrl, options: options)
+
+        } catch {
+          // Fallback to original URL if compression fails
+          uploadUrl = localUrl
+        }
+      } else {
+        uploadUrl = localUrl
+      }
+
       // get data from file
-      let data = try Data(contentsOf: localUrl)
+      let data = try Data(contentsOf: uploadUrl)
 
       // upload file with progress tracking
       let result = try await ApiClient.shared.uploadFile(
@@ -226,6 +255,8 @@ public actor FileUploader {
           await self?.updateProgress(uploadId: uploadId, progress: progress)
         }
       }
+
+      // TODO: Set compressed file in db if it was created
 
       // return IDs
       let result_ = UploadResult(
