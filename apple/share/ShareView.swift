@@ -48,11 +48,11 @@ struct ShareView: View {
       // Chat Grid
       ScrollView {
         LazyVGrid(columns: [
-          GridItem(.flexible(minimum: 70), spacing: 16),
-          GridItem(.flexible(minimum: 70), spacing: 16),
-          GridItem(.flexible(minimum: 70), spacing: 16),
-          GridItem(.flexible(minimum: 70), spacing: 16),
-        ], spacing: 16) {
+          GridItem(.flexible(minimum: 70), spacing: 20),
+          GridItem(.flexible(minimum: 70), spacing: 20),
+          GridItem(.flexible(minimum: 70), spacing: 20),
+          GridItem(.flexible(minimum: 70), spacing: 20),
+        ], spacing: 20) {
           if let chats = state.sharedData?.shareExtensionData.first?.chats,
              let users = state.sharedData?.shareExtensionData.first?.users
           {
@@ -66,7 +66,7 @@ struct ShareView: View {
           }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 14)
+        .padding(.top, 6)
       }
 
       Spacer()
