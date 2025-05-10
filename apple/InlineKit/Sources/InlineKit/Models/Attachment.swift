@@ -92,7 +92,6 @@ public extension Attachment {
 
     if let attachmentId = attachment.attachmentId {
       if let existing = try Attachment.filter(Column("attachmentId") == attachmentId).fetchOne(db) {
-        print("existing: \(existing)")
         return existing
       }
     }
