@@ -40,7 +40,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       peerId: inputPeer,
       message: input.text ?? undefined,
       photoId: input.photoId ? BigInt(input.photoId) : undefined,
-      sendDate: messageDate.getTime(),
+      sendDate: Math.floor(messageDate.getTime() / 1000),
       isSticker: false,
     },
     {
