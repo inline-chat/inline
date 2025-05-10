@@ -53,7 +53,13 @@ public enum ImageFormat: String, Codable, Sendable {
 }
 
 public protocol ImageSaving {
-  func save(to directory: URL, withName fileName: String, format: ImageFormat, optimize: Bool) -> String?
+  func save(to directory: URL, withName fileName: String, format: ImageFormat, optimize: Bool) throws
+    -> (path: String, url: URL)
+}
+
+enum ImageSavingError: Error {
+  case failedToSave
+  case failed(error: Error)
 }
 
 #if os(iOS)
@@ -66,7 +72,7 @@ extension UIImage: ImageSaving {
     withName fileName: String,
     format: ImageFormat,
     optimize: Bool = false
-  ) -> String? {
+  ) throws -> (path: String, url: URL) {
     // TODO: Resize on optimize=true
     let path = fileName.isEmpty ? UUID().uuidString + "." + format.fileExtension : fileName
     let fileUrl = directory.appendingPathComponent(path)
@@ -74,27 +80,26 @@ extension UIImage: ImageSaving {
     let imageData: Data? =
       switch format {
         case .png:
-          optimize ? optimizedPNGData() : pngData()
+          optimize ? try optimizedPNGData() : pngData()
         case .jpeg:
           jpegData(compressionQuality: optimize ? 0.8 : 1.0)
       }
 
-    guard let data = imageData else { return nil }
+    guard let data = imageData else { throw ImageSavingError.failedToSave }
 
-    do {
-      try data.write(to: fileUrl)
-      return path
-    } catch {
-      return nil
-    }
+    try data.write(to: fileUrl)
+    return (path: path, url: fileUrl)
   }
 
-  private func optimizedPNGData() -> Data? {
+  private func optimizedPNGData() throws -> Data {
     let imageToOptimize = self
 
     // Use ImageIO for better compression control
     guard let cgImage = imageToOptimize.cgImage else {
-      return imageToOptimize.pngData()
+      if let data = imageToOptimize.pngData() {
+        return data
+      }
+      throw ImageSavingError.failedToSave
     }
 
     let data = NSMutableData()
@@ -104,7 +109,10 @@ extension UIImage: ImageSaving {
       1,
       nil
     ) else {
-      return imageToOptimize.pngData()
+      if let data = imageToOptimize.pngData() {
+        return data
+      }
+      throw ImageSavingError.failedToSave
     }
 
     // PNG optimization properties
@@ -119,7 +127,10 @@ extension UIImage: ImageSaving {
     if CGImageDestinationFinalize(destination) {
       return data as Data
     } else {
-      return imageToOptimize.pngData()
+      if let data = imageToOptimize.pngData() {
+        return data
+      }
+      throw ImageSavingError.failedToSave
     }
   }
 }
@@ -131,13 +142,13 @@ extension NSImage: ImageSaving {
     withName fileName: String,
     format: ImageFormat,
     optimize: Bool = false
-  ) -> String? {
+  ) throws -> (path: String, url: URL) {
     let path = fileName.isEmpty ? UUID().uuidString + "." + format.fileExtension : fileName
     let fileUrl = directory.appendingPathComponent(path)
 
     // Get the CGImage representation
     guard let cgImage = cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-      return nil
+      throw ImageSavingError.failedToSave
     }
 
     // Create a mutable data object to hold the image data
@@ -152,7 +163,7 @@ extension NSImage: ImageSaving {
       1,
       nil
     ) else {
-      return nil
+      throw ImageSavingError.failedToSave
     }
 
     // Set properties based on format and optimization
@@ -167,15 +178,15 @@ extension NSImage: ImageSaving {
 
     // Finalize the destination
     guard CGImageDestinationFinalize(destination) else {
-      return nil
+      throw ImageSavingError.failedToSave
     }
 
-    // Write the data to file
     do {
+      // Write the data to file
       try data.write(to: fileUrl)
-      return path
+      return (path: path, url: fileUrl)
     } catch {
-      return nil
+      throw ImageSavingError.failed(error: error)
     }
   }
 }
