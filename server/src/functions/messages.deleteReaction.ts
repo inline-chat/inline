@@ -30,6 +30,7 @@ export const deleteReaction = async (input: Input, context: FunctionContext): Pr
         emoji: input.emoji,
         chatId: BigInt(chatId),
         messageId: input.messageId,
+        userId: BigInt(context.currentUserId),
       },
     },
   }
