@@ -15,7 +15,7 @@ public struct ApiUser: Codable, Hashable, Sendable {
   public var date: Int
   public var username: String?
   public var photo: [ApiPhoto]?
-
+  public var timeZone: String?
   public static let preview = Self(
     id: 1,
     email: "mo@inline.chat",
@@ -144,6 +144,7 @@ public extension User {
     lastOnline = apiUser.lastOnline.map(Self.fromTimestamp(from:))
     pendingSetup = apiUser.pendingSetup ?? false
     phoneNumber = apiUser.phoneNumber ?? nil
+    timeZone = apiUser.timeZone ?? nil
   }
 
   static func fromTimestamp(from: Int) -> Date {
