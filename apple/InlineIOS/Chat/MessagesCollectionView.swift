@@ -875,13 +875,17 @@ private extension MessagesCollectionView {
 
         let isMessageSending = message.status == .sending
 
-        let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
-          UIPasteboard.general.string = message.text
+        var actions: [UIAction] = []
+
+        if message.hasText {
+          let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
+            UIPasteboard.general.string = message.text
+          }
+          actions.append(copyAction)
         }
 
         if isMessageSending {
           let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { [weak self] _ in
-
             if let transactionId = message.transactionId, !transactionId.isEmpty {
               Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
 
@@ -899,9 +903,26 @@ private extension MessagesCollectionView {
               }
             }
           }
-          return UIMenu(children: [copyAction, cancelAction])
+          actions.append(cancelAction)
+
+          if fullMessage.photoInfo != nil {
+            let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
+              [weak self] _ in
+              guard let self else { return }
+              if let image = cell.messageView?.newPhotoView.getCurrentImage() {
+                UIPasteboard.general.image = image
+                ToastManager.shared.showToast(
+                  "Photo copied to clipboard",
+                  type: .success,
+                  systemImage: "doc.on.clipboard"
+                )
+              }
+            }
+            actions.append(copyPhotoAction)
+          }
+
+          return UIMenu(children: actions)
         }
-        var actions: [UIAction] = [copyAction]
 
         if fullMessage.photoInfo != nil {
           let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
