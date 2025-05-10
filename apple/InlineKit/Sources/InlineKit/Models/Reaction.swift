@@ -94,3 +94,20 @@ public extension Reaction {
     return reaction
   }
 }
+
+public struct GroupedReaction: Hashable, Sendable, Identifiable, Codable, Equatable {
+  public var id: String {
+    emoji
+  }
+
+  public var emoji: String
+  public var reactions: [Reaction]
+  public var maxDate: Date
+
+  public init(emoji: String, reactions: [Reaction]) {
+    self.emoji = emoji
+    self.reactions = reactions
+
+    maxDate = reactions.map(\.date).max() ?? Date()
+  }
+}

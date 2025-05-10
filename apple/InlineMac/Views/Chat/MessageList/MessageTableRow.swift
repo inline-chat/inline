@@ -7,7 +7,7 @@ import SwiftUI
 class MessageTableCell: NSView {
   private var messageView: MessageViewAppKit?
   private var currentContent: (message: FullMessage, props: MessageViewProps)?
-  private let log = Log.scoped("MessageTableCell", enableTracing: false)
+  private let log = Log.scoped("MessageTableCell", enableTracing: true)
 
   override init(frame: NSRect) {
     super.init(frame: frame)
@@ -25,7 +25,7 @@ class MessageTableCell: NSView {
     layerContentsRedrawPolicy = .onSetNeedsDisplay
   }
 
-  func configure(with message: FullMessage, props: MessageViewProps) {
+  func configure(with message: FullMessage, props: MessageViewProps, animate: Bool = true) {
     if message == currentContent?.message, props == currentContent?.props {
       // layoutSubtreeIfNeeded()
       // added this to solve the clipping issue in scroll view on last message when it was multiline and initial height
@@ -63,11 +63,15 @@ class MessageTableCell: NSView {
        currentContent.message.photoInfo?.id == message.photoInfo?.id,
        currentContent.message.videoInfo?.id == message.videoInfo?.id,
        currentContent.message.documentInfo?.id == message.documentInfo?.id,
+       // exclude reactions from reuse
+       currentContent.message.reactions == message.reactions || currentContent.message.id == message.id,
        // exclude replies from reuse
        currentContent.message.repliedToMessage?.id == message.repliedToMessage?.id,
        // disable re-use for file message completely for now until we can optimize later
        // same avatar
        currentContent.props.firstInGroup == props.firstInGroup
+    // For now, recreate if moving from single line to multi line
+    // , currentContent.props.layout.isSingleLine == props.layout.isSingleLine
     // different text
     // currentContent.message.message.text != message.message.text
     {
@@ -76,7 +80,9 @@ class MessageTableCell: NSView {
       log.trace("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
       #endif
       self.currentContent = (message, props)
-      updateTextAndSize()
+      // Only animate if same message
+      let animateForReal = animate && currentContent.message.message.id == message.message.id
+      updateTextAndSize(animate: animateForReal)
 
       return
     }
@@ -93,16 +99,11 @@ class MessageTableCell: NSView {
     updateContent()
   }
 
-//  func ensureLayout(_ props: MessageViewProps) {
-//    messageView?.ensureLayout(props)
-//    layoutSubtreeIfNeeded()
-//  }
-
-  func updateTextAndSize() {
+  func updateTextAndSize(animate: Bool = true) {
     guard let content = currentContent else { return }
     guard let messageView else { return }
 
-    messageView.updateTextAndSize(fullMessage: content.0, props: content.1)
+    messageView.updateTextAndSize(fullMessage: content.0, props: content.1, animate: animate)
     needsDisplay = true
   }
 
@@ -127,7 +128,11 @@ class MessageTableCell: NSView {
 
     messageView?.removeFromSuperview()
 
-    let newMessageView = MessageViewAppKit(fullMessage: content.0, props: content.1, isScrolling: scrollState.isScrolling)
+    let newMessageView = MessageViewAppKit(
+      fullMessage: content.0,
+      props: content.1,
+      isScrolling: scrollState.isScrolling
+    )
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(newMessageView)
 

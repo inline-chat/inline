@@ -173,8 +173,6 @@ class MessageListAppKit: NSViewController {
     }
     scrollToBottomButton.translatesAutoresizingMaskIntoConstraints = false
     scrollToBottomButton.setVisibility(false)
-    //scrollToBottomButton.alphaValue = 0
-    //scrollToBottomButton.wantsLayer = true
 
     return scrollToBottomButton
   }()
@@ -272,19 +270,6 @@ class MessageListAppKit: NSViewController {
   }
 
   private func updateMessageViewColors() {
-//    let visibleRect = userVisibleRect()
-//    let visibleRange = tableView.rows(in: visibleRect)
-//
-//    for row in visibleRange.location ..< visibleRange.location + visibleRange.length {
-//      guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell else {
-//        return
-//      }
-//      let rect = tableView.rect(ofRow: row)
-//
-//      let fractionToTopOfViewport = (rect.minY - visibleRect.minY) / visibleRect.height
-//
-//      cell.reflectBoundsChange(fraction: fractionToTopOfViewport)
-//    }
   }
 
   private var isToolbarVisible = false
@@ -910,6 +895,7 @@ class MessageListAppKit: NSViewController {
             context.duration = animationDuration
             tableView
               .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
+            tableView.noteHeightOfRows(withIndexesChanged: IndexSet(indexSet))
             if shouldScroll { scrollToBottom(animated: true) } // ??
           } completionHandler: { [weak self] in
             self?.isPerformingUpdate = false
@@ -1260,6 +1246,11 @@ extension MessageListAppKit: NSTableViewDelegate {
   func isFirstMessage(at row: Int) -> Bool {
     row == 0
   }
+  
+  var animateUpdates: Bool {
+    // don't animate initial layout
+    !needsInitialScroll
+  }
 
   /// ceil'ed table width.
   /// ceiling prevent subpixel differences in height calc passes which can cause jitter
@@ -1296,7 +1287,7 @@ extension MessageListAppKit: NSTableViewDelegate {
     )
 
     cell.setScrollState(scrollState)
-    cell.configure(with: message, props: props)
+    cell.configure(with: message, props: props, animate: animateUpdates)
 
     // Store the configured cell in cache
     // cellCache.cacheCell(cell, withType: "MessageCell", messageId: message.id)
