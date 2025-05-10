@@ -238,6 +238,7 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(makeApiRoute("/deleteMessage", DeleteMessageInput, DeleteMessageResponse, deleteMessageHandler))
       .use(makeApiRoute("/getIntegrations", GetIntegrationsInput, GetIntegrationsResponse, getIntegrationsHandler))
       .use(makeApiRoute("/getAlphaText", GetAlphaTextInput, GetAlphaTextResponse, getAlphaTextHandler))
+      .use(makeApiRoute("/sendMessage20250509", SendMessageInput, SendMessageResponse, sendMessageHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }
