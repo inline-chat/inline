@@ -1,12 +1,7 @@
-import Foundation
-import InlineKit
 import Logger
 import MultipartFormDataKit
 import SwiftUI
 
-#if canImport(UIKit)
-import UIKit
-#endif
 
 class ShareState: ObservableObject {
   @Published var sharedImages: [UIImage] = []
@@ -46,117 +41,60 @@ class ShareState: ObservableObject {
 
   func sendMessage(caption: String, selectedChat: SharedChat, completion: @escaping () -> Void) {
     guard !sharedImages.isEmpty,
-          let image = sharedImages.first
+          let image = sharedImages.first,
+          let imageData = image.jpegData(compressionQuality: 0.7)
     else {
-      log.error("No image to share")
+      log.error("Failed to prepare image data for upload")
       completion()
       return
     }
+
+    let fileName = "shared_image_\(Date().timeIntervalSince1970).jpg"
+    let mimeType = MIMEType.imageJpeg
+
+    log.info("Preparing to upload image: \(fileName) with size: \(imageData.count) bytes")
 
     isSending = true
     uploadProgress = 0
 
     Task {
       do {
-        autoreleasepool {
-          // Save image to temporary file for compression
-          let tempDir = FileManager.default.temporaryDirectory
-          let tempImageURL = tempDir.appendingPathComponent("temp_\(UUID().uuidString).jpg")
+        let apiClient = SharedApiClient.shared
 
-          guard let imageData = image.jpegData(compressionQuality: 1.0),
-                (try? imageData.write(to: tempImageURL)) != nil
-          else {
-            log.error("Failed to save temporary image")
+        // Upload file
+        log.info("Starting file upload...")
+        let uploadResult = try await apiClient.uploadFile(
+          data: imageData,
+          filename: fileName,
+          mimeType: mimeType,
+          progress: { [weak self] progress in
+            self?.log.info("Upload progress: \(Int(progress * 100))%")
             DispatchQueue.main.async {
-              self.isSending = false
-              completion()
-            }
-            return
-          }
-
-          // Clear the original image from memory
-          self.sharedImages.removeAll()
-
-          // Compress image using ImageCompressor
-          Task {
-            do {
-              let compressedURL = try await ImageCompressor.shared.compressImage(
-                at: tempImageURL,
-                options: .defaultPhoto
-              )
-
-              // Read compressed data
-              guard let compressedData = try? Data(contentsOf: compressedURL) else {
-                log.error("Failed to read compressed image data")
-                DispatchQueue.main.async {
-                  self.isSending = false
-                  completion()
-                }
-                return
-              }
-
-              // Clean up temporary files
-              try? FileManager.default.removeItem(at: tempImageURL)
-              try? FileManager.default.removeItem(at: compressedURL)
-
-              let fileName = "shared_image_\(Date().timeIntervalSince1970).jpg"
-              let mimeType = MIMEType.imageJpeg
-
-              log.info("Preparing to upload image: \(fileName) with size: \(compressedData.count) bytes")
-
-              let apiClient = SharedApiClient.shared
-
-              // Upload file
-              log.info("Starting file upload...")
-              do {
-                let uploadResult = try await apiClient.uploadFile(
-                  data: compressedData,
-                  filename: fileName,
-                  mimeType: mimeType,
-                  progress: { [weak self] progress in
-                    self?.log.info("Upload progress: \(Int(progress * 100))%")
-                    DispatchQueue.main.async {
-                      self?.uploadProgress = progress
-                    }
-                  }
-                )
-
-                log.info("File upload successful, fileUniqueId: \(uploadResult.fileUniqueId)")
-                uploadProgress = 1.0
-
-                // Send message
-                log.info("Sending message with uploaded file...")
-                _ = try await apiClient.sendMessage(
-                  peerUserId: selectedChat.peerUserId != nil ? Int64(selectedChat.peerUserId!) : nil,
-                  peerThreadId: selectedChat.peerThreadId != nil ? Int64(selectedChat.peerThreadId!) : nil,
-                  text: caption,
-                  randomId: nil,
-                  repliedToMessageId: nil,
-                  date: nil,
-                  fileUniqueId: uploadResult.fileUniqueId,
-                  isSticker: false
-                )
-
-                log.info("Message sent successfully")
-                DispatchQueue.main.async {
-                  self.isSending = false
-                  completion()
-                }
-              } catch {
-                log.error("Failed to share image", error: error)
-                DispatchQueue.main.async {
-                  self.isSending = false
-                  completion()
-                }
-              }
-            } catch {
-              log.error("Failed to compress image", error: error)
-              DispatchQueue.main.async {
-                self.isSending = false
-                completion()
-              }
+              self?.uploadProgress = progress
             }
           }
+        )
+
+        log.info("File upload successful, fileUniqueId: \(uploadResult.fileUniqueId)")
+        uploadProgress = 1.0
+
+        // Send message
+        log.info("Sending message with uploaded file...")
+        _ = try await apiClient.sendMessage(
+          peerUserId: selectedChat.peerUserId != nil ? Int64(selectedChat.peerUserId!) : nil,
+          peerThreadId: selectedChat.peerThreadId != nil ? Int64(selectedChat.peerThreadId!) : nil,
+          text: caption,
+          randomId: nil,
+          repliedToMessageId: nil,
+          date: nil,
+          fileUniqueId: uploadResult.fileUniqueId,
+          isSticker: false
+        )
+
+        log.info("Message sent successfully")
+        DispatchQueue.main.async {
+          self.isSending = false
+          completion()
         }
       } catch {
         log.error("Failed to share image", error: error)
