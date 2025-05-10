@@ -148,10 +148,10 @@ struct ReactionItem: View {
   var foregroundColor: Color {
     let isOutgoing = fullMessage?.message.out ?? false
     let baseColor = if colorScheme == .dark {
-      //isOutgoing ? Color.white : 
+      // isOutgoing ? Color.white :
       weReacted ? Color.accent : Color.white
     } else {
-      isOutgoing ? Color.accent : weReacted ? Color.white : Color.accent
+      isOutgoing ? (weReacted ? Color.accent : Color.white) : (weReacted ? Color.white : Color.accent)
     }
 
     return baseColor
