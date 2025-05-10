@@ -307,11 +307,12 @@ public extension Message {
     if globalId == nil {
       if let existing = try? Message.fetchOne(db, key: ["messageId": messageId, "chatId": chatId]) {
         globalId = existing.globalId
-        fileId = existing.fileId ?? fileId
-        photoId = existing.photoId ?? photoId
-        photoId = existing.documentId ?? documentId
-        photoId = existing.videoId ?? videoId
-        photoId = existing.repliedToMessageId ?? repliedToMessageId
+
+        fileId = fileId ?? existing.fileId
+        photoId = photoId ?? existing.photoId
+        documentId = documentId ?? existing.documentId
+        videoId = videoId ?? existing.videoId
+
         transactionId = existing.transactionId
         isExisting = true
       }
