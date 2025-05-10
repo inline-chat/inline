@@ -164,3 +164,12 @@ public final class HomeViewModel: ObservableObject {
       )
   }
 }
+
+public extension AppDatabase {
+  func getHomeChatItems() async throws -> [HomeChatItem] {
+    // Fetch all chat items
+    try await self.reader.read { db in
+      try HomeChatItem.all().fetchAll(db)
+    }
+  }
+}

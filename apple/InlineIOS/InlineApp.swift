@@ -4,7 +4,7 @@ import Sentry
 import SwiftUI
 
 @main
-struct InlineApp: App { 
+struct InlineApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
   var body: some Scene {
