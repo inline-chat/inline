@@ -28,11 +28,11 @@ struct ShareExtensionData: Codable {
 }
 
 struct SharedChat: Codable {
-  var id: String
+  var id: Int64
   var title: String
-  var peerUserId: String?
-  var peerThreadId: String?
-  init(id: String, title: String, peerUserId: String?, peerThreadId: String?) {
+  var peerUserId: Int64?
+  var peerThreadId: Int64?
+  init(id: Int64, title: String, peerUserId: Int64?, peerThreadId: Int64?) {
     self.id = id
     self.title = title
     self.peerUserId = peerUserId
@@ -41,11 +41,11 @@ struct SharedChat: Codable {
 }
 
 struct SharedUser: Codable {
-  var id: String
+  var id: Int64
   var firstName: String
   var lastName: String
 
-  init(id: String, firstName: String, lastName: String) {
+  init(id: Int64, firstName: String, lastName: String) {
     self.id = id
     self.firstName = firstName
     self.lastName = lastName
