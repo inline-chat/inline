@@ -32,6 +32,7 @@ class AppDataUpdater {
 //        let homeChatItems: [HomeChatItem] = try await db.reader.read { db in
 //          try HomeChatItem.all().fetchAll(db)
 //        }
+        //
         let homeChatItems: [HomeChatItem] = try await db.getHomeChatItems()
         print("👽 homeChatItems: \(homeChatItems)")
 
