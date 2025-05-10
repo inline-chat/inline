@@ -13,14 +13,14 @@ public actor FileCache: Sendable {
 
   private let database = AppDatabase.shared
   private let log = Log.scoped("FileCache")
-  
-   var downloadingPhotos : [Int64: Task<Void, Never>] = [:]
-  
+
+  var downloadingPhotos: [Int64: Task<Void, Never>] = [:]
+
   private init() {}
-  
-  private func removeFromDownloadingPhotos (_ id: Int64 ) {
-      downloadingPhotos[id] = nil
-      log.debug("Removed photo \(id) from downloadingPhotos")
+
+  private func removeFromDownloadingPhotos(_ id: Int64) {
+    downloadingPhotos[id] = nil
+    log.debug("Removed photo \(id) from downloadingPhotos")
   }
 
   // MARK: -  Fetches
@@ -33,13 +33,11 @@ public actor FileCache: Sendable {
   // MARK: -  Remote downloads
 
   public func download(photo: PhotoInfo, for message: Message) async {
-    
     guard downloadingPhotos[photo.id] == nil else {
-        log.debug("Photo \(photo.id) is already being downloaded")
-        return
+      log.debug("Photo \(photo.id) is already being downloaded")
+      return
     }
 
-    
     // TODO: Implement via Nuke for now?
     log.debug("downloading photo \(photo.id) for message \(message.id)")
 
@@ -48,13 +46,10 @@ public actor FileCache: Sendable {
       log.warning("No remote URL found for photo")
       return
     }
-    
 
     let request = ImageRequest(url: URL(string: remoteUrl))
-    downloadingPhotos[photo.id]  = Task {
-      
-      
-   _ =   await MainActor.run {
+    downloadingPhotos[photo.id] = Task {
+      _ = await MainActor.run {
         ImagePipeline.shared.loadData(
           with: request,
           progress: { completed, total in
@@ -65,41 +60,41 @@ public actor FileCache: Sendable {
           completion: { result in
             Task.detached { [weak self] in
               guard let self else { return }
-              
+
               await removeFromDownloadingPhotos(photo.id)
-             
+
               switch result {
-              case let .success(response):
-                log.debug("success \(response)")
-                
-                // Generate a new file name
-                let localPath = "IMG" + (photo.bestPhotoSize()?.type ?? "") + String(photo.id) +
-                photo.photo.format
-                  .toExt()
-                let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
-                do {
-                  try response.data.write(to: localUrl, options: .atomic)
-                  
-                  Task { [weak self] in
-                    guard let self else { return }
-                    // Update database
-                    try? await database.dbWriter.write { db in
-                      guard var matchingSize = photo.bestPhotoSize() else { return }
-                      matchingSize.localPath = localPath
-                      try matchingSize.save(db)
-                      self.log.debug("saved photo size \(matchingSize)")
+                case let .success(response):
+                  log.debug("success \(response)")
+
+                  // Generate a new file name
+                  let localPath = "IMG" + (photo.bestPhotoSize()?.type ?? "") + String(photo.id) +
+                    photo.photo.format
+                    .toExt()
+                  let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
+                  do {
+                    try response.data.write(to: localUrl, options: .atomic)
+
+                    Task { [weak self] in
+                      guard let self else { return }
+                      // Update database
+                      try? await database.dbWriter.write { db in
+                        guard var matchingSize = photo.bestPhotoSize() else { return }
+                        matchingSize.localPath = localPath
+                        try matchingSize.save(db)
+                        self.log.debug("saved photo size \(matchingSize)")
+                      }
+
+                      await triggerMessageReload(message: message)
                     }
-                    
-                    await triggerMessageReload(message: message)
+                  } catch {
+                    if Task.isCancelled {
+                      log.debug("Downloading photo \(photo.id) was cancelled")
+                    }
+                    log.error("error saving image locally \(error)")
                   }
-                } catch {
-                  if Task.isCancelled {
-                    log.debug("Downloading photo \(photo.id) was cancelled")
-                  }
-                  log.error("error saving image locally \(error)")
-                }
-              case let .failure(error):
-                log.error("error \(error)")
+                case let .failure(error):
+                  log.error("error \(error)")
               }
             }
           }
