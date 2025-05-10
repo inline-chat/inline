@@ -11,7 +11,7 @@ import Throttler
 
 class MessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
-  private let log = Log.scoped("MessageView", enableTracing: true)
+  private let log = Log.scoped("MessageView", enableTracing: false)
   static let avatarSize: CGFloat = Theme.messageAvatarSize
   private(set) var fullMessage: FullMessage
   private var props: MessageViewProps
