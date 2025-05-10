@@ -20,7 +20,7 @@ struct CreateSpace: View {
         Section {
           HStack {
             InitialsCircle(name: name, size: 40)
-            TextField("Space Name", text: $name)
+            TextField("eg. AGL Fellows", text: $name)
               .focused($isFocused)
               .keyboardType(.emailAddress)
               .textInputAutocapitalization(.never)
@@ -35,7 +35,7 @@ struct CreateSpace: View {
       .navigationBarTitleDisplayMode(.inline)
       .toolbar(content: {
         ToolbarItem(placement: .topBarLeading) {
-          Text("Create Space")
+          Text("Create a new supergroup (team)")
             .fontWeight(.bold)
         }
         ToolbarItem(placement: .topBarTrailing) {

@@ -15,7 +15,7 @@ struct CreateSpaceSwiftUI: View {
   
   var body: some View {
     VStack {
-      Text("Create a new space").font(.title2)
+      Text("Create a new supergroup (team)").font(.title2)
       
       GrayTextField("eg. AGI Fellows", text: $spaceName, size: .medium)
         .frame(maxWidth: 200)
