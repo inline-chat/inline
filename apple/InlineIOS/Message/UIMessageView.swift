@@ -32,7 +32,7 @@ class UIMessageView: UIView {
   }
 
   var bubbleColor: UIColor {
-    if isEmojiOnlyMessage || isSticker {
+    if specificUI {
       UIColor.clear
     } else if outgoing {
       ThemeManager.shared.selected.bubbleBackground
@@ -47,6 +47,10 @@ class UIMessageView: UIView {
 
   var message: Message {
     fullMessage.message
+  }
+
+  var shouldShowFloatingMetadata: Bool {
+    message.hasPhoto && !message.hasText
   }
 
   var isSticker: Bool {
@@ -70,6 +74,10 @@ class UIMessageView: UIView {
   var isTripleEmojiMessage: Bool {
     guard let text = message.text else { return false }
     return isEmojiOnlyMessage && text.count <= 3
+  }
+
+  var specificUI: Bool {
+    isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata
   }
 
   var isMultiline: Bool {
@@ -279,6 +287,10 @@ class UIMessageView: UIView {
     guard fullMessage.photoInfo != nil else { return }
 
     containerStack.addArrangedSubview(newPhotoView)
+
+    if shouldShowFloatingMetadata {
+      addFloatingMetadata()
+    }
   }
 
   func setupDocumentViewIfNeeded() {
@@ -359,15 +371,13 @@ class UIMessageView: UIView {
       }
 
       if fullMessage.reactions.count > 0 {
-        print("Setup reactions")
         setupReactionsIfNeeded()
         multiLineContainer.addArrangedSubview(reactionsFlowView)
       }
 
-      if !message.hasPhoto || message.hasText || isSticker {
+      if message.hasText || isSticker {
         setupMultilineMetadata()
         containerStack.addArrangedSubview(multiLineContainer)
-        return
       }
     }
   }
@@ -376,7 +386,7 @@ class UIMessageView: UIView {
     let metadataContainer = UIStackView()
     metadataContainer.axis = .horizontal
     metadataContainer.addArrangedSubview(UIView()) // Spacer
-    metadataContainer.addArrangedSubview(isEmojiOnlyMessage || isSticker ? floatingMetadataView : metadataView)
+    metadataContainer.addArrangedSubview(specificUI ? floatingMetadataView : metadataView)
     multiLineContainer.addArrangedSubview(metadataContainer)
   }
 
