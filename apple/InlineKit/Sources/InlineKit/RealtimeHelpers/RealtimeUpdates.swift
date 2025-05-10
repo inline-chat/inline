@@ -250,7 +250,12 @@ extension InlineProtocol.UpdateMessageAttachment {
 extension InlineProtocol.UpdateReaction {
   func apply(_ db: Database) throws {
     _ = try Reaction.save(db, protocolMessage: reaction, publishChanges: true)
-    let message = try Message.filter(Column("messageId") == reaction.messageID).fetchOne(db)
+    let message = try Message
+      .filter(Column("messageId") == reaction.messageID)
+      .filter(Column("chatId") == reaction.chatID)
+      .fetchOne(
+        db
+      )
 
     if let message {
       db.afterNextTransaction { _ in
@@ -265,9 +270,27 @@ extension InlineProtocol.UpdateReaction {
 extension InlineProtocol.UpdateDeleteReaction {
   func apply(_ db: Database) throws {
     _ = try Reaction.filter(
-      Column("messageId") == messageID && Column("chatId") == chatID && Column("emoji") == emoji && Column("userId") ==
-        Auth.shared.getCurrentUserId() ?? 0
-    ).deleteAll(db)
+      Column("messageId") == messageID
+    ).filter(Column("chatId") == chatID)
+      .filter(Column("emoji") == emoji)
+      .filter(
+        Column("userId") == userID
+      ).deleteAll(db)
+
+    let message = try Message
+      .filter(Column("messageId") == messageID)
+      .filter(Column("chatId") == chatID)
+      .fetchOne(
+        db
+      )
+
+    if let message {
+      db.afterNextTransaction { _ in
+        Task(priority: .userInitiated) { @MainActor in
+          MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
+        }
+      }
+    }
   }
 }
 
