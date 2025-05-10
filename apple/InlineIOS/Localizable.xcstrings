@@ -116,10 +116,10 @@
     "Create" : {
 
     },
-    "Create Chat" : {
+    "Create a new supergroup (team)" : {
 
     },
-    "Create Space" : {
+    "Create Chat" : {
 
     },
     "Creating Account..." : {
@@ -135,6 +135,9 @@
 
     },
     "Edit" : {
+
+    },
+    "eg. AGL Fellows" : {
 
     },
     "Email" : {
@@ -519,9 +522,6 @@
 
     },
     "Settings" : {
-
-    },
-    "Space Name" : {
 
     },
     "Sticker" : {
