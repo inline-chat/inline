@@ -856,6 +856,11 @@ extension ComposeView {
       return
     }
 
+    // Save the captured photo to the photo library
+    if picker.sourceType == .camera {
+      UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+    }
+
     picker.dismiss(animated: true) { [weak self] in
       self?.handleDroppedImage(image)
     }
