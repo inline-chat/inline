@@ -1,5 +1,5 @@
 {
-  "id": "5860ec34-13b8-46f0-9abb-343fe0fe35c2",
+  "id": "014162d3-837c-4ba2-bdc9-55b483ee3214",
   "prevId": "c3c4097c-59c7-4621-83c4-b0a305fd19b1",
   "version": "7",
   "dialect": "postgresql",
@@ -2451,13 +2451,13 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "message_id_chat_id_fk": {
-          "name": "message_id_chat_id_fk",
+        "chat_id_message_id_fk": {
+          "name": "chat_id_message_id_fk",
           "tableFrom": "message_translations",
           "tableTo": "messages",
           "columnsFrom": [
-            "message_id",
-            "chat_id"
+            "chat_id",
+            "message_id"
           ],
           "columnsTo": [
             "chat_id",
