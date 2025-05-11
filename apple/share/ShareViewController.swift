@@ -47,9 +47,9 @@ class ShareViewController: UIViewController {
       hostingController.view.bottomAnchor.constraint(equalTo: sheetContainerView.bottomAnchor),
     ])
 
-    let sheetHeight: CGFloat = 480
+    let sheetHeight: CGFloat = UIScreen.main.bounds.height * 0.5
     let bottomConstraint = sheetContainerView.bottomAnchor.constraint(
-      equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+      equalTo: view.keyboardLayoutGuide.topAnchor,
       constant: sheetHeight
     )
     NSLayoutConstraint.activate([

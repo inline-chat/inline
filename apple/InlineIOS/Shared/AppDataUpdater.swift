@@ -41,7 +41,7 @@ class AppDataUpdater {
         // Process chats
         for item in homeChatItems {
           let chatId = item.dialog.id
-          let title = item.user.user.fullName
+          let title = item.user.user.firstName ?? item.user.user.fullName
 
           var peerUserId: Int64? = nil
           var peerThreadId: Int64? = nil
