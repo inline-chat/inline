@@ -58,9 +58,10 @@ actor TranslationManager {
 
         if existingTranslation == nil {
           // Detect message language
-          if let detectedLanguage = LanguageDetector.detect(text),
-             detectedLanguage != targetLanguage
-          {
+          let detectedLanguages = LanguageDetector.detectTopTwoSupported(text)
+          self.log.debug("Detected languages: \(detectedLanguages) for message \(message.messageId)")
+          // Only translate if target language is not among the top 2 detected languages
+          if !detectedLanguages.contains(targetLanguage) {
             messagesNeedingTranslation.append(message)
           }
         }

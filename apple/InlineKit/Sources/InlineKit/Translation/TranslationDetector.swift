@@ -37,44 +37,37 @@ public final class TranslationDetector {
   public func analyzeMessages(peer: Peer, messages: [FullMessage]) {
     Task(priority: .background) {
       let userLanguage = UserLocale.getCurrentLanguage()
-      var needsTranslation = false
 
-      let recognizer = NLLanguageRecognizer()
-      recognizer.languageConstraints = supportedLanguages
-
-      // Process messages in batches to avoid blocking
+      // Check messages one by one
       for message in messages {
         guard let text = message.message.text, !text.isEmpty else { continue }
+
+        // Create a new recognizer for each message
+        let recognizer = NLLanguageRecognizer()
+        recognizer.languageConstraints = supportedLanguages
+
         recognizer.processString(text)
-      }
+        let hypotheses = recognizer.languageHypotheses(withMaximum: 1)
 
-      let hypotheses = recognizer.languageHypotheses(withMaximum: 2)
-      guard !hypotheses.isEmpty else {
-        return
-      }
-
-      // Check if any of the top 2 languages match the user's language
-      let matchingHypothesis = hypotheses.first { $0.key.rawValue == userLanguage }
-
-      if let matchingHypothesis {
-        // If we found a match with user's language, no translation needed
-        log.debug("Found matching language: \(userLanguage) (confidence: \(matchingHypothesis.value))")
-        needsTranslation = false
-      } else {
-        // If no match found, use the most confident language
-        if let topHypothesis = hypotheses.first, topHypothesis.value >= confidenceThreshold {
+        // If we found a language with sufficient confidence
+        if let detectedLanguage = hypotheses.first,
+           detectedLanguage.key.rawValue != userLanguage,
+           detectedLanguage.value >= confidenceThreshold
+        {
           log
             .debug(
-              "Translation needed: \(topHypothesis.key.rawValue) != \(userLanguage) (confidence: \(topHypothesis.value))"
+              "Found message in other language: \(detectedLanguage.key.rawValue) with confidence: \(detectedLanguage.value)"
             )
-          needsTranslation = true
-        } else {
-          log.debug("Confidence too low (\(hypotheses.first?.value ?? 0)) to determine language")
+          log.debug("Translation needed: true")
+          publisher.send(DetectionResult(peer: peer, needsTranslation: true))
+          return
         }
       }
 
-      log.debug("Translation needed: \(needsTranslation)")
-      publisher.send(DetectionResult(peer: peer, needsTranslation: needsTranslation))
+      // If we get here, no messages needed translation
+      log.debug("No messages found in other languages")
+      log.debug("Translation needed: false")
+      publisher.send(DetectionResult(peer: peer, needsTranslation: false))
     }
   }
 }
