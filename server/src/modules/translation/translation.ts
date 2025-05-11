@@ -78,7 +78,8 @@ async function translateMessages(input: {
   }
 
   try {
-    const result = BatchTranslationResultSchema.parse(response.choices[0]?.message.content)
+    log.info(`Translation result: ${response.choices[0]?.message.content}`)
+    const result = BatchTranslationResultSchema.parse(JSON.parse(response.choices[0]?.message.content ?? "{}"))
     const date = new Date()
     return result.translations.map((t) => ({
       translation: t.translation,
