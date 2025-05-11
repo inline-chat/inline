@@ -18,9 +18,9 @@ public final class TranslationDetector {
   ]
 
   public struct DetectionResult {
-    let peer: Peer
-    let needsTranslation: Bool
-    let detectedLanguages: [(language: String, confidence: Double)]
+    public let peer: Peer
+    public let needsTranslation: Bool
+    public let detectedLanguages: [(language: String, confidence: Double)]
   }
 
   private let log = Log.scoped("TranslationDetector")
