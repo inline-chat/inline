@@ -921,7 +921,8 @@ class MessageViewAppKit: NSView {
   private func setupMessageText() {
     guard hasText else { return }
 
-    let text = message.text ?? ""
+    // Get display text which handles translations
+    let text = fullMessage.displayText ?? ""
 
     // From Cache
     if let cachedAttributedString = CacheAttrs.shared.get(message: message) {
@@ -969,7 +970,10 @@ class MessageViewAppKit: NSView {
 
     textView.textStorage?.setAttributedString(attributedString)
 
-    CacheAttrs.shared.set(message: message, value: attributedString)
+    // Only cache if translation is not enabled
+    if !TranslationState.shared.isTranslationEnabled(for: fullMessage.peerId) {
+      CacheAttrs.shared.set(message: message, value: attributedString)
+    }
 
     if useTextKit2 {
       textView.textContainer?.size = props.layout.text?.size ?? .zero
