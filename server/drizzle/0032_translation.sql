@@ -16,7 +16,7 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
- ALTER TABLE "message_translations" ADD CONSTRAINT "message_id_chat_id_fk" FOREIGN KEY ("message_id","chat_id") REFERENCES "public"."messages"("chat_id","message_id") ON DELETE no action ON UPDATE no action;
+ ALTER TABLE "message_translations" ADD CONSTRAINT "chat_id_message_id_fk" FOREIGN KEY ("chat_id","message_id") REFERENCES "public"."messages"("chat_id","message_id") ON DELETE no action ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
