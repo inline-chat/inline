@@ -34,14 +34,14 @@ async function translateMessages(input: {
 
   // Call OpenAI
   const response = await openaiClient.chat.completions.create({
-    //model: "gpt-4.1-mini",
-    model: "gpt-4.1-nano",
+    model: "gpt-4.1-mini",
+    // model: "gpt-4.1-nano",
     messages: [
       {
         role: "system",
-        content: `You are a translator. Translate the following text to ${getLanguageNameFromCode(
+        content: `You are a message translator for Inline Chat App, a work chat app like Slack. Translate the following message texts to ${getLanguageNameFromCode(
           input.language,
-        )} language. This is a work chat app like Slack. Try to preserve the original meaning, intent and tone of the messages. Do not use formal language. Do not add or remove or change any emojis, special characters, code, numbers, barcodes, URLs, etc. Preserve those as is properly. Then, output the translations, no explanations or additional text. Find messages by their id between <message id="<id>" date="<ISO date>" [...more attributes]> and </message> tags. Use the context to help you translate the messages. Return the translations in an array of objects by attaching the message id to the translation.`,
+        )} language. If parts of text are already in "${languageName}", keep them as is. Don't be formal, this is a chat between coworkers. Try to preserve the original meaning, intent and tone of the messages. Don't add extra information. Don't summarize. Do not use formal language. Do not add or remove or change any emojis, special characters, code, numbers, barcodes, URLs, emails,  etc. Preserve those as is properly. Then, output the translations, no explanations or additional text. This is a work context, people collaborating, coordinating, discussing, sharing information, etc usually. Find messages by their id between <message id="<id>" date="<ISO date>" [...more attributes]> and </message> tags. Use the context to help you translate the messages. Return the translations in an array of objects by attaching the message id to the translation.`,
       },
       {
         role: "user",
@@ -49,7 +49,9 @@ async function translateMessages(input: {
         <context>
         Chat ID: ${input.chat.id}
         Chat: ${input.chat.title}
+        Type: ${input.chat.type}
         Today's date: ${new Date().toLocaleDateString()}
+        This chat is part of Wanver workspace, a company for streamers selling stuff online. It has a warehouse, it processes products, it builds a software called wanver.shop to facilitate selling. They operate in Taiwan and Canada. They have several shops called Amy Shop, Pan pan, Crazy Shop, etc. 
         </context>
 
         <messages>
@@ -79,6 +81,20 @@ async function translateMessages(input: {
 
   try {
     log.info(`Translation result: ${response.choices[0]?.message.content}`)
+    log.info("AI usage", response.usage)
+
+    // Calculate price based on token usage
+    // Input tokens: $0.40 per 1M tokens ($0.00040 per 1K tokens)
+    // Output tokens: $1.60 per 1M tokens ($0.00160 per 1K tokens)
+    const inputTokens = response.usage?.prompt_tokens ?? 0
+    const outputTokens = response.usage?.completion_tokens ?? 0
+
+    const inputPrice = (inputTokens * 0.0004) / 1000
+    const outputPrice = (outputTokens * 0.0016) / 1000
+    const totalPrice = inputPrice + outputPrice
+
+    log.info(`Translation price: $${totalPrice.toFixed(4)}`)
+
     const result = BatchTranslationResultSchema.parse(JSON.parse(response.choices[0]?.message.content ?? "{}"))
     const date = new Date()
     return result.translations.map((t) => ({
