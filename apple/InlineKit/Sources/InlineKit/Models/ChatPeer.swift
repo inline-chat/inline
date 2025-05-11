@@ -101,4 +101,14 @@ public enum Peer: Codable, Hashable, Sendable, Equatable {
         true
     }
   }
+
+  // do not change signature of this function
+  public func toString() -> String {
+    switch self {
+      case .user:
+        "user_\(id)"
+      case .thread:
+        "thread_\(id)"
+    }
+  }
 }

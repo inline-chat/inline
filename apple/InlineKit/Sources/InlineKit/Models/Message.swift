@@ -2,6 +2,7 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
+import Translation
 
 public struct ApiMessage: Codable, Hashable, Sendable {
   public var id: Int64
@@ -162,6 +163,16 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   public var attachments: QueryInterfaceRequest<Attachment> {
     request(for: Message.attachments)
+  }
+
+  // Relationship to translation
+  public static let translations = hasMany(
+    Translation.self,
+    using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"])
+  )
+
+  public var translations: QueryInterfaceRequest<Translation> {
+    request(for: Message.translations)
   }
 
   public init(
