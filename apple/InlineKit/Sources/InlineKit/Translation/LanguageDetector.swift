@@ -25,7 +25,7 @@ class LanguageDetector {
     return languageCode
   }
 
-  private static func cleanText(_ text: String) -> String {
+  public static func cleanText(_ text: String) -> String {
     // Remove URLs
     let urlPattern = "https?://\\S+"
     let withoutUrls = text.replacingOccurrences(of: urlPattern, with: "", options: .regularExpression)
