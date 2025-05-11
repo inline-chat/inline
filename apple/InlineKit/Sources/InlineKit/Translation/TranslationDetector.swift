@@ -48,19 +48,29 @@ public final class TranslationDetector {
         recognizer.processString(text)
       }
 
-      guard let languageCode = recognizer.dominantLanguage?.rawValue,
-            let confidence = recognizer.languageHypotheses(withMaximum: 1).first?.value
-      else {
+      let hypotheses = recognizer.languageHypotheses(withMaximum: 2)
+      guard !hypotheses.isEmpty else {
         return
       }
 
-      if confidence >= confidenceThreshold {
-        if languageCode != userLanguage {
-          log.debug("Translation needed: \(languageCode) != \(userLanguage) (confidence: \(confidence))")
-          needsTranslation = true
-        }
+      // Check if any of the top 2 languages match the user's language
+      let matchingHypothesis = hypotheses.first { $0.key.rawValue == userLanguage }
+
+      if let matchingHypothesis {
+        // If we found a match with user's language, no translation needed
+        log.debug("Found matching language: \(userLanguage) (confidence: \(matchingHypothesis.value))")
+        needsTranslation = false
       } else {
-        log.debug("Confidence too low (\(confidence)) to determine language")
+        // If no match found, use the most confident language
+        if let topHypothesis = hypotheses.first, topHypothesis.value >= confidenceThreshold {
+          log
+            .debug(
+              "Translation needed: \(topHypothesis.key.rawValue) != \(userLanguage) (confidence: \(topHypothesis.value))"
+            )
+          needsTranslation = true
+        } else {
+          log.debug("Confidence too low (\(hypotheses.first?.value ?? 0)) to determine language")
+        }
       }
 
       log.debug("Translation needed: \(needsTranslation)")
