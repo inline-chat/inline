@@ -11,7 +11,6 @@ actor TranslationManager {
 
   // Cache for pending translation requests to avoid duplicates
   private var pendingTranslations: Set<Int64> = []
-  private var translationTask: Task<Void, Never>?
 
   private init() {}
 
@@ -20,34 +19,20 @@ actor TranslationManager {
   ///   - messages: Messages to check for translation
   ///   - chatId: ID of the chat containing the messages
   ///   - peerId: Peer ID for the chat
-  func requestTranslations(messages: [Message], chatId: Int64, peerId: Peer) async {
-    // Cancel any existing translation task
-    translationTask?.cancel()
+  func requestTranslations(messages: [Message], chatId: Int64, peerId: Peer) async throws {
+    // Get user's preferred language
+    let targetLanguage = UserLocale.getCurrentLanguage()
+    log.debug("Requesting translations for \(messages.count) messages in \(targetLanguage)")
 
-    // Create new task with debounce
-    translationTask = Task {
-      do {
-        try await Task.sleep(nanoseconds: 500_000_000) // 500ms debounce
-        guard !Task.isCancelled else { return }
+    // Create translation request
+    var input = TranslateMessagesInput()
+    input.peerID = peerId.toInputPeer()
+    input.messageIds = messages.map(\.messageId)
+    input.language = targetLanguage
 
-        // Get user's preferred language
-        let targetLanguage = UserLocale.getCurrentLanguage()
-        self.log.debug("Requesting translations for \(messages.count) messages in \(targetLanguage)")
-
-        // Create translation request
-        var input = TranslateMessagesInput()
-        input.peerID = peerId.toInputPeer()
-        input.messageIds = messages.map(\.messageId)
-        input.language = targetLanguage
-
-        // Call translation API
-        try await realtime.invokeWithHandler(.translateMessages, input: .translateMessages(input))
-        self.log.debug("Successfully sent translation request to API")
-
-      } catch {
-        self.log.error("Failed to request translations", error: error)
-      }
-    }
+    // Call translation API
+    try await realtime.invokeWithHandler(.translateMessages, input: .translateMessages(input))
+    log.debug("Successfully sent translation request to API")
   }
 
   /// Filter messages that need translation
