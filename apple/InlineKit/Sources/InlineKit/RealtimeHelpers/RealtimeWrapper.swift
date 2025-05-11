@@ -191,6 +191,9 @@ public extension Realtime {
         case let .removeChatParticipant(result):
           try await handleResult_removeChatParticipant(result, input: input!)
 
+        case let .translateMessages(result):
+          try await handleResult_translateMessages(result, input: input!)
+
         default:
           break
       }
@@ -389,5 +392,32 @@ public extension Realtime {
 
   private func handleResult_deleteChat() async throws {
     log.trace("deleteChat done")
+  }
+
+  private func handleResult_translateMessages(
+    _ result: InlineProtocol.TranslateMessagesResult,
+    input: RpcCall.OneOf_Input
+  ) async throws {
+    log.trace("translate result: \(result)")
+
+    guard case let .translateMessages(input) = input else {
+      log.error("could not infer chatId and userId")
+      return
+    }
+
+    let peerID = input.peerID
+
+    try await db.dbWriter.write { db in
+      guard let chat = try Chat.getByPeerId(peerId: peerID.toPeer()) else {
+        self.log.error("could not find chat")
+        return
+      }
+      let chatID = chat.id
+      for translation in result.translations {
+        _ = try Translation.save(db, protocolTranslation: translation, chatId: chatID)
+      }
+
+      // TODO: reload messages???
+    }
   }
 }
