@@ -25,10 +25,10 @@ export const translations = pgTable(
     language: text("language").notNull(),
   },
   (t) => ({
-    /** Ensure messageId and chatId are valid */
-    messageIdChatIdForeignKey: foreignKey({
-      name: "message_id_chat_id_fk",
-      columns: [t.messageId, t.chatId],
+    /** Ensure chatId and messageId are valid */
+    chatIdMessageIdForeignKey: foreignKey({
+      name: "chat_id_message_id_fk",
+      columns: [t.chatId, t.messageId],
       foreignColumns: [messages.chatId, messages.messageId],
     }),
   }),
