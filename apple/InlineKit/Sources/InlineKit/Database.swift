@@ -404,6 +404,34 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("translations") { db in
+      try db.create(table: "translation") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("messageId", .integer).notNull()
+        t.column("chatId", .integer).notNull()
+        t.column("translation", .text)
+        t.column("language", .text).notNull()
+        t.column("date", .datetime).notNull()
+
+        // Add foreign key constraints
+        t.foreignKey(
+          ["chatId", "messageId"],
+          references: "message",
+          columns: ["chatId", "messageId"],
+          onDelete: .cascade
+        )
+        t.foreignKey(["chatId"], references: "chat", columns: ["id"], onDelete: .cascade)
+      }
+
+      // Add index for faster lookups
+      try db.create(
+        index: "translation_lookup_idx",
+        on: "translation",
+        columns: ["chatId", "messageId", "language"],
+        unique: true
+      )
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
