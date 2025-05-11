@@ -225,6 +225,13 @@
       "when": 1746721381389,
       "tag": "0031_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1747000349043,
+      "tag": "0032_translation",
+      "breakpoints": true
     }
   ]
 }
