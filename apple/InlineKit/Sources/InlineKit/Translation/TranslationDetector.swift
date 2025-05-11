@@ -17,19 +17,24 @@ public final class TranslationDetector {
     .persian,
   ]
 
+  public struct DetectionResult {
+    let peer: Peer
+    let needsTranslation: Bool
+  }
+
   private let log = Log.scoped("TranslationDetector")
-  private let publisher = PassthroughSubject<Bool, Never>()
+  private let publisher = PassthroughSubject<DetectionResult, Never>()
 
   private init() {}
 
   /// Publisher that emits true when translation is needed, false otherwise
-  public var needsTranslation: AnyPublisher<Bool, Never> {
+  public var needsTranslation: AnyPublisher<DetectionResult, Never> {
     publisher.eraseToAnyPublisher()
   }
 
   /// Analyze messages to detect if translation is needed
   /// - Parameter messages: Array of messages to analyze
-  public func analyzeMessages(_ messages: [FullMessage]) {
+  public func analyzeMessages(peer: Peer, messages: [FullMessage]) {
     Task(priority: .background) {
       let userLanguage = UserLocale.getCurrentLanguage()
       var needsTranslation = false
@@ -59,7 +64,7 @@ public final class TranslationDetector {
       }
 
       log.debug("Translation needed: \(needsTranslation)")
-      await publisher.send(needsTranslation)
+      publisher.send(DetectionResult(peer: peer, needsTranslation: needsTranslation))
     }
   }
 }

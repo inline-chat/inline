@@ -32,54 +32,108 @@ export async function translateMessages(
   input: TranslateMessagesFnInput,
   context: FunctionContext,
 ): Promise<{ translations: MessageTranslation[] }> {
-  // Get chat
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  try {
+    log.debug("Starting translation request", {
+      peerId: input.peerId,
+      messageCount: input.messageIds.length,
+      language: input.language,
+    })
 
-  // Get messages
-  const msgs = await getMessagesAndTranslations({
-    chatId: chat.id,
-    messageIds: input.messageIds,
-    translationLanguage: input.language,
-  })
+    // Get chat
+    const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+    log.debug("Retrieved chat", { chatId: chat.id })
 
-  log.debug("Got messages", {
-    msgs: msgs.length,
-  })
+    // Get messages
+    const msgs = await getMessagesAndTranslations({
+      chatId: chat.id,
+      messageIds: input.messageIds,
+      translationLanguage: input.language,
+    })
 
-  // Get existing translations
-  const existingTranslations = await db.query.translations.findMany({
-    where: and(
-      eq(translations.chatId, chat.id),
-      eq(translations.language, input.language),
-      inArray(translations.messageId, input.messageIds),
-    ),
-  })
+    log.debug("Retrieved messages", {
+      messageCount: msgs.length,
+      requestedCount: input.messageIds.length,
+    })
 
-  // Filter out messages that already have translations
-  const messagesToTranslate = msgs.filter((msg) => !existingTranslations.some((t) => t.messageId === msg.messageId))
+    // Get existing translations
+    const existingTranslations = await db.query.translations.findMany({
+      where: and(
+        eq(translations.chatId, chat.id),
+        eq(translations.language, input.language),
+        inArray(translations.messageId, input.messageIds),
+      ),
+    })
 
-  // Nothing to translate
-  if (!messagesToTranslate.length) {
-    log.debug("No messages to translate")
-    return {
-      translations: existingTranslations.map((t) => Encoders.translation({ translation: t })),
+    log.debug("Found existing translations", {
+      existingCount: existingTranslations.length,
+    })
+
+    // Filter out messages that already have translations
+    const messagesToTranslate = msgs.filter((msg) => !existingTranslations.some((t) => t.messageId === msg.messageId))
+
+    // Nothing to translate
+    if (!messagesToTranslate.length) {
+      log.debug("No new messages to translate, returning existing translations")
+      return {
+        translations: existingTranslations.map((t) => Encoders.translation({ translation: t })),
+      }
     }
-  }
 
-  // Translate messages
-  const messageTranslations = await TranslationModule.translateMessages({
-    messages: messagesToTranslate,
-    language: input.language,
-    chat,
-    actorId: context.currentUserId,
-  })
+    log.debug("Starting translation of new messages", {
+      newMessagesCount: messagesToTranslate.length,
+    })
 
-  // Insert translations
-  await TranslationModel.insertTranslations(messageTranslations)
+    // Translate messages
+    const messageTranslations = await TranslationModule.translateMessages({
+      messages: messagesToTranslate,
+      language: input.language,
+      chat,
+      actorId: context.currentUserId,
+    }).catch((error) => {
+      log.error("Failed to translate messages", {
+        error,
+        messageCount: messagesToTranslate.length,
+        language: input.language,
+      })
+      throw error
+    })
 
-  // Encode translations
-  return {
-    translations: messageTranslations.map((t) => Encoders.unencryptedTranslation({ translation: t })),
+    log.debug("Successfully translated messages", {
+      translatedCount: messageTranslations.length,
+    })
+
+    // Insert translations
+    await TranslationModel.insertTranslations(messageTranslations).catch((error) => {
+      log.error("Failed to insert translations", {
+        error,
+        translationCount: messageTranslations.length,
+      })
+      throw error
+    })
+
+    // Combine new and existing translations
+    const allTranslations = [
+      ...messageTranslations.map((t) => Encoders.unencryptedTranslation({ translation: t })),
+      ...existingTranslations.map((t) => Encoders.translation({ translation: t })),
+    ]
+
+    log.debug("Returning combined translations", {
+      totalTranslations: allTranslations.length,
+      newTranslations: messageTranslations.length,
+      existingTranslations: existingTranslations.length,
+    })
+
+    return {
+      translations: allTranslations,
+    }
+  } catch (error) {
+    log.error("Failed to process translation request", {
+      error,
+      peerId: input.peerId,
+      messageCount: input.messageIds.length,
+      language: input.language,
+    })
+    throw error
   }
 }
 
@@ -91,34 +145,48 @@ async function getMessagesAndTranslations(input: {
   messageIds: number[]
   translationLanguage: string
 }): Promise<ProcessedMessageAndTranslation[]> {
-  let result = await db.query.messages.findMany({
-    where: and(eq(messages.chatId, input.chatId), inArray(messages.messageId, input.messageIds)),
-    orderBy: desc(messages.messageId),
-    with: {
-      translations: {
-        where: eq(translations.language, input.translationLanguage),
+  try {
+    let result = await db.query.messages.findMany({
+      where: and(eq(messages.chatId, input.chatId), inArray(messages.messageId, input.messageIds)),
+      orderBy: desc(messages.messageId),
+      with: {
+        translations: {
+          where: eq(translations.language, input.translationLanguage),
+        },
       },
-    },
-  })
+    })
 
-  return result.map((msg) => {
-    let translation = msg.translations.find((t) => t.language === input.translationLanguage) ?? null
-    return {
-      ...msg,
+    log.debug("Retrieved messages from database", {
+      foundCount: result.length,
+      requestedCount: input.messageIds.length,
+    })
 
-      // Decrypt text
-      text:
-        msg.textEncrypted && msg.textIv && msg.textTag
-          ? decryptMessage({
-              encrypted: msg.textEncrypted,
-              iv: msg.textIv,
-              authTag: msg.textTag,
-            })
-          : // legacy fallback
-            msg.text,
+    return result.map((msg) => {
+      let translation = msg.translations.find((t) => t.language === input.translationLanguage) ?? null
+      return {
+        ...msg,
 
-      // Get translation in language
-      translation: translation ? processMessageTranslation(translation) : null,
-    }
-  })
+        // Decrypt text
+        text:
+          msg.textEncrypted && msg.textIv && msg.textTag
+            ? decryptMessage({
+                encrypted: msg.textEncrypted,
+                iv: msg.textIv,
+                authTag: msg.textTag,
+              })
+            : // legacy fallback
+              msg.text,
+
+        // Get translation in language
+        translation: translation ? processMessageTranslation(translation) : null,
+      }
+    })
+  } catch (error) {
+    log.error("Failed to get messages and translations", {
+      error,
+      chatId: input.chatId,
+      messageCount: input.messageIds.length,
+    })
+    throw error
+  }
 }

@@ -127,7 +127,7 @@ public class MessagesProgressiveViewModel {
 
           // Only analyze new messages if we haven't done initial analysis
           if !hasAnalyzedInitialMessages, !newMessages.isEmpty {
-            TranslationDetector.shared.analyzeMessages(newMessages)
+            TranslationDetector.shared.analyzeMessages(peer: peer, messages: newMessages)
             hasAnalyzedInitialMessages = true
           }
 
@@ -275,7 +275,7 @@ public class MessagesProgressiveViewModel {
 
       // Only analyze messages on initial load
       if case let .limit(limit) = loadMode, limit == initialLimit, !hasAnalyzedInitialMessages {
-        TranslationDetector.shared.analyzeMessages(messages)
+        TranslationDetector.shared.analyzeMessages(peer: peer, messages: messages)
         hasAnalyzedInitialMessages = true
       }
     } catch {
