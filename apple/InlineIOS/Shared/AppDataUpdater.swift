@@ -15,8 +15,6 @@ class AppDataUpdater {
     DispatchQueue.global(qos: .background).async {
       self.fetchChatsAndUsers { chats, users in
         if let chats, let users {
-          print("👽 Chats: \(chats)")
-          print("👽 Users: \(users)")
           // Save data to shared location
           BridgeManager.shared.saveSharedData(chats: chats, users: users)
         }

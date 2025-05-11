@@ -116,6 +116,38 @@ struct ShareView: View {
     .onAppear {
       state.loadSharedData()
     }
+    .alert(
+      state.errorState?.title ?? "Error",
+      isPresented: Binding(
+        get: { state.errorState != nil },
+        set: { if !$0 {
+          state.errorState = nil
+          if state.isSending == false {
+            extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+          }
+        } }
+      ),
+      actions: {
+        Button("OK", role: .cancel) {
+          state.errorState = nil
+          if state.isSending == false {
+            extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+          }
+        }
+      },
+      message: {
+        VStack(alignment: .leading) {
+          if let message = state.errorState?.message {
+            Text(message)
+          }
+          if let suggestion = state.errorState?.suggestion {
+            Text(suggestion)
+              .font(.callout)
+              .foregroundColor(.secondary)
+          }
+        }
+      }
+    )
   }
 }
 
