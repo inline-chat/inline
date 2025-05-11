@@ -1,5 +1,7 @@
 import Combine
+import Foundation
 import GRDB
+import InlineProtocol
 import Logger
 import SwiftUI
 
@@ -55,9 +57,18 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var photoInfo: PhotoInfo?
   public var videoInfo: VideoInfo?
   public var documentInfo: DocumentInfo?
+  public var translations: [Translation]
 
   public var from: User? {
     senderInfo?.user
+  }
+
+  public func translation(for language: String) -> Translation? {
+    translations.first { $0.language == language }
+  }
+
+  public var currentTranslation: Translation? {
+    translation(for: UserLocale.getCurrentLanguage())
   }
 
   /// Grouped reactions by emoji
@@ -72,7 +83,6 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   // stable id
   public var id: Int64 {
     message.globalId ?? message.id
-    //    message.id
   }
 
   public var hasMedia: Bool {
@@ -85,13 +95,15 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     message: Message,
     reactions: [Reaction],
     repliedToMessage: Message?,
-    attachments: [FullAttachment]
+    attachments: [FullAttachment],
+    translations: [Translation] = []
   ) {
     self.senderInfo = senderInfo
     self.message = message
     self.reactions = reactions
     self.repliedToMessage = repliedToMessage
     self.attachments = attachments
+    self.translations = translations
 
     // Group reactions and store on a property
 //    if reactions.count > 0 {
@@ -101,6 +113,19 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
 //        return GroupedReaction(emoji: emoji, reactions: reactions)
 //      }
 //    }
+  }
+}
+
+public extension FullMessage {
+  /// Display text for the message
+  /// If translation is enabled, use the current translation
+  /// Otherwise, use the message text
+  var displayText: String? {
+    if TranslationState.shared.isTranslationEnabled(for: peerId) {
+      currentTranslation?.translation ?? message.text ?? nil
+    } else {
+      message.text ?? nil
+    }
   }
 }
 
@@ -186,6 +211,8 @@ public extension FullMessage {
               .forKey(DocumentInfo.CodingKeys.thumbnail)
           )
       )
+      // Include all translations
+      .including(all: Message.translations.forKey(CodingKeys.translations))
       .asRequest(of: FullMessage.self)
   }
 }
