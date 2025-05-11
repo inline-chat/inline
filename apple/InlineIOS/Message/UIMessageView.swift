@@ -1,4 +1,5 @@
 import Auth
+import Combine
 import GRDB
 import InlineKit
 import Logger
@@ -12,6 +13,16 @@ class UIMessageView: UIView {
 
   let fullMessage: FullMessage
   let spaceId: Int64
+  private var translationCancellable: AnyCancellable?
+  private var isTranslating = false {
+    didSet {
+      if isTranslating {
+        startBlinkingAnimation()
+      } else {
+        stopBlinkingAnimation()
+      }
+    }
+  }
 
   var linkTapHandler: ((URL) -> Void)?
   var interaction: UIContextMenuInteraction?
@@ -148,7 +159,9 @@ class UIMessageView: UIView {
 
   // MARK: - Initialization
 
-  deinit {}
+  deinit {
+    translationCancellable?.cancel()
+  }
 
   init(fullMessage: FullMessage, spaceId: Int64) {
     self.fullMessage = fullMessage
@@ -193,6 +206,38 @@ class UIMessageView: UIView {
     setupDoubleTapGestureRecognizer()
     setupAppearance()
     setupConstraints()
+    setupTranslationObserver()
+  }
+
+  private func setupTranslationObserver() {
+    translationCancellable = TranslatingStatePublisher.shared.publisher.sink { [weak self] translatingSet in
+      guard let self else { return }
+      let isCurrentlyTranslating = translatingSet.contains { translating in
+        translating.messageId == self.message.messageId && translating.peerId == self.message.peerId
+      }
+
+      if isCurrentlyTranslating != isTranslating {
+        isTranslating = isCurrentlyTranslating
+      }
+    }
+  }
+
+  private func startBlinkingAnimation() {
+    UIView.animate(
+      withDuration: 0.8,
+      delay: 0,
+      options: [.autoreverse, .repeat, .allowUserInteraction],
+      animations: { [weak self] in
+        self?.bubbleView.alpha = 0.6
+      }
+    )
+  }
+
+  private func stopBlinkingAnimation() {
+    bubbleView.layer.removeAllAnimations()
+    UIView.animate(withDuration: 0.2) { [weak self] in
+      self?.bubbleView.alpha = 1
+    }
   }
 
   private func createURLPreviewView(for attachment: FullAttachment) -> URLPreviewView {
