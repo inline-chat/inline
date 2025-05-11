@@ -34,7 +34,6 @@ export async function translateMessages(
 ): Promise<{ translations: MessageTranslation[] }> {
   try {
     log.debug("Starting translation request", {
-      peerId: input.peerId,
       messageCount: input.messageIds.length,
       language: input.language,
     })
