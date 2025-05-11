@@ -521,7 +521,7 @@ export interface Message {
  */
 export interface MessageReactions {
     /**
-     * Reactions of the messageprotocol buffers
+     * Reactions of the message
      *
      * @generated from protobuf field: repeated Reaction reactions = 1;
      */
@@ -1315,6 +1315,12 @@ export interface RpcCall {
          */
         removeChatParticipant: RemoveChatParticipantInput;
     } | {
+        oneofKind: "translateMessages";
+        /**
+         * @generated from protobuf field: TranslateMessagesInput translateMessages = 17;
+         */
+        translateMessages: TranslateMessagesInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1420,8 +1426,84 @@ export interface RpcResult {
          */
         removeChatParticipant: RemoveChatParticipantResult;
     } | {
+        oneofKind: "translateMessages";
+        /**
+         * @generated from protobuf field: TranslateMessagesResult translateMessages = 17;
+         */
+        translateMessages: TranslateMessagesResult;
+    } | {
         oneofKind: undefined;
     };
+}
+/**
+ * @generated from protobuf message TranslateMessagesInput
+ */
+export interface TranslateMessagesInput {
+    /**
+     * ID of the peer
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * IDs of the messages to translate, these must not have gaps of more than 50
+     * messages
+     *
+     * @generated from protobuf field: repeated int64 message_ids = 2;
+     */
+    messageIds: bigint[];
+    // // Only return messages starting from the specified message ID
+    // int32 offset_id = 2;
+
+    // // Number of messages to return
+    // int32 limit = 3;
+
+    /**
+     * Language code to translate to
+     *
+     * @generated from protobuf field: string language = 4;
+     */
+    language: string;
+}
+/**
+ * @generated from protobuf message TranslateMessagesResult
+ */
+export interface TranslateMessagesResult {
+    /**
+     * Translated messages
+     *
+     * @generated from protobuf field: repeated MessageTranslation translations = 1;
+     */
+    translations: MessageTranslation[];
+}
+/**
+ * @generated from protobuf message MessageTranslation
+ */
+export interface MessageTranslation {
+    /**
+     * ID of the message
+     *
+     * @generated from protobuf field: int64 message_id = 1;
+     */
+    messageId: bigint;
+    /**
+     * Language code of the translation
+     *
+     * @generated from protobuf field: string language = 2;
+     */
+    language: string;
+    /**
+     * Translation of the message
+     *
+     * @generated from protobuf field: string translation = 3;
+     */
+    translation: string;
+    /**
+     * Date of translation
+     *
+     * @generated from protobuf field: int64 date = 4;
+     */
+    date: bigint;
 }
 /**
  * @generated from protobuf message GetMeInput
@@ -2410,7 +2492,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: REMOVE_CHAT_PARTICIPANT = 15;
      */
-    REMOVE_CHAT_PARTICIPANT = 15
+    REMOVE_CHAT_PARTICIPANT = 15,
+    /**
+     * @generated from protobuf enum value: TRANSLATE_MESSAGES = 16;
+     */
+    TRANSLATE_MESSAGES = 16
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -5224,7 +5310,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 13, name: "inviteToSpace", kind: "message", oneof: "input", T: () => InviteToSpaceInput },
             { no: 14, name: "getChatParticipants", kind: "message", oneof: "input", T: () => GetChatParticipantsInput },
             { no: 15, name: "addChatParticipant", kind: "message", oneof: "input", T: () => AddChatParticipantInput },
-            { no: 16, name: "removeChatParticipant", kind: "message", oneof: "input", T: () => RemoveChatParticipantInput }
+            { no: 16, name: "removeChatParticipant", kind: "message", oneof: "input", T: () => RemoveChatParticipantInput },
+            { no: 17, name: "translateMessages", kind: "message", oneof: "input", T: () => TranslateMessagesInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -5333,6 +5420,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         removeChatParticipant: RemoveChatParticipantInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).removeChatParticipant)
                     };
                     break;
+                case /* TranslateMessagesInput translateMessages */ 17:
+                    message.input = {
+                        oneofKind: "translateMessages",
+                        translateMessages: TranslateMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).translateMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5393,6 +5486,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* RemoveChatParticipantInput removeChatParticipant = 16; */
         if (message.input.oneofKind === "removeChatParticipant")
             RemoveChatParticipantInput.internalBinaryWrite(message.input.removeChatParticipant, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* TranslateMessagesInput translateMessages = 17; */
+        if (message.input.oneofKind === "translateMessages")
+            TranslateMessagesInput.internalBinaryWrite(message.input.translateMessages, writer.tag(17, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5422,7 +5518,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 13, name: "inviteToSpace", kind: "message", oneof: "result", T: () => InviteToSpaceResult },
             { no: 14, name: "getChatParticipants", kind: "message", oneof: "result", T: () => GetChatParticipantsResult },
             { no: 15, name: "addChatParticipant", kind: "message", oneof: "result", T: () => AddChatParticipantResult },
-            { no: 16, name: "removeChatParticipant", kind: "message", oneof: "result", T: () => RemoveChatParticipantResult }
+            { no: 16, name: "removeChatParticipant", kind: "message", oneof: "result", T: () => RemoveChatParticipantResult },
+            { no: 17, name: "translateMessages", kind: "message", oneof: "result", T: () => TranslateMessagesResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -5531,6 +5628,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         removeChatParticipant: RemoveChatParticipantResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).removeChatParticipant)
                     };
                     break;
+                case /* TranslateMessagesResult translateMessages */ 17:
+                    message.result = {
+                        oneofKind: "translateMessages",
+                        translateMessages: TranslateMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).translateMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5591,6 +5694,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* RemoveChatParticipantResult removeChatParticipant = 16; */
         if (message.result.oneofKind === "removeChatParticipant")
             RemoveChatParticipantResult.internalBinaryWrite(message.result.removeChatParticipant, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* TranslateMessagesResult translateMessages = 17; */
+        if (message.result.oneofKind === "translateMessages")
+            TranslateMessagesResult.internalBinaryWrite(message.result.translateMessages, writer.tag(17, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5601,6 +5707,194 @@ class RpcResult$Type extends MessageType<RpcResult> {
  * @generated MessageType for protobuf message RpcResult
  */
 export const RpcResult = new RpcResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class TranslateMessagesInput$Type extends MessageType<TranslateMessagesInput> {
+    constructor() {
+        super("TranslateMessagesInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "language", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<TranslateMessagesInput>): TranslateMessagesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageIds = [];
+        message.language = "";
+        if (value !== undefined)
+            reflectionMergePartial<TranslateMessagesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: TranslateMessagesInput): TranslateMessagesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* repeated int64 message_ids */ 2:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.messageIds.push(reader.int64().toBigInt());
+                    else
+                        message.messageIds.push(reader.int64().toBigInt());
+                    break;
+                case /* string language */ 4:
+                    message.language = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: TranslateMessagesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated int64 message_ids = 2; */
+        if (message.messageIds.length) {
+            writer.tag(2, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.messageIds.length; i++)
+                writer.int64(message.messageIds[i]);
+            writer.join();
+        }
+        /* string language = 4; */
+        if (message.language !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.language);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message TranslateMessagesInput
+ */
+export const TranslateMessagesInput = new TranslateMessagesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class TranslateMessagesResult$Type extends MessageType<TranslateMessagesResult> {
+    constructor() {
+        super("TranslateMessagesResult", [
+            { no: 1, name: "translations", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => MessageTranslation }
+        ]);
+    }
+    create(value?: PartialMessage<TranslateMessagesResult>): TranslateMessagesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.translations = [];
+        if (value !== undefined)
+            reflectionMergePartial<TranslateMessagesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: TranslateMessagesResult): TranslateMessagesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated MessageTranslation translations */ 1:
+                    message.translations.push(MessageTranslation.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: TranslateMessagesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated MessageTranslation translations = 1; */
+        for (let i = 0; i < message.translations.length; i++)
+            MessageTranslation.internalBinaryWrite(message.translations[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message TranslateMessagesResult
+ */
+export const TranslateMessagesResult = new TranslateMessagesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageTranslation$Type extends MessageType<MessageTranslation> {
+    constructor() {
+        super("MessageTranslation", [
+            { no: 1, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "language", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "translation", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageTranslation>): MessageTranslation {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageId = 0n;
+        message.language = "";
+        message.translation = "";
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<MessageTranslation>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageTranslation): MessageTranslation {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 message_id */ 1:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* string language */ 2:
+                    message.language = reader.string();
+                    break;
+                case /* string translation */ 3:
+                    message.translation = reader.string();
+                    break;
+                case /* int64 date */ 4:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageTranslation, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 message_id = 1; */
+        if (message.messageId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.messageId);
+        /* string language = 2; */
+        if (message.language !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.language);
+        /* string translation = 3; */
+        if (message.translation !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.translation);
+        /* int64 date = 4; */
+        if (message.date !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageTranslation
+ */
+export const MessageTranslation = new MessageTranslation$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetMeInput$Type extends MessageType<GetMeInput> {
     constructor() {

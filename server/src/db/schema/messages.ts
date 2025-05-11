@@ -12,6 +12,7 @@ import { reactions } from "./reactions"
 import { files } from "@in/server/db/schema/files"
 import { documents, photos, videos } from "@in/server/db/schema/media"
 import { messageAttachments } from "./attachments"
+import { translations } from "@in/server/db/schema/translations"
 
 export const messages = pgTable(
   "messages",
@@ -84,6 +85,8 @@ export const messageRelations = relations(messages, ({ one, many }) => ({
   video: one(videos, { fields: [messages.videoId], references: [videos.id] }),
   document: one(documents, { fields: [messages.documentId], references: [documents.id] }),
   messageAttachments: many(messageAttachments),
+
+  translations: many(translations),
 }))
 
 export type DbMessage = typeof messages.$inferSelect

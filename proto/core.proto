@@ -502,6 +502,7 @@ enum Method {
   GET_CHAT_PARTICIPANTS = 13;
   ADD_CHAT_PARTICIPANT = 14;
   REMOVE_CHAT_PARTICIPANT = 15;
+  TRANSLATE_MESSAGES = 16;
 }
 
 message RpcCall {
@@ -522,6 +523,7 @@ message RpcCall {
     GetChatParticipantsInput getChatParticipants = 14;
     AddChatParticipantInput addChatParticipant = 15;
     RemoveChatParticipantInput removeChatParticipant = 16;
+    TranslateMessagesInput translateMessages = 17;
   }
 }
 
@@ -544,7 +546,45 @@ message RpcResult {
     GetChatParticipantsResult getChatParticipants = 14;
     AddChatParticipantResult addChatParticipant = 15;
     RemoveChatParticipantResult removeChatParticipant = 16;
+    TranslateMessagesResult translateMessages = 17;
   }
+}
+
+message TranslateMessagesInput {
+  // ID of the peer
+  InputPeer peer_id = 1;
+
+  // IDs of the messages to translate, these must not have gaps of more than 50
+  // messages
+  repeated int64 message_ids = 2;
+
+  // // Only return messages starting from the specified message ID
+  // int32 offset_id = 2;
+
+  // // Number of messages to return
+  // int32 limit = 3;
+
+  // Language code to translate to
+  string language = 4;
+}
+
+message TranslateMessagesResult {
+  // Translated messages
+  repeated MessageTranslation translations = 1;
+}
+
+message MessageTranslation {
+  // ID of the message
+  int64 message_id = 1;
+
+  // Language code of the translation
+  string language = 2;
+
+  // Translation of the message
+  string translation = 3;
+
+  // Date of translation
+  int64 date = 4;
 }
 
 message GetMeInput {}

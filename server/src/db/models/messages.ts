@@ -1,4 +1,4 @@
-import type { InputPeer } from "@in/protocol/core"
+import type { InputPeer, MessageTranslation } from "@in/protocol/core"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -18,6 +18,7 @@ import {
   type DbMessage,
   type DbNewMessage,
   type DbReaction,
+  type DbTranslation,
   type DbUser,
 } from "@in/server/db/schema"
 import { type DbMessageAttachment } from "@in/server/db/schema/attachments"
@@ -36,6 +37,7 @@ export const MessageModel = {
   insertMessage: insertMessage,
   getMessages: getMessages,
   getMessage: getMessage, // 1 msg
+  getNonFullMessagesRange: getNonFullMessagesRange,
   processMessage: processMessage,
   editMessage: editMessage,
   processAttachments: processAttachments,
@@ -53,6 +55,18 @@ export type DbInputFullMessage = DbMessage & {
   video: InputDbFullVideo | null
   document: InputDbFullDocument | null
   messageAttachments?: DbInputFullAttachment[]
+}
+
+export type ProcessedMessage = Omit<DbMessage, "textEncrypted" | "textIv" | "textTag"> & {
+  text: string | null
+}
+
+export type ProcessedMessageTranslation = Omit<DbTranslation, "translation" | "translationIv" | "translationTag"> & {
+  translation: string | null
+}
+
+export type ProcessedMessageAndTranslation = ProcessedMessage & {
+  translation: ProcessedMessageTranslation | null
 }
 
 export type DbFullMessage = Omit<DbMessage, "textEncrypted" | "textIv" | "textTag"> & {
@@ -353,6 +367,20 @@ async function getMessage(messageId: number, chatId: number): Promise<DbFullMess
   return processMessage(result)
 }
 
+export function processMessageTranslation(translation: DbTranslation): ProcessedMessageTranslation {
+  return {
+    ...translation,
+    translation:
+      translation.translation && translation.translationIv && translation.translationTag
+        ? decrypt({
+            encrypted: translation.translation,
+            iv: translation.translationIv,
+            authTag: translation.translationTag,
+          })
+        : null,
+  }
+}
+
 export function processAttachments(
   attachments: (DbMessageAttachment & {
     externalTask?: DbExternalTask | null
@@ -429,4 +457,25 @@ export function processAttachments(
 
     return processed
   })
+}
+
+async function getNonFullMessagesRange(chatId: number, offsetId: number, limit: number): Promise<ProcessedMessage[]> {
+  let result = await db.query.messages.findMany({
+    where: and(eq(messages.chatId, chatId), gt(messages.messageId, offsetId)),
+    orderBy: desc(messages.messageId),
+    limit: limit ?? 60,
+  })
+
+  return result.map((msg) => ({
+    ...msg,
+    text:
+      msg.textEncrypted && msg.textIv && msg.textTag
+        ? decryptMessage({
+            encrypted: msg.textEncrypted,
+            iv: msg.textIv,
+            authTag: msg.textTag,
+          })
+        : // legacy fallback
+          msg.text,
+  }))
 }
