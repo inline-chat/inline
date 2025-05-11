@@ -58,10 +58,18 @@ class BridgeManager {
 
   private let sharedContainerIdentifier = "group.chat.inline"
 
+  var shareDataFileName: String {
+    #if DEBUG
+    return "SharedData_dev.json"
+    #else
+    return "SharedData.json"
+    #endif
+  }
+
   private var sharedDataURL: URL {
     let containerURL = FileManager.default
       .containerURL(forSecurityApplicationGroupIdentifier: sharedContainerIdentifier)!
-    return containerURL.appendingPathComponent("SharedData.json")
+    return containerURL.appendingPathComponent(shareDataFileName)
   }
 
   // Save data from main app to be shared with extension
