@@ -7,7 +7,7 @@ public final class TranslationDetector {
   public static let shared = TranslationDetector()
 
   // Minimum confidence threshold for language detection (0.0 to 1.0)
-  private let confidenceThreshold: Double = 0.6
+  private let confidenceThreshold: Double = 0.3
 
   // Supported languages for detection
   private let supportedLanguages: [NLLanguage] = [
@@ -20,6 +20,7 @@ public final class TranslationDetector {
   public struct DetectionResult {
     let peer: Peer
     let needsTranslation: Bool
+    let detectedLanguages: [(language: String, confidence: Double)]
   }
 
   private let log = Log.scoped("TranslationDetector")
@@ -37,37 +38,41 @@ public final class TranslationDetector {
   public func analyzeMessages(peer: Peer, messages: [FullMessage]) {
     Task(priority: .background) {
       let userLanguage = UserLocale.getCurrentLanguage()
+      let recognizer = NLLanguageRecognizer()
+      recognizer.languageConstraints = supportedLanguages
+      recognizer.languageHints = [
+        .english: 0.8,
+        .traditionalChinese: 0.5,
+      ]
 
-      // Check messages one by one
+      // Process all messages
       for message in messages {
         guard let text = message.message.text, !text.isEmpty else { continue }
-
-        // Create a new recognizer for each message
-        let recognizer = NLLanguageRecognizer()
-        recognizer.languageConstraints = supportedLanguages
-
-        recognizer.processString(text)
-        let hypotheses = recognizer.languageHypotheses(withMaximum: 1)
-
-        // If we found a language with sufficient confidence
-        if let detectedLanguage = hypotheses.first,
-           detectedLanguage.key.rawValue != userLanguage,
-           detectedLanguage.value >= confidenceThreshold
-        {
-          log
-            .debug(
-              "Found message in other language: \(detectedLanguage.key.rawValue) with confidence: \(detectedLanguage.value)"
-            )
-          log.debug("Translation needed: true")
-          publisher.send(DetectionResult(peer: peer, needsTranslation: true))
-          return
-        }
+        let cleanedText = LanguageDetector.cleanText(text)
+        recognizer.processString(cleanedText)
       }
 
-      // If we get here, no messages needed translation
-      log.debug("No messages found in other languages")
-      log.debug("Translation needed: false")
-      publisher.send(DetectionResult(peer: peer, needsTranslation: false))
+      // Get language hypotheses
+      let hypotheses = recognizer.languageHypotheses(withMaximum: 2)
+        .filter { $0.value >= confidenceThreshold }
+        .map { (language: $0.key.rawValue, confidence: $0.value) }
+
+      // Check if any detected language is different from user's language
+      let needsTranslation = hypotheses.contains { $0.language != userLanguage }
+
+      if needsTranslation {
+        log.debug("Found languages: \(hypotheses)")
+        log.debug("Translation needed: true")
+      } else {
+        log.debug("No messages found in other languages")
+        log.debug("Translation needed: false")
+      }
+
+      publisher.send(DetectionResult(
+        peer: peer,
+        needsTranslation: needsTranslation,
+        detectedLanguages: hypotheses
+      ))
     }
   }
 }
