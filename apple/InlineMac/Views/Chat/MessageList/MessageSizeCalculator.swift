@@ -267,7 +267,7 @@ class MessageSizeCalculator {
     #endif
 
     let hasText = message.message.text != nil
-    let text = message.message.text ?? emptyFallback
+    let text = message.displayText ?? emptyFallback
     let hasMedia = message.hasMedia
     let hasDocument = message.documentInfo != nil
     let hasReply = message.message.repliedToMessageId != nil
@@ -581,7 +581,7 @@ class MessageSizeCalculator {
         reactionsPlan!.size.width = max(reactionsPlan!.size.width, currentLineWidth)
         reactionsPlan!.size.height = CGFloat(reactionsCurrentLine + 1) * (reactionSize.height + reactionsSpacing)
       }
-      
+
       print("reactionsPlan width:\(reactionsPlan!.size.width) height:\(reactionsPlan!.size.height)")
     }
 
