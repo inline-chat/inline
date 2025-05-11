@@ -587,10 +587,10 @@ class UIMessageView: UIView {
   }
 
   func setupAppearance() {
-    let cacheKey = "\(message.stableId)-\(message.text ?? "")"
+    let cacheKey = "\(message.stableId)-\(fullMessage.displayText ?? "")"
     bubbleView.backgroundColor = bubbleColor
 
-    guard let text = message.text else { return }
+    guard let text = fullMessage.displayText else { return }
     if let cachedString = Self.attributedCache.object(forKey: NSString(string: cacheKey)) {
       messageLabel.attributedText = cachedString
       // Re-detect links even with cached string to ensure links array is populated

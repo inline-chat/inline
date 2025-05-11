@@ -12,6 +12,9 @@ struct ChatView: View {
   @State var text: String = ""
   @State var textViewHeight: CGFloat = 36
   @State private var navBarHeight: CGFloat = 0
+  @State private var showTranslationPopover = false
+  @State private var needsTranslation = false
+  @State private var cancellables = Set<AnyCancellable>()
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
@@ -65,6 +68,8 @@ struct ChatView: View {
     }
   }
 
+  @State var isTranslationEnabled = false
+
   init(peer: Peer, preview: Bool = false) {
     peerId = peer
     self.preview = preview
@@ -113,6 +118,7 @@ struct ChatView: View {
     }
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
+    .toolbarRole(.editor)
     .toolbar {
       ToolbarItem(placement: .principal) {
         Button(action: {
@@ -123,6 +129,31 @@ struct ChatView: View {
           header
         }
         .buttonStyle(.plain)
+      }
+
+      ToolbarItem(placement: .topBarLeading) {
+        Button {
+          isTranslationEnabled.toggle()
+          TranslationState.shared.toggleTranslation(for: fullChatViewModel.peer)
+          showTranslationPopover = false
+        } label: {
+          Image(systemName: "translate")
+        }
+        .tint(isTranslationEnabled ? Color(ThemeManager.shared.selected.accent) : .gray)
+        .popover(isPresented: $showTranslationPopover) {
+          VStack {
+            Text(
+              "Translate this chat to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
+            )
+            Button("Translate") {
+              isTranslationEnabled.toggle()
+              TranslationState.shared.toggleTranslation(for: fullChatViewModel.peer)
+              showTranslationPopover = false
+            }
+          }
+          .padding()
+          .presentationCompactAdaptation(.popover)
+        }
       }
 
       if let user = fullChatViewModel.peerUserInfo {
@@ -154,7 +185,16 @@ struct ChatView: View {
       }
     }
     .onAppear {
+      isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: fullChatViewModel.peer)
       fetch()
+    }
+    .onReceive(TranslationDetector.shared.needsTranslation) { result in
+      print("Translation result: \(result) ")
+
+      needsTranslation = result.needsTranslation
+      if result.needsTranslation {
+        showTranslationPopover = true
+      }
     }
     .onChange(of: scenePhase) { _, scenePhase_ in
       switch scenePhase_ {
