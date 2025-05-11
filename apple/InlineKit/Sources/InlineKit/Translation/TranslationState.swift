@@ -38,6 +38,11 @@ public final class TranslationState: @unchecked Sendable {
     // Update both cache and UserDefaults
     cache[key] = enabled
     UserDefaults.standard.set(enabled, forKey: translationEnabledKey + key)
+
+    // Notify progressive view model with a reload
+    Task { @MainActor in
+      MessagesPublisher.shared.messagesReload(peer: peerId, animated: true)
+    }
   }
 
   public func toggleTranslation(for peerId: Peer) {
