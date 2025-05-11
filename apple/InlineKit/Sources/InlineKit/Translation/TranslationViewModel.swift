@@ -147,25 +147,25 @@ actor TranslationViewModel {
 public final class TranslatingStatePublisher {
   public static let shared = TranslatingStatePublisher()
 
-  actor TranslatingStateHolder {
-    struct Translating: Hashable {
-      let messageId: Int64
-      let peerId: Peer
+  public actor TranslatingStateHolder {
+    public struct Translating: Hashable, Sendable {
+      public let messageId: Int64
+      public let peerId: Peer
     }
 
-    var translating: Set<Translating> = []
+    public var translating: Set<Translating> = []
 
-    func addBatch(messageIds: [Int64], peerId: Peer) {
+    public func addBatch(messageIds: [Int64], peerId: Peer) {
       let newItems = Set(messageIds.map { Translating(messageId: $0, peerId: peerId) })
       translating.formUnion(newItems)
     }
 
-    func removeBatch(messageIds: [Int64], peerId: Peer) {
+    public func removeBatch(messageIds: [Int64], peerId: Peer) {
       let itemsToRemove = Set(messageIds.map { Translating(messageId: $0, peerId: peerId) })
       translating.subtract(itemsToRemove)
     }
 
-    func isTranslating(messageId: Int64, peerId: Peer) -> Bool {
+    public func isTranslating(messageId: Int64, peerId: Peer) -> Bool {
       translating.contains(Translating(messageId: messageId, peerId: peerId))
     }
   }
@@ -175,9 +175,9 @@ public final class TranslatingStatePublisher {
 
   private init() {}
 
-  let publisher = CurrentValueSubject<Set<TranslatingStateHolder.Translating>, Never>([])
+  public let publisher = CurrentValueSubject<Set<TranslatingStateHolder.Translating>, Never>([])
 
-  func addBatch(messageIds: [Int64], peerId: Peer) {
+  public func addBatch(messageIds: [Int64], peerId: Peer) {
     Task {
       await state.addBatch(messageIds: messageIds, peerId: peerId)
       let currentState = await state.translating
@@ -186,7 +186,7 @@ public final class TranslatingStatePublisher {
     }
   }
 
-  func removeBatch(messageIds: [Int64], peerId: Peer) {
+  public func removeBatch(messageIds: [Int64], peerId: Peer) {
     Task {
       await state.removeBatch(messageIds: messageIds, peerId: peerId)
       let currentState = await state.translating
@@ -196,15 +196,15 @@ public final class TranslatingStatePublisher {
   }
 
   // Keep individual methods for backward compatibility
-  func add(messageId: Int64, peerId: Peer) {
+  public func add(messageId: Int64, peerId: Peer) {
     addBatch(messageIds: [messageId], peerId: peerId)
   }
 
-  func remove(messageId: Int64, peerId: Peer) {
+  public func remove(messageId: Int64, peerId: Peer) {
     removeBatch(messageIds: [messageId], peerId: peerId)
   }
 
-  func isTranslating(messageId: Int64, peerId: Peer) -> Bool {
+  public func isTranslating(messageId: Int64, peerId: Peer) -> Bool {
     publisher.value.contains(TranslatingStateHolder.Translating(messageId: messageId, peerId: peerId))
   }
 }
