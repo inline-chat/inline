@@ -95,7 +95,7 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var title: some View {
-    if let userInfo = userInfo {
+    if let userInfo {
       Text(displayName(for: userInfo))
         .font(.customTitle())
         .foregroundColor(.primary)
