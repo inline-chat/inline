@@ -7,17 +7,29 @@ class ShareState: ObservableObject {
   @Published var sharedData: SharedData?
   @Published var isSending: Bool = false
   @Published var uploadProgress: Double = 0
+  @Published var errorState: ErrorState?
 
   private let log = Log.scoped("ShareState")
 
+  struct ErrorState: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let suggestion: String?
+  }
+
   func loadSharedData() {
-    // log.info("Loading shared data...")
     let sharedContainerIdentifier = "group.chat.inline"
 
     guard let containerURL = FileManager.default
       .containerURL(forSecurityApplicationGroupIdentifier: sharedContainerIdentifier)
     else {
       log.error("Failed to get container URL - check app group entitlements")
+      errorState = ErrorState(
+        title: "Configuration Error",
+        message: "Failed to access shared container. Please check app group entitlements.",
+        suggestion: "Try reinstalling the app."
+      )
       return
     }
 
@@ -25,6 +37,11 @@ class ShareState: ObservableObject {
 
     if !FileManager.default.fileExists(atPath: sharedDataURL.path) {
       log.warning("SharedData.json doesn't exist - has it been created yet?")
+      errorState = ErrorState(
+        title: "No Data Available",
+        message: "No chats available to share with.",
+        suggestion: "Open the main app first to load your chats."
+      )
       return
     }
 
@@ -35,24 +52,31 @@ class ShareState: ObservableObject {
       log.info("Shared data loaded successfully")
     } catch {
       log.error("Error loading shared data", error: error)
+      errorState = ErrorState(
+        title: "Failed to Load Data",
+        message: "Could not load your chats.",
+        suggestion: "Try opening the main app first."
+      )
     }
   }
 
-//
   func sendMessage(caption: String, selectedChat: SharedChat, completion: @escaping () -> Void) {
     guard !sharedImages.isEmpty,
           let image = sharedImages.first,
           let imageData = image.jpegData(compressionQuality: 0.7)
     else {
       log.error("Failed to prepare image data for upload")
-      completion()
+      errorState = ErrorState(
+        title: "Image Error",
+        message: "Failed to prepare image for upload.",
+        suggestion: "Try selecting a different image."
+      )
+      isSending = false
       return
     }
 
     let fileName = "shared_image_\(Date().timeIntervalSince1970).jpg"
     let mimeType = MIMEType.imageJpeg
-
-    // log.info("Preparing to upload image: \(fileName) with size: \(imageData.count) bytes")
 
     isSending = true
     uploadProgress = 0
@@ -95,8 +119,12 @@ class ShareState: ObservableObject {
       } catch {
         log.error("Failed to share image", error: error)
         DispatchQueue.main.async {
+          self.errorState = ErrorState(
+            title: "Failed to Share",
+            message: "Could not share the image.",
+            suggestion: "Please check your internet connection and try again."
+          )
           self.isSending = false
-          completion()
         }
       }
     }
