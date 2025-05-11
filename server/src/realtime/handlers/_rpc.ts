@@ -18,6 +18,8 @@ import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
 import { getChatParticipants } from "@in/server/realtime/handlers/messages.getChatParticipants"
 import { addChatParticipant } from "@in/server/realtime/handlers/messages.addChatParticipant"
 import { removeChatParticipant } from "@in/server/realtime/handlers/messages.removeChatParticipant"
+import { handleTranslateMessages } from "./translateMessages"
+
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
   Log.shared.debug("rpc call", call.method)
@@ -137,8 +139,21 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       let result = await removeChatParticipant(call.input.removeChatParticipant, handlerContext)
       return { oneofKind: "removeChatParticipant", removeChatParticipant: result }
     }
+
+    case Method.TRANSLATE_MESSAGES: {
+      if (call.input.oneofKind !== "translateMessages") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await handleTranslateMessages(call.input.translateMessages, handlerContext)
+      return { oneofKind: "translateMessages", translateMessages: result }
+    }
+
     default:
       Log.shared.error(`Unknown method: ${call.method}`)
       throw RealtimeRpcError.BadRequest
   }
+}
+
+export const handlers = {
+  translateMessages: handleTranslateMessages,
 }

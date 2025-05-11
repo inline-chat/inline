@@ -46,7 +46,7 @@
     "libphonenumber-js": "^1.12.7",
     "nanoid": "^5.0.7",
     "nanoid-dictionary": "^4.3.0",
-    "openai": "^4.85.1",
+    "openai": "^4.98.0",
     "postgres": "^3.4.4",
     "resend": "^4.0.0",
     "sharp": "^0.33.5",
