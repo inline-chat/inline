@@ -41,6 +41,7 @@ public class MessagesProgressiveViewModel {
   private let translationViewModel: TranslationViewModel
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
+  private var hasAnalyzedInitialMessages = false
 
   // Note:
   // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
@@ -123,6 +124,12 @@ public class MessagesProgressiveViewModel {
           // sort()
 
           updateRange()
+
+          // Only analyze new messages if we haven't done initial analysis
+          if !hasAnalyzedInitialMessages, !newMessages.isEmpty {
+            TranslationDetector.shared.analyzeMessages(newMessages)
+            hasAnalyzedInitialMessages = true
+          }
 
           // Return changeset
           return MessagesChangeSet.added(newMessages, indexSet: [messages.count - 1])
@@ -265,6 +272,12 @@ public class MessagesProgressiveViewModel {
       // sort()
 
       updateRange()
+
+      // Only analyze messages on initial load
+      if case let .limit(limit) = loadMode, limit == initialLimit, !hasAnalyzedInitialMessages {
+        TranslationDetector.shared.analyzeMessages(messages)
+        hasAnalyzedInitialMessages = true
+      }
     } catch {
       Log.shared.error("Failed to get messages \(error)")
     }
