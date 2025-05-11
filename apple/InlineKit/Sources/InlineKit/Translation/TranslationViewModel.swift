@@ -21,10 +21,37 @@ private actor TranslationCache {
   }
 }
 
+// Actor to track in-progress translation requests
+private actor TranslationRequestTracker {
+  private struct Request: Hashable {
+    let peerId: Peer
+    let messageIds: Set<Int64>
+    let targetLanguage: String
+  }
+
+  private var inProgressRequests: Set<Request> = []
+
+  func isRequestInProgress(peerId: Peer, messageIds: [Int64], targetLanguage: String) -> Bool {
+    let request = Request(peerId: peerId, messageIds: Set(messageIds), targetLanguage: targetLanguage)
+    return inProgressRequests.contains(request)
+  }
+
+  func addRequest(peerId: Peer, messageIds: [Int64], targetLanguage: String) {
+    let request = Request(peerId: peerId, messageIds: Set(messageIds), targetLanguage: targetLanguage)
+    inProgressRequests.insert(request)
+  }
+
+  func removeRequest(peerId: Peer, messageIds: [Int64], targetLanguage: String) {
+    let request = Request(peerId: peerId, messageIds: Set(messageIds), targetLanguage: targetLanguage)
+    inProgressRequests.remove(request)
+  }
+}
+
 actor TranslationViewModel {
   private let db = AppDatabase.shared
   private let realtime = Realtime.shared
   private let log = Log.scoped("TranslationViewModel")
+  private let requestTracker = TranslationRequestTracker()
 
   private var cancellables = Set<AnyCancellable>()
 
@@ -54,6 +81,17 @@ actor TranslationViewModel {
     // Do everything on a background thread to avoid impacting UI
     Task(priority: .background) {
       do {
+        // Check if this exact request is already in progress
+        let requestMessageIds = messagesCopy.map(\.id)
+        if await requestTracker.isRequestInProgress(
+          peerId: peerId,
+          messageIds: requestMessageIds,
+          targetLanguage: targetLanguage
+        ) {
+          log.debug("Translation request already in progress for these messages")
+          return
+        }
+
         // Filter out messages we've already processed for this language
         var newMessages: [FullMessage] = []
         for message in messagesCopy {
@@ -73,6 +111,9 @@ actor TranslationViewModel {
 
         log.debug("Found \(newMessages.count) new messages to process for translation")
 
+        // Mark this request as in progress
+        await requestTracker.addRequest(peerId: peerId, messageIds: requestMessageIds, targetLanguage: targetLanguage)
+
         // 1. Filter messages needing translation
         let messagesNeedingTranslation = try await TranslationManager.shared.filterMessagesNeedingTranslation(
           messages: newMessages.map(\.message),
@@ -84,6 +125,12 @@ actor TranslationViewModel {
           // Mark all messages as processed even if they don't need translation
           await cache.markAsProcessed(
             messageIds: newMessages.map(\.id),
+            targetLanguage: targetLanguage
+          )
+          // Remove from in-progress requests
+          await requestTracker.removeRequest(
+            peerId: peerId,
+            messageIds: requestMessageIds,
             targetLanguage: targetLanguage
           )
           return
@@ -128,6 +175,13 @@ actor TranslationViewModel {
           targetLanguage: targetLanguage
         )
 
+        // Remove from in-progress requests
+        await requestTracker.removeRequest(
+          peerId: peerId,
+          messageIds: requestMessageIds,
+          targetLanguage: targetLanguage
+        )
+
         log.debug("Completed translation cycle for \(messageIds.count) messages")
 
       } catch {
@@ -138,6 +192,8 @@ actor TranslationViewModel {
           messageIds: messageIds,
           peerId: peerId
         )
+        // Remove from in-progress requests
+        await requestTracker.removeRequest(peerId: peerId, messageIds: messageIds, targetLanguage: targetLanguage)
       }
     }
   }
