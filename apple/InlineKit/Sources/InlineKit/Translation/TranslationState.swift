@@ -6,6 +6,11 @@ import InlineProtocol
 
 public final class TranslationState: @unchecked Sendable {
   public static let shared = TranslationState()
+  private let subject = PassthroughSubject<(Peer, Bool), Never>()
+  public var translationChanged: AnyPublisher<(Peer, Bool), Never> {
+    subject.eraseToAnyPublisher()
+  }
+
   private var cache: [String: Bool] = [:]
   private let cacheLock = NSLock()
   private let translationEnabledKey = "translation_enabled_"
@@ -38,6 +43,9 @@ public final class TranslationState: @unchecked Sendable {
     // Update both cache and UserDefaults
     cache[key] = enabled
     UserDefaults.standard.set(enabled, forKey: translationEnabledKey + key)
+
+    // Publish the change
+    subject.send((peerId, enabled))
 
     // Notify progressive view model with a reload
     Task { @MainActor in
