@@ -32,36 +32,32 @@ actor TranslationManager {
 
         // Get user's preferred language
         let targetLanguage = UserLocale.getCurrentLanguage()
-
-        // Filter messages that need translation
-        let messagesNeedingTranslation = try await filterMessagesNeedingTranslation(
-          messages: messages,
-          targetLanguage: targetLanguage
-        )
-
-        guard !messagesNeedingTranslation.isEmpty else { return }
+        self.log.debug("Requesting translations for \(messages.count) messages in \(targetLanguage)")
 
         // Create translation request
         var input = TranslateMessagesInput()
         input.peerID = peerId.toInputPeer()
-        input.messageIds = messagesNeedingTranslation.map(\.messageId)
+        input.messageIds = messages.map(\.messageId)
         input.language = targetLanguage
 
         // Call translation API
         try await realtime.invokeWithHandler(.translateMessages, input: .translateMessages(input))
+        self.log.debug("Successfully sent translation request to API")
 
       } catch {
-        log.error("Failed to request translations", error: error)
+        self.log.error("Failed to request translations", error: error)
       }
     }
   }
 
   /// Filter messages that need translation
-  private func filterMessagesNeedingTranslation(
+  public func filterMessagesNeedingTranslation(
     messages: [Message],
     targetLanguage: String
   ) async throws -> [Message] {
-    try await db.dbWriter.read { db in
+    log.debug("Filtering \(messages.count) messages for translation needs")
+
+    return try await db.dbWriter.read { db in
       var messagesNeedingTranslation: [Message] = []
 
       for message in messages {
@@ -85,6 +81,7 @@ actor TranslationManager {
         }
       }
 
+      self.log.debug("Found \(messagesNeedingTranslation.count) messages needing translation")
       return messagesNeedingTranslation
     }
   }
