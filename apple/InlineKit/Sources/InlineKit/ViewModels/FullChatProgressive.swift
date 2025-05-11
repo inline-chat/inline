@@ -38,6 +38,7 @@ public class MessagesProgressiveViewModel {
 
   private let log = Log.scoped("MessagesViewModel", enableTracing: false)
   private let db = AppDatabase.shared
+  private let translationViewModel: TranslationViewModel
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
 
@@ -46,6 +47,7 @@ public class MessagesProgressiveViewModel {
   public init(peer: Peer, reversed: Bool = false) {
     self.peer = peer
     self.reversed = reversed
+    translationViewModel = TranslationViewModel(peerId: peer)
     // get initial batch
     loadMessages(.limit(initialLimit))
 
@@ -214,7 +216,8 @@ public class MessagesProgressiveViewModel {
     minDate = lowestDate
     maxDate = highestDate
 
-    //    log.trace("Updated range: \(lowestDate) - \(highestDate), (count: \(messages.count))")
+    // Trigger translation
+    translationViewModel.messagesDisplayed(messages: messages)
   }
 
   private func refetchCurrentRange() {
@@ -421,7 +424,7 @@ public final class MessagesPublisher {
   }
 
   public func messageUpdatedSync(message: Message, peer: Peer, animated: Bool?) {
-        Log.shared.debug("Message updated: \(message)")
+    Log.shared.debug("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? db.reader.read { db in
       let query = FullMessage.queryRequest()
