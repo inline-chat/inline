@@ -143,7 +143,7 @@ struct ChatView: View {
         .popover(isPresented: $showTranslationPopover) {
           VStack {
             Text(
-              "Translate this chat to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
+              "Translate to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
             )
             Button("Translate") {
               isTranslationEnabled = true
@@ -193,7 +193,11 @@ struct ChatView: View {
 
       needsTranslation = result.needsTranslation
       if result.needsTranslation {
-        showTranslationPopover = true
+        if TranslationState.shared.isTranslationEnabled(for: peerId) {
+          showTranslationPopover = false
+        } else {
+          showTranslationPopover = true
+        }
       }
     }
     .onChange(of: scenePhase) { _, scenePhase_ in
