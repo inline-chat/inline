@@ -28,13 +28,30 @@ type TranslateMessagesFnInput = {
   language: string
 }
 
+const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
+
 export async function translateMessages(
   input: TranslateMessagesFnInput,
   context: FunctionContext,
 ): Promise<{ translations: MessageTranslation[] }> {
   try {
+    // Validate message IDs
+    const validMessageIds = input.messageIds.filter((id) => Number.isInteger(id) && id > 0 && id <= MAX_SAFE_INTEGER)
+
+    if (validMessageIds.length !== input.messageIds.length) {
+      log.warn("Some message IDs were invalid and were filtered out", {
+        originalCount: input.messageIds.length,
+        validCount: validMessageIds.length,
+        invalidIds: input.messageIds.filter((id) => !Number.isInteger(id) || id <= 0 || id > MAX_SAFE_INTEGER),
+      })
+    }
+
+    if (validMessageIds.length === 0) {
+      throw new Error("No valid message IDs provided")
+    }
+
     log.debug("Starting translation request", {
-      messageCount: input.messageIds.length,
+      messageCount: validMessageIds.length,
       language: input.language,
     })
 
@@ -45,7 +62,7 @@ export async function translateMessages(
     // Get messages
     const msgs = await getMessagesAndTranslations({
       chatId: chat.id,
-      messageIds: input.messageIds,
+      messageIds: validMessageIds,
       translationLanguage: input.language,
     })
 
