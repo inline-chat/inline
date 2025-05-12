@@ -79,7 +79,7 @@ actor TranslationViewModel {
     let messagesCopy = messages
 
     // Do everything on a background thread to avoid impacting UI
-    Task(priority: .background) {
+    Task(priority: .userInitiated) {
       do {
         // Check if this exact request is already in progress
         let requestMessageIds = messagesCopy.map(\.id)
