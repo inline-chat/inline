@@ -1,10 +1,6 @@
 import Foundation
+import Logger
 
-// let encoder = JSONEncoder()
-// let data = try encoder.encode(SharedData())
-// try data.write(to: stateFileURL)
-
-//
 struct SharedData: Codable {
   var shareExtensionData: [ShareExtensionData]
   var lastUpdate: Date
@@ -15,8 +11,8 @@ struct SharedData: Codable {
   }
 }
 
-//
-//
+// TODO: Refactor and simplify
+
 struct ShareExtensionData: Codable {
   var chats: [SharedChat]
   var users: [SharedUser]
@@ -74,16 +70,19 @@ class BridgeManager {
 
   // Save data from main app to be shared with extension
   func saveSharedData(chats: [SharedChat], users: [SharedUser]) {
-    let shareExtensionData = ShareExtensionData(chats: chats, users: users)
+    Task(priority: .background) {
+      let shareExtensionData = ShareExtensionData(chats: chats, users: users)
 
-    let sharedData = SharedData(shareExtensionData: [shareExtensionData], lastUpdate: Date())
+      let sharedData = SharedData(shareExtensionData: [shareExtensionData], lastUpdate: Date())
 
-    do {
-      let encoder = JSONEncoder()
-      let data = try encoder.encode(sharedData)
-      try data.write(to: sharedDataURL)
-
-    } catch {}
+      do {
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(sharedData)
+        try data.write(to: sharedDataURL)
+      } catch {
+        Log.shared.error("Failed to save shared data", error: error)
+      }
+    }
   }
 
   // Load shared data (used by both app and extension)

@@ -24,7 +24,7 @@ class AppDataUpdater {
 
   // Fetch recent chats and users from app data
   private func fetchChatsAndUsers(completion: @escaping ([SharedChat]?, [SharedUser]?) -> Void) {
-    Task {
+    Task(priority: .background) {
       do {
         // Use GRDB to fetch chats and users similar to HomeViewModel
 //        let homeChatItems: [HomeChatItem] = try await db.reader.read { db in
