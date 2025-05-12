@@ -146,8 +146,8 @@ struct ChatView: View {
               "Translate this chat to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
             )
             Button("Translate") {
-              isTranslationEnabled.toggle()
-              TranslationState.shared.toggleTranslation(for: fullChatViewModel.peer)
+              isTranslationEnabled = true
+              TranslationState.shared.setTranslationEnabled(true, for: fullChatViewModel.peer)
               showTranslationPopover = false
             }
           }
