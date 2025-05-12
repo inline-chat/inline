@@ -96,6 +96,10 @@ actor TranslationViewModel {
         // Filter out messages we've already processed for this language
         var newMessages: [FullMessage] = []
         for message in messagesCopy {
+          // Skip sending/failed messages
+          if message.message.status != .sent {
+            continue
+          }
           let isProcessed = await isProcessed(messageId: message.id, targetLanguage: targetLanguage)
           if !isProcessed {
             newMessages.append(message)
