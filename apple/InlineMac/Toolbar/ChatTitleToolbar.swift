@@ -209,6 +209,7 @@ final class ChatStatusView: NSView {
     case composing(ApiComposeAction)
     case online(User)
     case offline(User)
+    case timezone(String)
     case empty
 
     var label: String {
@@ -219,6 +220,7 @@ final class ChatStatusView: NSView {
         case let .composing(action): action.toHumanReadable()
         case let .online(user): getOnlineText(user: user)
         case let .offline(user): getOfflineText(user: user)
+        case let .timezone(timeZone): getTimeZoneText(timeZone: timeZone)
         case .empty: ""
       }
     }
@@ -228,6 +230,10 @@ final class ChatStatusView: NSView {
         case .composing: .accent
         default: .secondaryLabelColor
       }
+    }
+
+    func getTimeZoneText(timeZone: String) -> String {
+      TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone) ?? ""
     }
 
     func getOnlineText(user: User) -> String {
@@ -284,6 +290,11 @@ final class ChatStatusView: NSView {
       return .online(user)
     } else if let _ = user.lastOnline {
       return .offline(user)
+    }
+
+    // Show timezone
+    if let timeZone = user.timeZone, timeZone != TimeZone.current.identifier {
+      return .timezone(timeZone)
     }
 
     return .empty
