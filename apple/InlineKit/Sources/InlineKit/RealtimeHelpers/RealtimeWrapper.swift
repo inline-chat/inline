@@ -414,8 +414,14 @@ public extension Realtime {
       }
       let chatID = chat.id
       for translation in result.translations {
-        _ = try Translation.save(db, protocolTranslation: translation, chatId: chatID)
+        do {
+          _ = try Translation.save(db, protocolTranslation: translation, chatId: chatID)
+        } catch {
+          Log.shared.error("Failed to save one translation", error: error)
+        }
       }
+      
+      
 
       // TODO: reload messages???
     }
