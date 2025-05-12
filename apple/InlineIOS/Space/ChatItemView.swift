@@ -43,7 +43,22 @@ struct ChatItemView: View {
     props.dialog.unreadCount ?? 0 > 0
   }
 
-
+  private var displayText: String? {
+    guard let message = message else { return message?.text }
+    if TranslationState.shared.isTranslationEnabled(for: message.peerId) {
+      do {
+        let translations = try AppDatabase.shared.reader.read { db in
+          try message.translations.filter(Column("language") == UserLocale.getCurrentLanguage()).fetchAll(db)
+        }
+        return translations.first?.translation ?? message.text
+      } catch {
+        Log.shared.error("Failed to fetch translations: \(error)")
+        return message.text
+      }
+    } else {
+      return message.text
+    }
+  }
 
   var body: some View {
     VStack {
@@ -155,7 +170,7 @@ struct ChatItemView: View {
         .foregroundColor(.secondary)
 
     } else {
-      Text(message?.displayText ?? "")
+      Text(displayText ?? "")
         .font(.customCaption())
         .foregroundColor(.secondary)
     }
