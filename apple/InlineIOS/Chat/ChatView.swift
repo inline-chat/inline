@@ -189,7 +189,7 @@ struct ChatView: View {
       fetch()
     }
     .onReceive(TranslationDetector.shared.needsTranslation) { result in
-      print("Translation result: \(result) ")
+      // print("Translation result: \(result)")
 
       needsTranslation = result.needsTranslation
       if result.needsTranslation {
