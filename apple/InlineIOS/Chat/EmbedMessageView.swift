@@ -1,7 +1,5 @@
 import InlineKit
-import Logger
 import UIKit
-import GRDB
 
 class EmbedMessageView: UIView {
   private enum Constants {
@@ -16,23 +14,6 @@ class EmbedMessageView: UIView {
   static let height = 42.0
   private var outgoing: Bool = false
   private var isOnlyEmoji: Bool = false
-  private var message: Message!
-
-  private var displayText: String? {
-    if TranslationState.shared.isTranslationEnabled(for: message.peerId) {
-      do {
-        let translations = try AppDatabase.shared.reader.read { db in
-          try message.translations.filter(Column("language") == UserLocale.getCurrentLanguage()).fetchAll(db)
-        }
-        return translations.first?.translation ?? message.text
-      } catch {
-        Log.shared.error("Failed to fetch translations: \(error)")
-        return message.text
-      }
-    } else {
-      return message.text
-    }
-  }
 
   private lazy var headerLabel: UILabel = {
     let label = UILabel()
@@ -108,7 +89,6 @@ class EmbedMessageView: UIView {
   func configure(message: Message, senderName: String, outgoing: Bool, isOnlyEmoji: Bool) {
     self.outgoing = outgoing
     self.isOnlyEmoji = isOnlyEmoji
-    self.message = message
     headerLabel.text = senderName
 
     if message.hasUnsupportedTypes {
@@ -121,13 +101,13 @@ class EmbedMessageView: UIView {
       messageLabel.text = "Sticker"
     } else if message.hasPhoto, message.hasText {
       imageIconView.isHidden = false
-      messageLabel.text = displayText
+      messageLabel.text = message.text
     } else if message.hasPhoto, !message.hasText {
       imageIconView.isHidden = true
       messageLabel.text = "Photo"
     } else if !message.hasPhoto, message.hasText {
       imageIconView.isHidden = true
-      messageLabel.text = displayText
+      messageLabel.text = message.text
     }
 
     updateColors()
@@ -194,6 +174,7 @@ private extension EmbedMessageView {
     messageLabel.textColor = textColor
     rectangleView.backgroundColor = rectangleColor
     imageIconView.tintColor = textColor
+
   }
 }
 
