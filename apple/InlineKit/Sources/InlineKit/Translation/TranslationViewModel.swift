@@ -32,6 +32,39 @@ actor TranslationViewModel {
 
   init(peerId: Peer) {
     self.peerId = peerId
+
+    // Subscribe to translation state changes
+    Task { @MainActor in
+      TranslationState.shared.subscribe(peerId: peerId, key: "translationViewModel") { [weak self] enabled in
+        Task {
+          await self?.translationStateChanged(enabled: enabled)
+        }
+      }
+    }
+  }
+
+  deinit {
+    let peerId = self.peerId
+    Task { @MainActor in
+      TranslationState.shared.unsubscribe(peerId: peerId, key: "translationViewModel")
+    }
+  }
+
+  private func translationStateChanged(enabled: Bool) {
+    log.debug("Translation state changed to \(enabled) for peer \(peerId)")
+    if !enabled {
+      Task {
+        resetState()
+      }
+    }
+  }
+
+  private func resetState() {
+    Task {
+      processedMessages.removeAll()
+      inProgressRequests.removeAll()
+      await TranslatingStatePublisher.shared.removeForPeer(peerId: peerId)
+    }
   }
 
   nonisolated func messagesDisplayed(messages: [FullMessage]) {
@@ -270,6 +303,14 @@ public final class TranslatingStatePublisher {
       translating.subtract(itemsToRemove)
     }
 
+    public func removeForPeer(peerId: Peer) {
+      for item in translating {
+        if item.peerId == peerId {
+          translating.remove(item)
+        }
+      }
+    }
+
     public func isTranslating(messageId: Int64, peerId: Peer) -> Bool {
       translating.contains(Translating(messageId: messageId, peerId: peerId))
     }
@@ -296,6 +337,15 @@ public final class TranslatingStatePublisher {
       await state.removeBatch(messageIds: messageIds, peerId: peerId)
       let currentState = await state.translating
       log.debug("Removed batch of \(messageIds.count) messages from translating state")
+      await publisher.send(currentState)
+    }
+  }
+
+  public func removeForPeer(peerId: Peer) {
+    Task {
+      await state.removeForPeer(peerId: peerId)
+      let currentState = await state.translating
+      log.debug("Removed \(currentState.count) messages for peer \(peerId) from translating state")
       await publisher.send(currentState)
     }
   }

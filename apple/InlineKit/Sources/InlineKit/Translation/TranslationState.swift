@@ -61,4 +61,24 @@ public final class TranslationState: @unchecked Sendable {
       cache.removeAll()
     }
   }
+
+  // MARK: - Subscriptions
+
+  @MainActor private var cancellables: [String: AnyCancellable] = [:]
+
+  // Subscribe to translation state changes
+  @MainActor public func subscribe(peerId: Peer, key: String, completion: @escaping (Bool) -> Void) {
+    let key = peerId.toString() + "_" + key
+    let cancellable = subject.sink {
+      completion($0.1)
+    }
+    cancellables[key]?.cancel()
+    cancellables[key] = cancellable
+  }
+
+  @MainActor public func unsubscribe(peerId: Peer, key: String) {
+    let key = peerId.toString() + "_" + key
+    cancellables[key]?.cancel()
+    cancellables[key] = nil
+  }
 }
