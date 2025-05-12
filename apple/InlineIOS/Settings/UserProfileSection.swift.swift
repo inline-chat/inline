@@ -36,6 +36,7 @@ struct ProfileRow: View {
     self.userInfo = userInfo
     self.isChatInfo = isChatInfo
   }
+
   var body: some View {
     HStack {
       UserAvatar(userInfo: userInfo, size: 42)
@@ -50,7 +51,7 @@ struct ProfileRow: View {
             .font(.callout)
             .foregroundColor(.secondary)
         } else {
-          Text(user.username ?? "")
+          Text("@\(user.username ?? "")")
             .font(.callout)
             .foregroundColor(.secondary)
         }
