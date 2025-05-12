@@ -184,13 +184,13 @@ class ComposeEmbedViewContent: UIView {
         messageLabel.text = "Sticker"
       } else if message.hasPhoto, message.hasText {
         imageIconView.isHidden = false
-        messageLabel.text = message.text
+        messageLabel.text = viewModel.fullMessage?.displayText ?? message.text ?? ""
       } else if message.hasPhoto, !message.hasText {
         imageIconView.isHidden = false
         messageLabel.text = "Photo"
       } else if !message.hasPhoto, message.hasText {
         imageIconView.isHidden = true
-        messageLabel.text = message.text
+        messageLabel.text = viewModel.fullMessage?.displayText ?? message.text ?? ""
       } else {
         imageIconView.isHidden = true
         messageLabel.text = "Not loaded"

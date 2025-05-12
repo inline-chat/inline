@@ -611,15 +611,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-      case (true, false):
-        // File only
-        withFileConstraints
-      case (true, true):
-        // File with text
-        withFileAndTextConstraints
-      default:
-        // Text only
-        withoutFileConstraints
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -632,7 +632,6 @@ class UIMessageView: UIView {
   }
 
   func setupAppearance() {
-    print("👽 fullMessage.displayText  \(fullMessage.displayText )")
     let cacheKey = "\(message.stableId)-\(fullMessage.displayText ?? "")"
     bubbleView.backgroundColor = bubbleColor
 
