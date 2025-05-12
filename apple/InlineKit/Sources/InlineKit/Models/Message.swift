@@ -593,21 +593,3 @@ public extension Message {
     videoId != nil
   }
 }
-
-public extension Message {
-  public  var displayText: String? {
-    if TranslationState.shared.isTranslationEnabled(for: peerId) {
-      do {
-        let translations = try AppDatabase.shared.reader.read { db in
-          try self.translations.filter(Column("language") == UserLocale.getCurrentLanguage()).fetchAll(db)
-        }
-        return translations.first?.translation ?? text
-      } catch {
-        Log.shared.error("Failed to fetch translations: \(error)")
-        return text
-      }
-    } else {
-      return text
-    }
-  }
-}

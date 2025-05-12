@@ -44,6 +44,23 @@ struct DirectChatItem: View {
     (dialog.unreadCount ?? 0) > 0
   }
 
+  private var displayText: String? {
+    guard let message = lastMsg else { return lastMsg?.text }
+    if TranslationState.shared.isTranslationEnabled(for: message.peerId) {
+      do {
+        let translations = try AppDatabase.shared.reader.read { db in
+          try message.translations.filter(Column("language") == UserLocale.getCurrentLanguage()).fetchAll(db)
+        }
+        return translations.first?.translation ?? message.text
+      } catch {
+        Log.shared.error("Failed to fetch translations: \(error)")
+        return message.text
+      }
+    } else {
+      return message.text
+    }
+  }
+
   @ObservedObject var composeActions: ComposeActions = .shared
   @Environment(\.colorScheme) private var colorScheme
 
@@ -167,7 +184,7 @@ struct DirectChatItem: View {
         .truncationMode(.tail)
         .padding(.top, 1)
     } else {
-      Text(lastMsg?.displayText ?? "")
+      Text(displayText ?? "")
         .font(.customCaption())
         .foregroundColor(.secondary)
         .lineLimit(2)
