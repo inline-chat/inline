@@ -14,7 +14,7 @@ export enum LogLevel {
 }
 
 // Global log level configs
-const productionDefaultLogLevel = LogLevel.WARN
+const productionDefaultLogLevel = LogLevel.DEBUG //LogLevel.WARN
 const developmentDefaultLogLevel = LogLevel.DEBUG
 const testDefaultLogLevel = LogLevel.NONE
 
