@@ -1,7 +1,5 @@
-import GRDB
 import InlineKit
 import InlineUI
-import Logger
 import SwiftUI
 
 struct ChatItemProps {
@@ -41,23 +39,6 @@ struct ChatItemView: View {
 
   var hasUnreadMessages: Bool {
     props.dialog.unreadCount ?? 0 > 0
-  }
-
-  private var displayText: String? {
-    guard let message = message else { return message?.text }
-    if TranslationState.shared.isTranslationEnabled(for: message.peerId) {
-      do {
-        let translations = try AppDatabase.shared.reader.read { db in
-          try message.translations.filter(Column("language") == UserLocale.getCurrentLanguage()).fetchAll(db)
-        }
-        return translations.first?.translation ?? message.text
-      } catch {
-        Log.shared.error("Failed to fetch translations: \(error)")
-        return message.text
-      }
-    } else {
-      return message.text
-    }
   }
 
   var body: some View {
@@ -170,7 +151,7 @@ struct ChatItemView: View {
         .foregroundColor(.secondary)
 
     } else {
-      Text(displayText ?? "")
+      Text(message?.text ?? "")
         .font(.customCaption())
         .foregroundColor(.secondary)
     }
