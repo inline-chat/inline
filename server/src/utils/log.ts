@@ -22,6 +22,7 @@ const testDefaultLogLevel = LogLevel.NONE
 const globalLogLevel: Record<string, LogLevel> = {
   shared: LogLevel.INFO,
   server: LogLevel.INFO,
+  "modules/translation/translation": LogLevel.DEBUG,
 }
 
 export class Log {
