@@ -10,13 +10,13 @@ CREATE TABLE IF NOT EXISTS "message_translations" (
 );
 --> statement-breakpoint
 DO $$ BEGIN
- ALTER TABLE "message_translations" ADD CONSTRAINT "message_translations_chat_id_chats_id_fk" FOREIGN KEY ("chat_id") REFERENCES "public"."chats"("id") ON DELETE no action ON UPDATE no action;
+ ALTER TABLE "message_translations" ADD CONSTRAINT "message_translations_chat_id_chats_id_fk" FOREIGN KEY ("chat_id") REFERENCES "public"."chats"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
- ALTER TABLE "message_translations" ADD CONSTRAINT "chat_id_message_id_fk" FOREIGN KEY ("chat_id","message_id") REFERENCES "public"."messages"("chat_id","message_id") ON DELETE no action ON UPDATE no action;
+ ALTER TABLE "message_translations" ADD CONSTRAINT "chat_id_message_id_fk" FOREIGN KEY ("chat_id","message_id") REFERENCES "public"."messages"("chat_id","message_id") ON DELETE CASCADE ON UPDATE CASCADE;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
