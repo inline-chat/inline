@@ -69,6 +69,8 @@ public final class TranslationDetector {
           ))
           return
         }
+
+        recognizer.reset()
       }
 
       // If we get here, all messages were in the user's language
