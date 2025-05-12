@@ -37,7 +37,6 @@ struct SpaceView: View {
 
   @EnvironmentStateObject var fullSpaceViewModel: FullSpaceViewModel
 
-  // trigger build
   @State private var navBarHeight: CGFloat = 0
   @State private var selectedTab: Tabs = .chats
 
