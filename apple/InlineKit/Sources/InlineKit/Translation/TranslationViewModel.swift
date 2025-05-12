@@ -97,7 +97,7 @@ actor TranslationViewModel {
 
         // 1. Filter messages needing translation
         let messagesNeedingTranslation = try await TranslationManager.shared.filterMessagesNeedingTranslation(
-          messages: newMessages.map(\.message),
+          messages: newMessages,
           targetLanguage: targetLanguage
         )
 
