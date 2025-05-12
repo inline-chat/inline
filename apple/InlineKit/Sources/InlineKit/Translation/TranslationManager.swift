@@ -37,39 +37,36 @@ actor TranslationManager {
 
   /// Filter messages that need translation
   public func filterMessagesNeedingTranslation(
-    messages: [Message],
+    messages: [FullMessage],
     targetLanguage: String
   ) async throws -> [Message] {
     log.debug("Filtering \(messages.count) messages for translation needs")
 
-    return try await db.dbWriter.read { db in
-      var messagesNeedingTranslation: [Message] = []
+    var messagesNeedingTranslation: [Message] = []
 
-      for message in messages {
-        // Skip if no text content
-        guard let text = message.text, !text.isEmpty else { continue }
+    for fullMessage in messages {
+      let message = fullMessage.message
 
-        // Check if translation already exists
-        let existingTranslation = try Translation
-          .filter(Column("messageId") == message.messageId)
-          .filter(Column("chatId") == message.chatId)
-          .filter(Column("language") == targetLanguage)
-          .fetchOne(db)
+      // Skip if no text content
+      guard let text = message.text, !text.isEmpty else { continue }
 
-        if existingTranslation == nil {
-          // Detect message language
-          let detectedLanguages = LanguageDetector.detectTopTwoSupported(text)
-          self.log.debug("Detected languages: \(detectedLanguages) for message \(message.messageId)")
-          // Only translate if target language is not among the top 2 detected languages
-          if !detectedLanguages.contains(targetLanguage) {
-            messagesNeedingTranslation.append(message)
-          }
-        }
+      // Check if translation already exists using FullMessage's translations
+      if fullMessage.translation(for: targetLanguage) != nil {
+        continue
       }
 
-      self.log.debug("Found \(messagesNeedingTranslation.count) messages needing translation")
-      return messagesNeedingTranslation
+      // Detect message language outside of DB transaction
+      let detectedLanguages = LanguageDetector.detectTopTwoSupported(text)
+      log.debug("Detected languages: \(detectedLanguages) for message \(message.messageId)")
+
+      // Only translate if target language is not among the top 2 detected languages
+      if !detectedLanguages.contains(targetLanguage) {
+        messagesNeedingTranslation.append(message)
+      }
     }
+
+    log.debug("Found \(messagesNeedingTranslation.count) messages needing translation")
+    return messagesNeedingTranslation
   }
 
   /// Get translation for a message
