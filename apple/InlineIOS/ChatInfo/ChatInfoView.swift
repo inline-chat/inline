@@ -163,35 +163,36 @@ struct ChatInfoView: View {
             value: chatItem.chat?.isPublic != true ? "Private" : "Public"
           )
         }
-
-        Section("Participants") {
-          if isOwnerOrAdmin {
-            Button(action: {
-              isSearching = true
-            }) {
-              Label("Add Participant", systemImage: "person.badge.plus")
+        if chatItem.chat?.isPublic != true {
+          Section("Participants") {
+            if isOwnerOrAdmin {
+              Button(action: {
+                isSearching = true
+              }) {
+                Label("Add Participant", systemImage: "person.badge.plus")
+              }
             }
-          }
-          ForEach(participantsViewModel.participants) { userInfo in
-            ProfileRow(userInfo: userInfo, isChatInfo: true)
-              .swipeActions {
-                if isOwnerOrAdmin {
-                  Button(role: .destructive, action: {
-                    Task {
-                      do {
-                        try await Realtime.shared.invokeWithHandler(.removeChatParticipant, input: .removeChatParticipant(.with { input in
-                          input.chatID = chatItem.chat?.id ?? 0
-                          input.userID = userInfo.user.id
-                        }))
-                      } catch {
-                        Log.shared.error("Failed to remove participant", error: error)
+            ForEach(participantsViewModel.participants) { userInfo in
+              ProfileRow(userInfo: userInfo, isChatInfo: true)
+                .swipeActions {
+                  if isOwnerOrAdmin {
+                    Button(role: .destructive, action: {
+                      Task {
+                        do {
+                          try await Realtime.shared.invokeWithHandler(.removeChatParticipant, input: .removeChatParticipant(.with { input in
+                            input.chatID = chatItem.chat?.id ?? 0
+                            input.userID = userInfo.user.id
+                          }))
+                        } catch {
+                          Log.shared.error("Failed to remove participant", error: error)
+                        }
                       }
+                    }) {
+                      Text("Remove")
                     }
-                  }) {
-                    Text("Remove")
                   }
                 }
-              }
+            }
           }
         }
       }
