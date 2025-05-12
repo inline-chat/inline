@@ -44,7 +44,7 @@ public final class TranslationState: @unchecked Sendable {
 
     // Notify progressive view model with a reload
     Task { @MainActor in
-      MessagesPublisher.shared.messagesReload(peer: peerId, animated: true)
+//      MessagesPublisher.shared.messagesReload(peer: peerId, animated: true)
 
       // Publish the change
       self.subject.send((peerId, enabled))
