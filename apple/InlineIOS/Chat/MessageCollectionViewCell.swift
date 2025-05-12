@@ -19,6 +19,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   var fromOtherSender: Bool = false
   var message: FullMessage!
   var spaceId: Int64 = 0
+  var prevText: String? = nil
 
   private var panGesture: UIPanGestureRecognizer!
   private let replyIndicator = ReplyIndicatorView()
@@ -50,7 +51,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   func configure(with message: FullMessage, fromOtherSender: Bool, spaceId: Int64) {
     if self.message != nil {
-      if self.message.displayText == message.displayText, self.message == message,
+      if prevText == message.displayText, self.message == message,
          self.fromOtherSender == fromOtherSender, self.spaceId == spaceId
       {
         print("👽 MessageCollectionViewCell skipping update")
@@ -60,6 +61,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     }
 
     // update it first
+    prevText = message.displayText
     self.message = message
     self.fromOtherSender = fromOtherSender
     self.spaceId = spaceId
