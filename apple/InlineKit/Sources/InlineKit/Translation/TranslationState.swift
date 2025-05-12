@@ -8,7 +8,7 @@ public final class TranslationState: @unchecked Sendable {
   public static let shared = TranslationState()
 
   @MainActor
-  private let subject = PassthroughSubject<(Peer, Bool), Never>()
+  public let subject = PassthroughSubject<(Peer, Bool), Never>()
 
   private var cache: [String: Bool] = [:]
   private let cacheLock = NSLock()
@@ -48,7 +48,7 @@ public final class TranslationState: @unchecked Sendable {
       MessagesPublisher.shared.messagesReload(peer: peerId, animated: true)
 
       // Publish the change
-      subject.send((peerId, enabled))
+      self.subject.send((peerId, enabled))
     }
   }
 

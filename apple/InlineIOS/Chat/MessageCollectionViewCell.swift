@@ -50,7 +50,10 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   func configure(with message: FullMessage, fromOtherSender: Bool, spaceId: Int64) {
     if self.message != nil {
-      if self.message == message, self.fromOtherSender == fromOtherSender, self.spaceId == spaceId {
+      if self.message.displayText == message.displayText, self.message == message,
+         self.fromOtherSender == fromOtherSender, self.spaceId == spaceId
+      {
+        print("👽 MessageCollectionViewCell skipping update")
         // skip only if everything is exact match
         return
       }
