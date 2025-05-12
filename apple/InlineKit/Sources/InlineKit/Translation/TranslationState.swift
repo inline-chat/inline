@@ -3,7 +3,6 @@ import Foundation
 import InlineProtocol
 
 /// Global state for translations
-
 public final class TranslationState: @unchecked Sendable {
   public static let shared = TranslationState()
 
@@ -20,27 +19,27 @@ public final class TranslationState: @unchecked Sendable {
     let key = peerId.toString()
 
     // Check cache first
-    cacheLock.lock()
-    defer { cacheLock.unlock() }
-
-    if let cached = cache[key] {
+    let cached = cacheLock.withLock { cache[key] }
+    if let cached {
       return cached
     }
 
     // If not in cache, get from UserDefaults and cache it
     let value = UserDefaults.standard.bool(forKey: translationEnabledKey + key)
-    cache[key] = value
+
+    cacheLock.withLock {
+      cache[key] = value
+    }
+
     return value
   }
 
   public func setTranslationEnabled(_ enabled: Bool, for peerId: Peer) {
     let key = peerId.toString()
 
-    cacheLock.lock()
-    defer { cacheLock.unlock() }
-
-    // Update both cache and UserDefaults
-    cache[key] = enabled
+    cacheLock.withLock {
+      cache[key] = enabled
+    }
     UserDefaults.standard.set(enabled, forKey: translationEnabledKey + key)
 
     // Notify progressive view model with a reload
@@ -57,10 +56,9 @@ public final class TranslationState: @unchecked Sendable {
     setTranslationEnabled(!current, for: peerId)
   }
 
-  // Optional: Method to clear cache if needed
   public func clearCache() {
-    cacheLock.lock()
-    defer { cacheLock.unlock() }
-    cache.removeAll()
+    cacheLock.withLock {
+      cache.removeAll()
+    }
   }
 }
