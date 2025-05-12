@@ -45,33 +45,40 @@ public final class TranslationDetector {
         .traditionalChinese: 0.5,
       ]
 
-      // Process all messages
+      // Process messages one by one until we find a different language
       for message in messages {
         guard let text = message.message.text, !text.isEmpty else { continue }
+
         let cleanedText = LanguageDetector.cleanText(text)
         recognizer.processString(cleanedText)
+
+        // Get language hypotheses for current message
+        let hypotheses = recognizer.languageHypotheses(withMaximum: 2)
+          .filter { $0.value >= confidenceThreshold }
+          .map { (language: $0.key.rawValue, confidence: $0.value) }
+
+        // If we found a message in a different language, stop and publish true
+        if hypotheses.contains(where: { $0.language != userLanguage }) {
+          log.debug("Found message in different language: \(hypotheses)")
+          log.debug("Translation needed: true")
+
+          publisher.send(DetectionResult(
+            peer: peer,
+            needsTranslation: true,
+            detectedLanguages: hypotheses
+          ))
+          return
+        }
       }
 
-      // Get language hypotheses
-      let hypotheses = recognizer.languageHypotheses(withMaximum: 2)
-        .filter { $0.value >= confidenceThreshold }
-        .map { (language: $0.key.rawValue, confidence: $0.value) }
-
-      // Check if any detected language is different from user's language
-      let needsTranslation = hypotheses.contains { $0.language != userLanguage }
-
-      if needsTranslation {
-        log.debug("Found languages: \(hypotheses)")
-        log.debug("Translation needed: true")
-      } else {
-        log.debug("No messages found in other languages")
-        log.debug("Translation needed: false")
-      }
+      // If we get here, all messages were in the user's language
+      log.debug("All messages in user's language")
+      log.debug("Translation needed: false")
 
       publisher.send(DetectionResult(
         peer: peer,
-        needsTranslation: needsTranslation,
-        detectedLanguages: hypotheses
+        needsTranslation: false,
+        detectedLanguages: []
       ))
     }
   }
