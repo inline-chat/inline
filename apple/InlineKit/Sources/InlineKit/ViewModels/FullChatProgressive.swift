@@ -461,7 +461,7 @@ public final class MessagesPublisher {
     publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
   }
 
-  func messagesReload(peer: Peer, animated: Bool?) {
+  public func messagesReload(peer: Peer, animated: Bool?) {
     publisher.send(.reload(peer: peer, animated: animated))
   }
 

@@ -117,14 +117,27 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
 }
 
 public extension FullMessage {
+  /// Translation text for the message, without falling back to the original text
+  var translationText: String? {
+    if TranslationState.shared.isTranslationEnabled(for: peerId) {
+      currentTranslation?.translation
+    } else {
+      message.text ?? nil
+    }
+  }
+  
+  var isTranslated: Bool {
+    translationText != nil
+  }
+
   /// Display text for the message
   /// If translation is enabled, use the current translation
   /// Otherwise, use the message text
   var displayText: String? {
-    if TranslationState.shared.isTranslationEnabled(for: peerId) {
-      currentTranslation?.translation ?? message.text ?? nil
+    if let translationText {
+      translationText
     } else {
-      message.text ?? nil
+      message.text
     }
   }
 }

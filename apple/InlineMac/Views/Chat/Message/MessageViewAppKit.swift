@@ -922,10 +922,15 @@ class MessageViewAppKit: NSView {
     guard hasText else { return }
 
     // Get display text which handles translations
-    let text = fullMessage.displayText ?? ""
+    let translationText = fullMessage.translationText
+    let showingTranslatedText = fullMessage.translationText != nil
+    let text = translationText ?? fullMessage.message.text ?? ""
 
     // From Cache
-    if let cachedAttributedString = CacheAttrs.shared.get(message: message) {
+
+    if
+      let cachedAttributedString = CacheAttrs.shared.get(message: fullMessage)
+    {
       let attributedString = cachedAttributedString
       textView.textStorage?.setAttributedString(attributedString)
 
@@ -970,10 +975,7 @@ class MessageViewAppKit: NSView {
 
     textView.textStorage?.setAttributedString(attributedString)
 
-    // Only cache if translation is not enabled
-    if !TranslationState.shared.isTranslationEnabled(for: fullMessage.peerId) {
-      CacheAttrs.shared.set(message: message, value: attributedString)
-    }
+    CacheAttrs.shared.set(message: fullMessage, value: attributedString)
 
     if useTextKit2 {
       textView.textContainer?.size = props.layout.text?.size ?? .zero
@@ -1569,10 +1571,11 @@ struct MessageViewInputProps: Equatable, Codable, Hashable {
   var isFirstMessage: Bool
   var isDM: Bool
   var isRtl: Bool
+  var translated: Bool
 
   /// Used in cache key
   func toString() -> String {
-    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")"
+    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")"
   }
 }
 
@@ -1583,6 +1586,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var isRtl: Bool
   var isDM: Bool = false
   var index: Int?
+  var translated: Bool
   var layout: MessageSizeCalculator.LayoutPlans
 
   func equalExceptSize(_ rhs: MessageViewProps) -> Bool {
@@ -1590,7 +1594,8 @@ struct MessageViewProps: Equatable, Codable, Hashable {
       isLastMessage == rhs.isLastMessage &&
       isFirstMessage == rhs.isFirstMessage &&
       isRtl == rhs.isRtl &&
-      isDM == rhs.isDM
+      isDM == rhs.isDM &&
+      translated == rhs.translated
   }
 }
 

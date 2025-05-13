@@ -52,6 +52,8 @@ actor TranslationManager {
 
       // Check if translation already exists using FullMessage's translations
       if fullMessage.translation(for: targetLanguage) != nil {
+        // Translation already exists, skip this message
+        log.debug("Translation already exists for message \(message.messageId)")
         continue
       }
 

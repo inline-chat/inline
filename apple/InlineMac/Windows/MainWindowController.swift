@@ -67,27 +67,11 @@ class MainWindowController: NSWindowController {
     window?.setFrameUsingName("MainWindow")
 
     window?.minSize = NSSize(width: 330, height: 220)
-
-//    if topLevelRoute == .onboarding {
-//      setupOnboarding()
-//    } else {
-//      setupMainSplitView()
-//    }
   }
 
   /// Animate or switch to next VC
   private func switchViewController(to viewController: NSViewController) {
-//    if let _ = window?.contentViewController {
-//      NSAnimationContext.runAnimationGroup { context in
-//        context.duration = 0.1
-//        context.allowsImplicitAnimation = true
-//
-//        window?.contentViewController = viewController
-//      }
-//    } else {
-
     window?.contentViewController = viewController
-//    }
   }
 
   private func setupOnboarding() {
@@ -242,6 +226,7 @@ extension MainWindowController: NSToolbarDelegate {
       .navBack,
       .navForward,
       .chatTitle,
+      .translate,
     ]
   }
 
@@ -295,6 +280,10 @@ extension MainWindowController: NSToolbarDelegate {
           dependencies: dependencies
         )
 
+      case .translate:
+        guard case let .chat(peer) = nav.currentRoute else { return nil }
+        return createTranslateButton(peer: peer)
+
       default:
         return nil
     }
@@ -315,18 +304,10 @@ extension MainWindowController: NSToolbarDelegate {
     return menu
   }
 
-//  private func makeBackToHome() -> NSToolbarItem {
-//    let item = NSToolbarItem(itemIdentifier: .backToHome)
-//    item.isBordered = true
-//    item.label = "Back to Home"
-//    item.image = NSImage(
-//      systemSymbolName: "house",
-//      accessibilityDescription: "Home"
-//    )
-//    item.action = #selector(goBackToHome)
-//    item.target = self
-//    return item
-//  }
+  private func createTranslateButton(peer: Peer) -> NSToolbarItem {
+    let item = TranslateToolbar(peer: peer, dependencies: dependencies)
+    return item
+  }
 
   @objc private func createNewSpace() {
     dependencies.nav.open(.createSpace)
@@ -354,6 +335,7 @@ extension NSToolbarItem.Identifier {
   static let navBack = Self("NavBack")
   static let navForward = Self("NavForward")
   static let chatTitle = Self("ChatTitle")
+  static let translate = Self("Translate")
 }
 
 // MARK: - Top level router
@@ -446,6 +428,9 @@ extension MainWindowController {
     switch nav.currentRoute {
       case .chat:
         items.append(.chatTitle)
+        items.append(.flexibleSpace)
+        // FIXME: check if we should show this
+        items.append(.translate)
 
       default:
         break

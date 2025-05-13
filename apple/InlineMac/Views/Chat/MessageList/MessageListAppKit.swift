@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import InlineKit
 import Logger
 import SwiftUI
@@ -14,7 +15,7 @@ class MessageListAppKit: NSViewController {
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
 
-  private let log = Log.scoped("MessageListAppKit", enableTracing: false)
+  private let log = Log.scoped("MessageListAppKit", enableTracing: true)
   private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 45.0
 
@@ -37,6 +38,7 @@ class MessageListAppKit: NSViewController {
   private var debug_slowAnimation = false
 
   private var eventMonitorTask: Task<Void, Never>?
+  private var cancellables: Set<AnyCancellable> = []
 
   init(dependencies: AppDependencies, peerId: Peer, chat: Chat) {
     self.dependencies = dependencies
@@ -83,6 +85,20 @@ class MessageListAppKit: NSViewController {
         }
       }
     }
+
+    TranslationState.shared.subject.sink { [weak self] _ in
+      guard let self else { return }
+
+      // Invalidate message text cache
+      CacheAttrs.shared.invalidate()
+
+      // Invalidate message view heights
+      MessageSizeCalculator.shared.invalidateCache()
+
+      // Reload to reflect changes
+      //applyUpdate(.reload(animated: true))
+      applyUpdate(.reload(animated: false))
+    }.store(in: &cancellables)
   }
 
   @available(*, unavailable)
@@ -269,8 +285,7 @@ class MessageListAppKit: NSViewController {
     )
   }
 
-  private func updateMessageViewColors() {
-  }
+  private func updateMessageViewColors() {}
 
   private var isToolbarVisible = false
 
@@ -1099,7 +1114,8 @@ class MessageListAppKit: NSViewController {
             isRtl: inputProps.isRtl,
             isDM: chat?.type == .privateChat,
             index: row,
-            layout: plan
+            translated: inputProps.translated,
+            layout: plan,
           )
 
           rowView.updateSizeWithProps(props: props)
@@ -1154,6 +1170,11 @@ class MessageListAppKit: NSViewController {
     return sizeCalculator.cachedSize(messageStableId: message.id)
   }
 
+  // TODO: cache it
+  private func getIsChatTranslated() -> Bool {
+    TranslationState.shared.isTranslationEnabled(for: peerId)
+  }
+
   private func messageProps(for row: Int) -> MessageViewInputProps {
     guard row >= 0, row < messages.count else {
       return MessageViewInputProps(
@@ -1161,7 +1182,8 @@ class MessageListAppKit: NSViewController {
         isLastMessage: true,
         isFirstMessage: true,
         isDM: chat?.type == .privateChat,
-        isRtl: false
+        isRtl: false,
+        translated: false
       )
     }
 
@@ -1171,7 +1193,8 @@ class MessageListAppKit: NSViewController {
       isLastMessage: isLastMessage(at: row),
       isFirstMessage: isFirstMessage(at: row),
       isDM: chat?.type == .privateChat,
-      isRtl: false
+      isRtl: false,
+      translated: message.isTranslated
     )
   }
 
@@ -1246,7 +1269,7 @@ extension MessageListAppKit: NSTableViewDelegate {
   func isFirstMessage(at row: Int) -> Bool {
     row == 0
   }
-  
+
   var animateUpdates: Bool {
     // don't animate initial layout
     !needsInitialScroll
@@ -1283,6 +1306,7 @@ extension MessageListAppKit: NSTableViewDelegate {
       isRtl: inputProps.isRtl,
       isDM: chat?.type == .privateChat,
       index: row,
+      translated: inputProps.translated,
       layout: layoutPlan
     )
 

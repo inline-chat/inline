@@ -82,7 +82,8 @@ class MessageSizeCalculator {
     // know we don't need to recalc. since this function is used in message list to bypass unneccessary calcs.
     guard !fullMessage.hasMedia else { return nil }
 
-    let text = fullMessage.message.text ?? emptyFallback
+    //let text = fullMessage.message.text ?? emptyFallback
+    let text = fullMessage.displayText ?? emptyFallback
     let minTextSize = minTextWidthForSingleLine.object(forKey: text as NSString) as? CGSize
 
     // This is just text size, we need to take bubble paddings into account as well
@@ -365,7 +366,7 @@ class MessageSizeCalculator {
     }
 
     if hasText, textSize == nil {
-      let textSize_ = calculateSizeForText(text, width: availableWidth, message: message.message)
+      let textSize_ = calculateSizeForText(text, width: availableWidth, message: message)
       textSize = textSize_
 
       // Cache as single line if height is equal to single line height
@@ -752,7 +753,7 @@ class MessageSizeCalculator {
     }
   }
 
-//  private func calculateSizeForText(_ text: String, width: CGFloat, message: Message? = nil) -> NSSize {
+//  private func calculateSizeForText(_ text: String, width: CGFloat, message: FullMessage? = nil) -> NSSize {
 //    textContainer.size = NSSize(width: width, height: .greatestFiniteMagnitude)
 //
 //    // See if this actually helps performance or not
@@ -793,7 +794,7 @@ class MessageSizeCalculator {
 //    return CGSize(width: textWidth, height: textHeight)
 //  }
 
-  private func calculateSizeForText(_ text: String, width: CGFloat, message: Message? = nil) -> NSSize {
+  private func calculateSizeForText(_ text: String, width: CGFloat, message: FullMessage? = nil) -> NSSize {
     // Create attributed string
     let attributedString = if let message, let attrs = CacheAttrs.shared.get(message: message) {
       attrs
