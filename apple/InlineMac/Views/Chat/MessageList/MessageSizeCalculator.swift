@@ -459,6 +459,9 @@ class MessageSizeCalculator {
       } else {
         textBottomSpacing += Theme.messageTextAndTimeSpacing
       }
+      
+      // Offset added height to keep bubble height unchanged
+      textBottomSpacing -= additionalTextHeight
 
       textPlan = LayoutPlan(
         size: NSSize(width: ceil(textWidth), height: ceil(textHeight)),
@@ -820,7 +823,7 @@ class MessageSizeCalculator {
 
     // Add a small amount of padding to account for any rounding errors
     let textWidth = ceil(frameSize.width) + Self.extraSafeWidth
-    let textHeight = ceil(frameSize.height) + 3.0 // this 3.0 fixes 2 line chinese text, otherwise it won't fit
+    let textHeight = ceil(frameSize.height) + additionalTextHeight
 
     #if DEBUG
     log.trace("calculateSizeForText \(text) width \(width) resulting in size \(frameSize)")
@@ -828,6 +831,9 @@ class MessageSizeCalculator {
 
     return CGSize(width: textWidth, height: textHeight)
   }
+  
+  /// Fixes a bug with the text view height calculation for Chinese text that don't show last line.
+  private var additionalTextHeight: CGFloat = 1.0
 
   func calculatePhotoSize(
     width: CGFloat,
