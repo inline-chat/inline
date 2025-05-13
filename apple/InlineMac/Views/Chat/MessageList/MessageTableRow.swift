@@ -7,7 +7,7 @@ import SwiftUI
 class MessageTableCell: NSView {
   private var messageView: MessageViewAppKit?
   private var currentContent: (message: FullMessage, props: MessageViewProps)?
-  private let log = Log.scoped("MessageTableCell", enableTracing: false)
+  private let log = Log.scoped("MessageTableCell", enableTracing: true)
 
   override init(frame: NSRect) {
     super.init(frame: frame)
@@ -25,8 +25,16 @@ class MessageTableCell: NSView {
     layerContentsRedrawPolicy = .onSetNeedsDisplay
   }
 
+  private var wasTranslated: Bool? = nil
+
   func configure(with message: FullMessage, props: MessageViewProps, animate: Bool = true) {
-    if message == currentContent?.message, props == currentContent?.props {
+    defer { wasTranslated = message.isTranslated }
+
+    if message == currentContent?.message,
+       props == currentContent?.props,
+       // And same translation
+       wasTranslated == message.isTranslated
+    {
       // layoutSubtreeIfNeeded()
       // added this to solve the clipping issue in scroll view on last message when it was multiline and initial height
       // was calculated with a wider width during the table view setup
@@ -40,11 +48,13 @@ class MessageTableCell: NSView {
        messageView != nil,
        // same message
        currentContent.message == message,
+       // and translate not changed
+       wasTranslated == message.isTranslated,
        // different width and height (ie. window resized)
        currentContent.props.equalExceptSize(props)
     {
-      log.trace("updating message size")
       self.currentContent = (message, props)
+      log.trace("updating message size \(currentContent.message.message.id ?? 0)")
       updateSize()
       return
     }
@@ -197,5 +207,6 @@ class MessageTableCell: NSView {
   override func prepareForReuse() {
     super.prepareForReuse()
     layer?.removeAllAnimations()
+    wasTranslated = nil
   }
 }
