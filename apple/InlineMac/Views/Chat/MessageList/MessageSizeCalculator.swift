@@ -819,7 +819,7 @@ class MessageSizeCalculator {
 
     // Add a small amount of padding to account for any rounding errors
     let textWidth = ceil(frameSize.width) + Self.extraSafeWidth
-    let textHeight = ceil(frameSize.height)
+    let textHeight = ceil(frameSize.height) + 3.0 // this 3.0 fixes 2 line chinese text, otherwise it won't fit
 
     #if DEBUG
     log.trace("calculateSizeForText \(text) width \(width) resulting in size \(frameSize)")
