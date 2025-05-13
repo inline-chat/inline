@@ -454,6 +454,9 @@ private extension MessagesCollectionView {
     private let spaceId: Int64
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var cancellables = Set<AnyCancellable>()
+    private var updateWorkItem: DispatchWorkItem?
+    private var isApplyingSnapshot = false
+    private var needsAnotherUpdate = false
 
     func collectionView(
       _ collectionView: UICollectionView,
@@ -1121,15 +1124,28 @@ private extension MessagesCollectionView {
       }
       if isUserScrollInEffect {
         let isAtBottom = scrollView.contentOffset.y >= (scrollView.contentSize.height - scrollView.bounds.size.height)
-
         if isAtBottom {
           viewModel.loadBatch(at: .older)
-          updateItems()
+          scheduleUpdateItems()
         }
       }
     }
 
-    func updateItems() {
+    func scheduleUpdateItems() {
+      updateWorkItem?.cancel()
+      let workItem = DispatchWorkItem { [weak self] in
+        self?.updateItemsSafely()
+      }
+      updateWorkItem = workItem
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: workItem)
+    }
+
+    private func updateItemsSafely() {
+      guard !isApplyingSnapshot else {
+        needsAnotherUpdate = true
+        return
+      }
+      isApplyingSnapshot = true
       let currentSnapshot = dataSource.snapshot()
       let currentIds = Set(currentSnapshot.itemIdentifiers)
       let availableIds = Set(messages.map(\.id))
@@ -1138,12 +1154,24 @@ private extension MessagesCollectionView {
       if !missingIds.isEmpty {
         var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
         snapshot.appendSections([.main])
-
         let orderedIds = messages.map(\.id)
-
         snapshot.appendItems(orderedIds, toSection: .main)
-
-        dataSource.apply(snapshot, animatingDifferences: false)
+        DispatchQueue.main.async { [weak self] in
+          self?.dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+            guard let self else { return }
+            isApplyingSnapshot = false
+            if needsAnotherUpdate {
+              needsAnotherUpdate = false
+              scheduleUpdateItems()
+            }
+          }
+        }
+      } else {
+        isApplyingSnapshot = false
+        if needsAnotherUpdate {
+          needsAnotherUpdate = false
+          scheduleUpdateItems()
+        }
       }
     }
   }
