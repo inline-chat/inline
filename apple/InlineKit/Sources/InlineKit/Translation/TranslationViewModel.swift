@@ -97,7 +97,7 @@ actor TranslationViewModel {
         var newMessages: [FullMessage] = []
         for message in messagesCopy {
           // Skip sending/failed messages
-          if message.message.status != .sent {
+          if message.message.status == .sending || message.message.status == .failed {
             continue
           }
           let isProcessed = await isProcessed(messageId: message.id, targetLanguage: targetLanguage)
