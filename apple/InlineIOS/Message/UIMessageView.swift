@@ -633,7 +633,6 @@ class UIMessageView: UIView {
   }
 
   func setupAppearance() {
-    print("👽 fullMessage.displayText  \(fullMessage.displayText)")
     let cacheKey = "\(message.stableId)-\(fullMessage.displayText ?? "")"
     bubbleView.backgroundColor = bubbleColor
 
