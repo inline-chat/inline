@@ -54,7 +54,6 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       if prevText == message.displayText, self.message == message,
          self.fromOtherSender == fromOtherSender, self.spaceId == spaceId
       {
-        // print("👽 MessageCollectionViewCell skipping update")
         // skip only if everything is exact match
         return
       }
@@ -360,6 +359,8 @@ extension MessageCollectionViewCell {
 
   // Add avatar if we have user info
   func resetCell() {
+    messageView?.stopBlinkingAnimation()
+
     messageView?.removeFromSuperview()
     if isThread {
       nameLabel.removeFromSuperview()

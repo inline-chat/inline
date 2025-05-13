@@ -513,36 +513,6 @@ private extension MessagesCollectionView {
           dataSource.apply(snapshot, animatingDifferences: true)
         }
         .store(in: &cancellables)
-      // .sink { [weak self] peer, enabled in
-      //   print("translationChanged: \(peer) \(enabled)")
-      //   guard let self, peer == self.peerId else { return }
-
-      //   // Use batch updates to prevent hanging
-      //   currentCollectionView?.performBatchUpdates {
-      //     var snapshot = self.dataSource.snapshot()
-      //     // Only reconfigure visible items and a small buffer
-      //     let visibleIndexPaths = self.currentCollectionView?.indexPathsForVisibleItems ?? []
-      //     let visibleIds = visibleIndexPaths.compactMap { indexPath -> FullMessage.ID? in
-      //       guard indexPath.item < self.messages.count else { return nil }
-      //       return self.messages[indexPath.item].id
-      //     }
-
-      //     // Add a small buffer of items before and after visible range
-      //     let bufferSize = 5
-      //     let startIndex = max(0, (visibleIndexPaths.first?.item ?? 0) - bufferSize)
-      //     let endIndex = min(self.messages.count, (visibleIndexPaths.last?.item ?? 0) + bufferSize)
-      //     let bufferedIds = (startIndex ..< endIndex).compactMap { index -> FullMessage.ID? in
-      //       guard index < self.messages.count else { return nil }
-      //       return self.messages[index].id
-      //     }
-
-      //     // Combine visible and buffered items, removing duplicates
-      //     let idsToUpdate = Array(Set(visibleIds + bufferedIds))
-      //     snapshot.reconfigureItems(idsToUpdate)
-      //     self.dataSource.apply(snapshot, animatingDifferences: true)
-      //   }
-      // }
-      // .store(in: &cancellables)
     }
 
     func setupDataSource(_ collectionView: UICollectionView) {

@@ -223,21 +223,22 @@ class UIMessageView: UIView {
   }
 
   private func startBlinkingAnimation() {
-    UIView.animate(
-      withDuration: 0.8,
-      delay: 0,
-      options: [.autoreverse, .repeat, .allowUserInteraction],
-      animations: { [weak self] in
-        self?.bubbleView.alpha = 0.6
-      }
-    )
+    bubbleView.layer.removeAllAnimations()
+
+    let animation = CABasicAnimation(keyPath: "opacity")
+    animation.fromValue = 1.0
+    animation.toValue = 0.6
+    animation.duration = 0.8
+    animation.autoreverses = true
+    animation.repeatCount = .infinity
+    animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+    bubbleView.layer.add(animation, forKey: "blinking")
   }
 
-  private func stopBlinkingAnimation() {
-    bubbleView.layer.removeAllAnimations()
-    UIView.animate(withDuration: 0.2) { [weak self] in
-      self?.bubbleView.alpha = 1
-    }
+  public func stopBlinkingAnimation() {
+    bubbleView.layer.removeAnimation(forKey: "blinking")
+    bubbleView.layer.opacity = 1.0
   }
 
   private func createURLPreviewView(for attachment: FullAttachment) -> URLPreviewView {
@@ -632,7 +633,7 @@ class UIMessageView: UIView {
   }
 
   func setupAppearance() {
-    print("👽 fullMessage.displayText  \(fullMessage.displayText )")
+    print("👽 fullMessage.displayText  \(fullMessage.displayText)")
     let cacheKey = "\(message.stableId)-\(fullMessage.displayText ?? "")"
     bubbleView.backgroundColor = bubbleColor
 
