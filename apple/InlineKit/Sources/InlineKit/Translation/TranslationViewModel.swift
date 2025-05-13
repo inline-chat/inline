@@ -293,6 +293,11 @@ public final class TranslatingStatePublisher {
     public struct Translating: Hashable, Sendable {
       public let messageId: Int64
       public let peerId: Peer
+
+      public init(messageId: Int64, peerId: Peer) {
+        self.messageId = messageId
+        self.peerId = peerId
+      }
     }
 
     public var translating: Set<Translating> = []

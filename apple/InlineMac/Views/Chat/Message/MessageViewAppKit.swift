@@ -1,5 +1,6 @@
 // MessageView.swift
 import AppKit
+import Combine
 import Foundation
 import InlineKit
 import InlineUI
@@ -15,6 +16,8 @@ class MessageViewAppKit: NSView {
   static let avatarSize: CGFloat = Theme.messageAvatarSize
   private(set) var fullMessage: FullMessage
   private var props: MessageViewProps
+  private var shineEffectView: ShineEffectView?
+  private var translationStateCancellable: AnyCancellable?
   private var from: User {
     fullMessage.from ?? User.deletedInstance
   }
@@ -340,6 +343,7 @@ class MessageViewAppKit: NSView {
     if let observer = notificationObserver {
       NotificationCenter.default.removeObserver(observer)
     }
+    translationStateCancellable?.cancel()
   }
 
   private func setupView() {
@@ -392,6 +396,48 @@ class MessageViewAppKit: NSView {
     setupMessageText()
     setupContextMenu()
     setupGestureRecognizers()
+
+    // Setup translation state observation
+    setupTranslationStateObservation()
+  }
+
+  private func setupTranslationStateObservation() {
+    translationStateCancellable = TranslatingStatePublisher.shared.publisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] translatingSet in
+        guard let self else { return }
+        let isTranslating = translatingSet.contains(
+          TranslatingStatePublisher.TranslatingStateHolder.Translating(
+            messageId: message.messageId,
+            peerId: message.peerId
+          )
+        )
+        updateShineEffect(isTranslating: isTranslating)
+      }
+  }
+
+  private func updateShineEffect(isTranslating: Bool) {
+    if isTranslating {
+      if shineEffectView == nil {
+        let shineView = ShineEffectView(frame: bubbleView.bounds)
+        shineView.translatesAutoresizingMaskIntoConstraints = false
+        bubbleView.addSubview(shineView)
+
+        NSLayoutConstraint.activate([
+          shineView.topAnchor.constraint(equalTo: bubbleView.topAnchor),
+          shineView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor),
+          shineView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
+          shineView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor),
+        ])
+
+        shineEffectView = shineView
+        shineView.startAnimation()
+      }
+    } else {
+      shineEffectView?.stopAnimation()
+      shineEffectView?.removeFromSuperview()
+      shineEffectView = nil
+    }
   }
 
   // MARK: - Reactions UI
@@ -1455,6 +1501,20 @@ class MessageViewAppKit: NSView {
     }
 
     return container
+  }
+
+  func reset() {
+    // Cancel translation state observation
+    translationStateCancellable?.cancel()
+    translationStateCancellable = nil
+
+    // Remove shine effect
+    shineEffectView?.stopAnimation()
+    shineEffectView?.removeFromSuperview()
+    shineEffectView = nil
+
+    // Re-setup translation state observation
+    setupTranslationStateObservation()
   }
 }
 
