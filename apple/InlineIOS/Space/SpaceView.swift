@@ -49,6 +49,7 @@ struct SpaceView: View {
 
   @State var openAddMemberSheet = false
 
+  // MARK: - Computed Properties
   var currentUserMemberItem: FullMemberItem? {
     fullSpaceViewModel.members.first { fullMember in
       fullMember.userInfo.user.id == Auth.shared.getCurrentUserId()
