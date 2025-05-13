@@ -775,7 +775,7 @@ extension ComposeView: UITextViewDelegate {
   func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
     if text.contains("￼") {
       DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-        self?.textView.checkForNewAttachmentsImmediate()
+        self?.textView.textDidChange()
       }
     }
 

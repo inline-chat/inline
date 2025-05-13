@@ -73,11 +73,22 @@ class ComposeTextView: UITextView {
     )
   }
 
-  @objc private func textDidChange() {
+  @objc public func textDidChange() {
     showPlaceholder(text.isEmpty)
 
     if text.contains("￼") || attributedText.string.contains("￼") {
-      handleStickerDetection()
+      // Get the full context of the text
+      let fullText = attributedText.string
+      let components = fullText.components(separatedBy: "￼")
+
+      let isLikelyVoiceToSpeech = components.count == 2 &&
+        (components[0].isEmpty || components[1].isEmpty) &&
+        !hasValidStickerAttributes()
+
+      if !isLikelyVoiceToSpeech {
+        // handleStickerDetection()
+        checkForNewAttachments()
+      }
     }
 
     fixFontSizeAfterStickerInsertion()
@@ -150,22 +161,6 @@ class ComposeTextView: UITextView {
     }
   }
 
-  private func handleStickerDetection() {
-    // Do we need these?
-
-    // Do we need these?
-    NSObject.cancelPreviousPerformRequests(
-      withTarget: self,
-      selector: #selector(performStickerDetection),
-      object: nil
-    )
-    perform(#selector(performStickerDetection), with: nil, afterDelay: 0.0)
-  }
-
-  @objc private func performStickerDetection() {
-    checkForNewAttachments()
-  }
-
   public func checkForNewAttachments() {
     guard let attributedText else { return }
 
@@ -199,23 +194,25 @@ class ComposeTextView: UITextView {
     at range: NSRange,
     attributes: [NSAttributedString.Key: Any]
   ) {
+    if !hasValidStickerAttributes() {
+      return
+    }
+
     let rangeIdentifier = "\(range.location):\(range.length):\(Date().timeIntervalSince1970)"
 
     processingLock.lock()
-
     if processedRanges.contains(rangeIdentifier) {
       processingLock.unlock()
       return
     }
-
     processedRanges.insert(rangeIdentifier)
     processingLock.unlock()
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-      self?.processingLock.lock()
-      self?.processedRanges.remove(rangeIdentifier)
-      self?.processingLock.unlock()
-    }
+    // DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+    processingLock.lock()
+    processedRanges.remove(rangeIdentifier)
+    processingLock.unlock()
+    // }
 
     var finalImage: UIImage?
     var imageSource = "unknown"
@@ -235,32 +232,6 @@ class ComposeTextView: UITextView {
         finalImage = image
         imageSource = "adaptive_glyph"
       }
-    }
-
-    if finalImage == nil {
-      var glyphRect = layoutManager.boundingRect(forGlyphRange: range, in: textContainer)
-
-      if glyphRect.width < 10 || glyphRect.height < 10 {
-        glyphRect = CGRect(
-          x: glyphRect.origin.x,
-          y: glyphRect.origin.y,
-          width: 200,
-          height: 200
-        )
-      }
-
-      let renderer = UIGraphicsImageRenderer(bounds: glyphRect)
-      let image = renderer.image { context in
-        UIColor.clear.setFill()
-        context.fill(glyphRect)
-        context.cgContext.saveGState()
-        context.cgContext.translateBy(x: -glyphRect.origin.x, y: -glyphRect.origin.y)
-        self.layer.render(in: context.cgContext)
-        context.cgContext.restoreGState()
-      }
-
-      finalImage = image
-      imageSource = "rendered_glyph"
     }
 
     if let image = finalImage {
@@ -423,49 +394,6 @@ class ComposeTextView: UITextView {
     }
   }
 
-  private func processAdaptiveImageProvider(_ provider: Any, range: NSRange) {
-    var finalImage: UIImage?
-
-    if let adaptiveGlyph = provider as? NSObject {
-      if adaptiveGlyph.responds(to: Selector(("image"))) {
-        if let image = adaptiveGlyph.value(forKey: "image") as? UIImage {
-          finalImage = image
-        }
-      }
-    }
-
-    if finalImage == nil {
-      let renderer = UIGraphicsImageRenderer(bounds: bounds)
-      let image = renderer.image { context in
-        context.cgContext.saveGState()
-
-        let glyphRect = self.layoutManager.boundingRect(
-          forGlyphRange: range,
-          in: self.textContainer
-        )
-        context.cgContext.translateBy(x: -glyphRect.origin.x, y: -glyphRect.origin.y)
-
-        self.layer.render(in: context.cgContext)
-
-        context.cgContext.restoreGState()
-      }
-
-      finalImage = image
-    }
-
-    guard let image = finalImage else {
-      return
-    }
-
-    guard let imageData = image.pngData() ?? image.jpegData(compressionQuality: 0.9) else {
-      return
-    }
-
-    sendStickerImage(imageData, metadata: ["source": "adaptive_image_provider"])
-
-    safelyRemoveAttachment(at: range)
-  }
-
   private func sendStickerImage(_ imageData: Data, metadata: [String: Any]) {
     let imageHash = imageData.prefix(1_024).hashValue
 
@@ -479,11 +407,11 @@ class ComposeTextView: UITextView {
     recentlySentImageHashes.insert(imageHash)
     processingLock.unlock()
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-      self?.processingLock.lock()
-      self?.recentlySentImageHashes.remove(imageHash)
-      self?.processingLock.unlock()
-    }
+    // DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+    processingLock.lock()
+    recentlySentImageHashes.remove(imageHash)
+    processingLock.unlock()
+    // }
 
     if let originalImage = UIImage(data: imageData) {
       Task {
@@ -529,6 +457,41 @@ class ComposeTextView: UITextView {
         self?.attributedText = attributedString
       }
     }
+  }
+
+  private func hasValidStickerAttributes() -> Bool {
+    guard let attributedText else { return false }
+
+    var hasValidSticker = false
+    attributedText.enumerateAttribute(
+      .attachment,
+      in: NSRange(location: 0, length: attributedText.length),
+      options: []
+    ) { value, _, _ in
+      if let attachment = value as? NSTextAttachment {
+        // Check if the attachment has valid image data
+        if attachment.image != nil ||
+          (attachment.fileWrapper?.regularFileContents != nil)
+        {
+          hasValidSticker = true
+        }
+      }
+    }
+
+    // Also check for adaptive glyph with image content
+    attributedText.enumerateAttribute(
+      NSAttributedString.Key(rawValue: "CTAdaptiveImageProvider"),
+      in: NSRange(location: 0, length: attributedText.length),
+      options: []
+    ) { value, _, _ in
+      if let adaptiveGlyph = value as? NSObject,
+         adaptiveGlyph.responds(to: Selector(("imageContent")))
+      {
+        hasValidSticker = true
+      }
+    }
+
+    return hasValidSticker
   }
 }
 
