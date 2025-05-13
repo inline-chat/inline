@@ -1,5 +1,5 @@
 import * as arctic from "arctic"
-import { encryptLinearTokens } from "@in/server/libs/linear/linear-helpers"
+import { encryptLinearTokens } from "@in/server/libs/helpers"
 import { db } from "@in/server/db"
 import { integrations } from "@in/server/db/schema/integrations"
 import { Log } from "@in/server/utils/log"

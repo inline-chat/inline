@@ -1,6 +1,6 @@
 import * as arctic from "arctic"
-import { encrypt } from "../../modules/encryption/encryption"
-import { decrypt } from "../../modules/encryption/encryption"
+import { encrypt } from "../modules/encryption/encryption"
+import { decrypt } from "../modules/encryption/encryption"
 
 interface EncryptedData {
   encrypted: Buffer

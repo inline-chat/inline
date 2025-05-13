@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm"
 import { db } from ".."
 import { integrations } from "../schema"
-import { decryptLinearTokens } from "@in/server/libs/linear/linear-helpers"
+import { decryptLinearTokens } from "@in/server/libs/helpers"
 
 export class IntegrationsModel {
   static async getWithUserId(userId: number) {
