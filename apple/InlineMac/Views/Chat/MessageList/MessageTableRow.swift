@@ -208,5 +208,6 @@ class MessageTableCell: NSView {
     super.prepareForReuse()
     layer?.removeAllAnimations()
     wasTranslated = nil
+    messageView?.reset()
   }
 }
