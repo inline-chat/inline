@@ -50,6 +50,7 @@ struct SpaceView: View {
   @State var openAddMemberSheet = false
 
   // MARK: - Computed Properties
+
   var currentUserMemberItem: FullMemberItem? {
     fullSpaceViewModel.members.first { fullMember in
       fullMember.userInfo.user.id == Auth.shared.getCurrentUserId()
@@ -114,7 +115,7 @@ struct SpaceView: View {
               .padding(.trailing, 4)
           }
           VStack(alignment: .leading) {
-            Text(fullSpaceViewModel.space?.name ?? "Space")
+            Text(fullSpaceViewModel.space?.nameWithoutEmoji ?? fullSpaceViewModel.space?.name ?? "Space")
               .font(.body)
               .fontWeight(.semibold)
           }

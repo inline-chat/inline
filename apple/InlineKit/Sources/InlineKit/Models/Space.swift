@@ -76,3 +76,47 @@ public extension Space {
     Date(timeIntervalSince1970: Double(from) / 1_000)
   }
 }
+
+public extension Space {
+  var nameWithoutEmoji: String {
+    filterEmojiFromStart(name)
+  }
+
+  func filterEmojiFromStart(_ text: String) -> String {
+    guard let firstChar = text.first else { return text }
+
+    if String(firstChar).containsEmoji {
+      return String(text.dropFirst())
+    }
+
+    return text
+  }
+}
+
+extension String {
+  var containsEmoji: Bool {
+    for scalar in unicodeScalars {
+      switch scalar.value {
+        case 0x1_F600 ... 0x1_F64F, // Emoticons
+             0x1_F300 ... 0x1_F5FF, // Misc Symbols and Pictographs
+             0x1_F680 ... 0x1_F6FF, // Transport and Map
+             0x1_F700 ... 0x1_F77F, // Alchemical Symbols
+             0x1_F780 ... 0x1_F7FF, // Geometric Shapes
+             0x1_F800 ... 0x1_F8FF, // Supplemental Arrows-C
+             0x1_F900 ... 0x1_F9FF, // Supplemental Symbols and Pictographs
+             0x1_FA00 ... 0x1_FA6F, // Chess Symbols
+             0x1_FA70 ... 0x1_FAFF, // Symbols and Pictographs Extended-A
+             0x2600 ... 0x26FF, // Miscellaneous Symbols
+             0x2700 ... 0x27BF, // Dingbats
+             0x2300 ... 0x23FF, // Miscellaneous Technical
+             0x2B00 ... 0x2BFF, // Miscellaneous Symbols and Arrows
+             0x3000 ... 0x303F, // CJK Symbols and Punctuation
+             0x3200 ... 0x32FF: // Enclosed CJK Letters and Months
+          return true
+        default:
+          continue
+      }
+    }
+    return false
+  }
+}

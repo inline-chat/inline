@@ -16,7 +16,7 @@ struct RectangleSpaceItem: View {
       ZStack {
         HStack {
           SpaceAvatar(space: space, size: 28)
-          Text(space.name)
+          Text(space.nameWithoutEmoji ?? space.name)
             .font(.body)
             .fontWeight(.medium)
             .foregroundColor(.primary)
