@@ -298,6 +298,7 @@ async function sendNotificationToUser({
     userId,
     senderUserId: messageInfo.message.fromId,
     threadId: `chat_${messageInfo.message.chatId}`,
+    isThread: chat?.type == "thread",
     title,
     body,
   })

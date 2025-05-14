@@ -115,17 +115,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
     let userInfo = response.notification.request.content.userInfo
+    let userId = userInfo["userId"] as? Int64
+    let isThread = userInfo["isThread"] as? Bool
+    let threadId = userInfo["threadId"] as? String
+    let ogThreadId = threadId?.replacingOccurrences(of: "chat_", with: "")
 
-    if let userId = userInfo["userId"] as? Int {
-      let peerId = Peer.user(id: Int64(userId))
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-        // go to home first
-        self.nav.popToRoot()
-        self.nav.push(.chat(peer: peerId))
-      }
+    let peerId = isThread == true ? Peer.thread(id: Int64(ogThreadId ?? "")!) : Peer.user(id: userId ?? 0)
 
-      completionHandler()
-    }
+    nav.navigateToChatFromNotification(peer: peerId)
+
+    completionHandler()
   }
 }
 
