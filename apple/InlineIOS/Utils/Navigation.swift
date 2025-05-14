@@ -121,14 +121,37 @@ class Navigation: ObservableObject, @unchecked Sendable {
     }
   }
 
+  func navigateToChatFromNotification(peer: Peer) {
+    if let spaceDestination = pathComponents.first(where: { destination in
+      if case .space = destination {
+        return true
+      }
+      return false
+    }) {
+      if case let .space(id: spaceId) = spaceDestination {
+        pathComponents = [.space(id: spaceId)]
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+          self.push(.chat(peer: peer))
+        }
+      }
+    } else {
+      popToRoot()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        self.push(.chat(peer: peer))
+      }
+    }
+  }
+
   func popPush(_ destination: Destination) {
     activeDestination = destination
     pathComponents = [destination]
   }
 
   func popToRoot() {
-    pathComponents = []
-    activeSheet = nil
+    DispatchQueue.main.async {
+      self.pathComponents = []
+      self.activeSheet = nil
+    }
   }
 
   func pop() {
