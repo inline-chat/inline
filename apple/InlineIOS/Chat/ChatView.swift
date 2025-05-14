@@ -163,7 +163,7 @@ struct ChatView: View {
               nav.push(.chatInfo(chatItem: chatItem))
             }
           }) {
-            UserAvatar(userInfo: user)
+            UserAvatar(userInfo: user, size: 28)
           }
           .buttonStyle(.plain)
         }
