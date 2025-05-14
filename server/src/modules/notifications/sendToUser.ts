@@ -11,6 +11,7 @@ type SendPushNotificationToUserInput = {
   threadId: string
   title: string
   body: string
+  isThread: boolean
 }
 
 const log = new Log("notifications.sendToUser")
@@ -21,6 +22,7 @@ export const sendPushNotificationToUser = async ({
   userId,
   senderUserId,
   threadId,
+  isThread,
   title,
   body,
 }: SendPushNotificationToUserInput) => {
@@ -42,13 +44,15 @@ export const sendPushNotificationToUser = async ({
       const notification = new Notification()
       notification.payload = {
         userId: senderUserId,
-
+        threadId,
+        isThread,
         // from?
       }
       notification.contentAvailable = true
       notification.mutableContent = true
       notification.topic = topic
       notification.threadId = threadId
+
       notification.sound = "default"
       notification.alert = {
         title,
@@ -69,16 +73,19 @@ export const sendPushNotificationToUser = async ({
             log.debug("Failed to send push notification", {
               errors: result.failed.map((f) => f.response),
               userId,
+              threadId,
             })
           } else {
             log.debug("Push notification sent successfully", {
               userId,
+              threadId,
             })
           }
         } catch (error) {
           log.debug("Error sending push notification", {
             error,
             userId,
+            threadId,
           })
         }
       }
@@ -89,6 +96,7 @@ export const sendPushNotificationToUser = async ({
     log.debug("Error sending push notification", {
       error,
       userId,
+      threadId,
     })
   }
 }
