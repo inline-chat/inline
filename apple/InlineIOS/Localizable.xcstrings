@@ -1,288 +1,597 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "@%@" : {
-
-    },
-    "@dena" : {
-
-    },
-    "@mo" : {
-
-    },
-    "%@" : {
-
-    },
     "%@:" : {
-
-    },
-    "%@: %@" : {
       "localizations" : {
-        "en" : {
+        "fa" : {
           "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@: %2$@"
+            "state" : "translated",
+            "value" : "%@: "
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: "
           }
         }
       }
     },
-    "%@..." : {
-
-    },
-    "%lld" : {
-
-    },
-    "%lld members" : {
-
-    },
-    "💬" : {
-
-    },
-    "🔍" : {
-
-    },
-    "🔎" : {
-
-    },
-    "🫙" : {
-
-    },
     "Account" : {
-
-    },
-    "Actions" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "حساب"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帳戶"
+          }
+        }
+      }
     },
     "Add a caption..." : {
-
-    },
-    "Add Member" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "یک توضیح اضافه کنید..."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加標題..."
+          }
+        }
+      }
     },
     "Add Participant" : {
-
-    },
-    "ALPHA" : {
-
-    },
-    "Appearance" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "افزودن شرکت‌کننده"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加參與者"
+          }
+        }
+      }
     },
     "Cancel" : {
-
-    },
-    "Change Profile Photo" : {
-
-    },
-    "Chat Info" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "لغو"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
+        }
+      }
     },
     "Chat Title" : {
-
-    },
-    "Chat Type" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "عنوان چت"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天標題"
+          }
+        }
+      }
     },
     "Clear" : {
-
-    },
-    "Clear Cache" : {
-
-    },
-    "Code sent to %@." : {
-
-    },
-    "Connect" : {
-
-    },
-    "Connect your Linear to create issues from messages with AI" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "پاک کردن"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除"
+          }
+        }
+      }
     },
     "Connected" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "متصل"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已連接"
+          }
+        }
+      }
     },
     "Connecting..." : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "در حال اتصال..."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連接中..."
+          }
+        }
+      }
     },
     "Continue" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ادامه"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "繼續"
+          }
+        }
+      }
     },
     "Continue with Email" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ادامه با ایمیل"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "繼續使用電子郵件"
+          }
+        }
+      }
     },
     "Continue with Phone Number" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ادامه با شماره تلفن"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "繼續使用電話號碼"
+          }
+        }
+      }
     },
     "Create" : {
-
-    },
-    "Create a new supergroup (team)" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ایجاد"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "創建"
+          }
+        }
+      }
     },
     "Create Chat" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ایجاد چت"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "創建聊天"
+          }
+        }
+      }
     },
     "Creating Account..." : {
-
-    },
-    "Creating..." : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "در حال ایجاد حساب..."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在創建帳戶..."
+          }
+        }
+      }
     },
     "Delete Space" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "حذف فضا"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除空間"
+          }
+        }
+      }
     },
     "Double tap to change profile photo" : {
-
-    },
-    "Edit" : {
-
-    },
-    "eg. AGL Fellows" : {
-
-    },
-    "Email" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "دو بار ضربه بزنید تا عکس پروفایل را تغییر دهید"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "雙擊以更改個人資料照片"
+          }
+        }
+      }
     },
     "Error Clearing Cache" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "untranslated",
+            "value" : ""
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除快取錯誤"
+          }
+        }
+      }
     },
     "Find" : {
-
-    },
-    "Integrations" : {
-
-    },
-    "Invite Member" : {
-
-    },
-    "Invite People" : {
-
-    },
-    "It's an all new way to chat with your team." : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "untranslated",
+            "value" : ""
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找到"
+          }
+        }
+      }
     },
     "Key" : {
-      "extractionState" : "manual"
-    },
-    "Leave Space" : {
-
-    },
-    "Linear" : {
-
-    },
-    "Logout" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "untranslated",
+            "value" : ""
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "untranslated",
+            "value" : ""
+          }
+        }
+      }
     },
     "New Group Chat" : {
-
-    },
-    "No archived chats" : {
-
-    },
-    "No chats or spaces yet" : {
-
-    },
-    "No messages yet" : {
-
-    },
-    "No users found" : {
-
-    },
-    "OK" : {
-
-    },
-    "Open Chat" : {
-
-    },
-    "or" : {
-
-    },
-    "Participants" : {
-
-    },
-    "Photo" : {
-
-    },
-    "Pin" : {
-
-    },
-    "Please enter a username to search for" : {
-
-    },
-    "Please search a username or start a new chat or message                               , or create a new space by clicking the + button" : {
-
-    },
-    "Private" : {
-
-    },
-    "Profile" : {
-
-    },
-    "Profile photo" : {
-
-    },
-    "Public" : {
-
-    },
-    "Remove" : {
-
-    },
-    "Search by username" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "چت گروهی جدید"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新群聊"
+          }
+        }
+      }
     },
     "Search for people" : {
-
-    },
-    "Searching..." : {
-
-    },
-    "Sending Code..." : {
-
-    },
-    "Set up profile" : {
-
-    },
-    "Settings" : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "جستجو برای افراد"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜尋人"
+          }
+        }
+      }
     },
     "Sticker" : {
-
-    },
-    "Themes" : {
-
-    },
-    "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
-
-    },
-    "Translate" : {
-
-    },
-    "Translate to %@?" : {
-
-    },
-    "Type a username to find someone to add. eg. dena, mo" : {
-
-    },
-    "Type a username to find someone to chat with. eg. dena, mo" : {
-
-    },
-    "Unknown User" : {
-
-    },
-    "Unpin" : {
-
-    },
-    "Unsupported message" : {
-
-    },
-    "Username" : {
-
-    },
-    "Verifying..." : {
-
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "برچسب"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "貼圖"
+          }
+        }
+      }
     },
     "Welcome to Inline" : {
-      "comment" : "Welcome to Inline"
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "به اینلاین خوش آمدید"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "歡迎使用 Inline"
+          }
+        }
+      }
+    },
+    "It's an all new way to chat with your team." : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "این یک روش کاملاً جدید برای چت با تیم شماست."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這是一種與團隊聊天的新方式。"
+          }
+        }
+      }
+    },
+    "Enter your email" : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ایمیل خود را وارد کنید"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入您的電子郵件"
+          }
+        }
+      }
+    },
+    "name@example.com" : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "name@example.com"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "name@example.com"
+          }
+        }
+      }
+    },
+    "Sending Code..." : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "در حال ارسال کد..."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在發送驗證碼..."
+          }
+        }
+      }
+    },
+    "Enter the code" : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "کد را وارد کنید"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入驗證碼"
+          }
+        }
+      }
+    },
+    "xxxxxx" : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "xxxxxx"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "xxxxxx"
+          }
+        }
+      }
+    },
+    "Verifying..." : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "در حال تأیید..."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在驗證..."
+          }
+        }
+      }
+    },
+    "Code sent to %@." : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "کد به %@ ارسال شد."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "驗證碼已發送至 %@。"
+          }
+        }
+      }
+    },
+    "Edit" : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ویرایش"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "編輯"
+          }
+        }
+      }
+    },
+    "Enter your phone number" : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "شماره تلفن خود را وارد کنید"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入您的電話號碼"
+          }
+        }
+      }
+    },
+    "+1 555 555 5555" : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+1 555 555 5555"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+1 555 555 5555"
+          }
+        }
+      }
+    },
+    "Phone number must be at least %d digits." : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "شماره تلفن باید حداقل %d رقم باشد."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電話號碼必須至少包含 %d 位數字。"
+          }
+        }
+      }
+    },
+    "Please try again." : {
+      "localizations" : {
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "لطفاً دوباره تلاش کنید."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請再試一次。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
