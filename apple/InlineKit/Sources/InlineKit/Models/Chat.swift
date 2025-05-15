@@ -163,7 +163,7 @@ public extension Chat {
 public extension Chat {
   init(from: InlineProtocol.Chat) {
     id = from.id
-    date = Date() // placeholder
+    date = from.hasDate ? Date(timeIntervalSince1970: Double(from.date)) : Date(timeIntervalSince1970: Double(0))
     title = from.title
     spaceId = from.hasSpaceID ? from.spaceID : nil
     lastMsgId = from.hasLastMsgID ? from.lastMsgID : nil

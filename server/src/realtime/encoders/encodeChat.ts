@@ -1,6 +1,7 @@
 import { Chat, Dialog, Peer, PeerChat } from "@in/protocol/core"
 import type { chats, DbChat } from "@in/server/db/schema"
 import { encodePeer } from "@in/server/realtime/encoders/encodePeer"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log } from "@in/server/utils/log"
 import type { InferSelectModel } from "drizzle-orm"
 
@@ -39,5 +40,6 @@ export function encodeChat(chat: DbChat, { encodingForUserId }: { encodingForUse
     isPublic: chat.publicThread ?? false,
     lastMsgId: chat.lastMsgId ? BigInt(chat.lastMsgId) : undefined,
     peerId: peerId,
+    date: encodeDateStrict(chat.date),
   }
 }

@@ -426,6 +426,12 @@ export interface Chat {
      * @generated from protobuf field: Peer peer_id = 8;
      */
     peerId?: Peer;
+    /**
+     * Date of creation
+     *
+     * @generated from protobuf field: optional int64 date = 9;
+     */
+    date?: bigint;
 }
 /**
  * @generated from protobuf message Message
@@ -3686,7 +3692,8 @@ class Chat$Type extends MessageType<Chat> {
             { no: 5, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "is_public", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 7, name: "last_msg_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 8, name: "peer_id", kind: "message", T: () => Peer }
+            { no: 8, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 9, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<Chat>): Chat {
@@ -3726,6 +3733,9 @@ class Chat$Type extends MessageType<Chat> {
                 case /* Peer peer_id */ 8:
                     message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
                     break;
+                case /* optional int64 date */ 9:
+                    message.date = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3762,6 +3772,9 @@ class Chat$Type extends MessageType<Chat> {
         /* Peer peer_id = 8; */
         if (message.peerId)
             Peer.internalBinaryWrite(message.peerId, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 date = 9; */
+        if (message.date !== undefined)
+            writer.tag(9, WireType.Varint).int64(message.date);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
