@@ -144,6 +144,9 @@ message Chat {
 
   // ID of the peer that this chat belongs to
   Peer peer_id = 8;
+
+  // Date of creation
+  optional int64 date = 9;
 }
 
 message Message {
