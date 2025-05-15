@@ -31,6 +31,7 @@ export const OPENAI_API_KEY = process.env["OPENAI_API_KEY"]
 
 export const LINEAR_CLIENT_ID = process.env["LINEAR_CLIENT_ID"]
 export const LINEAR_CLIENT_SECRET = process.env["LINEAR_CLIENT_SECRET"]
+export const WANVER_TRANSLATION_CONTEXT = process.env["WANVER_TRANSLATION_CONTEXT"]
 
 // Check required variables
 const requiredProductionVariables = [
@@ -71,6 +72,7 @@ const optionalVariables = [
   "OPENAI_API_KEY",
   "LINEAR_CLIENT_ID",
   "LINEAR_CLIENT_SECRET",
+  "WANVER_TRANSLATION_CONTEXT",
 ]
 
 optionalVariables.forEach((variable) => {

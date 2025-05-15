@@ -2,6 +2,7 @@ import type { MessageTranslation } from "@in/protocol/core"
 import type { ProcessedMessage, ProcessedMessageTranslation } from "@in/server/db/models/messages"
 import type { InputTranslation } from "@in/server/db/models/translations"
 import type { DbChat } from "@in/server/db/schema"
+import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
 import { openaiClient } from "@in/server/libs/openAI"
 import { Log } from "@in/server/utils/log"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
@@ -12,6 +13,10 @@ const log = new Log("modules/translation/translation")
 
 export const TranslationModule = {
   translateMessages,
+}
+
+if (!WANVER_TRANSLATION_CONTEXT) {
+  log.warn("WANVER_TRANSLATION_CONTEXT is not available")
 }
 
 // ----------------
@@ -47,11 +52,13 @@ async function translateMessages(input: {
         role: "user",
         content: `
         <context>
+        # Chat Info
         Chat ID: ${input.chat.id}
         Chat: ${input.chat.title}
         Type: ${input.chat.type}
         Today's date: ${new Date().toLocaleDateString()}
-        This chat is part of Wanver workspace, a company for streamers selling stuff online. It has a warehouse, it processes products, it builds a software called wanver.shop to facilitate selling. They operate in Taiwan and Canada. They have several shops called Amy Shop, Pan pan, Crazy Shop, etc. 
+
+        ${WANVER_TRANSLATION_CONTEXT}
         </context>
 
         <messages>
