@@ -6,6 +6,7 @@ import { ChatParticipant } from "@in/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { Encoders } from "../realtime/encoders/encoders"
 
 export async function getChatParticipants(
   input: {
@@ -26,10 +27,7 @@ export async function getChatParticipants(
       return []
     }
 
-    return participants.map((participant) => ({
-      userId: BigInt(participant.userId),
-      date: encodeDateStrict(participant.date),
-    }))
+    return participants.map((participant) => Encoders.chatParticipant(participant))
   } catch (error) {
     Log.shared.error(`Failed to get participants for chat ${input.chatId}: ${error}`)
     if (error instanceof RealtimeRpcError) {
