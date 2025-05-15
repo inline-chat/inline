@@ -357,9 +357,6 @@
     "Creating..." : {
 
     },
-    "Crop & Use" : {
-
-    },
     "Delete Space" : {
       "localizations" : {
         "fa" : {
@@ -375,6 +372,9 @@
           }
         }
       }
+    },
+    "Done" : {
+
     },
     "Double tap to change profile photo" : {
       "localizations" : {

@@ -15,6 +15,8 @@ struct SettingsView: View {
   @State private var showClearCacheAlert = false
   @State private var clearCacheError: Error?
   @State private var showClearCacheError = false
+  @State private var pickedImage: UIImage? = nil
+  @State private var showCropper: Bool = false
 
   var body: some View {
     List {
@@ -114,32 +116,42 @@ struct SettingsView: View {
     }
     .sheet(isPresented: $fileUploadViewModel.showImagePicker) {
       ImagePicker(sourceType: .photoLibrary) { image in
-        Task {
-          do {
-            // Create temporary file URL for the original image
-            let tempDir = FileManager.default.temporaryDirectory
-            let tempURL = tempDir.appendingPathComponent("profile_\(UUID().uuidString).jpg")
+        pickedImage = image
+        showCropper = true
+      }
+    }
+    .sheet(isPresented: $showCropper, onDismiss: { pickedImage = nil }) {
+      if let image = pickedImage {
+        CircularCropView(image: image) { croppedImage in
+          Task {
+            do {
+              // Create temporary file URL for the cropped image
+              let tempDir = FileManager.default.temporaryDirectory
+              let tempURL = tempDir.appendingPathComponent("profile_\(UUID().uuidString)_cropped.jpg")
 
-            // Save original image to temp file
-            if let jpegData = image.jpegData(compressionQuality: 1.0) {
-              try jpegData.write(to: tempURL)
+              // Save cropped image to temp file
+              if let jpegData = croppedImage.jpegData(compressionQuality: 1.0) {
+                try jpegData.write(to: tempURL)
 
-              // Compress the image using ImageCompressor
-              let compressedURL = try await ImageCompressor.shared.compressImage(
-                at: tempURL,
-                options: .defaultPhoto
-              )
+                // Compress the image using ImageCompressor
+                let compressedURL = try await ImageCompressor.shared.compressImage(
+                  at: tempURL,
+                  options: .defaultPhoto
+                )
 
-              // Read the compressed data and upload
-              let compressedData = try Data(contentsOf: compressedURL)
-              await fileUploadViewModel.uploadImage(compressedData, fileType: .jpeg)
+                // Read the compressed data and upload
+                let compressedData = try Data(contentsOf: compressedURL)
+                await fileUploadViewModel.uploadImage(compressedData, fileType: .jpeg)
 
-              // Clean up temp files
-              try? FileManager.default.removeItem(at: tempURL)
-              try? FileManager.default.removeItem(at: compressedURL)
+                // Clean up temp files
+                try? FileManager.default.removeItem(at: tempURL)
+                try? FileManager.default.removeItem(at: compressedURL)
+              }
+            } catch {
+              Log.scoped("Settings").error("Failed to compress/crop profile image", error: error)
             }
-          } catch {
-            Log.scoped("Settings").error("Failed to compress profile image", error: error)
+            pickedImage = nil
+            showCropper = false
           }
         }
       }
