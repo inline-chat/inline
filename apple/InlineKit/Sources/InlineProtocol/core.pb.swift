@@ -187,67 +187,61 @@ public struct ConnectionInit: Sendable {
   public init() {}
 }
 
-public struct ServerProtocolMessage: @unchecked Sendable {
+public struct ServerProtocolMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var id: UInt64 {
-    get {return _storage._id}
-    set {_uniqueStorage()._id = newValue}
-  }
+  public var id: UInt64 = 0
 
-  public var body: OneOf_Body? {
-    get {return _storage._body}
-    set {_uniqueStorage()._body = newValue}
-  }
+  public var body: ServerProtocolMessage.OneOf_Body? = nil
 
   public var connectionOpen: ConnectionOpen {
     get {
-      if case .connectionOpen(let v)? = _storage._body {return v}
+      if case .connectionOpen(let v)? = body {return v}
       return ConnectionOpen()
     }
-    set {_uniqueStorage()._body = .connectionOpen(newValue)}
+    set {body = .connectionOpen(newValue)}
   }
 
   public var rpcResult: RpcResult {
     get {
-      if case .rpcResult(let v)? = _storage._body {return v}
+      if case .rpcResult(let v)? = body {return v}
       return RpcResult()
     }
-    set {_uniqueStorage()._body = .rpcResult(newValue)}
+    set {body = .rpcResult(newValue)}
   }
 
   public var rpcError: RpcError {
     get {
-      if case .rpcError(let v)? = _storage._body {return v}
+      if case .rpcError(let v)? = body {return v}
       return RpcError()
     }
-    set {_uniqueStorage()._body = .rpcError(newValue)}
+    set {body = .rpcError(newValue)}
   }
 
   public var message: ServerMessage {
     get {
-      if case .message(let v)? = _storage._body {return v}
+      if case .message(let v)? = body {return v}
       return ServerMessage()
     }
-    set {_uniqueStorage()._body = .message(newValue)}
+    set {body = .message(newValue)}
   }
 
   public var ack: Ack {
     get {
-      if case .ack(let v)? = _storage._body {return v}
+      if case .ack(let v)? = body {return v}
       return Ack()
     }
-    set {_uniqueStorage()._body = .ack(newValue)}
+    set {body = .ack(newValue)}
   }
 
   public var pong: Pong {
     get {
-      if case .pong(let v)? = _storage._body {return v}
+      if case .pong(let v)? = body {return v}
       return Pong()
     }
-    set {_uniqueStorage()._body = .pong(newValue)}
+    set {body = .pong(newValue)}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -263,8 +257,6 @@ public struct ServerProtocolMessage: @unchecked Sendable {
   }
 
   public init() {}
-
-  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public struct ServerMessage: Sendable {
@@ -768,6 +760,16 @@ public struct Chat: Sendable {
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
+  /// Date of creation
+  public var date: Int64 {
+    get {return _date ?? 0}
+    set {_date = newValue}
+  }
+  /// Returns true if `date` has been explicitly set.
+  public var hasDate: Bool {return self._date != nil}
+  /// Clears the value of `date`. Subsequent reads from it will return its default value.
+  public mutating func clearDate() {self._date = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -778,6 +780,7 @@ public struct Chat: Sendable {
   fileprivate var _isPublic: Bool? = nil
   fileprivate var _lastMsgID: Int64? = nil
   fileprivate var _peerID: Peer? = nil
+  fileprivate var _date: Int64? = nil
 }
 
 public struct Message: @unchecked Sendable {
@@ -1941,149 +1944,155 @@ public struct RpcCall: Sendable {
   public init() {}
 }
 
-public struct RpcResult: Sendable {
+public struct RpcResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var reqMsgID: UInt64 = 0
+  public var reqMsgID: UInt64 {
+    get {return _storage._reqMsgID}
+    set {_uniqueStorage()._reqMsgID = newValue}
+  }
 
-  public var result: RpcResult.OneOf_Result? = nil
+  public var result: OneOf_Result? {
+    get {return _storage._result}
+    set {_uniqueStorage()._result = newValue}
+  }
 
   public var getMe: GetMeResult {
     get {
-      if case .getMe(let v)? = result {return v}
+      if case .getMe(let v)? = _storage._result {return v}
       return GetMeResult()
     }
-    set {result = .getMe(newValue)}
+    set {_uniqueStorage()._result = .getMe(newValue)}
   }
 
   public var getPeerPhoto: GetPeerPhotoResult {
     get {
-      if case .getPeerPhoto(let v)? = result {return v}
+      if case .getPeerPhoto(let v)? = _storage._result {return v}
       return GetPeerPhotoResult()
     }
-    set {result = .getPeerPhoto(newValue)}
+    set {_uniqueStorage()._result = .getPeerPhoto(newValue)}
   }
 
   public var deleteMessages: DeleteMessagesResult {
     get {
-      if case .deleteMessages(let v)? = result {return v}
+      if case .deleteMessages(let v)? = _storage._result {return v}
       return DeleteMessagesResult()
     }
-    set {result = .deleteMessages(newValue)}
+    set {_uniqueStorage()._result = .deleteMessages(newValue)}
   }
 
   public var sendMessage: SendMessageResult {
     get {
-      if case .sendMessage(let v)? = result {return v}
+      if case .sendMessage(let v)? = _storage._result {return v}
       return SendMessageResult()
     }
-    set {result = .sendMessage(newValue)}
+    set {_uniqueStorage()._result = .sendMessage(newValue)}
   }
 
   public var getChatHistory: GetChatHistoryResult {
     get {
-      if case .getChatHistory(let v)? = result {return v}
+      if case .getChatHistory(let v)? = _storage._result {return v}
       return GetChatHistoryResult()
     }
-    set {result = .getChatHistory(newValue)}
+    set {_uniqueStorage()._result = .getChatHistory(newValue)}
   }
 
   public var addReaction: AddReactionResult {
     get {
-      if case .addReaction(let v)? = result {return v}
+      if case .addReaction(let v)? = _storage._result {return v}
       return AddReactionResult()
     }
-    set {result = .addReaction(newValue)}
+    set {_uniqueStorage()._result = .addReaction(newValue)}
   }
 
   public var deleteReaction: DeleteReactionResult {
     get {
-      if case .deleteReaction(let v)? = result {return v}
+      if case .deleteReaction(let v)? = _storage._result {return v}
       return DeleteReactionResult()
     }
-    set {result = .deleteReaction(newValue)}
+    set {_uniqueStorage()._result = .deleteReaction(newValue)}
   }
 
   public var editMessage: EditMessageResult {
     get {
-      if case .editMessage(let v)? = result {return v}
+      if case .editMessage(let v)? = _storage._result {return v}
       return EditMessageResult()
     }
-    set {result = .editMessage(newValue)}
+    set {_uniqueStorage()._result = .editMessage(newValue)}
   }
 
   public var createChat: CreateChatResult {
     get {
-      if case .createChat(let v)? = result {return v}
+      if case .createChat(let v)? = _storage._result {return v}
       return CreateChatResult()
     }
-    set {result = .createChat(newValue)}
+    set {_uniqueStorage()._result = .createChat(newValue)}
   }
 
   public var getSpaceMembers: GetSpaceMembersResult {
     get {
-      if case .getSpaceMembers(let v)? = result {return v}
+      if case .getSpaceMembers(let v)? = _storage._result {return v}
       return GetSpaceMembersResult()
     }
-    set {result = .getSpaceMembers(newValue)}
+    set {_uniqueStorage()._result = .getSpaceMembers(newValue)}
   }
 
   public var deleteChat: DeleteChatResult {
     get {
-      if case .deleteChat(let v)? = result {return v}
+      if case .deleteChat(let v)? = _storage._result {return v}
       return DeleteChatResult()
     }
-    set {result = .deleteChat(newValue)}
+    set {_uniqueStorage()._result = .deleteChat(newValue)}
   }
 
   public var inviteToSpace: InviteToSpaceResult {
     get {
-      if case .inviteToSpace(let v)? = result {return v}
+      if case .inviteToSpace(let v)? = _storage._result {return v}
       return InviteToSpaceResult()
     }
-    set {result = .inviteToSpace(newValue)}
+    set {_uniqueStorage()._result = .inviteToSpace(newValue)}
   }
 
   public var getChatParticipants: GetChatParticipantsResult {
     get {
-      if case .getChatParticipants(let v)? = result {return v}
+      if case .getChatParticipants(let v)? = _storage._result {return v}
       return GetChatParticipantsResult()
     }
-    set {result = .getChatParticipants(newValue)}
+    set {_uniqueStorage()._result = .getChatParticipants(newValue)}
   }
 
   public var addChatParticipant: AddChatParticipantResult {
     get {
-      if case .addChatParticipant(let v)? = result {return v}
+      if case .addChatParticipant(let v)? = _storage._result {return v}
       return AddChatParticipantResult()
     }
-    set {result = .addChatParticipant(newValue)}
+    set {_uniqueStorage()._result = .addChatParticipant(newValue)}
   }
 
   public var removeChatParticipant: RemoveChatParticipantResult {
     get {
-      if case .removeChatParticipant(let v)? = result {return v}
+      if case .removeChatParticipant(let v)? = _storage._result {return v}
       return RemoveChatParticipantResult()
     }
-    set {result = .removeChatParticipant(newValue)}
+    set {_uniqueStorage()._result = .removeChatParticipant(newValue)}
   }
 
   public var translateMessages: TranslateMessagesResult {
     get {
-      if case .translateMessages(let v)? = result {return v}
+      if case .translateMessages(let v)? = _storage._result {return v}
       return TranslateMessagesResult()
     }
-    set {result = .translateMessages(newValue)}
+    set {_uniqueStorage()._result = .translateMessages(newValue)}
   }
 
   public var getChats: GetChatsResult {
     get {
-      if case .getChats(let v)? = result {return v}
+      if case .getChats(let v)? = _storage._result {return v}
       return GetChatsResult()
     }
-    set {result = .getChats(newValue)}
+    set {_uniqueStorage()._result = .getChats(newValue)}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -2110,6 +2119,8 @@ public struct RpcResult: Sendable {
   }
 
   public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public struct GetChatsInput: Sendable {
@@ -3840,179 +3851,137 @@ extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
     9: .same(proto: "pong"),
   ]
 
-  fileprivate class _StorageClass {
-    var _id: UInt64 = 0
-    var _body: ServerProtocolMessage.OneOf_Body?
-
-    #if swift(>=5.10)
-      // This property is used as the initial default value for new instances of the type.
-      // The type itself is protecting the reference to its storage via CoW semantics.
-      // This will force a copy to be made of this reference when the first mutation occurs;
-      // hence, it is safe to mark this as `nonisolated(unsafe)`.
-      static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
-
-    private init() {}
-
-    init(copying source: _StorageClass) {
-      _id = source._id
-      _body = source._body
-    }
-  }
-
-  fileprivate mutating func _uniqueStorage() -> _StorageClass {
-    if !isKnownUniquelyReferenced(&_storage) {
-      _storage = _StorageClass(copying: _storage)
-    }
-    return _storage
-  }
-
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    _ = _uniqueStorage()
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      while let fieldNumber = try decoder.nextFieldNumber() {
-        // The use of inline closures is to circumvent an issue where the compiler
-        // allocates stack space for every case branch when no optimizations are
-        // enabled. https://github.com/apple/swift-protobuf/issues/1034
-        switch fieldNumber {
-        case 1: try { try decoder.decodeSingularUInt64Field(value: &_storage._id) }()
-        case 4: try {
-          var v: ConnectionOpen?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .connectionOpen(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .connectionOpen(v)
-          }
-        }()
-        case 5: try {
-          var v: RpcResult?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .rpcResult(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .rpcResult(v)
-          }
-        }()
-        case 6: try {
-          var v: RpcError?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .rpcError(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .rpcError(v)
-          }
-        }()
-        case 7: try {
-          var v: ServerMessage?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .message(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .message(v)
-          }
-        }()
-        case 8: try {
-          var v: Ack?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .ack(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .ack(v)
-          }
-        }()
-        case 9: try {
-          var v: Pong?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .pong(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .pong(v)
-          }
-        }()
-        default: break
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
+      case 4: try {
+        var v: ConnectionOpen?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .connectionOpen(let m) = current {v = m}
         }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .connectionOpen(v)
+        }
+      }()
+      case 5: try {
+        var v: RpcResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .rpcResult(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .rpcResult(v)
+        }
+      }()
+      case 6: try {
+        var v: RpcError?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .rpcError(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .rpcError(v)
+        }
+      }()
+      case 7: try {
+        var v: ServerMessage?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .message(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .message(v)
+        }
+      }()
+      case 8: try {
+        var v: Ack?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .ack(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .ack(v)
+        }
+      }()
+      case 9: try {
+        var v: Pong?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .pong(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .pong(v)
+        }
+      }()
+      default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every if/case branch local when no optimizations
-      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-      // https://github.com/apple/swift-protobuf/issues/1182
-      if _storage._id != 0 {
-        try visitor.visitSingularUInt64Field(value: _storage._id, fieldNumber: 1)
-      }
-      switch _storage._body {
-      case .connectionOpen?: try {
-        guard case .connectionOpen(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-      }()
-      case .rpcResult?: try {
-        guard case .rpcResult(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-      }()
-      case .rpcError?: try {
-        guard case .rpcError(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-      }()
-      case .message?: try {
-        guard case .message(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-      }()
-      case .ack?: try {
-        guard case .ack(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-      }()
-      case .pong?: try {
-        guard case .pong(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
-      }()
-      case nil: break
-      }
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    }
+    switch self.body {
+    case .connectionOpen?: try {
+      guard case .connectionOpen(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case .rpcResult?: try {
+      guard case .rpcResult(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    }()
+    case .rpcError?: try {
+      guard case .rpcError(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    }()
+    case .message?: try {
+      guard case .message(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    }()
+    case .ack?: try {
+      guard case .ack(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    }()
+    case .pong?: try {
+      guard case .pong(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ServerProtocolMessage, rhs: ServerProtocolMessage) -> Bool {
-    if lhs._storage !== rhs._storage {
-      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
-        let _storage = _args.0
-        let rhs_storage = _args.1
-        if _storage._id != rhs_storage._id {return false}
-        if _storage._body != rhs_storage._body {return false}
-        return true
-      }
-      if !storagesAreEqual {return false}
-    }
+    if lhs.id != rhs.id {return false}
+    if lhs.body != rhs.body {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -4735,6 +4704,7 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     6: .standard(proto: "is_public"),
     7: .standard(proto: "last_msg_id"),
     8: .standard(proto: "peer_id"),
+    9: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4751,6 +4721,7 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       case 6: try { try decoder.decodeSingularBoolField(value: &self._isPublic) }()
       case 7: try { try decoder.decodeSingularInt64Field(value: &self._lastMsgID) }()
       case 8: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 9: try { try decoder.decodeSingularInt64Field(value: &self._date) }()
       default: break
       }
     }
@@ -4785,6 +4756,9 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
     } }()
+    try { if let v = self._date {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 9)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -4797,6 +4771,7 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     if lhs._isPublic != rhs._isPublic {return false}
     if lhs._lastMsgID != rhs._lastMsgID {return false}
     if lhs._peerID != rhs._peerID {return false}
+    if lhs._date != rhs._date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -6540,324 +6515,366 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     18: .same(proto: "getChats"),
   ]
 
+  fileprivate class _StorageClass {
+    var _reqMsgID: UInt64 = 0
+    var _result: RpcResult.OneOf_Result?
+
+    #if swift(>=5.10)
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+    #else
+      static let defaultInstance = _StorageClass()
+    #endif
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _reqMsgID = source._reqMsgID
+      _result = source._result
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.reqMsgID) }()
-      case 2: try {
-        var v: GetMeResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getMe(let m) = current {v = m}
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularUInt64Field(value: &_storage._reqMsgID) }()
+        case 2: try {
+          var v: GetMeResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getMe(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getMe(v)
+          }
+        }()
+        case 3: try {
+          var v: GetPeerPhotoResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getPeerPhoto(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getPeerPhoto(v)
+          }
+        }()
+        case 4: try {
+          var v: DeleteMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteMessages(v)
+          }
+        }()
+        case 5: try {
+          var v: SendMessageResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .sendMessage(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .sendMessage(v)
+          }
+        }()
+        case 6: try {
+          var v: GetChatHistoryResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getChatHistory(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getChatHistory(v)
+          }
+        }()
+        case 7: try {
+          var v: AddReactionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .addReaction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .addReaction(v)
+          }
+        }()
+        case 8: try {
+          var v: DeleteReactionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteReaction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteReaction(v)
+          }
+        }()
+        case 9: try {
+          var v: EditMessageResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .editMessage(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .editMessage(v)
+          }
+        }()
+        case 10: try {
+          var v: CreateChatResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createChat(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createChat(v)
+          }
+        }()
+        case 11: try {
+          var v: GetSpaceMembersResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getSpaceMembers(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getSpaceMembers(v)
+          }
+        }()
+        case 12: try {
+          var v: DeleteChatResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteChat(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteChat(v)
+          }
+        }()
+        case 13: try {
+          var v: InviteToSpaceResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .inviteToSpace(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .inviteToSpace(v)
+          }
+        }()
+        case 14: try {
+          var v: GetChatParticipantsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getChatParticipants(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getChatParticipants(v)
+          }
+        }()
+        case 15: try {
+          var v: AddChatParticipantResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .addChatParticipant(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .addChatParticipant(v)
+          }
+        }()
+        case 16: try {
+          var v: RemoveChatParticipantResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .removeChatParticipant(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .removeChatParticipant(v)
+          }
+        }()
+        case 17: try {
+          var v: TranslateMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .translateMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .translateMessages(v)
+          }
+        }()
+        case 18: try {
+          var v: GetChatsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getChats(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getChats(v)
+          }
+        }()
+        default: break
         }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getMe(v)
-        }
-      }()
-      case 3: try {
-        var v: GetPeerPhotoResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getPeerPhoto(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getPeerPhoto(v)
-        }
-      }()
-      case 4: try {
-        var v: DeleteMessagesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteMessages(v)
-        }
-      }()
-      case 5: try {
-        var v: SendMessageResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .sendMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .sendMessage(v)
-        }
-      }()
-      case 6: try {
-        var v: GetChatHistoryResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getChatHistory(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getChatHistory(v)
-        }
-      }()
-      case 7: try {
-        var v: AddReactionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .addReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .addReaction(v)
-        }
-      }()
-      case 8: try {
-        var v: DeleteReactionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteReaction(v)
-        }
-      }()
-      case 9: try {
-        var v: EditMessageResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .editMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .editMessage(v)
-        }
-      }()
-      case 10: try {
-        var v: CreateChatResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .createChat(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .createChat(v)
-        }
-      }()
-      case 11: try {
-        var v: GetSpaceMembersResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getSpaceMembers(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getSpaceMembers(v)
-        }
-      }()
-      case 12: try {
-        var v: DeleteChatResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteChat(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteChat(v)
-        }
-      }()
-      case 13: try {
-        var v: InviteToSpaceResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .inviteToSpace(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .inviteToSpace(v)
-        }
-      }()
-      case 14: try {
-        var v: GetChatParticipantsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getChatParticipants(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getChatParticipants(v)
-        }
-      }()
-      case 15: try {
-        var v: AddChatParticipantResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .addChatParticipant(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .addChatParticipant(v)
-        }
-      }()
-      case 16: try {
-        var v: RemoveChatParticipantResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .removeChatParticipant(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .removeChatParticipant(v)
-        }
-      }()
-      case 17: try {
-        var v: TranslateMessagesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .translateMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .translateMessages(v)
-        }
-      }()
-      case 18: try {
-        var v: GetChatsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getChats(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getChats(v)
-        }
-      }()
-      default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    if self.reqMsgID != 0 {
-      try visitor.visitSingularUInt64Field(value: self.reqMsgID, fieldNumber: 1)
-    }
-    switch self.result {
-    case .getMe?: try {
-      guard case .getMe(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    }()
-    case .getPeerPhoto?: try {
-      guard case .getPeerPhoto(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    }()
-    case .deleteMessages?: try {
-      guard case .deleteMessages(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
-    case .sendMessage?: try {
-      guard case .sendMessage(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    }()
-    case .getChatHistory?: try {
-      guard case .getChatHistory(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    }()
-    case .addReaction?: try {
-      guard case .addReaction(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    }()
-    case .deleteReaction?: try {
-      guard case .deleteReaction(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-    }()
-    case .editMessage?: try {
-      guard case .editMessage(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
-    }()
-    case .createChat?: try {
-      guard case .createChat(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
-    }()
-    case .getSpaceMembers?: try {
-      guard case .getSpaceMembers(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
-    }()
-    case .deleteChat?: try {
-      guard case .deleteChat(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
-    }()
-    case .inviteToSpace?: try {
-      guard case .inviteToSpace(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
-    }()
-    case .getChatParticipants?: try {
-      guard case .getChatParticipants(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
-    }()
-    case .addChatParticipant?: try {
-      guard case .addChatParticipant(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
-    }()
-    case .removeChatParticipant?: try {
-      guard case .removeChatParticipant(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
-    }()
-    case .translateMessages?: try {
-      guard case .translateMessages(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
-    }()
-    case .getChats?: try {
-      guard case .getChats(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
-    }()
-    case nil: break
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if _storage._reqMsgID != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._reqMsgID, fieldNumber: 1)
+      }
+      switch _storage._result {
+      case .getMe?: try {
+        guard case .getMe(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      }()
+      case .getPeerPhoto?: try {
+        guard case .getPeerPhoto(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      }()
+      case .deleteMessages?: try {
+        guard case .deleteMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      }()
+      case .sendMessage?: try {
+        guard case .sendMessage(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      }()
+      case .getChatHistory?: try {
+        guard case .getChatHistory(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      }()
+      case .addReaction?: try {
+        guard case .addReaction(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      }()
+      case .deleteReaction?: try {
+        guard case .deleteReaction(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+      }()
+      case .editMessage?: try {
+        guard case .editMessage(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      }()
+      case .createChat?: try {
+        guard case .createChat(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+      }()
+      case .getSpaceMembers?: try {
+        guard case .getSpaceMembers(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+      }()
+      case .deleteChat?: try {
+        guard case .deleteChat(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+      }()
+      case .inviteToSpace?: try {
+        guard case .inviteToSpace(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
+      }()
+      case .getChatParticipants?: try {
+        guard case .getChatParticipants(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
+      }()
+      case .addChatParticipant?: try {
+        guard case .addChatParticipant(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
+      }()
+      case .removeChatParticipant?: try {
+        guard case .removeChatParticipant(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
+      }()
+      case .translateMessages?: try {
+        guard case .translateMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
+      }()
+      case .getChats?: try {
+        guard case .getChats(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
+      }()
+      case nil: break
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: RpcResult, rhs: RpcResult) -> Bool {
-    if lhs.reqMsgID != rhs.reqMsgID {return false}
-    if lhs.result != rhs.result {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._reqMsgID != rhs_storage._reqMsgID {return false}
+        if _storage._result != rhs_storage._result {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
