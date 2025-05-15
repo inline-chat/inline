@@ -359,7 +359,7 @@ extension MessageCollectionViewCell {
 
   // Add avatar if we have user info
   func resetCell() {
-    messageView?.stopBlinkingAnimation()
+    messageView?.stopShineAnimation()
 
     messageView?.removeFromSuperview()
     if isThread {

@@ -280,6 +280,9 @@
     },
     "Verifying..." : {
 
+    },
+    "Welcome to Inline" : {
+      "comment" : "Welcome to Inline"
     }
   },
   "version" : "1.0"
