@@ -13,7 +13,8 @@ import { getUpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { UpdateGroup } from "@in/server/modules/updates"
-import type { DbChat } from "@in/server/db/schema"
+import type { DbChat, DbDialog } from "@in/server/db/schema"
+import { encodeDialog } from "@in/server/realtime/encoders/encodeDialog"
 
 export async function createChat(
   input: {
@@ -94,39 +95,35 @@ export async function createChat(
     )
   }
 
+  let dialog: DbDialog | undefined
   try {
     // Create a dialog for the chat
-    await db.insert(dialogs).values({
-      chatId: chat[0].id,
-      userId: context.currentUserId,
-      spaceId: spaceId,
-      date: new Date(),
-    })
+    ;[dialog] = await db
+      .insert(dialogs)
+      .values({
+        chatId: chat[0].id,
+        userId: context.currentUserId,
+        spaceId: spaceId,
+        date: new Date(),
+      })
+      .returning()
+
+    if (!dialog) {
+      throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
+    }
   } catch (error) {
     Log.shared.error(`Failed to create dialog for chat ${chat[0].id}: ${error}`)
     throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
   }
 
-  const dialog: Dialog = {
-    archived: false,
-    pinned: false,
-    spaceId: BigInt(spaceId),
-    peer: {
-      type: {
-        oneofKind: "chat",
-        chat: {
-          chatId: BigInt(chat[0].id),
-        },
-      },
-    },
-  }
+  let encodedDialog: Dialog = Encoders.dialog(dialog, { unreadCount: 0 })
 
   // Broadcast the new chat update
   await pushUpdates({ chat: chat[0], currentUserId: context.currentUserId })
 
   return {
     chat: encodeChat(chat[0], { encodingForUserId: context.currentUserId }),
-    dialog,
+    dialog: encodedDialog,
   }
 }
 
