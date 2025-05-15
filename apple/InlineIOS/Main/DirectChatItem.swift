@@ -95,14 +95,16 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var title: some View {
-    if let userInfo {
-      Text(displayName(for: userInfo))
-        .font(.customTitle())
-        .foregroundColor(.primary)
-    } else {
-      Text("Unknown User")
-        .font(.customTitle())
-        .foregroundColor(.primary)
+    VStack(alignment: .leading, spacing: 2) {
+      if let userInfo {
+        Text(displayName(for: userInfo))
+          .font(.customTitle())
+          .foregroundColor(.primary)
+      } else {
+        Text("Unknown User")
+          .font(.customTitle())
+          .foregroundColor(.primary)
+      }
     }
   }
 

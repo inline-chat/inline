@@ -402,7 +402,8 @@ struct SpaceView: View {
             user: chat.userInfo,
             chat: chat.chat,
             message: chat.message,
-            from: chat.from
+            from: chat.from,
+            space: nil
           ))
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
