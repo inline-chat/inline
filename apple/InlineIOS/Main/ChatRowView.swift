@@ -1,8 +1,8 @@
+import Auth
 import InlineKit
 import InlineUI
 import SwiftUI
 import UIKit
-import Auth
 
 struct ChatRowView: View {
   let item: ChatRowItem
@@ -27,7 +27,7 @@ struct ChatRowView: View {
   private func currentComposeAction() -> ApiComposeAction? {
     switch item {
       case let .home(homeItem):
-        composeActions.getComposeAction(for: Peer(userId: homeItem.user.id))?.action
+        composeActions.getComposeAction(for: Peer(userId: homeItem.user?.user.id ?? 0))?.action
       case .space:
         nil
     }
@@ -45,7 +45,7 @@ struct ChatRowView: View {
   private var isCurrentUser: Bool {
     switch item {
       case let .home(homeItem):
-        homeItem.user.id == Auth.shared.getCurrentUserId()
+        homeItem.user?.user.id == Auth.shared.getCurrentUserId()
       case let .space(spaceItem):
         spaceItem.user?.id == Auth.shared.getCurrentUserId()
     }
@@ -61,7 +61,7 @@ struct ChatRowView: View {
         if homeItem.from?.id == Auth.shared.getCurrentUserId() {
           "You"
         } else {
-          homeItem.from?.firstName ?? ""
+          homeItem.from?.user.firstName ?? ""
         }
       case let .space(spaceItem):
         if let user = spaceItem.user {
@@ -88,7 +88,9 @@ struct ChatRowView: View {
           if isCurrentUser {
             savedMessageSymbol
           } else {
-            userAvatar(homeItem.user.user)
+            if let userInfo = homeItem.user {
+              userAvatar(userInfo.user)
+            }
           }
         case let .space(spaceItem):
           if isCurrentUser {
@@ -180,8 +182,8 @@ struct ChatRowView: View {
       case let .home(homeItem):
         Text(
           type == .privateChat
-            ? homeItem.user.id == Auth.shared.getCurrentUserId()
-            ? "Saved Message" : homeItem.user.user.firstName ?? ""
+            ? homeItem.user?.user.id == Auth.shared.getCurrentUserId()
+            ? "Saved Message" : homeItem.user?.user.firstName ?? ""
             : homeItem.chat?.title ?? ""
         )
         .fontWeight(.medium)

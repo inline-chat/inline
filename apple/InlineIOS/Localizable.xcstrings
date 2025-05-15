@@ -357,6 +357,9 @@
     "Creating..." : {
 
     },
+    "Crop & Use" : {
+
+    },
     "Delete Space" : {
       "localizations" : {
         "fa" : {
@@ -579,9 +582,6 @@
           }
         }
       }
-    },
-    "No archived chats" : {
-
     },
     "No chats or spaces yet" : {
 

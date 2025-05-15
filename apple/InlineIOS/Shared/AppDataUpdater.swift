@@ -41,7 +41,7 @@ class AppDataUpdater {
         // Process chats
         for item in homeChatItems {
           let chatId = item.dialog.id
-          let title = item.user.user.firstName ?? item.user.user.fullName
+          let title = item.user?.user.firstName ?? item.user?.user.fullName
 
           var peerUserId: Int64? = nil
           var peerThreadId: Int64? = nil
@@ -54,7 +54,7 @@ class AppDataUpdater {
 
           let bridgeChat = SharedChat(
             id: chatId,
-            title: title,
+            title: title ?? "",
             peerUserId: peerUserId,
             peerThreadId: peerThreadId
           )
@@ -64,9 +64,9 @@ class AppDataUpdater {
 
           // Add user info
           let bridgeUser = SharedUser(
-            id: item.user.user.id,
-            firstName: item.user.user.firstName ?? "",
-            lastName: item.user.user.lastName ?? ""
+            id: item.user?.user.id ?? 0,
+            firstName: item.user?.user.firstName ?? "",
+            lastName: item.user?.user.lastName ?? ""
           )
 
           print("👽 bridgeUser: \(bridgeUser)")

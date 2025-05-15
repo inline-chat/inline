@@ -83,8 +83,8 @@ struct HomeView: View {
                   LazyHStack {
                     ForEach(home.spaces.sorted(by: { s1, s2 in
                       s1.space.date > s2.space.date
-                    }), id: \.id) { space in
-                      RectangleSpaceItem(spaceItem: space)
+                    }), id: \.id) { spaceItem in
+                      RectangleSpaceItem(spaceItem: spaceItem)
                     }
                   }
                 }
@@ -108,12 +108,12 @@ struct HomeView: View {
                   ))
                   .contextMenu {
                     Button {
-                      nav.push(.chat(peer: .user(id: item.user.id)))
+                      nav.push(.chat(peer: .user(id: item.user?.user.id ?? 0)))
                     } label: {
                       Label("Open Chat", systemImage: "bubble.left")
                     }
                   } preview: {
-                    ChatView(peer: .user(id: item.user.id), preview: true)
+                    ChatView(peer: .user(id: item.user?.user.id ?? 0), preview: true)
                       .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
                       .environmentObject(nav)
                       .environmentObject(data)
@@ -144,7 +144,7 @@ struct HomeView: View {
           onSelect: { tab in
             playTabHaptic()
 
-            withAnimation(.snappy(duration:  0.1)) {
+            withAnimation(.snappy(duration: 0.1)) {
               selectedTab = tab
             }
           }
@@ -160,7 +160,10 @@ struct HomeView: View {
       searchUsers(query: value)
     }
     .task {
-      await initalFetch()
+      initalFetch()
+    }
+    .onAppear {
+      initalFetch()
     }
   }
 
@@ -204,26 +207,29 @@ struct HomeView: View {
     }
   }
 
-  private func initalFetch() async {
+  private func initalFetch() {
     notificationHandler.setAuthenticated(value: true)
-    do {
-      _ = try await dataManager.fetchMe()
-    } catch {
-      Log.shared.error("Failed to getMe", error: error)
-      return
-    }
 
-    // Continue with existing tasks if user exists
-    do {
-      try await dataManager.getPrivateChats()
-    } catch {
-      Log.shared.error("Failed to getPrivateChats", error: error)
-    }
+    Task.detached {
+      do {
+        try await Realtime.shared
+          .invokeWithHandler(.getMe, input: .getMe(.init()))
+      } catch {
+        Log.shared.error("Error fetching getMe info", error: error)
+      }
 
-    do {
-      try await dataManager.getSpaces()
-    } catch {
-      Log.shared.error("Failed to getSpaces", error: error)
+      do {
+        try await Realtime.shared
+          .invokeWithHandler(.getChats, input: .getChats(.init()))
+      } catch {
+        Log.shared.error("Error fetching getChats", error: error)
+      }
+
+      do {
+        try await dataManager.getSpaces()
+      } catch {
+        Log.shared.error("Failed to getSpaces", error: error)
+      }
     }
   }
 
@@ -256,23 +262,23 @@ struct HomeView: View {
 
   @ViewBuilder
   func chatView(for item: HomeChatItem) -> some View {
-    if item.chat?.peerUserId != nil {
+    if let user = item.user {
       Button {
-        nav.push(.chat(peer: .user(id: item.user.id)))
+        nav.push(.chat(peer: .user(id: user.user.id)))
       } label: {
         DirectChatItem(props: Props(
           dialog: item.dialog,
-          user: item.user,
+          user: user,
           chat: item.chat,
           message: item.message,
-          from: item.from
+          from: item.from?.user
         ))
       }
       .swipeActions(edge: .trailing, allowsFullSwipe: true) {
         Button(role: .destructive) {
           Task {
             try await dataManager.updateDialog(
-              peerId: .user(id: item.user.id),
+              peerId: .user(id: user.user.id),
               archived: true
             )
           }
@@ -284,7 +290,7 @@ struct HomeView: View {
         Button {
           Task {
             try await dataManager.updateDialog(
-              peerId: .user(id: item.user.id),
+              peerId: .user(id: user.user.id),
               pinned: !(item.dialog.pinned ?? false)
             )
           }
@@ -303,8 +309,54 @@ struct HomeView: View {
         }
         .tint(.blue)
       }
-    } else {
-      EmptyView()
+    } else if let chat = item.chat {
+      Button {
+        nav.push(.chat(peer: .thread(id: chat.id)))
+      } label: {
+        ChatItemView(props: ChatItemProps(
+          dialog: item.dialog,
+          user: item.user,
+          chat: chat,
+          message: item.message,
+          from: item.from,
+          space: item.space
+        ))
+      }
+      .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+        Button(role: .destructive) {
+          Task {
+            try await dataManager.updateDialog(
+              peerId: .thread(id: chat.id),
+              archived: true
+            )
+          }
+        } label: {
+          Image(systemName: "tray.and.arrow.down.fill")
+        }
+        .tint(Color(.systemGray2))
+
+        Button {
+          Task {
+            try await dataManager.updateDialog(
+              peerId: .thread(id: chat.id),
+              pinned: !(item.dialog.pinned ?? false)
+            )
+          }
+        } label: {
+          Image(systemName: item.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+        }
+        .tint(.indigo)
+      }
+      .swipeActions(edge: .leading) {
+        Button {
+          Task {
+            UnreadManager.shared.readAll(item.dialog.peerId, chatId: chat.id)
+          }
+        } label: {
+          Image(systemName: "checkmark.message.fill")
+        }
+        .tint(.blue)
+      }
     }
   }
 }

@@ -17,7 +17,7 @@ enum CombinedItem: Identifiable {
   var id: Int64 {
     switch self {
       case let .space(space): space.id
-      case let .chat(chat): chat.user.id
+      case let .chat(chat): chat.id
     }
   }
 
