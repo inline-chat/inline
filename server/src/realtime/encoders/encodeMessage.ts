@@ -8,7 +8,7 @@ import type { DbFullDocument, DbFullPhoto, DbFullVideo } from "@in/server/db/mod
 import { encodeVideo } from "@in/server/realtime/encoders/encodeVideo"
 import { encodeDocument } from "@in/server/realtime/encoders/encodeDocument"
 import type { DbFullMessage } from "@in/server/db/models/messages"
-import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodeReaction } from "@in/server/realtime/encoders/encodeReaction"
 
 export const encodeMessage = ({
@@ -178,7 +178,7 @@ export const encodeFullMessage = ({
             assignedUserId: BigInt(attachment.externalTask.assignedUserId ?? 0),
             url: attachment.externalTask.url ?? "",
             number: attachment.externalTask.number ?? "",
-            date: BigInt(attachment.externalTask.date.getTime() ?? 0),
+            date: encodeDateStrict(attachment.externalTask.date),
           },
         }
       }
@@ -193,7 +193,7 @@ export const encodeFullMessage = ({
             title: attachment.linkEmbed.title ?? undefined,
             description: attachment.linkEmbed.description ?? undefined,
             photo: attachment.linkEmbed.photo ? encodePhoto({ photo: attachment.linkEmbed.photo }) : undefined,
-            duration: BigInt(attachment.linkEmbed.duration ?? 0),
+            duration: encodeDateStrict(attachment.linkEmbed.date),
           },
         }
       }
