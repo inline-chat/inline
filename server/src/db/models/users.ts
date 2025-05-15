@@ -19,7 +19,7 @@ export class UsersModel {
    * @returns The user
    */
   static async getUserById(id: number): Promise<DbUser | undefined> {
-    const user = await db.query.users.findFirst({
+    const user = await db._query.users.findFirst({
       where: eq(users.id, id),
     })
 
@@ -33,7 +33,7 @@ export class UsersModel {
    * @returns The user
    */
   static async getUserByEmail(email: string): Promise<DbUser | undefined> {
-    const user = await db.query.users.findFirst({
+    const user = await db._query.users.findFirst({
       where: eq(users.email, email),
     })
 
@@ -56,7 +56,7 @@ export class UsersModel {
     // E.164 phone numbers
     const e164PhoneNumber = parsedPhoneNumber.number
 
-    const user = await db.query.users.findFirst({
+    const user = await db._query.users.findFirst({
       where: eq(users.phoneNumber, e164PhoneNumber),
     })
 
@@ -158,7 +158,7 @@ export class UsersModel {
   }
 
   static async getUserWithPhoto(userId: number) {
-    const user = await db.query.users.findFirst({
+    const user = await db._query.users.findFirst({
       where: eq(users.id, userId),
       with: {
         photo: true,
@@ -173,7 +173,7 @@ export class UsersModel {
   }
 
   static async getUsersWithPhotos(userIds: number[]): Promise<Array<{ user: DbUser; photoFile?: DbFile | undefined }>> {
-    const usersWithPhotos = await db.query.users.findMany({
+    const usersWithPhotos = await db._query.users.findMany({
       where: inArray(users.id, userIds),
       with: {
         photo: true,
@@ -195,7 +195,7 @@ export class UsersModel {
     limit: number
     excludeUserId?: number
   }): Promise<Array<{ user: DbUser; photoFile?: DbFile | undefined }>> {
-    const usersWithPhotos = await db.query.users.findMany({
+    const usersWithPhotos = await db._query.users.findMany({
       where: and(
         sql`${users.username} ilike ${"%" + query + "%"}`,
         excludeUserId ? not(eq(users.id, excludeUserId)) : undefined,

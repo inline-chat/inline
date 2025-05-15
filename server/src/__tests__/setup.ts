@@ -1,8 +1,7 @@
-import { db } from "../db"
+import { db, schema } from "../db"
 import { migrateDb } from "../../scripts/helpers/migrate-db"
 import postgres from "postgres"
 import { beforeEach, afterEach, beforeAll, afterAll } from "bun:test"
-import * as schema from "../db/schema"
 import { sql, eq } from "drizzle-orm"
 
 // Test database configuration

@@ -1,7 +1,7 @@
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import { files } from "@in/server/db/schema/files"
 import { messages } from "@in/server/db/schema/messages"
-import { relations } from "drizzle-orm"
+import { relations } from "drizzle-orm/_relations"
 import { pgTable, serial, integer, text, bigint, boolean } from "drizzle-orm/pg-core"
 
 // export const messageMedia = pgTable("message_media", {
@@ -26,7 +26,7 @@ export const photos = pgTable("photos", {
   strippedIv: bytea("stripped_iv"),
   strippedTag: bytea("stripped_tag"),
 
-  date: creationDate
+  date: creationDate,
 })
 
 export type DbPhoto = typeof photos.$inferSelect

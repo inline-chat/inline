@@ -49,7 +49,7 @@ export const handler = async (
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
 
-  const members_ = await db.query.members.findMany({
+  const members_ = await db._query.members.findMany({
     where: eq(members.spaceId, spaceId),
   })
 

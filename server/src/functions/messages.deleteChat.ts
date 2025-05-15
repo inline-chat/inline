@@ -26,7 +26,7 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
   }
 
   // Check user role in space
-  const member = await db.query.members.findFirst({
+  const member = await db._query.members.findFirst({
     where: and(eq(members.spaceId, chat.spaceId), eq(members.userId, currentUserId)),
   })
   if (!member || (member.role !== "admin" && member.role !== "owner")) {

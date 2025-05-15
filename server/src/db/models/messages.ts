@@ -114,7 +114,7 @@ async function getMessages(
 
   const offsetIdNumber = offsetId ? Number(offsetId) : undefined
 
-  let result = await db.query.messages.findMany({
+  let result = await db._query.messages.findMany({
     where: offsetIdNumber
       ? and(eq(messages.chatId, chatId), lt(messages.messageId, offsetIdNumber))
       : eq(messages.chatId, chatId),
@@ -306,7 +306,7 @@ async function editMessage(messageId: number, chatId: number, text: string) {
 }
 
 async function getMessage(messageId: number, chatId: number): Promise<DbFullMessage> {
-  let result = await db.query.messages.findFirst({
+  let result = await db._query.messages.findFirst({
     where: and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)),
     with: {
       from: true,
@@ -460,7 +460,7 @@ export function processAttachments(
 }
 
 async function getNonFullMessagesRange(chatId: number, offsetId: number, limit: number): Promise<ProcessedMessage[]> {
-  let result = await db.query.messages.findMany({
+  let result = await db._query.messages.findMany({
     where: and(eq(messages.chatId, chatId), gt(messages.messageId, offsetId)),
     orderBy: desc(messages.messageId),
     limit: limit ?? 60,
