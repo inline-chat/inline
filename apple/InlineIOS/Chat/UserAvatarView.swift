@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import Logger
 import Nuke
 import NukeUI
@@ -90,22 +91,26 @@ final class UserAvatarView: UIView {
 
     // Get name for initials
     let user = userInfo.user
-    let firstName = user.firstName ?? user.email?.components(separatedBy: "@").first ?? "User"
-    let lastName = user.lastName
-    nameForInitials = UserAvatarView.getNameForInitials(user: user)
+    nameForInitials = AvatarColorUtility.formatNameForHashing(
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email
+    )
 
     // Update initials
     initialsLabel.text = nameForInitials.first.map(String.init)?.uppercased() ?? ""
 
     // Update gradient colors
-    let baseColor = colorForName(nameForInitials)
-    let isDarkMode = traitCollection.userInterfaceStyle == .dark
-    let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
+    Task { @MainActor in
+      let baseColor = await AvatarColorUtility.uiColorFor(name: nameForInitials)
+      let isDarkMode = traitCollection.userInterfaceStyle == .dark
+      let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
 
-    gradientLayer.colors = [
-      adjustedColor.adjustLuminosity(by: 0.2).cgColor,
-      adjustedColor.cgColor,
-    ]
+      gradientLayer.colors = [
+        adjustedColor.adjustLuminosity(by: 0.2).cgColor,
+        adjustedColor.cgColor,
+      ]
+    }
 
     // Load image if available
     if var photo = userInfo.profilePhoto?.first {

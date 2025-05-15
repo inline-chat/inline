@@ -27,6 +27,14 @@ public struct UserAvatar: View, Equatable {
 
   let nameForInitials: String
 
+  public static func getNameForInitials(user: User) -> String {
+    AvatarColorUtility.formatNameForHashing(
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email
+    )
+  }
+
   public init(user: User, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
     firstName = user.firstName
     lastName = user.lastName
@@ -59,22 +67,11 @@ public struct UserAvatar: View, Equatable {
     username = apiUser.username
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
-    nameForInitials = Self.getNameForInitials(user: apiUser)
-  }
-
-  // This must match below
-  public static func getNameForInitials(user: User) -> String {
-    let firstName = user.firstName ?? user.email?.components(separatedBy: "@").first ?? "User"
-    let lastName = user.lastName
-    let name = "\(firstName)\(lastName != nil ? " \(lastName ?? "")" : "")"
-    return name
-  }
-
-  static func getNameForInitials(user: ApiUser) -> String {
-    let firstName = user.firstName ?? user.email?.components(separatedBy: "@").first ?? "User"
-    let lastName = user.lastName
-    let name = "\(firstName)\(lastName != nil ? " \(lastName ?? "")" : "")"
-    return name
+    nameForInitials = AvatarColorUtility.formatNameForHashing(
+      firstName: apiUser.firstName,
+      lastName: apiUser.lastName,
+      email: apiUser.email
+    )
   }
 
   @ViewBuilder
@@ -95,48 +92,9 @@ public struct UserAvatar: View, Equatable {
 
   @Environment(\.colorScheme) private var colorScheme
 
-  @MainActor
-  public enum ColorPalette {
-    @MainActor
-
-    static let colors: [Color] = [
-      .pink.adjustLuminosity(by: -0.1),
-      .orange,
-      .purple,
-      .yellow.adjustLuminosity(by: -0.1),
-      .teal,
-      .blue,
-      .teal,
-      .green,
-      .primary,
-      .red,
-      .indigo,
-      .mint,
-      .cyan,
-//      .gray,
-//      .brown,
-    ]
-
-    public static func color(for name: String) -> Color {
-      // let hash = name.hashValue
-      let hash = name.utf8.reduce(0) { $0 + Int($1) }
-      return colors[abs(hash) % colors.count]
-    }
-  }
-
-  var name: String {
-    "\(firstName ?? "") \(lastName ?? "")"
-  }
-
-  private var initialsName: String {
-    name.first.map(String.init)?.uppercased() ?? ""
-  }
-
   private var backgroundColor: Color {
-    let baseColor = ColorPalette.color(for: name)
-    return colorScheme == .dark
-      ? baseColor.adjustLuminosity(by: -0.1)
-      : baseColor.adjustLuminosity(by: 0)
+    AvatarColorUtility.colorFor(name: nameForInitials)
+      .adjustLuminosity(by: colorScheme == .dark ? -0.1 : 0)
   }
 
   private var backgroundGradient: LinearGradient {
