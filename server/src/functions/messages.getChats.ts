@@ -188,8 +188,6 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
     },
   })
 
-  console.log("chats", chats)
-
   // Create dialogs for all chats that don't have a dialog
   const chatsThatNeedDialogs = chats.filter((c) => c.dialogs.length === 0)
   if (chatsThatNeedDialogs.length > 0) {
