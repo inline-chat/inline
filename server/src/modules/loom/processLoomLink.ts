@@ -208,7 +208,7 @@ async function sendLoomUpdate(
     // Get photo data if exists
     let protoPhoto: Photo | undefined
     if (photoId) {
-      const photo = await db.query.photos.findFirst({
+      const photo = await db._query.photos.findFirst({
         where: eq(photos.id, photoId),
         with: {
           photoSizes: {

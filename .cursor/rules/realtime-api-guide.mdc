@@ -16,6 +16,6 @@ We use Bun. And Bun test to write our tests. Our tests are in src/__tests__. We 
 /proto/core.proto is my core protocol files 
 protocol is generated in server/packages/protocol/src/core.ts. Snake case fields are turned into camel case in typescript, and camel case in Swift except for Id that becomes ID.
 
-We use Drizzle ORM for database calls, for complex queries we use the default syntax (db.select(chats)) and for simpler nested query cases we use the query format that is more readable (db.query.chats.findMany). In drizzle when you write `where` statements, you need to import utility functions like `eq`, `and`, `or` from drizzle package.
+We use Drizzle ORM for database calls, for complex queries we use the default syntax (db.select(chats)) and for simpler nested query cases we use the query format that is more readable (db._query.chats.findMany). In drizzle when you write `where` statements, you need to import utility functions like `eq`, `and`, `or` from drizzle package.
 
 Our testing utilities are at /server/src/__tests__/setup.ts.

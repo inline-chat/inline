@@ -1,5 +1,6 @@
 import { db } from "@in/server/db"
-import { eq, and, desc, type ExtractTablesWithRelations } from "drizzle-orm"
+import { eq, and, desc } from "drizzle-orm"
+import { type ExtractTablesWithRelations } from "drizzle-orm/_relations"
 import { chats, dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { TPeerInfo } from "@in/server/api-types"
@@ -38,7 +39,7 @@ async function createUserChatAndDialog(input: {
     let chat: DbChat | undefined
 
     // Check if already a chat, fetch it
-    chat = await tx.query.chats.findFirst({
+    chat = await tx._query.chats.findFirst({
       where: and(eq(chats.type, "private"), eq(chats.minUserId, minUserId), eq(chats.maxUserId, maxUserId)),
     })
 
@@ -60,7 +61,7 @@ async function createUserChatAndDialog(input: {
     }
 
     // check if dialog already exists
-    let dialog = await tx.query.dialogs.findFirst({
+    let dialog = await tx._query.dialogs.findFirst({
       where: and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, input.currentUserId)),
     })
 
@@ -243,7 +244,7 @@ async function refreshLastMessageId(chatId: number) {
 }
 
 /** Updates lastMsgId for a chat by selecting the highest messageId */
-async function refreshLastMessageIdTransaction(chatId: number, transaction: (tx: DrizzleTx) => Promise<void>) {
+async function refreshLastMessageIdTransaction(chatId: number, transaction: (tx: any) => Promise<void>) {
   // Use a transaction with FOR UPDATE to lock the row while we're working with it
   return await db.transaction(async (tx) => {
     let [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update")
@@ -270,8 +271,8 @@ async function refreshLastMessageIdTransaction(chatId: number, transaction: (tx:
   })
 }
 
-type DrizzleTx = PgTransaction<
-  PostgresJsQueryResultHKT,
-  typeof import("../schema/index"),
-  ExtractTablesWithRelations<typeof import("../schema/index")>
->
+// type DrizzleTx = PgTransaction<
+//   PostgresJsQueryResultHKT,
+//   typeof import("../schema/index"),
+//   ExtractTablesWithRelations<typeof import("../schema/index")>
+// >

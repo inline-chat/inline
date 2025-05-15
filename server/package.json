@@ -39,7 +39,7 @@
     "@sinclair/typebox": "=0.32.34",
     "apn": "^2.2.0",
     "arctic": "^3.3.0",
-    "drizzle-orm": "^0.36.4",
+    "drizzle-orm": "^1.0.0-beta.1-c0277c0",
     "elysia": "=1.1.26",
     "elysia-helmet": "^2.0.0",
     "elysia-rate-limit": "^4.1.0",
@@ -58,10 +58,10 @@
     "@types/nanoid-dictionary": "^4.2.3",
     "@typescript-eslint/eslint-plugin": "^8.17.0",
     "@typescript-eslint/parser": "^8.17.0",
-    "drizzle-kit": "^0.28.1",
+    "drizzle-kit": "^1.0.0-beta.1-c0277c0",
     "eslint": "^9.16.0",
     "eslint-plugin-react": "^7.37.2",
     "typescript-eslint": "^8.17.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.8.3"
   }
 }

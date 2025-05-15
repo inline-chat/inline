@@ -21,7 +21,7 @@ export const MembersModel = {
  * @returns The member
  */
 async function getMemberByUserId(spaceId: number, userId: number): Promise<DbMember | undefined> {
-  const member = await db.query.members.findFirst({
+  const member = await db._query.members.findFirst({
     where: and(eq(members.spaceId, spaceId), eq(members.userId, userId)),
   })
 
@@ -29,7 +29,7 @@ async function getMemberByUserId(spaceId: number, userId: number): Promise<DbMem
 }
 
 async function getMemberById(id: number): Promise<DbMember | undefined> {
-  const member = await db.query.members.findFirst({
+  const member = await db._query.members.findFirst({
     where: eq(members.id, id),
   })
 

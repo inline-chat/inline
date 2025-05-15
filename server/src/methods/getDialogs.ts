@@ -106,7 +106,7 @@ export const handler = async (
   let messages: TMessageInfo[] = []
 
   // --- 1. Existing Thread Dialogs ---
-  const existingThreadDialogs = await db.query.dialogs.findMany({
+  const existingThreadDialogs = await db._query.dialogs.findMany({
     where: and(eq(schema.dialogs.userId, currentUserId), eq(schema.dialogs.spaceId, spaceId)),
     with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
     limit: MAX_LIMIT,
@@ -131,7 +131,7 @@ export const handler = async (
   // --- 2. Public Chats and Private Dialogs in Space ---
   if (spaceId) {
     // 2a. Public Chats
-    const publicChats = await db.query.chats.findMany({
+    const publicChats = await db._query.chats.findMany({
       where: and(
         eq(schema.chats.spaceId, spaceId),
         eq(schema.chats.type, "thread"),
@@ -211,7 +211,7 @@ export const handler = async (
     })
 
     // 2b. Space Members
-    const space = await db.query.spaces.findFirst({
+    const space = await db._query.spaces.findFirst({
       where: eq(schema.spaces.id, spaceId),
       with: {
         members: {
@@ -221,12 +221,15 @@ export const handler = async (
       },
     })
     // 2c. Private Dialogs with Space Members
-    const privateDialogs = await db.query.dialogs.findMany({
+    const privateDialogs = await db._query.dialogs.findMany({
       where: and(
         eq(schema.dialogs.userId, currentUserId),
         // spaceid = nil
         isNull(schema.dialogs.spaceId),
-        inArray(schema.dialogs.peerUserId, space?.members.map((m) => m.user.id) ?? []),
+        inArray(
+          schema.dialogs.peerUserId,
+          space?.members.map((m: schema.DbMember & { user: schema.DbUserWithPhoto }) => m.user.id) ?? [],
+        ),
       ),
       with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
       limit: MAX_LIMIT,
@@ -240,7 +243,7 @@ export const handler = async (
     // Create private chats and dialogs for members that don't have them
     if (space?.members) {
       const memberIds = space.members.map((m) => m.user.id)
-      const existingPrivateChats = await db.query.chats.findMany({
+      const existingPrivateChats = await db._query.chats.findMany({
         where: and(
           eq(schema.chats.type, "private"),
           or(

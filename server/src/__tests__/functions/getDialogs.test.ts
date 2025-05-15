@@ -135,7 +135,7 @@ describe("getDialogs", () => {
       .then((rows) => rows[0])
     // Sanity: ensure no dialog exists for this chat/user
     if (!chat) throw new Error("Chat was not created")
-    const dialogsBefore = await db.query.dialogs.findMany({
+    const dialogsBefore = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, user.id)),
     })
     expect(dialogsBefore.length).toBe(0)
@@ -144,7 +144,7 @@ describe("getDialogs", () => {
     const context = makeHandlerContext(user.id)
     const result = await getDialogsHandler(input, context)
     // Should now have a dialog for the chat
-    const dialogsAfter = await db.query.dialogs.findMany({
+    const dialogsAfter = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, user.id)),
     })
     expect(dialogsAfter.length).toBe(1)
@@ -186,7 +186,7 @@ describe("getDialogs", () => {
       ])
       .execute()
     // Sanity: ensure no dialog exists for userA
-    const dialogsBefore = await db.query.dialogs.findMany({
+    const dialogsBefore = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, userA.id)),
     })
     expect(dialogsBefore.length).toBe(0)
@@ -195,7 +195,7 @@ describe("getDialogs", () => {
     const context = makeHandlerContext(userA.id)
     const result = await getDialogsHandler(input, context)
     // Should now have a dialog for the chat
-    const dialogsAfter = await db.query.dialogs.findMany({
+    const dialogsAfter = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, userA.id)),
     })
     expect(dialogsAfter.length).toBe(1)
@@ -233,7 +233,7 @@ describe("getDialogs", () => {
       .values([{ chatId: chat.id, userId: userB.id }])
       .execute()
     // Sanity: ensure no dialog exists for userA
-    const dialogsBefore = await db.query.dialogs.findMany({
+    const dialogsBefore = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, userA.id)),
     })
     expect(dialogsBefore.length).toBe(0)
@@ -242,7 +242,7 @@ describe("getDialogs", () => {
     const context = makeHandlerContext(userA.id)
     const result = await getDialogsHandler(input, context)
     // Should still have no dialog for userA
-    const dialogsAfter = await db.query.dialogs.findMany({
+    const dialogsAfter = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, userA.id)),
     })
     expect(dialogsAfter.length).toBe(0)
@@ -289,7 +289,7 @@ describe("getDialogs", () => {
       .execute()
 
     // Sanity: ensure no private chat exists between userA and userC
-    const chatsBefore = await db.query.chats.findMany({
+    const chatsBefore = await db._query.chats.findMany({
       where: and(
         eq(schema.chats.type, "private"),
         or(
@@ -312,7 +312,7 @@ describe("getDialogs", () => {
     const result = await getDialogsHandler(input, context)
 
     // Should now have a private chat between userA and userC
-    const chatsAfter = await db.query.chats.findMany({
+    const chatsAfter = await db._query.chats.findMany({
       where: and(
         eq(schema.chats.type, "private"),
         or(
@@ -330,7 +330,7 @@ describe("getDialogs", () => {
     expect(chatsAfter.length).toBe(1)
 
     // Should have a dialog for userA with userC
-    const dialogsAfter = await db.query.dialogs.findMany({
+    const dialogsAfter = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.userId, userA.id), eq(schema.dialogs.peerUserId, userC.id)),
     })
     expect(dialogsAfter.length).toBe(1)
@@ -379,7 +379,7 @@ describe("getDialogs", () => {
       .execute()
 
     // Count existing chats before
-    const chatsBefore = await db.query.chats.findMany({
+    const chatsBefore = await db._query.chats.findMany({
       where: and(
         eq(schema.chats.type, "private"),
         or(
@@ -402,7 +402,7 @@ describe("getDialogs", () => {
     const result = await getDialogsHandler(input, context)
 
     // Should still have the same number of chats
-    const chatsAfter = await db.query.chats.findMany({
+    const chatsAfter = await db._query.chats.findMany({
       where: and(
         eq(schema.chats.type, "private"),
         or(
@@ -420,7 +420,7 @@ describe("getDialogs", () => {
     expect(chatsAfter.length).toBe(initialChatCount)
 
     // Should have exactly one dialog for userA with userB
-    const dialogsAfter = await db.query.dialogs.findMany({
+    const dialogsAfter = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.userId, userA.id), eq(schema.dialogs.peerUserId, userB.id)),
     })
     expect(dialogsAfter.length).toBe(1)
@@ -472,7 +472,7 @@ describe("getDialogs", () => {
       .execute()
 
     // Verify no dialog exists for new user
-    const dialogsBefore = await db.query.dialogs.findMany({
+    const dialogsBefore = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, newUser.id)),
     })
     expect(dialogsBefore.length).toBe(0)
@@ -483,7 +483,7 @@ describe("getDialogs", () => {
     const result = await getDialogsHandler(input, context)
 
     // Verify dialog was created
-    const dialogsAfter = await db.query.dialogs.findMany({
+    const dialogsAfter = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, newUser.id)),
     })
     expect(dialogsAfter.length).toBe(1)

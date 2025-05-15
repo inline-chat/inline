@@ -54,7 +54,7 @@ describe("getPrivateChats", () => {
     })
 
     // Verify initial state - only one dialog exists
-    const dialogsBefore = await db.query.dialogs.findMany({
+    const dialogsBefore = await db._query.dialogs.findMany({
       where: eq(schema.dialogs.chatId, chat.id),
     })
     expect(dialogsBefore.length).toBe(1)
@@ -69,7 +69,7 @@ describe("getPrivateChats", () => {
     expect(result.chats.some((c) => c.id === chat.id)).toBe(true)
 
     // Verify dialog was created for userB
-    const dialogsAfter = await db.query.dialogs.findMany({
+    const dialogsAfter = await db._query.dialogs.findMany({
       where: eq(schema.dialogs.chatId, chat.id),
     })
     expect(dialogsAfter.length).toBe(2)
@@ -94,7 +94,7 @@ describe("getPrivateChats", () => {
     })
 
     // Verify initial state - both dialogs exist
-    const dialogsBefore = await db.query.dialogs.findMany({
+    const dialogsBefore = await db._query.dialogs.findMany({
       where: eq(schema.dialogs.chatId, chat.id),
     })
     expect(dialogsBefore.length).toBe(2)
@@ -103,7 +103,7 @@ describe("getPrivateChats", () => {
     const result = await handler({}, makeTestContext(userB.id))
 
     // Verify no new dialogs were created
-    const dialogsAfter = await db.query.dialogs.findMany({
+    const dialogsAfter = await db._query.dialogs.findMany({
       where: eq(schema.dialogs.chatId, chat.id),
     })
     expect(dialogsAfter.length).toBe(2)
@@ -135,7 +135,7 @@ describe("getPrivateChats", () => {
     })
 
     // Verify initial state - only one dialog exists (for userA in chatAB)
-    const dialogsBefore = await db.query.dialogs.findMany({
+    const dialogsBefore = await db._query.dialogs.findMany({
       where: inArray(schema.dialogs.chatId, [chatAB.id, chatBC.id]),
     })
     expect(dialogsBefore.length).toBe(1)
@@ -148,7 +148,7 @@ describe("getPrivateChats", () => {
     expect(result.chats.some((c) => c.id === chatBC.id)).toBe(true)
 
     // Verify dialogs were created for userB in both chats
-    const dialogsAfter = await db.query.dialogs.findMany({
+    const dialogsAfter = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.userId, userB.id), inArray(schema.dialogs.chatId, [chatAB.id, chatBC.id])),
     })
     expect(dialogsAfter.length).toBe(2)

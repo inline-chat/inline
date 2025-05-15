@@ -2,7 +2,7 @@ import { SQL, sql } from "drizzle-orm"
 import { integer, pgTable, uniqueIndex, varchar, boolean, timestamp, type AnyPgColumn } from "drizzle-orm/pg-core"
 import { pgSequence } from "drizzle-orm/pg-core"
 import { files, type DbFile } from "./files"
-import { relations } from "drizzle-orm"
+import { relations } from "drizzle-orm/_relations"
 
 // custom lower function
 export function lower(email: AnyPgColumn): SQL {

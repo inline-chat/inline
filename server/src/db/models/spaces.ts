@@ -12,7 +12,7 @@ export const SpaceModel = {
  * @returns The space or undefined if it doesn't exist
  */
 async function getSpaceById(id: number): Promise<DbSpace | undefined> {
-  const result = await db.query.spaces.findFirst({
+  const result = await db._query.spaces.findFirst({
     where: eq(spaces.id, id),
   })
 

@@ -87,7 +87,7 @@ export const handler = async (
       .returning()
 
     if (!dialog) {
-      dialog = await db.query.dialogs.findFirst({
+      dialog = await db._query.dialogs.findFirst({
         where: and(
           eq(dialogs.userId, context.currentUserId),
           eq(dialogs.peerUserId, context.currentUserId),

@@ -16,7 +16,7 @@ export const getSpaceMembers = async (
     throw RealtimeRpcError.BadRequest
   }
 
-  const members_ = await db.query.members.findMany({
+  const members_ = await db._query.members.findMany({
     where: eq(members.spaceId, spaceId),
   })
 

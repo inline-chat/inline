@@ -61,7 +61,7 @@ const normalizeToken = (token: unknown): string | null => {
 export const getUserIdFromToken = async (token: string): Promise<{ userId: number; sessionId: number }> => {
   let supposedUserId = token.split(":")[0]
   let tokenHash = hashToken(token)
-  let session = await db.query.sessions.findFirst({
+  let session = await db._query.sessions.findFirst({
     where: and(eq(sessions.tokenHash, tokenHash), isNull(sessions.revoked)),
   })
 

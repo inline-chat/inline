@@ -82,7 +82,7 @@ export function processFullPhoto(photo: InputDbFullPhoto): DbFullPhoto {
 }
 
 async function getPhotoById(photoId: bigint): Promise<DbFullPhoto | undefined> {
-  let result = await db.query.photos.findFirst({
+  let result = await db._query.photos.findFirst({
     where: eq(photos.id, Number(photoId)),
     with: {
       photoSizes: {
@@ -125,7 +125,7 @@ export type DbFullVideo = DbVideo & {
 }
 
 async function getVideoById(videoId: bigint): Promise<DbFullVideo | undefined> {
-  const result = await db.query.videos.findFirst({
+  const result = await db._query.videos.findFirst({
     where: eq(videos.id, Number(videoId)),
     with: {
       file: true,
@@ -176,7 +176,7 @@ export type DbFullDocument = DbPlainDocument & {
 }
 
 async function getDocumentById(documentId: bigint): Promise<DbFullDocument | undefined> {
-  const result = await db.query.documents.findFirst({
+  const result = await db._query.documents.findFirst({
     where: eq(documents.id, Number(documentId)),
     with: {
       file: true,

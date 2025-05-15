@@ -1,7 +1,7 @@
 import { pgTable, boolean, unique, integer, text } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
-import { relations } from "drizzle-orm"
+import { relations } from "drizzle-orm/_relations"
 import { chats } from "./chats"
 import { creationDate } from "@in/server/db/schema/common"
 import { serial } from "drizzle-orm/pg-core"

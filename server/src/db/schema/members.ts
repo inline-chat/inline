@@ -3,7 +3,7 @@ import { users } from "./users"
 import { spaces } from "./spaces"
 import { creationDate } from "@in/server/db/schema/common"
 import { serial } from "drizzle-orm/pg-core"
-import { relations } from "drizzle-orm"
+import { relations } from "drizzle-orm/_relations"
 
 export const rolesEnum = pgEnum("member_roles", ["owner", "admin", "member"])
 export type DbMemberRole = (typeof rolesEnum.enumValues)[number]

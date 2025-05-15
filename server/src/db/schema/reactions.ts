@@ -5,7 +5,7 @@ import { chats } from "./chats"
 import { bigserial } from "drizzle-orm/pg-core"
 import { integer } from "drizzle-orm/pg-core"
 import { messages } from "./messages"
-import { relations } from "drizzle-orm"
+import { relations } from "drizzle-orm/_relations"
 import { creationDate } from "./common"
 
 export const reactions = pgTable(
