@@ -19,6 +19,7 @@ import { getChatParticipants } from "@in/server/realtime/handlers/messages.getCh
 import { addChatParticipant } from "@in/server/realtime/handlers/messages.addChatParticipant"
 import { removeChatParticipant } from "@in/server/realtime/handlers/messages.removeChatParticipant"
 import { handleTranslateMessages } from "./translateMessages"
+import { handleGetChats } from "./messages.getChats"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -148,6 +149,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "translateMessages", translateMessages: result }
     }
 
+    case Method.GET_CHATS: {
+      if (call.input.oneofKind !== "getChats") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await handleGetChats(call.input.getChats, handlerContext)
+      return { oneofKind: "getChats", getChats: result }
+    }
+
     default:
       Log.shared.error(`Unknown method: ${call.method}`)
       throw RealtimeRpcError.BadRequest
@@ -156,4 +165,5 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
 export const handlers = {
   translateMessages: handleTranslateMessages,
+  getChats: handleGetChats,
 }
