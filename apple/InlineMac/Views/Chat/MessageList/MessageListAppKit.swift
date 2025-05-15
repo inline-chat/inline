@@ -96,7 +96,7 @@ class MessageListAppKit: NSViewController {
       MessageSizeCalculator.shared.invalidateCache()
 
       // Reload to reflect changes
-      //applyUpdate(.reload(animated: true))
+      // applyUpdate(.reload(animated: true))
       applyUpdate(.reload(animated: false))
     }.store(in: &cancellables)
   }
@@ -1258,8 +1258,9 @@ extension MessageListAppKit: NSTableViewDelegate {
     let current = messages[row]
     let previous = messages[row - 1]
 
-    return previous.message.fromId != current.message.fromId ||
-      current.message.date.timeIntervalSince(previous.message.date) > 300
+    return previous.message.fromId != current.message.fromId
+//    return previous.message.fromId != current.message.fromId ||
+//      current.message.date.timeIntervalSince(previous.message.date) > 300
   }
 
   func isLastMessage(at row: Int) -> Bool {

@@ -82,7 +82,7 @@ class MessageSizeCalculator {
     // know we don't need to recalc. since this function is used in message list to bypass unneccessary calcs.
     guard !fullMessage.hasMedia else { return nil }
 
-    //let text = fullMessage.message.text ?? emptyFallback
+    // let text = fullMessage.message.text ?? emptyFallback
     let text = fullMessage.displayText ?? emptyFallback
     let minTextSize = minTextWidthForSingleLine.object(forKey: text as NSString) as? CGSize
 
@@ -459,7 +459,7 @@ class MessageSizeCalculator {
       } else {
         textBottomSpacing += Theme.messageTextAndTimeSpacing
       }
-      
+
       // Offset added height to keep bubble height unchanged
       textBottomSpacing -= additionalTextHeight
 
@@ -672,7 +672,7 @@ class MessageSizeCalculator {
     }
     if props.firstInGroup {
       /// Remove extra bubble spacing for now
-      // wrapperTopSpacing = Theme.messageGroupSpacing
+      wrapperTopSpacing = Theme.messageGroupSpacing
     }
     if let avatarPlan {
       wrapperWidth += avatarPlan.size.width
@@ -831,7 +831,7 @@ class MessageSizeCalculator {
 
     return CGSize(width: textWidth, height: textHeight)
   }
-  
+
   /// Fixes a bug with the text view height calculation for Chinese text that don't show last line.
   private var additionalTextHeight: CGFloat = 1.0
 
