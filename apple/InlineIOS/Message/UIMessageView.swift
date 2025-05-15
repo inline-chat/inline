@@ -432,7 +432,18 @@ class UIMessageView: UIView {
     let metadataContainer = UIStackView()
     metadataContainer.axis = .horizontal
     metadataContainer.addArrangedSubview(UIView()) // Spacer
-    metadataContainer.addArrangedSubview(specificUI ? floatingMetadataView : metadataView)
+    if specificUI {
+      metadataContainer.addSubview(floatingMetadataView)
+      NSLayoutConstraint.activate([
+        floatingMetadataView.topAnchor.constraint(
+          equalTo: metadataContainer.topAnchor,
+          constant: isSticker ? -30 : -18
+        ),
+        floatingMetadataView.trailingAnchor.constraint(equalTo: metadataContainer.trailingAnchor, constant: -4),
+      ])
+    } else {
+      metadataContainer.addArrangedSubview(metadataView)
+    }
     multiLineContainer.addArrangedSubview(metadataContainer)
   }
 
