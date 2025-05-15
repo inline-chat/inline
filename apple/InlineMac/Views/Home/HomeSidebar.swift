@@ -10,12 +10,12 @@ struct HomeSidebar: View {
     case space(InlineKit.Space)
     case chat(InlineKit.HomeChatItem)
 
-    var id: Int64 {
+    var id: String {
       switch self {
         case let .space(space):
-          space.id
+          "\(space.id)\(space.name)"
         case let .chat(chat):
-          chat.dialog.id
+          "\(chat.dialog.id)dialog"
       }
     }
   }
@@ -23,7 +23,7 @@ struct HomeSidebar: View {
   enum Tab: String, Hashable {
     case inbox
     case archive
-    case search
+    case spaces
   }
 
   // MARK: - State
@@ -86,92 +86,104 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var list: some View {
-    List {
-      if search.hasResults || (isSearching && search.canSearch) {
-        searchView
-      } else {
-        spacesAndUsersView
-      }
-    }
-    .padding(.bottom, 0)
-    .listStyle(.sidebar)
-    .animation(.smoothSnappy, value: items)
-    .animation(.smoothSnappy, value: home.chats)
-    .safeAreaInset(
-      edge: .bottom,
-      content: {
-        tabs
-          .padding(.top, -8)
-      }
-    )
-
-//    .overlay(alignment: .bottom) {
-//      tabs
-//    }
-
-    //    .safeAreaInset(
-    //      edge: .top,
-    //      content: {
-    //        Color.clear
-    //          .frame(height: 12)
-    //      }
-    //    )
-
-    //    .safeAreaInset(
-    //      edge: .top,
-    //      content: {
-    //        VStack(alignment: .leading, spacing: 0) {
-    //          HStack(alignment: .center, spacing: 0) {
-    //            SelfUser()
-    //              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while
-    //              /the
-    //              /// wrapper view was moving
-    //              .scaleEffect(1.0)
-    //
-    //            AlphaCapsule()
-    //          }
-    //          .padding(.top, 0)
-    //          .padding(.bottom, 8)
-    //
-    //          searchBar
-    //            .padding(.bottom, 2)
-    //        }
-    //        .frame(maxWidth: .infinity, alignment: .leading)
-    //        .padding(.horizontal) // default side padding
-    //        .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
-    //      }
-    //    )
-
-    .safeAreaInset(
-      edge: .top,
-      spacing: 0,
-      content: {
-        VStack(alignment: .leading, spacing: 0) {
-          topArea
-          searchBar
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(
-          .horizontal,
-          Theme.sidebarItemOuterSpacing
+    if tab == .spaces {
+      SpacesTab()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(
+          edge: .bottom,
+          content: {
+            tabs
+              .padding(.top, -8)
+          }
         )
-        .padding(.bottom, 8)
-        .edgesIgnoringSafeArea(.bottom)
-        .background(alignment: .bottom) {
-          if !isAtTop {
-            Divider().opacity(0.4)
+    } else {
+      List {
+        if search.hasResults || (isSearching && search.canSearch) {
+          searchView
+        } else {
+          spacesAndUsersView
+        }
+      }
+      .padding(.bottom, 0)
+      .listStyle(.sidebar)
+      .animation(.smoothSnappy, value: items)
+      .animation(.smoothSnappy, value: home.chats)
+      .safeAreaInset(
+        edge: .bottom,
+        content: {
+          tabs
+            .padding(.top, -8)
+        }
+      )
+
+      //    .overlay(alignment: .bottom) {
+      //      tabs
+      //    }
+
+      //    .safeAreaInset(
+      //      edge: .top,
+      //      content: {
+      //        Color.clear
+      //          .frame(height: 12)
+      //      }
+      //    )
+
+      //    .safeAreaInset(
+      //      edge: .top,
+      //      content: {
+      //        VStack(alignment: .leading, spacing: 0) {
+      //          HStack(alignment: .center, spacing: 0) {
+      //            SelfUser()
+      //              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while
+      //              /the
+      //              /// wrapper view was moving
+      //              .scaleEffect(1.0)
+      //
+      //            AlphaCapsule()
+      //          }
+      //          .padding(.top, 0)
+      //          .padding(.bottom, 8)
+      //
+      //          searchBar
+      //            .padding(.bottom, 2)
+      //        }
+      //        .frame(maxWidth: .infinity, alignment: .leading)
+      //        .padding(.horizontal) // default side padding
+      //        .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
+      //      }
+      //    )
+
+      .safeAreaInset(
+        edge: .top,
+        spacing: 0,
+        content: {
+          VStack(alignment: .leading, spacing: 0) {
+            topArea
+            searchBar
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(
+            .horizontal,
+            Theme.sidebarItemOuterSpacing
+          )
+          .padding(.bottom, 8)
+          .edgesIgnoringSafeArea(.bottom)
+          .background(alignment: .bottom) {
+            if !isAtTop {
+              Divider().opacity(0.4)
+            }
           }
         }
-      }
-    )
+      )
 
-    .onChange(of: nav.currentRoute) { _ in
-      DispatchQueue.main.async {
+      .onChange(of: nav.currentRoute) { _ in
+        DispatchQueue.main.async {
+          subscribeNavKeyMonitor()
+        }
+      }
+      .onAppear {
         subscribeNavKeyMonitor()
       }
-    }
-    .onAppear {
-      subscribeNavKeyMonitor()
     }
   }
 
@@ -219,6 +231,7 @@ struct HomeSidebar: View {
       tabs: [
         .init(value: .archive, systemImage: "archivebox.fill"),
         .init(value: .inbox, systemImage: "bubble.left.and.bubble.right.fill", fontSize: 15),
+        .init(value: .spaces, systemImage: "building.2.fill", fontSize: 15),
       ],
       selected: tab,
       showDivider: !isAtBottom,
@@ -336,15 +349,27 @@ struct HomeSidebar: View {
           )
         )
         .overlay {
-          Image(systemName: "house.fill")
-            .foregroundColor(.white)
-            .font(.system(size: 13, weight: .regular))
+          // Image(systemName: "house.fill")
+          if tab == .archive {
+            Image(systemName: "archivebox.fill")
+              .foregroundColor(.white)
+              .font(.system(size: 11, weight: .regular))
+          } else {
+            Image(systemName: "bubble.left.and.text.bubble.right.fill")
+              .foregroundColor(.white)
+              .font(.system(size: 11, weight: .regular))
+          }
         }
         .frame(width: Theme.sidebarTitleIconSize, height: Theme.sidebarTitleIconSize)
         .fixedSize()
         .padding(.trailing, Theme.sidebarIconSpacing)
 
-      Text("Home")
+      // Text("Home")
+      if tab == .archive {
+        Text("Archive")
+      } else {
+        Text("Your Chats")
+      }
 
       Spacer()
 
@@ -372,6 +397,23 @@ struct HomeSidebar: View {
           .font(.system(size: 14, weight: .medium))
           .foregroundStyle(Color.accent)
       }
+
+      Menu {
+        ForEach(home.spaces, id: \.space.id) { spaceItem in
+          Button {
+            nav.open(.newChat(spaceId: spaceItem.space.id))
+          } label: {
+            Label(spaceItem.space.name, systemImage: "bubble.left.and.bubble.right.fill")
+              .font(.system(size: 14, weight: .medium))
+              .foregroundStyle(Color.accent)
+          }
+        }
+      } label: {
+        Label("Create group chat", systemImage: "person.3.fill")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundStyle(Color.accent)
+      }
+
     } label: {
       Image(systemName: "plus")
         .font(.system(size: 15, weight: .medium))

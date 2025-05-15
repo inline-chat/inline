@@ -14,10 +14,15 @@ struct SpaceItem: View {
   @Environment(\.appearsActive) var appearsActive
 
   var space: Space
+  var onSelect: ((Int64) -> Void)?
 
   var body: some View {
     let view = Button {
-      nav.openSpace(space.id)
+      if let onSelect {
+        onSelect(space.id)
+      } else {
+        nav.openSpace(space.id)
+      }
     } label: {
       content
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -30,7 +35,6 @@ struct SpaceItem: View {
     ))
     .focused($isFocused)
     .padding(.horizontal, -Theme.sidebarItemInnerSpacing)
-    
     // Alert for delete confirmation
     .alert("Are you sure?", isPresented: $alertPresented, presenting: pendingAction, actions: { action in
       Button(actionText(action), role: .destructive) {
@@ -55,7 +59,6 @@ struct SpaceItem: View {
           act(.leave)
         }
       }
-      
     }
 
     if #available(macOS 14.0, *) {
@@ -67,6 +70,7 @@ struct SpaceItem: View {
     }
   }
 
+  @ViewBuilder
   var content: some View {
     HStack(spacing: 0) {
       SpaceAvatar(space: space, size: Theme.sidebarIconSize)
@@ -117,7 +121,9 @@ struct SpaceItem: View {
   }
 
   private func navigateOutOfSpace() {
-    // todo
+    if nav.currentSpaceId == space.id {
+      nav.openHome()
+    }
   }
 }
 
