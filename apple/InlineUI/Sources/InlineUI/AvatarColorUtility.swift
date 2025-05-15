@@ -1,7 +1,7 @@
 import SwiftUI
 
+@MainActor
 public enum AvatarColorUtility {
-  @MainActor
   public static let colors: [Color] = [
     .pink.adjustLuminosity(by: -0.1),
     .orange,
@@ -11,7 +11,7 @@ public enum AvatarColorUtility {
     .blue,
     .teal,
     .green,
-    .primary,
+//    .primary,
     .red,
     .indigo,
     .mint,
@@ -24,17 +24,14 @@ public enum AvatarColorUtility {
     return name
   }
 
-  @MainActor
   public static func colorFor(name: String) -> Color {
     let hash = name.utf8.reduce(0) { $0 + Int($1) }
     return colors[abs(hash) % colors.count]
   }
 
   #if os(iOS)
-  public static func uiColorFor(name: String) async -> UIColor {
-    await MainActor.run {
-      UIColor(colorFor(name: name))
-    }
+  public static func uiColorFor(name: String) -> UIColor {
+    UIColor(colorFor(name: name))
   }
   #endif
 }

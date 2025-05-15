@@ -101,16 +101,15 @@ final class UserAvatarView: UIView {
     initialsLabel.text = nameForInitials.first.map(String.init)?.uppercased() ?? ""
 
     // Update gradient colors
-    Task { @MainActor in
-      let baseColor = await AvatarColorUtility.uiColorFor(name: nameForInitials)
-      let isDarkMode = traitCollection.userInterfaceStyle == .dark
-      let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
 
-      gradientLayer.colors = [
-        adjustedColor.adjustLuminosity(by: 0.2).cgColor,
-        adjustedColor.cgColor,
-      ]
-    }
+    let baseColor = AvatarColorUtility.uiColorFor(name: nameForInitials)
+    let isDarkMode = traitCollection.userInterfaceStyle == .dark
+    let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
+
+    gradientLayer.colors = [
+      adjustedColor.adjustLuminosity(by: 0.2).cgColor,
+      adjustedColor.cgColor,
+    ]
 
     // Load image if available
     if var photo = userInfo.profilePhoto?.first {
