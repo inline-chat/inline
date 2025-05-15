@@ -8,6 +8,7 @@ struct ChatItemProps {
   let chat: Chat?
   let message: Message?
   let from: UserInfo?
+  let space: Space?
 }
 
 struct ChatItemView: View {
@@ -35,6 +36,10 @@ struct ChatItemView: View {
 
   var from: UserInfo? {
     props.from
+  }
+
+  var space: Space? {
+    props.space
   }
 
   var hasUnreadMessages: Bool {
@@ -98,9 +103,21 @@ struct ChatItemView: View {
 
   @ViewBuilder
   var title: some View {
-    Text(chat?.title ?? "")
-      .font(.customTitle())
-      .foregroundColor(.primary)
+//    VStack(alignment: .leading, spacing: 2) {
+    HStack {
+      Text(chat?.title ?? "")
+        .font(.customTitle())
+        .foregroundColor(.primary)
+      Spacer()
+
+      if let space {
+        Text(space.name ?? "")
+          .font(.callout)
+          .fontWeight(.medium)
+          .foregroundColor(.secondary)
+      }
+    }
+//    }
   }
 
   @ViewBuilder
