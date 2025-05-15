@@ -10,7 +10,7 @@ struct Email: View {
   @FormState var formState
   @State private var isInputValid: Bool = false
 
-  private var placeHolder: String = "name@example.com"
+  private var placeHolder: String = NSLocalizedString("name@example.com", comment: "Email placeholder")
 
   @EnvironmentObject var nav: OnboardingNavigation
   @EnvironmentObject var api: ApiClient
@@ -21,7 +21,7 @@ struct Email: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      AnimatedLabel(animate: $animate, text: "Enter your email")
+      AnimatedLabel(animate: $animate, text: NSLocalizedString("Enter your email", comment: "Email input label"))
       TextField(placeHolder, text: $email)
         .focused($isFocused)
         .keyboardType(.emailAddress)
@@ -52,7 +52,11 @@ struct Email: View {
     .padding(.horizontal, OnboardingUtils.shared.hPadding)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     .safeAreaInset(edge: .bottom) {
-      Button(formState.isLoading ? "Sending Code..." : "Continue") {
+      Button(
+        formState
+          .isLoading ? NSLocalizedString("Sending Code...", comment: "Sending code button loading state") :
+          NSLocalizedString("Continue", comment: "Continue button")
+      ) {
         submit()
       }
       .buttonStyle(SimpleButtonStyle())
@@ -74,7 +78,8 @@ struct Email: View {
     }
   }
 
-  private let emailRegex = #"(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])"#
+  private let emailRegex =
+    #"(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])"#
 
   private func validateInput() {
     errorMsg = ""

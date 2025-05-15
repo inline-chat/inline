@@ -74,7 +74,7 @@ extension Welcome {
 
   @ViewBuilder
   var subheading: some View {
-    Text("It's an all new way to chat with your team.")
+    Text(NSLocalizedString("It's an all new way to chat with your team.", comment: "Welcome subheading"))
       .foregroundColor(.secondary)
       .font(.title3)
       .multilineTextAlignment(.leading)
@@ -83,18 +83,16 @@ extension Welcome {
   @ViewBuilder
   var bottomArea: some View {
     VStack {
-      Button("Continue with Email") {
+      Button(NSLocalizedString("Continue with Email", comment: "Continue with email button")) {
         submitToEmailRoute()
       }
       .buttonStyle(SimpleButtonStyle())
-      
       .frame(maxWidth: .infinity)
 
-      Button("Continue with Phone Number") {
+      Button(NSLocalizedString("Continue with Phone Number", comment: "Continue with phone number button")) {
         submitToPhoneNumberRoute()
       }
       .buttonStyle(SimpleWhiteButtonStyle())
-      
       .frame(maxWidth: .infinity)
     }
     .padding(.horizontal, OnboardingUtils.shared.hPadding)

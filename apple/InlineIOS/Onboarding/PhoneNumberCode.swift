@@ -6,7 +6,7 @@ import SwiftUI
 
 struct PhoneNumberCode: View {
   var phoneNumber: String
-  var placeHolder: String = "xxxxxx"
+  var placeHolder: String = NSLocalizedString("xxxxxx", comment: "Code input placeholder")
   let characterLimit = 6
 
   @State var code = ""
@@ -31,7 +31,7 @@ struct PhoneNumberCode: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      AnimatedLabel(animate: $animate, text: "Enter the code")
+      AnimatedLabel(animate: $animate, text: NSLocalizedString("Enter the code", comment: "Code input label"))
       codeInput
       hint
     }
@@ -81,7 +81,7 @@ extension PhoneNumberCode {
         }
 
       } catch let error as APIError {
-        errorMsg = "Please try again."
+        errorMsg = NSLocalizedString("Please try again.", comment: "Error message for code verification")
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
         formState.reset()
         isInputValid = false
@@ -146,16 +146,20 @@ extension PhoneNumberCode {
   var bottomArea: some View {
     VStack(alignment: .center) {
       HStack(spacing: 2) {
-        Text("Code sent to \(phoneNumber).")
+        Text(String(format: NSLocalizedString("Code sent to %@.", comment: "Code sent confirmation"), phoneNumber))
           .font(.callout)
           .foregroundColor(.secondary)
-        Button("Edit") {
+        Button(NSLocalizedString("Edit", comment: "Edit button")) {
           nav.pop()
         }
         .font(.callout)
       }
 
-      Button(formState.isLoading ? "Verifying..." : "Continue") {
+      Button(
+        formState
+          .isLoading ? NSLocalizedString("Verifying...", comment: "Verifying code button loading state") :
+          NSLocalizedString("Continue", comment: "Continue button")
+      ) {
         submitCode()
       }
       .buttonStyle(SimpleButtonStyle())

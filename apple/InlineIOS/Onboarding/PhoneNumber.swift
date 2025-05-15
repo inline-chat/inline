@@ -10,7 +10,7 @@ struct PhoneNumber: View {
   @State var errorMsg: String = ""
   @FormState var formState
 
-  private var placeHolder: String = "+1 555 555 5555"
+  private var placeHolder: String = NSLocalizedString("+1 555 555 5555", comment: "Phone number placeholder")
   private let minPhoneLength = 10
 
   @EnvironmentObject var nav: OnboardingNavigation
@@ -22,7 +22,10 @@ struct PhoneNumber: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      AnimatedLabel(animate: $animate, text: "Enter your phone number")
+      AnimatedLabel(
+        animate: $animate,
+        text: NSLocalizedString("Enter your phone number", comment: "Phone number input label")
+      )
       iPhoneNumberField(placeHolder, text: $phoneNumber)
         .flagHidden(false)
         .flagSelectable(true)
@@ -49,7 +52,11 @@ struct PhoneNumber: View {
     .padding(.horizontal, OnboardingUtils.shared.hPadding)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     .safeAreaInset(edge: .bottom) {
-      Button(formState.isLoading ? "Sending Code..." : "Continue") {
+      Button(
+        formState
+          .isLoading ? NSLocalizedString("Sending Code...", comment: "Sending code button loading state") :
+          NSLocalizedString("Continue", comment: "Continue button")
+      ) {
         submit()
       }
       .buttonStyle(SimpleButtonStyle())
@@ -72,7 +79,10 @@ struct PhoneNumber: View {
 
   func submit() {
     if phoneNumber.count < minPhoneLength {
-      errorMsg = "Phone number must be at least \(minPhoneLength) digits."
+      errorMsg = String(
+        format: NSLocalizedString("Phone number must be at least %d digits.", comment: "Phone number validation error"),
+        minPhoneLength
+      )
       return
     }
     errorMsg = ""

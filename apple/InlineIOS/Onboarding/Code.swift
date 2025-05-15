@@ -6,7 +6,7 @@ import SwiftUI
 
 struct Code: View {
   var email: String
-  var placeHolder: String = "xxxxxx"
+  var placeHolder: String = NSLocalizedString("xxxxxx", comment: "Code input placeholder")
   let characterLimit = 6
 
   @State var code = ""
@@ -31,7 +31,7 @@ struct Code: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      AnimatedLabel(animate: $animate, text: "Enter the code")
+      AnimatedLabel(animate: $animate, text: NSLocalizedString("Enter the code", comment: "Code input label"))
       codeInput
       hint
     }
@@ -81,7 +81,7 @@ extension Code {
         }
 
       } catch let error as APIError {
-        errorMsg = "Please try again."
+        errorMsg = NSLocalizedString("Please try again.", comment: "Error message for code verification")
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
         formState.reset()
         isInputValid = false
@@ -146,16 +146,20 @@ extension Code {
   var bottomArea: some View {
     VStack(alignment: .center) {
       HStack(spacing: 2) {
-        Text("Code sent to \(email).")
+        Text(String(format: NSLocalizedString("Code sent to %@.", comment: "Code sent confirmation"), email))
           .font(.callout)
           .foregroundColor(.secondary)
-        Button("Edit") {
+        Button(NSLocalizedString("Edit", comment: "Edit button")) {
           nav.pop()
         }
         .font(.callout)
       }
 
-      Button(formState.isLoading ? "Verifying..." : "Continue") {
+      Button(
+        formState
+          .isLoading ? NSLocalizedString("Verifying...", comment: "Verifying code button loading state") :
+          NSLocalizedString("Continue", comment: "Continue button")
+      ) {
         submitCode()
       }
       .buttonStyle(SimpleButtonStyle())
