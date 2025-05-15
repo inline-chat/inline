@@ -5,6 +5,7 @@ import InlineProtocol
 public struct ApiDialog: Codable, Hashable, Sendable {
   public var peerId: Peer
   public var pinned: Bool?
+  public var chatId: Int64?
   public var spaceId: Int64?
   public var unreadCount: Int?
   public var readInboxMaxId: Int64?
@@ -24,6 +25,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var pinned: Bool?
   public var draft: String?
   public var archived: Bool?
+  public var chatId: Int64?
 
   public static let space = belongsTo(Space.self)
   public var space: QueryInterfaceRequest<Space> {
@@ -41,7 +43,18 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     request(for: Dialog.peerUser)
   }
 
-  public static let peerThread = belongsTo(Chat.self)
+  public static let chat = belongsTo(
+    Chat.self,
+    using: ForeignKey(["chatId"], to: ["id"])
+  )
+  public var chat: QueryInterfaceRequest<Chat> {
+    request(for: Dialog.chat)
+  }
+
+  public static let peerThread = belongsTo(
+    Chat.self,
+    using: ForeignKey(["peerThreadId"], to: ["id"])
+  )
   public var peerThread: QueryInterfaceRequest<Chat> {
     request(for: Dialog.peerThread)
   }
@@ -61,6 +74,7 @@ public extension Dialog {
     }
 
     spaceId = from.spaceId
+    chatId = from.chatId
     unreadCount = from.unreadCount
     readInboxMaxId = from.readInboxMaxId
     readOutboxMaxId = from.readOutboxMaxId
@@ -76,7 +90,6 @@ public extension Dialog {
     peerUserId = userId
     peerThreadId = nil
     id = Self.getDialogId(peerUserId: userId)
-
     spaceId = nil
     unreadCount = nil
     readInboxMaxId = nil
@@ -85,6 +98,7 @@ public extension Dialog {
     draft = nil
     archived = nil
     unreadCount = nil
+    chatId = nil
   }
 
   init(optimisticForChat chat: Chat) {
@@ -100,6 +114,7 @@ public extension Dialog {
     draft = nil
     archived = nil
     unreadCount = nil
+    chatId = chat.id
   }
 
   init(from: InlineProtocol.Dialog) {
@@ -123,6 +138,7 @@ public extension Dialog {
     pinned = from.pinned
     archived = from.archived
     draft = nil
+    chatId = from.hasChatID ? from.chatID : nil
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {

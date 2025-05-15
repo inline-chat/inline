@@ -369,6 +369,10 @@ export interface Dialog {
      * @generated from protobuf field: optional int32 unread_count = 6;
      */
     unreadCount?: number;
+    /**
+     * @generated from protobuf field: optional int64 chat_id = 7;
+     */
+    chatId?: bigint;
 }
 /**
  * A thread
@@ -1321,6 +1325,12 @@ export interface RpcCall {
          */
         translateMessages: TranslateMessagesInput;
     } | {
+        oneofKind: "getChats";
+        /**
+         * @generated from protobuf field: GetChatsInput getChats = 18;
+         */
+        getChats: GetChatsInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1432,8 +1442,54 @@ export interface RpcResult {
          */
         translateMessages: TranslateMessagesResult;
     } | {
+        oneofKind: "getChats";
+        /**
+         * @generated from protobuf field: GetChatsResult getChats = 18;
+         */
+        getChats: GetChatsResult;
+    } | {
         oneofKind: undefined;
     };
+}
+/**
+ * @generated from protobuf message GetChatsInput
+ */
+export interface GetChatsInput {
+}
+/**
+ * @generated from protobuf message GetChatsResult
+ */
+export interface GetChatsResult {
+    /**
+     * Dialogs
+     *
+     * @generated from protobuf field: repeated Dialog dialogs = 1;
+     */
+    dialogs: Dialog[];
+    /**
+     * Chats
+     *
+     * @generated from protobuf field: repeated Chat chats = 2;
+     */
+    chats: Chat[];
+    /**
+     * Spaces referenced in the chats
+     *
+     * @generated from protobuf field: repeated Space spaces = 3;
+     */
+    spaces: Space[];
+    /**
+     * Users referenced in the chats or messages
+     *
+     * @generated from protobuf field: repeated User users = 4;
+     */
+    users: User[];
+    /**
+     * Messages referenced in the chats
+     *
+     * @generated from protobuf field: repeated Message messages = 5;
+     */
+    messages: Message[];
 }
 /**
  * @generated from protobuf message TranslateMessagesInput
@@ -2496,7 +2552,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: TRANSLATE_MESSAGES = 16;
      */
-    TRANSLATE_MESSAGES = 16
+    TRANSLATE_MESSAGES = 16,
+    /**
+     * @generated from protobuf enum value: GET_CHATS = 17;
+     */
+    GET_CHATS = 17
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -3536,7 +3596,8 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 3, name: "archived", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 4, name: "pinned", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 5, name: "read_max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 6, name: "unread_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 6, name: "unread_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 7, name: "chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<Dialog>): Dialog {
@@ -3568,6 +3629,9 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional int32 unread_count */ 6:
                     message.unreadCount = reader.int32();
                     break;
+                case /* optional int64 chat_id */ 7:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3598,6 +3662,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional int32 unread_count = 6; */
         if (message.unreadCount !== undefined)
             writer.tag(6, WireType.Varint).int32(message.unreadCount);
+        /* optional int64 chat_id = 7; */
+        if (message.chatId !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.chatId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5311,7 +5378,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 14, name: "getChatParticipants", kind: "message", oneof: "input", T: () => GetChatParticipantsInput },
             { no: 15, name: "addChatParticipant", kind: "message", oneof: "input", T: () => AddChatParticipantInput },
             { no: 16, name: "removeChatParticipant", kind: "message", oneof: "input", T: () => RemoveChatParticipantInput },
-            { no: 17, name: "translateMessages", kind: "message", oneof: "input", T: () => TranslateMessagesInput }
+            { no: 17, name: "translateMessages", kind: "message", oneof: "input", T: () => TranslateMessagesInput },
+            { no: 18, name: "getChats", kind: "message", oneof: "input", T: () => GetChatsInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -5426,6 +5494,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         translateMessages: TranslateMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).translateMessages)
                     };
                     break;
+                case /* GetChatsInput getChats */ 18:
+                    message.input = {
+                        oneofKind: "getChats",
+                        getChats: GetChatsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getChats)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5489,6 +5563,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* TranslateMessagesInput translateMessages = 17; */
         if (message.input.oneofKind === "translateMessages")
             TranslateMessagesInput.internalBinaryWrite(message.input.translateMessages, writer.tag(17, WireType.LengthDelimited).fork(), options).join();
+        /* GetChatsInput getChats = 18; */
+        if (message.input.oneofKind === "getChats")
+            GetChatsInput.internalBinaryWrite(message.input.getChats, writer.tag(18, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5519,7 +5596,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 14, name: "getChatParticipants", kind: "message", oneof: "result", T: () => GetChatParticipantsResult },
             { no: 15, name: "addChatParticipant", kind: "message", oneof: "result", T: () => AddChatParticipantResult },
             { no: 16, name: "removeChatParticipant", kind: "message", oneof: "result", T: () => RemoveChatParticipantResult },
-            { no: 17, name: "translateMessages", kind: "message", oneof: "result", T: () => TranslateMessagesResult }
+            { no: 17, name: "translateMessages", kind: "message", oneof: "result", T: () => TranslateMessagesResult },
+            { no: 18, name: "getChats", kind: "message", oneof: "result", T: () => GetChatsResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -5634,6 +5712,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         translateMessages: TranslateMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).translateMessages)
                     };
                     break;
+                case /* GetChatsResult getChats */ 18:
+                    message.result = {
+                        oneofKind: "getChats",
+                        getChats: GetChatsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getChats)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5697,6 +5781,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* TranslateMessagesResult translateMessages = 17; */
         if (message.result.oneofKind === "translateMessages")
             TranslateMessagesResult.internalBinaryWrite(message.result.translateMessages, writer.tag(17, WireType.LengthDelimited).fork(), options).join();
+        /* GetChatsResult getChats = 18; */
+        if (message.result.oneofKind === "getChats")
+            GetChatsResult.internalBinaryWrite(message.result.getChats, writer.tag(18, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5707,6 +5794,110 @@ class RpcResult$Type extends MessageType<RpcResult> {
  * @generated MessageType for protobuf message RpcResult
  */
 export const RpcResult = new RpcResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetChatsInput$Type extends MessageType<GetChatsInput> {
+    constructor() {
+        super("GetChatsInput", []);
+    }
+    create(value?: PartialMessage<GetChatsInput>): GetChatsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetChatsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetChatsInput): GetChatsInput {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: GetChatsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetChatsInput
+ */
+export const GetChatsInput = new GetChatsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetChatsResult$Type extends MessageType<GetChatsResult> {
+    constructor() {
+        super("GetChatsResult", [
+            { no: 1, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog },
+            { no: 2, name: "chats", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Chat },
+            { no: 3, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space },
+            { no: 4, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
+            { no: 5, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
+        ]);
+    }
+    create(value?: PartialMessage<GetChatsResult>): GetChatsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.dialogs = [];
+        message.chats = [];
+        message.spaces = [];
+        message.users = [];
+        message.messages = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetChatsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetChatsResult): GetChatsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Dialog dialogs */ 1:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Chat chats */ 2:
+                    message.chats.push(Chat.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Space spaces */ 3:
+                    message.spaces.push(Space.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated User users */ 4:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Message messages */ 5:
+                    message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetChatsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Dialog dialogs = 1; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Chat chats = 2; */
+        for (let i = 0; i < message.chats.length; i++)
+            Chat.internalBinaryWrite(message.chats[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Space spaces = 3; */
+        for (let i = 0; i < message.spaces.length; i++)
+            Space.internalBinaryWrite(message.spaces[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* repeated User users = 4; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Message messages = 5; */
+        for (let i = 0; i < message.messages.length; i++)
+            Message.internalBinaryWrite(message.messages[i], writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetChatsResult
+ */
+export const GetChatsResult = new GetChatsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class TranslateMessagesInput$Type extends MessageType<TranslateMessagesInput> {
     constructor() {

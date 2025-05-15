@@ -8,6 +8,11 @@ const queryClient = postgres(DATABASE_URL)
 export const db = drizzle(queryClient, {
   relations,
   schema,
+  // logger: {
+  //   logQuery(query, params) {
+  //     console.log(query, params)
+  //   },
+  // },
 })
 
 export { schema }

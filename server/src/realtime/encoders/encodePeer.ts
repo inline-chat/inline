@@ -1,5 +1,6 @@
 import type { TPeerInfo } from "@in/server/api-types"
 import type { InputPeer, Peer } from "@in/protocol/core"
+import type { DbChat } from "@in/server/db/schema"
 
 export const encodePeer = (peer: TPeerInfo): Peer => {
   if ("userId" in peer) {
@@ -11,6 +12,26 @@ export const encodePeer = (peer: TPeerInfo): Peer => {
   return {
     type: { oneofKind: "chat", chat: { chatId: BigInt(peer.threadId) } },
   }
+}
+
+export const encodePeerFromChat = (chat: DbChat, { currentUserId }: { currentUserId: number }): InputPeer => {
+  if (chat.type == "thread") {
+    return {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+    }
+  }
+
+  if (chat.type == "private") {
+    let peerUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
+    if (!peerUserId) {
+      throw new Error("Peer user ID is null")
+    }
+    return {
+      type: { oneofKind: "user", user: { userId: BigInt(peerUserId) } },
+    }
+  }
+
+  throw new Error("Unsupported chat type")
 }
 
 export const encodePeerFromInputPeer = ({

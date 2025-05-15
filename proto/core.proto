@@ -117,6 +117,7 @@ message Dialog {
   optional bool pinned = 4;
   optional int64 read_max_id = 5;
   optional int32 unread_count = 6;
+  optional int64 chat_id = 7;
 }
 
 // A thread
@@ -503,6 +504,7 @@ enum Method {
   ADD_CHAT_PARTICIPANT = 14;
   REMOVE_CHAT_PARTICIPANT = 15;
   TRANSLATE_MESSAGES = 16;
+  GET_CHATS = 17;
 }
 
 message RpcCall {
@@ -524,6 +526,7 @@ message RpcCall {
     AddChatParticipantInput addChatParticipant = 15;
     RemoveChatParticipantInput removeChatParticipant = 16;
     TranslateMessagesInput translateMessages = 17;
+    GetChatsInput getChats = 18;
   }
 }
 
@@ -547,7 +550,27 @@ message RpcResult {
     AddChatParticipantResult addChatParticipant = 15;
     RemoveChatParticipantResult removeChatParticipant = 16;
     TranslateMessagesResult translateMessages = 17;
+    GetChatsResult getChats = 18;
   }
+}
+
+message GetChatsInput {}
+
+message GetChatsResult {
+  // Dialogs
+  repeated Dialog dialogs = 1;
+
+  // Chats
+  repeated Chat chats = 2;
+
+  // Spaces referenced in the chats
+  repeated Space spaces = 3;
+
+  // Users referenced in the chats or messages
+  repeated User users = 4;
+
+  // Messages referenced in the chats
+  repeated Message messages = 5;
 }
 
 message TranslateMessagesInput {

@@ -8,17 +8,14 @@ struct HomeSidebar: View {
 
   enum SideItem: Identifiable, Equatable {
     case space(InlineKit.Space)
-    case user(InlineKit.HomeChatItem)
-    case thread(InlineKit.SpaceChatItem)
+    case chat(InlineKit.HomeChatItem)
 
     var id: Int64 {
       switch self {
         case let .space(space):
           space.id
-        case let .user(chat):
-          chat.user.id
-        case let .thread(chat):
-          chat.chat?.id ?? 0
+        case let .chat(chat):
+          chat.dialog.id
       }
     }
   }
@@ -68,7 +65,7 @@ struct HomeSidebar: View {
         .filter { item in
           item.dialog.archived == true
         }
-        .map { SideItem.user($0) }
+        .map { SideItem.chat($0) }
     }
 
     let spaces = home.spaces.map { SideItem.space($0.space) }
@@ -76,7 +73,7 @@ struct HomeSidebar: View {
       .filter { item in
         item.dialog.archived != true
       }
-      .map { SideItem.user($0) }
+      .map { SideItem.chat($0) }
 
     return users + spaces
   }
@@ -259,11 +256,12 @@ struct HomeSidebar: View {
   @ViewBuilder
   fileprivate func renderItem(_ item: SideItem) -> some View {
     switch item {
-      case let .user(chat):
-        userItem(chat: chat)
-
-      case let .thread(chatItem):
-        threadItem(chatItem: chatItem)
+      case let .chat(chat):
+        if let user = chat.user {
+          userItem(user, item: chat)
+        } else if let thread = chat.chat {
+          threadItem(thread, item: chat)
+        }
 
       case let .space(space):
         spaceItem(space: space)
@@ -290,17 +288,16 @@ struct HomeSidebar: View {
   }
 
   @ViewBuilder
-  func userItem(chat: HomeChatItem) -> some View {
-    let userInfo = chat.user
+  func userItem(_ userInfo: UserInfo, item: HomeChatItem) -> some View {
     let user = userInfo.user
-    let dialog = chat.dialog
-    let chatChat = chat.chat
+    let dialog = item.dialog
+    let chatChat = item.chat
     let peerId = Peer.user(id: user.id)
 
     SidebarItem(
       type: .user(userInfo, chat: chatChat),
       dialog: dialog,
-      lastMessage: chat.message,
+      lastMessage: item.message,
       selected: nav.currentRoute == .chat(peer: peerId),
       onPress: {
         nav.open(.chat(peer: peerId))
@@ -310,22 +307,17 @@ struct HomeSidebar: View {
   }
 
   @ViewBuilder
-  func threadItem(chatItem: SpaceChatItem) -> some View {
-    if let chat = chatItem.chat {
-      let peerId: Peer = .thread(id: chat.id)
+  func threadItem(_ chat: Chat, item: HomeChatItem) -> some View {
+    let peerId: Peer = .thread(id: chat.id)
 
-      ThreadItem(
-        thread: chat,
-        action: {
-          nav.open(.chat(peer: peerId))
-        },
-        commandPress: {
-          openInWindow(peerId)
-        },
-        selected: nav.upcomingRoute == .chat(peer: peerId)
-      )
-      .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-    } else {}
+    SidebarThreadItem(
+      chat: chat,
+      dialog: item.dialog,
+      lastMessage: item.message,
+      lastMessageSender: item.from,
+      spaceName: item.space?.name
+    )
+    .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
 
   @ViewBuilder
