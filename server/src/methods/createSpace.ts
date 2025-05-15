@@ -76,6 +76,7 @@ export const handler = async (
         publicThread: true,
         description: "Main chat for everyone in the space",
         threadNumber: 1,
+        date: new Date(),
       })
       .returning()
 
