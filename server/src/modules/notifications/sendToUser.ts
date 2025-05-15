@@ -11,7 +11,7 @@ type SendPushNotificationToUserInput = {
   threadId: string
   title: string
   body: string
-  isThread: boolean
+  isThread?: boolean
 }
 
 const log = new Log("notifications.sendToUser")
@@ -22,9 +22,9 @@ export const sendPushNotificationToUser = async ({
   userId,
   senderUserId,
   threadId,
-  isThread,
   title,
   body,
+  isThread = false,
 }: SendPushNotificationToUserInput) => {
   try {
     // Get all sessions for the user
