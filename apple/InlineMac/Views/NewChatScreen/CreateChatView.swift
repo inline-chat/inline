@@ -52,7 +52,7 @@ public struct CreateChatView: View {
   }
 
   private var chatDetailsSection: some View {
-    Section(header: Text("New Chat")) {
+    Section(header: Text("New Chat In \(spaceViewModel.space?.name ?? "Space")")) {
       titleTextField
       iconPicker
       visibilityPicker
