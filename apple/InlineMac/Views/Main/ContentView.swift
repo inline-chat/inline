@@ -79,12 +79,12 @@ class ContentViewController: NSViewController {
         let createSpaceVC = CreateSpaceViewController(dependencies: dependencies)
         addRouteSubview(createSpaceVC.view, createSpaceVC)
 
-      case .newChat:
-        let newChatVC = NewChatViewController(dependencies: dependencies)
+      case let .newChat(spaceId):
+        let newChatVC = NewChatViewController(spaceId: spaceId, dependencies: dependencies)
         addRouteSubview(newChatVC.view, newChatVC)
 
-      case .inviteToSpace:
-        let inviteToSpaceVC = InviteToSpaceViewController(dependencies: dependencies)
+      case let .inviteToSpace(spaceId):
+        let inviteToSpaceVC = InviteToSpaceViewController(spaceId: spaceId, dependencies: dependencies)
         addRouteSubview(inviteToSpaceVC.view, inviteToSpaceVC)
 
       default:
