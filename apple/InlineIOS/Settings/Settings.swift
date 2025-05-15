@@ -1,6 +1,7 @@
 import Auth
 import GRDBQuery
 import InlineKit
+import Logger
 import SwiftUI
 
 struct SettingsView: View {
@@ -37,7 +38,7 @@ struct SettingsView: View {
           .padding(.vertical, 2)
         }
       }
-        
+
       NavigationLink(destination: IntegrationsView()) {
         HStack {
           Image(systemName: "app.connected.to.app.below.fill")
@@ -66,7 +67,7 @@ struct SettingsView: View {
         }
         .padding(.vertical, 2)
       }
-        
+
       Section {
         Button {
           showClearCacheAlert = true
@@ -90,10 +91,10 @@ struct SettingsView: View {
         }
         .disabled(isClearing)
       }
-        
+
       LogoutSection()
     }
-      
+
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
     .toolbar {
@@ -114,10 +115,31 @@ struct SettingsView: View {
     .sheet(isPresented: $fileUploadViewModel.showImagePicker) {
       ImagePicker(sourceType: .photoLibrary) { image in
         Task {
-          if let pngData = image.pngData() {
-            await fileUploadViewModel.uploadImage(pngData, fileType: .png)
-          } else if let jpegData = image.jpegData(compressionQuality: 0.8) {
-            await fileUploadViewModel.uploadImage(jpegData, fileType: .jpeg)
+          do {
+            // Create temporary file URL for the original image
+            let tempDir = FileManager.default.temporaryDirectory
+            let tempURL = tempDir.appendingPathComponent("profile_\(UUID().uuidString).jpg")
+
+            // Save original image to temp file
+            if let jpegData = image.jpegData(compressionQuality: 1.0) {
+              try jpegData.write(to: tempURL)
+
+              // Compress the image using ImageCompressor
+              let compressedURL = try await ImageCompressor.shared.compressImage(
+                at: tempURL,
+                options: .defaultPhoto
+              )
+
+              // Read the compressed data and upload
+              let compressedData = try Data(contentsOf: compressedURL)
+              await fileUploadViewModel.uploadImage(compressedData, fileType: .jpeg)
+
+              // Clean up temp files
+              try? FileManager.default.removeItem(at: tempURL)
+              try? FileManager.default.removeItem(at: compressedURL)
+            }
+          } catch {
+            Log.scoped("Settings").error("Failed to compress profile image", error: error)
           }
         }
       }
