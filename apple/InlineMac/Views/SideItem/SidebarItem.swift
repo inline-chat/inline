@@ -24,7 +24,7 @@ struct SidebarItem: View {
 
   // MARK: - Constants
 
-  static var avatarSize: CGFloat = 46
+  static var avatarSize: CGFloat = 44
   static var titleFont: Font = .system(size: 13.0).weight(.regular)
   static var subtitleFont: Font = .system(size: 12.0)
   static var subtitleColor: Color = .secondary.opacity(0.9)
@@ -140,6 +140,7 @@ struct SidebarItem: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.leading, Self.avatarAndContentSpacing)
+    .padding(.top, -1)
     // doesn't work for some reason
     // .animation(.fastFeedback, value: hasComposeAction)
   }
@@ -158,7 +159,7 @@ struct SidebarItem: View {
 //      Text(title)
 //    }
 
-    HStack(spacing: 1) {
+    HStack(spacing: 0) {
       Text(title)
         .font(Self.titleFont)
         .foregroundColor(.primary)

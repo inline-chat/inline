@@ -13,8 +13,8 @@ struct NavEntry: Hashable, Codable, Equatable {
     case chatInfo(peer: Peer)
     case createSpace
     case profile(userInfo: UserInfo)
-    case newChat
-    case inviteToSpace
+    case newChat(spaceId: Int64)
+    case inviteToSpace(spaceId: Int64)
 
     static func == (lhs: Route, rhs: Route) -> Bool {
       switch (lhs, rhs) {
@@ -28,10 +28,10 @@ struct NavEntry: Hashable, Codable, Equatable {
           lhsUser == rhsUser
         case (.createSpace, .createSpace):
           true
-        case (.newChat, .newChat):
-          true
-        case (.inviteToSpace, .inviteToSpace):
-          true
+        case let (.newChat(lhsSpaceId), .newChat(rhsSpaceId)):
+          lhsSpaceId == rhsSpaceId
+        case let (.inviteToSpace(lhsSpaceId), .inviteToSpace(rhsSpaceId)):
+          lhsSpaceId == rhsSpaceId
         default:
           false
       }

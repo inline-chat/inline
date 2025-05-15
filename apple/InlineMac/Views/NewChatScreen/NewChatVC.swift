@@ -4,9 +4,11 @@ import InlineUI
 import SwiftUI
 
 class NewChatViewController: NSViewController {
+  var spaceId: Int64
   var dependencies: AppDependencies
 
-  init(dependencies: AppDependencies) {
+  init(spaceId: Int64, dependencies: AppDependencies) {
+    self.spaceId = spaceId
     self.dependencies = dependencies
     super.init(nibName: nil, bundle: nil)
   }
@@ -17,7 +19,7 @@ class NewChatViewController: NSViewController {
   }
 
   private lazy var swiftUIView: some View =
-    CreateChatView(spaceId: self.dependencies.nav.currentSpaceId ?? 0) { chatId in
+    CreateChatView(spaceId: self.spaceId) { chatId in
       self.dependencies.nav.open(.chat(peer: Peer.thread(id: chatId)))
     }
     .environment(dependencies: dependencies)

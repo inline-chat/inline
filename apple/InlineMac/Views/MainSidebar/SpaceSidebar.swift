@@ -37,11 +37,12 @@ struct SpaceSidebar: View {
       }
     )
 
-    if tab == .archive {
-      return items.filter { $0.dialog.archived == true }
-    } else {
-      return items.filter { $0.dialog.archived != true }
-    }
+    return items
+//    if tab == .archive {
+//      return items.filter { $0.dialog.archived == true }
+//    } else {
+//      return items.filter { $0.dialog.archived != true }
+//    }
   }
 
   @ViewBuilder
@@ -194,7 +195,7 @@ struct SpaceSidebar: View {
   var tabs: some View {
     SidebarTabView<Tab>(
       tabs: [
-        .init(value: .archive, systemImage: "archivebox.fill", accessibilityLabel: "Archive"),
+        //        .init(value: .archive, systemImage: "archivebox.fill", accessibilityLabel: "Archive"),
 
         .init(
           value: .chats,
@@ -247,11 +248,11 @@ struct SpaceSidebar: View {
     Menu {
       // Button("New Chat") {
       Button("New Group Chat") {
-        nav.open(.newChat)
+        nav.open(.newChat(spaceId: spaceId))
       }
 
       Button("Invite to Space") {
-        nav.open(.inviteToSpace)
+        nav.open(.inviteToSpace(spaceId: spaceId))
       }
     } label: {
       Image(systemName: "plus")

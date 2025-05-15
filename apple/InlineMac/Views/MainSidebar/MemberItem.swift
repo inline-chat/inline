@@ -80,7 +80,7 @@ struct MemberItem: View {
   var content: some View {
     VStack(alignment: .leading, spacing: 0) {
       nameView
-      subtitleView
+      //subtitleView
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.leading, Self.avatarAndContentSpacing)
