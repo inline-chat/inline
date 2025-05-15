@@ -42,7 +42,7 @@ extension UIMessageView {
   func createMultiLineStack() -> UIStackView {
     let stack = UIStackView()
     stack.axis = .vertical
-    stack.spacing = 6
+    stack.spacing = 10
     stack.alignment = .fill
     stack.distribution = .fill
     stack.translatesAutoresizingMaskIntoConstraints = false
