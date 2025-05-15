@@ -118,7 +118,7 @@ export class SessionsModel {
       throw new Error("Invalid session ID")
     }
 
-    const session = await db.query.sessions.findFirst({
+    const session = await db._query.sessions.findFirst({
       where: eq(sessions.id, id),
     })
 

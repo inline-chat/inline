@@ -21,7 +21,7 @@ export const TMakeApiResponse = <T extends TSchema>(type: T) => {
 
 export const handleError = new Elysia({ name: "api-error-handler" })
   .error("INLINE_ERROR", InlineError)
-  .onError({ as: "scoped" }, ({ code, error }) => {
+  .onError({ as: "scoped" }, ({ code, error, path }) => {
     if (code === "NOT_FOUND") {
       Log.shared.error("API ERROR NOT FOUND", error)
       return {
@@ -47,7 +47,7 @@ export const handleError = new Elysia({ name: "api-error-handler" })
         description: "Validation error",
       }
     } else {
-      Log.shared.error("Top level error" + code, error)
+      Log.shared.error(`Top level error ${code} in ${path}`, error)
       return {
         ok: false,
         error: "SERVER_ERROR",

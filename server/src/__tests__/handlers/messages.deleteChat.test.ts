@@ -41,13 +41,13 @@ describe("messages.deleteChatHandler", () => {
       ),
     ).resolves.toEqual({})
     // Chat, participants, dialogs should be deleted
-    const chatExists = await db.query.chats.findFirst({ where: eq(schema.chats.id, chat.id) })
+    const chatExists = await db._query.chats.findFirst({ where: eq(schema.chats.id, chat.id) })
     expect(chatExists).toBeFalsy()
-    const participants = await db.query.chatParticipants.findMany({
+    const participants = await db._query.chatParticipants.findMany({
       where: eq(schema.chatParticipants.chatId, chat.id),
     })
     expect(participants.length).toBe(0)
-    const dialogs = await db.query.dialogs.findMany({ where: eq(schema.dialogs.chatId, chat.id) })
+    const dialogs = await db._query.dialogs.findMany({ where: eq(schema.dialogs.chatId, chat.id) })
     expect(dialogs.length).toBe(0)
   })
 

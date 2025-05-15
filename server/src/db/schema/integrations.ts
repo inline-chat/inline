@@ -1,6 +1,6 @@
 import { pgTable, integer, text, timestamp, serial } from "drizzle-orm/pg-core"
 import { users } from "./users"
-import { relations } from "drizzle-orm"
+import { relations } from "drizzle-orm/_relations"
 import { bytea, creationDate } from "@in/server/db/schema/common"
 
 export const integrations = pgTable("integrations", {

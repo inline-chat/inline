@@ -2,7 +2,7 @@ import { bytea, creationDate } from "@in/server/db/schema/common"
 import { files } from "@in/server/db/schema/files"
 import { messages } from "@in/server/db/schema/messages"
 import { users } from "@in/server/db/schema/users"
-import { relations } from "drizzle-orm"
+import { relations } from "drizzle-orm/_relations"
 import { pgTable, serial, integer, text, bigint, varchar, pgEnum, numeric } from "drizzle-orm/pg-core"
 import { photos } from "./media"
 

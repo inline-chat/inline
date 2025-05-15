@@ -5,7 +5,7 @@ import { InlineError } from "@in/server/types/errors"
 
 /** Check if user is creator of space */
 const spaceCreator = async (spaceId: number, currentUserId: number) => {
-  const space = await db.query.spaces.findFirst({
+  const space = await db._query.spaces.findFirst({
     where: and(eq(spaces.id, spaceId), eq(spaces.creatorId, currentUserId)),
   })
 
@@ -22,7 +22,7 @@ const spaceCreator = async (spaceId: number, currentUserId: number) => {
 
 /** Check if user is member of space */
 const spaceMember = async (spaceId: number, currentUserId: number): Promise<{ member: DbMember }> => {
-  const member = await db.query.members.findFirst({
+  const member = await db._query.members.findFirst({
     where: and(eq(members.spaceId, spaceId), eq(members.userId, currentUserId)),
   })
 
@@ -36,7 +36,7 @@ const spaceMember = async (spaceId: number, currentUserId: number): Promise<{ me
 
 /** Check if user is chat participant */
 const chatParticipant = async (chatId: number, currentUserId: number) => {
-  const participant = await db.query.chatParticipants.findFirst({
+  const participant = await db._query.chatParticipants.findFirst({
     where: and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, currentUserId)),
   })
 

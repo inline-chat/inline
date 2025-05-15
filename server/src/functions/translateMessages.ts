@@ -72,7 +72,7 @@ export async function translateMessages(
     })
 
     // Get existing translations
-    const existingTranslations = await db.query.translations.findMany({
+    const existingTranslations = await db._query.translations.findMany({
       where: and(
         eq(translations.chatId, chat.id),
         eq(translations.language, input.language),
@@ -162,7 +162,7 @@ async function getMessagesAndTranslations(input: {
   translationLanguage: string
 }): Promise<ProcessedMessageAndTranslation[]> {
   try {
-    let result = await db.query.messages.findMany({
+    let result = await db._query.messages.findMany({
       where: and(eq(messages.chatId, input.chatId), inArray(messages.messageId, input.messageIds)),
       orderBy: desc(messages.messageId),
       with: {

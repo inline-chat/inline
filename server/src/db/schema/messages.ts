@@ -7,12 +7,12 @@ import { integer } from "drizzle-orm/pg-core"
 import { index } from "drizzle-orm/pg-core"
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
-import { relations } from "drizzle-orm"
-import { reactions } from "./reactions"
+import { relations } from "drizzle-orm/_relations"
 import { files } from "@in/server/db/schema/files"
 import { documents, photos, videos } from "@in/server/db/schema/media"
 import { messageAttachments } from "./attachments"
 import { translations } from "@in/server/db/schema/translations"
+import { reactions } from "@in/server/db/schema/reactions"
 
 export const messages = pgTable(
   "messages",

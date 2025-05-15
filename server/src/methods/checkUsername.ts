@@ -30,7 +30,7 @@ export const handler = async (
 /// HELPER FUNCTIONS ///
 export const checkUsernameAvailable = async (username: string, context: { userId?: number }) => {
   const normalizedUsername = username.toLowerCase().trim()
-  const result = await db.query.users.findFirst({
+  const result = await db._query.users.findFirst({
     where: and(
       eq(users.username, normalizedUsername),
       // If the user ID is provided, we don't want to check against the current user

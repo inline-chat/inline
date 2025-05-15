@@ -44,7 +44,7 @@ export const handler = async (
 
     Log.shared.debug("sending sms code to", { phoneNumber: formattedPhoneNumber })
 
-    let existingUser = await db.query.users.findFirst({
+    let existingUser = await db._query.users.findFirst({
       where: eq(users.phoneNumber, formattedPhoneNumber),
       columns: {
         pendingSetup: true,

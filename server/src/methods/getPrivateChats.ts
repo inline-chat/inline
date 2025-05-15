@@ -72,7 +72,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
 
   // -------------------------------------------------------------------------------------------------------------------
   // Get all private chats
-  // const result = await db.query.chats.findMany({
+  // const result = await db._query.chats.findMany({
   //   where: and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))),
   //   with: {
   //     dialogs: { where: eq(dialogs.userId, currentUserId) },
@@ -122,7 +122,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
     })
   }
 
-  const peerUsers = await db.query.users.findMany({
+  const peerUsers = await db._query.users.findMany({
     where: inArray(
       users.id,
       [...new Set([...result.map((c) => c.chat.minUserId), ...result.map((c) => c.chat.maxUserId)])].filter(

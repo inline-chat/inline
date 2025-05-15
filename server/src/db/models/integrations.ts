@@ -5,7 +5,7 @@ import { decryptLinearTokens } from "@in/server/libs/helpers"
 
 export class IntegrationsModel {
   static async getWithUserId(userId: number) {
-    const integration = await db.query.integrations.findFirst({
+    const integration = await db._query.integrations.findFirst({
       where: eq(integrations.userId, userId),
     })
 
