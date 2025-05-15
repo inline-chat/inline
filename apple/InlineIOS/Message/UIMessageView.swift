@@ -43,7 +43,7 @@ class UIMessageView: UIView {
   }
 
   var bubbleColor: UIColor {
-    if specificUI {
+    if isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata {
       UIColor.clear
     } else if outgoing {
       ThemeManager.shared.selected.bubbleBackground
@@ -61,7 +61,7 @@ class UIMessageView: UIView {
   }
 
   var shouldShowFloatingMetadata: Bool {
-    message.hasPhoto && !message.hasText
+    message.hasPhoto && !message.hasText && fullMessage.reactions.count == 0
   }
 
   var isSticker: Bool {
@@ -87,10 +87,6 @@ class UIMessageView: UIView {
     return isEmojiOnlyMessage && text.count <= 3
   }
 
-  var specificUI: Bool {
-    isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata
-  }
-
   var isMultiline: Bool {
     if fullMessage.reactions.count > 0 {
       return true
@@ -113,7 +109,7 @@ class UIMessageView: UIView {
     if !fullMessage.attachments.isEmpty {
       return true
     }
-    guard let text = message.text else { return false }
+    guard let text = fullMessage.displayText else { return false }
     return text.count > 24 || text.contains("\n") || text.containsEmoji
   }
 
@@ -260,7 +256,7 @@ class UIMessageView: UIView {
 
     NSLayoutConstraint.activate([
       floatingMetadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -padding),
-      floatingMetadataView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -padding),
+      floatingMetadataView.bottomAnchor.constraint(equalTo: newPhotoView.bottomAnchor, constant: -10),
     ])
   }
 
@@ -350,7 +346,6 @@ class UIMessageView: UIView {
   }
 
   @objc func handleDocumentTap() {
-    print("HANDLE DOCUMENT TAP")
     NotificationCenter.default.post(
       name: Notification.Name("DocumentTapped"),
       object: nil,
@@ -367,17 +362,18 @@ class UIMessageView: UIView {
   }
 
   func setupMultilineMessage() {
-    if message.hasPhoto, message.hasText {
+    if message.hasPhoto, message.hasText || fullMessage.reactions.count > 0 {
       let innerContainer = UIStackView()
       innerContainer.axis = .vertical
       innerContainer.translatesAutoresizingMaskIntoConstraints = false
       innerContainer.layoutMargins = UIEdgeInsets(
         top: 0,
         left: StackPadding.leading,
-        bottom: 0,
+        bottom: 12,
         right: StackPadding.trailing
       )
-      innerContainer.spacing = 10
+
+      innerContainer.spacing = 4
       innerContainer.isLayoutMarginsRelativeArrangement = true
       innerContainer.insetsLayoutMarginsFromSafeArea = false
 
@@ -423,8 +419,8 @@ class UIMessageView: UIView {
 
       if message.hasText || isSticker {
         setupMultilineMetadata()
-        containerStack.addArrangedSubview(multiLineContainer)
       }
+      containerStack.addArrangedSubview(multiLineContainer)
     }
   }
 
@@ -432,7 +428,7 @@ class UIMessageView: UIView {
     let metadataContainer = UIStackView()
     metadataContainer.axis = .horizontal
     metadataContainer.addArrangedSubview(UIView()) // Spacer
-    if specificUI {
+    if isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata {
       metadataContainer.addSubview(floatingMetadataView)
       NSLayoutConstraint.activate([
         floatingMetadataView.topAnchor.constraint(
@@ -619,19 +615,23 @@ class UIMessageView: UIView {
       ).withPriority(.defaultHigh),
     ]
 
+    // Dena: Really hacky, needs refactor.
+    if message.hasPhoto, message.hasText, fullMessage.reactions.count > 0 {
+      NSLayoutConstraint.activate(baseConstraints + withFileConstraints)
+    }
     let constraints: [NSLayoutConstraint] = switch (
       message.hasPhoto,
       message.hasText
     ) {
-      case (true, false):
-        // File only
-        withFileConstraints
-      case (true, true):
-        // File with text
-        withFileAndTextConstraints
-      default:
-        // Text only
-        withoutFileConstraints
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
