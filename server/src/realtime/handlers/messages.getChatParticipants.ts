@@ -20,9 +20,6 @@ export const getChatParticipants = async (
   )
 
   return {
-    participants: result.map((participant) => ({
-      userId: participant.userId,
-      date: participant.date,
-    })),
+    participants: result,
   }
 }
