@@ -7,6 +7,7 @@ import { encodeMember } from "@in/server/realtime/encoders/encodeMember"
 import { encodeSpace } from "@in/server/realtime/encoders/encodeSpace"
 import { encodeDialog } from "@in/server/realtime/encoders/encodeDialog"
 import { encodeTranslation, encodeUnencryptedTranslation } from "@in/server/realtime/encoders/encodeTranslation"
+import { encodeChatParticipant } from "./encodeChatParticipant"
 export const Encoders = {
   photoLegacy: encodePhotoLegacy,
   message: encodeMessage,
@@ -21,4 +22,5 @@ export const Encoders = {
   dialog: encodeDialog,
   translation: encodeTranslation,
   unencryptedTranslation: encodeUnencryptedTranslation,
+  chatParticipant: encodeChatParticipant,
 }
