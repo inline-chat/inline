@@ -18,7 +18,7 @@ public final actor Realtime: Sendable {
   public static let shared = Realtime()
 
   private let db = AppDatabase.shared
-  private let log = Log.scoped("RealtimeWrapper", enableTracing: false)
+  private let log = Log.scoped("RealtimeWrapper", enableTracing: true)
   public var updates: UpdatesEngine
   private var api: RealtimeAPI
   private var eventsTask: Task<Void, Never>?
@@ -193,6 +193,9 @@ public extension Realtime {
 
         case let .translateMessages(result):
           try await handleResult_translateMessages(result, input: input!)
+
+        case let .getChats(result):
+          try await handleResult_getChats(result)
 
         default:
           break
@@ -420,10 +423,82 @@ public extension Realtime {
           Log.shared.error("Failed to save one translation", error: error)
         }
       }
-      
-      
 
       // TODO: reload messages???
     }
+  }
+
+  private func handleResult_getChats(
+    _ result: InlineProtocol.GetChatsResult,
+  ) async throws {
+    log.trace("getChats result: \(result)")
+
+    try await db.dbWriter.write { db in
+      // Save spaces
+      for space in result.spaces {
+        do {
+          let spaceModel = Space(from: space)
+          try spaceModel.save(db)
+        } catch {
+          Log.shared.error("Failed to save space", error: error)
+        }
+      }
+
+      // Save users
+      for user in result.users {
+        do {
+          let userModel = User(from: user)
+          try userModel.save(db)
+        } catch {
+          Log.shared.error("Failed to save user", error: error)
+        }
+      }
+
+      // First save chats without lastMsgId to avoid foreign key constraint
+      var chatsToUpdate: [(Chat, Int64?)] = []
+      for chat in result.chats {
+        do {
+          var chatModel = Chat(from: chat)
+          let lastMsgId = chatModel.lastMsgId
+          chatModel.lastMsgId = nil // Temporarily remove lastMsgId
+          try chatModel.save(db)
+          chatsToUpdate.append((chatModel, lastMsgId))
+        } catch {
+          Log.shared.error("Failed to save chat", error: error)
+        }
+      }
+
+      // Save messages
+      for message in result.messages {
+        do {
+          _ = try Message.save(db, protocolMessage: message, publishChanges: false)
+        } catch {
+          Log.shared.error("Failed to save message", error: error)
+        }
+      }
+
+      // Now update chats with lastMsgId since messages exist
+      for (chat, lastMsgId) in chatsToUpdate {
+        do {
+          var updatedChat = chat
+          updatedChat.lastMsgId = lastMsgId
+          try updatedChat.save(db)
+        } catch {
+          Log.shared.error("Failed to update chat with lastMsgId", error: error)
+        }
+      }
+
+      // Save dialogs
+      for dialog in result.dialogs {
+        do {
+          let dialogModel = Dialog(from: dialog)
+          try dialogModel.save(db)
+        } catch {
+          Log.shared.error("Failed to save dialog", error: error)
+        }
+      }
+    }
+
+    log.trace("getChats saved successfully")
   }
 }

@@ -6,7 +6,7 @@ struct SidebarItem: View {
   // MARK: - Types
 
   enum SidebarItemType {
-    case chat(Chat)
+    case chat(Chat, spaceName: String?)
     case user(UserInfo, chat: Chat?)
     case space(Space)
   }
@@ -28,6 +28,8 @@ struct SidebarItem: View {
   static var titleFont: Font = .system(size: 13.0).weight(.regular)
   static var subtitleFont: Font = .system(size: 12.0)
   static var subtitleColor: Color = .secondary.opacity(0.9)
+  static var tertiaryFont: Font = .system(size: 11.0)
+  static var tertiaryColor: Color = .secondary.opacity(0.6)
   static var height: CGFloat = 56
   static var verticalPadding: CGFloat = (Self.height - Self.avatarSize) / 2
   static var gutterWidth: CGFloat = Theme.sidebarItemInnerSpacing
@@ -109,7 +111,7 @@ struct SidebarItem: View {
   @ViewBuilder
   var avatar: some View {
     switch type {
-      case let .chat(chat):
+      case let .chat(chat, _):
         ChatIcon(peer: .chat(chat), size: Self.avatarSize)
       case let .user(userInfo, _):
         if isCurrentUser {
@@ -144,22 +146,43 @@ struct SidebarItem: View {
 
   @ViewBuilder
   var nameView: some View {
-    Text(title)
-      .font(Self.titleFont)
-      .foregroundColor(.primary)
-      .lineLimit(1)
-      .truncationMode(.tail)
-      .fixedSize(horizontal: false, vertical: true)
+//    let text = if case let .chat(_, spaceName) = type,
+//                  let spaceName
+//    {
+//      Text(spaceName)
+//        .foregroundColor(.secondary) +
+//        Text(" / ")
+//        .foregroundColor(.secondary) +
+//        Text(title)
+//    } else {
+//      Text(title)
+//    }
+
+    HStack(spacing: 1) {
+      Text(title)
+        .font(Self.titleFont)
+        .foregroundColor(.primary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .fixedSize(horizontal: false, vertical: true)
+
+      Spacer()
+
+      spaceView
+    }.padding(.trailing, 8)
   }
 
   @ViewBuilder
   var lastMessageView: some View {
-    Text(lastMessageText)
-      .font(Self.subtitleFont)
-      .foregroundColor(Self.subtitleColor)
-      .lineLimit(showsMessageSender ? 1 : 2)
-      .truncationMode(.tail)
-      .fixedSize(horizontal: false, vertical: true)
+    HStack(spacing: 0) {
+      // senderView
+      Text(lastMessageText)
+        .font(Self.subtitleFont)
+        .foregroundColor(Self.subtitleColor)
+        .lineLimit(showsMessageSender ? 1 : 2)
+        .truncationMode(.tail)
+        .fixedSize(horizontal: false, vertical: true)
+    }
   }
 
   @ViewBuilder
@@ -177,12 +200,54 @@ struct SidebarItem: View {
   }
 
   @ViewBuilder
+  var spaceView: some View {
+    if case let .chat(_, spaceName) = type,
+       let spaceName
+    {
+      Text(spaceName)
+        //.font(Self.subtitleFont)
+        //.foregroundColor(Self.subtitleColor)
+        .font(Self.tertiaryFont)
+        .foregroundColor(Self.tertiaryColor)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .fixedSize(horizontal: false, vertical: true)
+    } else {
+      EmptyView()
+    }
+  }
+
+  @ViewBuilder
   var lastMessageSenderView: some View {
+//    spaceView
+
+    senderView
+
+//    if let lastMessageSender {
+//      HStack(spacing: 3) {
+//        UserAvatar(
+//          userInfo: lastMessageSender,
+//          size: 12
+//        )
+//        Text(lastMessageSender.user.shortDisplayName)
+//          .font(Self.subtitleFont)
+//          .foregroundColor(Self.subtitleColor)
+//          .lineLimit(1)
+//          .truncationMode(.tail)
+//          .fixedSize(horizontal: false, vertical: true)
+//      }.padding(.top, 1)
+//    } else {
+//      EmptyView()
+//    }
+  }
+
+  @ViewBuilder
+  var senderView: some View {
     if let lastMessageSender {
-      HStack(spacing: 3) {
+      HStack(spacing: 2) {
         UserAvatar(
           userInfo: lastMessageSender,
-          size: 13
+          size: 11
         )
         Text(lastMessageSender.user.shortDisplayName)
           .font(Self.subtitleFont)
@@ -190,7 +255,7 @@ struct SidebarItem: View {
           .lineLimit(1)
           .truncationMode(.tail)
           .fixedSize(horizontal: false, vertical: true)
-      }.padding(.top, 1)
+      }
     } else {
       EmptyView()
     }
@@ -239,7 +304,7 @@ struct SidebarItem: View {
 
   var chat: Chat? {
     switch type {
-      case let .chat(chat):
+      case let .chat(chat, _):
         chat
       case let .user(_, chat):
         chat
@@ -259,7 +324,7 @@ struct SidebarItem: View {
 
   var peerId: Peer? {
     switch type {
-      case let .chat(chat):
+      case let .chat(chat, _):
         .thread(id: chat.id)
       case let .user(userInfo, _):
         .user(id: userInfo.user.id)
@@ -300,7 +365,7 @@ struct SidebarItem: View {
 
   var title: String {
     switch type {
-      case let .chat(chat):
+      case let .chat(chat, spaceName):
         chat.title ?? ""
 
       case let .user(userInfo, _):
@@ -404,7 +469,7 @@ struct SidebarItem: View {
 
     Section("thread") {
       SidebarItem(
-        type: .chat(Chat.preview),
+        type: .chat(Chat.preview, spaceName: "Space"),
         dialog: nil,
         lastMessage: Message.preview,
         selected: false

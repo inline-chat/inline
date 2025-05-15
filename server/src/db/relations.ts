@@ -116,6 +116,7 @@ export const relations = defineRelations(
       from: r.one.users({
         from: r.messages.fromId,
         to: r.users.id,
+        optional: false,
       }),
       reactions: r.many.reactions(),
       messageAttachments: r.many.messageAttachments(),
@@ -222,7 +223,7 @@ export const relations = defineRelations(
       }),
     },
 
-    photo: {
+    photos: {
       photoSizes: r.many.photoSizes(),
     },
 

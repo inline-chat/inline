@@ -44,30 +44,45 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   Identifiable
 {
   public var dialog: Dialog
-  public var user: UserInfo
+  /// peerUser
+  public var user: UserInfo?
   public var chat: Chat?
   public var message: Message?
-  public var from: User?
-  public var id: Int64 { user.id }
+  public var from: UserInfo?
 
-  public init(dialog: Dialog, user: UserInfo, chat: Chat?, message: Message?, from: User?) {
+  // public var spaceName: String?
+  public var space: Space?
+  public var id: Int64 { dialog.id }
+
+  public init(
+    dialog: Dialog,
+    user: UserInfo?,
+    chat: Chat?,
+    message: Message?,
+    from: UserInfo?,
+    space: Space?,
+    // spaceName: String? = nil
+  ) {
     self.dialog = dialog
     self.user = user
     self.chat = chat
     self.message = message
     self.from = from
+    self.space = space
+    // self.spaceName = spaceName
   }
 
   // Add a static method to create the request
   static func all() -> QueryInterfaceRequest<HomeChatItem> {
     Dialog
       .including(
-        required: Dialog.peerUser
+        optional: Dialog.peerUser
           .forKey(CodingKeys.user)
           .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
       )
+
       .including(
-        optional: Dialog.peerUserChat
+        optional: Dialog.chat
           .forKey(CodingKeys.chat)
           .including(
             optional: Chat.lastMessage
@@ -75,9 +90,28 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
               .including(
                 optional: Message.from
                   .forKey(CodingKeys.from)
+                  .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
               )
           )
       )
+
+      // TODO: make it just name
+      .including(
+        optional: Dialog.space
+      )
+//      .including(
+//        optional: Dialog.peerThread
+//          .forKey(CodingKeys.chat)
+//          .including(
+//            optional: Chat.lastMessage
+//              .forKey(CodingKeys.message)
+//              .including(
+//                optional: Message.from
+//                  .forKey(CodingKeys.from)
+//                  .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+//              )
+//          )
+//      )
       .asRequest(of: HomeChatItem.self)
   }
 
@@ -137,10 +171,11 @@ public final class HomeViewModel: ObservableObject {
           Log.shared.error("Failed to get home chats \(error)")
         },
         receiveValue: { [weak self] chats in
-          self?.chats = chats.filter { chat in
-            // For now, filter chats with users who are pending setup
-            chat.user.user.pendingSetup != true
-          }
+          self?.chats = chats
+          // .filter { chat in
+          // For now, filter chats with users who are pending setup
+          // chat.user.user.pendingSetup != true
+          // }
         }
       )
   }
@@ -168,7 +203,7 @@ public final class HomeViewModel: ObservableObject {
 public extension AppDatabase {
   func getHomeChatItems() async throws -> [HomeChatItem] {
     // Fetch all chat items
-    try await self.reader.read { db in
+    try await reader.read { db in
       try HomeChatItem.all().fetchAll(db)
     }
   }

@@ -244,6 +244,7 @@ export const TPeerNotifySettings = Type.Object({
 // Telegram Ref: https://core.telegram.org/constructor/dialog
 export const TDialogInfo = Type.Object({
   peerId: TPeerInfo,
+  chatId: Optional(Type.Integer()),
   pinned: Optional(Type.Boolean()),
   spaceId: Optional(Type.Integer()),
   unreadCount: Optional(Type.Integer()),
@@ -260,6 +261,7 @@ export type TDialogInfo = StaticEncode<typeof TDialogInfo>
 export const encodeDialogInfo = (dialog: DbDialog & { unreadCount: number }): TDialogInfo => {
   return Value.Encode(TDialogInfo, {
     peerId: dialog.peerUserId ? { userId: dialog.peerUserId } : { threadId: dialog.chatId },
+    chatId: dialog.chatId,
     pinned: dialog.pinned,
     spaceId: dialog.spaceId,
     readInboxMaxId: dialog.readInboxMaxId,

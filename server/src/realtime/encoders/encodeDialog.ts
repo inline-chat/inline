@@ -35,6 +35,7 @@ export function encodeDialog(dialog: DbDialog, { unreadCount }: { unreadCount: n
   return {
     spaceId: dialog.spaceId ? BigInt(dialog.spaceId) : undefined,
     peer,
+    chatId: BigInt(dialog.chatId),
     archived: dialog.archived ?? false,
     pinned: dialog.pinned ?? false,
     unreadCount: unreadCount,

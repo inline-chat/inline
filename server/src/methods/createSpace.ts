@@ -57,6 +57,7 @@ export const handler = async (
           spaceId: space.id,
           userId: context.currentUserId,
           role: "owner",
+          date: new Date(),
         })
         .returning()
     )[0]

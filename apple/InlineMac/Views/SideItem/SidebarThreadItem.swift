@@ -10,6 +10,7 @@ struct SidebarThreadItem: View {
   var dialog: Dialog?
   var lastMessage: Message?
   var lastMessageSender: UserInfo?
+  var spaceName: String?
 
   // MARK: - State
 
@@ -32,7 +33,7 @@ struct SidebarThreadItem: View {
   var body: some View {
     let peerId: Peer = .thread(id: chat.id)
     let view = SidebarItem(
-      type: .chat(chat),
+      type: .chat(chat, spaceName: spaceName),
       dialog: dialog,
       lastMessage: lastMessage,
       lastMessageSender: lastMessageSender,

@@ -432,6 +432,12 @@ public extension AppDatabase {
       )
     }
 
+    migrator.registerMigration("dialog chat id") { db in
+      try db.alter(table: "dialog") { t in
+        t.add(column: "chatId", .integer).references("chat", column: "id", onDelete: .setNull)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
