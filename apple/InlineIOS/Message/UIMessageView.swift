@@ -17,12 +17,14 @@ class UIMessageView: UIView {
   private var isTranslating = false {
     didSet {
       if isTranslating {
-        startBlinkingAnimation()
+        startShineAnimation()
       } else {
-        stopBlinkingAnimation()
+        stopShineAnimation()
       }
     }
   }
+
+  private var shineEffectView: ShineEffectView?
 
   var linkTapHandler: ((URL) -> Void)?
   var interaction: UIContextMenuInteraction?
@@ -218,23 +220,42 @@ class UIMessageView: UIView {
     }
   }
 
-  private func startBlinkingAnimation() {
-    bubbleView.layer.removeAllAnimations()
+  private func startShineAnimation() {
+    if shineEffectView == nil {
+      let shineView = ShineEffectView(frame: bubbleView.bounds)
+      shineView.translatesAutoresizingMaskIntoConstraints = false
+      shineView.layer.cornerRadius = bubbleView.layer.cornerRadius
+      shineView.layer.masksToBounds = true
+      bubbleView.addSubview(shineView)
 
-    let animation = CABasicAnimation(keyPath: "opacity")
-    animation.fromValue = 1.0
-    animation.toValue = 0.6
-    animation.duration = 0.8
-    animation.autoreverses = true
-    animation.repeatCount = .infinity
-    animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+      NSLayoutConstraint.activate([
+        shineView.topAnchor.constraint(equalTo: bubbleView.topAnchor),
+        shineView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor),
+        shineView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
+        shineView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor),
+      ])
 
-    bubbleView.layer.add(animation, forKey: "blinking")
+      shineEffectView = shineView
+      shineView.startAnimation()
+    }
   }
 
-  public func stopBlinkingAnimation() {
-    bubbleView.layer.removeAnimation(forKey: "blinking")
-    bubbleView.layer.opacity = 1.0
+  public func stopShineAnimation() {
+    shineEffectView?.stopAnimation()
+    shineEffectView?.removeFromSuperview()
+    shineEffectView = nil
+  }
+
+  func reset() {
+    // Cancel translation state observation
+    translationCancellable?.cancel()
+    translationCancellable = nil
+
+    // Remove shine effect
+    stopShineAnimation()
+
+    // Re-setup translation state observation
+    setupTranslationObserver()
   }
 
   private func createURLPreviewView(for attachment: FullAttachment) -> URLPreviewView {
@@ -623,15 +644,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
