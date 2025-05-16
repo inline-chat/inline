@@ -192,7 +192,6 @@ actor TranslationViewModel {
         }
 
         log.debug("Completed translation cycle for \(messageIds.count) messages")
-
       } catch {
         log.error("Failed to process translations", error: error)
         // Clean up translating state in case of error

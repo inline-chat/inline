@@ -7,7 +7,26 @@ actor LanguageDetector {
     .simplifiedChinese,
     .english,
     .persian,
+//    .spanish,
+//    .french,
+//    .german,
+//    .finnish,
+//    .japanese,
+//    .korean,
+//    .turkish,
+//    .russian,
+//    .ukrainian,
+//    .vietnamese,
+//    .hindi,
+//    .polish,
+//    .portuguese
   ]
+
+  // Define major script groups
+  private static let latinScripts: Set<String> = ["Latin"]
+  private static let arabicScripts: Set<String> = ["Arabic"]
+  private static let cjkScripts: Set<String> = ["Han", "Hiragana", "Katakana"]
+  private static let commonScripts: Set<String> = ["Common", "Inherited"]
 
   /// Detects the language of a given text
   /// - Parameter text: The text to detect the language of
@@ -44,63 +63,89 @@ actor LanguageDetector {
     // clean text
     let text = Self.cleanText(rawText)
 
-    // setup
-    let recognizer = NLLanguageRecognizer()
-    let confidenceThreshold = 0.4
-    let minimumSegmentLength = 2
-    // Common scripts we want to group with surrounding text
-    let commonScripts: Set<String> = ["Common", "Inherited"]
+    // First, collect all segments
+    let segments = collectSegments(from: text)
 
-    // process
-    // recognizer.processString(text)
+    // Then analyze each segment
+    return analyzeSegments(segments)
+  }
 
-    /// Detects languages in mixed text using direct Unicode script detection
-    var results: Set<String> = []
+  private static func collectSegments(from text: String) -> [(scriptGroup: String, text: String)] {
+    var segments: [(scriptGroup: String, text: String)] = []
+    var currentSegment = ""
+    var currentScriptGroup: String?
 
-    // Pre-allocate buffers for better performance
-    var currentScriptBuffer = String()
-    currentScriptBuffer.reserveCapacity(64) // Reasonable starting capacity
-    var currentScript: String?
+    // Process each character
+    for char in text {
+      let scriptName = getUnicodeScriptName(for: char.unicodeScalars.first!)
+      let scriptGroup = getScriptGroup(for: scriptName)
 
-    // Scan through text scalar-by-scalar for script changes
-    for scalar in text.unicodeScalars {
-      // Get the script name using Character properties
-      let scriptName = getUnicodeScriptName(for: scalar)
-
-      // Common script (punctuation, spaces) gets added to the current segment
-      if commonScripts.contains(scriptName) {
-        currentScriptBuffer.unicodeScalars.append(scalar)
+      // Skip whitespace
+      if char.isWhitespace {
+        if !currentSegment.isEmpty {
+          segments.append((scriptGroup: currentScriptGroup!, text: currentSegment))
+          currentSegment = ""
+          currentScriptGroup = nil
+        }
         continue
       }
 
       // Handle script change
-      if scriptName != currentScript {
-        // Process previous segment if it exists
-        if !currentScriptBuffer.isEmpty, currentScript != nil,
-           !commonScripts.contains(currentScript!)
-        {
-          if let language = Self.detectLanguageForSegment(recognizer, currentScriptBuffer) {
-            results.insert(language.rawValue)
-          }
-          currentScriptBuffer.removeAll(keepingCapacity: true)
+      if scriptGroup != currentScriptGroup {
+        // Save current segment if it exists
+        if !currentSegment.isEmpty {
+          segments.append((scriptGroup: currentScriptGroup!, text: currentSegment))
+          currentSegment = ""
         }
-        currentScript = scriptName
+        currentScriptGroup = scriptGroup
       }
 
-      // Add to current segment
-      currentScriptBuffer.unicodeScalars.append(scalar)
+      // Add character to current segment
+      currentSegment.append(char)
     }
 
-    // Process the final segment
-    if !currentScriptBuffer.isEmpty, currentScript != nil,
-       !commonScripts.contains(currentScript!)
-    {
-      if let language = Self.detectLanguageForSegment(recognizer, currentScriptBuffer) {
+    // Add final segment if exists
+    if !currentSegment.isEmpty {
+      segments.append((scriptGroup: currentScriptGroup!, text: currentSegment))
+    }
+
+    // Merge adjacent segments of the same script group
+    var mergedSegments: [(scriptGroup: String, text: String)] = []
+    for segment in segments {
+      if let lastSegment = mergedSegments.last, lastSegment.scriptGroup == segment.scriptGroup {
+        mergedSegments[mergedSegments.count - 1].text += " " + segment.text
+      } else {
+        mergedSegments.append(segment)
+      }
+    }
+
+    return mergedSegments
+  }
+
+  private static func analyzeSegments(_ segments: [(scriptGroup: String, text: String)]) -> [String] {
+    let recognizer = NLLanguageRecognizer()
+    var results: Set<String> = []
+
+    for segment in segments {
+      if let language = detectLanguageForSegment(recognizer, segment.text) {
         results.insert(language.rawValue)
       }
     }
 
-    return results.map { $0 }
+    return Array(results)
+  }
+
+  private static func getScriptGroup(for scriptName: String) -> String {
+    if latinScripts.contains(scriptName) {
+      return "Latin"
+    } else if arabicScripts.contains(scriptName) {
+      return "Arabic"
+    } else if cjkScripts.contains(scriptName) {
+      return "CJK"
+    } else if commonScripts.contains(scriptName) {
+      return "Common"
+    }
+    return scriptName
   }
 
   /// Get the Unicode script name for a scalar
@@ -111,39 +156,18 @@ actor LanguageDetector {
     var scriptCode: CFStringEncoding = CFStringGetSmallestEncoding(cfStr)
 
     if let scriptName = CFStringGetNameOfEncoding(scriptCode) as String? {
-      // Simplify to basic script category
-      if scriptName.contains("Latin") { return "Latin" }
-      if scriptName.contains("Han") || scriptName.contains("Chinese") { return "Han" }
-      if scriptName.contains("Cyrillic") { return "Cyrillic" }
-      if scriptName.contains("Arabic") { return "Arabic" }
-      // Add more script mappings as needed
-
       return scriptName
     }
-
-    // Method 2: Simple range checks for common scripts as fallback
-    let value = scalar.value
-    if (0x0000 ... 0x007F).contains(value) { return "Latin" } // Basic Latin
-    if (0x0080 ... 0x024F).contains(value) { return "Latin" } // Extended Latin
-    if (0x0400 ... 0x04FF).contains(value) { return "Cyrillic" } // Cyrillic
-    if (0x0600 ... 0x06FF).contains(value) { return "Arabic" } // Arabic
-    if (0x3040 ... 0x309F).contains(value) { return "Hiragana" } // Hiragana
-    if (0x30A0 ... 0x30FF).contains(value) { return "Katakana" } // Katakana
-    if (0x4E00 ... 0x9FFF).contains(value) { return "Han" } // CJK Unified Ideographs
-
-    // Default fallback
-    return "Common"
+    return ""
   }
 
   private static func detectLanguageForSegment(_ recognizer: NLLanguageRecognizer, _ text: String) -> NLLanguage? {
-    // Skip short segments for better performance and accuracy
-    guard text.count >= 2 else { return nil }
-
     recognizer.reset()
-    recognizer.languageConstraints = supportedLanguages
+    // recognizer.languageConstraints = Self.supportedLanguages
     recognizer.languageHints = [
-      .english: 0.8,
-      .traditionalChinese: 0.5,
+      .english: 0.9,
+      .traditionalChinese: 0.9,
+      .persian: 0.5,
     ]
     recognizer.processString(text)
 
@@ -156,6 +180,6 @@ actor LanguageDetector {
     }
 
     // Only return languages with sufficient confidence
-    return confidence >= 0.5 ? language : nil
+    return confidence >= 0.1 ? language : nil
   }
 }
