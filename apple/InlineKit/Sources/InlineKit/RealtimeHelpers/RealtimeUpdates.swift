@@ -101,6 +101,16 @@ extension InlineProtocol.UpdateNewMessage {
     if var dialog = try? Dialog.get(peerId: msg.peerId).fetchOne(db) {
       dialog.unreadCount = (dialog.unreadCount ?? 0) + (msg.out == false ? 1 : 0)
       try dialog.update(db)
+
+      #if os(macOS)
+      // Show notification for incoming messages
+      if msg.out == false {
+        Task {
+          // Handle notification
+          await MacNotifications.shared.handleNewMessage(protocolMsg: message, message: msg, chat: chat)
+        }
+      }
+      #endif
     }
   }
 }
