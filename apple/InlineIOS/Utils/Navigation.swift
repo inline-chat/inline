@@ -22,7 +22,6 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case createSpace
     case createThread(spaceId: Int64)
     case archivedChats
-    case profile(userInfo: UserInfo)
     case alphaSheet
     case chatInfo(chatItem: SpaceChatItem)
 
@@ -37,7 +36,6 @@ class Navigation: ObservableObject, @unchecked Sendable {
         case .createSpace: "createSpace"
         case let .createThread(spaceId): "createThread-\(spaceId)"
         case .archivedChats: "archivedChats"
-        case let .profile(userInfo): "profile-\(userInfo.id)"
         case .alphaSheet: "alphaSheet"
         case let .chatInfo(chatItem): "chatInfo-\(chatItem.id)"
       }
@@ -110,7 +108,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
   func push(_ destination: Destination) {
     // TODO: Handle sheets in aother func
     switch destination {
-      case .createSpace, .createThread, .profile, .alphaSheet:
+      case .createSpace, .createThread, .alphaSheet:
         activeSheet = destination
       default:
         if pathComponents.last == destination {
