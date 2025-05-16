@@ -127,21 +127,21 @@ struct HomeView: View {
                   }
                 )
               case .spaces:
-                EmptyView()
-                List(home.spaces.sorted(by: { s1, s2 in
-                  s1.space.date > s2.space.date
-                })) { spaceItem in
-                  Button(action: {
-                    nav.push(.space(id: spaceItem.space.id))
-                  }) {
-                    HStack {
-                      SpaceAvatar(space: spaceItem.space, size: 34)
-                      Text(spaceItem.space.nameWithoutEmoji)
-                        .foregroundColor(.primary)
-                    }
-                  }
-                }
-                .listStyle(.plain)
+              SpacesView()
+//                List(home.spaces.sorted(by: { s1, s2 in
+//                  s1.space.date > s2.space.date
+//                })) { spaceItem in
+//                  Button(action: {
+//                    nav.push(.space(id: spaceItem.space.id))
+//                  }) {
+//                    HStack {
+//                      SpaceAvatar(space: spaceItem.space, size: 34)
+//                      Text(spaceItem.space.nameWithoutEmoji)
+//                        .foregroundColor(.primary)
+//                    }
+//                  }
+//                }
+//                .listStyle(.plain)
             }
           }
         }
