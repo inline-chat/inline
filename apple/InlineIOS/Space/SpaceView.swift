@@ -5,18 +5,12 @@ import Logger
 import SwiftUI
 import UIKit
 
-private enum Tabs {
-  case archived
-  case chats
-  case members
+// MARK: - Models
 
-  var title: String {
-    switch self {
-      case .archived: "Archived"
-      case .chats: "Chats"
-      case .members: "Members"
-    }
-  }
+private enum Tab: String, CaseIterable {
+  case archived = "Archived"
+  case chats = "Chats"
+  case members = "Members"
 
   var icon: String {
     switch self {
@@ -27,264 +21,150 @@ private enum Tabs {
   }
 }
 
+// MARK: - SpaceView
+
 struct SpaceView: View {
-  var spaceId: Int64
+  let spaceId: Int64
 
-  @Environment(\.appDatabase) var database
-  @Environment(\.realtime) var realtime
-  @EnvironmentObject var nav: Navigation
-  @EnvironmentObject var data: DataManager
+  @Environment(\.appDatabase) private var database
+  @Environment(\.realtime) private var realtime
+  @EnvironmentObject private var nav: Navigation
+  @EnvironmentObject private var data: DataManager
+  @EnvironmentStateObject private var viewModel: FullSpaceViewModel
 
-  @EnvironmentStateObject var fullSpaceViewModel: FullSpaceViewModel
-
-  @State private var navBarHeight: CGFloat = 0
-  @State private var selectedTab: Tabs = .chats
+  @State private var selectedTab: Tab = .chats
+  @State private var showAddMemberSheet = false
 
   init(spaceId: Int64) {
     self.spaceId = spaceId
-    _fullSpaceViewModel = EnvironmentStateObject { env in
+    _viewModel = EnvironmentStateObject { env in
       FullSpaceViewModel(db: env.appDatabase, spaceId: spaceId)
     }
   }
 
-  @State var openAddMemberSheet = false
-
   // MARK: - Computed Properties
 
-  var currentUserMemberItem: FullMemberItem? {
-    fullSpaceViewModel.members.first { fullMember in
-      fullMember.userInfo.user.id == Auth.shared.getCurrentUserId()
-    }
+  private var currentUserMember: Member? {
+    viewModel.members.first { $0.userInfo.user.id == Auth.shared.getCurrentUserId() }?.member
   }
 
-  var currentUserMember: Member? {
-    currentUserMemberItem?.member
+  private var isCreator: Bool {
+    currentUserMember?.role == .owner || currentUserMember?.role == .admin
   }
 
-  var isCreator: Bool {
-    if currentUserMember?.role == .owner || currentUserMember?.role == .admin {
-      true
-    } else {
-      false
-    }
-  }
-
-  private func playTabHaptic() {
-    let generator = UIImpactFeedbackGenerator(style: .soft)
-    generator.impactOccurred(intensity: 0.5)
-  }
+  // MARK: - Body
 
   var body: some View {
-    VStack {
-      if selectedTab == .archived {
-        ArchivedChatsView(type: .space(spaceId: spaceId))
-          .environmentObject(fullSpaceViewModel)
-      } else {
-        List {
-          Section {
-            ForEach(getCombinedItems(), id: \.id) { item in
-              combinedItemRow(for: item)
-                .listRowInsets(.init(
-                  top: 9,
-                  leading: 16,
-                  bottom: 2,
-                  trailing: 0
-                ))
-            }
-          }
-        }
-        .listStyle(.plain)
-        .animation(.default, value: fullSpaceViewModel.chats)
-        .animation(.default, value: fullSpaceViewModel.memberChats)
+    VStack(spacing: 0) {
+      contentView
+      tabBar
+    }
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar { toolbarContent }
+    .toolbarRole(.editor)
+    .sheet(isPresented: $showAddMemberSheet) {
+      AddMember(showSheet: $showAddMemberSheet, spaceId: spaceId)
+        .presentationCornerRadius(28)
+    }
+    .task { await loadData() }
+  }
+
+  // MARK: - Subviews
+
+  private var contentView: some View {
+    Group {
+      switch selectedTab {
+        case .archived:
+          ArchivedChatsView(type: .space(spaceId: spaceId))
+            .environmentObject(viewModel)
+        case .chats:
+          ChatListContent(items: viewModel.filteredChats)
+        case .members:
+          MemberListView(members: viewModel.members, viewModel: viewModel)
       }
     }
     .id(selectedTab)
+  }
+
+  private var tabBar: some View {
+    HStack(spacing: 0) {
+      ForEach(Tab.allCases, id: \.self) { tab in
+        TabButton(
+          tab: tab,
+          isSelected: selectedTab == tab,
+          action: { selectTab(tab) }
+        )
+      }
+    }
     .frame(maxWidth: .infinity)
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(id: "space", placement: .principal) {
-        HStack {
-          if let space = fullSpaceViewModel.space {
-            SpaceAvatar(space: space, size: 28)
-              .padding(.trailing, 4)
+  }
 
+  @ToolbarContentBuilder
+  private var toolbarContent: some ToolbarContent {
+    ToolbarItem(placement: .principal) {
+      SpaceHeaderView(space: viewModel.space)
+    }
+
+    ToolbarItem(placement: .navigationBarTrailing) {
+      Menu {
+        Button(action: { nav.push(.createThread(spaceId: spaceId)) }) {
+          Label("New Group Chat", systemImage: "plus.message.fill")
+        }
+        Button(action: { showAddMemberSheet = true }) {
+          Label("Invite Member", systemImage: "person.badge.plus.fill")
+        }
+      } label: {
+        Image(systemName: "plus")
+          .tint(.secondary)
+      }
+    }
+
+    ToolbarItem(placement: .navigationBarTrailing) {
+      Menu {
+        Button(role: .destructive) {
+          showSpaceActionAlert()
+        } label: {
+          if isCreator {
+            Label("Delete Space", systemImage: "trash.fill")
           } else {
-            Image(systemName: "person.2.fill")
-              .foregroundColor(.secondary)
-              .font(.callout)
-              .padding(.trailing, 4)
-          }
-          VStack(alignment: .leading) {
-            Text(fullSpaceViewModel.space?.nameWithoutEmoji ?? fullSpaceViewModel.space?.name ?? "Space")
-              .font(.body)
-              .fontWeight(.semibold)
+            Label("Leave Space", systemImage: "rectangle.portrait.and.arrow.right.fill")
           }
         }
-      }
-    }
-    .toolbarRole(.editor)
-    .toolbar {
-      Group {
-        ToolbarItem(placement: .navigationBarTrailing) {
-          Menu {
-            Button(action: {
-              nav.push(.createThread(spaceId: spaceId))
-            }) {
-              Label("New Group Chat", systemImage: "plus.message.fill")
-            }
-            Button(action: {
-              openAddMemberSheet = true
-            }) {
-              Label("Invite Member", systemImage: "person.badge.plus.fill")
-            }
-          } label: {
-            Image(systemName: "plus")
-              .tint(Color.secondary)
-              .contentShape(Rectangle())
-          }
-        }
-
-        ToolbarItem(placement: .navigationBarTrailing) {
-          Menu {
-            Button(role: .destructive, action: {
-              setupAndPresentAlert(spaceId: spaceId, isCreator: isCreator)
-            }) {
-              if isCreator {
-                Label("Delete Space", systemImage: "trash.fill")
-
-              } else {
-                Label("Leave Space", systemImage: "rectangle.portrait.and.arrow.right.fill")
-              }
-            }
-          } label: {
-            Image(systemName: "ellipsis")
-              .tint(Color.secondary)
-              .contentShape(Rectangle())
-          }
-        }
-
-        ToolbarItem(placement: .bottomBar) {
-          BottomTabBar(
-            tabs: [Tabs.archived, .chats, .members],
-            selected: selectedTab,
-            onSelect: { tab in
-              playTabHaptic()
-              withAnimation(.snappy(duration: 0.1)) {
-                selectedTab = tab
-              }
-            }
-          )
-        }
-      }
-    }
-    .sheet(isPresented: $openAddMemberSheet) {
-      AddMember(showSheet: $openAddMemberSheet, spaceId: spaceId)
-        .presentationCornerRadius(28)
-    }
-    .task {
-      do {
-        try await data.getSpace(spaceId: spaceId)
-      } catch {
-        Log.shared.error("Failed to getSpace", error: error)
-      }
-
-      // order matters here
-      // @mo: please do not change ⚠️⚠️⚠️
-      do {
-        try await data.getDialogs(spaceId: spaceId)
-      } catch {
-        Log.shared.error("Failed to getDialogs", error: error)
-      }
-
-      do {
-        try await realtime
-          .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-            $0.spaceID = spaceId
-          }))
-      } catch {
-        Log.shared.error("Failed to get space members", error: error)
-      }
-    }
-    .onAppear {
-      // order matters here
-      // @mo: please do not change ⚠️⚠️⚠️
-      Task.detached {
-        do {
-          try await data.getSpace(spaceId: spaceId)
-        } catch {
-          Log.shared.error("Failed to getSpace", error: error)
-        }
-
-//        Task.detached {
-//          do {
-//            try await realtime
-//              .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-//                $0.spaceID = spaceId
-//              }))
-//          } catch {
-//            Log.shared.error("Failed to get space members", error: error)
-//          }
-//        }
-
-//        Task.detached {
-//          do {
-//            try await data.getDialogs(spaceId: spaceId)
-//          } catch {
-//            Log.shared.error("Failed to getDialogs", error: error)
-//          }
-//        }
-
-//      Task {
-//        try await data.getSpace(spaceId: spaceId)
-//      }
-//
-//      Task.detached {
-//        do {
-//          try await realtime
-//            .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-//              $0.spaceID = spaceId
-//            }))
-//        } catch {
-//          Log.shared.error("Failed to get space members", error: error)
-//        }
-//
-//        // TODO: reduce over fetching
-//        do {
-//          try await data.getDialogs(spaceId: spaceId)
-//        } catch {
-//          Log.shared.error("Failed to getDialogs", error: error)
-//        }
+      } label: {
+        Image(systemName: "ellipsis")
+          .tint(.secondary)
       }
     }
   }
 
-  // MARK: - Helper Methods
+  // MARK: - Actions
 
-  func setupAndPresentAlert(spaceId: Int64, isCreator: Bool) {
+  private func selectTab(_ tab: Tab) {
+    UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.5)
+    withAnimation(.snappy(duration: 0.1)) {
+      selectedTab = tab
+    }
+  }
+
+  private func showSpaceActionAlert() {
     let title = isCreator ? "Delete Space" : "Leave Space"
     let message = isCreator
       ? "Are you sure you want to delete this space? This action cannot be undone."
       : "Are you sure you want to leave this space?"
 
-    let alert = UIAlertController(
-      title: title,
-      message: message,
-      preferredStyle: .alert
-    )
-
+    let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
     alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
     alert.addAction(UIAlertAction(title: title, style: .destructive) { _ in
       Task {
         do {
+          nav.pop()
           if isCreator {
-            nav.pop()
             try await data.deleteSpace(spaceId: spaceId)
           } else {
-            nav.pop()
             try await data.leaveSpace(spaceId: spaceId)
           }
         } catch {
-          print("Error: \(error)")
+          Log.shared.error("Failed to \(isCreator ? "delete" : "leave") space", error: error)
         }
       }
     })
@@ -296,225 +176,198 @@ struct SpaceView: View {
     }
   }
 
-  private func getCombinedItems() -> [SpaceCombinedItem] {
-    let memberItems = fullSpaceViewModel.filteredMemberChats.map { SpaceCombinedItem.member($0) }
-    let chatItems = fullSpaceViewModel.filteredChats.map { SpaceCombinedItem.chat($0) }
-
-    let allItems = (memberItems + chatItems).sorted { item1, item2 in
-      let pinned1 = item1.isPinned
-      let pinned2 = item2.isPinned
-      if pinned1 != pinned2 { return pinned1 }
-      return item1.date > item2.date
-    }
-
-    switch selectedTab {
-      case .archived:
-        return allItems.filter { item in
-          switch item {
-            case let .member(memberChat):
-              memberChat.dialog.archived == true
-            case let .chat(chat):
-              chat.dialog.archived == true
-          }
-        }
-      case .chats:
-        return allItems.filter { item in
-          switch item {
-            case let .member(memberChat):
-              memberChat.dialog.archived != true
-            case let .chat(chat):
-              chat.dialog.archived != true
-          }
-        }
-      case .members:
-        return allItems.filter { item in
-          switch item {
-            case let .member(memberChat):
-              memberChat.dialog.archived != true
-            case .chat:
-              false
-          }
-        }
-    }
-  }
-
-  @ViewBuilder
-  private func combinedItemRow(for item: SpaceCombinedItem) -> some View {
-    switch item {
-      case let .member(memberChat):
-        Button {
-          nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
-        } label: {
-          DirectChatItem(props: Props(
-            dialog: memberChat.dialog,
-            user: memberChat.userInfo,
-            chat: memberChat.chat,
-            message: memberChat.message,
-            from: memberChat.from?.user
-          ))
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-          Button(role: .destructive) {
-            Task {
-              try await data.updateDialog(
-                peerId: .user(id: memberChat.user?.id ?? 0),
-                archived: true
-              )
-            }
-          } label: {
-            Image(systemName: "tray.and.arrow.down.fill")
-          }
-          .tint(Color(.systemGray2))
-
-          Button {
-            Task {
-              try await data.updateDialog(
-                peerId: .user(id: memberChat.user?.id ?? 0),
-                pinned: !(memberChat.dialog.pinned ?? false)
-              )
-            }
-          } label: {
-            Image(systemName: memberChat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-          }
-          .tint(.indigo)
-        }
-        .contextMenu {
-          Button {
-            nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
-          } label: {
-            Label("Open Chat", systemImage: "bubble.left")
-          }
-        } preview: {
-          ChatView(peer: .user(id: memberChat.user?.id ?? 0), preview: true)
-            .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-            .environmentObject(nav)
-            .environmentObject(data)
-            .environment(\.realtime, realtime)
-            .environment(\.appDatabase, database)
-        }
-
-      case let .chat(chat):
-        Button {
-          nav.push(.chat(peer: chat.peerId))
-        } label: {
-          ChatItemView(props: ChatItemProps(
-            dialog: chat.dialog,
-            user: chat.userInfo,
-            chat: chat.chat,
-            message: chat.message,
-            from: chat.from,
-            space: nil
-          ))
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-          Button(role: .destructive) {
-            Task {
-              try await data.updateDialog(
-                peerId: chat.peerId,
-                archived: true
-              )
-            }
-          } label: {
-            Image(systemName: "tray.and.arrow.down.fill")
-          }
-          .tint(Color(.systemGray2))
-
-          Button {
-            Task {
-              try await data.updateDialog(
-                peerId: chat.peerId,
-                pinned: !(chat.dialog.pinned ?? false)
-              )
-            }
-          } label: {
-            Image(systemName: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-          }
-          .tint(.indigo)
-        }
-        .contextMenu {
-          Button {
-            Task {
-              try await data.updateDialog(
-                peerId: chat.peerId,
-                pinned: !(chat.dialog.pinned ?? false)
-              )
-            }
-          } label: {
-            Label(
-              chat.dialog.pinned ?? false ? "Unpin" : "Pin",
-              systemImage: chat.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill"
-            )
-          }
-          Button {
-            nav.push(.chat(peer: chat.peerId))
-          } label: {
-            Label("Open Chat", systemImage: "bubble.left")
-          }
-        } preview: {
-          ChatView(peer: chat.peerId, preview: true)
-            .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-            .environmentObject(nav)
-            .environmentObject(data)
-            .environment(\.realtime, realtime)
-            .environment(\.appDatabase, database)
-        }
-        .listRowBackground(chat.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
+  private func loadData() async {
+    do {
+      try await data.getSpace(spaceId: spaceId)
+      try await data.getDialogs(spaceId: spaceId)
+      try await realtime.invokeWithHandler(
+        .getSpaceMembers,
+        input: .getSpaceMembers(.with { $0.spaceID = spaceId })
+      )
+    } catch {
+      Log.shared.error("Failed to load space data", error: error)
     }
   }
 }
 
-// MARK: - CombinedItem Enum
+// MARK: - Supporting Views
 
-private enum SpaceCombinedItem: Identifiable {
-  case member(SpaceChatItem)
-  case chat(SpaceChatItem)
+private struct SpaceHeaderView: View {
+  let space: Space?
 
-  var id: Int64 {
-    switch self {
-      case let .member(item): item.user?.id ?? 0
-      case let .chat(item): item.id
-    }
-  }
-
-  var date: Date {
-    switch self {
-      case let .member(item): item.message?.date ?? item.chat?.date ?? Date()
-      case let .chat(item): item.message?.date ?? item.chat?.date ?? Date()
-    }
-  }
-
-  var isPinned: Bool {
-    switch self {
-      case let .member(item): item.dialog.pinned ?? false
-      case let .chat(item): item.dialog.pinned ?? false
-    }
-  }
-}
-
-private struct BottomTabBar: View {
-  let tabs: [Tabs]
-  let selected: Tabs
-  let onSelect: (Tabs) -> Void
   var body: some View {
-    HStack(spacing: 0) {
-      ForEach(tabs, id: \.self) { tab in
-        VStack {
-          Image(systemName: tab.icon)
-            .font(.system(size: 20, weight: .semibold))
-            .foregroundColor(selected == tab ? Color(ThemeManager.shared.selected.accent) : Color(.systemGray4))
-            .frame(width: 100, height: 36)
-            .animation(.bouncy(duration: 0.08), value: selected == tab)
-            .contentShape(Rectangle())
-        }
-        .frame(maxWidth: .infinity)
-        .onTapGesture {
-          onSelect(tab)
+    HStack {
+      if let space {
+        SpaceAvatar(space: space, size: 28)
+          .padding(.trailing, 4)
+      } else {
+        Image(systemName: "person.2.fill")
+          .foregroundColor(.secondary)
+          .font(.callout)
+          .padding(.trailing, 4)
+      }
+
+      Text(space?.nameWithoutEmoji ?? space?.name ?? "Space")
+        .font(.body)
+        .fontWeight(.semibold)
+    }
+  }
+}
+
+private struct TabButton: View {
+  let tab: Tab
+  let isSelected: Bool
+  let action: () -> Void
+
+  var body: some View {
+    VStack {
+      Image(systemName: tab.icon)
+        .font(.system(size: 20, weight: .semibold))
+        .foregroundColor(isSelected ? Color(ThemeManager.shared.selected.accent) : Color(.systemGray4))
+        .frame(width: 100, height: 36)
+        .animation(.bouncy(duration: 0.08), value: isSelected)
+    }
+    .frame(maxWidth: .infinity)
+    .contentShape(Rectangle())
+    .onTapGesture(perform: action)
+  }
+}
+
+private struct ChatListContent: View {
+  let items: [SpaceChatItem]
+
+  var body: some View {
+    List {
+      Section {
+        ForEach(items, id: \.id) { item in
+          ChatItemRow(item: item)
+            .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
         }
       }
     }
-    .frame(maxWidth: .infinity)
+    .listStyle(.plain)
   }
 }
+
+private struct MemberListView: View {
+  let members: [FullMemberItem]
+  let viewModel: FullSpaceViewModel
+
+  var body: some View {
+    List {
+      Section {
+        ForEach(members, id: \.userInfo.user.id) { member in
+          MemberItemRow(
+            member: member,
+            hasUnread: viewModel.filteredMemberChats.first(where: { $0.user?.id == member.userInfo.user.id })?.dialog
+              .unreadCount ?? 0 > 0
+          )
+          .listRowInsets(.init(top: 9, leading: 12, bottom: 2, trailing: 0))
+        }
+      }
+    }
+    .listStyle(.plain)
+  }
+}
+
+private struct MemberItemRow: View {
+  let member: FullMemberItem
+  let hasUnread: Bool
+  @EnvironmentObject private var nav: Navigation
+
+  var body: some View {
+    Button {
+      nav.push(.chat(peer: .user(id: member.userInfo.user.id)))
+    } label: {
+      HStack(spacing: 9) {
+        HStack(alignment: .center, spacing: 5) {
+          Circle()
+            .fill(hasUnread ? ColorManager.shared.swiftUIColor : .clear)
+            .frame(width: 6, height: 6)
+            .animation(.easeInOut(duration: 0.3), value: hasUnread)
+          UserAvatar(user: member.userInfo.user, size: 34)
+        }
+        Text(member.userInfo.user.displayName)
+          .font(.body)
+        
+      }
+    }
+  }
+}
+
+private struct ChatItemRow: View {
+  let item: SpaceChatItem
+  @EnvironmentObject private var nav: Navigation
+  @EnvironmentObject private var data: DataManager
+
+  var body: some View {
+    Button {
+      nav.push(.chat(peer: item.peerId))
+    } label: {
+      ChatItemView(props: ChatItemProps(
+        dialog: item.dialog,
+        user: item.userInfo,
+        chat: item.chat,
+        message: item.message,
+        from: item.from,
+        space: nil
+      ))
+    }
+    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+      Button(role: .destructive) {
+        Task {
+          try await data.updateDialog(
+            peerId: item.peerId,
+            archived: true
+          )
+        }
+      } label: {
+        Image(systemName: "tray.and.arrow.down.fill")
+      }
+      .tint(Color(.systemGray2))
+
+      Button {
+        Task {
+          try await data.updateDialog(
+            peerId: item.peerId,
+            pinned: !(item.dialog.pinned ?? false)
+          )
+        }
+      } label: {
+        Image(systemName: item.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
+      }
+      .tint(.indigo)
+    }
+    .contextMenu {
+      Button {
+        Task {
+          try await data.updateDialog(
+            peerId: item.peerId,
+            pinned: !(item.dialog.pinned ?? false)
+          )
+        }
+      } label: {
+        Label(
+          item.dialog.pinned ?? false ? "Unpin" : "Pin",
+          systemImage: item.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill"
+        )
+      }
+      Button {
+        nav.push(.chat(peer: item.peerId))
+      } label: {
+        Label("Open Chat", systemImage: "bubble.left")
+      }
+    } preview: {
+      ChatView(peer: item.peerId, preview: true)
+        .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+        .environmentObject(nav)
+        .environmentObject(data)
+    }
+    .listRowBackground(item.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
+  }
+}
+
+// MARK: - Preview
 
 #Preview {
   SpaceView(spaceId: Int64.random(in: 1 ... 500))

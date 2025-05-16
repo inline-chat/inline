@@ -135,7 +135,7 @@ struct HomeView: View {
                     nav.push(.space(id: spaceItem.space.id))
                   }) {
                     HStack {
-                      SpaceAvatar(space: spaceItem.space, size: 28)
+                      SpaceAvatar(space: spaceItem.space, size: 34)
                       Text(spaceItem.space.nameWithoutEmoji)
                         .foregroundColor(.primary)
                     }
