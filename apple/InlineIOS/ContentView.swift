@@ -61,8 +61,6 @@ extension ContentView {
         EmptyView()
       case .createThread:
         EmptyView()
-      case .profile:
-        EmptyView()
       case .alphaSheet:
         EmptyView()
       case let .chatInfo(chatItem):
@@ -81,8 +79,7 @@ extension ContentView {
         CreateSpace()
           .presentationCornerRadius(18)
 
-      case let .profile(userInfo):
-        ProfilePage(userInfo: userInfo)
+      
 
       case .alphaSheet:
         AlphaSheet()
