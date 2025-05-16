@@ -11,6 +11,7 @@ struct SettingsView: View {
   @EnvironmentObject private var onboardingNavigation: OnboardingNavigation
   @EnvironmentObject private var mainRouter: MainViewRouter
   @EnvironmentObject private var fileUploadViewModel: FileUploadViewModel
+
   @State private var isClearing = false
   @State private var showClearCacheAlert = false
   @State private var clearCacheError: Error?
