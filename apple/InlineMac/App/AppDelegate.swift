@@ -147,7 +147,9 @@ extension AppDelegate {
   }
 
   func getPeerFromNotification(_ userInfo: [String: Any]) -> Peer? {
-    if let peerUserId = userInfo["userId"] as? Int64 {
+    if let isThread = userInfo["isThread"] as? Bool, let threadId = userInfo["threadId"] as? Int64, isThread {
+      .thread(id: threadId)
+    } else if let peerUserId = userInfo["userId"] as? Int64 {
       .user(id: peerUserId)
     } else {
       nil
