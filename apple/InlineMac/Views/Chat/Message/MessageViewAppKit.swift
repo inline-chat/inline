@@ -1135,6 +1135,9 @@ class MessageViewAppKit: NSView {
     let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
     menu.addItem(replyItem)
 
+    let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "r")
+    menu.addItem(addReactionItem)
+
     if hasText {
       let copyItem = NSMenuItem(title: "Copy", action: #selector(copyMessage), keyEquivalent: "c")
       menu.addItem(copyItem)
@@ -1165,6 +1168,11 @@ class MessageViewAppKit: NSView {
 
     menu.delegate = self
     self.menu = menu
+  }
+
+  @objc private func addReaction() {
+    // Show reaction overlay
+    showReactionOverlay()
   }
 
   @objc private func copyMessage() {
@@ -1260,7 +1268,7 @@ class MessageViewAppKit: NSView {
     if animate {
       // Animate the changes
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.2
+        context.duration = 0.15
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         context.allowsImplicitAnimation = true
 
