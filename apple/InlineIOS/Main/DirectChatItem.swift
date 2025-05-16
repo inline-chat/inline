@@ -73,11 +73,11 @@ struct DirectChatItem: View {
       if userInfo.user.id == Auth.shared.getCurrentUserId() {
         InitialsCircle(
           name: UserAvatar.getNameForInitials(user: userInfo.user),
-          size: 58,
+          size: 60,
           symbol: "bookmark.fill"
         )
       } else {
-        UserAvatar(userInfo: userInfo, size: 58)
+        UserAvatar(userInfo: userInfo, size: 60)
       }
     }
   }
@@ -95,16 +95,14 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var title: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      if let userInfo {
-        Text(displayName(for: userInfo))
-          .font(.customTitle())
-          .foregroundColor(.primary)
-      } else {
-        Text("Unknown User")
-          .font(.customTitle())
-          .foregroundColor(.primary)
-      }
+    if let userInfo {
+      Text(displayName(for: userInfo))
+        .font(.body)
+        .foregroundColor(.primary)
+    } else {
+      Text("Unknown User")
+        .font(.body)
+        .foregroundColor(.primary)
     }
   }
 
@@ -185,12 +183,12 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var titleAndLastMessageView: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      HStack(spacing: 0) {
-        title
-        Spacer()
-        messageDate
-      }
+    VStack(alignment: .leading, spacing: 0) {
+//      HStack(spacing: 0) {
+      title
+//        Spacer()
+//        messageDate
+//      }
       lastMessage
     }
   }
