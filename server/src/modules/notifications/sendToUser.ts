@@ -37,8 +37,11 @@ export const sendPushNotificationToUser = async ({
 
     for (const session of userSessions) {
       if (!session.applePushToken) continue
+      if (session.clientType === "macos") continue
 
-      let topic = session.clientType === "macos" ? macOSTopic : iOSTopic
+      let topic = session.clientType === "ios" ? iOSTopic : null
+
+      if (!topic) continue
 
       // Configure notification
       const notification = new Notification()
