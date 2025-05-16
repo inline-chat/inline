@@ -58,11 +58,11 @@ actor TranslationManager {
       }
 
       // Detect message language outside of DB transaction
-      let detectedLanguages = LanguageDetector.detectTopTwoSupported(text)
+      let detectedLanguages = LanguageDetector.advancedDetect(text)
       log.debug("Detected languages: \(detectedLanguages) for message \(message.messageId)")
 
-      // Only translate if target language is not among the top 2 detected languages
-      if !detectedLanguages.contains(targetLanguage) {
+      // Translate if it contains a language other than the target language
+      if detectedLanguages.count > 0, detectedLanguages.contains(where: { $0 != targetLanguage }) {
         messagesNeedingTranslation.append(message)
       }
     }

@@ -41,6 +41,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.2"),
     .package(url: "https://github.com/Kuniwak/MultipartFormDataKit", from: "1.0.0"),
     .package(url: "https://github.com/kean/Get", from: "2.2.1"),
+    .package(url: "https://github.com/kean/Nuke", from: "12.8.0"),
     .package(
       url: "https://github.com/apple/swift-atomics.git",
       .upToNextMajor(from: "1.2.0")
@@ -68,6 +69,7 @@ let package = Package(
         .product(name: "Atomics", package: "swift-atomics"),
         .product(name: "MultipartFormDataKit", package: "MultipartFormDataKit"),
         .product(name: "Get", package: "Get"),
+        .product(name: "Nuke", package: "Nuke"),
         "InlineConfig",
         "Logger",
         "InlineProtocol",
