@@ -306,6 +306,7 @@ extension MainWindowController: NSToolbarDelegate {
 
   private func createTranslateButton(peer: Peer) -> NSToolbarItem {
     let item = TranslateToolbar(peer: peer, dependencies: dependencies)
+    item.visibilityPriority = .high
     return item
   }
 
@@ -442,6 +443,7 @@ extension MainWindowController {
   private func makeNavigationButtons() -> NSToolbarItem {
     let item = NSToolbarItemGroup(itemIdentifier: .navGroup)
     item.isNavigational = true
+    item.visibilityPriority = .low
     item.label = "Navigation"
 
     // Create a container view for the buttons
