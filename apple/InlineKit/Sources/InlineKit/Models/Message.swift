@@ -461,7 +461,8 @@ public extension Message {
       message.transactionId = message.transactionId ?? existing.transactionId
       message.isSticker = message.isSticker ?? existing.isSticker
       message.editDate = message.editDate ?? existing.editDate
-
+      message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
+      
       // Update media selectively if needed
       if protocolMessage.hasMedia {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
