@@ -9,11 +9,13 @@ import UIKit
 private enum Tabs {
   case chats
   case archived
+  case spaces
 
   var title: String {
     switch self {
       case .chats: "Chats"
       case .archived: "Archived"
+      case .spaces: "Spaces"
     }
   }
 
@@ -21,6 +23,7 @@ private enum Tabs {
     switch self {
       case .chats: "bubble.left.and.bubble.right.fill"
       case .archived: "archivebox.fill"
+      case .spaces: "building.2.fill"
     }
   }
 }
@@ -74,57 +77,72 @@ struct HomeView: View {
         Group {
           if !searchResults.isEmpty {
             searchResultsView
-          } else if selectedTab == .archived {
-            ArchivedChatsView(type: .home)
           } else {
-            List {
-              if selectedTab == .chats, !home.spaces.isEmpty {
-                ScrollView(.horizontal) {
-                  LazyHStack {
-                    ForEach(home.spaces.sorted(by: { s1, s2 in
-                      s1.space.date > s2.space.date
-                    }), id: \.id) { spaceItem in
-                      RectangleSpaceItem(spaceItem: spaceItem)
+            switch selectedTab {
+              case .chats, .archived:
+                ChatListView(
+                  items: chatItems,
+                  isArchived: selectedTab == .archived,
+                  onItemTap: { item in
+                    if let user = item.user {
+                      nav.push(.chat(peer: .user(id: user.user.id)))
+                    } else if let chat = item.chat {
+                      nav.push(.chat(peer: .thread(id: chat.id)))
+                    }
+                  },
+                  onArchive: { item in
+                    Task {
+                      if let user = item.user {
+                        try await dataManager.updateDialog(
+                          peerId: .user(id: user.user.id),
+                          archived: selectedTab == .chats
+                        )
+                      } else if let chat = item.chat {
+                        try await dataManager.updateDialog(
+                          peerId: .thread(id: chat.id),
+                          archived: selectedTab == .chats
+                        )
+                      }
+                    }
+                  },
+                  onPin: { item in
+                    Task {
+                      if let user = item.user {
+                        try await dataManager.updateDialog(
+                          peerId: .user(id: user.user.id),
+                          pinned: !(item.dialog.pinned ?? false)
+                        )
+                      } else if let chat = item.chat {
+                        try await dataManager.updateDialog(
+                          peerId: .thread(id: chat.id),
+                          pinned: !(item.dialog.pinned ?? false)
+                        )
+                      }
+                    }
+                  },
+                  onRead: { item in
+                    Task {
+                      UnreadManager.shared.readAll(item.dialog.peerId, chatId: item.chat?.id ?? 0)
+                    }
+                  }
+                )
+              case .spaces:
+                EmptyView()
+                List(home.spaces.sorted(by: { s1, s2 in
+                  s1.space.date > s2.space.date
+                })) { spaceItem in
+                  Button(action: {
+                    nav.push(.space(id: spaceItem.space.id))
+                  }) {
+                    HStack {
+                      SpaceAvatar(space: spaceItem.space, size: 28)
+                      Text(spaceItem.space.nameWithoutEmoji)
+                        .foregroundColor(.primary)
                     }
                   }
                 }
-                .scrollIndicators(.hidden)
-                .contentMargins(.horizontal, 16, for: .scrollContent)
-                .listRowInsets(.init(
-                  top: 0,
-                  leading: 0,
-                  bottom: 16,
-                  trailing: 0
-                ))
-                .listRowSeparator(.hidden)
-              }
-              ForEach(chatItems, id: \.id) { item in
-                chatView(for: item)
-                  .listRowInsets(.init(
-                    top: 9,
-                    leading: 16,
-                    bottom: 2,
-                    trailing: 0
-                  ))
-                  .contextMenu {
-                    Button {
-                      nav.push(.chat(peer: .user(id: item.user?.user.id ?? 0)))
-                    } label: {
-                      Label("Open Chat", systemImage: "bubble.left")
-                    }
-                  } preview: {
-                    ChatView(peer: .user(id: item.user?.user.id ?? 0), preview: true)
-                      .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-                      .environmentObject(nav)
-                      .environmentObject(data)
-                      .environment(\.realtime, realtime)
-                      .environment(\.appDatabase, database)
-                  }
-              }
+                .listStyle(.plain)
             }
-            .listStyle(.plain)
-            .animation(.default, value: home.chats)
-            .animation(.default, value: home.spaces)
           }
         }
         .overlay {
@@ -139,11 +157,10 @@ struct HomeView: View {
       HomeToolbarContent()
       ToolbarItem(placement: .bottomBar) {
         BottomTabBar(
-          tabs: [Tabs.archived, .chats],
+          tabs: [Tabs.archived, .chats, .spaces],
           selected: selectedTab,
           onSelect: { tab in
             playTabHaptic()
-
             withAnimation(.snappy(duration: 0.1)) {
               selectedTab = tab
             }
@@ -259,106 +276,6 @@ struct HomeView: View {
       }
     }
   }
-
-  @ViewBuilder
-  func chatView(for item: HomeChatItem) -> some View {
-    if let user = item.user {
-      Button {
-        nav.push(.chat(peer: .user(id: user.user.id)))
-      } label: {
-        DirectChatItem(props: Props(
-          dialog: item.dialog,
-          user: user,
-          chat: item.chat,
-          message: item.message,
-          from: item.from?.user
-        ))
-      }
-      .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-        Button(role: .destructive) {
-          Task {
-            try await dataManager.updateDialog(
-              peerId: .user(id: user.user.id),
-              archived: true
-            )
-          }
-        } label: {
-          Image(systemName: "tray.and.arrow.down.fill")
-        }
-        .tint(Color(.systemGray2))
-
-        Button {
-          Task {
-            try await dataManager.updateDialog(
-              peerId: .user(id: user.user.id),
-              pinned: !(item.dialog.pinned ?? false)
-            )
-          }
-        } label: {
-          Image(systemName: item.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-        }
-        .tint(.indigo)
-      }
-      .swipeActions(edge: .leading) {
-        Button {
-          Task {
-            UnreadManager.shared.readAll(item.dialog.peerId, chatId: item.chat?.id ?? 0)
-          }
-        } label: {
-          Image(systemName: "checkmark.message.fill")
-        }
-        .tint(.blue)
-      }
-    } else if let chat = item.chat {
-      Button {
-        nav.push(.chat(peer: .thread(id: chat.id)))
-      } label: {
-        ChatItemView(props: ChatItemProps(
-          dialog: item.dialog,
-          user: item.user,
-          chat: chat,
-          message: item.message,
-          from: item.from,
-          space: item.space
-        ))
-      }
-      .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-        Button(role: .destructive) {
-          Task {
-            try await dataManager.updateDialog(
-              peerId: .thread(id: chat.id),
-              archived: true
-            )
-          }
-        } label: {
-          Image(systemName: "tray.and.arrow.down.fill")
-        }
-        .tint(Color(.systemGray2))
-
-        Button {
-          Task {
-            try await dataManager.updateDialog(
-              peerId: .thread(id: chat.id),
-              pinned: !(item.dialog.pinned ?? false)
-            )
-          }
-        } label: {
-          Image(systemName: item.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-        }
-        .tint(.indigo)
-      }
-      .swipeActions(edge: .leading) {
-        Button {
-          Task {
-            UnreadManager.shared.readAll(item.dialog.peerId, chatId: chat.id)
-          }
-        } label: {
-          Image(systemName: "checkmark.message.fill")
-        }
-        .tint(.blue)
-      }
-    }
-  }
 }
 
 extension UIViewController {
@@ -407,12 +324,15 @@ private struct BottomTabBar: View {
     HStack(spacing: 0) {
       ForEach(tabs, id: \.self) { tab in
         VStack {
-          Image(systemName: tab == .chats ? "bubble.left.and.bubble.right.fill" : "archivebox.fill")
-            .font(.system(size: 20, weight: .semibold))
-            .foregroundColor(selected == tab ? Color(ThemeManager.shared.selected.accent) : Color(.systemGray4))
-            .frame(width: 100, height: 36)
-            .animation(.bouncy(duration: 0.08), value: selected == tab)
-            .contentShape(Rectangle())
+          Image(
+            systemName: tab == .chats ? "bubble.left.and.bubble.right.fill" : tab == .archived ? "archivebox.fill" :
+              "building.2.fill"
+          )
+          .font(.system(size: 20, weight: .semibold))
+          .foregroundColor(selected == tab ? Color(ThemeManager.shared.selected.accent) : Color(.systemGray4))
+          .frame(width: 100, height: 36)
+          .animation(.bouncy(duration: 0.08), value: selected == tab)
+          .contentShape(Rectangle())
         }
         .frame(maxWidth: .infinity)
         .onTapGesture {

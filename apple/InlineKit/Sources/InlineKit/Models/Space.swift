@@ -86,7 +86,12 @@ public extension Space {
     guard let firstChar = text.first else { return text }
 
     if String(firstChar).containsEmoji {
-      return String(text.dropFirst())
+      let withoutEmoji = String(text.dropFirst())
+
+      if withoutEmoji.first == " " {
+        return String(withoutEmoji.dropFirst())
+      }
+      return withoutEmoji
     }
 
     return text
