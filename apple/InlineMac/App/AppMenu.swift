@@ -343,6 +343,17 @@ final class AppMenu: NSObject {
 
     windowMenu.addItem(NSMenuItem.separator())
 
+    let alwaysOnTopItem = NSMenuItem(
+      title: "Always on Top",
+      action: #selector(toggleAlwaysOnTop(_:)),
+      keyEquivalent: "t"
+    )
+    alwaysOnTopItem.keyEquivalentModifierMask = [.command, .option]
+    alwaysOnTopItem.target = self
+    windowMenu.addItem(alwaysOnTopItem)
+
+    windowMenu.addItem(NSMenuItem.separator())
+
     windowMenu.addItem(
       withTitle: "Bring All to Front",
       action: #selector(NSApplication.arrangeInFront(_:)),
@@ -384,6 +395,18 @@ final class AppMenu: NSObject {
   @objc private func clearMediaCache(_ sender: Any?) {
     Task {
       try await FileCache.shared.clearCache()
+    }
+  }
+
+  @objc private func toggleAlwaysOnTop(_ sender: NSMenuItem) {
+    guard let window = NSApp.keyWindow else { return }
+
+    if window.level == .floating {
+      window.level = .normal
+      sender.state = .off
+    } else {
+      window.level = .floating
+      sender.state = .on
     }
   }
 }
