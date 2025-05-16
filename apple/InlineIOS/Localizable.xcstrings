@@ -377,6 +377,7 @@
 
     },
     "Double tap to change profile photo" : {
+      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -659,12 +660,6 @@
     "Private" : {
 
     },
-    "Profile" : {
-
-    },
-    "Profile photo" : {
-
-    },
     "Public" : {
 
     },
@@ -778,6 +773,9 @@
           }
         }
       }
+    },
+    "View" : {
+
     },
     "Welcome to Inline" : {
       "comment" : "Welcome to Inline",
