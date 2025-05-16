@@ -48,7 +48,7 @@ struct ChatItemView: View {
 
   var body: some View {
     VStack {
-      HStack(alignment: .top, spacing: 9) {
+      HStack(alignment: .top, spacing: 14) {
         unreadAndProfileView
         titleAndLastMessageView
         Spacer()
@@ -73,7 +73,7 @@ struct ChatItemView: View {
           endPoint: .bottom
         )
       )
-      .frame(width: 58, height: 58)
+      .frame(width: 60, height: 60)
       .overlay {
         Group {
           if let emoji = chat?.emoji {
@@ -103,21 +103,18 @@ struct ChatItemView: View {
 
   @ViewBuilder
   var title: some View {
-//    VStack(alignment: .leading, spacing: 2) {
-    HStack {
+    HStack(alignment: .center) {
       Text(chat?.title ?? "")
-        .font(.customTitle())
+        .font(.body)
         .foregroundColor(.primary)
       Spacer()
 
       if let space {
-        Text(space.name ?? "")
-          .font(.callout)
-          .fontWeight(.medium)
-          .foregroundColor(.secondary)
+        Text(space.name)
+          .font(.caption)
+          .foregroundStyle(.tertiary)
       }
     }
-//    }
   }
 
   @ViewBuilder
@@ -130,8 +127,8 @@ struct ChatItemView: View {
       }
 
       Text(from?.user.firstName ?? "")
-        .font(.customCaption())
-        .foregroundColor(.primary)
+        .font(.callout)
+        .foregroundColor(.secondary)
     }
     .padding(.top, 2)
   }
@@ -141,11 +138,11 @@ struct ChatItemView: View {
     if message?.isSticker == true {
       HStack(spacing: 4) {
         Image(systemName: "cup.and.saucer.fill")
-          .font(.customCaption())
+          .font(.callout)
           .foregroundColor(.secondary)
 
         Text("Sticker")
-          .font(.customCaption())
+          .font(.callout)
           .foregroundColor(.secondary)
           .lineLimit(2)
           .truncationMode(.tail)
@@ -154,29 +151,27 @@ struct ChatItemView: View {
     } else if message?.photoId != nil || message?.fileId != nil {
       HStack {
         Image(systemName: "photo.fill")
-          .font(.customCaption())
-          .foregroundColor(.secondary)
+          .font(.callout)
 
         Text("Photo")
-          .font(.customCaption())
           .foregroundColor(.secondary)
       }
     } else if message?.hasUnsupportedTypes == true {
       Text("Unsupported message")
         .italic()
-        .font(.customCaption())
+        .font(.callout)
         .foregroundColor(.secondary)
 
     } else {
       Text(message?.text ?? "")
-        .font(.customCaption())
+        .font(.callout)
         .foregroundColor(.secondary)
     }
   }
 
   @ViewBuilder
   var titleAndLastMessageView: some View {
-    VStack(alignment: .leading, spacing: 2) {
+    VStack(alignment: .leading, spacing: 0) {
       title
       lastMessageSenderView
       lastMessageView
