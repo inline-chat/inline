@@ -220,6 +220,9 @@
     "Connect your Linear to create issues from messages with AI" : {
 
     },
+    "Connect your Notion to create tasks from messages with AI" : {
+
+    },
     "Connected" : {
       "localizations" : {
         "fa" : {
@@ -583,6 +586,9 @@
         }
       }
     },
+    "No archived chats" : {
+
+    },
     "No chats or spaces yet" : {
 
     },
@@ -590,6 +596,9 @@
 
     },
     "No users found" : {
+
+    },
+    "Notion" : {
 
     },
     "OK" : {
