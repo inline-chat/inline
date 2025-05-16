@@ -15,6 +15,7 @@ public class ObjectCache {
   private var observingUsers: Set<Int64> = []
   private var users: [Int64: UserInfo] = [:]
   private var chats: [Int64: Chat] = [:]
+  private var spaces: [Int64: Space] = [:]
   private var cancellables: Set<AnyCancellable> = []
   private var userPublishers: [Int64: PassthroughSubject<UserInfo?, Never>] = [:]
 
@@ -47,6 +48,15 @@ public class ObjectCache {
     }
 
     return chats[id]
+  }
+
+  public func getSpace(id: Int64) -> Space? {
+    if spaces[id] == nil {
+      // fill in the cache
+      observeSpace(id: id)
+    }
+
+    return spaces[id]
   }
 }
 
@@ -108,6 +118,35 @@ public extension ObjectCache {
         } else {
           self?.log.trace("Chat \(chatId) not found")
           self?.chats[chatId] = nil
+        }
+      }
+    ).store(in: &cancellables)
+  }
+}
+
+// Spaces
+public extension ObjectCache {
+  func observeSpace(id spaceId: Int64) {
+    log.trace("Observing space \(spaceId)")
+    ValueObservation.tracking { db in
+      try Space
+        .filter(id: spaceId)
+        .fetchOne(db)
+    }
+    .publisher(in: db.dbWriter, scheduling: .immediate)
+    .sink(
+      receiveCompletion: { completion in
+        if case let .failure(error) = completion {
+          Log.shared.error("Failed to observe space \(spaceId): \(error)")
+        }
+      },
+      receiveValue: { [weak self] space in
+        if let space {
+          self?.log.trace("Space \(spaceId) updated")
+          self?.spaces[spaceId] = space
+        } else {
+          self?.log.trace("Space \(spaceId) not found")
+          self?.spaces[spaceId] = nil
         }
       }
     ).store(in: &cancellables)
