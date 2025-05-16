@@ -27,7 +27,7 @@ type LoomMetadata = {
   thumbnailUrl: string | null
   thumbnailWidth: number
   thumbnailHeight: number
-  duration: number
+  duration: number | null
 }
 
 export async function processLoomLink(
@@ -46,6 +46,7 @@ export async function processLoomLink(
 
     // Fetch Loom oEmbed data
     const oembed = await fetchLoomOembed(loomUrl)
+
     const metadata: LoomMetadata = {
       url: loomUrl,
       title: oembed.title,
@@ -53,7 +54,7 @@ export async function processLoomLink(
       thumbnailUrl: oembed.thumbnailUrl || null,
       thumbnailWidth: oembed.thumbnailWidth,
       thumbnailHeight: oembed.thumbnailHeight,
-      duration: Math.round(oembed.duration),
+      duration: oembed.duration == null ? null : Math.round(oembed.duration),
     }
 
     // Process the Loom link
@@ -106,7 +107,6 @@ async function processLoomMetadata(
         date: new Date(),
       })
       .returning()
-
     if (!urlPreviewRecord) {
       log.error("Failed to create URL preview record")
       return
@@ -240,7 +240,7 @@ async function sendLoomUpdate(
           title: metadata.title,
           description: metadata.description ?? undefined,
           photo: protoPhoto,
-          duration: BigInt(metadata.duration),
+          duration: metadata.duration == null ? undefined : BigInt(metadata.duration),
         },
       },
     }
