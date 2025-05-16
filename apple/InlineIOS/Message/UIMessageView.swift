@@ -112,7 +112,18 @@ class UIMessageView: UIView {
       return true
     }
     guard let text = fullMessage.displayText else { return false }
-    return text.count > 24 || text.contains("\n") || text.containsEmoji
+
+    // Check if text contains Chinese characters
+    let containsChinese = text.unicodeScalars.contains { scalar in
+      (0x4E00 ... 0x9FFF).contains(scalar.value) || // CJK Unified Ideographs
+        (0x3400 ... 0x4DBF).contains(scalar.value) || // CJK Unified Ideographs Extension A
+        (0x2_0000 ... 0x2_A6DF).contains(scalar.value) // CJK Unified Ideographs Extension B
+    }
+
+    // Use lower threshold for Chinese text
+    let characterThreshold = containsChinese ? 16 : 24
+
+    return text.count > characterThreshold || text.contains("\n") || text.containsEmoji
   }
 
   // MARK: - UI Components
