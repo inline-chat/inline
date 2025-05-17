@@ -331,15 +331,21 @@ export interface UserProfilePhoto {
     /**
      * ID of the photo
      *
-     * @generated from protobuf field: int64 photo_id = 1;
+     * @generated from protobuf field: optional int64 photo_id = 1;
      */
-    photoId: bigint;
+    photoId?: bigint;
     /**
      * Stripped thumbnail of the photo
      *
-     * @generated from protobuf field: bytes stripped_thumb = 2;
+     * @generated from protobuf field: optional bytes stripped_thumb = 2;
      */
-    strippedThumb: Uint8Array;
+    strippedThumb?: Uint8Array;
+    /**
+     * Photo
+     *
+     * @generated from protobuf field: optional string cdn_url = 3;
+     */
+    cdnUrl?: string;
 }
 /**
  * @generated from protobuf message Dialog
@@ -3542,14 +3548,13 @@ export const User = new User$Type();
 class UserProfilePhoto$Type extends MessageType<UserProfilePhoto> {
     constructor() {
         super("UserProfilePhoto", [
-            { no: 1, name: "photo_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "stripped_thumb", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+            { no: 1, name: "photo_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "stripped_thumb", kind: "scalar", opt: true, T: 12 /*ScalarType.BYTES*/ },
+            { no: 3, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<UserProfilePhoto>): UserProfilePhoto {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.photoId = 0n;
-        message.strippedThumb = new Uint8Array(0);
         if (value !== undefined)
             reflectionMergePartial<UserProfilePhoto>(this, message, value);
         return message;
@@ -3559,11 +3564,14 @@ class UserProfilePhoto$Type extends MessageType<UserProfilePhoto> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* int64 photo_id */ 1:
+                case /* optional int64 photo_id */ 1:
                     message.photoId = reader.int64().toBigInt();
                     break;
-                case /* bytes stripped_thumb */ 2:
+                case /* optional bytes stripped_thumb */ 2:
                     message.strippedThumb = reader.bytes();
+                    break;
+                case /* optional string cdn_url */ 3:
+                    message.cdnUrl = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3577,12 +3585,15 @@ class UserProfilePhoto$Type extends MessageType<UserProfilePhoto> {
         return message;
     }
     internalBinaryWrite(message: UserProfilePhoto, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* int64 photo_id = 1; */
-        if (message.photoId !== 0n)
+        /* optional int64 photo_id = 1; */
+        if (message.photoId !== undefined)
             writer.tag(1, WireType.Varint).int64(message.photoId);
-        /* bytes stripped_thumb = 2; */
-        if (message.strippedThumb.length)
+        /* optional bytes stripped_thumb = 2; */
+        if (message.strippedThumb !== undefined)
             writer.tag(2, WireType.LengthDelimited).bytes(message.strippedThumb);
+        /* optional string cdn_url = 3; */
+        if (message.cdnUrl !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.cdnUrl);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
