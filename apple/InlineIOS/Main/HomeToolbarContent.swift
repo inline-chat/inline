@@ -52,7 +52,7 @@ struct HomeToolbarContent: ToolbarContent {
       // }
 
       VStack(alignment: .leading, spacing: 0) {
-        Text(shouldShow ? getStatusText(apiState) : "Your chats")
+        Text(shouldShow ? getStatusText(apiState) : "Your Chats")
           .font(.title3)
           .fontWeight(.semibold)
           .contentTransition(.numericText())
