@@ -97,6 +97,14 @@ final class AppMenu: NSObject {
     clearMediaCacheMenuItem.target = self
     appMenu.addItem(clearMediaCacheMenuItem)
 
+    let resetDismissedPopoversMenuItem = NSMenuItem(
+      title: "Reset Dismissed Popovers…",
+      action: #selector(resetDismissedPopovers(_:)),
+      keyEquivalent: ""
+    )
+    resetDismissedPopoversMenuItem.target = self
+    appMenu.addItem(resetDismissedPopoversMenuItem)
+
     appMenu.addItem(NSMenuItem.separator())
 
     appMenu.addItem(
@@ -395,6 +403,12 @@ final class AppMenu: NSObject {
   @objc private func clearMediaCache(_ sender: Any?) {
     Task {
       try await FileCache.shared.clearCache()
+    }
+  }
+
+  @objc private func resetDismissedPopovers(_ sender: Any?) {
+    Task {
+      await TranslationAlertDismiss.shared.resetAllDismissStates()
     }
   }
 
