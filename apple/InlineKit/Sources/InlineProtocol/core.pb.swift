@@ -945,11 +945,147 @@ public struct Message: @unchecked Sendable {
   /// Clears the value of `isSticker`. Subsequent reads from it will return its default value.
   public mutating func clearIsSticker() {_uniqueStorage()._isSticker = nil}
 
+  /// Rich text entities
+  public var entities: [MessageEntity] {
+    get {return _storage._entities}
+    set {_uniqueStorage()._entities = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct MessageEntities: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var entities: [MessageEntity] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct MessageEntity: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var type: MessageEntity.TypeEnum = .unspecified
+
+  public var offset: Int64 = 0
+
+  public var length: Int64 = 0
+
+  public var entity: MessageEntity.OneOf_Entity? = nil
+
+  public var mention: MessageEntity.MessageEntityMention {
+    get {
+      if case .mention(let v)? = entity {return v}
+      return MessageEntity.MessageEntityMention()
+    }
+    set {entity = .mention(newValue)}
+  }
+
+  public var textURL: MessageEntity.MessageEntityTextUrl {
+    get {
+      if case .textURL(let v)? = entity {return v}
+      return MessageEntity.MessageEntityTextUrl()
+    }
+    set {entity = .textURL(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum OneOf_Entity: Equatable, Sendable {
+    case mention(MessageEntity.MessageEntityMention)
+    case textURL(MessageEntity.MessageEntityTextUrl)
+
+  }
+
+  public enum TypeEnum: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case mention // = 1
+    case url // = 2
+    case textURL // = 3
+    case email // = 4
+    case bold // = 5
+    case italic // = 6
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .mention
+      case 2: self = .url
+      case 3: self = .textURL
+      case 4: self = .email
+      case 5: self = .bold
+      case 6: self = .italic
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .mention: return 1
+      case .url: return 2
+      case .textURL: return 3
+      case .email: return 4
+      case .bold: return 5
+      case .italic: return 6
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [MessageEntity.TypeEnum] = [
+      .unspecified,
+      .mention,
+      .url,
+      .textURL,
+      .email,
+      .bold,
+      .italic,
+    ]
+
+  }
+
+  public struct MessageEntityMention: Sendable {
+    // SwiftProtobuf.Message conformance is added in an extension below. See the
+    // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+    // methods supported on all messages.
+
+    public var userID: Int64 = 0
+
+    public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+    public init() {}
+  }
+
+  public struct MessageEntityTextUrl: Sendable {
+    // SwiftProtobuf.Message conformance is added in an extension below. See the
+    // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+    // methods supported on all messages.
+
+    public var url: String = String()
+
+    public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+    public init() {}
+  }
+
+  public init() {}
 }
 
 public struct MessageReactions: Sendable {
@@ -4833,6 +4969,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     13: .same(proto: "attachments"),
     14: .same(proto: "reactions"),
     15: .standard(proto: "is_sticker"),
+    16: .same(proto: "entities"),
   ]
 
   fileprivate class _StorageClass {
@@ -4851,6 +4988,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _attachments: MessageAttachments? = nil
     var _reactions: MessageReactions? = nil
     var _isSticker: Bool? = nil
+    var _entities: [MessageEntity] = []
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -4880,6 +5018,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       _attachments = source._attachments
       _reactions = source._reactions
       _isSticker = source._isSticker
+      _entities = source._entities
     }
   }
 
@@ -4913,6 +5052,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 13: try { try decoder.decodeSingularMessageField(value: &_storage._attachments) }()
         case 14: try { try decoder.decodeSingularMessageField(value: &_storage._reactions) }()
         case 15: try { try decoder.decodeSingularBoolField(value: &_storage._isSticker) }()
+        case 16: try { try decoder.decodeRepeatedMessageField(value: &_storage._entities) }()
         default: break
         }
       }
@@ -4970,6 +5110,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._isSticker {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 15)
       } }()
+      if !_storage._entities.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._entities, fieldNumber: 16)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -4994,10 +5137,207 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         if _storage._attachments != rhs_storage._attachments {return false}
         if _storage._reactions != rhs_storage._reactions {return false}
         if _storage._isSticker != rhs_storage._isSticker {return false}
+        if _storage._entities != rhs_storage._entities {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageEntities: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageEntities"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "entities"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.entities) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.entities.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.entities, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageEntities, rhs: MessageEntities) -> Bool {
+    if lhs.entities != rhs.entities {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageEntity"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "type"),
+    2: .same(proto: "offset"),
+    3: .same(proto: "length"),
+    4: .same(proto: "mention"),
+    5: .standard(proto: "text_url"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.type) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.offset) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.length) }()
+      case 4: try {
+        var v: MessageEntity.MessageEntityMention?
+        var hadOneofValue = false
+        if let current = self.entity {
+          hadOneofValue = true
+          if case .mention(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.entity = .mention(v)
+        }
+      }()
+      case 5: try {
+        var v: MessageEntity.MessageEntityTextUrl?
+        var hadOneofValue = false
+        if let current = self.entity {
+          hadOneofValue = true
+          if case .textURL(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.entity = .textURL(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.type != .unspecified {
+      try visitor.visitSingularEnumField(value: self.type, fieldNumber: 1)
+    }
+    if self.offset != 0 {
+      try visitor.visitSingularInt64Field(value: self.offset, fieldNumber: 2)
+    }
+    if self.length != 0 {
+      try visitor.visitSingularInt64Field(value: self.length, fieldNumber: 3)
+    }
+    switch self.entity {
+    case .mention?: try {
+      guard case .mention(let v)? = self.entity else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case .textURL?: try {
+      guard case .textURL(let v)? = self.entity else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageEntity, rhs: MessageEntity) -> Bool {
+    if lhs.type != rhs.type {return false}
+    if lhs.offset != rhs.offset {return false}
+    if lhs.length != rhs.length {return false}
+    if lhs.entity != rhs.entity {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageEntity.TypeEnum: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "TYPE_UNSPECIFIED"),
+    1: .same(proto: "TYPE_MENTION"),
+    2: .same(proto: "TYPE_URL"),
+    3: .same(proto: "TYPE_TEXT_URL"),
+    4: .same(proto: "TYPE_EMAIL"),
+    5: .same(proto: "TYPE_BOLD"),
+    6: .same(proto: "TYPE_ITALIC"),
+  ]
+}
+
+extension MessageEntity.MessageEntityMention: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityMention"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "user_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.userID != 0 {
+      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageEntity.MessageEntityMention, rhs: MessageEntity.MessageEntityMention) -> Bool {
+    if lhs.userID != rhs.userID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageEntity.MessageEntityTextUrl: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityTextUrl"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "url"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.url) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.url.isEmpty {
+      try visitor.visitSingularStringField(value: self.url, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageEntity.MessageEntityTextUrl, rhs: MessageEntity.MessageEntityTextUrl) -> Bool {
+    if lhs.url != rhs.url {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
