@@ -56,7 +56,7 @@ struct HomeNavigationWrapper: View {
       }
       .tag(TabItem.spaces)
     }
-
+    .tint(Color(ThemeManager.shared.selected.accent))
     .onChange(of: nav.selectedTab) { _ in
       nav.saveNavigationState()
     }
