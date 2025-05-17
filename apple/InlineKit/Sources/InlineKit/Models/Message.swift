@@ -287,6 +287,8 @@ public extension Message {
   var stringRepresentationWithEmoji: String {
     if let text, !text.isEmpty {
       text
+    } else if isSticker == true {
+      "🖼️ Sticker"
     } else if let fileId {
       "📄 File"
     } else if let _ = photoId {
@@ -462,7 +464,7 @@ public extension Message {
       message.isSticker = message.isSticker ?? existing.isSticker
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
-      
+
       // Update media selectively if needed
       if protocolMessage.hasMedia {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
