@@ -100,7 +100,7 @@ struct HomeToolbarContent: ToolbarContent {
     Button {
       nav.push(.settings)
     } label: {
-      Image(systemName: "gearshape.fill")
+      Image(systemName: "gearshape")
         .tint(Color.secondary)
         .contentShape(Rectangle())
     }
