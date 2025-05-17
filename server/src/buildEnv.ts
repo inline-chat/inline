@@ -47,6 +47,8 @@ declare global {
       LINEAR_CLIENT_ID?: string
       LINEAR_CLIENT_SECRET?: string
       OPENAI_API_KEY?: string
+      NOTION_CLIENT_ID?: string
+      NOTION_CLIENT_SECRET?: string
       // Allow for additional dynamic environment variables
       [key: string]: string | undefined
     }
