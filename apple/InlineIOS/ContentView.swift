@@ -41,68 +41,16 @@ struct ContentView: View {
     .environmentObject(fileUploadViewModel)
     .toastView()
   }
-}
-
-extension ContentView {
-  @ViewBuilder
-  func destinationView(for destination: Navigation.Destination) -> some View {
-    switch destination {
-      case let .chat(peer):
-        ChatView(peer: peer)
-      case let .space(id):
-        SpaceView(spaceId: id)
-      case .settings:
-        SettingsView()
-      case .main:
-        HomeView()
-      case .archivedChats:
-        ArchivedChatsView()
-      case .createSpace:
-        EmptyView()
-      case .createThread:
-        EmptyView()
-      case .alphaSheet:
-        EmptyView()
-      case let .chatInfo(chatItem):
-        ChatInfoView(chatItem: chatItem)
-    }
-  }
-
-  @ViewBuilder
-  func sheetContent(for destination: Navigation.Destination) -> some View {
-    switch destination {
-      case let .createThread(spaceId):
-        CreateChatIOSView(spaceId: spaceId)
-          .presentationCornerRadius(18)
-
-      case .createSpace:
-        CreateSpace()
-          .presentationCornerRadius(18)
-
-      
-
-      case .alphaSheet:
-        AlphaSheet()
-
-      default:
-        EmptyView()
-    }
-  }
 
   @ViewBuilder
   var content: some View {
     switch mainViewRouter.route {
       case .main:
-        NavigationStack(path: $nav.pathComponents) {
-          HomeView()
-            .navigationDestination(for: Navigation.Destination.self) { destination in
-              destinationView(for: destination)
-            }
-        }
-        .sheet(item: $nav.activeSheet) { destination in
-          sheetContent(for: destination)
-            .presentationDetents(destination == .alphaSheet ?[.medium, .large] : [.large])
-        }
+        HomeNavigationWrapper()
+          .sheet(item: $nav.activeSheet) { destination in
+            nav.sheetContent(for: destination)
+              .presentationDetents(destination == .alphaSheet ? [.medium, .large] : [.large])
+          }
 
       case .onboarding:
         OnboardingView()
