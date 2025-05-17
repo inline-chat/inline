@@ -11,11 +11,11 @@ struct HomeToolbarContent: ToolbarContent {
   @State var apiState: RealtimeAPIState = .connecting
 
   var body: some ToolbarContent {
-    ToolbarItem(placement: .topBarLeading) {
+    ToolbarItem(placement: .principal) {
       header
     }
 
-    ToolbarItemGroup(placement: .topBarTrailing) {
+    ToolbarItem(placement: .topBarLeading) {
       Button(action: {
         nav.push(.alphaSheet)
       }, label: {
@@ -32,6 +32,9 @@ struct HomeToolbarContent: ToolbarContent {
           )
       })
       .buttonStyle(.plain)
+    }
+
+    ToolbarItemGroup(placement: .topBarTrailing) {
       settingsButton
       createSpaceButton
     }
@@ -40,16 +43,16 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var header: some View {
     HStack(spacing: 8) {
-      if apiState != .connected {
-        Spinner(size: 16)
-          .padding(.trailing, 4)
-      } else {
-        Image(systemName: "house.fill")
-          .font(.caption)
-      }
+      // if apiState != .connected {
+      //   Spinner(size: 16)
+      //     .padding(.trailing, 4)
+      // } else {
+      //   Image(systemName: "house.fill")
+      //     .font(.caption)
+      // }
 
       VStack(alignment: .leading, spacing: 0) {
-        Text(shouldShow ? getStatusText(apiState) : "Home")
+        Text(shouldShow ? getStatusText(apiState) : "Your chats")
           .font(.title3)
           .fontWeight(.semibold)
           .contentTransition(.numericText())
@@ -97,7 +100,7 @@ struct HomeToolbarContent: ToolbarContent {
     Button {
       nav.push(.settings)
     } label: {
-      Image(systemName: "gearshape")
+      Image(systemName: "gearshape.fill")
         .tint(Color.secondary)
         .contentShape(Rectangle())
     }
@@ -114,14 +117,14 @@ struct Spinner: View {
   var size: CGFloat = 50
 
   var gradient: LinearGradient {
-    if let secondaryColor = secondaryColor {
-      return LinearGradient(
+    if let secondaryColor {
+      LinearGradient(
         gradient: Gradient(colors: [color, secondaryColor]),
         startPoint: .topLeading,
         endPoint: .bottomTrailing
       )
     } else {
-      return LinearGradient(
+      LinearGradient(
         gradient: Gradient(colors: [color, color.opacity(0.7)]),
         startPoint: .topLeading,
         endPoint: .bottomTrailing

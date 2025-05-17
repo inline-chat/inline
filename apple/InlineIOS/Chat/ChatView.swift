@@ -119,6 +119,7 @@ struct ChatView: View {
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
+    .toolbar(.hidden, for: .tabBar)
     .toolbar {
       ToolbarItem(placement: .principal) {
         Button(action: {

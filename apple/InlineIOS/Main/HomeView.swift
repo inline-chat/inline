@@ -6,28 +6,6 @@ import Logger
 import SwiftUI
 import UIKit
 
-private enum Tabs {
-  case chats
-  case archived
-  case spaces
-
-  var title: String {
-    switch self {
-      case .chats: "Chats"
-      case .archived: "Archived"
-      case .spaces: "Spaces"
-    }
-  }
-
-  var icon: String {
-    switch self {
-      case .chats: "bubble.left.and.bubble.right.fill"
-      case .archived: "archivebox.fill"
-      case .spaces: "building.2.fill"
-    }
-  }
-}
-
 struct HomeView: View {
   // MARK: - Environment
 
@@ -51,24 +29,16 @@ struct HomeView: View {
   @State private var searchResults: [UserInfo] = []
   @State private var isSearchingState = false
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
-  @State private var selectedTab: Tabs = .chats
 
   var chatItems: [HomeChatItem] {
     home.chats.filter {
-      selectedTab == .chats ?
-        ($0.dialog.archived == nil || $0.dialog.archived == false) :
-        $0.dialog.archived == true
+      $0.dialog.archived == nil || $0.dialog.archived == false
     }.sorted { (item1: HomeChatItem, item2: HomeChatItem) in
       let pinned1 = item1.dialog.pinned ?? false
       let pinned2 = item2.dialog.pinned ?? false
       if pinned1 != pinned2 { return pinned1 }
       return item1.message?.date ?? item1.chat?.date ?? Date.now > item2.message?.date ?? item2.chat?.date ?? Date.now
     }
-  }
-
-  private func playTabHaptic() {
-    let generator = UIImpactFeedbackGenerator(style: .soft)
-    generator.impactOccurred(intensity: 0.5)
   }
 
   var body: some View {
@@ -78,95 +48,63 @@ struct HomeView: View {
           if !searchResults.isEmpty {
             searchResultsView
           } else {
-            switch selectedTab {
-              case .chats, .archived:
-                ChatListView(
-                  items: chatItems,
-                  isArchived: selectedTab == .archived,
-                  onItemTap: { item in
-                    if let user = item.user {
-                      nav.push(.chat(peer: .user(id: user.user.id)))
-                    } else if let chat = item.chat {
-                      nav.push(.chat(peer: .thread(id: chat.id)))
-                    }
-                  },
-                  onArchive: { item in
-                    Task {
-                      if let user = item.user {
-                        try await dataManager.updateDialog(
-                          peerId: .user(id: user.user.id),
-                          archived: selectedTab == .chats
-                        )
-                      } else if let chat = item.chat {
-                        try await dataManager.updateDialog(
-                          peerId: .thread(id: chat.id),
-                          archived: selectedTab == .chats
-                        )
-                      }
-                    }
-                  },
-                  onPin: { item in
-                    Task {
-                      if let user = item.user {
-                        try await dataManager.updateDialog(
-                          peerId: .user(id: user.user.id),
-                          pinned: !(item.dialog.pinned ?? false)
-                        )
-                      } else if let chat = item.chat {
-                        try await dataManager.updateDialog(
-                          peerId: .thread(id: chat.id),
-                          pinned: !(item.dialog.pinned ?? false)
-                        )
-                      }
-                    }
-                  },
-                  onRead: { item in
-                    Task {
-                      UnreadManager.shared.readAll(item.dialog.peerId, chatId: item.chat?.id ?? 0)
-                    }
-                  }
-                )
-              case .spaces:
-                EmptyView()
-                List(home.spaces.sorted(by: { s1, s2 in
-                  s1.space.date > s2.space.date
-                })) { spaceItem in
-                  Button(action: {
-                    nav.push(.space(id: spaceItem.space.id))
-                  }) {
-                    HStack {
-                      SpaceAvatar(space: spaceItem.space, size: 34)
-                      Text(spaceItem.space.nameWithoutEmoji)
-                        .foregroundColor(.primary)
-                    }
+            ChatListView(
+              items: chatItems,
+              isArchived: false,
+              onItemTap: { item in
+                if let user = item.user {
+                  nav.push(.chat(peer: .user(id: user.user.id)))
+                } else if let chat = item.chat {
+                  nav.push(.chat(peer: .thread(id: chat.id)))
+                }
+              },
+              onArchive: { item in
+                Task {
+                  if let user = item.user {
+                    try await dataManager.updateDialog(
+                      peerId: .user(id: user.user.id),
+                      archived: true
+                    )
+                  } else if let chat = item.chat {
+                    try await dataManager.updateDialog(
+                      peerId: .thread(id: chat.id),
+                      archived: true
+                    )
                   }
                 }
-                .listStyle(.plain)
-            }
+              },
+              onPin: { item in
+                Task {
+                  if let user = item.user {
+                    try await dataManager.updateDialog(
+                      peerId: .user(id: user.user.id),
+                      pinned: !(item.dialog.pinned ?? false)
+                    )
+                  } else if let chat = item.chat {
+                    try await dataManager.updateDialog(
+                      peerId: .thread(id: chat.id),
+                      pinned: !(item.dialog.pinned ?? false)
+                    )
+                  }
+                }
+              },
+              onRead: { item in
+                Task {
+                  UnreadManager.shared.readAll(item.dialog.peerId, chatId: item.chat?.id ?? 0)
+                }
+              }
+            )
           }
         }
         .overlay {
           SearchedView(textIsEmpty: text.isEmpty, isSearchResultsEmpty: searchResults.isEmpty)
         }
       }
-      .id(selectedTab)
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden()
     .toolbar {
       HomeToolbarContent()
-      ToolbarItem(placement: .bottomBar) {
-        BottomTabBar(
-          tabs: [Tabs.archived, .chats, .spaces],
-          selected: selectedTab,
-          onSelect: { tab in
-            playTabHaptic()
-            withAnimation(.snappy(duration: 0.1)) {
-              selectedTab = tab
-            }
-          }
-        )
-      }
     }
     .searchable(text: $text, prompt: "Find")
     .onChange(of: text) { _, newValue in
@@ -313,33 +251,5 @@ struct SearchedView: View {
         .transition(.opacity)
       }
     }
-  }
-}
-
-private struct BottomTabBar: View {
-  let tabs: [Tabs]
-  let selected: Tabs
-  let onSelect: (Tabs) -> Void
-  var body: some View {
-    HStack(spacing: 0) {
-      ForEach(tabs, id: \.self) { tab in
-        VStack {
-          Image(
-            systemName: tab == .chats ? "bubble.left.and.bubble.right.fill" : tab == .archived ? "archivebox.fill" :
-              "building.2.fill"
-          )
-          .font(.system(size: 20, weight: .semibold))
-          .foregroundColor(selected == tab ? Color(ThemeManager.shared.selected.accent) : Color(.systemGray4))
-          .frame(width: 100, height: 36)
-          .animation(.bouncy(duration: 0.08), value: selected == tab)
-          .contentShape(Rectangle())
-        }
-        .frame(maxWidth: .infinity)
-        .onTapGesture {
-          onSelect(tab)
-        }
-      }
-    }
-    .frame(maxWidth: .infinity)
   }
 }

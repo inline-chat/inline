@@ -100,6 +100,7 @@ struct SettingsView: View {
 
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
+    .toolbar(.hidden, for: .tabBar)
     .toolbar {
       ToolbarItem(id: "settings", placement: .principal) {
         HStack {
