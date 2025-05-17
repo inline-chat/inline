@@ -196,6 +196,35 @@ message Message {
 
   // Whether the message is a sticker
   optional bool is_sticker = 15;
+
+  // Rich text entities
+  repeated MessageEntity entities = 16;
+}
+
+message MessageEntities { repeated MessageEntity entities = 1; }
+
+message MessageEntity {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_MENTION = 1;
+    TYPE_URL = 2;
+    TYPE_TEXT_URL = 3;
+    TYPE_EMAIL = 4;
+    TYPE_BOLD = 5;
+    TYPE_ITALIC = 6;
+  }
+
+  Type type = 1;
+  int64 offset = 2;
+  int64 length = 3;
+
+  message MessageEntityMention { int64 user_id = 1; }
+  message MessageEntityTextUrl { string url = 1; }
+
+  oneof entity {
+    MessageEntityMention mention = 4;
+    MessageEntityTextUrl text_url = 5;
+  }
 }
 
 message MessageReactions {

@@ -531,6 +531,107 @@ export interface Message {
      * @generated from protobuf field: optional bool is_sticker = 15;
      */
     isSticker?: boolean;
+    /**
+     * Rich text entities
+     *
+     * @generated from protobuf field: repeated MessageEntity entities = 16;
+     */
+    entities: MessageEntity[];
+}
+/**
+ * @generated from protobuf message MessageEntities
+ */
+export interface MessageEntities {
+    /**
+     * @generated from protobuf field: repeated MessageEntity entities = 1;
+     */
+    entities: MessageEntity[];
+}
+/**
+ * @generated from protobuf message MessageEntity
+ */
+export interface MessageEntity {
+    /**
+     * @generated from protobuf field: MessageEntity.Type type = 1;
+     */
+    type: MessageEntity_Type;
+    /**
+     * @generated from protobuf field: int64 offset = 2;
+     */
+    offset: bigint;
+    /**
+     * @generated from protobuf field: int64 length = 3;
+     */
+    length: bigint;
+    /**
+     * @generated from protobuf oneof: entity
+     */
+    entity: {
+        oneofKind: "mention";
+        /**
+         * @generated from protobuf field: MessageEntity.MessageEntityMention mention = 4;
+         */
+        mention: MessageEntity_MessageEntityMention;
+    } | {
+        oneofKind: "textUrl";
+        /**
+         * @generated from protobuf field: MessageEntity.MessageEntityTextUrl text_url = 5;
+         */
+        textUrl: MessageEntity_MessageEntityTextUrl;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message MessageEntity.MessageEntityMention
+ */
+export interface MessageEntity_MessageEntityMention {
+    /**
+     * @generated from protobuf field: int64 user_id = 1;
+     */
+    userId: bigint;
+}
+/**
+ * @generated from protobuf message MessageEntity.MessageEntityTextUrl
+ */
+export interface MessageEntity_MessageEntityTextUrl {
+    /**
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
+}
+/**
+ * @generated from protobuf enum MessageEntity.Type
+ */
+export enum MessageEntity_Type {
+    /**
+     * @generated from protobuf enum value: TYPE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: TYPE_MENTION = 1;
+     */
+    MENTION = 1,
+    /**
+     * @generated from protobuf enum value: TYPE_URL = 2;
+     */
+    URL = 2,
+    /**
+     * @generated from protobuf enum value: TYPE_TEXT_URL = 3;
+     */
+    TEXT_URL = 3,
+    /**
+     * @generated from protobuf enum value: TYPE_EMAIL = 4;
+     */
+    EMAIL = 4,
+    /**
+     * @generated from protobuf enum value: TYPE_BOLD = 5;
+     */
+    BOLD = 5,
+    /**
+     * @generated from protobuf enum value: TYPE_ITALIC = 6;
+     */
+    ITALIC = 6
 }
 /**
  * @generated from protobuf message MessageReactions
@@ -3814,7 +3915,8 @@ class Message$Type extends MessageType<Message> {
             { no: 12, name: "grouped_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 13, name: "attachments", kind: "message", T: () => MessageAttachments },
             { no: 14, name: "reactions", kind: "message", T: () => MessageReactions },
-            { no: 15, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 15, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 16, name: "entities", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => MessageEntity }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -3824,6 +3926,7 @@ class Message$Type extends MessageType<Message> {
         message.chatId = 0n;
         message.out = false;
         message.date = 0n;
+        message.entities = [];
         if (value !== undefined)
             reflectionMergePartial<Message>(this, message, value);
         return message;
@@ -3877,6 +3980,9 @@ class Message$Type extends MessageType<Message> {
                     break;
                 case /* optional bool is_sticker */ 15:
                     message.isSticker = reader.bool();
+                    break;
+                case /* repeated MessageEntity entities */ 16:
+                    message.entities.push(MessageEntity.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -3935,6 +4041,9 @@ class Message$Type extends MessageType<Message> {
         /* optional bool is_sticker = 15; */
         if (message.isSticker !== undefined)
             writer.tag(15, WireType.Varint).bool(message.isSticker);
+        /* repeated MessageEntity entities = 16; */
+        for (let i = 0; i < message.entities.length; i++)
+            MessageEntity.internalBinaryWrite(message.entities[i], writer.tag(16, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3945,6 +4054,231 @@ class Message$Type extends MessageType<Message> {
  * @generated MessageType for protobuf message Message
  */
 export const Message = new Message$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntities$Type extends MessageType<MessageEntities> {
+    constructor() {
+        super("MessageEntities", [
+            { no: 1, name: "entities", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => MessageEntity }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntities>): MessageEntities {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.entities = [];
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntities>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntities): MessageEntities {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated MessageEntity entities */ 1:
+                    message.entities.push(MessageEntity.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntities, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated MessageEntity entities = 1; */
+        for (let i = 0; i < message.entities.length; i++)
+            MessageEntity.internalBinaryWrite(message.entities[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntities
+ */
+export const MessageEntities = new MessageEntities$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntity$Type extends MessageType<MessageEntity> {
+    constructor() {
+        super("MessageEntity", [
+            { no: 1, name: "type", kind: "enum", T: () => ["MessageEntity.Type", MessageEntity_Type, "TYPE_"] },
+            { no: 2, name: "offset", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "length", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "mention", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityMention },
+            { no: 5, name: "text_url", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityTextUrl }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntity>): MessageEntity {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.type = 0;
+        message.offset = 0n;
+        message.length = 0n;
+        message.entity = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntity>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntity): MessageEntity {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* MessageEntity.Type type */ 1:
+                    message.type = reader.int32();
+                    break;
+                case /* int64 offset */ 2:
+                    message.offset = reader.int64().toBigInt();
+                    break;
+                case /* int64 length */ 3:
+                    message.length = reader.int64().toBigInt();
+                    break;
+                case /* MessageEntity.MessageEntityMention mention */ 4:
+                    message.entity = {
+                        oneofKind: "mention",
+                        mention: MessageEntity_MessageEntityMention.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).mention)
+                    };
+                    break;
+                case /* MessageEntity.MessageEntityTextUrl text_url */ 5:
+                    message.entity = {
+                        oneofKind: "textUrl",
+                        textUrl: MessageEntity_MessageEntityTextUrl.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).textUrl)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntity, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* MessageEntity.Type type = 1; */
+        if (message.type !== 0)
+            writer.tag(1, WireType.Varint).int32(message.type);
+        /* int64 offset = 2; */
+        if (message.offset !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.offset);
+        /* int64 length = 3; */
+        if (message.length !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.length);
+        /* MessageEntity.MessageEntityMention mention = 4; */
+        if (message.entity.oneofKind === "mention")
+            MessageEntity_MessageEntityMention.internalBinaryWrite(message.entity.mention, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* MessageEntity.MessageEntityTextUrl text_url = 5; */
+        if (message.entity.oneofKind === "textUrl")
+            MessageEntity_MessageEntityTextUrl.internalBinaryWrite(message.entity.textUrl, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntity
+ */
+export const MessageEntity = new MessageEntity$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntity_MessageEntityMention$Type extends MessageType<MessageEntity_MessageEntityMention> {
+    constructor() {
+        super("MessageEntity.MessageEntityMention", [
+            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntity_MessageEntityMention>): MessageEntity_MessageEntityMention {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntity_MessageEntityMention>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntity_MessageEntityMention): MessageEntity_MessageEntityMention {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntity_MessageEntityMention, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.userId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntity.MessageEntityMention
+ */
+export const MessageEntity_MessageEntityMention = new MessageEntity_MessageEntityMention$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntity_MessageEntityTextUrl$Type extends MessageType<MessageEntity_MessageEntityTextUrl> {
+    constructor() {
+        super("MessageEntity.MessageEntityTextUrl", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntity_MessageEntityTextUrl>): MessageEntity_MessageEntityTextUrl {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntity_MessageEntityTextUrl>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntity_MessageEntityTextUrl): MessageEntity_MessageEntityTextUrl {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntity_MessageEntityTextUrl, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntity.MessageEntityTextUrl
+ */
+export const MessageEntity_MessageEntityTextUrl = new MessageEntity_MessageEntityTextUrl$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageReactions$Type extends MessageType<MessageReactions> {
     constructor() {
