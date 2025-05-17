@@ -946,10 +946,14 @@ public struct Message: @unchecked Sendable {
   public mutating func clearIsSticker() {_uniqueStorage()._isSticker = nil}
 
   /// Rich text entities
-  public var entities: [MessageEntity] {
-    get {return _storage._entities}
+  public var entities: MessageEntities {
+    get {return _storage._entities ?? MessageEntities()}
     set {_uniqueStorage()._entities = newValue}
   }
+  /// Returns true if `entities` has been explicitly set.
+  public var hasEntities: Bool {return _storage._entities != nil}
+  /// Clears the value of `entities`. Subsequent reads from it will return its default value.
+  public mutating func clearEntities() {_uniqueStorage()._entities = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4988,7 +4992,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _attachments: MessageAttachments? = nil
     var _reactions: MessageReactions? = nil
     var _isSticker: Bool? = nil
-    var _entities: [MessageEntity] = []
+    var _entities: MessageEntities? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -5052,7 +5056,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 13: try { try decoder.decodeSingularMessageField(value: &_storage._attachments) }()
         case 14: try { try decoder.decodeSingularMessageField(value: &_storage._reactions) }()
         case 15: try { try decoder.decodeSingularBoolField(value: &_storage._isSticker) }()
-        case 16: try { try decoder.decodeRepeatedMessageField(value: &_storage._entities) }()
+        case 16: try { try decoder.decodeSingularMessageField(value: &_storage._entities) }()
         default: break
         }
       }
@@ -5110,9 +5114,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._isSticker {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 15)
       } }()
-      if !_storage._entities.isEmpty {
-        try visitor.visitRepeatedMessageField(value: _storage._entities, fieldNumber: 16)
-      }
+      try { if let v = _storage._entities {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }

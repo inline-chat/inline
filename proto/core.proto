@@ -198,7 +198,7 @@ message Message {
   optional bool is_sticker = 15;
 
   // Rich text entities
-  repeated MessageEntity entities = 16;
+  optional MessageEntities entities = 16;
 }
 
 message MessageEntities { repeated MessageEntity entities = 1; }
