@@ -72,6 +72,7 @@ struct SidebarItem: View {
     HStack(alignment: .top, spacing: 0) {
       gutter
       avatar
+
       content
     }
     .padding(.vertical, Self.verticalPadding)
@@ -102,6 +103,16 @@ struct SidebarItem: View {
         Label("Archive", systemImage: "archivebox.fill")
       }
       .tint(.purple)
+
+      Button {
+        if let peerId {
+          Task(priority: .userInitiated) {
+            try await DataManager.shared.updateDialog(peerId: peerId, pinned: !pinned)
+          }
+        }
+      } label: {
+        Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash.fill" : "pin.fill")
+      }.tint(.orange)
     }
 
     // Listeners
@@ -206,8 +217,8 @@ struct SidebarItem: View {
        let spaceName
     {
       Text(spaceName)
-        //.font(Self.subtitleFont)
-        //.foregroundColor(Self.subtitleColor)
+        // .font(Self.subtitleFont)
+        // .foregroundColor(Self.subtitleColor)
         .font(Self.tertiaryFont)
         .foregroundColor(Self.tertiaryColor)
         .lineLimit(1)
@@ -265,7 +276,11 @@ struct SidebarItem: View {
   @ViewBuilder
   var gutter: some View {
     HStack(spacing: 0) {
-      unreadIndicator
+      if unreadCount > 0 {
+        unreadIndicator
+      } else if pinned {
+        pinnedIndicator
+      }
     }
     .animation(.fastFeedback, value: unreadCount > 0)
     .frame(width: Self.gutterWidth, height: Self.avatarSize)
@@ -273,11 +288,17 @@ struct SidebarItem: View {
 
   @ViewBuilder
   var unreadIndicator: some View {
-    if unreadCount > 0 {
-      Circle()
-        .fill(Color.accentColor)
-        .frame(width: 5, height: 5)
-    }
+    Circle()
+      .fill(Color.accentColor)
+      .frame(width: 5, height: 5)
+  }
+
+  @ViewBuilder
+  var pinnedIndicator: some View {
+    Image(systemName: "pin.fill")
+      .font(.system(size: 8))
+      .foregroundColor(Color.secondary.opacity(0.5))
+      .frame(width: 5, height: 5)
   }
 
   @ViewBuilder
@@ -397,6 +418,10 @@ struct SidebarItem: View {
     colorScheme == .dark ? .white.opacity(0.1) : .gray.opacity(0.1)
   }
 
+  var pinned: Bool {
+    dialog?.pinned ?? false
+  }
+
   // MARK: - Private Methods
 
   private func setComposeAction() {
@@ -430,6 +455,12 @@ struct SidebarItem: View {
     return dialog
   }
 
+  var pinnedDialog: Dialog {
+    var dialog = Dialog(optimisticForUserId: User.previewUserId)
+    dialog.pinned = true
+    return dialog
+  }
+
   List {
     // Only name
     Section("only name") {
@@ -454,6 +485,15 @@ struct SidebarItem: View {
       SidebarItem(
         type: .user(UserInfo.preview, chat: nil),
         dialog: dialogWithUnread,
+        lastMessage: Message.preview,
+        selected: false
+      )
+    }
+    
+    Section("pinned with last message") {
+      SidebarItem(
+        type: .user(UserInfo.preview, chat: nil),
+        dialog: pinnedDialog,
         lastMessage: Message.preview,
         selected: false
       )
