@@ -1,9 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "" : {
-
-    },
     "@%@" : {
 
     },
@@ -140,7 +137,10 @@
     "Appearance" : {
 
     },
-    "Archived chats" : {
+    "Archived" : {
+
+    },
+    "Archived Chats" : {
 
     },
     "Cancel" : {
@@ -182,6 +182,9 @@
       }
     },
     "Chat Type" : {
+
+    },
+    "Chats" : {
 
     },
     "Clear" : {
@@ -375,6 +378,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "刪除空間"
+          }
+        }
+      }
+    },
+    "Dismiss" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉"
           }
         }
       }
@@ -670,6 +683,9 @@
 
     },
     "Remove" : {
+
+    },
+    "Reset Translation Alerts" : {
 
     },
     "Search by username" : {
