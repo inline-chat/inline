@@ -438,6 +438,13 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("user photo field") { db in
+      try db.alter(table: "user") { t in
+        t.add(column: "profileCdnUrl", .text)
+        t.add(column: "profileLocalPath", .text)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

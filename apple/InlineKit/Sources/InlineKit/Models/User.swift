@@ -2,6 +2,7 @@ import Auth
 import Foundation
 import GRDB
 import InlineProtocol
+import Logger
 
 public struct ApiUser: Codable, Hashable, Sendable {
   public var id: Int64
@@ -44,8 +45,9 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var online: Bool?
   public var lastOnline: Date?
   public var timeZone: String?
-
   public var profileFileId: String?
+  public var profileCdnUrl: String?
+  public var profileLocalPath: String?
 
   // Add hasMany for all files (including historical profile photos)
   public static let photos = hasMany(
@@ -181,12 +183,16 @@ public extension ApiUser {
     let existing = try? User.fetchOne(db, id: id)
     var user = User(from: self)
 
+    var profileCdnUrl: String? = nil
+    var profileLocalPath: String? = nil
+
     // TODO: support clearing photo
-    let file: File? = if let photo = photo?.first {
+    var file: File? = nil
+
+    if let photo = photo?.first {
+      profileCdnUrl = photo.temporaryUrl
       // save file
-      try? File.save(db, apiPhoto: photo, forUserId: user.id)
-    } else {
-      nil
+      file = try? File.save(db, apiPhoto: photo, forUserId: user.id)
     }
 
     // remove old photos except new ones for existing users
@@ -209,11 +215,17 @@ public extension ApiUser {
       user.email = user.email ?? existing.email
       user.pendingSetup = user.pendingSetup ?? existing.pendingSetup
       user.timeZone = user.timeZone ?? existing.timeZone
+      user.profileCdnUrl = profileCdnUrl ?? existing.profileCdnUrl
+      user.profileLocalPath = existing.profileLocalPath
+
       try user.save(db)
       // ... anything else?
     } else {
+      // NEW USER
       // attach main photo
       user.profileFileId = file?.id
+      user.profileCdnUrl = profileCdnUrl
+
       // TODO: handle multiple files
       try user.save(db)
     }
@@ -247,6 +259,10 @@ public extension User {
           : nil
       }
     }
+
+    if user.hasProfilePhoto {
+      profileCdnUrl = user.profilePhoto.hasCdnURL ? user.profilePhoto.cdnURL : nil
+    }
   }
 
   static func save(
@@ -264,6 +280,9 @@ public extension User {
       user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
       user.email = user.email ?? existing.email
       user.timeZone = user.timeZone ?? existing.timeZone
+      user.profileCdnUrl = user.profileCdnUrl ?? existing.profileCdnUrl
+      user.profileLocalPath = existing.profileLocalPath
+
       // don't preserve pendingSetup
       try user.save(db)
     } else {
@@ -273,5 +292,46 @@ public extension User {
     }
 
     return user
+  }
+}
+
+// MARK: - Photo helpers
+
+public extension User {
+  private static func getProfileCacheDirectory() -> URL {
+    FileHelpers.getLocalCacheDirectory(for: .photos)
+  }
+
+  func getLocalURL() -> URL? {
+    guard let profileLocalPath else {
+      return nil
+    }
+    return
+      User.getProfileCacheDirectory()
+        .appending(path: profileLocalPath)
+  }
+
+  func getRemoteURL() -> URL? {
+    guard let profileCdnUrl else {
+      return nil
+    }
+    return URL(string: profileCdnUrl)
+  }
+
+  static func cacheImage(userId: Int64, image: PlatformImage) async throws {
+    Log.shared.debug("Trying to cache image")
+
+    // Save image locally when loaded
+    let directory = User.getProfileCacheDirectory()
+    let fileName = "User\(UUID().uuidString).jpg"
+    if let (localPath, _) = try? image.save(
+      to: directory, withName: fileName, format: .jpeg
+    ) {
+      _ = try? await AppDatabase.shared.dbWriter.write { db in
+        try User.filter(id: userId).updateAll(db, [
+          Column("profileLocalPath").set(to: localPath),
+        ])
+      }
+    }
   }
 }
