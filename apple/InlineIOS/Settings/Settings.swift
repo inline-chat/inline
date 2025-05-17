@@ -93,6 +93,23 @@ struct SettingsView: View {
           .padding(.vertical, 2)
         }
         .disabled(isClearing)
+
+        Button {
+          TranslationAlertDismiss.shared.resetAllDismissStates()
+        } label: {
+          HStack {
+            Image(systemName: "bell.badge.slash.fill")
+              .foregroundColor(.white)
+              .frame(width: 25, height: 25)
+              .background(Color.orange)
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            Text("Reset Translation Alerts")
+              .foregroundColor(.primary)
+              .padding(.leading, 4)
+            Spacer()
+          }
+          .padding(.vertical, 2)
+        }
       }
 
       LogoutSection()

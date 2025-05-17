@@ -146,14 +146,30 @@ struct ChatView: View {
             Text(
               "Translate to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
             )
-            Button("Translate") {
-              isTranslationEnabled = true
-              TranslationState.shared.setTranslationEnabled(true, for: fullChatViewModel.peer)
-              showTranslationPopover = false
-            }
+            HStack(spacing: 12) {
+              Button("Translate") {
+                isTranslationEnabled = true
+                TranslationState.shared.setTranslationEnabled(true, for: fullChatViewModel.peer)
+                showTranslationPopover = false
+              }
+
+              if needsTranslation {
+                Button("Dismiss") {
+                  TranslationAlertDismiss.shared.dismissForPeer(fullChatViewModel.peer)
+                  showTranslationPopover = false
+                }
+                .foregroundStyle(.tertiary)
+              }
+
+            }.padding(.top, 4)
           }
           .padding()
           .presentationCompactAdaptation(.popover)
+        }
+        .onChange(of: showTranslationPopover) { _, isPresented in
+          if !isPresented {
+            needsTranslation = false
+          }
         }
       }
 
