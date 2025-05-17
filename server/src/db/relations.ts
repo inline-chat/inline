@@ -110,6 +110,14 @@ export const relations = defineRelations(
       }),
     },
 
+    users: {
+      photoFile: r.one.files({
+        from: r.users.photoFileId,
+        to: r.files.id,
+        optional: true,
+      }),
+    },
+
     // Message relations - handles message content and metadata
     messages: {
       // Core message relations

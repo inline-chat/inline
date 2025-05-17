@@ -19,6 +19,7 @@ import {
   type DbChat,
   type DbDialog,
   type DbUser,
+  type DbFile,
 } from "@in/server/db/schema"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
@@ -40,7 +41,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
 
   // Buckets for results
   let dialogsList: DbDialog[] = []
-  let usersList: DbUser[] = []
+  let usersList: (DbUser & { photoFile?: DbFile | null })[] = []
   let chatsList: DbChat[] = []
   let messagesList: Message[] = []
   let spacesList: DbSpace[] = []
@@ -128,13 +129,21 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
         },
 
         with: {
-          peerUser: true,
+          peerUser: {
+            with: {
+              photoFile: true,
+            },
+          },
         },
       },
 
       lastMsg: {
         with: {
-          from: true,
+          from: {
+            with: {
+              photoFile: true,
+            },
+          },
           file: true,
           photo: {
             with: {
@@ -254,7 +263,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
 
   const encodedChats = chatsList.map((chat) => Encoders.chat(chat, { encodingForUserId: currentUserId }))
   const encodedSpaces = spacesList.map((space) => Encoders.space(space, { encodingForUserId: currentUserId }))
-  const encodedUsers = usersList.map((user) => Encoders.user({ user }))
+  const encodedUsers = usersList.map((user) => Encoders.user({ user, photoFile: user.photoFile ?? undefined }))
 
   return {
     chats: encodedChats,
