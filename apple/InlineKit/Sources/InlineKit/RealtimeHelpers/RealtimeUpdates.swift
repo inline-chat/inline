@@ -332,8 +332,7 @@ extension InlineProtocol.UpdateNewChat {
 
 extension InlineProtocol.UpdateSpaceMemberAdd {
   func apply(_ db: Database) throws {
-    let user = User(from: user)
-    try user.save(db)
+    let _ = try User.save(db, user: user)
     let member = Member(from: member)
     try member.save(db)
   }
