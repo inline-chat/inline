@@ -44,21 +44,23 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   // MARK: - Published Properties
 
-  @Published var navigationPath = NavigationPath()
   @Published var activeSheet: Destination?
   @Published var activeDestination: Destination?
+  @Published var selectedTab: TabItem = .chats
+
+  // Navigation paths for each tab
+  @Published var chatsPath: [Destination] = []
+  @Published var archivedPath: [Destination] = []
+  @Published var spacesPath: [Destination] = []
 
   // MARK: - Computed Properties
 
-  var currentStack: NavigationPath {
-    navigationPath
-  }
-
-  var currentStackBinding: Binding<NavigationPath> {
-    Binding(
-      get: { self.navigationPath },
-      set: { self.navigationPath = $0 }
-    )
+  var currentPath: [Destination] {
+    switch selectedTab {
+      case .chats: chatsPath
+      case .archived: archivedPath
+      case .spaces: spacesPath
+    }
   }
 
   // MARK: - Navigation Actions
@@ -67,33 +69,91 @@ class Navigation: ObservableObject, @unchecked Sendable {
     loadNavigationState()
   }
 
-  // MARK: - Persistence
+  // MARK: - View Builders
 
-  @Published var pathComponents: [Destination] = [] {
-    didSet {
-      saveNavigationState()
+  @ViewBuilder
+  func destinationView(for destination: Destination) -> some View {
+    switch destination {
+      case let .chat(peer):
+        ChatView(peer: peer)
+      case let .space(id):
+        SpaceView(spaceId: id)
+      case .settings:
+        SettingsView()
+      case .main:
+        HomeView()
+      case .archivedChats:
+        ArchivedChatsView()
+      case .createSpace:
+        CreateSpace()
+      case let .createThread(spaceId):
+        CreateChatIOSView(spaceId: spaceId)
+      case .alphaSheet:
+        AlphaSheet()
+      case let .chatInfo(chatItem):
+        ChatInfoView(chatItem: chatItem)
     }
   }
 
+  @ViewBuilder
+  func sheetContent(for destination: Destination) -> some View {
+    switch destination {
+      case let .createThread(spaceId):
+        CreateChatIOSView(spaceId: spaceId)
+          .presentationCornerRadius(18)
+      case .createSpace:
+        CreateSpace()
+          .presentationCornerRadius(18)
+      case .alphaSheet:
+        AlphaSheet()
+      default:
+        EmptyView()
+    }
+  }
+
+  // MARK: - Persistence
+
   func saveNavigationState() {
-    let pathComponents_ = pathComponents
+    let chatsPath_ = chatsPath
+    let archivedPath_ = archivedPath
+    let spacesPath_ = spacesPath
     let activeSheet_ = activeSheet
+    let selectedTab_ = selectedTab
 
     Task.detached(priority: .background) {
-      if let encodedPath = try? JSONEncoder().encode(pathComponents_) {
-        UserDefaults.standard.set(encodedPath, forKey: Self.pathKey)
+      if let encodedChatsPath = try? JSONEncoder().encode(chatsPath_) {
+        UserDefaults.standard.set(encodedChatsPath, forKey: "chatsPath")
+      }
+      if let encodedArchivedPath = try? JSONEncoder().encode(archivedPath_) {
+        UserDefaults.standard.set(encodedArchivedPath, forKey: "archivedPath")
+      }
+      if let encodedSpacesPath = try? JSONEncoder().encode(spacesPath_) {
+        UserDefaults.standard.set(encodedSpacesPath, forKey: "spacesPath")
       }
       if let encodedSheet = try? JSONEncoder().encode(activeSheet_) {
         UserDefaults.standard.set(encodedSheet, forKey: Self.sheetKey)
       }
+      UserDefaults.standard.set(selectedTab_.rawValue, forKey: "selectedTab")
     }
   }
 
   func loadNavigationState() {
-    if let pathData = UserDefaults.standard.data(forKey: Self.pathKey),
-       let decodedPath = try? JSONDecoder().decode([Destination].self, from: pathData)
+    if let chatsPathData = UserDefaults.standard.data(forKey: "chatsPath"),
+       let decodedChatsPath = try? JSONDecoder().decode([Destination].self, from: chatsPathData)
     {
-      pathComponents = decodedPath
+      chatsPath = decodedChatsPath
+    }
+
+    if let archivedPathData = UserDefaults.standard.data(forKey: "archivedPath"),
+       let decodedArchivedPath = try? JSONDecoder().decode([Destination].self, from: archivedPathData)
+    {
+      archivedPath = decodedArchivedPath
+    }
+
+    if let spacesPathData = UserDefaults.standard.data(forKey: "spacesPath"),
+       let decodedSpacesPath = try? JSONDecoder().decode([Destination].self, from: spacesPathData)
+    {
+      spacesPath = decodedSpacesPath
     }
 
     if let sheetData = UserDefaults.standard.data(forKey: Self.sheetKey),
@@ -101,33 +161,49 @@ class Navigation: ObservableObject, @unchecked Sendable {
     {
       activeSheet = decodedSheet
     }
+
+    if let tabRawValue = UserDefaults.standard.integer(forKey: "selectedTab") as Int?,
+       let tab = TabItem(rawValue: tabRawValue)
+    {
+      selectedTab = tab
+    }
   }
 
-  // MARK: - Navigation Actions (updated to use pathComponents)
+  // MARK: - Navigation Actions
 
   func push(_ destination: Destination) {
-    // TODO: Handle sheets in aother func
     switch destination {
       case .createSpace, .createThread, .alphaSheet:
         activeSheet = destination
       default:
-        if pathComponents.last == destination {
-          break
-        } else {
-          pathComponents.append(destination)
+        switch selectedTab {
+          case .chats:
+            if chatsPath.last == destination { return }
+            chatsPath.append(destination)
+          case .archived:
+            if archivedPath.last == destination { return }
+            archivedPath.append(destination)
+          case .spaces:
+            if spacesPath.last == destination { return }
+            spacesPath.append(destination)
         }
+        saveNavigationState()
     }
   }
 
   func navigateToChatFromNotification(peer: Peer) {
-    if let spaceDestination = pathComponents.first(where: { destination in
+    if let spaceDestination = currentPath.first(where: { destination in
       if case .space = destination {
         return true
       }
       return false
     }) {
       if case let .space(id: spaceId) = spaceDestination {
-        pathComponents = [.space(id: spaceId)]
+        switch selectedTab {
+          case .chats: chatsPath = [.space(id: spaceId)]
+          case .archived: archivedPath = [.space(id: spaceId)]
+          case .spaces: spacesPath = [.space(id: spaceId)]
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
           self.push(.chat(peer: peer))
         }
@@ -142,32 +218,70 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   func popPush(_ destination: Destination) {
     activeDestination = destination
-    pathComponents = [destination]
+    switch selectedTab {
+      case .chats: chatsPath = [destination]
+      case .archived: archivedPath = [destination]
+      case .spaces: spacesPath = [destination]
+    }
+    saveNavigationState()
   }
 
   func popToRoot() {
     DispatchQueue.main.async {
-      self.pathComponents = []
+      switch self.selectedTab {
+        case .chats: self.chatsPath = []
+        case .archived: self.archivedPath = []
+        case .spaces: self.spacesPath = []
+      }
       self.activeSheet = nil
+      self.saveNavigationState()
     }
   }
 
   func pop() {
-    guard !pathComponents.isEmpty else { return }
-    withAnimation(.snappy) {
-      pathComponents.removeLast()
+    switch selectedTab {
+      case .chats:
+        guard !chatsPath.isEmpty else { return }
+        withAnimation(.snappy) {
+          chatsPath.removeLast()
+          saveNavigationState()
+        }
+      case .archived:
+        guard !archivedPath.isEmpty else { return }
+        withAnimation(.snappy) {
+          archivedPath.removeLast()
+          saveNavigationState()
+        }
+      case .spaces:
+        guard !spacesPath.isEmpty else { return }
+        withAnimation(.snappy) {
+          spacesPath.removeLast()
+          saveNavigationState()
+        }
     }
   }
 
   func dismissSheet() {
     activeSheet = nil
+    saveNavigationState()
+  }
+
+  // MARK: - Tab Management
+
+  func switchToTab(_ tab: TabItem) {
+    selectedTab = tab
+    saveNavigationState()
   }
 
   // MARK: - Reset
 
   func reset() {
-    navigationPath = NavigationPath()
+    chatsPath = []
+    archivedPath = []
+    spacesPath = []
     activeSheet = nil
     activeDestination = .main
+    selectedTab = .chats
+    saveNavigationState()
   }
 }

@@ -5,22 +5,6 @@ import Logger
 import SwiftUI
 import UIKit
 
-// MARK: - Models
-
-private enum Tab: String, CaseIterable {
-  case archived = "Archived"
-  case chats = "Chats"
-  case members = "Members"
-
-  var icon: String {
-    switch self {
-      case .archived: "archivebox.fill"
-      case .chats: "bubble.left.and.bubble.right.fill"
-      case .members: "person.2.fill"
-    }
-  }
-}
-
 // MARK: - SpaceView
 
 struct SpaceView: View {
@@ -32,8 +16,20 @@ struct SpaceView: View {
   @EnvironmentObject private var data: DataManager
   @EnvironmentStateObject private var viewModel: FullSpaceViewModel
 
-  @State private var selectedTab: Tab = .chats
   @State private var showAddMemberSheet = false
+  @State private var selectedSegment = 0
+
+  enum Segment: Int, CaseIterable {
+    case chats
+    case members
+
+    var title: String {
+      switch self {
+        case .chats: "Chats"
+        case .members: "Members"
+      }
+    }
+  }
 
   init(spaceId: Int64) {
     self.spaceId = spaceId
@@ -56,8 +52,15 @@ struct SpaceView: View {
 
   var body: some View {
     VStack(spacing: 0) {
+      Picker("View", selection: $selectedSegment) {
+        ForEach(Segment.allCases, id: \.rawValue) { segment in
+          Text(segment.title).tag(segment.rawValue)
+        }
+      }
+      .pickerStyle(.segmented)
+      .padding()
+
       contentView
-      tabBar
     }
     .navigationBarTitleDisplayMode(.inline)
     .toolbar { toolbarContent }
@@ -73,30 +76,18 @@ struct SpaceView: View {
 
   private var contentView: some View {
     Group {
-      switch selectedTab {
-        case .archived:
-          ArchivedChatsView(type: .space(spaceId: spaceId))
-            .environmentObject(viewModel)
+      switch Segment(rawValue: selectedSegment) {
         case .chats:
           ChatListContent(items: viewModel.filteredChats)
+            .environmentObject(viewModel)
         case .members:
-          MemberListView(members: viewModel.members, viewModel: viewModel)
+          MemberListView(members: viewModel.members)
+            .environmentObject(viewModel)
+        case .none:
+          EmptyView()
       }
     }
-    .id(selectedTab)
-  }
-
-  private var tabBar: some View {
-    HStack(spacing: 0) {
-      ForEach(Tab.allCases, id: \.self) { tab in
-        TabButton(
-          tab: tab,
-          isSelected: selectedTab == tab,
-          action: { selectTab(tab) }
-        )
-      }
-    }
-    .frame(maxWidth: .infinity)
+    .id(selectedSegment)
   }
 
   @ToolbarContentBuilder
@@ -138,13 +129,6 @@ struct SpaceView: View {
   }
 
   // MARK: - Actions
-
-  private func selectTab(_ tab: Tab) {
-    UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.5)
-    withAnimation(.snappy(duration: 0.1)) {
-      selectedTab = tab
-    }
-  }
 
   private func showSpaceActionAlert() {
     let title = isCreator ? "Delete Space" : "Leave Space"
@@ -214,44 +198,9 @@ private struct SpaceHeaderView: View {
   }
 }
 
-private struct TabButton: View {
-  let tab: Tab
-  let isSelected: Bool
-  let action: () -> Void
-
-  var body: some View {
-    VStack {
-      Image(systemName: tab.icon)
-        .font(.system(size: 20, weight: .semibold))
-        .foregroundColor(isSelected ? Color(ThemeManager.shared.selected.accent) : Color(.systemGray4))
-        .frame(width: 100, height: 36)
-        .animation(.bouncy(duration: 0.08), value: isSelected)
-    }
-    .frame(maxWidth: .infinity)
-    .contentShape(Rectangle())
-    .onTapGesture(perform: action)
-  }
-}
-
-private struct ChatListContent: View {
-  let items: [SpaceChatItem]
-
-  var body: some View {
-    List {
-      Section {
-        ForEach(items, id: \.id) { item in
-          ChatItemRow(item: item)
-            .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
-        }
-      }
-    }
-    .listStyle(.plain)
-  }
-}
-
 private struct MemberListView: View {
   let members: [FullMemberItem]
-  let viewModel: FullSpaceViewModel
+  @EnvironmentObject private var viewModel: FullSpaceViewModel
 
   var body: some View {
     List {
@@ -263,6 +212,23 @@ private struct MemberListView: View {
               .unreadCount ?? 0 > 0
           )
           .listRowInsets(.init(top: 9, leading: 12, bottom: 2, trailing: 0))
+        }
+      }
+    }
+    .listStyle(.plain)
+  }
+}
+
+private struct ChatListContent: View {
+  let items: [SpaceChatItem]
+  @EnvironmentObject private var viewModel: FullSpaceViewModel
+
+  var body: some View {
+    List {
+      Section {
+        ForEach(items, id: \.id) { item in
+          ChatItemRow(item: item)
+            .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
         }
       }
     }
@@ -289,7 +255,6 @@ private struct MemberItemRow: View {
         }
         Text(member.userInfo.user.displayName)
           .font(.body)
-        
       }
     }
   }
