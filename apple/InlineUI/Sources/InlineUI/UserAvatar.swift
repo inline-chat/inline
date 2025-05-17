@@ -1,3 +1,4 @@
+import GRDB
 import InlineKit
 import Logger
 import Nuke
@@ -9,7 +10,8 @@ public struct UserAvatar: View, Equatable {
     lhs.firstName == rhs.firstName && lhs.lastName == rhs.lastName && lhs.email == rhs.email
       && lhs.username == rhs.username && lhs.size == rhs.size
       && lhs.ignoresSafeArea == rhs.ignoresSafeArea
-      && lhs.remoteUrl == rhs.remoteUrl // ???
+      // FIXME: This causes flicker because every time we fetch there is a new URL
+      && lhs.remoteUrl == rhs.remoteUrl
       && lhs.fileId == rhs.fileId && lhs.localUrl == rhs.localUrl
   }
 
@@ -19,6 +21,7 @@ public struct UserAvatar: View, Equatable {
   let username: String?
   let size: CGFloat
   let ignoresSafeArea: Bool
+  let userId: Int64
 
   var file: File? = nil
   var fileId: String? = nil
@@ -36,21 +39,25 @@ public struct UserAvatar: View, Equatable {
   }
 
   public init(user: User, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
+    userId = user.id
     firstName = user.firstName
     lastName = user.lastName
     email = user.email
     username = user.username
     self.size = size
+    remoteUrl = user.getRemoteURL()
+    localUrl = user.getLocalURL()
     self.ignoresSafeArea = ignoresSafeArea
     nameForInitials = Self.getNameForInitials(user: user)
   }
 
   public init(userInfo: UserInfo, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
     let user = userInfo.user
+    userId = user.id
     file = userInfo.profilePhoto?.first
     fileId = userInfo.profilePhoto?.first?.id
-    remoteUrl = userInfo.profilePhoto?.first?.getRemoteURL()
-    localUrl = userInfo.profilePhoto?.first?.getLocalURL()
+    remoteUrl = user.getRemoteURL()// ?? userInfo.profilePhoto?.first?.getRemoteURL()
+    localUrl = user.getLocalURL() // ?? userInfo.profilePhoto?.first?.getLocalURL()
     firstName = user.firstName
     lastName = user.lastName
     email = user.email
@@ -61,6 +68,7 @@ public struct UserAvatar: View, Equatable {
   }
 
   public init(apiUser: ApiUser, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
+    userId = apiUser.id
     firstName = apiUser.firstName
     lastName = apiUser.lastName
     email = apiUser.email
@@ -130,22 +138,13 @@ public struct UserAvatar: View, Equatable {
               .task {
                 // don't re-save if already
                 guard localUrl == nil else { return }
+                guard let image = try? state.result?.get().image else { return }
 
-                Log.shared.info("Loaded image, trying to save locally")
-                // Save image locally when loaded
-                if let nsImage = try? state.result?.get().image {
-                  if var file {
-                    let directory = FileHelpers.getDocumentsDirectory()
-                    let fileName = file.fileName ?? ""
-                    if let (pathString, _) = try? nsImage.save(
-                      to: directory, withName: fileName, format: file.imageFormat
-                    ) {
-                      file.localPath = pathString
-                      let file_ = file
-                      try? await AppDatabase.shared.dbWriter.write { db in
-                        try file_.save(db)
-                      }
-                    }
+                Task.detached {
+                  do {
+                    try await User.cacheImage(userId: userId, image: image)
+                  } catch {
+                    Log.shared.error("Failed to cache image", error: error)
                   }
                 }
               }

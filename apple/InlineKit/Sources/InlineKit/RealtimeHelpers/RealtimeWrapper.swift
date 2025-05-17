@@ -287,13 +287,20 @@ public extension Realtime {
     log.trace("getSpaceMembers")
     try await db.dbWriter.write { db in
       for user in result.users {
-        let user = User(from: user)
-        try user.save(db)
+        do {
+          _ = try User.save(db, user: user)
+        } catch {
+          Log.shared.error("Failed to save user", error: error)
+        }
       }
 
       for member in result.members {
-        let member = Member(from: member)
-        try member.save(db)
+        do {
+          let member = Member(from: member)
+          try member.save(db)
+        } catch {
+          Log.shared.error("Failed to save member", error: error)
+        }
       }
     }
     log.trace("getSpaceMembers saved")
@@ -304,7 +311,6 @@ public extension Realtime {
     try await db.dbWriter.write { db in
       do {
         let user = User(from: result.user)
-        // print("user: \(user)")
         try user.save(db)
       } catch {
         Log.shared.error("Failed to save user", error: error)
