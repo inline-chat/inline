@@ -204,15 +204,13 @@ private struct MemberListView: View {
 
   var body: some View {
     List {
-      Section {
-        ForEach(members, id: \.userInfo.user.id) { member in
-          MemberItemRow(
-            member: member,
-            hasUnread: viewModel.filteredMemberChats.first(where: { $0.user?.id == member.userInfo.user.id })?.dialog
-              .unreadCount ?? 0 > 0
-          )
-          .listRowInsets(.init(top: 9, leading: 12, bottom: 2, trailing: 0))
-        }
+      ForEach(members, id: \.userInfo.user.id) { member in
+        MemberItemRow(
+          member: member,
+          hasUnread: viewModel.filteredMemberChats.first(where: { $0.user?.id == member.userInfo.user.id })?.dialog
+            .unreadCount ?? 0 > 0
+        )
+        .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 0))
       }
     }
     .listStyle(.plain)
@@ -225,11 +223,9 @@ private struct ChatListContent: View {
 
   var body: some View {
     List {
-      Section {
-        ForEach(items, id: \.id) { item in
-          ChatItemRow(item: item)
-            .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
-        }
+      ForEach(items, id: \.id) { item in
+        ChatItemRow(item: item)
+          .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
       }
     }
     .listStyle(.plain)
@@ -245,7 +241,7 @@ private struct MemberItemRow: View {
     Button {
       nav.push(.chat(peer: .user(id: member.userInfo.user.id)))
     } label: {
-      HStack(spacing: 9) {
+      HStack(alignment: .center, spacing: 9) {
         HStack(alignment: .center, spacing: 5) {
           Circle()
             .fill(hasUnread ? ColorManager.shared.swiftUIColor : .clear)
