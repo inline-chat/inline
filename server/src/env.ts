@@ -33,6 +33,9 @@ export const LINEAR_CLIENT_ID = process.env["LINEAR_CLIENT_ID"]
 export const LINEAR_CLIENT_SECRET = process.env["LINEAR_CLIENT_SECRET"]
 export const WANVER_TRANSLATION_CONTEXT = process.env["WANVER_TRANSLATION_CONTEXT"]
 
+export const NOTION_CLIENT_ID = process.env["NOTION_CLIENT_ID"]
+export const NOTION_CLIENT_SECRET = process.env["NOTION_CLIENT_SECRET"]
+
 // Check required variables
 const requiredProductionVariables = [
   "DATABASE_URL",
@@ -73,6 +76,8 @@ const optionalVariables = [
   "LINEAR_CLIENT_ID",
   "LINEAR_CLIENT_SECRET",
   "WANVER_TRANSLATION_CONTEXT",
+  "NOTION_CLIENT_ID",
+  "NOTION_CLIENT_SECRET",
 ]
 
 optionalVariables.forEach((variable) => {
