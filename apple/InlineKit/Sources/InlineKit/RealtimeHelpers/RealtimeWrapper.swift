@@ -447,8 +447,7 @@ public extension Realtime {
       // Save users
       for user in result.users {
         do {
-          let userModel = User(from: user)
-          try userModel.save(db)
+          _ = try User.save(db, user: user)
         } catch {
           Log.shared.error("Failed to save user", error: error)
         }
