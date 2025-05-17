@@ -14,7 +14,7 @@ struct ChatListView: View {
       EmptyChatsView(isArchived: isArchived)
     } else {
       List {
-        ForEach(items, id: \.id) { item in
+        ForEach(items, id: \.self) { item in
           ChatListItem(
             item: item,
             onTap: { onItemTap(item) },

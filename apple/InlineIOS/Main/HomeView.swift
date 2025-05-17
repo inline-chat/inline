@@ -32,7 +32,7 @@ struct HomeView: View {
 
   var chatItems: [HomeChatItem] {
     home.chats.filter {
-      $0.dialog.archived == nil || $0.dialog.archived == false
+      $0.dialog.archived != true
     }.sorted { (item1: HomeChatItem, item2: HomeChatItem) in
       let pinned1 = item1.dialog.pinned ?? false
       let pinned2 = item2.dialog.pinned ?? false
