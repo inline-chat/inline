@@ -598,14 +598,42 @@ public struct UserProfilePhoto: @unchecked Sendable {
   // methods supported on all messages.
 
   /// ID of the photo
-  public var photoID: Int64 = 0
+  public var photoID: Int64 {
+    get {return _photoID ?? 0}
+    set {_photoID = newValue}
+  }
+  /// Returns true if `photoID` has been explicitly set.
+  public var hasPhotoID: Bool {return self._photoID != nil}
+  /// Clears the value of `photoID`. Subsequent reads from it will return its default value.
+  public mutating func clearPhotoID() {self._photoID = nil}
 
   /// Stripped thumbnail of the photo
-  public var strippedThumb: Data = Data()
+  public var strippedThumb: Data {
+    get {return _strippedThumb ?? Data()}
+    set {_strippedThumb = newValue}
+  }
+  /// Returns true if `strippedThumb` has been explicitly set.
+  public var hasStrippedThumb: Bool {return self._strippedThumb != nil}
+  /// Clears the value of `strippedThumb`. Subsequent reads from it will return its default value.
+  public mutating func clearStrippedThumb() {self._strippedThumb = nil}
+
+  /// Photo
+  public var cdnURL: String {
+    get {return _cdnURL ?? String()}
+    set {_cdnURL = newValue}
+  }
+  /// Returns true if `cdnURL` has been explicitly set.
+  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
+  public mutating func clearCdnURL() {self._cdnURL = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _photoID: Int64? = nil
+  fileprivate var _strippedThumb: Data? = nil
+  fileprivate var _cdnURL: String? = nil
 }
 
 public struct Dialog: Sendable {
@@ -4588,6 +4616,7 @@ extension UserProfilePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "photo_id"),
     2: .standard(proto: "stripped_thumb"),
+    3: .standard(proto: "cdn_url"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4596,26 +4625,35 @@ extension UserProfilePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.photoID) }()
-      case 2: try { try decoder.decodeSingularBytesField(value: &self.strippedThumb) }()
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self._photoID) }()
+      case 2: try { try decoder.decodeSingularBytesField(value: &self._strippedThumb) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._cdnURL) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.photoID != 0 {
-      try visitor.visitSingularInt64Field(value: self.photoID, fieldNumber: 1)
-    }
-    if !self.strippedThumb.isEmpty {
-      try visitor.visitSingularBytesField(value: self.strippedThumb, fieldNumber: 2)
-    }
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._photoID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._strippedThumb {
+      try visitor.visitSingularBytesField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._cdnURL {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UserProfilePhoto, rhs: UserProfilePhoto) -> Bool {
-    if lhs.photoID != rhs.photoID {return false}
-    if lhs.strippedThumb != rhs.strippedThumb {return false}
+    if lhs._photoID != rhs._photoID {return false}
+    if lhs._strippedThumb != rhs._strippedThumb {return false}
+    if lhs._cdnURL != rhs._cdnURL {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

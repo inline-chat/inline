@@ -104,10 +104,13 @@ message User {
 
 message UserProfilePhoto {
   // ID of the photo
-  int64 photo_id = 1;
+  optional int64 photo_id = 1;
 
   // Stripped thumbnail of the photo
-  bytes stripped_thumb = 2;
+  optional bytes stripped_thumb = 2;
+
+  // Photo
+  optional string cdn_url = 3;
 }
 
 message Dialog {
