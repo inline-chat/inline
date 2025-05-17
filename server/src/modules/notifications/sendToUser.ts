@@ -39,7 +39,8 @@ export const sendPushNotificationToUser = async ({
       if (!session.applePushToken) continue
       if (session.clientType === "macos") continue
 
-      let topic = session.clientType === "ios" ? iOSTopic : null
+      //let topic = session.clientType === "ios" ? iOSTopic : null
+      let topic = iOSTopic
 
       if (!topic) continue
 
@@ -73,7 +74,7 @@ export const sendPushNotificationToUser = async ({
         try {
           const result = await apnProvider.send(notification, session.applePushToken)
           if (result.failed.length > 0) {
-            log.debug("Failed to send push notification", {
+            log.error("Failed to send push notification", {
               errors: result.failed.map((f) => f.response),
               userId,
               threadId,
@@ -85,7 +86,7 @@ export const sendPushNotificationToUser = async ({
             })
           }
         } catch (error) {
-          log.debug("Error sending push notification", {
+          log.error("Error sending push notification", {
             error,
             userId,
             threadId,
@@ -96,7 +97,7 @@ export const sendPushNotificationToUser = async ({
       sendPush()
     }
   } catch (error) {
-    log.debug("Error sending push notification", {
+    log.error("Error sending push notification", {
       error,
       userId,
       threadId,
