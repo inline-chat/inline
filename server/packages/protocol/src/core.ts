@@ -534,9 +534,9 @@ export interface Message {
     /**
      * Rich text entities
      *
-     * @generated from protobuf field: repeated MessageEntity entities = 16;
+     * @generated from protobuf field: optional MessageEntities entities = 16;
      */
-    entities: MessageEntity[];
+    entities?: MessageEntities;
 }
 /**
  * @generated from protobuf message MessageEntities
@@ -3916,7 +3916,7 @@ class Message$Type extends MessageType<Message> {
             { no: 13, name: "attachments", kind: "message", T: () => MessageAttachments },
             { no: 14, name: "reactions", kind: "message", T: () => MessageReactions },
             { no: 15, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 16, name: "entities", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => MessageEntity }
+            { no: 16, name: "entities", kind: "message", T: () => MessageEntities }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -3926,7 +3926,6 @@ class Message$Type extends MessageType<Message> {
         message.chatId = 0n;
         message.out = false;
         message.date = 0n;
-        message.entities = [];
         if (value !== undefined)
             reflectionMergePartial<Message>(this, message, value);
         return message;
@@ -3981,8 +3980,8 @@ class Message$Type extends MessageType<Message> {
                 case /* optional bool is_sticker */ 15:
                     message.isSticker = reader.bool();
                     break;
-                case /* repeated MessageEntity entities */ 16:
-                    message.entities.push(MessageEntity.internalBinaryRead(reader, reader.uint32(), options));
+                case /* optional MessageEntities entities */ 16:
+                    message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -4041,9 +4040,9 @@ class Message$Type extends MessageType<Message> {
         /* optional bool is_sticker = 15; */
         if (message.isSticker !== undefined)
             writer.tag(15, WireType.Varint).bool(message.isSticker);
-        /* repeated MessageEntity entities = 16; */
-        for (let i = 0; i < message.entities.length; i++)
-            MessageEntity.internalBinaryWrite(message.entities[i], writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageEntities entities = 16; */
+        if (message.entities)
+            MessageEntities.internalBinaryWrite(message.entities, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
