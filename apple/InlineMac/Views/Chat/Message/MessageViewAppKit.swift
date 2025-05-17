@@ -2,6 +2,7 @@
 import AppKit
 import Combine
 import Foundation
+import GRDB
 import InlineKit
 import InlineUI
 import Logger
@@ -1115,59 +1116,7 @@ class MessageViewAppKit: NSView {
   // MARK: - Context Menu
 
   private func setupContextMenu() {
-    let menu = NSMenu()
-
-    #if DEBUG
-    let idItem = NSMenuItem(title: "ID: \(message.id)", action: nil, keyEquivalent: "")
-    idItem.isEnabled = false
-    menu.addItem(idItem)
-
-    let indexItem = NSMenuItem(
-      // TODO: debug why it's nil sometimes
-      title: "Index: \(props.index?.description ?? "?")",
-      action: nil,
-      keyEquivalent: ""
-    )
-    indexItem.isEnabled = false
-    menu.addItem(indexItem)
-    #endif
-
-    let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
-    menu.addItem(replyItem)
-
-    let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "r")
-    menu.addItem(addReactionItem)
-
-    if hasText {
-      let copyItem = NSMenuItem(title: "Copy", action: #selector(copyMessage), keyEquivalent: "c")
-      menu.addItem(copyItem)
-    }
-
-    if hasPhoto {
-      let saveItem = NSMenuItem(title: "Save Image", action: #selector(newPhotoView.saveImage), keyEquivalent: "m")
-      saveItem.target = newPhotoView
-      saveItem.isEnabled = true
-      menu.addItem(saveItem)
-
-      let copyItem = NSMenuItem(title: "Copy Image", action: #selector(newPhotoView.copyImage), keyEquivalent: "i")
-      copyItem.target = newPhotoView
-      copyItem.isEnabled = true
-      menu.addItem(copyItem)
-    }
-
-    // Add document-related menu items
-    if hasDocument {
-      let saveDocumentItem = NSMenuItem(title: "Save Document", action: #selector(saveDocument), keyEquivalent: "s")
-      menu.addItem(saveDocumentItem)
-    }
-
-    let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "i")
-    deleteItem.target = self
-    deleteItem.isEnabled = true
-    menu.addItem(deleteItem)
-
-    menu.delegate = self
-    self.menu = menu
+    menu = createMenu(context: .message)
   }
 
   @objc private func addReaction() {
@@ -1524,6 +1473,26 @@ class MessageViewAppKit: NSView {
     // Re-setup translation state observation
     setupTranslationStateObservation()
   }
+
+  @objc private func cancelMessage() {
+    Log.shared.debug("Canceling message")
+    if let transactionId = message.transactionId, !transactionId.isEmpty {
+      Transactions.shared.cancel(transactionId: transactionId)
+    }
+    let chatId = message.chatId
+    let messageId = message.messageId
+    Task(priority: .userInitiated) {
+      let _ = try? await AppDatabase.shared.dbWriter.write { db in
+        try Message
+          .filter(Column("chatId") == chatId)
+          .filter(Column("messageId") == messageId)
+          .deleteAll(db)
+      }
+
+      MessagesPublisher.shared
+        .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
+    }
+  }
 }
 
 // MARK: - Tracking Area & Hover
@@ -1590,48 +1559,107 @@ extension MessageViewAppKit {
 
 extension MessageViewAppKit: NSTextViewDelegate {
   func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
-    let customMenu = NSMenu()
-
-    // Add native Copy at the very top (for selected text)
-    let nativeCopyItem = NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-    nativeCopyItem.target = textView
-    customMenu.addItem(nativeCopyItem)
-
-    // Add our custom message actions
-    let copyMessageItem = NSMenuItem(title: "Copy Message", action: #selector(copyMessage), keyEquivalent: "")
-    copyMessageItem.target = self
-    customMenu.addItem(copyMessageItem)
-
-    let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "")
-    replyItem.target = self
-    customMenu.addItem(replyItem)
-
-    // Add a separator after our primary items
-    customMenu.addItem(NSMenuItem.separator())
-
-    // Insert native "Look Up" and "Translate" items from the original menu
-    for item in menu.items {
-      // The native items usually start with "Look Up" or "Translate"
-      if item.title.hasPrefix("Look Up") || item.title.hasPrefix("Translate") {
-        // Copy the item (including its action, target, etc.)
-        let newItem = item.copy() as! NSMenuItem
-        customMenu.addItem(newItem)
-      }
-    }
-
-    // Add a separator before Delete
-    customMenu.addItem(NSMenuItem.separator())
-
-    // Add Delete as the last item
-    let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "")
-    deleteItem.target = self
-    customMenu.addItem(deleteItem)
-
-    return customMenu
+    createMenu(context: .textView, nativeMenu: menu)
   }
 }
 
-extension MessageViewAppKit: NSMenuDelegate {}
+extension MessageViewAppKit: NSMenuDelegate {
+  enum MenuContext {
+    case message
+    case textView
+  }
+
+  func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil) -> NSMenu {
+    let menu = NSMenu()
+
+    #if DEBUG
+    // Add debug items
+    let idItem = NSMenuItem(title: "ID: \(message.id)", action: nil, keyEquivalent: "")
+    idItem.isEnabled = false
+    menu.addItem(idItem)
+
+    let indexItem = NSMenuItem(
+      title: "Index: \(props.index?.description ?? "?")",
+      action: nil,
+      keyEquivalent: ""
+    )
+    indexItem.isEnabled = false
+    menu.addItem(indexItem)
+    #endif
+
+    // Add native copy for selected text if in text view context
+    if context == .textView, let nativeMenu {
+      if let nativeCopyItem = nativeMenu.items.first(where: { $0.title == "Copy" }) {
+        let newItem = nativeCopyItem.copy() as! NSMenuItem
+        menu.addItem(newItem)
+      }
+    }
+
+    // Add reply action only if not sending
+    if message.status != .sending {
+      let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
+      menu.addItem(replyItem)
+    }
+
+    // Add reaction action
+    let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "r")
+    menu.addItem(addReactionItem)
+
+    // Add copy message action for text
+    if hasText {
+      let copyItem = NSMenuItem(title: "Copy Message", action: #selector(copyMessage), keyEquivalent: "c")
+      menu.addItem(copyItem)
+    }
+
+    // Add photo actions
+    if hasPhoto {
+      let saveItem = NSMenuItem(title: "Save Image", action: #selector(newPhotoView.saveImage), keyEquivalent: "m")
+      saveItem.target = newPhotoView
+      saveItem.isEnabled = true
+      menu.addItem(saveItem)
+
+      let copyItem = NSMenuItem(title: "Copy Image", action: #selector(newPhotoView.copyImage), keyEquivalent: "i")
+      copyItem.target = newPhotoView
+      copyItem.isEnabled = true
+      menu.addItem(copyItem)
+    }
+
+    // Add document actions
+    if hasDocument {
+      let saveDocumentItem = NSMenuItem(title: "Save Document", action: #selector(saveDocument), keyEquivalent: "s")
+      menu.addItem(saveDocumentItem)
+    }
+
+    // Add other native menu items if in text view context
+    if context == .textView, let nativeMenu {
+      menu.addItem(NSMenuItem.separator())
+
+      for item in nativeMenu.items {
+        if item.title.hasPrefix("Look Up") || item.title.hasPrefix("Translate") {
+          let newItem = item.copy() as! NSMenuItem
+          menu.addItem(newItem)
+        }
+      }
+    }
+
+    // Add delete/cancel action based on message state
+    menu.addItem(NSMenuItem.separator())
+    if message.status == .sending {
+      let cancelItem = NSMenuItem(title: "Cancel", action: #selector(cancelMessage), keyEquivalent: "i")
+      cancelItem.target = self
+      cancelItem.isEnabled = true
+      menu.addItem(cancelItem)
+    } else {
+      let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "i")
+      deleteItem.target = self
+      deleteItem.isEnabled = true
+      menu.addItem(deleteItem)
+    }
+
+    menu.delegate = self
+    return menu
+  }
+}
 
 struct MessageViewInputProps: Equatable, Codable, Hashable {
   var firstInGroup: Bool
