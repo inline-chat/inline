@@ -7,7 +7,7 @@ public final class TranslationDetector {
   public static let shared = TranslationDetector()
 
   // Minimum confidence threshold for language detection (0.0 to 1.0)
-  private let confidenceThreshold: Double = 0.3
+  private let confidenceThreshold: Double = 0.4
 
   // Supported languages for detection
   private let supportedLanguages: [NLLanguage] = [
@@ -36,6 +36,12 @@ public final class TranslationDetector {
   /// Analyze messages to detect if translation is needed
   /// - Parameter messages: Array of messages to analyze
   public func analyzeMessages(peer: Peer, messages: [FullMessage]) {
+    // Check if translation alert is dismissed for this peer
+    if TranslationAlertDismiss.shared.isDismissedForPeer(peer) {
+      log.debug("Translation alert dismissed for peer: \(peer.id)")
+      return
+    }
+
     Task(priority: .background) {
       let userLanguage = UserLocale.getCurrentLanguage()
       let recognizer = NLLanguageRecognizer()

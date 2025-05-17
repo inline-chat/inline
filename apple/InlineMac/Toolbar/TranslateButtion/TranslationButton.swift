@@ -5,6 +5,7 @@ public struct TranslationButton: View {
   let peer: Peer
   @State private var isPopoverPresented = false
   @State private var isTranslationEnabled = false
+  @State private var openedAutomatically = false
 
   public init(peer: Peer) {
     self.peer = peer
@@ -25,15 +26,24 @@ public struct TranslationButton: View {
       TranslationPopoverView(
         peer: peer,
         isTranslationEnabled: $isTranslationEnabled,
-        isPresented: $isPopoverPresented
+        isPresented: $isPopoverPresented,
+        openedAutomatically: $openedAutomatically
       )
-      .frame(width: 160)
+      .frame(width: 190)
       .padding(.horizontal, 8)
       .padding(.vertical, 8)
     }
     .onReceive(TranslationDetector.shared.needsTranslation) { result in
       if result.peer == peer, result.needsTranslation == true {
+        // set flag to true when the popover is opened automatically
+        openedAutomatically = true
         isPopoverPresented = true
+      }
+    }
+    .onChange(of: isPopoverPresented) { newValue in
+      if newValue == false {
+        // Reset the flag when the popover is closed
+        openedAutomatically = false
       }
     }
   }
@@ -43,11 +53,18 @@ public struct TranslationPopoverView: View {
   let peer: Peer
   @Binding var isTranslationEnabled: Bool
   @Binding var isPresented: Bool
+  @Binding var openedAutomatically: Bool
 
-  public init(peer: Peer, isTranslationEnabled: Binding<Bool>, isPresented: Binding<Bool>) {
+  public init(
+    peer: Peer,
+    isTranslationEnabled: Binding<Bool>,
+    isPresented: Binding<Bool>,
+    openedAutomatically: Binding<Bool>
+  ) {
     self.peer = peer
     _isTranslationEnabled = isTranslationEnabled
     _isPresented = isPresented
+    _openedAutomatically = openedAutomatically
   }
 
   var currentLanguageName: String {
@@ -72,14 +89,28 @@ public struct TranslationPopoverView: View {
         Text("Translate to \(currentLanguageName)?")
           .font(.title3)
 
-        Button("Translate") {
-          TranslationState.shared.setTranslationEnabled(true, for: peer)
-          isTranslationEnabled = true
-          isPresented = false
+        HStack(spacing: 6) {
+          Spacer()
+
+          if openedAutomatically {
+            Button("Dismiss") {
+              TranslationAlertDismiss.shared.dismissForPeer(peer)
+              isPresented = false
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+          }
+
+          Button("Translate") {
+            TranslationState.shared.setTranslationEnabled(true, for: peer)
+            isTranslationEnabled = true
+            isPresented = false
+          }
+          .buttonStyle(.borderedProminent)
+          .controlSize(.regular)
+
+          Spacer()
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.regular)
-        .padding(.horizontal)
       }
     }
   }
