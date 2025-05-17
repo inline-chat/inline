@@ -26,7 +26,7 @@ struct HomeNavigationWrapper: View {
           .navigationBarBackButtonHidden()
       }
       .tabItem {
-        Label("", systemImage: "archivebox.fill")
+        Label("Archived", systemImage: "archivebox.fill")
       }
       .tag(TabItem.archived)
 
@@ -39,7 +39,7 @@ struct HomeNavigationWrapper: View {
           .navigationBarBackButtonHidden()
       }
       .tabItem {
-        Label("", systemImage: "bubble.left.and.bubble.right.fill")
+        Label("Chats", systemImage: "bubble.left.and.bubble.right.fill")
       }
       .tag(TabItem.chats)
 
@@ -52,7 +52,7 @@ struct HomeNavigationWrapper: View {
           .navigationBarBackButtonHidden()
       }
       .tabItem {
-        Label("", systemImage: "building.2.fill")
+        Label("Spaces", systemImage: "building.2.fill")
       }
       .tag(TabItem.spaces)
     }
