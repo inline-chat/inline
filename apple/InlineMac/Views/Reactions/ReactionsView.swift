@@ -141,7 +141,7 @@ struct ReactionItem: View {
     if weReacted {
       return baseColor.opacity(0.9)
     } else {
-      return baseColor.opacity(0.1)
+      return baseColor.opacity(0.2)
     }
   }
 
