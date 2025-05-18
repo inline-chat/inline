@@ -13,7 +13,7 @@ struct CreateSpace: View {
   @Environment(\.appDatabase) var database
   @Environment(\.dismiss) var dismiss
   @EnvironmentObject var dataManager: DataManager
-
+  @EnvironmentObject var tabsManager: TabsManager
   var body: some View {
     NavigationStack {
       List {
@@ -63,7 +63,8 @@ struct CreateSpace: View {
         dismiss()
 
         if let id {
-          nav.push(.space(id: id))
+          tabsManager.setSelectedTab(.spaces)
+          tabsManager.setActiveSpaceId(id)
         }
 
       } catch {
