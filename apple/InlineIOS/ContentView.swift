@@ -16,6 +16,7 @@ struct ContentView: View {
   @StateObject var userData = UserData()
   @StateObject var mainViewRouter = MainViewRouter()
   @StateObject private var fileUploadViewModel = FileUploadViewModel()
+  @StateObject private var tabsManager = TabsManager()
 
   init() {
     _data = EnvironmentStateObject { env in
@@ -39,6 +40,7 @@ struct ContentView: View {
     .environmentObject(mainViewRouter)
     .environmentObject(home)
     .environmentObject(fileUploadViewModel)
+    .environmentObject(tabsManager)
     .toastView()
   }
 
@@ -46,11 +48,16 @@ struct ContentView: View {
   var content: some View {
     switch mainViewRouter.route {
       case .main:
-        HomeNavigationWrapper()
-          .sheet(item: $nav.activeSheet) { destination in
-            nav.sheetContent(for: destination)
-              .presentationDetents(destination == .alphaSheet ? [.medium, .large] : [.large])
-          }
+        NavigationStack(path: $nav.pathComponents) {
+          HomeView()
+            .navigationDestination(for: Navigation.Destination.self) { destination in
+              nav.destinationView(for: destination)
+            }
+        }
+        .sheet(item: $nav.activeSheet) { destination in
+          nav.sheetContent(for: destination)
+            .presentationDetents(destination == .alphaSheet ?[.medium, .large] : [.large])
+        }
 
       case .onboarding:
         OnboardingView()
