@@ -77,11 +77,10 @@ struct HomeSidebar: View {
         .map { SideItem.chat($0) }
     }
 
-    let spaces = home.spaces.map { SideItem.space($0.space) }
     let users = filterArchived(sortedChats, archived: false)
       .map { SideItem.chat($0) }
 
-    return users + spaces
+    return users
   }
 
   // MARK: - Views
