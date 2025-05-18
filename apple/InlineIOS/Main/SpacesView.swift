@@ -6,29 +6,37 @@ struct SpacesView: View {
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var homeViewModel: HomeViewModel
 
+  @EnvironmentObject private var tabsManager: TabsManager
+
   var body: some View {
-    List(homeViewModel.spaces.sorted { s1, s2 in
-      s1.space.date > s2.space.date
-    }) { space in
-      Button {
-        nav.push(.space(id: space.space.id))
-      } label: {
-        HStack {
-          SpaceAvatar(space: space.space, size: 34)
-          Text(space.space.nameWithoutEmoji)
+    if let activeSpaceId = tabsManager.getActiveSpaceId() {
+      SpaceView(spaceId: activeSpaceId)
+    } else {
+      List(homeViewModel.spaces.sorted { s1, s2 in
+        s1.space.date > s2.space.date
+      }) { space in
+        Button {
+          tabsManager.setActiveSpaceId(space.space.id)
+        } label: {
+          HStack {
+            SpaceAvatar(space: space.space, size: 34)
+            Text(space.space.nameWithoutEmoji)
+          }
+        }
+        .padding(.vertical, 1)
+      }
+      .listStyle(.plain)
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .principal) {
+          Text("Spaces")
+            .font(.title3)
+            .fontWeight(.semibold)
         }
       }
-      .padding(.vertical, 1)
+      
     }
-    .listStyle(.plain)
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .principal) {
-        Text("Spaces")
-          .font(.title3)
-          .fontWeight(.semibold)
-      }
-    }
+    
   }
 }
 
