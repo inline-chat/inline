@@ -17,6 +17,7 @@ struct HomeView: View {
   @EnvironmentObject private var mainViewRouter: MainViewRouter
   @EnvironmentObject private var home: HomeViewModel
   @EnvironmentObject var data: DataManager
+  @EnvironmentObject private var tabsManager: TabsManager
 
   @Environment(\.realtime) var realtime
   @Environment(\.appDatabase) private var database
@@ -30,6 +31,8 @@ struct HomeView: View {
   @State private var isSearchingState = false
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
 
+  @State private var spacesPath: [Navigation.Destination] = []
+
   var chatItems: [HomeChatItem] {
     home.chats.filter {
       $0.dialog.archived != true
@@ -42,6 +45,69 @@ struct HomeView: View {
   }
 
   var body: some View {
+    VStack(spacing: 0) {
+      switch tabsManager.selectedTab {
+        case .archived:
+          ArchivedChatsView()
+        case .chats:
+          homeContent
+            .searchable(text: $text, prompt: "Find")
+            .onChange(of: text) { _, newValue in
+              searchDebouncer.input = newValue
+            }
+            .onReceive(searchDebouncer.$debouncedInput) { debouncedValue in
+              guard let value = debouncedValue else { return }
+              searchUsers(query: value)
+            }
+            .toolbar {
+              HomeToolbarContent()
+            }
+        case .spaces:
+          SpacesView()
+      }
+    }
+    .navigationBarTitleDisplayMode(.inline)
+    .navigationBarBackButtonHidden()
+    .toolbar {
+      ToolbarItemGroup(placement: .bottomBar) {
+        Spacer()
+
+        Button(action: { tabsManager.setSelectedTab(.archived) }) {
+          Image(systemName: "archivebox.fill")
+            .font(.body)
+            .foregroundColor(tabsManager.selectedTab == .archived ? Color(ThemeManager.shared.selected.accent) : .gray)
+        }
+
+        Spacer()
+
+        Button(action: { tabsManager.setSelectedTab(.chats) }) {
+          Image(systemName: "bubble.left.and.bubble.right.fill")
+            .font(.body)
+            .foregroundColor(tabsManager.selectedTab == .chats ? Color(ThemeManager.shared.selected.accent) : .gray)
+        }
+
+        Spacer()
+
+        Button(action: { tabsManager.setSelectedTab(.spaces) }) {
+          Image(systemName: "building.2.fill")
+            .font(.body)
+            .foregroundColor(tabsManager.selectedTab == .spaces ? Color(ThemeManager.shared.selected.accent) : .gray)
+        }
+
+        Spacer()
+      }
+    }
+
+    .task {
+      initalFetch()
+    }
+    .onAppear {
+      initalFetch()
+    }
+  }
+
+  @ViewBuilder
+  private var homeContent: some View {
     VStack(spacing: 0) {
       ZStack {
         Group {
@@ -100,25 +166,6 @@ struct HomeView: View {
           SearchedView(textIsEmpty: text.isEmpty, isSearchResultsEmpty: searchResults.isEmpty)
         }
       }
-    }
-    .navigationBarTitleDisplayMode(.inline)
-    .navigationBarBackButtonHidden()
-    .toolbar {
-      HomeToolbarContent()
-    }
-    .searchable(text: $text, prompt: "Find")
-    .onChange(of: text) { _, newValue in
-      searchDebouncer.input = newValue
-    }
-    .onReceive(searchDebouncer.$debouncedInput) { debouncedValue in
-      guard let value = debouncedValue else { return }
-      searchUsers(query: value)
-    }
-    .task {
-      initalFetch()
-    }
-    .onAppear {
-      initalFetch()
     }
   }
 
