@@ -34,7 +34,11 @@ public struct TranslationButton: View {
       .padding(.vertical, 8)
     }
     .onReceive(TranslationDetector.shared.needsTranslation) { result in
-      if result.peer == peer, result.needsTranslation == true {
+      if result.peer == peer,
+         result.needsTranslation == true,
+         // don't popover if translation is already enabled
+         isTranslationEnabled == false
+      {
         // set flag to true when the popover is opened automatically
         openedAutomatically = true
         isPopoverPresented = true
