@@ -15,6 +15,7 @@ struct SpaceView: View {
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var data: DataManager
   @EnvironmentStateObject private var viewModel: FullSpaceViewModel
+  @EnvironmentObject private var tabsManager: TabsManager
 
   @State private var showAddMemberSheet = false
   @State private var selectedSegment = 0
@@ -92,6 +93,14 @@ struct SpaceView: View {
 
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
+    ToolbarItem(placement: .topBarLeading) {
+      Button(action: {
+        tabsManager.setActiveSpaceId(nil)
+      }, label: {
+        Image(systemName: "chevron.left")
+          .fontWeight(.medium)
+      })
+    }
     ToolbarItem(placement: .principal) {
       SpaceHeaderView(space: viewModel.space)
     }
