@@ -28,7 +28,7 @@ struct SimpleButtonStyle: ButtonStyle {
       .fontWeight(.medium)
       .frame(height: 52)
       .frame(maxWidth: .infinity)
-      .background(Color(hex: "#a28cf2"))
+      .background(colorScheme == .dark ? Color(hex: "#8b77dc") : Color(hex: "#a28cf2"))
       .cornerRadius(16)
       .opacity(configuration.isPressed ? 0.8 : 1)
       .scaleEffect(configuration.isPressed ? 0.9 : 1)
