@@ -146,13 +146,9 @@ extension Code {
   var bottomArea: some View {
     VStack(alignment: .center) {
       HStack(spacing: 2) {
-        Text(String(format: NSLocalizedString("Code sent to %@.", comment: "Code sent confirmation"), email))
+        Text(String(format: NSLocalizedString("Code sent to %@", comment: "Code sent confirmation"), email))
           .font(.callout)
           .foregroundColor(.secondary)
-        Button(NSLocalizedString("Edit", comment: "Edit button")) {
-          nav.pop()
-        }
-        .font(.callout)
       }
 
       Button(
