@@ -4,21 +4,21 @@ import InlineConfig
 import InlineKit
 import SwiftUI
 
-struct IntegrationsView: View {
-  @State private var isConnectingLinear = false
-  @State private var isConnectedLinear = false
+struct SpaceIntegrationsView: View {
+  @State private var isConnectingNotion = false
+  @State private var isConnectedNotion = false
 
   var body: some View {
     List {
       Section {
         IntegrationCard(
-          image: "linear-icon",
-          title: "Linear",
-          description: "Connect your Linear to create issues from messages with AI",
-          isConnected: $isConnectedLinear,
-          isConnecting: $isConnectingLinear,
-          provider: "linear",
-          clipped: true,
+          image: "notion-logo",
+          title: "Notion",
+          description: "Connect your Notion to create issues from messages with AI",
+          isConnected: $isConnectedNotion,
+          isConnecting: $isConnectingNotion,
+          provider: "notion",
+          clipped: false,
           completion: checkIntegrationConnection
         )
       }
@@ -50,12 +50,11 @@ struct IntegrationsView: View {
     Task {
       do {
         let result = try await ApiClient.shared.getIntegrations(userId: Auth.shared.getCurrentUserId() ?? 0)
-        if result.hasLinearConnected {
-          isConnectedLinear = true
+        if result.hasNotionConnected {
+          isConnectedNotion = true
         } else {
-          isConnectedLinear = false
+          isConnectedNotion = false
         }
-
       } catch {
         print("Failed to get integrations \(error)")
       }
