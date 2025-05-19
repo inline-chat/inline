@@ -92,26 +92,23 @@ extension InlineProtocol.UpdateNewMessage {
       publishChanges: true
     )
 
-    // I think this needs to be faster
-    var chat = try Chat.fetchOne(db, id: message.chatID)
-    chat?.lastMsgId = msg.messageId
-    try chat?.save(db)
+    try Chat.updateLastMsgId(db, chatId: message.chatID, lastMsgId: msg.messageId, date: msg.date)
 
     // increase unread count if message is not ours
     if var dialog = try? Dialog.get(peerId: msg.peerId).fetchOne(db) {
       dialog.unreadCount = (dialog.unreadCount ?? 0) + (msg.out == false ? 1 : 0)
       try dialog.update(db)
-
-      #if os(macOS)
-      // Show notification for incoming messages
-      if msg.out == false {
-        Task {
-          // Handle notification
-          await MacNotifications.shared.handleNewMessage(protocolMsg: message, message: msg, chat: chat)
-        }
-      }
-      #endif
     }
+
+    #if os(macOS)
+    // Show notification for incoming messages
+    if msg.out == false {
+      Task.detached {
+        // Handle notification
+        await MacNotifications.shared.handleNewMessage(protocolMsg: message, message: msg)
+      }
+    }
+    #endif
   }
 }
 
