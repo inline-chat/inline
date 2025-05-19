@@ -1,5 +1,6 @@
 // MessageView.swift
 import AppKit
+import Auth
 import Combine
 import Foundation
 import GRDB
@@ -537,6 +538,11 @@ class MessageViewAppKit: NSView {
     if let gesture = longPressGesture {
       addGestureRecognizer(gesture)
     }
+
+    // Add double click gesture recognizer
+    let doubleClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick(_:)))
+    doubleClickGesture.numberOfClicksRequired = 2
+    addGestureRecognizer(doubleClickGesture)
   }
 
   @objc private func handleLongPress(_ gesture: NSPressGestureRecognizer) {
@@ -546,6 +552,39 @@ class MessageViewAppKit: NSView {
 
       // Show reaction overlay
       showReactionOverlay()
+    }
+  }
+
+  @objc private func handleDoubleClick(_ gesture: NSClickGestureRecognizer) {
+    // Provide haptic feedback
+    NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+
+    guard let currentUserId = Auth.shared.currentUserId else { return }
+    let weReacted = fullMessage.groupedReactions.contains { reaction in
+      reaction.reactions.contains { reaction in
+        reaction.userId == currentUserId
+      }
+    }
+
+    let emoji = "✔️"
+
+    // Set reaction
+    if weReacted {
+      // Remove reaction
+      Transactions.shared.mutate(transaction: .deleteReaction(.init(
+        message: fullMessage.message,
+        emoji: emoji,
+        peerId: fullMessage.message.peerId,
+        chatId: fullMessage.message.chatId
+      )))
+    } else {
+      // Add reaction
+      Transactions.shared.mutate(transaction: .addReaction(.init(
+        message: fullMessage.message,
+        emoji: emoji,
+        userId: currentUserId,
+        peerId: fullMessage.message.peerId
+      )))
     }
   }
 
