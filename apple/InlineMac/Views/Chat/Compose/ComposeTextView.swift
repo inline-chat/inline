@@ -1,5 +1,6 @@
 import AppKit
 import Logger
+import Nuke
 import UniformTypeIdentifiers
 
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
@@ -141,40 +142,28 @@ class ComposeNSTextView: NSTextView {
     logPasteboardTypes(pasteboard)
     Log.shared.debug("Attempting to handle image input from pasteboard")
 
+    /// Don't handle remote images when pasting into text input not dropping
+    // let shouldNotCaptureRemote = pasteboard == .general
+
     // Check for files that are images
     if let files = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
       var handled = false
+      var hasAsyncImageTask = false
 
       for file in files {
+        // let isRemote = !file.isFileURL
+
+        // if shouldNotCaptureRemote, isRemote {
+        //   // Ignore remote images
+        //   continue
+        // }
+
+        Log.shared.debug("File pasted/dropped: \(file)")
+
         let fileType = file.pathExtension.lowercased()
-        // Check if the file is an image
-        // if ["png", "jpg", "jpeg", "gif", "heic"].contains(fileType) {
-        let fileType2 = UTType(filenameExtension: file.pathExtension)
-        if let fileType2, fileType2.conforms(to: .image) {
-          let _ = file.startAccessingSecurityScopedResource()
 
-          if let image = NSImage(contentsOf: file) {
-            Log.shared.debug("Found image file: \(file.path)")
-            // Notify delegate about image paste
-            notifyDelegateAboutImage(image, file)
-            handled = true
-            file.stopAccessingSecurityScopedResource()
-            continue
-          } else {
-            if let image = NSImage(pasteboard: .general) {
-              Log.shared.debug("Found image from pasteboard: \(file.path)")
-              notifyDelegateAboutImage(image, file)
-              handled = true
-              continue
-            }
-
-            Log.shared.debug("Failed to create image from file: \(file.path)")
-          }
-        }
-
-        // TODO: Video and other
+        // Handle video files synchronously
         if ["mp4"].contains(fileType) {
-          // Handle URL as file
           let _ = file.startAccessingSecurityScopedResource()
           notifyDelegateAboutVideo(file)
           file.stopAccessingSecurityScopedResource()
@@ -182,22 +171,33 @@ class ComposeNSTextView: NSTextView {
           continue
         }
 
-        if file.isFileURL {
-          // Handle URL as file
+        hasAsyncImageTask = true
+
+        // Load image from URL asynchronously
+        Task { [weak self] in
+          guard let self else { return }
+
           let _ = file.startAccessingSecurityScopedResource()
-          notifyDelegateAboutFile(file)
-          file.stopAccessingSecurityScopedResource()
-          handled = true
-          continue
+          if let image = await loadImage(from: file) {
+            Log.shared.debug("Found image file: \(file.path)")
+            // Only switch to main thread for UI updates
+            notifyDelegateAboutImage(image, file)
+          } else {
+            // Handle other files synchronously
+            if file.isFileURL {
+              notifyDelegateAboutFile(file)
+            }
+
+            file.stopAccessingSecurityScopedResource()
+          }
         }
       }
 
-      if handled {
-        return true
-      }
+      // Return true if we handled anything synchronously or started an async image task
+      return handled || hasAsyncImageTask
     }
 
-    // Handle direct image data
+    // Handle direct image data synchronously
     let imageTypes: [NSPasteboard.PasteboardType] = [
       .tiff,
       .png,
@@ -291,5 +291,26 @@ class ComposeNSTextView: NSTextView {
   override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
     let handled = handleImageInput(from: sender.draggingPasteboard)
     return handled || super.performDragOperation(sender)
+  }
+
+  // MARK: - Helper Methods
+
+  private func loadImage(from url: URL) async -> NSImage? {
+    do {
+      // Create a request with proper options
+      let request = ImageRequest(
+        url: url,
+        processors: [.resize(width: 1_280)], // Resize to reasonable size
+        priority: .normal,
+        options: []
+      )
+
+      // Try to get image from pipeline
+      let response = try await ImagePipeline.shared.image(for: request)
+      return response
+    } catch {
+      Log.shared.error("Failed to load image from URL: \(error.localizedDescription)")
+      return nil
+    }
   }
 }
