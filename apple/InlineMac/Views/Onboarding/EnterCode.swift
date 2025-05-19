@@ -60,7 +60,7 @@ struct OnboardingEnterCode: View {
           focusedField = .codeField
         }
 
-      GrayButton {
+      InlineButton {
         submit()
       } label: {
         if !formState.isLoading {
