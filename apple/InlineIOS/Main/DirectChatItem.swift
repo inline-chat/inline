@@ -124,15 +124,15 @@ struct DirectChatItem: View {
       HStack(alignment: .center, spacing: 4) {
         switch currentComposeAction() {
           case .typing:
-            AnimatedDots(dotSize: 3, dotColor: Color(ThemeManager.shared.selected.accent))
+            AnimatedDots(dotSize: 3, dotColor: .secondary)
           case .uploadingPhoto:
-            UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
+            UploadProgressIndicator(color: .secondary)
               .frame(width: 14)
           case .uploadingDocument:
-            UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
+            UploadProgressIndicator(color: .secondary)
               .frame(width: 14)
           case .uploadingVideo:
-            UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
+            UploadProgressIndicator(color: .secondary)
               .frame(width: 14)
           case .none:
             EmptyView()
@@ -140,7 +140,7 @@ struct DirectChatItem: View {
 
         Text(currentComposeAction()?.toHumanReadableForIOS() ?? "")
           .font(.customCaption())
-          .foregroundStyle(Color(ThemeManager.shared.selected.accent))
+          .foregroundStyle(.secondary)
       }
       .padding(.top, 1)
     } else if lastMsg?.isSticker == true {
