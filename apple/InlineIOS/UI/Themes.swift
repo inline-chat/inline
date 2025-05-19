@@ -98,12 +98,18 @@ struct Orchid: ThemeConfig {
 
   var backgroundColor: UIColor = .systemBackground
 
-  var bubbleBackground: UIColor = .init(hex: "#CF7DFF")!
-  var incomingBubbleBackground: UIColor = .init(dynamicProvider: { trait in
+  var bubbleBackground: UIColor = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
       UIColor(hex: "#8b77dc")!
     } else {
       UIColor(hex: "#a28cf2")!
+    }
+  })
+  var incomingBubbleBackground: UIColor = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#27262B")!
+    } else {
+      UIColor(hex: "#F2F2F2")!
     }
   })
 
