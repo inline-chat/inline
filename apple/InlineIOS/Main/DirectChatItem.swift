@@ -121,16 +121,28 @@ struct DirectChatItem: View {
   @ViewBuilder
   var lastMessage: some View {
     if showTypingIndicator {
-      HStack {
-        AnimatedDots(dotSize: 4)
-        Text("\(currentComposeAction()?.rawValue ?? "")")
+      HStack(alignment: .center, spacing: 4) {
+        switch currentComposeAction() {
+          case .typing:
+            AnimatedDots(dotSize: 3, dotColor: Color(ThemeManager.shared.selected.accent))
+          case .uploadingPhoto:
+            UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
+              .frame(width: 14)
+          case .uploadingDocument:
+            UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
+              .frame(width: 14)
+          case .uploadingVideo:
+            UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
+              .frame(width: 14)
+          case .none:
+            EmptyView()
+        }
+
+        Text(currentComposeAction()?.toHumanReadableForIOS() ?? "")
           .font(.customCaption())
-          .foregroundColor(.secondary)
-          .lineLimit(2)
-          .truncationMode(.tail)
+          .foregroundStyle(Color(ThemeManager.shared.selected.accent))
       }
       .padding(.top, 1)
-
     } else if lastMsg?.isSticker == true {
       HStack(spacing: 4) {
         Image(systemName: "cup.and.saucer.fill")
