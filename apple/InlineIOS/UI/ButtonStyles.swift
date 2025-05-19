@@ -11,7 +11,7 @@ struct SimpleWhiteButtonStyle: ButtonStyle {
       .frame(height: 52)
       .frame(maxWidth: .infinity)
       .background(colorScheme == .light ? Color(.systemGray6) : .white.opacity(0.96))
-      .cornerRadius(12)
+      .cornerRadius(16)
       .opacity(configuration.isPressed ? 0.8 : 1)
       .scaleEffect(configuration.isPressed ? 0.9 : 1)
       .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
