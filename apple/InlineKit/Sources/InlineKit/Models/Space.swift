@@ -82,6 +82,10 @@ public extension Space {
     filterEmojiFromStart(name)
   }
 
+  var displayName: String {
+    nameWithoutEmoji.isEmpty ? "Untitled Space" : nameWithoutEmoji
+  }
+
   func filterEmojiFromStart(_ text: String) -> String {
     guard let firstChar = text.first else { return text }
 
