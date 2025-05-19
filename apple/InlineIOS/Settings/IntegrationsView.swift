@@ -131,7 +131,7 @@ struct IntegrationCard: View {
           .disabled(isConnecting || isConnected)
           .tint(Color(ThemeManager.shared.selected.accent))
           .font(.callout)
-          .padding(.trailing, 8)
+          .padding(.trailing, 7)
         }
         Text(description)
           .foregroundColor(.secondary)
