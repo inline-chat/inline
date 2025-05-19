@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import InlineProtocol
+import Logger
 
 public enum ChatType: String, Codable, Sendable {
   case privateChat = "private"
@@ -216,6 +217,40 @@ public extension Chat {
       try Dialog.filter(Column("id") == dialogId).deleteAll(db)
       // Delete the chat itself
       try Chat.filter(Column("id") == self.id).deleteAll(db)
+    }
+  }
+}
+
+public extension Chat {
+  struct ChatWithLastMessage: FetchableRecord, PersistableRecord, Codable, Hashable, Sendable {
+    public var id: Int64
+    public var lastMsgDate: Date?
+  }
+
+  static func updateLastMsgId(_ db: Database, chatId: Int64, lastMsgId: Int64, date: Date) throws {
+//    _ = try Chat
+//      .filter(Column("id") == chatId)
+//      .joining(optional: Chat.lastMessage.filter(Column("date") > date))
+//      .updateAll(db, [
+//        Column("lastMsgId").set(to: lastMsgId),
+//      ])
+
+    let chat = try Chat
+      .filter(Column("id") == chatId)
+      .annotated(
+        withOptional: Chat.lastMessage
+          .select(Column("date").forKey("lastMsgDate"))
+      )
+      .asRequest(of: ChatWithLastMessage.self)
+      .fetchOne(db)
+
+    if let chat, chat.lastMsgDate == nil || chat.lastMsgDate! <= date {
+      Log.shared.debug("Updating lastMsgId for chat \(chatId) to \(lastMsgId) with date \(chat.lastMsgDate)")
+      _ = try Chat
+        .filter(Column("id") == chatId)
+        .updateAll(db, [
+          Column("lastMsgId").set(to: lastMsgId),
+        ])
     }
   }
 }

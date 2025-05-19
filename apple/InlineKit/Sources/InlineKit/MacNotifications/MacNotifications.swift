@@ -55,11 +55,12 @@ actor MacNotifications: Sendable {
 }
 
 extension MacNotifications {
-  func handleNewMessage(protocolMsg: InlineProtocol.Message, message: InlineKit.Message, chat: Chat?) async {
+  func handleNewMessage(protocolMsg: InlineProtocol.Message, message: InlineKit.Message) async {
     // Only show notification for incoming messages
     guard message.out == false else { return }
 
     let user = await ObjectCache.shared.getUser(id: message.fromId)
+    let chat = await ObjectCache.shared.getChat(id: protocolMsg.chatID)
     let space: Space? = if let spaceId = chat?.spaceId {
       await ObjectCache.shared.getSpace(id: spaceId)
     } else {

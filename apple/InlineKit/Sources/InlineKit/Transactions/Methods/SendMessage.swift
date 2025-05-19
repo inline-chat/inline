@@ -97,7 +97,19 @@ public struct TransactionSendMessage: Transaction {
     Task(priority: .userInitiated) { // off main actor for db write
       let newMessage = try? AppDatabase.shared.dbWriter.write { db in
         do {
+          // Save message
           try message.save(db)
+
+          // Update last message id
+          try Chat
+            .updateLastMsgId(
+              db,
+              chatId: message.chatId,
+              lastMsgId: message.messageId,
+              date: message.date
+            )
+
+          // Fetch full message for update
           return try FullMessage.queryRequest()
             .filter(Column("messageId") == message.messageId)
             .filter(Column("chatId") == message.chatId)
