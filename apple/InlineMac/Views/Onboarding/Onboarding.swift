@@ -24,9 +24,27 @@ struct Onboarding: View {
 
   var body: some View {
     ZStack {
+      VisualEffectView(material: .popover, blendingMode: .behindWindow)
+        .overlay {
+          LinearGradient(
+            colors: [
+              .white.opacity(0.0),
+              .white.opacity(0.5),
+              .white.opacity(0.0),
+            ],
+            startPoint: .topTrailing,
+            endPoint: .bottomLeading,
+          )
+        }
+        .ignoresSafeArea(edges: .all)
+
       switch viewModel.path.last {
         case .welcome:
           OnboardingWelcome().transition(routeTransition)
+        case .getStarted:
+          OnboardingGetStarted().transition(routeTransition)
+        case .enterPhone:
+          OnboardingEnterPhone().transition(routeTransition)
         case .enterEmail:
           OnboardingEnterEmail().transition(routeTransition)
         case .enterCode:
@@ -66,6 +84,8 @@ struct Onboarding: View {
 
 enum OnboardingRoute {
   case welcome
+  case getStarted
+  case enterPhone
   case enterEmail
   case enterCode
   case profile
@@ -78,6 +98,7 @@ class OnboardingViewModel: ObservableObject {
 
   // Email entered in the onboarding
   @Published var email: String = ""
+  @Published var phoneNumber: String = ""
 
   // nil = server provided no data, true = login, false = sign up
   @Published var existingUser: Bool? = nil

@@ -2,7 +2,7 @@ import InlineKit
 import Logger
 import SwiftUI
 
-struct OnboardingEnterEmail: View {
+struct OnboardingEnterPhone: View {
   @EnvironmentObject var onboardingViewModel: OnboardingViewModel
   @FormState var formState
 
@@ -12,24 +12,27 @@ struct OnboardingEnterEmail: View {
 
   @FocusState private var focusedField: Field?
 
+  @State var phoneNumber = ""
+  @State var country = Country.getCurrentCountry()
+
   var body: some View {
     VStack {
-      Image(systemName: "at.circle.fill")
+      Image(systemName: "checkmark.message.fill")
         .resizable()
         .scaledToFit()
         .frame(width: 34, height: 34)
         .foregroundColor(.primary)
         .padding(.bottom, 4)
 
-      Text("Sign in with email")
+      Text("Continue with phone")
         .font(.system(size: 21.0, weight: .semibold))
         .foregroundStyle(.primary)
 
-      emailField
-        .focused($focusedField, equals: .codeField)
+      PhoneNumberField(phoneNumber: $phoneNumber, country: $country)
         .disabled(formState.isLoading)
         .padding(.top, 6)
         .padding(.bottom, 10)
+        .frame(maxWidth: 250)
         .onSubmit {
           sendCode()
         }
@@ -52,39 +55,32 @@ struct OnboardingEnterEmail: View {
     .padding()
   }
 
-  @ViewBuilder var emailField: some View {
-    let view = GrayTextField("Your Email", text: $onboardingViewModel.email)
-      .frame(width: 260)
-
-    if #available(macOS 14.0, *) {
-      view
-        .textContentType(.emailAddress)
-    } else {
-      view
-    }
-  }
-
   func sendCode() {
     formState.startLoading()
 
     Task {
       do {
-        onboardingViewModel.phoneNumber = ""
+        let fullPhoneNumber = country.dialCode + phoneNumber
         
-        let data = try await ApiClient.shared.sendCode(email: onboardingViewModel.email)
+        onboardingViewModel.phoneNumber = fullPhoneNumber
+        onboardingViewModel.email = ""
+        
+        let data = try await ApiClient.shared.sendSmsCode(
+          phoneNumber: fullPhoneNumber
+        )
 
         onboardingViewModel.existingUser = data.existingUser
         onboardingViewModel.navigate(to: .enterCode)
       } catch {
         formState.failed(error: "Failed: \(error.localizedDescription)")
-        Log.shared.error("Failed to send code", error: error)
+        Log.shared.error("Failed to send sms code", error: error)
       }
     }
   }
 }
 
 #Preview {
-  OnboardingEnterEmail()
+  OnboardingEnterPhone()
     .environmentObject(OnboardingViewModel())
     .frame(width: 900, height: 600)
 }

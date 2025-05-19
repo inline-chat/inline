@@ -93,10 +93,19 @@ struct OnboardingEnterCode: View {
 
     Task {
       do {
-        let result = try await ApiClient.shared.verifyCode(
-          code: code,
-          email: onboardingViewModel.email
-        )
+        let result = if !onboardingViewModel.email.isEmpty {
+          try await ApiClient.shared.verifyCode(
+            code: code,
+            email: onboardingViewModel.email
+          )
+        } else if !onboardingViewModel.phoneNumber.isEmpty {
+          try await ApiClient.shared.verifySmsCode(
+            code: code,
+            phoneNumber: onboardingViewModel.phoneNumber
+          )
+        } else {
+          throw APIError.error(error: "INVALID_REQUEST", errorCode: 401, description: "Email and phone empty")
+        }
 
         // Save creds
         await Auth.shared.saveCredentials(token: result.token, userId: result.userId)
