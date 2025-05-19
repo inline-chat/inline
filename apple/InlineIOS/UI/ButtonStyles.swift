@@ -28,7 +28,7 @@ struct SimpleButtonStyle: ButtonStyle {
       .fontWeight(.medium)
       .frame(height: 52)
       .frame(maxWidth: .infinity)
-      .background(Color(hex: "#3974F7"))
+      .background(Color(hex: "#a28cf2"))
       .cornerRadius(16)
       .opacity(configuration.isPressed ? 0.8 : 1)
       .scaleEffect(configuration.isPressed ? 0.9 : 1)
@@ -37,7 +37,7 @@ struct SimpleButtonStyle: ButtonStyle {
 }
 
 #Preview {
-  Button("Text") {}
+  Button("Continue with email") {}
     .buttonStyle(SimpleButtonStyle())
 }
 
