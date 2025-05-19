@@ -97,6 +97,10 @@ public extension Animation {
     // .easeInOut(duration: 0.06)
     .easeIn(duration: 0.04)
   }
+  
+  static var mediumFeedback: Animation {
+    .easeOut(duration: 0.08)
+  }
 
   static var smoothSnappy: Animation {
     .interpolatingSpring(

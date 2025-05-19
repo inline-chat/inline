@@ -28,7 +28,7 @@ struct CreateSpaceSwiftUI: View {
           focusedField = .name
         }
       
-      GrayButton(size: .medium) {
+      InlineButton(size: .medium) {
         submit()
       } label: {
         if formState.isLoading {
