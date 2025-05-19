@@ -4,7 +4,7 @@ struct OnboardingWelcome: View {
   @EnvironmentObject var windowViewModel: MainWindowViewModel
   @EnvironmentObject var onboardingViewModel: OnboardingViewModel
   @State private var isVisible = false
-  
+
   var animation: Animation {
     .easeOut(duration: 0.5)
   }
@@ -14,7 +14,6 @@ struct OnboardingWelcome: View {
       Spacer()
 
       Image("AppIcon")
-        .padding(.top, 30)
         .opacity(isVisible ? 1 : 0)
         .offset(y: isVisible ? 0 : -30)
         .animation(animation.delay(0.1), value: isVisible)
@@ -39,7 +38,7 @@ struct OnboardingWelcome: View {
       Spacer()
 
       InlineButton(size: .large, style: .primary) {
-        onboardingViewModel.navigate(to: .enterEmail)
+        onboardingViewModel.navigate(to: .getStarted)
       } label: {
         Text("Get Started").padding(.horizontal, 40)
       }
@@ -53,6 +52,7 @@ struct OnboardingWelcome: View {
         .animation(animation.delay(0.9), value: isVisible)
     }
     .padding()
+    .frame(minHeight: 400)
     .onAppear {
       isVisible = true
     }
