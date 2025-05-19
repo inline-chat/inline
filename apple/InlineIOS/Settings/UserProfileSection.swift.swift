@@ -28,7 +28,7 @@ struct ProfileRow: View {
 
   private var fullName: String {
     [user.firstName, user.lastName]
-      .compactMap { $0 }
+      .compactMap(\.self)
       .joined(separator: " ")
   }
 
