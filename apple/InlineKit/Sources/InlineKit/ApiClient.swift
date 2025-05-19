@@ -750,6 +750,7 @@ public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
 
 public struct GetIntegrations: Codable, Sendable {
   public let hasLinearConnected: Bool
+  public let hasNotionConnected: Bool
 }
 
 public struct CreateLinearIssue: Codable, Sendable {
