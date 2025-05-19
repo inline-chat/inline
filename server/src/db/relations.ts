@@ -228,6 +228,12 @@ export const relations = defineRelations(
       user: r.one.users({
         from: r.integrations.userId,
         to: r.users.id,
+        optional: true,
+      }),
+      space: r.one.spaces({
+        from: r.integrations.spaceId,
+        to: r.spaces.id,
+        optional: true,
       }),
     },
 
