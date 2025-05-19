@@ -33,9 +33,12 @@ public struct TransactionDeleteReaction: Transaction {
         try AppDatabase.shared.dbWriter.write { db in
           _ = try Reaction
             .filter(
-              Column("messageId") == message.messageId && Column("chatId") == message
-                .chatId && Column("emoji") == emoji && Column("userId") == Auth.shared.getCurrentUserId() ?? 0
-            ).deleteAll(db)
+              Column("messageId") == message.messageId
+            )
+            .filter(Column("chatId") == message.chatId)
+            .filter(Column("emoji") == emoji)
+            .filter(Column("userId") == Auth.shared.currentUserId)
+            .deleteAll(db)
         }
       } catch {
         Log.shared.error("Failed to delete reaction \(error)")
@@ -89,35 +92,9 @@ public struct TransactionDeleteReaction: Transaction {
 
   public func didFail(error: Error?) async {
     Log.shared.error("Failed to delete message", error: error)
-    Task(priority: .userInitiated) {
-      do {
-        try AppDatabase.shared.dbWriter.write { db in
-          _ = try Reaction
-            .filter(
-              Column("messageId") == message.messageId && Column("chatId") == message
-                .chatId && Column("emoji") == emoji && Column("userId") == Auth.shared.getCurrentUserId() ?? 0
-            ).deleteAll(db)
-        }
-      } catch {
-        Log.shared.error("Failed to delete reaction \(error)")
-      }
-
-      Task(priority: .userInitiated) { @MainActor in
-        MessagesPublisher.shared.messageUpdatedSync(message: message, peer: peerId, animated: true)
-      }
-    }
   }
 
-  public func rollback() async {
-    let _ = try? await AppDatabase.shared.dbWriter.write { db in
-
-      _ = try Reaction
-        .filter(
-          Column("messageId") == message.messageId && Column("chatId") == message
-            .chatId && Column("emoji") == emoji && Column("userId") == Auth.shared.getCurrentUserId() ?? 0
-        ).deleteAll(db)
-    }
-  }
+  public func rollback() async {}
 
   enum DeleteReactionError: Error {
     case failed

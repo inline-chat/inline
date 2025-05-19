@@ -125,6 +125,7 @@ class MessageViewAppKit: NSView {
 
   // Add gesture recognizer property
   private var longPressGesture: NSPressGestureRecognizer?
+  private var doubleClickGesture: NSClickGestureRecognizer?
 
   // MARK: Views
 
@@ -540,9 +541,12 @@ class MessageViewAppKit: NSView {
     }
 
     // Add double click gesture recognizer
-    let doubleClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick(_:)))
-    doubleClickGesture.numberOfClicksRequired = 2
-    addGestureRecognizer(doubleClickGesture)
+    doubleClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick(_:)))
+    doubleClickGesture?.numberOfClicksRequired = 2
+    doubleClickGesture?.delaysPrimaryMouseButtonEvents = false
+    if let gesture = doubleClickGesture {
+      addGestureRecognizer(gesture)
+    }
   }
 
   @objc private func handleLongPress(_ gesture: NSPressGestureRecognizer) {
