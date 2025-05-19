@@ -229,7 +229,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func verifySmsCode(code: String, phoneNumber: String) async throws -> VerifySmsCode {
+  public func verifySmsCode(code: String, phoneNumber: String) async throws -> VerifyCode {
     var body: [String: Any] = [
       "code": code,
       "phoneNumber": phoneNumber,
@@ -976,8 +976,3 @@ public struct SendSmsCode: Codable, Sendable {
   public let formattedPhoneNumber: String
 }
 
-public struct VerifySmsCode: Codable, Sendable {
-  public let userId: Int64
-  public let token: String
-  public let user: ApiUser
-}

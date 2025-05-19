@@ -74,7 +74,7 @@ struct InlineButton<Label>: View
         case .medium:
           Font.system(size: 15, weight: .regular)
         case .large:
-          Font.system(size: 17, weight: .regular)
+          Font.system(size: 16, weight: .regular)
       }
     }
 
