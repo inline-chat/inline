@@ -1,5 +1,5 @@
 {
-  "originHash" : "bac67b8261461630366dab23db4a04cff078e19a950b9d959353d89210d3681e",
+  "originHash" : "0356627d6708908e95263ee7eb032c8b8f518aba6bf3a29e4b3e0ecdf46caf80",
   "pins" : [
     {
       "identity" : "get",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "31249885da1052872e0ac91a2943f62567c0d96d",
         "version" : "2.2.1"
+      }
+    },
+    {
+      "identity" : "glur",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/joogps/Glur",
+      "state" : {
+        "revision" : "9e00ff79da318f2c78b749b1027e54a9d4de2e33",
+        "version" : "1.0.4"
       }
     },
     {
@@ -80,6 +89,15 @@
       "state" : {
         "revision" : "c107075aa8d394be7aced273a46e944afe8b321b",
         "version" : "3.8.0"
+      }
+    },
+    {
+      "identity" : "rendermethis",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Aeastr/RenderMeThis",
+      "state" : {
+        "revision" : "a4ce40b5430b5ad19c6b756690372ad2db82024f",
+        "version" : "2.0.0"
       }
     },
     {
