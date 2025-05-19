@@ -10,9 +10,6 @@
     "@mo" : {
 
     },
-    "%@" : {
-
-    },
     "%@:" : {
       "localizations" : {
         "fa" : {
@@ -224,9 +221,6 @@
       }
     },
     "Connect" : {
-
-    },
-    "Connect your Linear to create issues from messages with AI" : {
 
     },
     "Connected" : {
@@ -564,9 +558,6 @@
     "Leave Space" : {
 
     },
-    "Linear" : {
-
-    },
     "Logout" : {
 
     },
@@ -646,9 +637,6 @@
           }
         }
       }
-    },
-    "Photo" : {
-
     },
     "Pin" : {
 
