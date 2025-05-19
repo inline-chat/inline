@@ -2,7 +2,9 @@ import AppKit
 import Cocoa
 import Combine
 import InlineKit
+import InlineUI
 import Logger
+import Nuke
 import SwiftUI
 
 enum ChatViewError: Error {
@@ -260,13 +262,17 @@ class ChatViewAppKit: NSViewController {
         }
 
         // Try to load as image
-        if let image = NSImage(contentsOf: url) {
-          compose?.handleImageDropOrPaste(image)
-          continue
-        }
+        Task { [weak self] in
+          guard let self else { return }
 
-        // Otherwise handle as generic file
-        compose?.handleFileDrop([url])
+          if let image = await loadImage(from: url) {
+            compose?.handleImageDropOrPaste(image)
+          } else {
+            // Otherwise handle as generic file
+            compose?.handleFileDrop([url])
+          }
+        }
+        continue
       }
       return true
     }
@@ -290,5 +296,26 @@ class ChatViewAppKit: NSViewController {
   // IMAGE DROPPED
   private func handleDroppedImage(_ image: NSImage) {
     compose?.handleImageDropOrPaste(image)
+  }
+
+  // MARK: - Helper Methods
+
+  private func loadImage(from url: URL) async -> NSImage? {
+    do {
+      // Create a request with proper options
+      let request = ImageRequest(
+        url: url,
+        processors: [.resize(width: 1_280)], // Resize to reasonable size
+        priority: .normal,
+        options: []
+      )
+
+      // Try to get image from pipeline
+      let response = try await ImagePipeline.shared.image(for: request)
+      return response
+    } catch {
+      Log.shared.error("Failed to load image from URL: \(error.localizedDescription)")
+      return nil
+    }
   }
 }
