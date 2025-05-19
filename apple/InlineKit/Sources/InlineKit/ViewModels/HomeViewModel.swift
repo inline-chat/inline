@@ -2,6 +2,7 @@ import Auth
 import Combine
 import GRDB
 import Logger
+import SwiftUI
 
 public struct HomeSpaceItem: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
@@ -144,6 +145,10 @@ public final class HomeViewModel: ObservableObject {
   @Published public private(set) var chats: [HomeChatItem] = []
   @Published public private(set) var spaces: [HomeSpaceItem] = []
 
+  // NEW
+  @Published public private(set) var myChats: [HomeChatItem] = []
+  @Published public private(set) var archivedChats: [HomeChatItem] = []
+
   private var chatsCancellable: AnyCancellable?
   private var spacesCancellable: AnyCancellable?
   private var db: AppDatabase
@@ -171,11 +176,14 @@ public final class HomeViewModel: ObservableObject {
           Log.shared.error("Failed to get home chats \(error)")
         },
         receiveValue: { [weak self] chats in
-          self?.chats = chats
-          // .filter { chat in
-          // For now, filter chats with users who are pending setup
-          // chat.user.user.pendingSetup != true
-          // }
+          guard let self else { return }
+          self.chats = chats
+
+          let sortedChats = sortChats(chats)
+          withAnimation(.smooth) {
+            archivedChats = filterArchived(sortedChats, archived: true)
+            myChats = filterArchived(sortedChats, archived: false)
+          }
         }
       )
   }
@@ -206,5 +214,25 @@ public extension AppDatabase {
     try await reader.read { db in
       try HomeChatItem.all().fetchAll(db)
     }
+  }
+}
+
+extension HomeViewModel {
+  private func sortChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
+    chats.sorted { item1, item2 in
+      // First sort by pinned status
+      let pinned1 = item1.dialog.pinned ?? false
+      let pinned2 = item2.dialog.pinned ?? false
+      if pinned1 != pinned2 { return pinned1 }
+
+      // Then sort by date
+      let date1 = item1.message?.date ?? item1.chat?.date ?? Date.distantPast
+      let date2 = item2.message?.date ?? item2.chat?.date ?? Date.distantPast
+      return date1 > date2
+    }
+  }
+
+  private func filterArchived(_ chats: [HomeChatItem], archived: Bool) -> [HomeChatItem] {
+    chats.filter { $0.dialog.archived == archived }
   }
 }
