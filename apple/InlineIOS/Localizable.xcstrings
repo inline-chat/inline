@@ -159,6 +159,9 @@
     "Change Profile Photo" : {
 
     },
+    "Chat" : {
+
+    },
     "Chat Info" : {
 
     },
@@ -199,6 +202,9 @@
     },
     "Clear Cache" : {
 
+    },
+    "Code sent to %@" : {
+      "comment" : "Code sent confirmation"
     },
     "Code sent to %@." : {
       "comment" : "Code sent confirmation",

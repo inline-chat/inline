@@ -9,12 +9,11 @@ struct ChatView: View {
   var peerId: Peer
   var preview: Bool
 
-  @State var text: String = ""
-  @State var textViewHeight: CGFloat = 36
   @State private var navBarHeight: CGFloat = 0
   @State private var showTranslationPopover = false
   @State private var needsTranslation = false
-  @State private var cancellables = Set<AnyCancellable>()
+  @State var apiState: RealtimeAPIState = .connecting
+  @State var isTranslationEnabled = false
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var nav: Navigation
@@ -22,26 +21,9 @@ struct ChatView: View {
 
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
-
   @Environment(\.realtime) var realtime
 
   @ObservedObject var composeActions: ComposeActions = .shared
-
-  func currentComposeAction() -> ApiComposeAction? {
-    composeActions.getComposeAction(for: peerId)?.action
-  }
-
-  @State var currentTime = Date()
-
-  @State var apiState: RealtimeAPIState = .connecting
-
-  @State var isChatInfoPresented = false
-
-  let timer = Timer.publish(
-    every: 60, // 1 minute
-    on: .main,
-    in: .common
-  ).autoconnect()
 
   static let formatter = RelativeDateTimeFormatter()
 
@@ -54,21 +36,8 @@ struct ChatView: View {
   }
 
   var subtitle: String {
-    if apiState != .connected {
-      getStatusTextForChatHeader(realtime.apiState)
-    } else if let composeAction = currentComposeAction() {
-      composeAction.toHumanReadableForIOS()
-    } else if let user = fullChatViewModel.peerUserInfo?.user,
-              let timeZone = user.timeZone,
-              timeZone != TimeZone.current.identifier
-    {
-      TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone) ?? ""
-    } else {
-      ""
-    }
+    getCurrentSubtitle().text
   }
-
-  @State var isTranslationEnabled = false
 
   init(peer: Peer, preview: Bool = false) {
     peerId = peer
@@ -108,9 +77,7 @@ struct ChatView: View {
       }
       .ignoresSafeArea(.all)
     }
-    .onReceive(timer) { _ in
-      currentTime = Date()
-    }
+
     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
       if let height = notification.userInfo?["navBarHeight"] as? CGFloat {
         navBarHeight = height
@@ -206,7 +173,6 @@ struct ChatView: View {
       fetch()
     }
     .onReceive(TranslationDetector.shared.needsTranslation) { result in
-      // print("Translation result: \(result)")
 
       needsTranslation = result.needsTranslation
       if result.needsTranslation {
@@ -215,21 +181,6 @@ struct ChatView: View {
         } else {
           showTranslationPopover = true
         }
-      }
-    }
-    .onChange(of: scenePhase) { _, scenePhase_ in
-      switch scenePhase_ {
-        case .active:
-          fetch()
-          Task {
-            try? await data.updateStatus(online: true)
-          }
-        case .inactive, .background:
-          Task {
-            try? await data.updateStatus(online: false)
-          }
-        default:
-          break
       }
     }
     .onReceive(
@@ -252,19 +203,7 @@ struct ChatView: View {
         .fontWeight(.semibold)
         .foregroundStyle(.primary)
 
-      if !isCurrentUser, isPrivateChat, !subtitle.isEmpty {
-        HStack {
-          if let composeAction = currentComposeAction() {
-            AnimatedDots(dotSize: 3)
-          }
-
-          Text(subtitle.lowercased())
-            .font(.caption)
-            .foregroundStyle(.primary.opacity(0.7))
-        }
-        .padding(.top, -2)
-        .fixedSize()
-      }
+      subtitleView
     }
     .fixedSize()
     .onAppear {
@@ -277,13 +216,5 @@ struct ChatView: View {
 
   func fetch() {
     fullChatViewModel.refetchChatView()
-  }
-}
-
-struct CustomButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .scaleEffect(configuration.isPressed ? 0.8 : 1.0)
-      .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
   }
 }
