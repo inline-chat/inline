@@ -148,14 +148,31 @@ struct ChatItemView: View {
           .truncationMode(.tail)
       }
       .padding(.top, 1)
+    } else if message?.documentId != nil {
+      HStack {
+        Image(systemName: "document.fill")
+          .font(.callout)
+          .foregroundColor(.secondary)
+
+        Text(message?.hasText == true ? message?.text ?? "" : "Document")
+          .font(.callout)
+          .foregroundColor(.secondary)
+          .lineLimit(2)
+          .truncationMode(.tail)
+      }
+      .padding(.top, 1)
     } else if message?.photoId != nil || message?.fileId != nil {
       HStack {
         Image(systemName: "photo.fill")
           .font(.callout)
 
-        Text("Photo")
+        Text(message?.hasText == true ? message?.text ?? "" : "Photo")
+          .font(.callout)
           .foregroundColor(.secondary)
+          .lineLimit(2)
+          .truncationMode(.tail)
       }
+      .padding(.top, 1)
     } else if message?.hasUnsupportedTypes == true {
       Text("Unsupported message")
         .italic()
