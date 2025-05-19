@@ -10,6 +10,9 @@
     "@mo" : {
 
     },
+    "%@ Settings" : {
+
+    },
     "%@:" : {
       "localizations" : {
         "fa" : {
@@ -719,6 +722,9 @@
 
     },
     "Settings" : {
+
+    },
+    "Space ID" : {
 
     },
     "Spaces" : {
