@@ -182,6 +182,16 @@ class ComposeEmbedViewContent: UIView {
         imageIconView.image = UIImage(systemName: "face.smiling", withConfiguration: config)
         imageIconView.isHidden = false
         messageLabel.text = "Sticker"
+      } else if message.documentId != nil, !message.hasText {
+        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        imageIconView.image = UIImage(systemName: "document.fill", withConfiguration: config)
+        imageIconView.isHidden = false
+        messageLabel.text = "Document"
+      } else if message.documentId != nil, message.hasText {
+        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        imageIconView.image = UIImage(systemName: "document.fill", withConfiguration: config)
+        imageIconView.isHidden = false
+        messageLabel.text = message.text
       } else if message.hasPhoto, message.hasText {
         imageIconView.isHidden = false
         messageLabel.text = message.text
