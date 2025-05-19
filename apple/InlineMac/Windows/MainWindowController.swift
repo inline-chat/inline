@@ -81,7 +81,7 @@ class MainWindowController: NSWindowController {
     window?.titlebarAppearsTransparent = true
     window?.isMovableByWindowBackground = true
     window?.titleVisibility = .hidden
-    window?.backgroundColor = .windowBackgroundColor
+    window?.backgroundColor = .clear
     window?.setContentSize(NSSize(width: 780, height: 500))
 
     reloadToolbar()
