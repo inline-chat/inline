@@ -35,10 +35,6 @@ struct ChatView: View {
     fullChatViewModel.peer.isThread
   }
 
-  var subtitle: String {
-    getCurrentSubtitle().text
-  }
-
   init(peer: Peer, preview: Bool = false) {
     peerId = peer
     self.preview = preview
