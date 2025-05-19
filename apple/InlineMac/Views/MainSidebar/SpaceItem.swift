@@ -75,7 +75,7 @@ struct SpaceItem: View {
     HStack(spacing: 0) {
       SpaceAvatar(space: space, size: Theme.sidebarIconSize)
         .padding(.trailing, Theme.sidebarIconSpacing)
-      Text(space.name)
+      Text(space.displayName)
         // Text has a min height
         .lineLimit(1)
 
