@@ -105,7 +105,14 @@ struct SpaceView: View {
       SpaceHeaderView(space: viewModel.space)
     }
 
-    ToolbarItem(placement: .navigationBarTrailing) {
+    ToolbarItemGroup(placement: .navigationBarTrailing) {
+      Button {
+        nav.push(.spaceSettings(spaceId: spaceId))
+      } label: {
+        Image(systemName: "gearshape.fill")
+          .tint(.secondary)
+      }
+
       Menu {
         Button(action: { nav.push(.createThread(spaceId: spaceId)) }) {
           Label("New Group Chat", systemImage: "plus.message.fill")
@@ -118,56 +125,9 @@ struct SpaceView: View {
           .tint(.secondary)
       }
     }
-
-    ToolbarItem(placement: .navigationBarTrailing) {
-      Menu {
-        Button(role: .destructive) {
-          showSpaceActionAlert()
-        } label: {
-          if isCreator {
-            Label("Delete Space", systemImage: "trash.fill")
-          } else {
-            Label("Leave Space", systemImage: "rectangle.portrait.and.arrow.right.fill")
-          }
-        }
-      } label: {
-        Image(systemName: "ellipsis")
-          .tint(.secondary)
-      }
-    }
   }
 
   // MARK: - Actions
-
-  private func showSpaceActionAlert() {
-    let title = isCreator ? "Delete Space" : "Leave Space"
-    let message = isCreator
-      ? "Are you sure you want to delete this space? This action cannot be undone."
-      : "Are you sure you want to leave this space?"
-
-    let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-    alert.addAction(UIAlertAction(title: title, style: .destructive) { _ in
-      Task {
-        do {
-          nav.pop()
-          if isCreator {
-            try await data.deleteSpace(spaceId: spaceId)
-          } else {
-            try await data.leaveSpace(spaceId: spaceId)
-          }
-        } catch {
-          Log.shared.error("Failed to \(isCreator ? "delete" : "leave") space", error: error)
-        }
-      }
-    })
-
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-       let rootVC = windowScene.windows.first?.rootViewController
-    {
-      rootVC.topmostPresentedViewController.present(alert, animated: true)
-    }
-  }
 
   private func loadData() async {
     do {
