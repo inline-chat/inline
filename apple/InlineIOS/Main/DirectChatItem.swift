@@ -143,13 +143,26 @@ struct DirectChatItem: View {
           .truncationMode(.tail)
       }
       .padding(.top, 1)
+    } else if lastMsg?.documentId != nil {
+      HStack {
+        Image(systemName: "document.fill")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+
+        Text(lastMsg?.hasText == true ? lastMsg?.text ?? "" : "Document")
+          .font(.customCaption())
+          .foregroundColor(.secondary)
+          .lineLimit(2)
+          .truncationMode(.tail)
+      }
+      .padding(.top, 1)
     } else if lastMsg?.photoId != nil || lastMsg?.fileId != nil {
       HStack {
         Image(systemName: "photo.fill")
           .font(.customCaption())
           .foregroundColor(.secondary)
 
-        Text("Photo")
+        Text(lastMsg?.hasText == true ? lastMsg?.text ?? "" : "Photo")
           .font(.customCaption())
           .foregroundColor(.secondary)
           .lineLimit(2)
