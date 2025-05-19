@@ -98,7 +98,7 @@ extension ChatView {
 private struct AnimatedPhotoUpload: View {
   var body: some View {
     UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
-      .frame(width: subtitle)
+      .frame(width: 14)
   }
 }
 
