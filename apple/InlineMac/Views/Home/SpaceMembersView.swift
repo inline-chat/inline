@@ -53,7 +53,7 @@ struct SpaceMembersView: View {
           .padding(.trailing, Theme.sidebarIconSpacing)
       }
 
-      Text(fullSpace.space?.name ?? "Loading...")
+      Text(fullSpace.space?.displayName ?? "Loading...")
         .font(Theme.sidebarTopItemFont)
 
       Spacer()
