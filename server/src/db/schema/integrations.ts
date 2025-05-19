@@ -7,9 +7,8 @@ import { spaces } from "./spaces"
 export const integrations = pgTable("integrations", {
   id: serial("id").primaryKey(),
 
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id),
+  userId: integer("user_id").references(() => users.id),
+
   spaceId: integer("space_id").references(() => spaces.id),
 
   provider: text("provider").notNull(),
