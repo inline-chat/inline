@@ -37,7 +37,7 @@ struct OnboardingEnterEmail: View {
           focusedField = .codeField
         }
 
-      GrayButton {
+      InlineButton {
         sendCode()
       } label: {
         if !formState.isLoading {

@@ -3,50 +3,64 @@ import SwiftUI
 struct OnboardingWelcome: View {
   @EnvironmentObject var windowViewModel: MainWindowViewModel
   @EnvironmentObject var onboardingViewModel: OnboardingViewModel
+  @State private var isVisible = false
+  
+  var animation: Animation {
+    .easeOut(duration: 0.5)
+  }
 
   var body: some View {
     VStack {
-      Image("OnboardingLogoType")
-        .renderingMode(.template)
-        .foregroundColor(.primary)
-        .padding(.top, 30)
-
       Spacer()
 
-      //            Text("Hey There")
+      Image("AppIcon")
+        .padding(.top, 30)
+        .opacity(isVisible ? 1 : 0)
+        .offset(y: isVisible ? 0 : -30)
+        .animation(animation.delay(0.1), value: isVisible)
+
       Text("Welcome to Inline")
         .font(
-          .custom(Fonts.RedHatDisplay, size: 36, relativeTo: .title)
+          .custom(Fonts.RedHatDisplay, size: 32, relativeTo: .title)
         ).fontWeight(.bold)
         .padding(.bottom, 0.5)
+        .opacity(isVisible ? 1 : 0)
+        .offset(y: isVisible ? 0 : 20)
+        .animation(animation.delay(0.4), value: isVisible)
 
-      //            Text("Welcome to Inline, \nthe all new way to chat with your team.")
-      Text("It's an all new way to chat with your team.")
-        .font(.system(size: 21.0, weight: .medium))
+      Text("A fresh chatting experience")
+        .font(.system(size: 20.0, weight: .regular))
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
+        .opacity(isVisible ? 1 : 0)
+        .offset(y: isVisible ? 0 : 20)
+        .animation(animation.delay(0.5), value: isVisible)
 
       Spacer()
 
-      GrayButton {
+      InlineButton(size: .large, style: .primary) {
         onboardingViewModel.navigate(to: .enterEmail)
       } label: {
-        Text("Get Started").padding(.horizontal, 60)
+        Text("Get Started").padding(.horizontal, 40)
       }
       .padding(.bottom, 30)
+      .opacity(isVisible ? 1 : 0)
+      .offset(y: isVisible ? 0 : 20)
+      .animation(animation.delay(0.6), value: isVisible)
 
       Footer()
+        .opacity(isVisible ? 1 : 0)
+        .animation(animation.delay(0.9), value: isVisible)
     }
     .padding()
+    .onAppear {
+      isVisible = true
+    }
   }
 
   struct Footer: View {
     var body: some View {
       HStack(alignment: .bottom) {
-        Text("[inline.chat](https://inline.chat)")
-          .font(.footnote)
-          .tint(Color.secondary)
-
         Spacer()
 
         Text(
@@ -59,15 +73,11 @@ struct OnboardingWelcome: View {
         .frame(maxWidth: 300)
 
         Spacer()
-
-        Button(
-          "English",
-          systemImage: "globe",
-          action: {
-            // ..
-          }
-        )
-        .buttonStyle(.borderless)
+      }
+      .overlay(alignment: .bottomLeading) {
+        Text("[inline.chat](https://inline.chat)")
+          .font(.footnote)
+          .tint(Color.secondary)
       }
     }
   }

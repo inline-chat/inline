@@ -47,7 +47,7 @@ struct OnboardingProfile: View {
         }
       // todo .onChange start checking
 
-      GrayButton {
+      InlineButton {
         submit()
       } label: {
         if !formState.isLoading {

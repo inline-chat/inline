@@ -1,11 +1,17 @@
 import SwiftUI
 
-struct GrayButton<Label>: View
+struct InlineButton<Label>: View
   where Label: View
 {
+  enum InlineButtonStyle {
+    case secondary
+    case primary
+  }
+
   var action: () -> Void
   var label: Label
   var size: ButtonSize
+  var style: InlineButtonStyle = .secondary
 
   enum ButtonSize {
     case small
@@ -13,10 +19,16 @@ struct GrayButton<Label>: View
     case large
   }
 
-  init(size: ButtonSize? = nil, action: @escaping @MainActor () -> Void, @ViewBuilder label: () -> Label) {
+  init(
+    size: ButtonSize? = nil,
+    style: InlineButtonStyle = .secondary,
+    action: @escaping @MainActor () -> Void,
+    @ViewBuilder label: () -> Label
+  ) {
     self.action = action
     self.label = label()
     self.size = size ?? .large
+    self.style = style
   }
 
   @FocusState private var isFocused: Bool
@@ -25,7 +37,7 @@ struct GrayButton<Label>: View
   var body: some View {
     if #available(macOS 14.0, *) {
       Button(action: action, label: { label })
-        .buttonStyle(GrayButtonStyle(size: size, isFocused: isFocused, hovered: hovered))
+        .buttonStyle(GrayButtonStyle(size: size, style: style, isFocused: isFocused, hovered: hovered))
         .focusEffectDisabled(true)
         .focused($isFocused)
         .onHover {
@@ -41,11 +53,18 @@ struct GrayButton<Label>: View
     var isFocused: Bool
     var hovered: Bool
     var size: ButtonSize
+    var style: InlineButtonStyle
 
-    init(size: ButtonSize, isFocused: Bool? = nil, hovered: Bool? = nil) {
+    init(
+      size: ButtonSize,
+      style: InlineButtonStyle = .secondary,
+      isFocused: Bool? = nil,
+      hovered: Bool? = nil
+    ) {
       self.isFocused = isFocused ?? false
       self.hovered = hovered ?? false
       self.size = size
+      self.style = style
     }
 
     var font: Font {
@@ -81,10 +100,56 @@ struct GrayButton<Label>: View
       }
     }
 
+    var pressedBackground: Color {
+      switch style {
+        case .secondary:
+          Color.primary.opacity(0.15)
+        case .primary:
+          if #available(macOS 15.0, *) {
+            Color.accentColor.mix(with: .black, by: 0.05)
+          } else {
+            // Fallback on earlier versions
+            Color.accentColor.opacity(0.9)
+          }
+      }
+    }
+
+    var hoveredBackground: Color {
+      switch style {
+        case .secondary:
+          Color.primary.opacity(0.13)
+        case .primary:
+          if #available(macOS 15.0, *) {
+            Color.accentColor.mix(with: .white, by: 0.2)
+          } else {
+            // Fallback on earlier versions
+            Color.accentColor.opacity(0.95)
+          }
+      }
+    }
+
+    var background: Color {
+      switch style {
+        case .secondary:
+          Color.primary.opacity(0.09)
+        case .primary:
+          Color.accentColor
+      }
+    }
+
+    var foreground: Color {
+      switch style {
+        case .secondary:
+          Color.primary
+        case .primary:
+          Color.white
+      }
+    }
+    
     func makeBody(configuration: Configuration) -> some View {
       let background: Color =
         configuration.isPressed
-          ? .primary.opacity(0.15) : hovered ? .primary.opacity(0.13) : .primary.opacity(0.09)
+          ? pressedBackground : hovered ? hoveredBackground : background
       //            let background: Color = .accentColor
       let scale: CGFloat = configuration.isPressed ? 0.95 : 1
       let textOpacity: Double = configuration.isPressed ? 0.8 : 0.95
@@ -96,29 +161,39 @@ struct GrayButton<Label>: View
         .frame(height: height)
         .padding(.horizontal)
         .background(background)
-        .foregroundStyle(.primary.opacity(textOpacity))
+        .foregroundStyle(foreground.opacity(textOpacity))
         .cornerRadius(cornerRadius)
         .overlay(content: {
           if isFocused {
             RoundedRectangle(cornerRadius: cornerRadius)
-              .stroke(lineWidth: 1.0)
-              .foregroundStyle(.primary.opacity(0.3))
+              .stroke(lineWidth: 2.0)
+              .foregroundStyle(hoveredBackground)
           }
         })
         .scaleEffect(x: scale, y: scale)
-        .animation(.snappy.speed(2.0), value: animation)
+        .animation(.mediumFeedback, value: animation)
     }
   }
 }
 
 #Preview("Gray Button (Light)") {
-  GrayButton(action: {}, label: { Text("Continue") })
-    .padding()
+  VStack {
+    InlineButton(action: {}, label: { Text("Continue") })
+      .padding()
+
+    InlineButton(style: .primary, action: {}, label: { Text("Continue") })
+      .padding()
+  }.padding()
     .preferredColorScheme(.light)
 }
 
 #Preview("Gray Button (Dark)") {
-  GrayButton(action: {}, label: { Text("Continue") })
-    .padding()
+  VStack {
+    InlineButton(action: {}, label: { Text("Continue") })
+      .padding()
+    
+    InlineButton(style: .primary, action: {}, label: { Text("Continue") })
+      .padding()
+  }.padding()
     .preferredColorScheme(.dark)
 }
