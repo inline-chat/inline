@@ -9,7 +9,7 @@ class MainSplitViewController: NSSplitViewController {
   private var cancellables = Set<AnyCancellable>()
 
   private enum Metrics {
-    static let sidebarWidthRange = 220.0 ... 400.0
+    static let sidebarWidthRange = 240.0 ... 400.0
     static let contentMinWidth: CGFloat = 300
   }
 
@@ -93,7 +93,7 @@ extension MainSplitViewController {
     let item = NSSplitViewItem(sidebarWithViewController: controller)
     item.minimumThickness = Metrics.sidebarWidthRange.lowerBound
     item.maximumThickness = Metrics.sidebarWidthRange.upperBound
-    item.preferredThicknessFraction = 0.3
+    item.preferredThicknessFraction = 0.35
     item.canCollapse = true
     return item
   }
