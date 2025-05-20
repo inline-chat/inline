@@ -28,6 +28,13 @@ class SidebarSenderView: NSStackView {
     translatesAutoresizingMaskIntoConstraints = false
     clipsToBounds = false
 
+    NSLayoutConstraint.activate([
+      avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize),
+      avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize),
+
+      heightAnchor.constraint(equalToConstant: Self.height),
+    ])
+
     addArrangedSubview(avatarView)
     addArrangedSubview(nameLabel)
     configure(with: userInfo)
@@ -45,6 +52,8 @@ class SidebarSenderView: NSStackView {
       size: Self.avatarSize
     )
     view.translatesAutoresizingMaskIntoConstraints = false
+    view.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+    view.setContentHuggingPriority(.defaultHigh, for: .horizontal)
     return view
   }()
 
@@ -54,6 +63,7 @@ class SidebarSenderView: NSStackView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.isEditable = false
     view.isBordered = false
+    view.clipsToBounds = false
     view.backgroundColor = .clear
     view.font = .systemFont(ofSize: 12)
     view.textColor = .secondaryLabelColor
