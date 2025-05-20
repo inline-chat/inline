@@ -9,7 +9,7 @@ class SidebarSenderView: NSStackView {
   // MARK: - UI props
 
   static let avatarSize: CGFloat = 13
-  static let height: CGFloat = 16
+  static let height: CGFloat = 15
 
   var user: User {
     userInfo.user
@@ -24,6 +24,7 @@ class SidebarSenderView: NSStackView {
   private func setup() {
     orientation = .horizontal
     spacing = 2
+    edgeInsets = NSEdgeInsets(top: 0, left: 1, bottom: 0, right: 0)
     alignment = .centerY
     translatesAutoresizingMaskIntoConstraints = false
     clipsToBounds = false
