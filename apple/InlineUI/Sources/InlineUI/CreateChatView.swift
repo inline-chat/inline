@@ -38,7 +38,7 @@ public struct CreateChatView: View {
       .padding()
       .scrollContentBackground(.hidden)
       .frame(width: 480, height: 600)
-      .navigationTitle("Create Group Chat")
+      .navigationTitle("Create Chat")
   }
 
   private var mainForm: some View {
@@ -162,7 +162,7 @@ public struct CreateChatView: View {
       Button(action: submit) {
         HStack {
           Spacer()
-          Text("Create Group Chat")
+          Text("Create Chat")
           Spacer()
         }
       }

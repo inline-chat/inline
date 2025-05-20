@@ -35,7 +35,7 @@ struct CreateSpace: View {
       .navigationBarTitleDisplayMode(.inline)
       .toolbar(content: {
         ToolbarItem(placement: .topBarLeading) {
-          Text("Create a new supergroup (team)")
+          Text("Create a new space (team)")
             .fontWeight(.bold)
         }
         ToolbarItem(placement: .topBarTrailing) {

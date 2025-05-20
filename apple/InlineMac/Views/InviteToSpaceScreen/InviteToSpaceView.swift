@@ -42,7 +42,6 @@ public struct InviteToSpaceView: View {
       .formStyle(.grouped)
       .padding()
       .scrollContentBackground(.hidden)
-      .frame(width: 480, height: 600)
       .confirmationDialog(
         "Invite \(selectedUser?.anyName ?? "") to \(spaceViewModel.space?.name ?? "")?",
         isPresented: $showInviteConfirmation,
