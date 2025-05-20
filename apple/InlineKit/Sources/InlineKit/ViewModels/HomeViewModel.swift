@@ -54,7 +54,7 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   // public var spaceName: String?
   public var space: Space?
   public var id: Int64 { dialog.id }
-  
+
   public var peerId: Peer {
     dialog.peerId
   }
@@ -183,7 +183,7 @@ public final class HomeViewModel: ObservableObject {
           guard let self else { return }
           self.chats = chats
 
-          let sortedChats = sortChats(chats)
+          let sortedChats = sortChats(filterEmptyChats(chats))
           withAnimation(.smooth) {
             archivedChats = filterArchived(sortedChats, archived: true)
             myChats = filterArchived(sortedChats, archived: false)
@@ -238,5 +238,9 @@ extension HomeViewModel {
 
   private func filterArchived(_ chats: [HomeChatItem], archived: Bool) -> [HomeChatItem] {
     chats.filter { $0.dialog.archived == archived }
+  }
+
+  private func filterEmptyChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
+    chats.filter { $0.chat != nil }
   }
 }
