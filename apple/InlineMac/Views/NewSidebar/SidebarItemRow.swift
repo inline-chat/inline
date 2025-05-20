@@ -235,6 +235,8 @@ class SidebarItemRow: NSTableCellView {
       .user(.deleted),
       size: Self.avatarSize
     )
+    view.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+    view.setContentHuggingPriority(.defaultHigh, for: .horizontal)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -289,6 +291,8 @@ class SidebarItemRow: NSTableCellView {
     nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
     nameLabel.lineBreakMode = .byTruncatingTail
     nameLabel.maximumNumberOfLines = 1
+    nameLabel.cell?.wraps = true
+    nameLabel.cell?.isScrollable = false
 
     messageLabel.isEditable = false
     messageLabel.isBordered = false
@@ -297,6 +301,8 @@ class SidebarItemRow: NSTableCellView {
     messageLabel.textColor = .secondaryLabelColor
     messageLabel.lineBreakMode = .byTruncatingTail
     messageLabel.maximumNumberOfLines = isThread ? 1 : 2
+    messageLabel.cell?.wraps = true
+    messageLabel.cell?.isScrollable = false
 
     // Setup layout
     addSubview(containerView)
@@ -319,7 +325,7 @@ class SidebarItemRow: NSTableCellView {
 
     NSLayoutConstraint.activate([
       stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 0),
-      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -4),
+      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: 0),
       stackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: Self.verticalPadding),
       stackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.verticalPadding),
     ])
@@ -333,10 +339,10 @@ class SidebarItemRow: NSTableCellView {
     stackView.setCustomSpacing(6, after: avatarView)
 
     // Configure content hugging and compression resistance
-    contentStackView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-    contentStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-    nameLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-    messageLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+    // contentStackView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+    // contentStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+    // nameLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+    // messageLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
   }
 
   // MARK: - Context Menu
@@ -391,7 +397,7 @@ class SidebarItemRow: NSTableCellView {
         )
         avatarView.translatesAutoresizingMaskIntoConstraints = false
         stackView.insertArrangedSubview(avatarView, at: 1)
-        stackView.setCustomSpacing(8, after: avatarView)
+        stackView.setCustomSpacing(6, after: avatarView)
       }
     }
 
@@ -402,7 +408,6 @@ class SidebarItemRow: NSTableCellView {
         user.user.username ??
         user.user.phoneNumber ??
         user.user.email ?? ""
-
     } else if let chat = item.chat {
       let spaceName = item.space?.name
       if let spaceName {
@@ -415,6 +420,7 @@ class SidebarItemRow: NSTableCellView {
     }
 
     // Configure last message
+    messageLabel.maximumNumberOfLines = isThread ? 1 : 2
     if let message = item.message {
       messageLabel.stringValue = message.text ?? ""
       Log.shared.debug("SidebarItemRow message set to: \(messageLabel.stringValue)")

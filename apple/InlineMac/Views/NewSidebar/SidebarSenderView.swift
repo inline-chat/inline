@@ -26,6 +26,7 @@ class SidebarSenderView: NSStackView {
     spacing = 2
     alignment = .centerY
     translatesAutoresizingMaskIntoConstraints = false
+    clipsToBounds = false
 
     addArrangedSubview(avatarView)
     addArrangedSubview(nameLabel)
