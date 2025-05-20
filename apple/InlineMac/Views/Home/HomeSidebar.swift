@@ -223,23 +223,27 @@ struct HomeSidebar: View {
       Button {
         nav.open(.createSpace)
       } label: {
-        Label("New Supergroup (Team)", systemImage: "plus")
+        Label("New Space (Team)", systemImage: "plus")
           .font(.system(size: 14, weight: .medium))
           .foregroundStyle(Color.accent)
       }
 
       Menu {
-        ForEach(home.spaces, id: \.space.id) { spaceItem in
-          Button {
-            nav.open(.newChat(spaceId: spaceItem.space.id))
-          } label: {
-            Label(spaceItem.space.name, systemImage: "bubble.left.and.bubble.right.fill")
-              .font(.system(size: 14, weight: .medium))
-              .foregroundStyle(Color.accent)
+        if home.spaces.isEmpty {
+          Button("Create a Space First") {}.disabled(true)
+        } else {
+          ForEach(home.spaces, id: \.space.id) { spaceItem in
+            Button {
+              nav.open(.newChat(spaceId: spaceItem.space.id))
+            } label: {
+              Label(spaceItem.space.name, systemImage: "bubble.left.and.bubble.right.fill")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.accent)
+            }
           }
         }
       } label: {
-        Label("Create group chat", systemImage: "person.3.fill")
+        Label("New Chat", systemImage: "person.3.fill")
           .font(.system(size: 14, weight: .medium))
           .foregroundStyle(Color.accent)
       }

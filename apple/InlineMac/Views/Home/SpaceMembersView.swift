@@ -11,6 +11,7 @@ struct SpaceMembersView: View {
   @Environment(\.realtime) var realtime
 
   @State var searchQuery: String = ""
+  @State private var selectedTab: Int = 0
   var spaceId: Int64
   @Binding var selectedSpaceId: Int64?
 
@@ -26,7 +27,21 @@ struct SpaceMembersView: View {
     VStack(spacing: 0) {
       topBar
       searchBar
-      membersList
+
+      Picker("", selection: $selectedTab) {
+        Text("Chats").tag(0)
+        Text("Members").tag(1)
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+      .padding(.bottom, 8)
+
+      if selectedTab == 0 {
+        threadsList
+      } else {
+        membersList
+      }
     }
     .task {
       do {
@@ -75,24 +90,24 @@ struct SpaceMembersView: View {
 
   private var membersList: some View {
     List {
-      Section("Members") {
-        ForEach(fullSpace.members) { item in
-          memberItem(item)
-        }
+      ForEach(fullSpace.members) { item in
+        memberItem(item)
       }
+    }
+    .listStyle(.sidebar)
+  }
 
-      Section("Threads") {
-        ForEach(fullSpace.chats) { item in
-          if let chat = item.chat {
-            SpaceSmallChatItem(
-              chat: chat,
-              selected: nav.currentRoute == .chat(peer: .thread(id: chat.id)),
-              onPress: {
-                nav.open(.chat(peer: .thread(id: chat.id)))
-              }
-            )
-            .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-          }
+  private var threadsList: some View {
+    List {
+      ForEach(fullSpace.chats) { item in
+        if let chat = item.chat {
+          SidebarThreadItem(
+            chat: chat,
+            dialog: item.dialog,
+            lastMessage: item.message,
+            lastMessageSender: item.from,
+          )
+          .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
         }
       }
     }
@@ -116,7 +131,7 @@ struct SpaceMembersView: View {
   @ViewBuilder
   var plusButton: some View {
     Menu {
-      Button("New Group Chat") {
+      Button("New Chat") {
         nav.open(.newChat(spaceId: spaceId))
       }
 
