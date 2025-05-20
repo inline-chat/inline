@@ -409,7 +409,7 @@ class SidebarItemRow: NSTableCellView {
         user.user.phoneNumber ??
         user.user.email ?? ""
     } else if let chat = item.chat {
-      let spaceName = item.space?.name
+      let spaceName = item.space?.displayName
       if let spaceName {
         nameLabel.stringValue = "\(spaceName) / \(chat.title ?? "Unknown")"
       } else {
@@ -422,7 +422,7 @@ class SidebarItemRow: NSTableCellView {
     // Configure last message
     messageLabel.maximumNumberOfLines = isThread ? 1 : 2
     if let message = item.message {
-      messageLabel.stringValue = message.text ?? ""
+      messageLabel.stringValue = message.stringRepresentationWithEmoji ?? ""
       Log.shared.debug("SidebarItemRow message set to: \(messageLabel.stringValue)")
     } else {
       messageLabel.stringValue = ""
