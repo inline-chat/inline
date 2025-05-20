@@ -15,7 +15,7 @@ class MessageListAppKit: NSViewController {
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
 
-  private let log = Log.scoped("MessageListAppKit", enableTracing: true)
+  private let log = Log.scoped("MessageListAppKit", enableTracing: false)
   private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 45.0
 

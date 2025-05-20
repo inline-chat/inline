@@ -93,6 +93,7 @@ extension MainSplitViewController {
     let item = NSSplitViewItem(sidebarWithViewController: controller)
     item.minimumThickness = Metrics.sidebarWidthRange.lowerBound
     item.maximumThickness = Metrics.sidebarWidthRange.upperBound
+    item.preferredThicknessFraction = 0.3
     item.canCollapse = true
     return item
   }
