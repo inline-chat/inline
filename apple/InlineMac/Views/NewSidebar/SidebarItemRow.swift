@@ -287,6 +287,7 @@ class SidebarItemRow: NSTableCellView {
     // Configure text fields
     nameLabel.isEditable = false
     nameLabel.isBordered = false
+    nameLabel.clipsToBounds = false
     nameLabel.backgroundColor = .clear
     nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
     nameLabel.lineBreakMode = .byTruncatingTail
