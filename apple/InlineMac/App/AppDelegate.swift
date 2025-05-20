@@ -191,7 +191,7 @@ extension AppDelegate {
 // MARK: - Dependency Container
 
 @MainActor
-struct AppDependencies {
+public struct AppDependencies {
   let auth = Auth.shared
   let viewModel = MainWindowViewModel()
   let overlay = OverlayManager()
@@ -225,6 +225,7 @@ extension View {
       .appDatabase(deps.database)
       .environment(\.logOut, deps.logOut)
       .environment(\.keyMonitor, deps.keyMonitor)
+      .environment(\.dependencies, deps)
       .eraseToAnyView()
 
     if let rootData = deps.rootData {

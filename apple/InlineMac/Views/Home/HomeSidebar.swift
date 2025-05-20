@@ -30,6 +30,7 @@ struct HomeSidebar: View {
 
   @Environment(\.appDatabase) var db
   @Environment(\.keyMonitor) var keyMonitor
+  @Environment(\.dependencies) var dependencies
   @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager
@@ -38,8 +39,10 @@ struct HomeSidebar: View {
   @FocusState private var isSearching: Bool
 
   @State private var tab: Tab = .inbox
-  @State private var isAtTop = false
-  @State private var isAtBottom = false
+
+  private var showSearchBar: Bool {
+    search.hasResults || (isSearching && search.canSearch)
+  }
 
   // MARK: - Initializer
 
@@ -86,147 +89,43 @@ struct HomeSidebar: View {
   // MARK: - Views
 
   var body: some View {
-    list3
-  }
+    VStack(spacing: 0) {
+      if tab == .spaces {
+        SpacesTab()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        // Top area
+        VStack(alignment: .leading, spacing: 0) {
+          topArea
+          searchBar
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+        .padding(.bottom, 8)
 
-  @ViewBuilder
-  var list: some View {
-    if tab == .spaces {
-      SpacesTab()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .safeAreaInset(
-          edge: .bottom,
-          content: {
-            tabs
-              .padding(.top, -8)
+        // Main content
+        if showSearchBar {
+          List {
+            searchView
           }
-        )
-    } else {
-      List {
-        if search.hasResults || (isSearching && search.canSearch) {
-          searchView
+          .listStyle(.sidebar)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-          spacesAndUsersView
+          NewSidebarWrapper(dependencies: dependencies!, tab: tab)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
-      .padding(.bottom, 0)
-      .listStyle(.sidebar)
-      .animation(.smoothSnappy, value: items)
-      .animation(.smoothSnappy, value: home.chats)
-      .safeAreaInset(
-        edge: .bottom,
-        content: {
-          tabs
-            .padding(.top, -8)
-        }
-      )
 
-      //    .overlay(alignment: .bottom) {
-      //      tabs
-      //    }
-
-      //    .safeAreaInset(
-      //      edge: .top,
-      //      content: {
-      //        Color.clear
-      //          .frame(height: 12)
-      //      }
-      //    )
-
-      //    .safeAreaInset(
-      //      edge: .top,
-      //      content: {
-      //        VStack(alignment: .leading, spacing: 0) {
-      //          HStack(alignment: .center, spacing: 0) {
-      //            SelfUser()
-      //              /// NOTE(@mo): this `scaleEffect` fixes an animation issue where the image would stay still while
-      //              /the
-      //              /// wrapper view was moving
-      //              .scaleEffect(1.0)
-      //
-      //            AlphaCapsule()
-      //          }
-      //          .padding(.top, 0)
-      //          .padding(.bottom, 8)
-      //
-      //          searchBar
-      //            .padding(.bottom, 2)
-      //        }
-      //        .frame(maxWidth: .infinity, alignment: .leading)
-      //        .padding(.horizontal) // default side padding
-      //        .padding(.leading, Theme.sidebarItemLeadingGutter) // gutter to sync with items
-      //      }
-      //    )
-
-      .safeAreaInset(
-        edge: .top,
-        spacing: 0,
-        content: {
-          VStack(alignment: .leading, spacing: 0) {
-            topArea
-            searchBar
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(
-            .horizontal,
-            Theme.sidebarItemOuterSpacing
-          )
-          .padding(.bottom, 8)
-          .edgesIgnoringSafeArea(.bottom)
-          .background(alignment: .bottom) {
-            if !isAtTop {
-              Divider().opacity(0.4)
-            }
-          }
-        }
-      )
-
-      .onChange(of: nav.currentRoute) { _ in
-        DispatchQueue.main.async {
-          subscribeNavKeyMonitor()
-        }
-      }
-      .onAppear {
+      // Bottom tabs
+      tabs
+    }
+    .onChange(of: nav.currentRoute) { _ in
+      DispatchQueue.main.async {
         subscribeNavKeyMonitor()
       }
     }
-  }
-
-  @ViewBuilder
-  var list2: some View {
-    if #available(macOS 15.0, *) {
-      list
-//        .overlay(alignment: .top) {
-//          if !isAtTop {
-//            Divider().opacity(0.4)
-//          }
-//        }
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-          geometry.contentOffset.y <= 0
-        } action: { _, isBeyondZero in
-          self.isAtTop = isBeyondZero
-        }
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-          geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height
-        } action: { _, isBeyondBottom in
-          self.isAtBottom = isBeyondBottom
-        }
-    } else {
-      list
-    }
-  }
-
-  @ViewBuilder
-  var list3: some View {
-    if #available(macOS 14.0, *) {
-      list2
-
-      // .contentMargins(.bottom, 44, for: .scrollIndicators)
-      // .safeAreaPadding(.bottom, 40)
-      // .contentMargins(.bottom, 44, for: .scrollContent)
-      // .ignoresSafeArea(edges: .bottom)
-    } else {
-      list2
+    .onAppear {
+      subscribeNavKeyMonitor()
     }
   }
 
@@ -239,7 +138,7 @@ struct HomeSidebar: View {
         .init(value: .spaces, systemImage: "building.2.fill", fontSize: 15),
       ],
       selected: tab,
-      showDivider: !isAtBottom,
+      showDivider: true,
       onSelect: { tab = $0 }
     )
   }
@@ -262,80 +161,6 @@ struct HomeSidebar: View {
           unsubcribeKeyMonitor()
         }
       }
-  }
-
-  @ViewBuilder
-  var spacesAndUsersView: some View {
-    ForEach(items, id: \.id) { item in
-      renderItem(item)
-    }
-  }
-
-  @ViewBuilder
-  fileprivate func renderItem(_ item: SideItem) -> some View {
-    switch item {
-      case let .chat(chat):
-        if let user = chat.user {
-          userItem(user, item: chat)
-        } else if let thread = chat.chat {
-          threadItem(thread, item: chat)
-        }
-
-      case let .space(space):
-        spaceItem(space: space)
-    }
-  }
-
-  @ViewBuilder
-  func spaceItem(space: InlineKit.Space) -> some View {
-    SidebarSpaceItem(
-      space: space
-    )
-    .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-
-//    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-//      Button(action: {
-//        nav.openSpace(space.id)
-//      }) {
-//        Image(systemName: "chevron.right")
-//          .font(.system(size: 16, weight: .semibold))
-//          .foregroundStyle(.primary)
-//      }
-//      .tint(.primary)
-//    }
-  }
-
-  @ViewBuilder
-  func userItem(_ userInfo: UserInfo, item: HomeChatItem) -> some View {
-    let user = userInfo.user
-    let dialog = item.dialog
-    let chatChat = item.chat
-    let peerId = Peer.user(id: user.id)
-
-    SidebarItem(
-      type: .user(userInfo, chat: chatChat),
-      dialog: dialog,
-      lastMessage: item.message,
-      selected: nav.currentRoute == .chat(peer: peerId),
-      onPress: {
-        nav.open(.chat(peer: peerId))
-      },
-    )
-    .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-  }
-
-  @ViewBuilder
-  func threadItem(_ chat: Chat, item: HomeChatItem) -> some View {
-    let peerId: Peer = .thread(id: chat.id)
-
-    SidebarThreadItem(
-      chat: chat,
-      dialog: item.dialog,
-      lastMessage: item.message,
-      lastMessageSender: item.from,
-      spaceName: item.space?.name
-    )
-    .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
 
   @ViewBuilder
@@ -538,5 +363,20 @@ struct HomeSidebar: View {
       .previewsEnvironmentForMac(.populated)
   } detail: {
     Text("Welcome.")
+  }
+}
+
+// MARK: - NewSidebar Wrapper
+
+struct NewSidebarWrapper: NSViewControllerRepresentable {
+  let dependencies: AppDependencies
+  var tab: HomeSidebar.Tab
+
+  func makeNSViewController(context: Context) -> NewSidebar {
+    NewSidebar(dependencies: dependencies, tab: tab)
+  }
+
+  func updateNSViewController(_ nsView: NewSidebar, context: Context) {
+    nsView.update(tab: tab)
   }
 }

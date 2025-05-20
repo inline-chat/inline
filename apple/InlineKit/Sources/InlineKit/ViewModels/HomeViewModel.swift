@@ -54,6 +54,10 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   // public var spaceName: String?
   public var space: Space?
   public var id: Int64 { dialog.id }
+  
+  public var peerId: Peer {
+    dialog.peerId
+  }
 
   public init(
     dialog: Dialog,
