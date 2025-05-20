@@ -26,7 +26,7 @@ struct SpaceMembersView: View {
   var body: some View {
     VStack(spacing: 0) {
       topBar
-      searchBar
+      // searchBar
 
       Picker("", selection: $selectedTab) {
         Text("Chats").tag(0)
@@ -36,6 +36,7 @@ struct SpaceMembersView: View {
       .labelsHidden()
       .padding(.horizontal, Theme.sidebarItemOuterSpacing)
       .padding(.bottom, 8)
+      .padding(.top, 4)
 
       if selectedTab == 0 {
         threadsList
@@ -60,8 +61,7 @@ struct SpaceMembersView: View {
   private var topBar: some View {
     HStack(spacing: 0) {
       BackToSpacesButton(selectedSpaceId: $selectedSpaceId)
-        .padding(.leading, -4)
-        .padding(.trailing, 4)
+        .padding(.leading, -8)
 
       if let space = fullSpace.space {
         SpaceAvatar(space: space, size: Theme.sidebarTitleIconSize)
