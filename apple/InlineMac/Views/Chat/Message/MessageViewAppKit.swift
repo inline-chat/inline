@@ -560,6 +560,14 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func handleDoubleClick(_ gesture: NSClickGestureRecognizer) {
+    // Check if click is within text view bounds
+    let location = gesture.location(in: self)
+    if hasText, let textViewFrame = textView.superview?.convert(textView.frame, to: self),
+       textViewFrame.contains(location)
+    {
+      return // Ignore double click if it's on the text
+    }
+
     // Provide haptic feedback
     NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
