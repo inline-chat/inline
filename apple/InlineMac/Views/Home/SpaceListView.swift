@@ -93,7 +93,7 @@ struct SpaceListView: View {
       Button {
         nav.open(.createSpace)
       } label: {
-        Label("New Supergroup (Team)", systemImage: "plus")
+        Label("New Space (Team)", systemImage: "plus")
           .font(.system(size: 14, weight: .medium))
           .foregroundStyle(Color.accent)
       }

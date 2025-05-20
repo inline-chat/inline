@@ -247,7 +247,7 @@ struct SpaceSidebar: View {
   var plusButton: some View {
     Menu {
       // Button("New Chat") {
-      Button("New Group Chat") {
+      Button("New Chat") {
         nav.open(.newChat(spaceId: spaceId))
       }
 
