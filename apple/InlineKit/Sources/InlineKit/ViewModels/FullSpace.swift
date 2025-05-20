@@ -165,8 +165,23 @@ public final class FullSpaceViewModel: ObservableObject {
             Log.shared.error("failed to fetch chats in space view model. error: \(error)")
           },
           receiveValue: { [weak self] chats in
-            self?.chats = chats
+            guard let self else { return }
+            self.chats = sortChats(chats)
           }
         )
+  }
+
+  private func sortChats(_ chats: [SpaceChatItem]) -> [SpaceChatItem] {
+    chats.sorted { item1, item2 in
+      // First sort by pinned status
+      let pinned1 = item1.dialog.pinned ?? false
+      let pinned2 = item2.dialog.pinned ?? false
+      if pinned1 != pinned2 { return pinned1 }
+
+      // Then sort by date
+      let date1 = item1.message?.date ?? item1.chat?.date ?? Date.distantPast
+      let date2 = item2.message?.date ?? item2.chat?.date ?? Date.distantPast
+      return date1 > date2
+    }
   }
 }
