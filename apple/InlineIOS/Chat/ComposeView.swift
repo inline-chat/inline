@@ -17,7 +17,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 
   static let minHeight: CGFloat = 38.0
   private let maxHeight: CGFloat = 350
-  private let buttonSize: CGSize = .init(width: 34, height: 34)
+  private let buttonSize: CGSize = .init(width: 32, height: 32)
   static let textViewVerticalPadding: CGFloat = 0.0
   static let textViewHorizantalPadding: CGFloat = 12.0
   static let textViewHorizantalMargin: CGFloat = 7.0
@@ -36,6 +36,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 
   // MARK: - State Management
 
+  private var isButtonVisible = false
   var selectedImage: UIImage?
   var showingPhotoPreview: Bool = false
   var imageCaption: String = ""
@@ -55,16 +56,17 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     return view
   }()
 
-  lazy var sendButtonContainer: UIView = {
-    let container = UIView()
-    container.translatesAutoresizingMaskIntoConstraints = false
-    container.isUserInteractionEnabled = true
-    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(sendTapped))
-
-    container.addGestureRecognizer(tapGesture)
-    container.alpha = 0
-    return container
-  }()
+  // lazy var sendButtonContainer: UIButton = {
+  //   let container = UIButton()
+  //   container.translatesAutoresizingMaskIntoConstraints = false
+  //   container.isUserInteractionEnabled = true
+  //   container.isEnabled = true
+  //   container.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
+  //   container.addTarget(self, action: #selector(handleTouchDown), for: .touchDown)
+  //   container.addTarget(self, action: #selector(handleTouchUp), for: [.touchUpOutside, .touchCancel])
+  //   container.alpha = 0
+  //   return container
+  // }()
 
   lazy var sendButton = makeSendButton()
   lazy var plusButton = makePlusButton()
@@ -159,7 +161,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       resetHeight()
       textView.showPlaceholder(true)
       buttonDisappear()
-      sendMessageHaptic()
+      // sendMessageHaptic()
     } catch {
       Log.shared.error("❌ COMPOSE - Failed to save sticker", error: error)
     }
@@ -172,34 +174,50 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   private func setupViews() {
     backgroundColor = .clear
     addSubview(textView)
-    addSubview(sendButtonContainer)
-    sendButtonContainer.addSubview(sendButton)
+    // addSubview(sendButtonContainer)
+    // sendButtonContainer.addSubview(sendButton)
+    addSubview(sendButton)
     addSubview(plusButton)
 
+    // Make sure the container button is on top of the inner button
+    // sendButtonContainer.bringSubviewToFront(sendButton)
+
+    // Disable user interaction on the inner button since container will handle touches
+    // sendButton.isUserInteractionEnabled = false
+
     composeHeightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
+
+    let buttonBottomPadding: CGFloat = -3
 
     NSLayoutConstraint.activate([
       composeHeightConstraint,
 
       plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
-      plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: -3),
-      plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
-      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
+      plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
+      plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
+      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
 
       textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
       textView.topAnchor.constraint(equalTo: topAnchor),
       textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: sendButtonContainer.leadingAnchor, constant: 12),
+      // textView.trailingAnchor.constraint(equalTo: sendButtonContainer.leadingAnchor, constant: 12),
 
-      sendButtonContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
-      sendButtonContainer.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: 7),
-      sendButtonContainer.widthAnchor.constraint(equalToConstant: buttonSize.width + 20),
-      sendButtonContainer.heightAnchor.constraint(equalToConstant: buttonSize.height + 20),
+      // sendButtonContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
+      // sendButtonContainer.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: 7),
+      // sendButtonContainer.widthAnchor.constraint(equalToConstant: buttonSize.width + 20),
+      // sendButtonContainer.heightAnchor.constraint(equalToConstant: buttonSize.height + 20),
 
-      sendButton.trailingAnchor.constraint(equalTo: sendButtonContainer.trailingAnchor),
-      sendButton.centerYAnchor.constraint(equalTo: sendButtonContainer.centerYAnchor),
-      sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
-      sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
+      // sendButton.trailingAnchor.constraint(equalTo: sendButtonContainer.trailingAnchor),
+      // sendButton.centerYAnchor.constraint(equalTo: sendButtonContainer.centerYAnchor),
+      // sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width - 2),
+      // sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height - 2),
+
+      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -12),
+
+      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
+      sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
+      sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
+      sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
     ])
 
     let dropInteraction = UIDropInteraction(delegate: self)
@@ -221,6 +239,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     config.background.backgroundColor = ThemeManager.shared.selected.accent
     config.cornerStyle = .capsule
 
+    button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
+    button.addTarget(self, action: #selector(handleTouchDown), for: .touchDown)
+    button.addTarget(self, action: #selector(handleTouchUp), for: [.touchUpOutside, .touchCancel])
+
     button.configurationUpdateHandler = { [weak button] _ in
       guard let button else { return }
 
@@ -228,7 +250,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 
       if button.isHighlighted {
         UIView.animate(
-          withDuration: 0.2,
+          withDuration: 0.15,
           delay: 0,
           options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut],
           animations: {
@@ -237,9 +259,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         )
       } else {
         UIView.animate(
-          withDuration: 0.2,
-          delay: 0,
-          options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut],
+          withDuration: 0.12,
+          delay: 0.05,
+          options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseIn],
           animations: {
             button.transform = .identity
           }
@@ -252,9 +274,25 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     button.configuration = config
     button.isUserInteractionEnabled = true
 
-    button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
+    // Hide initially
+    button.alpha = 0.0
 
     return button
+  }
+
+  @objc private func handleTouchDown() {
+    // haptic
+    // let generator = UIImpactFeedbackGenerator(style: .soft)
+    // generator.impactOccurred()
+    // lighter
+    // let generator = UIImpactFeedbackGenerator(style: .light)
+    // generator.prepare()
+    // generator.impactOccurred(intensity: 0.8)
+  }
+
+  @objc private func handleTouchUp() {
+    print("Touch up detected")
+    // Handle touch end
   }
 
   private func makePlusButton() -> UIButton {
@@ -332,16 +370,34 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   // MARK: - Button Animation
 
   func buttonDisappear() {
-    UIView.animate(withDuration: 0.06, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
-      self.sendButtonContainer.alpha = 0
-      self.sendButtonContainer.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+    print("buttonDisappear")
+    isButtonVisible = false
+    UIView.animate(withDuration: 0.12, delay: 0.1, options: [.curveEaseOut, .allowUserInteraction]) {
+      // self.sendButtonContainer.alpha = 0
+      // self.sendButtonContainer.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+      self.sendButton.transform = CGAffineTransform(scaleX: 1.05, y: 1.05)
+      self.sendButton.alpha = 0
     }
   }
 
   func buttonAppear() {
-    UIView.animate(withDuration: 0.06, delay: 0, options: .curveEaseOut) {
-      self.sendButtonContainer.alpha = 1
-      self.sendButtonContainer.transform = .identity
+    print("buttonAppear")
+    guard !isButtonVisible else { return }
+    isButtonVisible = true
+    sendButton.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
+    sendButton.alpha = 0.0
+    layoutIfNeeded()
+    UIView.animate(
+      withDuration: 0.21,
+      delay: 0,
+      usingSpringWithDamping: 0.8,
+      initialSpringVelocity: 0.5,
+      options: .curveEaseOut
+    ) {
+      // self.sendButtonContainer.alpha = 1
+      // self.sendButtonContainer.transform = .identity
+      self.sendButton.transform = .identity
+      self.sendButton.alpha = 1
     } completion: { _ in
     }
   }
@@ -385,7 +441,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     resetHeight()
     textView.showPlaceholder(true)
     buttonDisappear()
-    sendMessageHaptic()
+    // Moved
+    // sendMessageHaptic()
   }
 
   private func updateSendButtonForEditing(_ isEditing: Bool) {
@@ -395,13 +452,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     )
   }
 
-  func sendMessageHaptic() {
-    Task { @MainActor in
-      let generator = UIImpactFeedbackGenerator(style: .medium)
-      generator.prepare()
-      generator.impactOccurred()
-    }
-  }
+  // func sendMessageHaptic() {
+  //   Task { @MainActor in
+  //     let generator = UIImpactFeedbackGenerator(style: .medium)
+  //     generator.prepare()
+  //     generator.impactOccurred()
+  //   }
+  // }
 
   // MARK: - Draft Management
 
@@ -423,23 +480,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   }
 
   public func getDraft(peerId: Peer) -> String? {
-    try? AppDatabase.shared.dbWriter.read { db in
-      let dialog = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
-      return dialog?.draft
-    }
+    // FIXME: retrieve draft without an extra database call
+//    try? AppDatabase.shared.dbWriter.read { db in
+//      let dialog = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+//      return dialog?.draft
+//    }
+    nil
   }
 
   private func saveDraft() {
     guard let peerId else { return }
 
     if let text = textView.text, !text.isEmpty {
-      Task {
-        do {
-          try await DataManager.shared.updateDialog(peerId: peerId, draft: text)
-        } catch {
-          Log.shared.error("Failed to save draft", error: error)
-        }
-      }
+      // FIXME: store draft
     }
   }
 
@@ -447,11 +500,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     guard let peerId else { return }
 
     Task {
-      do {
-        try await DataManager.shared.updateDialog(peerId: peerId, draft: "")
-      } catch {
-        Log.shared.error("Failed to clear draft", error: error)
-      }
+      // FIXME: store empty draft
     }
   }
 
@@ -697,7 +746,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     dismissPreview()
     sendButton.configuration?.showsActivityIndicator = false
     attachmentItems.removeAll()
-    sendMessageHaptic()
+    // sendMessageHaptic()
   }
 
   func handlePastedImage() {

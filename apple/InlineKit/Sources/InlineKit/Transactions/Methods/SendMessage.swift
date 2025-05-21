@@ -6,6 +6,10 @@ import Logger
 import MultipartFormDataKit
 import RealtimeAPI
 
+#if os(iOS)
+import UIKit
+#endif
+
 public struct SendMessageAttachment: Codable, Sendable {
   let media: FileMediaItem
 
@@ -234,6 +238,12 @@ public struct TransactionSendMessage: Transaction {
 
   public func didSucceed(result: [InlineProtocol.Update]) async {
     // await Realtime.shared.updates.applyBatch(updates: result)
+
+    #if os(iOS)
+    Task(priority: .userInitiated) { @MainActor in
+      SendMessageFeedback.shared.playHapticFeedback()
+    }
+    #endif
   }
 
   public func didFail(error: Error?) async {
