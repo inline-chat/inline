@@ -14,26 +14,43 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   var avatarView: UserAvatarView?
   var avatarSpacerView: UIView?
 
+  weak var delegate: MessageCellDelegate?
+  private var panGesture: UIPanGestureRecognizer!
+  private var swipeActive = false
+  private var initialTranslation: CGFloat = 0
+  private var prevText: String? = nil
+
+  // MARK: - Props
+
   var isThread: Bool = false
   var outgoing: Bool = false
   var fromOtherSender: Bool = false
   var message: FullMessage!
   var spaceId: Int64 = 0
-  var prevText: String? = nil
 
-  private var panGesture: UIPanGestureRecognizer!
-  private let replyIndicator = ReplyIndicatorView()
-  private var swipeActive = false
-  private var initialTranslation: CGFloat = 0
+  // MARK: - Sizes
 
-  weak var delegate: MessageCellDelegate?
+  private let avatarSize: CGFloat = 32
+  private let avatarLeading: CGFloat = 2
+  private let nameLabelLeading: CGFloat = 6
+  private let nameLabelTop: CGFloat = 14
+  private let nameLabelHeight: CGFloat = 16
 
-  lazy var nameLabel: UILabel = {
+  // MARK: - Views
+
+  private lazy var replyIndicator = {
+    let view = ReplyIndicatorView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
+    view.alpha = 0
+    return view
+  }()
+
+  private lazy var nameLabel: UILabel = {
     var label = UILabel()
     label.font = .systemFont(ofSize: 13, weight: .medium)
     label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false
-
     return label
   }()
 
@@ -81,6 +98,10 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     super.prepareForReuse()
     // resetCell()
   }
+
+  // MARK: - Constraints
+
+  var replyViewCenterYConstraint: NSLayoutConstraint!
 
   override func preferredLayoutAttributesFitting(
     _ layoutAttributes: UICollectionViewLayoutAttributes
@@ -239,17 +260,19 @@ extension MessageCollectionViewCell {
   }
 
   func setupReplyIndicator() {
-    replyIndicator.translatesAutoresizingMaskIntoConstraints = false
-    contentView.insertSubview(replyIndicator, belowSubview: messageView ?? UIView())
-    replyIndicator.isHidden = true
-    replyIndicator.alpha = 1
+    contentView.addSubview(replyIndicator)
 
-    NSLayoutConstraint.activate([
-      replyIndicator.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-      replyIndicator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5),
-      replyIndicator.widthAnchor.constraint(equalToConstant: 40),
-      replyIndicator.heightAnchor.constraint(equalToConstant: 40),
-    ])
+    replyViewCenterYConstraint = replyIndicator.centerYAnchor
+      .constraint(equalTo: contentView.centerYAnchor, constant: topBubblePadding / 2)
+
+    NSLayoutConstraint.activate(
+      [
+        replyViewCenterYConstraint,
+        replyIndicator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: 0),
+        replyIndicator.widthAnchor.constraint(equalToConstant: 40),
+        replyIndicator.heightAnchor.constraint(equalToConstant: 40),
+      ]
+    )
   }
 
   func setupSwipeGestures() {
@@ -265,11 +288,6 @@ extension MessageCollectionViewCell {
 
   func setupThreadHeaderViewsIfNeeded(fromOtherSender: Bool) {
     guard isThread, !outgoing else { return }
-
-    let avatarSize: CGFloat = 32
-    let avatarLeading: CGFloat = 2
-    let nameLabelLeading: CGFloat = 6
-    let nameLabelTop: CGFloat = 14
 
     let avatarOrSpacer: UIView
     if fromOtherSender, let from = message.senderInfo {
@@ -297,9 +315,18 @@ extension MessageCollectionViewCell {
       contentView.addSubview(nameLabel)
       NSLayoutConstraint.activate([
         nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: nameLabelTop),
-        nameLabel.heightAnchor.constraint(equalToConstant: 16),
+        nameLabel.heightAnchor.constraint(equalToConstant: nameLabelHeight),
         nameLabel.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: nameLabelLeading),
       ])
+    }
+  }
+
+  /// Space between bubble's top to contentView's top (includes name height)
+  private var topBubblePadding: CGFloat {
+    if isThread, fromOtherSender, !outgoing {
+      nameLabelHeight + nameLabelTop + 2
+    } else {
+      fromOtherSender ? 12 : 2
     }
   }
 
@@ -312,8 +339,13 @@ extension MessageCollectionViewCell {
     let leadingConstraint: NSLayoutConstraint
     let trailingConstraint: NSLayoutConstraint
 
+    // Bubble top constraint
+    topConstraint = newMessageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: topBubblePadding)
+
+    // Sync reply view
+    replyViewCenterYConstraint.constant = topBubblePadding / 2
+
     if isThread, fromOtherSender, !outgoing {
-      topConstraint = newMessageView.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2)
       if let avatarOrSpacer = avatarSpacerView {
         leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: 6)
       } else {
@@ -322,10 +354,6 @@ extension MessageCollectionViewCell {
       }
       trailingConstraint = newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10)
     } else {
-      topConstraint = newMessageView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: fromOtherSender ? 12 : 2
-      )
       var leadingAnchor = contentView.leadingAnchor
       var leadingConstant: CGFloat = 0
       // Add spacer for incoming messages that are not fromOtherSender
