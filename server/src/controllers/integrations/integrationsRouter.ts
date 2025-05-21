@@ -9,7 +9,7 @@ import { getNotionAuthUrl, handleNotionCallback } from "@in/server/libs/notion"
 export const integrationsRouter = new Elysia({ prefix: "/integrations" })
   .get(
     "/linear/integrate",
-    ({ cookie: { token: cookieToken, state: cookieState }, query }) => {
+    ({ cookie: { token: cookieToken, state: cookieState, spaceId: cookieSpaceId }, query }) => {
       if (!query.token) {
         return Response.json({ error: "Token is required" }, { status: 400 })
       }
@@ -36,6 +36,15 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
         sameSite: "lax",
       })
 
+      cookieSpaceId.set({
+        secure,
+        path: "/",
+        httpOnly: true,
+        maxAge: 60 * 10,
+        value: query.spaceId,
+        sameSite: "lax",
+      })
+
       const { url } = getLinearAuthUrl(state)
       if (!url) {
         return Response.json({ error: "Linear auth URL not found" }, { status: 500 })
@@ -46,16 +55,18 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       cookie: t.Cookie({
         token: t.Optional(t.String()),
         state: t.Optional(t.String()),
+        spaceId: t.Optional(t.String()),
       }),
       query: t.Object({
         token: t.String(),
+        spaceId: t.String(),
       }),
     },
   )
   .get(
     "/linear/callback",
-    async ({ query, cookie: { token: cookieToken, state: cookieState }, headers }) => {
-      if (!cookieToken.value || !cookieState.value) {
+    async ({ query, cookie: { token: cookieToken, state: cookieState, spaceId: cookieSpaceId }, headers }) => {
+      if (!cookieToken.value || !cookieState.value || !cookieSpaceId.value) {
         Log.shared.error("Linear cookie missing")
       } else {
         const { userId } = await getUserIdFromToken(cookieToken.value)
@@ -63,6 +74,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
         const result = await handleLinearCallback({
           code: query.code,
           userId,
+          spaceId: cookieSpaceId.value,
         })
 
         if (!result.ok) {
@@ -77,6 +89,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       cookie: t.Cookie({
         token: t.Optional(t.String()),
         state: t.Optional(t.String()),
+        spaceId: t.Optional(t.String()),
       }),
       query: t.Object({
         code: t.String(),
@@ -86,7 +99,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
   )
   .get(
     "/notion/integrate",
-    ({ cookie: { token: cookieToken, state: cookieState }, query }) => {
+    ({ cookie: { token: cookieToken, state: cookieState, spaceId: cookieSpaceId }, query }) => {
       if (!query.token) {
         return Response.json({ error: "Token is required" }, { status: 400 })
       }
@@ -113,6 +126,15 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
         sameSite: "lax",
       })
 
+      cookieSpaceId.set({
+        secure,
+        path: "/",
+        httpOnly: true,
+        maxAge: 60 * 10,
+        value: query.spaceId,
+        sameSite: "lax",
+      })
+
       const { url } = getNotionAuthUrl(state)
       if (!url) {
         return Response.json({ error: "Notion auth URL not found" }, { status: 500 })
@@ -123,16 +145,18 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       cookie: t.Cookie({
         token: t.Optional(t.String()),
         state: t.Optional(t.String()),
+        spaceId: t.Optional(t.String()),
       }),
       query: t.Object({
         token: t.String(),
+        spaceId: t.String(),
       }),
     },
   )
   .get(
     "/notion/callback",
-    async ({ query, cookie: { token: cookieToken, state: cookieState }, headers }) => {
-      if (!cookieToken.value || !cookieState.value) {
+    async ({ query, cookie: { token: cookieToken, state: cookieState, spaceId: cookieSpaceId }, headers }) => {
+      if (!cookieToken.value || !cookieState.value || !cookieSpaceId.value) {
         Log.shared.error("Notion cookie missing")
       } else {
         const { userId } = await getUserIdFromToken(cookieToken.value)
@@ -140,9 +164,9 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
         const result = await handleNotionCallback({
           code: query.code,
           userId,
+          spaceId: cookieSpaceId.value,
         })
 
-        console.log("🌴 result", result)
         if (!result.ok) {
           Log.shared.error("Notion callback failed", result.error)
           return "internal server error, contact mo@inline.chat"
@@ -155,6 +179,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       cookie: t.Cookie({
         token: t.Optional(t.String()),
         state: t.Optional(t.String()),
+        spaceId: t.Optional(t.String()),
       }),
       query: t.Object({
         code: t.String(),

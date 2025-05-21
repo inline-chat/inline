@@ -5,7 +5,15 @@ import { integrations } from "@in/server/db/schema/integrations"
 import { Log } from "@in/server/utils/log"
 import { linearOauth } from "@in/server/libs/linear"
 
-export const handleLinearCallback = async ({ code, userId }: { code: string; userId: number }) => {
+export const handleLinearCallback = async ({
+  code,
+  userId,
+  spaceId,
+}: {
+  code: string
+  userId: number
+  spaceId: string
+}) => {
   try {
     const tokens = await linearOauth?.validateAuthorizationCode(code)
     if (!tokens) {
@@ -19,6 +27,7 @@ export const handleLinearCallback = async ({ code, userId }: { code: string; use
     try {
       await db.insert(integrations).values({
         userId,
+        spaceId: Number(spaceId),
         provider: "linear",
         accessTokenEncrypted: encryptedToken.encrypted,
         accessTokenIv: encryptedToken.iv,
