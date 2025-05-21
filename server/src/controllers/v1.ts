@@ -182,6 +182,24 @@ import {
   Response as SendMessage20250509Response,
 } from "@in/server/methods/sendMessage_20250509"
 
+import {
+  handler as getNotionDatabasesHandler,
+  Input as GetNotionDatabasesInput,
+  Response as GetNotionDatabasesResponse,
+} from "@in/server/methods/notion/getNotionDatabases"
+
+import {
+  handler as saveNotionDatabaseIdHandler,
+  Input as SaveNotionDatabaseIdInput,
+  Response as SaveNotionDatabaseIdResponse,
+} from "@in/server/methods/notion/saveNotionDatabaseId"
+
+import {
+  handler as createNotionTaskHandler,
+  Input as CreateNotionTaskInput,
+  Response as CreateNotionTaskResponse,
+} from "@in/server/methods/notion/createNotionTask"
+
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
@@ -252,6 +270,23 @@ export const apiV1 = new Elysia({ name: "v1" })
           sendMessage20250509Handler,
         ),
       )
+      .use(
+        makeApiRoute(
+          "/getNotionDatabases",
+          GetNotionDatabasesInput,
+          GetNotionDatabasesResponse,
+          getNotionDatabasesHandler,
+        ),
+      )
+      .use(
+        makeApiRoute(
+          "/saveNotionDatabaseId",
+          SaveNotionDatabaseIdInput,
+          SaveNotionDatabaseIdResponse,
+          saveNotionDatabaseIdHandler,
+        ),
+      )
+      .use(makeApiRoute("/createNotionTask", CreateNotionTaskInput, CreateNotionTaskResponse, createNotionTaskHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }
