@@ -40,7 +40,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainMenu()
 
     // Send timezone to server
+
     Task {
+      // delay for 2 seconds
+      try? await Task.sleep(nanoseconds: 2_000_000_000)
+
       if Auth.shared.isLoggedIn {
         try? await DataManager.shared.updateTimezone()
       }
