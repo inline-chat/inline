@@ -62,11 +62,6 @@ class MainWindowController: NSWindowController {
     window?.delegate = self
 
     switchTopLevel(topLevelRoute)
-
-    window?.setContentSize(NSSize(width: 700, height: 600))
-    window?.setFrameUsingName("MainWindow")
-
-    window?.minSize = NSSize(width: 330, height: 220)
   }
 
   /// Animate or switch to next VC
@@ -140,6 +135,11 @@ class MainWindowController: NSWindowController {
       case .main:
         setupMainSplitView()
     }
+
+    // TODO: fix sizing
+    window?.setContentSize(NSSize(width: 740, height: 600))
+    window?.setFrameUsingName("MainWindow")
+    window?.minSize = NSSize(width: 330, height: 220)
   }
 
   private var cancellables: Set<AnyCancellable> = []
