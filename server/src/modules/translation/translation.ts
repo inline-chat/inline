@@ -2,20 +2,20 @@ import type { MessageTranslation } from "@in/protocol/core"
 import type { ProcessedMessage, ProcessedMessageTranslation } from "@in/server/db/models/messages"
 import type { InputTranslation } from "@in/server/db/models/translations"
 import type { DbChat } from "@in/server/db/schema"
-import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
+import { isProd, WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
 import { openaiClient } from "@in/server/libs/openAI"
 import { Log } from "@in/server/utils/log"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import invariant from "tiny-invariant"
 import { z } from "zod"
 
-const log = new Log("modules/translation/translation")
+const log = new Log("modules/translation")
 
 export const TranslationModule = {
   translateMessages,
 }
 
-if (!WANVER_TRANSLATION_CONTEXT) {
+if (!WANVER_TRANSLATION_CONTEXT && isProd) {
   log.warn("WANVER_TRANSLATION_CONTEXT is not available")
 }
 
@@ -30,7 +30,7 @@ async function translateMessages(input: {
   actorId: number
 }): Promise<InputTranslation[]> {
   // Checks
-  invariant(openaiClient, "openaiClient is not defined")
+  invariant(openaiClient, "OpenAPI client is not defined")
 
   // Data
   const languageName = getLanguageNameFromCode(input.language)
@@ -85,8 +85,8 @@ async function translateMessages(input: {
   }
 
   try {
-    log.info(`Translation result: ${response.choices[0]?.message.content}`)
-    log.info("AI usage", response.usage)
+    log.debug(`Translation result: ${response.choices[0]?.message.content}`)
+    log.debug("AI usage", response.usage)
 
     // Calculate price based on token usage
     // Input tokens: $0.40 per 1M tokens ($0.00040 per 1K tokens)
@@ -98,7 +98,7 @@ async function translateMessages(input: {
     const outputPrice = (outputTokens * 0.0016) / 1000
     const totalPrice = inputPrice + outputPrice
 
-    log.info(`Translation price: $${totalPrice.toFixed(4)}`)
+    log.info(`Translation price: $${totalPrice.toFixed(4)} • actorId: ${input.actorId}`)
 
     const result = BatchTranslationResultSchema.parse(JSON.parse(response.choices[0]?.message.content ?? "{}"))
     const date = new Date()

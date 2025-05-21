@@ -60,7 +60,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
         throw new InlineError(InlineError.ApiError.INTERNAL)
       }
       if (input.timeZone) {
-        Log.shared.info("Setting timeZone", { timeZone: input.timeZone })
+        Log.shared.debug("Setting timeZone", { timeZone: input.timeZone })
         props.timeZone = input.timeZone
       }
     }

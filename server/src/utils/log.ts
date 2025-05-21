@@ -13,27 +13,33 @@ export enum LogLevel {
   TRACE = 4,
 }
 
-// Global log level configs
-const productionDefaultLogLevel = LogLevel.DEBUG //LogLevel.WARN
-const developmentDefaultLogLevel = LogLevel.DEBUG
-const testDefaultLogLevel = LogLevel.NONE
-
 // scope -> log level
 const globalLogLevel: Record<string, LogLevel> = {
-  shared: LogLevel.INFO,
-  server: LogLevel.INFO,
-  "modules/translation/translation": LogLevel.DEBUG,
+  // shared: LogLevel.INFO,
+  // server: LogLevel.INFO,
+  //"modules/translation/translation": LogLevel.DEBUG,
 }
 
 export class Log {
   static shared = new Log("shared")
 
   private disableLogging = process.env.NODE_ENV === "test" && !process.env["DEBUG"]
-  private logLevel =
-    process.env.NODE_ENV === "test" && !process.env["DEBUG"] ? LogLevel.ERROR : isProd ? LogLevel.WARN : LogLevel.DEBUG
+  private static logLevel = (() => {
+    let defaultLevel =
+      process.env.NODE_ENV === "test" && !process.env["DEBUG"]
+        ? LogLevel.ERROR
+        : isProd
+        ? LogLevel.WARN
+        : LogLevel.DEBUG
+    const scopeColored = styleText("green", "logger")
+    console.info(scopeColored, "Initialized with default level:", LogLevel[defaultLevel])
+    return defaultLevel
+  })()
+
+  private logLevel: LogLevel
 
   constructor(private scope: string, level?: LogLevel) {
-    this.logLevel = level ?? globalLogLevel[scope] ?? this.logLevel
+    this.logLevel = level ?? globalLogLevel[scope] ?? Log.logLevel
   }
 
   error(

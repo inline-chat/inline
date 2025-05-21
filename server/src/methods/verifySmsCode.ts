@@ -18,6 +18,7 @@ import { prelude } from "@in/server/libs/prelude"
 export const Input = Type.Object({
   phoneNumber: Type.String(),
   code: Type.String(),
+  deviceId: Type.Optional(Type.String()),
 
   // optional
   clientType: Type.Optional(Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web")])),
@@ -106,6 +107,7 @@ export const handler = async (
       clientType: clientType ?? "web",
       clientVersion: clientVersion ?? undefined,
       osVersion: osVersion ?? undefined,
+      deviceId: input.deviceId ?? undefined,
     })
 
     return { userId: userId, token: token, user: encodeUserInfo(user) }
