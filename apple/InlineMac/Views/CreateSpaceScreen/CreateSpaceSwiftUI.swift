@@ -4,19 +4,19 @@ import SwiftUI
 struct CreateSpaceSwiftUI: View {
   @Environment(\.appDatabase) var db
   @EnvironmentObject var nav: Nav
-  
+
   @State private var spaceName: String = ""
   @FormState var formState
   @FocusState private var focusedField: Field?
-  
+
   enum Field {
     case name
   }
-  
+
   var body: some View {
     VStack {
       Text("New space (team)").font(.title2)
-      
+
       GrayTextField("eg. AGI Fellows", text: $spaceName, size: .medium)
         .frame(maxWidth: 200)
         .disabled(formState.isLoading)
@@ -27,7 +27,7 @@ struct CreateSpaceSwiftUI: View {
         .onAppear {
           focusedField = .name
         }
-      
+
       InlineButton(size: .medium) {
         submit()
       } label: {
@@ -42,15 +42,15 @@ struct CreateSpaceSwiftUI: View {
     }
     .padding()
   }
-  
+
   // MARK: Methods
-  
+
   private func submit() {
     Task {
       if spaceName.isEmpty {
         return
       }
-      
+
       do {
         formState.startLoading()
         let result = try await ApiClient.shared.createSpace(name: spaceName)
@@ -63,10 +63,15 @@ struct CreateSpaceSwiftUI: View {
           // ... save more stuff
         }
         formState.succeeded()
-        
+
         DispatchQueue.main.async {
           // Navigate to the new space
-          nav.openSpace(result.space.id)
+          // nav.openSpace(result.space.id)
+
+          // New way
+          //nav.selectedSpaceId = result.space.id
+          nav.selectedTab = .spaces
+          nav.open(.empty)
         }
       } catch {
         formState.failed(error: error.localizedDescription)

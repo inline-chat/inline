@@ -13,11 +13,9 @@ struct SpaceMembersView: View {
   @State var searchQuery: String = ""
   @State private var selectedTab: Int = 0
   var spaceId: Int64
-  @Binding var selectedSpaceId: Int64?
 
-  init(spaceId: Int64, selectedSpaceId: Binding<Int64?>) {
+  init(spaceId: Int64) {
     self.spaceId = spaceId
-    _selectedSpaceId = selectedSpaceId
     _fullSpace = EnvironmentStateObject { env in
       FullSpaceViewModel(db: env.appDatabase, spaceId: spaceId)
     }
@@ -60,7 +58,7 @@ struct SpaceMembersView: View {
   @ViewBuilder
   private var topBar: some View {
     HStack(spacing: 0) {
-      BackToSpacesButton(selectedSpaceId: $selectedSpaceId)
+      BackToSpacesButton(selectedSpaceId: $nav.selectedSpaceId)
         .padding(.leading, -8)
 
       if let space = fullSpace.space {
@@ -88,6 +86,7 @@ struct SpaceMembersView: View {
       .padding(.bottom, 8)
   }
 
+  @ViewBuilder
   private var membersList: some View {
     List {
       ForEach(fullSpace.members) { item in
@@ -97,6 +96,7 @@ struct SpaceMembersView: View {
     .listStyle(.sidebar)
   }
 
+  @ViewBuilder
   private var threadsList: some View {
     List {
       ForEach(fullSpace.chats) { item in
@@ -112,6 +112,26 @@ struct SpaceMembersView: View {
       }
     }
     .listStyle(.sidebar)
+    .overlay(alignment: .center) {
+      if fullSpace.chats.isEmpty || (fullSpace.chats.count == 1 && fullSpace.chats.first?.chat?.title == "Main") {
+        VStack(spacing: 10) {
+          Image(systemName: "ellipsis.bubble")
+            .font(.system(size: 22, weight: .medium))
+            .foregroundStyle(Color.accent)
+
+          Text("You can create more chats for different topics.")
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(.tertiary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+
+          Button("New Chat") {
+            nav.open(.newChat(spaceId: spaceId))
+          }
+        }
+      }
+      // .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
   }
 
   @ViewBuilder
@@ -151,6 +171,6 @@ struct SpaceMembersView: View {
 }
 
 #Preview {
-  SpaceMembersView(spaceId: 1, selectedSpaceId: .constant(1))
+  SpaceMembersView(spaceId: 1)
     .previewsEnvironmentForMac(.populated)
 }

@@ -38,10 +38,12 @@ struct HomeSidebar: View {
   @StateObject var search = GlobalSearch()
   @FocusState private var isSearching: Bool
 
-  @State private var tab: Tab = .inbox
-
   private var showSearchBar: Bool {
     search.hasResults || (isSearching && search.canSearch)
+  }
+
+  private var tab: Tab {
+    nav.selectedTab
   }
 
   // MARK: - Initializer
@@ -90,7 +92,7 @@ struct HomeSidebar: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      if tab == .spaces {
+      if nav.selectedTab == .spaces {
         SpacesTab()
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
@@ -113,6 +115,39 @@ struct HomeSidebar: View {
         } else {
           NewSidebarWrapper(dependencies: dependencies!, tab: tab)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .center) {
+              if tab == .inbox, home.myChats
+                .isEmpty, home.archivedChats.isEmpty
+              {
+                VStack(spacing: 10) {
+                  Image(systemName: "bubble.and.pencil")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(Color.accent)
+
+                  Text("Search a username (eg. @mo) to start a chat or create a new space.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+                }
+                .padding(.horizontal, 18)
+              }
+
+              if tab == .archive, home.archivedChats.isEmpty {
+                VStack(spacing: 10) {
+                  Image(systemName: "archivebox")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(Color.accent)
+
+                  Text("Archive chats you don't need to see anymore by swiping left.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+                }
+                .padding(.horizontal, 18)
+              }
+            }
         }
       }
 
@@ -133,13 +168,14 @@ struct HomeSidebar: View {
   var tabs: some View {
     SidebarTabView<Tab>(
       tabs: [
-        .init(value: .archive, systemImage: "archivebox.fill"),
-        .init(value: .inbox, systemImage: "bubble.left.and.bubble.right.fill", fontSize: 15),
-        .init(value: .spaces, systemImage: "building.2.fill", fontSize: 15),
+        .init(value: .archive, label: "Archive", systemImage: "archivebox.fill"),
+        .init(value: .inbox, label: "Your Chats", systemImage: "bubble.left.and.bubble.right.fill", fontSize: 16),
+        .init(value: .spaces, label: "Space", systemImage: "building.2.fill", fontSize: 16),
+        //  .init(value: .spaces, label: "Browse", systemImage: "list.bullet", fontSize: 18),
       ],
       selected: tab,
       showDivider: true,
-      onSelect: { tab = $0 }
+      onSelect: { nav.selectedTab = $0 }
     )
   }
 

@@ -78,6 +78,12 @@ class Nav: ObservableObject {
     }
   }
 
+  /// Selected tab in home sidebar
+  @Published var selectedTab: HomeSidebar.Tab = .inbox
+
+  /// Selected space id in spaces tab
+  @Published var selectedSpaceId: Int64? = nil
+
   @Published var currentSpaceId: Int64? = nil { didSet { currentSpaceIdPublisher.send(currentSpaceId) } }
 
   private init() {

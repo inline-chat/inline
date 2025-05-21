@@ -10,12 +10,20 @@ struct SidebarTabView<Tab: Hashable>: View {
   struct TabItem<Tab: Hashable>: Identifiable {
     var id: Tab { value }
     let value: Tab
+    let label: LocalizedStringKey?
     let systemImage: String
     let accessibilityLabel: LocalizedStringKey?
     let fontSize: CGFloat
 
-    init(value: Tab, systemImage: String, fontSize: CGFloat = 16, accessibilityLabel: LocalizedStringKey? = nil) {
+    init(
+      value: Tab,
+      label: LocalizedStringKey? = nil,
+      systemImage: String,
+      fontSize: CGFloat = 16,
+      accessibilityLabel: LocalizedStringKey? = nil
+    ) {
       self.value = value
+      self.label = label
       self.systemImage = systemImage
       self.fontSize = fontSize
       self.accessibilityLabel = accessibilityLabel
@@ -42,6 +50,7 @@ struct SidebarTabView<Tab: Hashable>: View {
         Spacer()
         ForEach(tabs) { tab in
           SidebarTabButton(
+            label: tab.label,
             systemImage: tab.systemImage,
             isActive: tab.value == selected,
             fontSize: tab.fontSize,
@@ -66,9 +75,9 @@ struct SidebarTabView<Tab: Hashable>: View {
   enum Tab: String, Hashable { case archive, inbox, members }
   return SidebarTabView<Tab>(
     tabs: [
-      .init(value: .archive, systemImage: "archivebox.fill"),
-      .init(value: .inbox, systemImage: "bubble.left.and.bubble.right.fill", fontSize: 15),
-      .init(value: .members, systemImage: "person.2.fill"),
+      .init(value: .archive, label: "Archive", systemImage: "archivebox.fill"),
+      .init(value: .inbox, label: "Inbox", systemImage: "bubble.left.and.bubble.right.fill", fontSize: 15),
+      .init(value: .members, label: "Members", systemImage: "person.2.fill"),
     ],
     selected: .inbox,
     onSelect: { _ in }
