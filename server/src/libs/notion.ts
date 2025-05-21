@@ -19,7 +19,15 @@ export const getNotionAuthUrl = (state: string) => {
   return { url }
 }
 
-export const handleNotionCallback = async ({ code, userId }: { code: string; userId: number }) => {
+export const handleNotionCallback = async ({
+  code,
+  userId,
+  spaceId,
+}: {
+  code: string
+  userId: number
+  spaceId: string
+}) => {
   try {
     const tokens = await notionOauth?.validateAuthorizationCode(code)
 
@@ -36,6 +44,7 @@ export const handleNotionCallback = async ({ code, userId }: { code: string; use
         .insert(integrations)
         .values({
           userId,
+          spaceId: Number(spaceId),
           provider: "notion",
           accessTokenEncrypted: encryptedToken.encrypted,
           accessTokenIv: encryptedToken.iv,
