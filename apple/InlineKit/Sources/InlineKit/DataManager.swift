@@ -120,22 +120,23 @@ public class DataManager: ObservableObject {
     let userId = user.id
 
     // Do in background
-    Task { @MainActor in
-      do {
-        // Remote call
-        let result = try await ApiClient.shared.createPrivateChat(userId: userId)
-        try await database.dbWriter.write { db in
-          let chat = Chat(from: result.chat)
-          try chat.save(db, onConflict: .replace)
-          let dialog = Dialog(from: result.dialog)
-          try dialog.save(db, onConflict: .replace)
-        }
-        Log.shared.info("Created private chat with \(user.anyName) with chatID: \(result.chat.id)")
-      } catch {
-        Log.shared.error("Failed to create private chat", error: error)
-        throw error
+    // FIXME: this should be in background but UI will fail
+    // Task { @MainActor in
+    do {
+      // Remote call
+      let result = try await ApiClient.shared.createPrivateChat(userId: userId)
+      try await database.dbWriter.write { db in
+        let chat = Chat(from: result.chat)
+        try chat.save(db, onConflict: .replace)
+        let dialog = Dialog(from: result.dialog)
+        try dialog.save(db, onConflict: .replace)
       }
+      Log.shared.info("Created private chat with \(user.anyName) with chatID: \(result.chat.id)")
+    } catch {
+      Log.shared.error("Failed to create private chat", error: error)
+      throw error
     }
+    /// }
   }
 
   /// Get list of user spaces and saves them
