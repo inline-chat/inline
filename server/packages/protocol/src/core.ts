@@ -63,6 +63,12 @@ export interface ConnectionInit {
      * @generated from protobuf field: string token = 1;
      */
     token: string;
+    /**
+     * Build number of the client app
+     *
+     * @generated from protobuf field: optional int32 build_number = 2;
+     */
+    buildNumber?: number;
 }
 /**
  * @generated from protobuf message ServerProtocolMessage
@@ -2771,7 +2777,8 @@ export const ClientMessage = new ClientMessage$Type();
 class ConnectionInit$Type extends MessageType<ConnectionInit> {
     constructor() {
         super("ConnectionInit", [
-            { no: 1, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 1, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "build_number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<ConnectionInit>): ConnectionInit {
@@ -2789,6 +2796,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
                 case /* string token */ 1:
                     message.token = reader.string();
                     break;
+                case /* optional int32 build_number */ 2:
+                    message.buildNumber = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2804,6 +2814,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
         /* string token = 1; */
         if (message.token !== "")
             writer.tag(1, WireType.LengthDelimited).string(message.token);
+        /* optional int32 build_number = 2; */
+        if (message.buildNumber !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.buildNumber);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
