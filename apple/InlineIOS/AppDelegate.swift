@@ -2,6 +2,7 @@ import Auth
 import Foundation
 import InlineConfig
 import InlineKit
+import Logger
 import Sentry
 import UIKit
 
@@ -16,7 +17,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // Set up notification delegate here to not miss anything
     let notificationCenter = UNUserNotificationCenter.current()
     notificationCenter.delegate = self
-    print("👽 AppDelegate method setupAppDataUpdater called")
     setupAppDataUpdater()
     return true
   }
@@ -107,24 +107,38 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   func application(
     _ application: UIApplication,
     didFailToRegisterForRemoteNotificationsWithError error: Error
-  ) {}
+  ) {
+    Log.shared.error("Failed to register for remote notifications", error: error)
+  }
 
   func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
+    defer {
+      completionHandler()
+    }
+
     let userInfo = response.notification.request.content.userInfo
     let userId = userInfo["userId"] as? Int64
     let isThread = userInfo["isThread"] as? Bool
     let threadId = userInfo["threadId"] as? String
     let ogThreadId = threadId?.replacingOccurrences(of: "chat_", with: "")
 
-    let peerId = isThread == true ? Peer.thread(id: Int64(ogThreadId ?? "")!) : Peer.user(id: userId ?? 0)
+    let peerId: Peer? = if isThread == true, let ogThreadId, let threadIdInt = Int64(ogThreadId) {
+      Peer.thread(id: threadIdInt)
+    } else if let userId {
+      Peer.user(id: userId)
+    } else {
+      nil
+    }
+
+    guard let peerId else {
+      return
+    }
 
     nav.navigateToChatFromNotification(peer: peerId)
-
-    completionHandler()
   }
 }
 
