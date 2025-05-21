@@ -5,19 +5,15 @@
  */
 
 import { getSpaceIdsForUser } from "@in/server/db/models/spaces"
-import type { Update } from "@in/protocol/core"
 import { filterFalsy } from "@in/server/utils/filter"
-import { Log, LogLevel } from "@in/server/utils/log"
+import { Log } from "@in/server/utils/log"
 import { presenceManager } from "@in/server/ws/presence"
 import { WebSocketTopic } from "@in/server/ws/topics"
-import { Value } from "@sinclair/typebox/value"
-import { type Server, type ServerWebSocket } from "bun"
+import { type Server } from "bun"
 import type { ElysiaWS } from "elysia/ws"
-import { nanoid } from "nanoid"
 import invariant from "tiny-invariant"
-import type { Context } from "elysia"
 
-const log = new Log("ws-connections", LogLevel.DEBUG)
+const log = new Log("ws-connections")
 
 const CLOSE_UNAUTHENTICATED_TIMEOUT = 20_000
 

@@ -17,13 +17,13 @@ import { there } from "./controllers/extra/there"
 import swagger from "@elysiajs/swagger"
 import { apiV1 } from "@in/server/controllers/v1"
 import { connectionManager } from "@in/server/ws/connections"
-import { Log } from "@in/server/utils/log"
+import { Log, LogLevel } from "@in/server/utils/log"
 import { realtime } from "@in/server/realtime"
 import { integrationsRouter } from "./controllers/integrations/integrationsRouter"
 import type { Server } from "bun"
 
-
 const port = process.env["PORT"] || 8000
+const log = new Log("server", LogLevel.INFO)
 
 // Ensure to call this before importing any other modules!
 
@@ -69,5 +69,5 @@ export const app = new Elysia()
 // Run
 app.listen(port, (server: Server) => {
   connectionManager.setServer(server)
-  Log.shared.info(`✅ Server is running on http://${server.hostname}:${server.port}`)
+  log.info(`Running on http://${server.hostname}:${server.port}`)
 })
