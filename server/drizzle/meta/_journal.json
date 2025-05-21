@@ -239,6 +239,13 @@
       "when": 1747667093958,
       "tag": "0033_add-spaceId-on-integrations",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1747840976407,
+      "tag": "0034_add-fields-on-integrations",
+      "breakpoints": true
     }
   ]
 }
