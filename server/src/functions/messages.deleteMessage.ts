@@ -2,13 +2,10 @@ import type { InputPeer, Update } from "@in/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { Updates } from "@in/server/modules/updates/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { UpdateGroup } from "../modules/updates"
 import { getUpdateGroupFromInputPeer } from "../modules/updates"
 import { RealtimeUpdates } from "../realtime/message"
-import { connectionManager } from "../ws/connections"
-import { Log } from "../utils/log"
 
 type Input = {
   messageIds: bigint[]
@@ -23,7 +20,7 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
   await MessageModel.deleteMessages(input.messageIds, chatId)
 
-  const { selfUpdates, updateGroup } = await pushUpdates({
+  const { selfUpdates } = await pushUpdates({
     inputPeer: input.peer,
     messageIds: input.messageIds,
     currentUserId: context.currentUserId,

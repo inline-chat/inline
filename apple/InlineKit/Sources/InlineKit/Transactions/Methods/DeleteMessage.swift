@@ -18,7 +18,10 @@ public struct TransactionDeleteMessage: Transaction {
   public var date = Date()
 
   public init(messageIds: [Int64], peerId: Peer, chatId: Int64) {
-    self.messageIds = messageIds
+    self.messageIds = messageIds.filter {
+      // only positive message ids
+      Int64($0) > 0
+    }
     self.peerId = peerId
     self.chatId = chatId
   }
@@ -62,7 +65,7 @@ public struct TransactionDeleteMessage: Transaction {
         MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerId)
       }
     } catch {
-      Log.shared.error("Failed to delete message \(error)")
+      Log.shared.error("Failed to delete message", error: error)
     }
   }
 
