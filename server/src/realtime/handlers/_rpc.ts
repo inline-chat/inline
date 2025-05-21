@@ -23,7 +23,7 @@ import { handleGetChats } from "./messages.getChats"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
-  Log.shared.debug("rpc call", call.method)
+  Log.shared.debug("rpc call", Method[call.method])
 
   switch (call.method) {
     case Method.GET_ME: {

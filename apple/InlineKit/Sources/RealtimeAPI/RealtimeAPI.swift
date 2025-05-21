@@ -187,10 +187,14 @@ public actor RealtimeAPI: Sendable {
     log.debug("authenticating")
     // Send connection init
     do {
-      let token = await Auth.shared.getToken() ?? ""
+      guard let token = Auth.shared.getToken() else {
+        log.error("No token available")
+        throw RealtimeAPIError.notAuthorized
+      }
       log.debug("sending connection init with token \(token)")
       let msg = wrapMessage(body: .connectionInit(.with {
         $0.token = token
+        $0.buildNumber = getBuildNumber()
       }))
       try await transport.send(msg)
     } catch {
@@ -210,7 +214,11 @@ public actor RealtimeAPI: Sendable {
 extension RealtimeAPI {
   // MARK: - RPC
 
-  public func invoke(_ method: InlineProtocol.Method, input: RpcCall.OneOf_Input?, discardIfNotConnected: Bool = false) async throws -> RpcResult
+  public func invoke(
+    _ method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    discardIfNotConnected: Bool = false
+  ) async throws -> RpcResult
     .OneOf_Result?
   {
     if state == .paused, discardIfNotConnected {
@@ -373,5 +381,10 @@ extension RealtimeAPI {
 
   private func currentTimestamp() -> UInt32 {
     UInt32(Date().timeIntervalSince(epoch))
+  }
+
+  private func getBuildNumber() -> Int32 {
+    (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
+      .flatMap { Int32($0) } ?? 0
   }
 }
