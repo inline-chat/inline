@@ -24,15 +24,14 @@ class AppDataUpdater {
 
   // Fetch recent chats and users from app data
   private func fetchChatsAndUsers(completion: @escaping ([SharedChat]?, [SharedUser]?) -> Void) {
-    Task(priority: .background) {
+    Task.detached(priority: .background) {
       do {
         // Use GRDB to fetch chats and users similar to HomeViewModel
-//        let homeChatItems: [HomeChatItem] = try await db.reader.read { db in
-//          try HomeChatItem.all().fetchAll(db)
-//        }
+        // let homeChatItems: [HomeChatItem] = try await db.reader.read { db in
+        //   try HomeChatItem.all().fetchAll(db)
+        // }
         //
-        let homeChatItems: [HomeChatItem] = try await db.getHomeChatItems()
-        print("👽 homeChatItems: \(homeChatItems)")
+        let homeChatItems: [HomeChatItem] = try await AppDatabase.shared.getHomeChatItems()
 
         // Convert from GRDB models to Bridge models
         var bridgeChats: [SharedChat] = []
@@ -43,8 +42,8 @@ class AppDataUpdater {
           let chatId = item.dialog.id
           let title = item.user?.user.firstName ?? item.user?.user.fullName
 
-          var peerUserId: Int64? = nil
-          var peerThreadId: Int64? = nil
+          var peerUserId: Int64?
+          var peerThreadId: Int64?
 
           if let peerId = item.dialog.peerUserId {
             peerUserId = peerId
@@ -59,7 +58,6 @@ class AppDataUpdater {
             peerThreadId: peerThreadId
           )
 
-          print("👽 bridgeChat: \(bridgeChat)")
           bridgeChats.append(bridgeChat)
 
           // Add user info
@@ -69,7 +67,6 @@ class AppDataUpdater {
             lastName: item.user?.user.lastName ?? ""
           )
 
-          print("👽 bridgeUser: \(bridgeUser)")
           if !bridgeUsers.contains(where: { $0.id == bridgeUser.id }) {
             bridgeUsers.append(bridgeUser)
           }
