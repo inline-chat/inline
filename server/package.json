@@ -33,6 +33,7 @@
     "@elysiajs/html": "^1.1.1",
     "@elysiajs/swagger": "^1.1.5",
     "@linear/sdk": "^38.0.0",
+    "@notionhq/client": "^3.0.1",
     "@prelude.so/sdk": "^0.3.0",
     "@protobuf-ts/plugin": "^2.9.4",
     "@sentry/bun": "^8.32.0",
