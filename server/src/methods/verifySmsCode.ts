@@ -14,6 +14,7 @@ import { generateToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import parsePhoneNumber from "libphonenumber-js"
 import { prelude } from "@in/server/libs/prelude"
+import { sendBotEvent } from "@in/server/modules/bot-events"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -137,6 +138,8 @@ const getUserByPhoneNumber = async (phoneNumber: string) => {
         .returning()
     )[0]
 
+    sendTelegramEvent(phoneNumber)
+
     return user
   } else {
     // update pending setup to false
@@ -148,4 +151,8 @@ const getUserByPhoneNumber = async (phoneNumber: string) => {
   }
 
   return user
+}
+
+function sendTelegramEvent(phoneNumber: string) {
+  sendBotEvent(`New user verified phone: \n${phoneNumber}\n\n🍓🫡☕️`)
 }
