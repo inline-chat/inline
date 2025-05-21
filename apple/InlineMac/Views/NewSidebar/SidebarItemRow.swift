@@ -253,7 +253,7 @@ class SidebarItemRow: NSTableCellView {
     let view = NSStackView()
     view.orientation = .vertical
     view.alignment = .leading
-    view.spacing = 2
+    view.spacing = 1
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -298,8 +298,9 @@ class SidebarItemRow: NSTableCellView {
     messageLabel.isEditable = false
     messageLabel.isBordered = false
     messageLabel.backgroundColor = .clear
-    messageLabel.font = .systemFont(ofSize: 12)
+    messageLabel.font = .systemFont(ofSize: 13)
     messageLabel.textColor = .secondaryLabelColor
+    messageLabel.alphaValue = 0.8
     messageLabel.lineBreakMode = .byTruncatingTail
     messageLabel.maximumNumberOfLines = isThread ? 1 : 2
     messageLabel.cell?.wraps = true
@@ -426,7 +427,7 @@ class SidebarItemRow: NSTableCellView {
       messageLabel.stringValue = message.stringRepresentationWithEmoji ?? ""
       Log.shared.debug("SidebarItemRow message set to: \(messageLabel.stringValue)")
     } else {
-      messageLabel.stringValue = ""
+      messageLabel.stringValue = "Empty chat"
       Log.shared.debug("SidebarItemRow no message")
     }
 
