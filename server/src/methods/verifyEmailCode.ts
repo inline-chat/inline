@@ -12,6 +12,7 @@ import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpe
 import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
 import { ipinfo, type IPInfoResponse } from "@in/server/libs/ipinfo"
 import { SessionsModel } from "@in/server/db/models/sessions"
+import { sendBotEvent } from "@in/server/modules/bot-events"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -110,10 +111,7 @@ export const handler = async (
 
 const verifyCode = async (email: string, code: string): Promise<true> => {
   if (email && code && email === process.env["DEMO_EMAIL"] && code === process.env["DEMO_CODE"]) {
-    try {
-      sendTelegramEventForDemoAccount()
-    } catch (error) {}
-
+    sendTelegramEventForDemoAccount()
     return true
   }
 
@@ -148,7 +146,7 @@ const verifyCode = async (email: string, code: string): Promise<true> => {
     // delete and return token
     await db.delete(loginCodes).where(eq(loginCodes.id, existingCode.id))
 
-    // success!!
+    // success!!!
     return true
   }
 }
@@ -171,11 +169,7 @@ const getUserByEmail = async (email: string) => {
         .returning()
     )[0]
 
-    try {
-      await sendTelegramEvent(email)
-    } catch (error) {
-      Log.shared.error("Error sending message to Telegram:", { error })
-    }
+    sendTelegramEvent(email)
 
     return user
   } else {
@@ -190,36 +184,10 @@ const getUserByEmail = async (email: string) => {
   return user
 }
 
-async function sendTelegramEvent(email: string) {
-  const telegramToken = process.env["TELEGRAM_TOKEN"]
-  const chatId = "-1002262866594"
-  const message = `New user verified email: \n${email}\n\n🍓🫡☕️`
-
-  await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: message,
-    }),
-  })
+function sendTelegramEvent(email: string) {
+  sendBotEvent(`New user verified email: \n${email}\n\n🍓🫡☕️`)
 }
 
-async function sendTelegramEventForDemoAccount() {
-  const telegramToken = process.env["TELEGRAM_TOKEN"]
-  const chatId = "-1002262866594"
-  const message = `🤐 Someone logged in with demo account`
-
-  await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: message,
-    }),
-  })
+function sendTelegramEventForDemoAccount() {
+  sendBotEvent(`🤐 Someone logged in with demo account`)
 }
