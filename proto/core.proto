@@ -16,7 +16,12 @@ message ClientMessage {
   }
 }
 
-message ConnectionInit { string token = 1; }
+message ConnectionInit {
+  string token = 1;
+
+  // Build number of the client app
+  optional int32 build_number = 2;
+}
 
 message ServerProtocolMessage {
   uint64 id = 1;
