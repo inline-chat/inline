@@ -97,7 +97,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   ) {
     let deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
 
-    Task {
+    Task.detached {
       let _ = try await ApiClient.shared.savePushNotification(
         pushToken: deviceToken
       )
