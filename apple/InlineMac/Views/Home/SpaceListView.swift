@@ -11,10 +11,8 @@ struct SpaceListView: View {
   @EnvironmentStateObject var home: HomeViewModel
 
   @State private var searchQuery: String = ""
-  @Binding var selectedSpaceId: Int64?
 
-  init(selectedSpaceId: Binding<Int64?>) {
-    _selectedSpaceId = selectedSpaceId
+  init() {
     _home = EnvironmentStateObject { env in
       HomeViewModel(db: env.appDatabase)
     }
@@ -23,7 +21,7 @@ struct SpaceListView: View {
   var body: some View {
     VStack(spacing: 0) {
       topBar
-      searchBar
+      // searchBar
       spacesList
     }
     .task {
@@ -81,10 +79,39 @@ struct SpaceListView: View {
   private var spacesList: some View {
     List(home.spaces, id: \.id) { spaceItem in
       SpaceItem(space: spaceItem.space) { spaceId in
-        selectedSpaceId = spaceId
+        nav.selectedSpaceId = spaceId
       }
+      .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
     }
     .listStyle(.sidebar)
+    .overlay(alignment: .center) {
+      if home.spaces.isEmpty {
+        VStack(spacing: 10) {
+          Image(systemName: "building.2.crop.circle")
+            .font(.system(size: 24, weight: .medium))
+            .foregroundStyle(Color.accent)
+
+          Text("Spaces are collections of chats and users.")
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+
+          Text("Use for teams, companies, or groups.")
+            .font(.system(size: 12, weight: .regular))
+            .foregroundStyle(.tertiary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+
+          Button {
+            nav.open(.createSpace)
+          } label: {
+            Text("New Space")
+          }
+        }
+        .padding(.horizontal, 8)
+      }
+    }
   }
 
   @ViewBuilder
@@ -110,6 +137,6 @@ struct SpaceListView: View {
 }
 
 #Preview {
-  SpaceListView(selectedSpaceId: .constant(nil))
+  SpaceListView()
     .previewsEnvironmentForMac(.populated)
 }

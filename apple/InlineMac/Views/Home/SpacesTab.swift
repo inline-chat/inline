@@ -11,13 +11,7 @@ struct SpacesTab: View {
   @EnvironmentObject var overlay: OverlayManager
   @EnvironmentStateObject var home: HomeViewModel
 
-  @AppStorage("selectedSpaceId") private var selectedSpaceIdString: String = ""
   @State private var searchQuery: String = ""
-
-  private var selectedSpaceId: Int64? {
-    get { Int64(selectedSpaceIdString) }
-    nonmutating set { selectedSpaceIdString = newValue?.description ?? "" }
-  }
 
   // MARK: - Initializer
 
@@ -30,16 +24,11 @@ struct SpacesTab: View {
   // MARK: - Views
 
   var body: some View {
-    if let spaceId = selectedSpaceId {
-      SpaceMembersView(spaceId: spaceId, selectedSpaceId: Binding(
-        get: { selectedSpaceId },
-        set: { selectedSpaceId = $0 }
-      ))
+    if let spaceId = nav.selectedSpaceId {
+      SpaceMembersView(spaceId: spaceId)
     } else {
-      SpaceListView(selectedSpaceId: Binding(
-        get: { selectedSpaceId },
-        set: { selectedSpaceId = $0 }
-      ))
+      SpaceListView()
+      
     }
   }
 }
