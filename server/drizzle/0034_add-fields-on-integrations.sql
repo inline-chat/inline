@@ -1,0 +1,1 @@
+ALTER TABLE "integrations" ADD COLUMN "notion_database_id" text;
