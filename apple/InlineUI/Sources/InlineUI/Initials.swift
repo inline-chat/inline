@@ -107,11 +107,11 @@ public struct InitialsCircle: View, Equatable {
       }
       .frame(width: size, height: size)
       .fixedSize()
-      // Looks better without these
-      // but performance is better with them
-      .drawingGroup(opaque: true)
-      .clipShape(Circle())
-      .fixedSize()
+    // Looks better without these
+    // but performance is better with them
+    // .drawingGroup(opaque: true)
+    // .clipShape(Circle())
+    // .fixedSize()
   }
 }
 
