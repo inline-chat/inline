@@ -23,6 +23,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case createThread(spaceId: Int64)
     case archivedChats
     case alphaSheet
+    // FIXME: this shouldn't use the whole chat item bc all of it will be persisted
     case chatInfo(chatItem: SpaceChatItem)
     case spaceSettings(spaceId: Int64)
 
@@ -164,24 +165,31 @@ class Navigation: ObservableObject, @unchecked Sendable {
   }
 
   func navigateToChatFromNotification(peer: Peer) {
-    if let spaceDestination = pathComponents.first(where: { destination in
-      if case .space = destination {
-        return true
-      }
-      return false
-    }) {
-      if case let .space(id: spaceId) = spaceDestination {
-        pathComponents = [.space(id: spaceId)]
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-          self.push(.chat(peer: peer))
-        }
-      }
-    } else {
-      popToRoot()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+      self.popToRoot()
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
         self.push(.chat(peer: peer))
       }
     }
+
+    // if let spaceDestination = pathComponents.first(where: { destination in
+    //   if case .space = destination {
+    //     return true
+    //   }
+    //   return false
+    // }) {
+    //   if case let .space(id: spaceId) = spaceDestination {
+    //     pathComponents = [.space(id: spaceId)]
+    //     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+    //       self.push(.chat(peer: peer))
+    //     }
+    //   }
+    // } else {
+    //   popToRoot()
+    //   DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+    //     self.push(.chat(peer: peer))
+    //   }
+    // }
   }
 
   func popPush(_ destination: Destination) {
@@ -190,10 +198,8 @@ class Navigation: ObservableObject, @unchecked Sendable {
   }
 
   func popToRoot() {
-    DispatchQueue.main.async {
-      self.pathComponents = []
-      self.activeSheet = nil
-    }
+    pathComponents = []
+    activeSheet = nil
   }
 
   func pop() {
