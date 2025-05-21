@@ -18,6 +18,9 @@ export const integrations = pgTable("integrations", {
   accessTokenIv: bytea("access_token_iv"),
   accessTokenTag: bytea("access_token_tag"),
 
+  // Notion related data
+  notionDatabaseId: text("notion_database_id"),
+
   date: creationDate,
 })
 
