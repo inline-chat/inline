@@ -895,6 +895,102 @@ private extension MessagesCollectionView {
 
         var actions: [UIAction] = []
 
+        let createNotionTaskAction = UIAction(
+          title: "Will Do",
+          image: UIImage(systemName: "circle.badge.plus")
+        ) { [weak self] _ in
+          Task { [weak self] in
+            guard let self else { return }
+            do {
+              let targetSpaceId: Int64? = switch message.peerId {
+                case .thread:
+                  spaceId
+                case .user:
+                  nil
+              }
+
+              let integrations = try await ApiClient.shared.getIntegrations(
+                userId: Auth.shared.getCurrentUserId() ?? 0,
+                spaceId: targetSpaceId
+              )
+
+              guard integrations.hasNotionConnected else {
+                let errorMessage = switch message.peerId {
+                  case .thread:
+                    "Please connect Notion in Space Settings"
+                  case .user:
+                    "Please connect Notion in one of your Space Settings"
+                }
+                ToastManager.shared.showToast(
+                  errorMessage,
+                  type: .error,
+                  systemImage: "exclamationmark.triangle"
+                )
+                return
+              }
+
+              let notionSpaceId: Int64
+              switch message.peerId {
+                case .thread:
+                  notionSpaceId = spaceId
+                case .user:
+                  guard let firstSpace = integrations.firstNotionSpace else {
+                    ToastManager.shared.showToast(
+                      "No Notion integration found in your spaces",
+                      type: .error,
+                      systemImage: "exclamationmark.triangle"
+                    )
+                    return
+                  }
+                  notionSpaceId = firstSpace.spaceId
+              }
+
+              ToastManager.shared.showToast(
+                "Creating Notion task...",
+                type: .info,
+                systemImage: "circle.badge.plus",
+                shouldStayVisible: true
+              )
+
+              let result = try await ApiClient.shared.createNotionTask(
+                spaceId: notionSpaceId,
+                messagesIds: getMessagesWindow(around: message.messageId),
+                messageId: message.messageId,
+                chatId: message.chatId,
+                peerId: message.peerId,
+                fromId: message.fromId
+              )
+
+              let successMessage = switch message.peerId {
+                case .thread:
+                  "Notion task created"
+                case .user:
+                  "Notion task created"
+              }
+
+              ToastManager.shared.showToast(
+                successMessage,
+                type: .success,
+                systemImage: "checkmark.circle",
+                action: {
+                  if let url = URL(string: result.url) {
+                    UIApplication.shared.open(url)
+                  }
+                },
+                actionTitle: "Open"
+              )
+            } catch {
+              Log.shared.error("Error creating notion task: \(error)")
+              ToastManager.shared.showToast(
+                "Failed to create Notion task",
+                type: .error,
+                systemImage: "exclamationmark.triangle"
+              )
+            }
+          }
+        }
+        actions.append(createNotionTaskAction)
+
         if message.hasText {
           let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
             UIPasteboard.general.string = message.text
@@ -1173,6 +1269,17 @@ private extension MessagesCollectionView {
           scheduleUpdateItems()
         }
       }
+    }
+
+    private func getMessagesWindow(around targetMessageId: Int64) -> [Int64] {
+      guard let targetIndex = messages.firstIndex(where: { $0.message.messageId == targetMessageId }) else {
+        return []
+      }
+
+      let startIndex = max(0, targetIndex - 10)
+      let endIndex = min(messages.count - 1, targetIndex + 10)
+
+      return messages[startIndex ... endIndex].map(\.message.messageId)
     }
   }
 }
