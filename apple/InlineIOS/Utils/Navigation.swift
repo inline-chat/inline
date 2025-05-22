@@ -25,6 +25,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case alphaSheet
     case chatInfo(chatItem: SpaceChatItem)
     case spaceSettings(spaceId: Int64)
+    case integrationOptions(spaceId: Int64, provider: String)
 
     // MARK: - Identifiable Conformance
 
@@ -40,6 +41,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
         case .alphaSheet: "alphaSheet"
         case let .chatInfo(chatItem): "chatInfo-\(chatItem.id)"
         case let .spaceSettings(spaceId): "spaceSettings-\(spaceId)"
+        case let .integrationOptions(spaceId, provider): "integrationOptions-\(spaceId)-\(provider)"
       }
     }
   }
@@ -100,6 +102,8 @@ class Navigation: ObservableObject, @unchecked Sendable {
         ChatInfoView(chatItem: chatItem)
       case let .spaceSettings(spaceId):
         SpaceSettingsView(spaceId: spaceId)
+      case let .integrationOptions(spaceId, provider):
+        IntegrationOptionsView(spaceId: spaceId, provider: provider)
     }
   }
 

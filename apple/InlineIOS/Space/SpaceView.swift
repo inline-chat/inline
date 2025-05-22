@@ -109,7 +109,7 @@ struct SpaceView: View {
       Button {
         nav.push(.spaceSettings(spaceId: spaceId))
       } label: {
-        Image(systemName: "gearshape.fill")
+        Image(systemName: "gearshape")
           .tint(.secondary)
       }
 
