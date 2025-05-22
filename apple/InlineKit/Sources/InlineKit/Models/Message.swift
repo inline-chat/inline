@@ -465,6 +465,13 @@ public extension Message {
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
 
+      if protocolMessage.hasReactions {
+        for reaction in protocolMessage.reactions.reactions {
+          print("saving reaction", reaction)
+          try Reaction.save(db, protocolMessage: reaction)
+        }
+      }
+
       // Update media selectively if needed
       if protocolMessage.hasMedia {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)

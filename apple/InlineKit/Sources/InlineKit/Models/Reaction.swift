@@ -87,11 +87,22 @@ public extension Reaction {
   }
 
   static func save(
-    _ db: Database, protocolMessage: InlineProtocol.Reaction, publishChanges: Bool = false
-  ) throws -> Reaction {
+    _ db: Database, protocolMessage: InlineProtocol.Reaction
+//    publishChanges: Bool = false,
+
+  ) throws {
     let reaction = Reaction(from: protocolMessage)
-    try reaction.save(db)
-    return reaction
+
+    let existingReaction = try? Reaction
+      .filter(Column("messageId") == reaction.messageId)
+      .filter(Column("chatId") == reaction.chatId)
+      .filter(Column("userId") == reaction.userId)
+      .filter(Column("emoji") == reaction.emoji)
+      .fetchOne(db)
+
+    if existingReaction == nil {
+      try reaction.save(db, onConflict: .replace)
+    }
   }
 }
 
