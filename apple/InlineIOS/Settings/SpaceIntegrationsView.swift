@@ -7,6 +7,8 @@ import SwiftUI
 struct SpaceIntegrationsView: View {
   @State private var isConnectingNotion = false
   @State private var isConnectedNotion = false
+  var spaceId: Int64?
+  @EnvironmentObject var nav: Navigation
 
   var body: some View {
     List {
@@ -19,7 +21,12 @@ struct SpaceIntegrationsView: View {
           isConnecting: $isConnectingNotion,
           provider: "notion",
           clipped: false,
-          completion: checkIntegrationConnection
+          spaceId: spaceId,
+          completion: checkIntegrationConnection,
+          hasOptions: true,
+          navigateToOptions: {
+            nav.push(.integrationOptions(spaceId: spaceId ?? 0, provider: "notion"))
+          }
         )
       }
     }
