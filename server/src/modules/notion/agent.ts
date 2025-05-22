@@ -1,5 +1,11 @@
 import { openaiClient } from "@in/server/libs/openAI"
-import { getActiveDatabaseData, getCurrentNotionUser, getNotionUsers, newNotionPage } from "./notion"
+import {
+  getActiveDatabaseData,
+  getCurrentNotionUser,
+  getNotionUsers,
+  newNotionPage,
+  getSampleDatabasePages,
+} from "./notion"
 import { MessageModel } from "@in/server/db/models/messages"
 import { Log } from "@in/server/utils/log"
 import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
@@ -26,6 +32,7 @@ async function createNotionPage(input: {
 
   const notionUsers = await getNotionUsers(input.spaceId)
   const database = await getActiveDatabaseData(input.spaceId)
+  const samplePages = await getSampleDatabasePages(input.spaceId)
 
   log.info("Creating Notion page", { database })
 
@@ -49,6 +56,9 @@ async function createNotionPage(input: {
   This is the Notion database we're using to track issues in it. We need to create a new page with this database structure:
   ${JSON.stringify(database, null, 2)}
   
+  Here are some example pages content from the database to help you understand the tone of the existing tasks for generating task titles. Keep the tone for titles:
+  ${JSON.stringify(samplePages, null, 2)}
+  
   This is the messages around the target message that triggered to create a new task maybe add context to the task. Analayze them and take important information from them to make a good and actionable task title:
   ${messages.map((m) => `${m.from.firstName}: ${m.text || ""}`).join("\n")}
 
@@ -60,15 +70,22 @@ async function createNotionPage(input: {
 
   Make sure the current user is the assignee and creator of the page:
   ${JSON.stringify(currentNotionUser, null, 2)}
-
+  
   Generate a properties object that EXACTLY matches the database schema structure. Each property must:
   1. Use the exact property name from the database schema
   2. Have the correct property type structure as defined in the database schema
   3. Follow Notion's API format for each property type
   4. Include only properties that exist in the database schema
+  5. Match the tone and format of the example pages provided above
+  6. Never set task in progress or done status
+  7. For date properties (like "Due date"), if a date is not specified, DO NOT include the property at all rather than setting it to null. If a date is specified, use the format: { "date": { "start": "YYYY-MM-DD" } }
 
   Generate ONLY the properties object for a Notion page - do not include parent or any top-level fields.
+
+
   `
+
+  console.log("🌴", taskPrompt)
 
   const completion = await openaiClient.chat.completions.create({
     model: process.env.NODE_ENV === "development" ? "gpt-4.1-nano" : "gpt-4.1-mini",
