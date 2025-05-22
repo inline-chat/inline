@@ -29,7 +29,7 @@ struct Onboarding: View {
           LinearGradient(
             colors: [
               .white.opacity(0.0),
-              .white.opacity(0.5),
+              .white.opacity(0.05),
               .white.opacity(0.0),
             ],
             startPoint: .topTrailing,

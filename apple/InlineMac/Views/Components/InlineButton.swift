@@ -12,6 +12,7 @@ struct InlineButton<Label>: View
   var label: Label
   var size: ButtonSize
   var style: InlineButtonStyle = .secondary
+  var shiny: Bool = false
 
   enum ButtonSize {
     case small
@@ -22,6 +23,7 @@ struct InlineButton<Label>: View
   init(
     size: ButtonSize? = nil,
     style: InlineButtonStyle = .secondary,
+    shiny: Bool = false,
     action: @escaping @MainActor () -> Void,
     @ViewBuilder label: () -> Label
   ) {
@@ -29,10 +31,12 @@ struct InlineButton<Label>: View
     self.label = label()
     self.size = size ?? .large
     self.style = style
+    self.shiny = shiny
   }
 
   @FocusState private var isFocused: Bool
   @State private var hovered: Bool = false
+  @State private var shineOffset: CGFloat = -200
 
   var body: some View {
     if #available(macOS 14.0, *) {
@@ -43,9 +47,60 @@ struct InlineButton<Label>: View
         .onHover {
           hovered = $0
         }
+        .overlay(shineOverlay)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .onAppear {
+          if shiny {
+            startShineAnimation()
+          }
+        }
     } else {
       Button(action: action, label: { label })
         .buttonStyle(GrayButtonStyle(size: size))
+        .overlay(shineOverlay)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .onAppear {
+          if shiny {
+            startShineAnimation()
+          }
+        }
+    }
+  }
+
+  var cornerRadius: CGFloat {
+    switch size {
+      case .small:
+        6
+      case .medium:
+        8
+      case .large:
+        10
+    }
+  }
+
+  @ViewBuilder
+  var shineOverlay: some View {
+    if shiny {
+      GeometryReader { geometry in
+        Image("shine")
+          .resizable()
+          .scaledToFit()
+          .frame(width: 150, height: geometry.size.height + 100)
+          .rotationEffect(.degrees(15))
+          .opacity(0.3)
+          .blendMode(.overlay)
+          .offset(x: shineOffset, y: -50)
+          .allowsHitTesting(false)
+      }
+    }
+  }
+
+  private func startShineAnimation() {
+    let animation = Animation.easeInOut(duration: 3.5)
+      .repeatForever(autoreverses: false)
+      .delay(0.4)
+    withAnimation(animation) {
+      shineOffset = 200
     }
   }
 
@@ -145,7 +200,7 @@ struct InlineButton<Label>: View
           Color.white
       }
     }
-    
+
     func makeBody(configuration: Configuration) -> some View {
       let background: Color =
         configuration.isPressed
@@ -183,6 +238,9 @@ struct InlineButton<Label>: View
 
     InlineButton(style: .primary, action: {}, label: { Text("Continue") })
       .padding()
+
+    InlineButton(style: .primary, shiny: true, action: {}, label: { Text("Shiny Button") })
+      .padding()
   }.padding()
     .preferredColorScheme(.light)
 }
@@ -191,8 +249,11 @@ struct InlineButton<Label>: View
   VStack {
     InlineButton(action: {}, label: { Text("Continue") })
       .padding()
-    
+
     InlineButton(style: .primary, action: {}, label: { Text("Continue") })
+      .padding()
+
+    InlineButton(style: .primary, shiny: true, action: {}, label: { Text("Shiny Button") })
       .padding()
   }.padding()
     .preferredColorScheme(.dark)
