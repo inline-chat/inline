@@ -10,6 +10,16 @@
     "@mo" : {
 
     },
+    "%@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@"
+          }
+        }
+      }
+    },
     "%@ Settings" : {
 
     },
@@ -44,6 +54,16 @@
     },
     "%lld" : {
 
+    },
+    "%lld %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld %2$@"
+          }
+        }
+      }
     },
     "%lld members" : {
 
@@ -363,6 +383,9 @@
     "Creating..." : {
 
     },
+    "Database" : {
+
+    },
     "Delete Space" : {
       "localizations" : {
         "fa" : {
@@ -515,6 +538,9 @@
         }
       }
     },
+    "Integration Options" : {
+
+    },
     "Integrations" : {
 
     },
@@ -612,10 +638,16 @@
     "No users found" : {
 
     },
+    "Notion" : {
+
+    },
     "OK" : {
 
     },
     "Open Chat" : {
+
+    },
+    "Options" : {
 
     },
     "or" : {
@@ -699,6 +731,12 @@
       }
     },
     "Searching..." : {
+
+    },
+    "Select a database" : {
+
+    },
+    "Select a database to help AI understand your data" : {
 
     },
     "Sending Code..." : {
