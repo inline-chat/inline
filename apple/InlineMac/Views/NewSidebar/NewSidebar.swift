@@ -87,12 +87,15 @@ class NewSidebar: NSViewController {
 
   lazy var scrollView: NSScrollView = {
     let scrollView = NSScrollView()
-    scrollView.hasVerticalScroller = true
     scrollView.drawsBackground = false
     scrollView.documentView = tableView
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.contentView.wantsLayer = true
     scrollView.postsBoundsChangedNotifications = true
+    
+    scrollView.hasVerticalScroller = true
+    scrollView.scrollerStyle = .overlay
+    scrollView.verticalScroller?.controlSize = .mini
 
     return scrollView
   }()
