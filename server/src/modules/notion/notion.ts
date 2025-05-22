@@ -133,3 +133,49 @@ export async function getCurrentNotionUser(spaceId: number, currentUserId: numbe
 
   return notionUser
 }
+
+/**
+ * Get a sample of pages from a Notion database to understand the tone and format
+ * @param {number} spaceId - The ID of the space who connected to the integration
+ * @param {number} [limit=10] - Maximum number of pages to retrieve
+ * @returns {Promise<any[]>} Array of sample pages with their properties
+ */
+export async function getSampleDatabasePages(spaceId: number, limit = 10) {
+  const notion = await getNotionClient(spaceId)
+
+  let [integration] = await db
+    .select()
+    .from(integrations)
+    .where(and(eq(integrations.spaceId, spaceId), eq(integrations.provider, "notion")))
+
+  if (!integration?.notionDatabaseId) {
+    Log.shared.error("No active database found for spaceId", { spaceId })
+    return []
+  }
+
+  try {
+    const response = await notion.databases.query({
+      database_id: integration.notionDatabaseId,
+      page_size: limit,
+      sorts: [
+        {
+          timestamp: "last_edited_time",
+          direction: "descending",
+        },
+      ],
+    })
+
+    Log.shared.info("Retrieved sample pages", {
+      count: response.results.length,
+      databaseId: integration.notionDatabaseId,
+    })
+
+    return response.results
+  } catch (error) {
+    Log.shared.error("Failed to retrieve sample pages", {
+      spaceId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return []
+  }
+}
