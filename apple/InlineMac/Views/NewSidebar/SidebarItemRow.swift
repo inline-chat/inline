@@ -177,6 +177,7 @@ class SidebarItemRow: NSTableCellView {
     view.orientation = .horizontal
     view.spacing = 0
     view.alignment = .top
+    view.distribution = .fill
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -266,9 +267,22 @@ class SidebarItemRow: NSTableCellView {
   }()
 
   /// The last message label
-  lazy var messageLabel: NSTextField = {
-    let view = NSTextField()
+  lazy var messageLabel: NSTextView = {
+    let view = NSTextView()
     view.translatesAutoresizingMaskIntoConstraints = false
+    view.isEditable = false
+    view.isSelectable = false
+    view.drawsBackground = false
+    view.textContainer?.lineFragmentPadding = 0
+    view.textContainerInset = .zero
+    view.textContainer?.widthTracksTextView = true
+    // view.textContainer?.containerSize = CGSize(
+    //   width: CGFloat.greatestFiniteMagnitude,
+    //   height: CGFloat.greatestFiniteMagnitude
+    // )
+    // view.maxSize = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+    view.isVerticallyResizable = true
+    view.isHorizontallyResizable = false
     return view
   }()
 
@@ -292,19 +306,14 @@ class SidebarItemRow: NSTableCellView {
     nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
     nameLabel.lineBreakMode = .byTruncatingTail
     nameLabel.maximumNumberOfLines = 1
-    nameLabel.cell?.wraps = true
+    nameLabel.cell?.usesSingleLineMode = true
+    nameLabel.cell?.wraps = false
     nameLabel.cell?.isScrollable = false
 
-    messageLabel.isEditable = false
-    messageLabel.isBordered = false
-    messageLabel.backgroundColor = .clear
     messageLabel.font = .systemFont(ofSize: 13)
     messageLabel.textColor = .secondaryLabelColor
     messageLabel.alphaValue = 0.8
-    messageLabel.lineBreakMode = .byTruncatingTail
-    messageLabel.maximumNumberOfLines = isThread ? 1 : 2
-    messageLabel.cell?.wraps = true
-    messageLabel.cell?.isScrollable = false
+    // Note: line limits will be set in configure()
 
     // Setup layout
     addSubview(containerView)
@@ -341,10 +350,14 @@ class SidebarItemRow: NSTableCellView {
     stackView.setCustomSpacing(6, after: avatarView)
 
     // Configure content hugging and compression resistance
-    // contentStackView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-    // contentStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-    // nameLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-    // messageLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+    contentStackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    contentStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
+    nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    nameLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
+    messageLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    messageLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
   }
 
   // MARK: - Context Menu
@@ -422,14 +435,22 @@ class SidebarItemRow: NSTableCellView {
     }
 
     // Configure last message
-    messageLabel.maximumNumberOfLines = isThread ? 1 : 2
+    let maxLines = isThread ? 1 : 2
+    messageLabel.textContainer?.maximumNumberOfLines = maxLines
+    messageLabel.textContainer?.lineBreakMode = .byTruncatingTail
+    // messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
     if let message = item.message {
-      messageLabel.stringValue = message.stringRepresentationWithEmoji ?? ""
-      Log.shared.debug("SidebarItemRow message set to: \(messageLabel.stringValue)")
+      messageLabel.string = message.stringRepresentationWithEmoji ?? ""
+      Log.shared.debug("SidebarItemRow message set to: \(messageLabel.string)")
     } else {
-      messageLabel.stringValue = "Empty chat"
+      messageLabel.string = "Empty chat"
       Log.shared.debug("SidebarItemRow no message")
     }
+
+    // Force the text view to recalculate its layout
+    // messageLabel.invalidateIntrinsicContentSize()
+    // messageLabel.needsLayout = true
 
     // Gutter badges ---
     // Unread badge
