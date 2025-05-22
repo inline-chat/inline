@@ -989,7 +989,7 @@ private extension MessagesCollectionView {
             }
           }
         }
-        actions.append(createNotionTaskAction)
+//        actions.append(createNotionTaskAction)
 
         if message.hasText {
           let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
