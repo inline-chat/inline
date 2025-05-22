@@ -65,7 +65,7 @@ struct SpaceSettingsView: View {
         }
       }
       Section {
-        NavigationLink(destination: SpaceIntegrationsView()) {
+        NavigationLink(destination: SpaceIntegrationsView(spaceId: spaceId)) {
           HStack {
             Image(systemName: "app.connected.to.app.below.fill")
               .foregroundColor(.white)
