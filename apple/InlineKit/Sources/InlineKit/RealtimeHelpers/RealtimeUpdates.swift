@@ -256,7 +256,7 @@ extension InlineProtocol.UpdateMessageAttachment {
 
 extension InlineProtocol.UpdateReaction {
   func apply(_ db: Database) throws {
-    _ = try Reaction.save(db, protocolMessage: reaction, publishChanges: true)
+    _ = try Reaction.save(db, protocolMessage: reaction)
     let message = try Message
       .filter(Column("messageId") == reaction.messageID)
       .filter(Column("chatId") == reaction.chatID)
