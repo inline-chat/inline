@@ -34,6 +34,25 @@ class MainSplitViewController: NSSplitViewController {
   func setup() {
     NotificationCenter.default
       .post(name: .requestNotificationPermission, object: nil)
+
+    // Add observer for app becoming active
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(refetchChats),
+      name: NSApplication.didBecomeActiveNotification,
+      object: nil
+    )
+  }
+
+  @objc private func refetchChats() {
+    Task.detached {
+      do {
+        try await self.dependencies.realtime
+          .invokeWithHandler(.getChats, input: .getChats(.init()))
+      } catch {
+        Log.shared.error("Error refetching getChats", error: error)
+      }
+    }
   }
 
   deinit {
@@ -49,6 +68,12 @@ extension MainSplitViewController {
       do {
         try await self.dependencies.realtime
           .invokeWithHandler(.getMe, input: .getMe(.init()))
+
+        // wait for our own user to finish fetching
+        // TODO: dedup from home sidebar
+        Task.detached {
+          try? await self.dependencies.data.getSpaces()
+        }
       } catch {
         Log.shared.error("Error fetching getMe info", error: error)
       }
@@ -60,15 +85,6 @@ extension MainSplitViewController {
         } catch {
           Log.shared.error("Error fetching getChats", error: error)
         }
-      }
-
-      // wait for our own user to finish fetching
-      // TODO: dedup from home sidebar
-      Task.detached {
-        try? await self.dependencies.data.getSpaces()
-      }
-      Task.detached {
-        // try? await self.dependencies.data.getPrivateChats()
       }
     }
   }
