@@ -233,6 +233,11 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
       if (processedMsg) {
         messagesList.push(encodedMsg)
       }
+
+      // sender
+      if (chat.lastMsg.from) {
+        usersList.push(chat.lastMsg.from)
+      }
     }
 
     if (chat.dialogs.length > 0) {
