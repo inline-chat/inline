@@ -139,6 +139,7 @@ class UIMessageView: UIView {
   lazy var newPhotoView = createNewPhotoView()
   lazy var floatingMetadataView = createFloatingMetadataView()
   lazy var documentView = createDocumentView()
+  lazy var messageAttachmentEmbed = createMessageAttachmentEmbed()
 
   lazy var reactionsFlowView: ReactionsFlowView = {
     let view = ReactionsFlowView(outgoing: outgoing)
@@ -413,7 +414,17 @@ class UIMessageView: UIView {
 
       // Insert URLPreviewView(s) for attachments with urlPreview
       for attachment in fullMessage.attachments {
-        if let urlPreview = attachment.urlPreview {
+        if let externalTask = attachment.externalTask {
+          messageAttachmentEmbed.configure(
+            userName: attachment.user?.firstName ?? attachment.user?.username ?? attachment.user?.email ?? "User",
+            outgoing: outgoing,
+            url: URL(string: externalTask.url ?? ""),
+            issueIdentifier: nil,
+            title: nil
+          )
+          innerContainer.addArrangedSubview(messageAttachmentEmbed)
+        }
+        if attachment.urlPreview != nil {
           let previewView = createURLPreviewView(for: attachment)
           innerContainer.addArrangedSubview(previewView)
         }
@@ -438,12 +449,21 @@ class UIMessageView: UIView {
 
       // Insert URLPreviewView(s) for attachments with urlPreview
       for attachment in fullMessage.attachments {
-        if let urlPreview = attachment.urlPreview {
+        if let externalTask = attachment.externalTask {
+          messageAttachmentEmbed.configure(
+            userName: attachment.user?.firstName ?? attachment.user?.username ?? attachment.user?.email ?? "User",
+            outgoing: outgoing,
+            url: URL(string: externalTask.url ?? ""),
+            issueIdentifier: nil,
+            title: nil
+          )
+          multiLineContainer.addArrangedSubview(messageAttachmentEmbed)
+        }
+        if attachment.urlPreview != nil {
           let previewView = createURLPreviewView(for: attachment)
           multiLineContainer.addArrangedSubview(previewView)
         }
       }
-
       if fullMessage.reactions.count > 0 {
         setupReactionsIfNeeded()
         multiLineContainer.addArrangedSubview(reactionsFlowView)

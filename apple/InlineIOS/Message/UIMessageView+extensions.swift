@@ -101,6 +101,13 @@ extension UIMessageView {
 
     return view
   }
+
+  func createMessageAttachmentEmbed() -> MessageAttachmentEmbed {
+    let view = MessageAttachmentEmbed()
+    view.translatesAutoresizingMaskIntoConstraints = false
+
+    return view
+  }
 }
 
 // MARK: - UIGestureRecognizerDelegate
