@@ -1460,8 +1460,10 @@ class MessageViewAppKit: NSView {
       if event.phase == .ended || event.phase == .cancelled {
         isSwipeInProgress = false
 
+        let direction = swipeOffset > 0 ? "right" : "left"
+
         // Check if swipe was far enough to trigger reply
-        if abs(swipeOffset) > swipeThreshold {
+        if abs(swipeOffset) > swipeThreshold, direction == "left" {
           Task(priority: .userInitiated) { @MainActor in self.reply() }
 
           // Animate back with spring effect
