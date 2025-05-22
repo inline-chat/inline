@@ -274,10 +274,13 @@ extension MessageCollectionViewCell {
     let avatarOrSpacer: UIView
     if fromOtherSender, let from = message.senderInfo {
       let avatar = UserAvatarView()
-      avatar.configure(with: from, size: avatarSize)
-      avatar.translatesAutoresizingMaskIntoConstraints = false
-      avatarView = avatar
+      UIView.performWithoutAnimation {
+        avatar.configure(with: from, size: avatarSize)
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatarView = avatar
+      }
       avatarOrSpacer = avatar
+
     } else {
       let spacer = UIView()
       spacer.translatesAutoresizingMaskIntoConstraints = false
