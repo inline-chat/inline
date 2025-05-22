@@ -59,6 +59,9 @@ public enum Path: String {
   case getAlphaText
   case sendSmsCode
   case verifySmsCode
+  case getNotionDatabases
+  case saveNotionDatabaseId
+  case createNotionTask
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -708,6 +711,55 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public func getAlphaText() async throws -> String {
     try await request(.getAlphaText, includeToken: true)
   }
+
+  public func getNotionDatabases(spaceId: Int64) async throws -> [NotionSimplifiedDatabase] {
+    try await request(
+      .getNotionDatabases,
+      queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
+      includeToken: true
+    )
+  }
+
+  public func saveNotionDatabaseId(spaceId: Int64, databaseId: String) async throws -> EmptyPayload {
+    try await request(
+      .saveNotionDatabaseId,
+      queryItems: [
+        URLQueryItem(name: "spaceId", value: "\(spaceId)"),
+        URLQueryItem(name: "databaseId", value: databaseId),
+      ],
+      includeToken: true
+    )
+  }
+
+  public func createNotionTask(
+    spaceId: Int64,
+    messagesIds: [Int64],
+    messageId: Int64,
+    chatId: Int64,
+    peerId: Peer,
+    fromId: Int64
+  ) async throws -> NotionTaskResult {
+    var peerIdObject: [String: Any] = [:]
+
+    if let userId = peerId.asUserId() {
+      peerIdObject["userId"] = userId
+    } else if let threadId = peerId.asThreadId() {
+      peerIdObject["threadId"] = threadId
+    }
+
+    return try await postRequest(
+      .createNotionTask,
+      body: [
+        "spaceId": spaceId,
+        "messagesIds": messagesIds,
+        "messageId": messageId,
+        "chatId": chatId,
+        "peerId": peerIdObject,
+        "fromId": fromId,
+      ],
+      includeToken: true
+    )
+  }
 }
 
 /// Example
@@ -748,9 +800,19 @@ public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
   }
 }
 
+public struct NotionTaskResult: Codable, Sendable {
+  public let url: String
+}
+
 public struct GetIntegrations: Codable, Sendable {
   public let hasLinearConnected: Bool
   public let hasNotionConnected: Bool
+}
+
+public struct NotionSimplifiedDatabase: Codable, Sendable {
+  public let id: String
+  public let title: String
+  public let icon: String?
 }
 
 public struct CreateLinearIssue: Codable, Sendable {
@@ -976,4 +1038,3 @@ public struct SendSmsCode: Codable, Sendable {
   public let phoneNumber: String
   public let formattedPhoneNumber: String
 }
-
