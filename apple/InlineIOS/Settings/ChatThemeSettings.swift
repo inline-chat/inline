@@ -4,17 +4,18 @@ import SwiftUI
 struct ThemeSelectionView: View {
   @StateObject private var themeManager = ThemeManager.shared
   @State private var selectedThemeId: String
-    
+
   init() {
     _selectedThemeId = State(initialValue: ThemeManager.shared.selected.id)
   }
-    
+
   var body: some View {
     List {
       ThemePreviewCard(theme: themeManager.selected)
         .listRowInsets(EdgeInsets())
-        
+
       themeGrid
+        .listRowInsets(EdgeInsets())
     }
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
@@ -31,7 +32,7 @@ struct ThemeSelectionView: View {
     }
     .animation(.spring(response: 0.3), value: selectedThemeId)
   }
-    
+
   private var themeGrid: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       LazyHStack(spacing: 12) {
@@ -46,9 +47,10 @@ struct ThemeSelectionView: View {
         }
       }
       .padding(.vertical)
+      .padding(.horizontal, 12)
     }
   }
-    
+
   private func selectTheme(_ theme: ThemeConfig) {
     selectedThemeId = theme.id
     themeManager.switchToTheme(theme)
@@ -59,7 +61,7 @@ struct ThemeSelectionView: View {
 struct ThemeCard: View {
   let theme: ThemeConfig
   let isSelected: Bool
-    
+
   var body: some View {
     VStack(alignment: .center) {
       Circle()
@@ -70,7 +72,7 @@ struct ThemeCard: View {
           Circle()
             .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
         )
-      
+
       Text(theme.name)
         .font(.footnote)
         .foregroundColor(isSelected ? .primary : .secondary)
@@ -78,11 +80,11 @@ struct ThemeCard: View {
     }
     .frame(minWidth: 80)
   }
-    
+
   private func messageBubble(outgoing: Bool, text: String) -> some View {
     HStack {
       if outgoing { Spacer() }
-            
+
       Text(text)
         .font(.caption)
         .padding(.horizontal, 8)
@@ -92,7 +94,7 @@ struct ThemeCard: View {
         )
         .foregroundColor(outgoing ? .white : .primary)
         .cornerRadius(10)
-            
+
       if !outgoing { Spacer() }
     }
   }
@@ -100,7 +102,7 @@ struct ThemeCard: View {
 
 struct ThemePreviewCard: View {
   let theme: ThemeConfig
-    
+
   var body: some View {
     VStack(spacing: 12) {
       messageBubble(outgoing: false, text: "Hey! Just pushed an update for users! Have you checked it out yet?")
@@ -109,11 +111,11 @@ struct ThemePreviewCard: View {
     .padding()
     .background(Color(theme.backgroundColor).ignoresSafeArea())
   }
-    
+
   private func messageBubble(outgoing: Bool, text: String) -> some View {
     HStack {
       if outgoing { Spacer() }
-            
+
       Text(text)
         .font(.body)
         .padding(.horizontal, 12)
@@ -124,7 +126,7 @@ struct ThemePreviewCard: View {
         .foregroundColor(outgoing ? .white : .primary)
         .cornerRadius(18)
         .frame(maxWidth: 260, alignment: outgoing ? .trailing : .leading)
-            
+
       if !outgoing { Spacer() }
     }
   }
