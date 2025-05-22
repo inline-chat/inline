@@ -655,6 +655,8 @@ class MessageSizeCalculator {
         bubbleHeight += timePlan.size.height
         bubbleHeight += timePlan.spacing.verticalTotal // ??? probably too much
       }
+      // ensure we have enough width for the time when multiline
+      bubbleWidth = max(bubbleWidth, timePlan.size.width + timePlan.spacing.horizontalTotal)
     }
 
     bubblePlan.size = CGSize(width: bubbleWidth, height: bubbleHeight)
