@@ -63,23 +63,18 @@ public extension Attachment {
     if let attachmentType = attachment.attachment {
       switch attachmentType {
         case let .externalTask(externalTask):
-          do {
-            externalTaskId = externalTask.id
-          } catch {
-            Log.shared.error("Failed to assign externalTaskId: \(error)")
-            throw error
-          }
+
+          let savedExternalTask = try ExternalTask.save(db, externalTask: externalTask)
+          externalTaskId = savedExternalTask.id
+
         case let .urlPreview(urlPreviewProto):
           do {
-            // Save the UrlPreview and use its DB id
             let savedUrlPreview = try UrlPreview.save(db, linkEmbed: urlPreviewProto)
             urlPreviewId = savedUrlPreview.id
           } catch {
             Log.shared.error("Failed to save UrlPreview: \(error)")
             throw error
           }
-        default:
-          break
       }
     }
 
