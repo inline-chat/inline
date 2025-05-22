@@ -491,6 +491,12 @@ public extension Message {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
       }
 
+      if protocolMessage.hasReactions {
+        for reaction in protocolMessage.reactions.reactions {
+          try Reaction.save(db, protocolMessage: reaction)
+        }
+      }
+      
       let message = try message.saveMessage(db, publishChanges: false) // publish is below
 
       if protocolMessage.hasAttachments {
