@@ -40,6 +40,15 @@ extension ChatView {
       }
     }
 
+    var isComposeAction: Bool {
+      switch self {
+        case .composeAction:
+          true
+        default:
+          false
+      }
+    }
+
     @ViewBuilder
     var animatedIndicator: some View {
       switch self {
@@ -85,7 +94,7 @@ extension ChatView {
 
         Text(subtitle.text.lowercased())
           .font(.caption)
-          .foregroundStyle(Color(ThemeManager.shared.selected.accent))
+          .foregroundStyle(subtitle.isComposeAction ? Color(ThemeManager.shared.selected.accent) : .secondary)
       }
       .padding(.top, -2)
       .fixedSize()
@@ -129,7 +138,7 @@ struct ChatSubtitlePreview: View {
 
         Text(subtitle.text.lowercased())
           .font(.caption)
-          .foregroundStyle(Color(ThemeManager.shared.selected.accent))
+          .foregroundStyle(subtitle.isComposeAction ? Color(ThemeManager.shared.selected.accent) : .secondary)
       }
       .padding(.top, -2)
       .fixedSize()
