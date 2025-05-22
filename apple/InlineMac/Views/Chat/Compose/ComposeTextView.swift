@@ -137,13 +137,10 @@ class ComposeNSTextView: NSTextView {
   /// - paste image from clipboard
   /// - drag and drop image from other apps
   /// - paste image file URL into text view
-  private func handleImageInput(from pasteboard: NSPasteboard) -> Bool {
+  private func handleImageInput(from pasteboard: NSPasteboard, fromPaste: Bool = false) -> Bool {
     // Log pasteboard types for debugging
     logPasteboardTypes(pasteboard)
     Log.shared.debug("Attempting to handle image input from pasteboard")
-
-    /// Don't handle remote images when pasting into text input not dropping
-    // let shouldNotCaptureRemote = pasteboard == .general
 
     // Check for files that are images
     if let files = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
@@ -151,16 +148,8 @@ class ComposeNSTextView: NSTextView {
       var hasAsyncImageTask = false
 
       for file in files {
-        // let isRemote = !file.isFileURL
-
-        // if shouldNotCaptureRemote, isRemote {
-        //   // Ignore remote images
-        //   continue
-        // }
-
-        Log.shared.debug("File pasted/dropped: \(file)")
-
         let fileType = file.pathExtension.lowercased()
+        let hasImageType = ["png", "jpg", "jpeg", "gif", "webp"].contains(fileType)
 
         // Handle video files synchronously
         if ["mp4"].contains(fileType) {
@@ -171,24 +160,27 @@ class ComposeNSTextView: NSTextView {
           continue
         }
 
-        hasAsyncImageTask = true
+        if (!fromPaste && hasImageType) || file.isFileURL {
+          Log.shared.debug("Handling image asynchronously")
+          hasAsyncImageTask = true
 
-        // Load image from URL asynchronously
-        Task { [weak self] in
-          guard let self else { return }
+          // Load image from URL asynchronously
+          Task { [weak self] in
+            guard let self else { return }
 
-          let _ = file.startAccessingSecurityScopedResource()
-          if let image = await loadImage(from: file) {
-            Log.shared.debug("Found image file: \(file.path)")
-            // Only switch to main thread for UI updates
-            notifyDelegateAboutImage(image, file)
-          } else {
-            // Handle other files synchronously
-            if file.isFileURL {
-              notifyDelegateAboutFile(file)
+            let _ = file.startAccessingSecurityScopedResource()
+            if let image = await loadImage(from: file) {
+              Log.shared.debug("Found image file: \(file.path)")
+              // Only switch to main thread for UI updates
+              notifyDelegateAboutImage(image, file)
+            } else {
+              // Handle other files synchronously
+              if file.isFileURL {
+                notifyDelegateAboutFile(file)
+              }
+
+              file.stopAccessingSecurityScopedResource()
             }
-
-            file.stopAccessingSecurityScopedResource()
           }
         }
       }
@@ -237,7 +229,7 @@ class ComposeNSTextView: NSTextView {
 
   override func paste(_ sender: Any?) {
     Log.shared.debug("Paste event received in ComposeNSTextView")
-    guard !handleImageInput(from: .general) else {
+    guard !handleImageInput(from: .general, fromPaste: true) else {
       Log.shared.debug("Image paste handled by custom handler")
       return
     }
@@ -289,7 +281,7 @@ class ComposeNSTextView: NSTextView {
   }
 
   override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-    let handled = handleImageInput(from: sender.draggingPasteboard)
+    let handled = handleImageInput(from: sender.draggingPasteboard, fromPaste: false)
     return handled || super.performDragOperation(sender)
   }
 
