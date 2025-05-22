@@ -91,9 +91,10 @@ class ComposeTextEditor: NSView {
 
     // Enables paste command for NSImages from clipboard
     textView.importsGraphics = true
-    
+
     // Must be called after import graphics as that enables it
-    textView.isRichText = false
+    // textView.isRichText = false
+    textView.isRichText = true
 
     // Smart
     textView.isAutomaticTextCompletionEnabled = true

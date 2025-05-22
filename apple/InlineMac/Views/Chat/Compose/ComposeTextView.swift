@@ -185,8 +185,10 @@ class ComposeNSTextView: NSTextView {
         }
       }
 
-      // Return true if we handled anything synchronously or started an async image task
-      return handled || hasAsyncImageTask
+      if handled || hasAsyncImageTask {
+        // Return true if we handled anything synchronously or started an async image task
+        return true
+      }
     }
 
     // Handle direct image data synchronously
@@ -227,14 +229,105 @@ class ComposeNSTextView: NSTextView {
 
   // MARK: - Paste Handling
 
+  private func handlePasteboardContent(from pasteboard: NSPasteboard, fromPaste: Bool) -> Bool {
+    // Try to handle images first
+    if handleImageInput(from: pasteboard, fromPaste: fromPaste) {
+      Log.shared.debug("Image content handled by custom handler")
+      return true
+    }
+
+    // Handle rich text
+    if handleRichTextPaste(from: pasteboard) {
+      Log.shared.debug("Rich text paste handled by custom handler")
+      return true
+    }
+
+    return false
+  }
+
   override func paste(_ sender: Any?) {
     Log.shared.debug("Paste event received in ComposeNSTextView")
-    guard !handleImageInput(from: .general, fromPaste: true) else {
-      Log.shared.debug("Image paste handled by custom handler")
+
+    if handlePasteboardContent(from: .general, fromPaste: true) {
       return
     }
+
     Log.shared.debug("Falling back to default paste handler")
     super.paste(sender)
+  }
+
+  private func handleRichTextPaste(from pasteboard: NSPasteboard) -> Bool {
+    // Check for HTML content first
+    let htmlType = NSPasteboard.PasteboardType("public.html")
+    if let htmlString = pasteboard.string(forType: htmlType) {
+      Log.shared.debug("Found HTML content in pasteboard")
+      let plainText = extractPlainTextFromHTML(htmlString)
+      insertPlainText(plainText)
+      return true
+    }
+
+    // Check for RTF (Rich Text Format)
+    if let rtfData = pasteboard.data(forType: .rtf) {
+      Log.shared.debug("Found RTF content in pasteboard")
+      if let attributedString = NSAttributedString(rtf: rtfData, documentAttributes: nil) {
+        let plainText = attributedString.string
+        insertPlainText(plainText)
+        return true
+      }
+    }
+
+    // Check for other rich text types
+    if let attributedString = pasteboard.readObjects(forClasses: [NSAttributedString.self], options: nil)?
+      .first as? NSAttributedString
+    {
+      Log.shared.debug("Found attributed string in pasteboard")
+      let plainText = attributedString.string
+      insertPlainText(plainText)
+      return true
+    }
+
+    return false
+  }
+
+  private func extractPlainTextFromHTML(_ html: String) -> String {
+    // Use NSAttributedString to parse HTML and extract plain text
+    guard let data = html.data(using: .utf8) else { return html }
+
+    do {
+      let attributedString = try NSAttributedString(
+        data: data,
+        options: [
+          .documentType: NSAttributedString.DocumentType.html,
+          .characterEncoding: String.Encoding.utf8.rawValue,
+        ],
+        documentAttributes: nil
+      )
+      return attributedString.string
+    } catch {
+      Log.shared.error("Failed to parse HTML: \(error)")
+      // Fallback: try to strip HTML tags manually
+      return html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil)
+    }
+  }
+
+  private func insertPlainText(_ text: String) {
+    guard let textStorage else { return }
+
+    // Get current selection
+    let selectedRange = selectedRange()
+
+    // Create attributed string with proper styling
+    let attributedText = NSAttributedString(string: text, attributes: typingAttributes)
+
+    // Insert the attributed text
+    textStorage.replaceCharacters(in: selectedRange, with: attributedText)
+
+    // Update selection to end of inserted text
+    let newLocation = selectedRange.location + text.count
+    setSelectedRange(NSRange(location: newLocation, length: 0))
+
+    // Notify delegate of text change
+    delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
   }
 
   // MARK: - Drag & Drop Handling
@@ -281,7 +374,7 @@ class ComposeNSTextView: NSTextView {
   }
 
   override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-    let handled = handleImageInput(from: sender.draggingPasteboard, fromPaste: false)
+    let handled = handlePasteboardContent(from: sender.draggingPasteboard, fromPaste: false)
     return handled || super.performDragOperation(sender)
   }
 
