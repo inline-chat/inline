@@ -37,7 +37,7 @@ struct OnboardingWelcome: View {
 
       Spacer()
 
-      InlineButton(size: .large, style: .primary) {
+      InlineButton(size: .large, style: .primary, shiny: true) {
         onboardingViewModel.navigate(to: .getStarted)
       } label: {
         Text("Get Started").padding(.horizontal, 40)
