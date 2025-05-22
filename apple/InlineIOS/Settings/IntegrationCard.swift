@@ -12,7 +12,10 @@ struct IntegrationCard: View {
   @Binding var isConnecting: Bool
   var provider: String
   var clipped: Bool
+  var spaceId: Int64?
   var completion: () -> Void
+  var hasOptions: Bool = false
+  var navigateToOptions: (() -> Void)? = nil
 
   @Environment(\.openURL) private var openURL
 
@@ -55,23 +58,48 @@ struct IntegrationCard: View {
         completion()
       }
       Divider()
-      HStack{
+      if isConnected, hasOptions, let navigateToOptions {
+        HStack {
+          Spacer()
+
+          Button("Options") {
+            navigateToOptions()
+          }
+          .buttonStyle(.borderless)
+          .tint(Color(ThemeManager.shared.selected.accent))
+          Spacer()
+        }
+
+        Divider()
+      }
+      HStack {
         Spacer()
+
         Button(isConnecting ? "Connecting..." : isConnected ? "Connected" : "Connect") {
           guard let token = Auth.shared.getToken() else {
             return
           }
-          if let url = URL(string: "\(baseURL)/integrations/\(provider)/integrate?token=\(token)") {
-            openURL(url)
+          if let spaceId {
+            if let url =
+              URL(string: "\(baseURL)/integrations/\(provider)/integrate?token=\(token)&spaceId=\(spaceId)")
+            {
+              print("URL with spaceId: \(url)")
+              openURL(url)
+            }
+          } else {
+            if let url = URL(string: "\(baseURL)/integrations/\(provider)/integrate?token=\(token)") {
+              print("URL: \(url)")
+              openURL(url)
+            }
           }
         }
         .buttonStyle(.borderless)
         .disabled(isConnecting || isConnected)
         .tint(Color(ThemeManager.shared.selected.accent))
         Spacer()
-
       }
     }
+    .animation(.easeInOut(duration: 0.1), value: isConnected)
   }
 }
 
@@ -85,8 +113,11 @@ struct IntegrationCard: View {
         isConnected: .constant(false),
         isConnecting: .constant(false),
         provider: "notion",
-        clipped: true
-      ) {}
+        clipped: true,
+        spaceId: 123,
+        completion: {},
+        navigateToOptions: {}
+      )
     }
   }
 }
