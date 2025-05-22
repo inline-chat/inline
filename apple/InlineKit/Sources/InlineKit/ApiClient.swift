@@ -698,12 +698,15 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func getIntegrations(userId: Int64) async throws -> GetIntegrations {
-    try await postRequest(
+  public func getIntegrations(userId: Int64, spaceId: Int64? = nil) async throws -> GetIntegrations {
+    var queryItems = [URLQueryItem(name: "userId", value: "\(userId)")]
+    if let spaceId {
+      queryItems.append(URLQueryItem(name: "spaceId", value: "\(spaceId)"))
+    }
+
+    return try await request(
       .getIntegrations,
-      body: [
-        "userId": userId,
-      ],
+      queryItems: queryItems,
       includeToken: true
     )
   }
@@ -807,6 +810,17 @@ public struct NotionTaskResult: Codable, Sendable {
 public struct GetIntegrations: Codable, Sendable {
   public let hasLinearConnected: Bool
   public let hasNotionConnected: Bool
+  public let notionSpaces: [NotionSpace]?
+
+  // Computed property for easy access to first Notion space
+  public var firstNotionSpace: NotionSpace? {
+    notionSpaces?.first
+  }
+}
+
+public struct NotionSpace: Codable, Sendable {
+  public let spaceId: Int64
+  public let spaceName: String
 }
 
 public struct NotionSimplifiedDatabase: Codable, Sendable {

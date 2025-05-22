@@ -56,7 +56,11 @@ struct SpaceIntegrationsView: View {
   func checkIntegrationConnection() {
     Task {
       do {
-        let result = try await ApiClient.shared.getIntegrations(userId: Auth.shared.getCurrentUserId() ?? 0)
+        guard let spaceId else { return }
+        let result = try await ApiClient.shared.getIntegrations(
+          userId: Auth.shared.getCurrentUserId() ?? 0,
+          spaceId: spaceId
+        )
         if result.hasNotionConnected {
           isConnectedNotion = true
         } else {
