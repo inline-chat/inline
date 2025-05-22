@@ -25,6 +25,7 @@
         "@elysiajs/html": "^1.1.1",
         "@elysiajs/swagger": "^1.1.5",
         "@linear/sdk": "^38.0.0",
+        "@notionhq/client": "^3.0.1",
         "@prelude.so/sdk": "^0.3.0",
         "@protobuf-ts/plugin": "^2.9.4",
         "@sentry/bun": "^8.32.0",
@@ -370,6 +371,8 @@
     "@nodelib/fs.stat": ["@nodelib/fs.stat@2.0.5", "", {}, "sha512-RkhPPp2zrqDAQA/2jNhnztcPAlv64XdhIp7a7454A5ovI7Bukxgt7MX7udwAu3zg1DcpPU0rz3VV1SeaqvY4+A=="],
 
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
+
+    "@notionhq/client": ["@notionhq/client@3.0.1", "", {}, "sha512-vHtFKrRKQg2PZSky1A9fTe+L9/WxNYRJWHmD6ZiBNgeN5jnFmv27ootRl9ROzEm/N+mOxfTo37EnuCHsaPgETg=="],
 
     "@npmcli/git": ["@npmcli/git@4.1.0", "", { "dependencies": { "@npmcli/promise-spawn": "^6.0.0", "lru-cache": "^7.4.4", "npm-pick-manifest": "^8.0.0", "proc-log": "^3.0.0", "promise-inflight": "^1.0.1", "promise-retry": "^2.0.1", "semver": "^7.3.5", "which": "^3.0.0" } }, "sha512-9hwoB3gStVfa0N31ymBmrX+GuDGdVA/QWShZVqE0HK2Af+7QGGrCTbZia/SW0ImUTjTne7SP91qxDmtXvDHRPQ=="],
 
