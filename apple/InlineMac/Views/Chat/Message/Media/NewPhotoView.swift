@@ -6,21 +6,24 @@ import NukeUI
 import Quartz
 
 final class NewPhotoView: NSView {
-  private let imageView: NSImageView = {
-    let view = NSImageView()
+  private let imageView: NSView = {
+    let view = NSView()
     view.wantsLayer = true
-    view.imageScaling = .scaleProportionallyUpOrDown
     view.translatesAutoresizingMaskIntoConstraints = false
 
     // Set a clear background initially
     view.layer?.backgroundColor = NSColor.clear.cgColor
 
-    // Disable the built-in drag behavior so chat view's drop handler works
-    view.unregisterDraggedTypes()
-    view.isEditable = false // Prevents drag-to-change-image behavior
-
     return view
   }()
+
+  private let imageLayer: CALayer = {
+    let layer = CALayer()
+    layer.contentsGravity = .resizeAspectFill // This gives us cover behavior
+    return layer
+  }()
+
+  private var currentImage: NSImage?
 
   // Add a separate background view for more reliable background coloring
   private let backgroundView: BasicView = {
@@ -107,21 +110,13 @@ final class NewPhotoView: NSView {
     guard !haveAddedImageView else { return }
     haveAddedImageView = true
     addSubview(imageView)
+
+    // Add the image layer to the image view
+    imageView.layer?.addSublayer(imageLayer)
+
     // Remove existing constraints array if needed
     NSLayoutConstraint.deactivate(imageConstraints)
     imageConstraints = [
-      //      // Center the image in the container
-//      imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
-//      imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-//
-//      // Set maximum size constraints
-//      imageView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
-//      imageView.heightAnchor.constraint(lessThanOrEqualTo: heightAnchor),
-//
-//      // Ensure the image view doesn't get smaller than the parent
-//      imageView.widthAnchor.constraint(equalTo: widthAnchor),
-//      imageView.heightAnchor.constraint(equalTo: heightAnchor),
-
       imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       imageView.topAnchor.constraint(equalTo: topAnchor),
@@ -171,7 +166,7 @@ final class NewPhotoView: NSView {
         addImageView()
 
         if loadSync {
-          imageView.image = image
+          setImage(image)
           hideLoadingView()
         } else {
           animateImageTransition(to: image)
@@ -181,7 +176,8 @@ final class NewPhotoView: NSView {
     } else {
       // If no URL, trigger download and show loading
       if let photoInfo = fullMessage.photoInfo {
-        Task {
+        Task.detached { [weak self] in
+          guard let self else { return }
           await FileCache.shared.download(photo: photoInfo, for: fullMessage.message)
         }
       }
@@ -191,10 +187,16 @@ final class NewPhotoView: NSView {
     }
   }
 
+  private func setImage(_ image: NSImage) {
+    currentImage = image
+    imageLayer.contents = image
+    updateImageLayerFrame()
+  }
+
   private func animateImageTransition(to image: NSImage) {
     // With animation
     imageView.alphaValue = 0.0
-    imageView.image = image
+    setImage(image)
 
     // Perform layout before animation
     needsLayout = true
@@ -212,6 +214,19 @@ final class NewPhotoView: NSView {
     }
   }
 
+  private func updateImageLayerFrame() {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    imageLayer.frame = imageView.bounds
+    CATransaction.commit()
+  }
+
+  private func updateLayerScaling() {
+    let scaleFactor = window?.backingScaleFactor ?? 2.0
+    imageLayer.contentsScale = scaleFactor
+    layer?.rasterizationScale = scaleFactor
+  }
+
   private func showLoadingView() {
     print("showLoadingView")
     wasLoadedWithPlaceholder = true
@@ -226,11 +241,17 @@ final class NewPhotoView: NSView {
   override func layout() {
     super.layout()
     updateMasks()
+    updateImageLayerFrame()
   }
 
   override func setFrameSize(_ newSize: NSSize) {
     super.setFrameSize(newSize)
     updateMasks()
+  }
+
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    updateLayerScaling()
   }
 
   // Update the mask path based on current bounds
@@ -382,7 +403,7 @@ final class NewPhotoView: NSView {
           dragStartPoint = nil // Reset to prevent multiple drag sessions
 
           let draggingItem = NSDraggingItem(pasteboardWriter: url as NSURL)
-          draggingItem.setDraggingFrame(bounds, contents: imageView.image)
+          draggingItem.setDraggingFrame(bounds, contents: currentImage)
 
           beginDraggingSession(
             with: [draggingItem],
@@ -483,30 +504,7 @@ extension NewPhotoView: QLPreviewPanelDataSource {
 
 extension NewPhotoView: QLPreviewPanelDelegate {
   func previewPanel(_ panel: QLPreviewPanel!, sourceFrameOnScreenFor item: QLPreviewItem!) -> NSRect {
-    guard let imageSize = imageView.image?.size else {
-      return window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
-    }
-    let aspectRatio = imageSize.width / imageSize.height
-
-    let width: CGFloat
-    let height: CGFloat
-    if imageSize.width > imageSize.height {
-      width = bounds.width
-      height = ceil(width / aspectRatio)
-    } else {
-      height = bounds.height
-      width = ceil(height * aspectRatio)
-    }
-
-    let actualBounds = NSRect(origin: CGPoint(
-      x: imageView.bounds.minX + (imageView.bounds.width - width) / 2,
-      y: imageView.bounds.minY + (imageView.bounds.height - height) / 2
-    ), size: CGSize(
-      width: width,
-      height: height
-    ))
-
-    return window?.convertToScreen(convert(actualBounds, to: nil)) ?? .zero
+    window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
   }
 
   // Doesn't work.
@@ -528,7 +526,7 @@ extension NewPhotoView: QLPreviewPanelDelegate {
     transitionImageFor item: QLPreviewItem!,
     contentRect: UnsafeMutablePointer<NSRect>!
   ) -> Any! {
-    imageView.image
+    currentImage
   }
 }
 
@@ -567,7 +565,7 @@ extension NewPhotoView: NSDraggingSource {
 
 extension NewPhotoView {
   @objc func copyImage() {
-    guard let image = imageView.image else { return }
+    guard let image = currentImage else { return }
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
 
@@ -592,7 +590,7 @@ extension NewPhotoView {
   }
 
   @objc func saveImage() {
-    guard let image = imageView.image else { return }
+    guard currentImage != nil else { return }
     let savePanel = NSSavePanel()
     savePanel.allowedContentTypes = [.png, .jpeg]
     savePanel.nameFieldStringValue = fullMessage.file?.fileName ?? "image"
