@@ -125,7 +125,7 @@ public extension FullMessage {
       message.text ?? nil
     }
   }
-  
+
   var isTranslated: Bool {
     translationText != nil
   }
@@ -314,7 +314,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
           }
         }
 
-        try? await Realtime.shared
+        _ = try? await Realtime.shared
           .invokeWithHandler(.getChatHistory, input: .getChatHistory(.with { input in
             input.peerID = peer_.toInputPeer()
           }))
