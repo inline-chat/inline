@@ -1625,29 +1625,6 @@ extension MessageViewAppKit: NSMenuDelegate {
   func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil) -> NSMenu {
     let menu = NSMenu()
 
-    #if DEBUG
-    // Add debug items
-    let idItem = NSMenuItem(title: "ID: \(message.id)", action: nil, keyEquivalent: "")
-    idItem.isEnabled = false
-    menu.addItem(idItem)
-
-    let indexItem = NSMenuItem(
-      title: "Index: \(props.index?.description ?? "?")",
-      action: nil,
-      keyEquivalent: ""
-    )
-    indexItem.isEnabled = false
-    menu.addItem(indexItem)
-    #endif
-
-    // Add native copy for selected text if in text view context
-    if context == .textView, let nativeMenu {
-      if let nativeCopyItem = nativeMenu.items.first(where: { $0.title == "Copy" }) {
-        let newItem = nativeCopyItem.copy() as! NSMenuItem
-        menu.addItem(newItem)
-      }
-    }
-
     // Add reply action only if not sending
     if message.status != .sending {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
@@ -1655,8 +1632,19 @@ extension MessageViewAppKit: NSMenuDelegate {
     }
 
     // Add reaction action
-    let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "r")
+    let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "e")
     menu.addItem(addReactionItem)
+
+    menu.addItem(NSMenuItem.separator())
+
+    // Add native copy for selected text if in text view context
+    if context == .textView, let nativeMenu {
+      if let nativeCopyItem = nativeMenu.items.first(where: { $0.title == "Copy" }) {
+        let newItem = nativeCopyItem.copy() as! NSMenuItem
+        newItem.title = "Copy Selection"
+        menu.addItem(newItem)
+      }
+    }
 
     // Add copy message action for text
     if hasText {
@@ -1708,6 +1696,24 @@ extension MessageViewAppKit: NSMenuDelegate {
       deleteItem.isEnabled = true
       menu.addItem(deleteItem)
     }
+
+    #if DEBUG
+    menu.addItem(NSMenuItem.separator())
+
+    // Add debug items
+    let idItem = NSMenuItem(title: "ID: \(message.id)", action: nil, keyEquivalent: "")
+    idItem.isEnabled = false
+    menu.addItem(idItem)
+
+    let indexItem = NSMenuItem(
+      title: "Index: \(props.index?.description ?? "?")",
+      action: nil,
+      keyEquivalent: ""
+    )
+    indexItem.isEnabled = false
+    menu.addItem(indexItem)
+
+    #endif
 
     menu.delegate = self
     return menu
