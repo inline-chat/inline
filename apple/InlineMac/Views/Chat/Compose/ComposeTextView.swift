@@ -154,7 +154,9 @@ class ComposeNSTextView: NSTextView {
         // Handle video files synchronously
         if ["mp4"].contains(fileType) {
           let _ = file.startAccessingSecurityScopedResource()
-          notifyDelegateAboutVideo(file)
+          notifyDelegateAboutFile(file)
+          // TODO:
+          // notifyDelegateAboutVideo(file)
           file.stopAccessingSecurityScopedResource()
           handled = true
           continue
