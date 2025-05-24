@@ -1631,12 +1631,6 @@ export interface NotificationSettings {
      * @generated from protobuf field: optional bool silent = 2;
      */
     silent?: boolean;
-    /**
-     * Only important notifications
-     *
-     * @generated from protobuf field: optional bool importantOnly = 3;
-     */
-    importantOnly?: boolean;
 }
 /**
  * @generated from protobuf enum NotificationSettings.Mode
@@ -1657,7 +1651,11 @@ export enum NotificationSettings_Mode {
     /**
      * @generated from protobuf enum value: MODE_MENTIONS = 3;
      */
-    MENTIONS = 3
+    MENTIONS = 3,
+    /**
+     * @generated from protobuf enum value: MODE_IMPORTANT_ONLY = 4;
+     */
+    IMPORTANT_ONLY = 4
 }
 /**
  * @generated from protobuf message UpdateUserSettingsInput
@@ -6456,8 +6454,7 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
     constructor() {
         super("NotificationSettings", [
             { no: 1, name: "mode", kind: "enum", opt: true, T: () => ["NotificationSettings.Mode", NotificationSettings_Mode, "MODE_"] },
-            { no: 2, name: "silent", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "importantOnly", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "silent", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<NotificationSettings>): NotificationSettings {
@@ -6477,9 +6474,6 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
                 case /* optional bool silent */ 2:
                     message.silent = reader.bool();
                     break;
-                case /* optional bool importantOnly */ 3:
-                    message.importantOnly = reader.bool();
-                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6498,9 +6492,6 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
         /* optional bool silent = 2; */
         if (message.silent !== undefined)
             writer.tag(2, WireType.Varint).bool(message.silent);
-        /* optional bool importantOnly = 3; */
-        if (message.importantOnly !== undefined)
-            writer.tag(3, WireType.Varint).bool(message.importantOnly);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -614,15 +614,13 @@ message NotificationSettings {
     MODE_ALL = 1;
     MODE_NONE = 2;
     MODE_MENTIONS = 3;
+    MODE_IMPORTANT_ONLY = 4;
   }
 
   optional Mode mode = 1;
 
   // If true, no sound will be played for notifications
   optional bool silent = 2;
-
-  // Only important notifications
-  optional bool importantOnly = 3;
 }
 
 message UpdateUserSettingsInput { UserSettings user_settings = 1; }
