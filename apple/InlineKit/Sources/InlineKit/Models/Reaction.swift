@@ -22,6 +22,15 @@ public struct Reaction: FetchableRecord, Identifiable, Codable, Hashable, Persis
   public var emoji: String
   public var date: Date
 
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let messageId = Column(CodingKeys.messageId)
+    static let userId = Column(CodingKeys.userId)
+    static let chatId = Column(CodingKeys.chatId)
+    static let emoji = Column(CodingKeys.emoji)
+    static let date = Column(CodingKeys.date)
+  }
+
   public static let message = belongsTo(
     Message.self,
     using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"])
