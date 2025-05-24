@@ -35,8 +35,8 @@ struct HomeToolbarContent: ToolbarContent {
     }
 
     ToolbarItemGroup(placement: .topBarTrailing) {
-      settingsButton
-      createSpaceButton
+      notificationsButton
+      dotsButton
     }
   }
 
@@ -82,6 +82,32 @@ struct HomeToolbarContent: ToolbarContent {
         shouldShow = true
       }
     })
+  }
+
+  @ViewBuilder
+  private var dotsButton: some View {
+    Menu {
+      Button {
+        nav.push(.createSpace)
+      } label: {
+        Label("Create Space", systemImage: "plus")
+      }
+
+      Button {
+        nav.push(.settings)
+      } label: {
+        Label("Settings", systemImage: "gearshape")
+      }
+    } label: {
+      Image(systemName: "ellipsis.circle")
+        .tint(Color.secondary)
+        .contentShape(Rectangle())
+    }
+  }
+
+  @ViewBuilder
+  private var notificationsButton: some View {
+    NotificationSettingsButton()
   }
 
   @ViewBuilder

@@ -16,6 +16,7 @@ struct InlineApp: App {
         .appDatabase(AppDatabase.shared)
         .environmentObject(appDelegate.notificationHandler)
         .environmentObject(appDelegate.nav)
+        .environmentObject(INUserSettings.current.notification)
     }
   }
 }

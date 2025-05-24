@@ -304,7 +304,7 @@ async function sendNotificationToUser({
 
   // Mentions
   if (userSettings?.notifications.mode === UserSettingsNotificationsMode.Mentions) {
-    if (!evalResult?.mentionedUserIds.includes(userId) && !evalResult?.needAttentionUserIds.includes(userId)) {
+    if (!evalResult?.mentionedUserIds?.includes(userId) && !evalResult?.mustSeeUserIds?.includes(userId)) {
       // Do not notify
       return
     }
@@ -312,7 +312,7 @@ async function sendNotificationToUser({
 
   // Important only
   if (userSettings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly) {
-    if (!evalResult?.mustSeeUserIds.includes(userId)) {
+    if (!evalResult?.mustSeeUserIds?.includes(userId)) {
       // Do not notify
       return
     }
