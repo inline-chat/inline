@@ -151,7 +151,7 @@ struct DirectChatItem: View {
         Text("Sticker")
           .font(.customCaption())
           .foregroundColor(.secondary)
-          .lineLimit(2)
+          .lineLimit(1)
           .truncationMode(.tail)
       }
       .padding(.top, 1)
@@ -161,10 +161,10 @@ struct DirectChatItem: View {
           .font(.customCaption())
           .foregroundColor(.secondary)
 
-        Text(lastMsg?.hasText == true ? lastMsg?.text ?? "" : "Document")
+        Text((lastMsg?.hasText == true ? lastMsg?.text ?? "" : "Document").replacingOccurrences(of: "\n", with: " "))
           .font(.customCaption())
           .foregroundColor(.secondary)
-          .lineLimit(2)
+          .lineLimit(1)
           .truncationMode(.tail)
       }
       .padding(.top, 1)
@@ -174,10 +174,10 @@ struct DirectChatItem: View {
           .font(.customCaption())
           .foregroundColor(.secondary)
 
-        Text(lastMsg?.hasText == true ? lastMsg?.text ?? "" : "Photo")
+        Text((lastMsg?.hasText == true ? lastMsg?.text ?? "" : "Photo").replacingOccurrences(of: "\n", with: " "))
           .font(.customCaption())
           .foregroundColor(.secondary)
-          .lineLimit(2)
+          .lineLimit(1)
           .truncationMode(.tail)
       }
       .padding(.top, 1)
@@ -186,11 +186,11 @@ struct DirectChatItem: View {
         .italic()
         .font(.customCaption())
         .foregroundColor(.secondary)
-        .lineLimit(2)
+        .lineLimit(1)
         .truncationMode(.tail)
         .padding(.top, 1)
     } else {
-      Text(lastMsg?.text ?? "")
+      Text((lastMsg?.text ?? "").replacingOccurrences(of: "\n", with: " "))
         .font(.customCaption())
         .foregroundColor(.secondary)
         .lineLimit(2)

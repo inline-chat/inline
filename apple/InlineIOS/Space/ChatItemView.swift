@@ -154,7 +154,7 @@ struct ChatItemView: View {
           .font(.callout)
           .foregroundColor(.secondary)
 
-        Text(message?.hasText == true ? message?.text ?? "" : "Document")
+        Text((message?.hasText == true ? message?.text ?? "" : "Document").replacingOccurrences(of: "\n", with: " "))
           .font(.callout)
           .foregroundColor(.secondary)
           .lineLimit(2)
@@ -166,7 +166,7 @@ struct ChatItemView: View {
         Image(systemName: "photo.fill")
           .font(.callout)
 
-        Text(message?.hasText == true ? message?.text ?? "" : "Photo")
+        Text((message?.hasText == true ? message?.text ?? "" : "Photo").replacingOccurrences(of: "\n", with: " "))
           .font(.callout)
           .foregroundColor(.secondary)
           .lineLimit(2)
@@ -180,7 +180,7 @@ struct ChatItemView: View {
         .foregroundColor(.secondary)
 
     } else {
-      Text(message?.text ?? "")
+      Text((message?.text ?? "").replacingOccurrences(of: "\n", with: " "))
         .font(.callout)
         .foregroundColor(.secondary)
     }

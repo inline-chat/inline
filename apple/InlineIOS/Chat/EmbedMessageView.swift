@@ -108,16 +108,16 @@ class EmbedMessageView: UIView {
       let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
       imageIconView.image = UIImage(systemName: "document.fill", withConfiguration: config)
       imageIconView.isHidden = false
-      messageLabel.text = message.text
+      messageLabel.text = message.text?.replacingOccurrences(of: "\n", with: " ")
     } else if message.hasPhoto, message.hasText {
       imageIconView.isHidden = false
-      messageLabel.text = message.text
+      messageLabel.text = message.text?.replacingOccurrences(of: "\n", with: " ")
     } else if message.hasPhoto, !message.hasText {
       imageIconView.isHidden = true
       messageLabel.text = "Photo"
     } else if !message.hasPhoto, message.hasText {
       imageIconView.isHidden = true
-      messageLabel.text = message.text
+      messageLabel.text = message.text?.replacingOccurrences(of: "\n", with: " ")
     }
 
     updateColors()
