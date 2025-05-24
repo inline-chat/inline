@@ -26,8 +26,8 @@ const log = new Log("notifications.eval")
 
 let outputSchema = z.object({
   msgId: z.number(),
-  mentionedUserIds: z.array(z.number()),
-  mustSeeUserIds: z.array(z.number()),
+  mentionedUserIds: z.array(z.number()).nullable(),
+  mustSeeUserIds: z.array(z.number()).nullable(),
 })
 
 type Output = z.infer<typeof outputSchema>
@@ -114,8 +114,8 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   # Instructions
   
   - Evaluate which of the participants are mentioned in the messages, put the IDs in the mentioned list.
-  - Then evaluate which users not only are mentioned or referred to, but additionally must immediately get a loud sound notification because something urgent needs their attention or an incident, significant event, or an issue has happened that they must be aware of or take action, even if they are asleep. This mode is ONLY for important messages, NOT for every mention. 
-  - DO NOT return user IDs of users who are mentioned but not important in the mustSee list. IT IS IMPORTANT TO NOT WAKE UP THE USER UNNECESSARILY. Users enable this when they're alseep. Greetings, links, casual chats, etc should NOT be considered important. 
+  - Then evaluate which users not only are mentioned or referred to, but additionally must immediately get a special notification because something needs their attention or an incident, event, or an issue has happened that they must be aware of or take action, even if they are asleep. this is NOT for every mention. 
+  -  IT IS IMPORTANT TO NOT WAKE UP THE USER UNNECESSARILY. Users enable this when they're alseep. Greetings, links, casual chats, etc should NOT be considered important.  Instead bug reports, company issues related to user, important DMs, things that explicitly require their attention etc should be considered important. If a user is mentioned, it's slightly more likely to be important.
   - Return user IDs of both groups.
   - Only evaluate messages between <new_messages> tag.
 
