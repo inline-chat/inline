@@ -54,3 +54,7 @@ export async function getCachedSpaceInfo(spaceId: number): Promise<CachedSpaceIn
 
   return spaceInfo
 }
+
+export const clearSpaceCache = () => {
+  cachedSpaceInfo.clear()
+}
