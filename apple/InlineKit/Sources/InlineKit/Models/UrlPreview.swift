@@ -12,6 +12,16 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
   public var photoId: Int64?
   public var duration: Int64?
 
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let url = Column(CodingKeys.url)
+    static let siteName = Column(CodingKeys.siteName)
+    static let title = Column(CodingKeys.title)
+    static let description = Column(CodingKeys.description)
+    static let photoId = Column(CodingKeys.photoId)
+    static let duration = Column(CodingKeys.duration)
+  }
+
   // Relationship to photo using photoId (server ID)
   static let photo = belongsTo(Photo.self, using: ForeignKey(["photoId"], to: ["photoId"]))
 

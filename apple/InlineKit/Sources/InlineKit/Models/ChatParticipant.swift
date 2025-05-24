@@ -9,6 +9,13 @@ public struct ChatParticipant: Codable, FetchableRecord, PersistableRecord {
   public var userId: Int64
   public var date: Date
 
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let chatId = Column(CodingKeys.chatId)
+    static let userId = Column(CodingKeys.userId)
+    static let date = Column(CodingKeys.date)
+  }
+
   static let chat = belongsTo(Chat.self)
   public var chat: QueryInterfaceRequest<Chat> {
     request(for: ChatParticipant.chat)

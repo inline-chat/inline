@@ -49,6 +49,23 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var profileCdnUrl: String?
   public var profileLocalPath: String?
 
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let email = Column(CodingKeys.email)
+    static let firstName = Column(CodingKeys.firstName)
+    static let lastName = Column(CodingKeys.lastName)
+    static let date = Column(CodingKeys.date)
+    static let username = Column(CodingKeys.username)
+    static let phoneNumber = Column(CodingKeys.phoneNumber)
+    static let pendingSetup = Column(CodingKeys.pendingSetup)
+    static let online = Column(CodingKeys.online)
+    static let lastOnline = Column(CodingKeys.lastOnline)
+    static let timeZone = Column(CodingKeys.timeZone)
+    static let profileFileId = Column(CodingKeys.profileFileId)
+    static let profileCdnUrl = Column(CodingKeys.profileCdnUrl)
+    static let profileLocalPath = Column(CodingKeys.profileLocalPath)
+  }
+
   // Add hasMany for all files (including historical profile photos)
   public static let photos = hasMany(
     File.self,

@@ -26,6 +26,13 @@ Sendable {
   // Are we creator of the space?
   public var creator: Bool?
 
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let name = Column(CodingKeys.name)
+    static let date = Column(CodingKeys.date)
+    static let creator = Column(CodingKeys.creator)
+  }
+
   // Based on https://github.com/groue/GRDB.swift/discussions/1492, GRDB models can't be marked as sendable in GRDB < 6
   // so we should use  . This issue was fixed in GRDB 7, but because we use GRDB + SQLCipher from Duck Duck Go, we can't
   // upgrade GRDB from v 6 to 7, and the discussions and issues are not open.
