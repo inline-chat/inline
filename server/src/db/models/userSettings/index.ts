@@ -39,23 +39,27 @@ async function getGeneral(userId: number): Promise<UserSettingsGeneral | null> {
     return null
   }
 
-  const decrypted = decrypt({
-    encrypted: generalEncrypted,
-    iv: generalIv,
-    authTag: generalTag,
-  })
+  try {
+    const decrypted = decrypt({
+      encrypted: generalEncrypted,
+      iv: generalIv,
+      authTag: generalTag,
+    })
 
-  // decode JSON
-  const general = UserSettingsGeneralSchema.safeParse(decrypted)
+    // decode JSON
+    const general = UserSettingsGeneralSchema.safeParse(JSON.parse(decrypted))
 
-  if (!general.success) {
-    log.error("Failed to parse general settings", { userId, error: general.error })
+    if (!general.success) {
+      log.error("Failed to parse general settings", { userId, error: general.error })
+      return null
+    }
 
+    // return
+    return general.data
+  } catch (error) {
+    log.error("Failed to decrypt or parse general settings", { userId, error })
     return null
   }
-
-  // return
-  return general.data
 }
 
 async function updateGeneral(userId: number, general: UserSettingsGeneralInput): Promise<void> {
