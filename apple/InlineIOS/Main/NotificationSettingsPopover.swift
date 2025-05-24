@@ -70,7 +70,10 @@ struct NotificationSettingsButton: View {
           description: "Receive all notifications",
           selected: notificationSettings.mode == .all,
           value: NotificationMode.all,
-          onChange: { notificationSettings.mode = $0 },
+          onChange: {
+            notificationSettings.mode = $0
+            close()
+          },
         )
 
         NotificationSettingsItem(
@@ -79,7 +82,10 @@ struct NotificationSettingsButton: View {
           description: "Mentions of your name or username",
           selected: notificationSettings.mode == .mentions,
           value: NotificationMode.mentions,
-          onChange: { notificationSettings.mode = $0 },
+          onChange: {
+            notificationSettings.mode = $0
+            close()
+          },
         )
 
         NotificationSettingsItem(
@@ -88,7 +94,10 @@ struct NotificationSettingsButton: View {
           description: "Only things that need your attention",
           selected: notificationSettings.mode == .importantOnly,
           value: NotificationMode.importantOnly,
-          onChange: { notificationSettings.mode = $0 },
+          onChange: {
+            notificationSettings.mode = $0
+            close()
+          },
         )
 
         NotificationSettingsItem(
@@ -97,7 +106,10 @@ struct NotificationSettingsButton: View {
           description: "No notifications",
           selected: notificationSettings.mode == .none,
           value: NotificationMode.none,
-          onChange: { notificationSettings.mode = $0 },
+          onChange: {
+            notificationSettings.mode = $0
+            close()
+          },
         )
       }
       .padding(.horizontal, 16)
@@ -105,6 +117,13 @@ struct NotificationSettingsButton: View {
       Spacer()
     }
     .padding(.vertical, 20)
+  }
+  
+  private func close() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+      // Delay closing to allow animations to finish
+      presented = false
+    }
   }
 }
 
@@ -156,6 +175,6 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
       )
     }
     .buttonStyle(.plain)
-    .animation(.easeOut(duration: 0.2), value: selected)
+    .animation(.easeOut(duration: 0.08), value: selected)
   }
 }
