@@ -6,5 +6,8 @@
   // Setup .swift formatter
   "[swift]": {
     "editor.defaultFormatter": "sweetpad.sweetpad"
-  }
+  },
+
+  // Show folder names in file tabs
+  "workbench.editor.labelFormat": "short"
 }
