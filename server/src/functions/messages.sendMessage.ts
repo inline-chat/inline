@@ -13,7 +13,10 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { processLoomLink } from "@in/server/modules/loom/processLoomLink"
-
+import { batchEvaluate, type NotificationEvalResult } from "@in/server/modules/notifications/eval"
+import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
+import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
+import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 type Input = {
   peerId: InputPeer
   message?: string
@@ -102,6 +105,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     messageInfo,
     currentUserId,
     chat,
+    unencryptedText: input.message,
   })
 
   // return new updates
@@ -221,33 +225,59 @@ type SendPushForMsgInput = {
   updateGroup: UpdateGroup
   messageInfo: MessageInfo
   currentUserId: number
-  chat?: DbChat
+  chat: DbChat
+  unencryptedText: string | undefined
 }
 
 /** Send push notifications for this message */
 async function sendNotifications(input: SendPushForMsgInput) {
-  const { updateGroup, messageInfo, currentUserId, chat } = input
+  const { updateGroup, messageInfo, currentUserId, chat, unencryptedText } = input
 
-  // decrypt message text
-  let messageText = ""
-  if (messageInfo.message.textEncrypted && messageInfo.message.textIv && messageInfo.message.textTag) {
-    messageText = decryptMessage({
-      encrypted: messageInfo.message.textEncrypted,
-      iv: messageInfo.message.textIv,
-      authTag: messageInfo.message.textTag,
-    })
+  // AI
+  let evalResult: NotificationEvalResult | undefined
+
+  try {
+    const chatId = chat.id
+    const chatInfo = await getCachedChatInfo(chatId)
+    const chatInfoParticipants = chatInfo?.participantUserIds ?? []
+    const participantSettings = await Promise.all(chatInfoParticipants.map((userId) => getCachedUserSettings(userId)))
+
+    log.debug("Participant settings", { participantSettings })
+
+    const hasAnyoneEnabledAI = participantSettings.some(
+      (setting) =>
+        setting?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly ||
+        setting?.notifications.mode === UserSettingsNotificationsMode.Mentions,
+    )
+    const hasText = !!unencryptedText
+
+    if (hasAnyoneEnabledAI && hasText) {
+      let evalResults = await batchEvaluate({
+        chatId: chatId,
+        message: {
+          id: messageInfo.message.messageId,
+          text: unencryptedText,
+          message: messageInfo.message,
+        },
+      })
+      evalResult = evalResults
+    }
+  } catch (error) {
+    log.error("Error getting chat info", { error })
   }
 
-  // Handle DMs and threads
-  if (updateGroup.type === "dmUsers" || updateGroup.type === "threadUsers") {
-    for (let userId of updateGroup.userIds) {
-      if (userId === currentUserId) {
-        // Don't send push notifications to yourself
-        continue
-      }
+  // decrypt message text
+  let messageText = input.unencryptedText ?? "Empty message"
 
-      sendNotificationToUser({ userId, messageInfo, messageText, chat })
+  // TODO: send to users who have it set to All immediately
+  // Handle DMs and threads
+  for (let userId of updateGroup.userIds) {
+    if (userId === currentUserId) {
+      // Don't send push notifications to yourself
+      continue
     }
+
+    sendNotificationToUser({ userId, messageInfo, messageText, chat, evalResult })
   }
 }
 
@@ -257,12 +287,39 @@ async function sendNotificationToUser({
   messageInfo,
   messageText,
   chat,
+  evalResult,
 }: {
   userId: number
   messageInfo: MessageInfo
   messageText: string
   chat?: DbChat
+  evalResult?: NotificationEvalResult
 }) {
+  // FIRST, check if we should notify this user or not ---------------------------------
+  let userSettings = await getCachedUserSettings(userId)
+  if (userSettings?.notifications.mode === UserSettingsNotificationsMode.None) {
+    // Do not notify
+    return
+  }
+
+  // Mentions
+  if (userSettings?.notifications.mode === UserSettingsNotificationsMode.Mentions) {
+    if (!evalResult?.mentionedUserIds.includes(userId) && !evalResult?.needAttentionUserIds.includes(userId)) {
+      // Do not notify
+      return
+    }
+  }
+
+  // Important only
+  if (userSettings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly) {
+    if (!evalResult?.mustSeeUserIds.includes(userId)) {
+      // Do not notify
+      return
+    }
+  }
+
+  // THEN, send notification ------------------------------------------------------------
+
   const userName = await getCachedUserName(messageInfo.message.fromId)
 
   if (!userName) {

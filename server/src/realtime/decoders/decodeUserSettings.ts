@@ -21,6 +21,9 @@ export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGen
     case NotificationSettings_Mode.MENTIONS:
       mode = UserSettingsNotificationsMode.Mentions
       break
+    case NotificationSettings_Mode.IMPORTANT_ONLY:
+      mode = UserSettingsNotificationsMode.ImportantOnly
+      break
     default:
       mode = UserSettingsNotificationsMode.All // Default fallback
       break
@@ -30,7 +33,6 @@ export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGen
     notifications: {
       mode,
       silent: notificationSettings.silent ?? false,
-      importantOnly: notificationSettings.importantOnly ?? false,
     },
   }
 }

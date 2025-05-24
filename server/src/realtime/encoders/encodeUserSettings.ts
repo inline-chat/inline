@@ -18,6 +18,9 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
       case UserSettingsNotificationsMode.Mentions:
         mode = NotificationSettings_Mode.MENTIONS
         break
+      case UserSettingsNotificationsMode.ImportantOnly:
+        mode = NotificationSettings_Mode.IMPORTANT_ONLY
+        break
       default:
         mode = NotificationSettings_Mode.UNSPECIFIED
         break
@@ -26,7 +29,6 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
     notificationSettings = {
       mode,
       silent: general.notifications.silent,
-      importantOnly: general.notifications.importantOnly,
     }
   }
 
