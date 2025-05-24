@@ -86,8 +86,23 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var transactionId: String?
   public var isSticker: Bool?
 
-  enum Columns {
+  public enum Columns {
+    static let globalId = Column(CodingKeys.globalId)
     static let messageId = Column(CodingKeys.messageId)
+    static let randomId = Column(CodingKeys.randomId)
+    static let date = Column(CodingKeys.date)
+    static let text = Column(CodingKeys.text)
+    static let peerUserId = Column(CodingKeys.peerUserId)
+    static let peerThreadId = Column(CodingKeys.peerThreadId)
+    static let chatId = Column(CodingKeys.chatId)
+    static let fromId = Column(CodingKeys.fromId)
+    static let mentioned = Column(CodingKeys.mentioned)
+    static let out = Column(CodingKeys.out)
+    static let pinned = Column(CodingKeys.pinned)
+    static let editDate = Column(CodingKeys.editDate)
+    static let status = Column(CodingKeys.status)
+    static let repliedToMessageId = Column(CodingKeys.repliedToMessageId)
+    static let isSticker = Column(CodingKeys.isSticker)
     static let photoId = Column(CodingKeys.photoId)
     static let videoId = Column(CodingKeys.videoId)
     static let documentId = Column(CodingKeys.documentId)
@@ -496,7 +511,7 @@ public extension Message {
           try Reaction.save(db, protocolMessage: reaction)
         }
       }
-      
+
       let message = try message.saveMessage(db, publishChanges: false) // publish is below
 
       if protocolMessage.hasAttachments {

@@ -1269,7 +1269,7 @@
 			repositoryURL = "https://github.com/inline-chat/GRDB.swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 3.1.1;
+				minimumVersion = 3.2.0;
 			};
 		};
 		CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */ = {
@@ -1277,7 +1277,7 @@
 			repositoryURL = "https://github.com/inline-chat/GRDBQuery";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.11.3;
+				minimumVersion = 0.11.4;
 			};
 		};
 		CD4D56CB2D2D4393006072AE /* XCRemoteSwiftPackageReference "Throttler" */ = {

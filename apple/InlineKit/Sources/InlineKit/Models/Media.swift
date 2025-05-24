@@ -15,7 +15,7 @@ public struct Photo: Codable, Equatable, Hashable, Sendable, Identifiable, Fetch
   public var date: Date
   public var format: ImageFormat
 
-  enum Columns {
+  public enum Columns {
     static let id = Column(CodingKeys.id)
     static let photoId = Column(CodingKeys.photoId)
     static let date = Column(CodingKeys.date)
@@ -48,7 +48,7 @@ public struct PhotoSize: Codable, Sendable, Equatable, Hashable, Identifiable, F
   public var cdnUrl: String?
   public var localPath: String?
 
-  enum Columns {
+  public enum Columns {
     static let id = Column(CodingKeys.id)
     static let photoId = Column(CodingKeys.photoId)
     static let type = Column(CodingKeys.type)
@@ -59,7 +59,7 @@ public struct PhotoSize: Codable, Sendable, Equatable, Hashable, Identifiable, F
     static let cdnUrl = Column(CodingKeys.cdnUrl)
     static let localPath = Column(CodingKeys.localPath)
   }
-  
+
   public init(
     id: Int64? = nil,
     photoId: Int64,
@@ -101,7 +101,7 @@ public struct Video: Codable, Sendable, Equatable, Hashable, Identifiable, Fetch
   public var cdnUrl: String?
   public var localPath: String?
 
-  enum Columns {
+  public enum Columns {
     static let id = Column(CodingKeys.id)
     static let videoId = Column(CodingKeys.videoId)
     static let date = Column(CodingKeys.date)
@@ -132,7 +132,7 @@ public struct Document: Codable, Sendable, Equatable, Hashable, Identifiable, Fe
   public var localPath: String?
   public var thumbnailPhotoId: Int64?
 
-  enum Columns {
+  public enum Columns {
     static let id = Column(CodingKeys.id)
     static let documentId = Column(CodingKeys.documentId)
     static let date = Column(CodingKeys.date)
@@ -655,5 +655,3 @@ public extension PhotoSize {
     }
   }
 }
-
-

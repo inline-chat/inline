@@ -22,6 +22,15 @@ public struct Member: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var userId: Int64
   public var spaceId: Int64
   public var role: MemberRole
+
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let date = Column(CodingKeys.date)
+    static let userId = Column(CodingKeys.userId)
+    static let spaceId = Column(CodingKeys.spaceId)
+    static let role = Column(CodingKeys.role)
+  }
+
   // Member -> Space
   public static let space = belongsTo(Space.self)
   public var space: QueryInterfaceRequest<Space> {

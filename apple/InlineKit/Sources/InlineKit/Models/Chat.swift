@@ -32,6 +32,18 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var emoji: String?
   public var isPublic: Bool?
 
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let date = Column(CodingKeys.date)
+    static let type = Column(CodingKeys.type)
+    static let title = Column(CodingKeys.title)
+    static let spaceId = Column(CodingKeys.spaceId)
+    static let peerUserId = Column(CodingKeys.peerUserId)
+    static let lastMsgId = Column(CodingKeys.lastMsgId)
+    static let emoji = Column(CodingKeys.emoji)
+    static let isPublic = Column(CodingKeys.isPublic)
+  }
+
   public static let space = belongsTo(Space.self)
   public var space: QueryInterfaceRequest<Space> {
     request(for: Chat.space)

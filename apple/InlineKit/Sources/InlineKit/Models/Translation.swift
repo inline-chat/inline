@@ -13,6 +13,15 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var language: String
   public var date: Date
 
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let messageId = Column(CodingKeys.messageId)
+    static let chatId = Column(CodingKeys.chatId)
+    static let translation = Column(CodingKeys.translation)
+    static let language = Column(CodingKeys.language)
+    static let date = Column(CodingKeys.date)
+  }
+
   public static let message = belongsTo(
     Message.self,
     using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"])

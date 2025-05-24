@@ -24,6 +24,18 @@ public struct ExternalTask: FetchableRecord, Identifiable, Codable, Hashable, Pe
   public var title: String?
   public var date: Date?
 
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let application = Column(CodingKeys.application)
+    static let taskId = Column(CodingKeys.taskId)
+    static let status = Column(CodingKeys.status)
+    static let assignedUserId = Column(CodingKeys.assignedUserId)
+    static let number = Column(CodingKeys.number)
+    static let url = Column(CodingKeys.url)
+    static let title = Column(CodingKeys.title)
+    static let date = Column(CodingKeys.date)
+  }
+
   static let assignedUser = belongsTo(User.self, using: ForeignKey(["assignedUserId"], to: ["id"]))
   var assignedUser: QueryInterfaceRequest<User> {
     request(for: ExternalTask.assignedUser)

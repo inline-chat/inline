@@ -27,6 +27,20 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var archived: Bool?
   public var chatId: Int64?
 
+  public enum Columns {
+    static let id = Column(CodingKeys.id)
+    static let peerUserId = Column(CodingKeys.peerUserId)
+    static let peerThreadId = Column(CodingKeys.peerThreadId)
+    static let spaceId = Column(CodingKeys.spaceId)
+    static let unreadCount = Column(CodingKeys.unreadCount)
+    static let readInboxMaxId = Column(CodingKeys.readInboxMaxId)
+    static let readOutboxMaxId = Column(CodingKeys.readOutboxMaxId)
+    static let pinned = Column(CodingKeys.pinned)
+    static let draft = Column(CodingKeys.draft)
+    static let archived = Column(CodingKeys.archived)
+    static let chatId = Column(CodingKeys.chatId)
+  }
+
   public static let space = belongsTo(Space.self)
   public var space: QueryInterfaceRequest<Space> {
     request(for: Dialog.space)
