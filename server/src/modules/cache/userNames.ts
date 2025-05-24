@@ -3,6 +3,7 @@ import { users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 
 export type UserName = {
+  id: number
   firstName: string | null
   lastName: string | null
   username: string | null
@@ -32,6 +33,7 @@ export async function getCachedUserName(userId: number): Promise<UserName | unde
   }
 
   const userName: UserName = {
+    id: userId,
     firstName: user.firstName,
     lastName: user.lastName,
     username: user.username,
