@@ -1,23 +1,3 @@
-// import {
-//   chats,
-//   chatParticipants,
-//   dialogs,
-//   messages,
-//   users,
-//   spaces,
-//   files,
-//   photos,
-//   videos,
-//   documents,
-//   photoSizes,
-//   reactions,
-//   messageAttachments,
-//   urlPreview,
-//   externalTasks,
-//   translations,
-//   members,
-//   integrations,
-// } from "./schema"
 import * as schema from "./schema"
 import { defineRelations } from "drizzle-orm"
 export { schema }
@@ -42,8 +22,23 @@ export const relations = defineRelations(
     externalTasks: schema.externalTasks,
     members: schema.members,
     translations: schema.translations,
+    userSettings: schema.userSettings,
   },
   (r) => ({
+    users: {
+      settings: r.one.userSettings({
+        from: r.users.id,
+        to: r.userSettings.userId,
+        optional: true,
+      }),
+
+      photoFile: r.one.files({
+        from: r.users.photoFileId,
+        to: r.files.id,
+        optional: true,
+      }),
+    },
+
     // Chat relations - core chat functionality
     chats: {
       // Space and message relations
@@ -106,14 +101,6 @@ export const relations = defineRelations(
       peerUser: r.one.users({
         from: r.dialogs.peerUserId,
         to: r.users.id,
-        optional: true,
-      }),
-    },
-
-    users: {
-      photoFile: r.one.files({
-        from: r.users.photoFileId,
-        to: r.files.id,
         optional: true,
       }),
     },
