@@ -41,6 +41,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case removeChatParticipant // = 15
   case translateMessages // = 16
   case getChats // = 17
+  case updateUserSettings // = 18
+  case getUserSettings // = 19
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -67,6 +69,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 15: self = .removeChatParticipant
     case 16: self = .translateMessages
     case 17: self = .getChats
+    case 18: self = .updateUserSettings
+    case 19: self = .getUserSettings
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -91,6 +95,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .removeChatParticipant: return 15
     case .translateMessages: return 16
     case .getChats: return 17
+    case .updateUserSettings: return 18
+    case .getUserSettings: return 19
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -115,6 +121,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .removeChatParticipant,
     .translateMessages,
     .getChats,
+    .updateUserSettings,
+    .getUserSettings,
   ]
 
 }
@@ -2098,6 +2106,22 @@ public struct RpcCall: Sendable {
     set {input = .getChats(newValue)}
   }
 
+  public var updateUserSettings: UpdateUserSettingsInput {
+    get {
+      if case .updateUserSettings(let v)? = input {return v}
+      return UpdateUserSettingsInput()
+    }
+    set {input = .updateUserSettings(newValue)}
+  }
+
+  public var getUserSettings: GetUserSettingsInput {
+    get {
+      if case .getUserSettings(let v)? = input {return v}
+      return GetUserSettingsInput()
+    }
+    set {input = .getUserSettings(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2118,6 +2142,8 @@ public struct RpcCall: Sendable {
     case removeChatParticipant(RemoveChatParticipantInput)
     case translateMessages(TranslateMessagesInput)
     case getChats(GetChatsInput)
+    case updateUserSettings(UpdateUserSettingsInput)
+    case getUserSettings(GetUserSettingsInput)
 
   }
 
@@ -2275,6 +2301,22 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .getChats(newValue)}
   }
 
+  public var updateUserSettings: UpdateUserSettingsResult {
+    get {
+      if case .updateUserSettings(let v)? = _storage._result {return v}
+      return UpdateUserSettingsResult()
+    }
+    set {_uniqueStorage()._result = .updateUserSettings(newValue)}
+  }
+
+  public var getUserSettings: GetUserSettingsResult {
+    get {
+      if case .getUserSettings(let v)? = _storage._result {return v}
+      return GetUserSettingsResult()
+    }
+    set {_uniqueStorage()._result = .getUserSettings(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2295,12 +2337,177 @@ public struct RpcResult: @unchecked Sendable {
     case removeChatParticipant(RemoveChatParticipantResult)
     case translateMessages(TranslateMessagesResult)
     case getChats(GetChatsResult)
+    case updateUserSettings(UpdateUserSettingsResult)
+    case getUserSettings(GetUserSettingsResult)
 
   }
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct GetUserSettingsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct GetUserSettingsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var userSettings: UserSettings {
+    get {return _userSettings ?? UserSettings()}
+    set {_userSettings = newValue}
+  }
+  /// Returns true if `userSettings` has been explicitly set.
+  public var hasUserSettings: Bool {return self._userSettings != nil}
+  /// Clears the value of `userSettings`. Subsequent reads from it will return its default value.
+  public mutating func clearUserSettings() {self._userSettings = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _userSettings: UserSettings? = nil
+}
+
+public struct UserSettings: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var notificationSettings: NotificationSettings {
+    get {return _notificationSettings ?? NotificationSettings()}
+    set {_notificationSettings = newValue}
+  }
+  /// Returns true if `notificationSettings` has been explicitly set.
+  public var hasNotificationSettings: Bool {return self._notificationSettings != nil}
+  /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
+  public mutating func clearNotificationSettings() {self._notificationSettings = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _notificationSettings: NotificationSettings? = nil
+}
+
+public struct NotificationSettings: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var mode: NotificationSettings.Mode {
+    get {return _mode ?? .unspecified}
+    set {_mode = newValue}
+  }
+  /// Returns true if `mode` has been explicitly set.
+  public var hasMode: Bool {return self._mode != nil}
+  /// Clears the value of `mode`. Subsequent reads from it will return its default value.
+  public mutating func clearMode() {self._mode = nil}
+
+  /// If true, no sound will be played for notifications
+  public var silent: Bool {
+    get {return _silent ?? false}
+    set {_silent = newValue}
+  }
+  /// Returns true if `silent` has been explicitly set.
+  public var hasSilent: Bool {return self._silent != nil}
+  /// Clears the value of `silent`. Subsequent reads from it will return its default value.
+  public mutating func clearSilent() {self._silent = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum Mode: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case all // = 1
+    case none // = 2
+    case mentions // = 3
+    case importantOnly // = 4
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .all
+      case 2: self = .none
+      case 3: self = .mentions
+      case 4: self = .importantOnly
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .all: return 1
+      case .none: return 2
+      case .mentions: return 3
+      case .importantOnly: return 4
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [NotificationSettings.Mode] = [
+      .unspecified,
+      .all,
+      .none,
+      .mentions,
+      .importantOnly,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _mode: NotificationSettings.Mode? = nil
+  fileprivate var _silent: Bool? = nil
+}
+
+public struct UpdateUserSettingsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var userSettings: UserSettings {
+    get {return _userSettings ?? UserSettings()}
+    set {_userSettings = newValue}
+  }
+  /// Returns true if `userSettings` has been explicitly set.
+  public var hasUserSettings: Bool {return self._userSettings != nil}
+  /// Clears the value of `userSettings`. Subsequent reads from it will return its default value.
+  public mutating func clearUserSettings() {self._userSettings = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _userSettings: UserSettings? = nil
+}
+
+public struct UpdateUserSettingsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public struct GetChatsInput: Sendable {
@@ -3052,6 +3259,14 @@ public struct Update: Sendable {
     set {update = .updateReadMaxID(newValue)}
   }
 
+  public var updateUserSettings: UpdateUserSettings {
+    get {
+      if case .updateUserSettings(let v)? = update {return v}
+      return UpdateUserSettings()
+    }
+    set {update = .updateUserSettings(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -3072,10 +3287,32 @@ public struct Update: Sendable {
     case spaceMemberDelete(UpdateSpaceMemberDelete)
     case joinSpace(UpdateJoinSpace)
     case updateReadMaxID(UpdateReadMaxId)
+    case updateUserSettings(UpdateUserSettings)
 
   }
 
   public init() {}
+}
+
+public struct UpdateUserSettings: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var settings: UserSettings {
+    get {return _settings ?? UserSettings()}
+    set {_settings = newValue}
+  }
+  /// Returns true if `settings` has been explicitly set.
+  public var hasSettings: Bool {return self._settings != nil}
+  /// Clears the value of `settings`. Subsequent reads from it will return its default value.
+  public mutating func clearSettings() {self._settings = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _settings: UserSettings? = nil
 }
 
 /// Update when a new space member is added
@@ -3866,6 +4103,8 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     15: .same(proto: "REMOVE_CHAT_PARTICIPANT"),
     16: .same(proto: "TRANSLATE_MESSAGES"),
     17: .same(proto: "GET_CHATS"),
+    18: .same(proto: "UPDATE_USER_SETTINGS"),
+    19: .same(proto: "GET_USER_SETTINGS"),
   ]
 }
 
@@ -6571,6 +6810,8 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     16: .same(proto: "removeChatParticipant"),
     17: .same(proto: "translateMessages"),
     18: .same(proto: "getChats"),
+    19: .same(proto: "updateUserSettings"),
+    20: .same(proto: "getUserSettings"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -6801,6 +7042,32 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .getChats(v)
         }
       }()
+      case 19: try {
+        var v: UpdateUserSettingsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updateUserSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updateUserSettings(v)
+        }
+      }()
+      case 20: try {
+        var v: GetUserSettingsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getUserSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getUserSettings(v)
+        }
+      }()
       default: break
       }
     }
@@ -6883,6 +7150,14 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .getChats(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
     }()
+    case .updateUserSettings?: try {
+      guard case .updateUserSettings(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
+    }()
+    case .getUserSettings?: try {
+      guard case .getUserSettings(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -6917,6 +7192,8 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     16: .same(proto: "removeChatParticipant"),
     17: .same(proto: "translateMessages"),
     18: .same(proto: "getChats"),
+    19: .same(proto: "updateUserSettings"),
+    20: .same(proto: "getUserSettings"),
   ]
 
   fileprivate class _StorageClass {
@@ -7178,6 +7455,32 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .getChats(v)
           }
         }()
+        case 19: try {
+          var v: UpdateUserSettingsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateUserSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateUserSettings(v)
+          }
+        }()
+        case 20: try {
+          var v: GetUserSettingsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getUserSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getUserSettings(v)
+          }
+        }()
         default: break
         }
       }
@@ -7262,6 +7565,14 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
         guard case .getChats(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
       }()
+      case .updateUserSettings?: try {
+        guard case .updateUserSettings(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
+      }()
+      case .getUserSettings?: try {
+        guard case .getUserSettings(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
+      }()
       case nil: break
       }
     }
@@ -7279,6 +7590,217 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetUserSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetUserSettingsInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetUserSettingsInput, rhs: GetUserSettingsInput) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetUserSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetUserSettingsResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "user_settings"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._userSettings) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._userSettings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetUserSettingsResult, rhs: GetUserSettingsResult) -> Bool {
+    if lhs._userSettings != rhs._userSettings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UserSettings"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "notification_settings"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._notificationSettings) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._notificationSettings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UserSettings, rhs: UserSettings) -> Bool {
+    if lhs._notificationSettings != rhs._notificationSettings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension NotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "NotificationSettings"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "mode"),
+    2: .same(proto: "silent"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self._mode) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self._silent) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._mode {
+      try visitor.visitSingularEnumField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._silent {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: NotificationSettings, rhs: NotificationSettings) -> Bool {
+    if lhs._mode != rhs._mode {return false}
+    if lhs._silent != rhs._silent {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension NotificationSettings.Mode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "MODE_UNSPECIFIED"),
+    1: .same(proto: "MODE_ALL"),
+    2: .same(proto: "MODE_NONE"),
+    3: .same(proto: "MODE_MENTIONS"),
+    4: .same(proto: "MODE_IMPORTANT_ONLY"),
+  ]
+}
+
+extension UpdateUserSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateUserSettingsInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "user_settings"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._userSettings) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._userSettings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateUserSettingsInput, rhs: UpdateUserSettingsInput) -> Bool {
+    if lhs._userSettings != rhs._userSettings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateUserSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateUserSettingsResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateUserSettingsResult, rhs: UpdateUserSettingsResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -8374,6 +8896,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     18: .standard(proto: "space_member_delete"),
     19: .standard(proto: "join_space"),
     20: .standard(proto: "update_read_max_id"),
+    21: .standard(proto: "update_user_settings"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8603,6 +9126,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
           self.update = .updateReadMaxID(v)
         }
       }()
+      case 21: try {
+        var v: UpdateUserSettings?
+        var hadOneofValue = false
+        if let current = self.update {
+          hadOneofValue = true
+          if case .updateUserSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.update = .updateUserSettings(v)
+        }
+      }()
       default: break
       }
     }
@@ -8682,6 +9218,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       guard case .updateReadMaxID(let v)? = self.update else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
     }()
+    case .updateUserSettings?: try {
+      guard case .updateUserSettings(let v)? = self.update else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -8689,6 +9229,42 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
 
   public static func ==(lhs: Update, rhs: Update) -> Bool {
     if lhs.update != rhs.update {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateUserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateUserSettings"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "settings"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._settings) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._settings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateUserSettings, rhs: UpdateUserSettings) -> Bool {
+    if lhs._settings != rhs._settings {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
