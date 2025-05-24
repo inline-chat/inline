@@ -545,6 +545,8 @@ enum Method {
   REMOVE_CHAT_PARTICIPANT = 15;
   TRANSLATE_MESSAGES = 16;
   GET_CHATS = 17;
+  UPDATE_USER_SETTINGS = 18;
+  GET_USER_SETTINGS = 19;
 }
 
 message RpcCall {
@@ -567,6 +569,8 @@ message RpcCall {
     RemoveChatParticipantInput removeChatParticipant = 16;
     TranslateMessagesInput translateMessages = 17;
     GetChatsInput getChats = 18;
+    UpdateUserSettingsInput updateUserSettings = 19;
+    GetUserSettingsInput getUserSettings = 20;
   }
 }
 
@@ -591,8 +595,39 @@ message RpcResult {
     RemoveChatParticipantResult removeChatParticipant = 16;
     TranslateMessagesResult translateMessages = 17;
     GetChatsResult getChats = 18;
+    UpdateUserSettingsResult updateUserSettings = 19;
+    GetUserSettingsResult getUserSettings = 20;
   }
 }
+
+message GetUserSettingsInput {}
+
+message GetUserSettingsResult { UserSettings user_settings = 1; }
+
+message UserSettings {
+  optional NotificationSettings notification_settings = 1;
+}
+
+message NotificationSettings {
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    MODE_ALL = 1;
+    MODE_NONE = 2;
+    MODE_MENTIONS = 3;
+  }
+
+  optional Mode mode = 1;
+
+  // If true, no sound will be played for notifications
+  optional bool silent = 2;
+
+  // Only important notifications
+  optional bool importantOnly = 3;
+}
+
+message UpdateUserSettingsInput { UserSettings user_settings = 1; }
+
+message UpdateUserSettingsResult { repeated Update updates = 1; }
 
 message GetChatsInput {}
 
@@ -789,8 +824,11 @@ message Update {
     UpdateSpaceMemberDelete space_member_delete = 18;
     UpdateJoinSpace join_space = 19;
     UpdateReadMaxId update_read_max_id = 20;
+    UpdateUserSettings update_user_settings = 21;
   }
 }
+
+message UpdateUserSettings { UserSettings settings = 1; }
 
 // Update when a new space member is added
 message UpdateSpaceMemberAdd {

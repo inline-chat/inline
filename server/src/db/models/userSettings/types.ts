@@ -15,8 +15,8 @@ export const UserSettingsGeneralSchema = z.object({
     /** If true, no sound will be played for notifications */
     silent: z.boolean(),
 
-    /** Tranquil mode */
-    tranquil: z.boolean(),
+    /** Only important notifications */
+    importantOnly: z.boolean(),
   }),
 })
 

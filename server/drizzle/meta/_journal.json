@@ -246,6 +246,13 @@
       "when": 1747840976407,
       "tag": "0034_add-fields-on-integrations",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1748082590022,
+      "tag": "0035_user_settings",
+      "breakpoints": true
     }
   ]
 }
