@@ -4,6 +4,7 @@ export enum UserSettingsNotificationsMode {
   All = "1",
   None = "2",
   Mentions = "3",
+  ImportantOnly = "4",
 }
 
 export const UserSettingsGeneralSchema = z.object({
@@ -14,9 +15,6 @@ export const UserSettingsGeneralSchema = z.object({
 
     /** If true, no sound will be played for notifications */
     silent: z.boolean(),
-
-    /** Only important notifications */
-    importantOnly: z.boolean(),
   }),
 })
 
