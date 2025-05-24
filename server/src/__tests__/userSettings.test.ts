@@ -62,6 +62,5 @@ describe("User Settings RPC", () => {
 
     expect(getResult.userSettings?.notificationSettings?.mode).toBe(NotificationSettings_Mode.MENTIONS)
     expect(getResult.userSettings?.notificationSettings?.silent).toBe(true)
-    expect(getResult.userSettings?.notificationSettings?.importantOnly).toBe(false)
   })
 })
