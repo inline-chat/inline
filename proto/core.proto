@@ -823,7 +823,22 @@ message Update {
     UpdateJoinSpace join_space = 19;
     UpdateReadMaxId update_read_max_id = 20;
     UpdateUserSettings update_user_settings = 21;
+    UpdateNewMessageNotification new_message_notification = 22;
   }
+}
+
+message UpdateNewMessageNotification {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    REASON_MENTION = 1;
+    REASON_IMPORTANT = 2;
+  }
+
+  // Message that triggered the notification
+  Message message = 1;
+
+  // Reason for the notification
+  Reason reason = 2;
 }
 
 message UpdateUserSettings { UserSettings settings = 1; }

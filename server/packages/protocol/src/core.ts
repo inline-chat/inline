@@ -2219,8 +2219,48 @@ export interface Update {
          */
         updateUserSettings: UpdateUserSettings;
     } | {
+        oneofKind: "newMessageNotification";
+        /**
+         * @generated from protobuf field: UpdateNewMessageNotification new_message_notification = 22;
+         */
+        newMessageNotification: UpdateNewMessageNotification;
+    } | {
         oneofKind: undefined;
     };
+}
+/**
+ * @generated from protobuf message UpdateNewMessageNotification
+ */
+export interface UpdateNewMessageNotification {
+    /**
+     * Message that triggered the notification
+     *
+     * @generated from protobuf field: Message message = 1;
+     */
+    message?: Message;
+    /**
+     * Reason for the notification
+     *
+     * @generated from protobuf field: UpdateNewMessageNotification.Reason reason = 2;
+     */
+    reason: UpdateNewMessageNotification_Reason;
+}
+/**
+ * @generated from protobuf enum UpdateNewMessageNotification.Reason
+ */
+export enum UpdateNewMessageNotification_Reason {
+    /**
+     * @generated from protobuf enum value: REASON_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: REASON_MENTION = 1;
+     */
+    MENTION = 1,
+    /**
+     * @generated from protobuf enum value: REASON_IMPORTANT = 2;
+     */
+    IMPORTANT = 2
 }
 /**
  * @generated from protobuf message UpdateUserSettings
@@ -8036,7 +8076,8 @@ class Update$Type extends MessageType<Update> {
             { no: 18, name: "space_member_delete", kind: "message", oneof: "update", T: () => UpdateSpaceMemberDelete },
             { no: 19, name: "join_space", kind: "message", oneof: "update", T: () => UpdateJoinSpace },
             { no: 20, name: "update_read_max_id", kind: "message", oneof: "update", T: () => UpdateReadMaxId },
-            { no: 21, name: "update_user_settings", kind: "message", oneof: "update", T: () => UpdateUserSettings }
+            { no: 21, name: "update_user_settings", kind: "message", oneof: "update", T: () => UpdateUserSettings },
+            { no: 22, name: "new_message_notification", kind: "message", oneof: "update", T: () => UpdateNewMessageNotification }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -8159,6 +8200,12 @@ class Update$Type extends MessageType<Update> {
                         updateUserSettings: UpdateUserSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).updateUserSettings)
                     };
                     break;
+                case /* UpdateNewMessageNotification new_message_notification */ 22:
+                    message.update = {
+                        oneofKind: "newMessageNotification",
+                        newMessageNotification: UpdateNewMessageNotification.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).newMessageNotification)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8225,6 +8272,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateUserSettings update_user_settings = 21; */
         if (message.update.oneofKind === "updateUserSettings")
             UpdateUserSettings.internalBinaryWrite(message.update.updateUserSettings, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateNewMessageNotification new_message_notification = 22; */
+        if (message.update.oneofKind === "newMessageNotification")
+            UpdateNewMessageNotification.internalBinaryWrite(message.update.newMessageNotification, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8235,6 +8285,60 @@ class Update$Type extends MessageType<Update> {
  * @generated MessageType for protobuf message Update
  */
 export const Update = new Update$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateNewMessageNotification$Type extends MessageType<UpdateNewMessageNotification> {
+    constructor() {
+        super("UpdateNewMessageNotification", [
+            { no: 1, name: "message", kind: "message", T: () => Message },
+            { no: 2, name: "reason", kind: "enum", T: () => ["UpdateNewMessageNotification.Reason", UpdateNewMessageNotification_Reason, "REASON_"] }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateNewMessageNotification>): UpdateNewMessageNotification {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.reason = 0;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateNewMessageNotification>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateNewMessageNotification): UpdateNewMessageNotification {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Message message */ 1:
+                    message.message = Message.internalBinaryRead(reader, reader.uint32(), options, message.message);
+                    break;
+                case /* UpdateNewMessageNotification.Reason reason */ 2:
+                    message.reason = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateNewMessageNotification, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Message message = 1; */
+        if (message.message)
+            Message.internalBinaryWrite(message.message, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateNewMessageNotification.Reason reason = 2; */
+        if (message.reason !== 0)
+            writer.tag(2, WireType.Varint).int32(message.reason);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateNewMessageNotification
+ */
+export const UpdateNewMessageNotification = new UpdateNewMessageNotification$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateUserSettings$Type extends MessageType<UpdateUserSettings> {
     constructor() {

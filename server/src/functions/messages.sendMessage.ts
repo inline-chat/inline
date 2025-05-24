@@ -1,4 +1,4 @@
-import { InputPeer, Update } from "@in/protocol/core"
+import { InputPeer, Update, UpdateNewMessageNotification_Reason } from "@in/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument } from "@in/server/db/models/files"
@@ -17,6 +17,7 @@ import { batchEvaluate, type NotificationEvalResult } from "@in/server/modules/n
 import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
+import { Updates } from "@in/server/modules/updates/updates"
 type Input = {
   peerId: InputPeer
   message?: string
@@ -106,6 +107,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
     chat,
     unencryptedText: input.message,
+    inputPeer,
   })
 
   // return new updates
@@ -114,6 +116,44 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
 type EncodeMessageInput = Parameters<typeof Encoders.message>[0]
 type MessageInfo = Omit<EncodeMessageInput, "encodingForUserId" | "encodingForPeer">
+
+// ------------------------------------------------------------
+// Message Encoding
+// ------------------------------------------------------------
+
+/** Encode a message for a specific user based on update group context */
+const encodeMessageForUser = ({
+  messageInfo,
+  updateGroup,
+  inputPeer,
+  currentUserId,
+  targetUserId,
+}: {
+  messageInfo: MessageInfo
+  updateGroup: UpdateGroup
+  inputPeer: InputPeer
+  currentUserId: number
+  targetUserId: number
+}) => {
+  let encodingForInputPeer: InputPeer
+
+  if (updateGroup.type === "dmUsers") {
+    // In DMs, encoding peer depends on whether we're encoding for current user or other user
+    encodingForInputPeer =
+      targetUserId === currentUserId
+        ? inputPeer
+        : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
+  } else {
+    // In threads, always use the same input peer
+    encodingForInputPeer = inputPeer
+  }
+
+  return Encoders.message({
+    ...messageInfo,
+    encodingForPeer: { inputPeer: encodingForInputPeer },
+    encodingForUserId: targetUserId,
+  })
+}
 
 // ------------------------------------------------------------
 // Updates
@@ -153,10 +193,12 @@ const pushUpdates = async ({
         update: {
           oneofKind: "newMessage",
           newMessage: {
-            message: Encoders.message({
-              ...messageInfo,
-              encodingForPeer: { inputPeer: encodingForInputPeer },
-              encodingForUserId,
+            message: encodeMessageForUser({
+              messageInfo,
+              updateGroup,
+              inputPeer,
+              currentUserId,
+              targetUserId: userId,
             }),
           },
         },
@@ -186,10 +228,12 @@ const pushUpdates = async ({
         update: {
           oneofKind: "newMessage",
           newMessage: {
-            message: Encoders.message({
-              ...messageInfo,
-              encodingForPeer: { inputPeer },
-              encodingForUserId: userId,
+            message: encodeMessageForUser({
+              messageInfo,
+              updateGroup,
+              inputPeer,
+              currentUserId,
+              targetUserId: userId,
             }),
           },
         },
@@ -227,11 +271,12 @@ type SendPushForMsgInput = {
   currentUserId: number
   chat: DbChat
   unencryptedText: string | undefined
+  inputPeer: InputPeer
 }
 
 /** Send push notifications for this message */
 async function sendNotifications(input: SendPushForMsgInput) {
-  const { updateGroup, messageInfo, currentUserId, chat, unencryptedText } = input
+  const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, inputPeer } = input
 
   // AI
   let evalResult: NotificationEvalResult | undefined
@@ -277,7 +322,16 @@ async function sendNotifications(input: SendPushForMsgInput) {
       continue
     }
 
-    sendNotificationToUser({ userId, messageInfo, messageText, chat, evalResult })
+    sendNotificationToUser({
+      userId,
+      messageInfo,
+      messageText,
+      chat,
+      evalResult,
+      updateGroup,
+      inputPeer,
+      currentUserId,
+    })
   }
 }
 
@@ -288,14 +342,23 @@ async function sendNotificationToUser({
   messageText,
   chat,
   evalResult,
+  updateGroup,
+  inputPeer,
+  currentUserId,
 }: {
   userId: number
   messageInfo: MessageInfo
   messageText: string
   chat?: DbChat
   evalResult?: NotificationEvalResult
+  // For explicit mac notification
+  updateGroup: UpdateGroup
+  inputPeer: InputPeer
+  currentUserId: number
 }) {
   // FIRST, check if we should notify this user or not ---------------------------------
+  let needsExplicitMacNotification = false
+  let reason = UpdateNewMessageNotification_Reason.UNSPECIFIED
   let userSettings = await getCachedUserSettings(userId)
   if (userSettings?.notifications.mode === UserSettingsNotificationsMode.None) {
     // Do not notify
@@ -308,6 +371,8 @@ async function sendNotificationToUser({
       // Do not notify
       return
     }
+    needsExplicitMacNotification = true
+    reason = UpdateNewMessageNotification_Reason.MENTION
   }
 
   // Important only
@@ -316,6 +381,8 @@ async function sendNotificationToUser({
       // Do not notify
       return
     }
+    needsExplicitMacNotification = true
+    reason = UpdateNewMessageNotification_Reason.IMPORTANT
   }
 
   // THEN, send notification ------------------------------------------------------------
@@ -359,4 +426,24 @@ async function sendNotificationToUser({
     title,
     body,
   })
+
+  if (needsExplicitMacNotification) {
+    RealtimeUpdates.pushToUser(userId, [
+      {
+        update: {
+          oneofKind: "newMessageNotification",
+          newMessageNotification: {
+            message: encodeMessageForUser({
+              messageInfo,
+              updateGroup,
+              inputPeer,
+              currentUserId,
+              targetUserId: userId,
+            }),
+            reason: reason,
+          },
+        },
+      },
+    ])
+  }
 }
