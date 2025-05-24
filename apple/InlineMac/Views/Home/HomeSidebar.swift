@@ -239,6 +239,7 @@ struct HomeSidebar: View {
 
       Spacer()
 
+      notificationsButton
       plusButton
     }
     .padding(.top, -6)
@@ -247,10 +248,12 @@ struct HomeSidebar: View {
       .leading,
       Theme.sidebarItemInnerSpacing
     )
-    .padding(
-      .trailing,
-      4
-    )
+    .padding(.trailing, 4)
+  }
+
+  @ViewBuilder
+  var notificationsButton: some View {
+    NotificationSettingsButton()
   }
 
   @ViewBuilder
@@ -290,10 +293,6 @@ struct HomeSidebar: View {
         .foregroundStyle(.tertiary)
         .contentShape(.circle)
         .frame(width: Theme.sidebarTitleIconSize, height: Theme.sidebarTitleIconSize, alignment: .center)
-//        .background(
-//          Circle()
-//            .foregroundStyle(.gray.opacity(0.1))
-//        )
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
