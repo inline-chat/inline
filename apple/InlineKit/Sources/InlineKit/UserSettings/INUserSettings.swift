@@ -37,8 +37,13 @@ public class INUserSettings {
     // Save to UserDefaults whenever notification settings change
     notification.objectWillChange
       .sink { [weak self] _ in
-        self?.saveToUserDefaults()
-        self?.saveToRealtime()
+        Task { @MainActor in
+          // wait a little
+          try await Task
+            .sleep(nanoseconds: UInt64(0.5) * 1_000_000_000) // 0.5 seconds
+          self?.saveToUserDefaults()
+          self?.saveToRealtime()
+        }
       }
       .store(in: &cancellables)
   }

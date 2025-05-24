@@ -329,6 +329,9 @@
         }
       }
     },
+    "Control how you receive notifications" : {
+
+    },
     "Create" : {
       "localizations" : {
         "fa" : {
@@ -363,6 +366,9 @@
           }
         }
       }
+    },
+    "Create Space" : {
+
     },
     "Creating Account..." : {
       "localizations" : {
@@ -636,6 +642,9 @@
 
     },
     "No users found" : {
+
+    },
+    "Notifications" : {
 
     },
     "Notion" : {
