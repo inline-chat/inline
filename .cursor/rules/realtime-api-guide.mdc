@@ -19,3 +19,5 @@ protocol is generated in server/packages/protocol/src/core.ts. Snake case fields
 We use Drizzle ORM for database calls, for complex queries we use the default syntax (db.select(chats)) and for simpler nested query cases we use the query format that is more readable (db._query.chats.findMany). In drizzle when you write `where` statements, you need to import utility functions like `eq`, `and`, `or` from drizzle package.
 
 Our testing utilities are at /server/src/__tests__/setup.ts.
+
+To enable debug logging in tests, set process.env["DEBUG"] = "1".
