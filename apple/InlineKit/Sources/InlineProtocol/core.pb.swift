@@ -3267,6 +3267,14 @@ public struct Update: Sendable {
     set {update = .updateUserSettings(newValue)}
   }
 
+  public var newMessageNotification: UpdateNewMessageNotification {
+    get {
+      if case .newMessageNotification(let v)? = update {return v}
+      return UpdateNewMessageNotification()
+    }
+    set {update = .newMessageNotification(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -3288,10 +3296,74 @@ public struct Update: Sendable {
     case joinSpace(UpdateJoinSpace)
     case updateReadMaxID(UpdateReadMaxId)
     case updateUserSettings(UpdateUserSettings)
+    case newMessageNotification(UpdateNewMessageNotification)
 
   }
 
   public init() {}
+}
+
+public struct UpdateNewMessageNotification: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Message that triggered the notification
+  public var message: Message {
+    get {return _message ?? Message()}
+    set {_message = newValue}
+  }
+  /// Returns true if `message` has been explicitly set.
+  public var hasMessage: Bool {return self._message != nil}
+  /// Clears the value of `message`. Subsequent reads from it will return its default value.
+  public mutating func clearMessage() {self._message = nil}
+
+  /// Reason for the notification
+  public var reason: UpdateNewMessageNotification.Reason = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum Reason: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case mention // = 1
+    case important // = 2
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .mention
+      case 2: self = .important
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .mention: return 1
+      case .important: return 2
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [UpdateNewMessageNotification.Reason] = [
+      .unspecified,
+      .mention,
+      .important,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _message: Message? = nil
 }
 
 public struct UpdateUserSettings: Sendable {
@@ -8897,6 +8969,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     19: .standard(proto: "join_space"),
     20: .standard(proto: "update_read_max_id"),
     21: .standard(proto: "update_user_settings"),
+    22: .standard(proto: "new_message_notification"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -9139,6 +9212,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
           self.update = .updateUserSettings(v)
         }
       }()
+      case 22: try {
+        var v: UpdateNewMessageNotification?
+        var hadOneofValue = false
+        if let current = self.update {
+          hadOneofValue = true
+          if case .newMessageNotification(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.update = .newMessageNotification(v)
+        }
+      }()
       default: break
       }
     }
@@ -9222,6 +9308,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       guard case .updateUserSettings(let v)? = self.update else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
     }()
+    case .newMessageNotification?: try {
+      guard case .newMessageNotification(let v)? = self.update else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -9232,6 +9322,56 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
+}
+
+extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateNewMessageNotification"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "message"),
+    2: .same(proto: "reason"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._message) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.reason) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._message {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.reason != .unspecified {
+      try visitor.visitSingularEnumField(value: self.reason, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateNewMessageNotification, rhs: UpdateNewMessageNotification) -> Bool {
+    if lhs._message != rhs._message {return false}
+    if lhs.reason != rhs.reason {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateNewMessageNotification.Reason: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "REASON_UNSPECIFIED"),
+    1: .same(proto: "REASON_MENTION"),
+    2: .same(proto: "REASON_IMPORTANT"),
+  ]
 }
 
 extension UpdateUserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

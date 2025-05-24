@@ -55,11 +55,11 @@ actor MacNotifications: Sendable {
 }
 
 extension MacNotifications {
-  func handleNewMessage(protocolMsg: InlineProtocol.Message, message: InlineKit.Message) async {
+  func handleNewMessage(protocolMsg: InlineProtocol.Message) async {
     // Only show notification for incoming messages
-    guard message.out == false else { return }
+    guard protocolMsg.out == false else { return }
 
-    let user = await ObjectCache.shared.getUser(id: message.fromId)
+    let user = await ObjectCache.shared.getUser(id: protocolMsg.fromID)
     let chat = await ObjectCache.shared.getChat(id: protocolMsg.chatID)
     let space: Space? = if let spaceId = chat?.spaceId {
       await ObjectCache.shared.getSpace(id: spaceId)
@@ -78,11 +78,11 @@ extension MacNotifications {
     if chat?.type == .thread {
       title = "\(space != nil ? "\(space!.name)  • " : "")\(chatName)"
       subtitle = senderName
-      body = message.text ?? message.stringRepresentationWithEmoji
+      body = protocolMsg.stringRepresentationWithEmoji
     } else {
       title = senderName
       subtitle = nil
-      body = message.text ?? message.stringRepresentationWithEmoji
+      body = protocolMsg.stringRepresentationWithEmoji
     }
 
     // // Get sender avatar if available
@@ -115,7 +115,7 @@ extension MacNotifications {
         body: body,
         userInfo: [
           // sender user ID
-          "userId": message.fromId,
+          "userId": protocolMsg.fromID,
           "isThread": chat?.type == .thread,
           "threadId": chat?.id,
         ],

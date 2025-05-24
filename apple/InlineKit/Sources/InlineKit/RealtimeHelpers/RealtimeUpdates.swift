@@ -58,6 +58,9 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
 
         case let .participantDelete(participantDelete):
           try participantDelete.apply(db)
+        
+      case let .newMessageNotification(newMessageNotification):
+          try newMessageNotification.apply(db)
 
         default:
           break
@@ -103,9 +106,33 @@ extension InlineProtocol.UpdateNewMessage {
     #if os(macOS)
     // Show notification for incoming messages
     if msg.out == false {
-      Task.detached {
-        // Handle notification
-        await MacNotifications.shared.handleNewMessage(protocolMsg: message, message: msg)
+      Task { @MainActor in
+        let mode = INUserSettings.current.notification.mode
+        // Only show notification if mode is all
+        guard mode == .all else { return }
+        Task.detached {
+          // Handle notification
+          await MacNotifications.shared.handleNewMessage(protocolMsg: message)
+        }
+      }
+    }
+    #endif
+  }
+}
+
+extension InlineProtocol.UpdateNewMessageNotification {
+  func apply(_ db: Database) throws {
+    #if os(macOS)
+    // Show notification for incoming messages
+    if message.out == false {
+      Task { @MainActor in
+        let mode = INUserSettings.current.notification.mode
+        // Only show notification if mode is all
+        guard mode != .all else { return }
+        Task.detached {
+          // Handle notification
+          await MacNotifications.shared.handleNewMessage(protocolMsg: message)
+        }
       }
     }
     #endif

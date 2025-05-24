@@ -318,6 +318,24 @@ public extension Message {
   }
 }
 
+public extension InlineProtocol.Message {
+  var stringRepresentationWithEmoji: String {
+    if hasMessage {
+      self.message
+    } else if isSticker == true {
+      "🖼️ Sticker"
+    } else if media.photo.hasPhoto {
+      "🖼️ Photo"
+    } else if media.video.hasVideo {
+      "🎥 Video"
+    } else if media.document.hasDocument {
+      "📄 Document"
+    } else {
+      "Message"
+    }
+  }
+}
+
 // MARK: - DB Helpers
 
 public extension Message {

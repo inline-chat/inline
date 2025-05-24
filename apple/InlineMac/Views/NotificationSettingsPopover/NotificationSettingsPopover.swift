@@ -1,5 +1,5 @@
-import SwiftUI
 import InlineKit
+import SwiftUI
 
 /// A button that opens the notification settings popover used in home sidebar
 struct NotificationSettingsButton: View {
@@ -69,8 +69,11 @@ struct NotificationSettingsButton: View {
           title: "All",
           description: "Receive all notifications",
           selected: notificationSettings.mode == .all,
-          value: .all,
-          onChange: { notificationSettings.mode = $0 },
+          value: NotificationMode.all,
+          onChange: {
+            notificationSettings.mode = $0
+            close()
+          },
         )
 
         NotificationSettingsItem(
@@ -78,8 +81,11 @@ struct NotificationSettingsButton: View {
           title: "Mentions",
           description: "Mentions of your name or username",
           selected: notificationSettings.mode == .mentions,
-          value: .mentions,
-          onChange: { notificationSettings.mode = $0 },
+          value: NotificationMode.mentions,
+          onChange: {
+            notificationSettings.mode = $0
+            close()
+          },
         )
 
         NotificationSettingsItem(
@@ -87,8 +93,11 @@ struct NotificationSettingsButton: View {
           title: "Important Only",
           description: "Only things that need your attention",
           selected: notificationSettings.mode == .importantOnly,
-          value: .importantOnly,
-          onChange: { notificationSettings.mode = $0 },
+          value: NotificationMode.importantOnly,
+          onChange: {
+            notificationSettings.mode = $0
+            close()
+          },
         )
 
         NotificationSettingsItem(
@@ -96,14 +105,24 @@ struct NotificationSettingsButton: View {
           title: "None",
           description: "No notifications",
           selected: notificationSettings.mode == .none,
-          value: .none,
-          onChange: { notificationSettings.mode = $0 },
+          value: NotificationMode.none,
+          onChange: {
+            notificationSettings.mode = $0
+            close()
+          },
         )
       }
     }
     .padding(.vertical, 10)
     .padding(.horizontal, 8)
     .frame(width: 260)
+  }
+  
+  private func close() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+      // Delay closing to allow animations to finish
+      presented = false
+    }
   }
 }
 
@@ -143,7 +162,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
       }
       Spacer()
     }
-    .animation(.easeOut(duration: 0.05), value: selected)
+    .animation(.easeOut(duration: 0.08), value: selected)
     .padding(4)
     .background(
       RoundedRectangle(cornerRadius: 10)
