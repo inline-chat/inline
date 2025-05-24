@@ -6,7 +6,7 @@ import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
-import { Log } from "@in/server/utils/log"
+import { Log, LogLevel } from "@in/server/utils/log"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import z from "zod"
 
@@ -22,7 +22,7 @@ type Input = {
   message: InputMessage
 }
 
-const log = new Log("notifications.eval")
+const log = new Log("notifications.eval", LogLevel.DEBUG)
 
 let outputSchema = z.object({
   msgId: z.number(),
@@ -64,8 +64,8 @@ export const batchEvaluate = async (input: Input): Promise<NotificationEvalResul
 
   try {
     log.debug(`Notification eval result: ${response.choices[0]?.message.content}`)
-    log.debug(`Notification eval system prompt: ${systemPrompt}`)
-    log.debug(`Notification eval user prompt: ${userPrompt}`)
+    // log.debug(`Notification eval system prompt: ${systemPrompt}`)
+    // log.debug(`Notification eval user prompt: ${userPrompt}`)
     log.debug("AI usage", response.usage)
 
     // Calculate price based on token usage for 4.1-nano model
