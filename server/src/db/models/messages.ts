@@ -25,7 +25,7 @@ import { type DbMessageAttachment } from "@in/server/db/schema/attachments"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { and, desc, eq, gt, inArray, lt } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, lt } from "drizzle-orm"
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 
@@ -41,6 +41,7 @@ export const MessageModel = {
   processMessage: processMessage,
   editMessage: editMessage,
   processAttachments: processAttachments,
+  getNonFullMessagesFromNewToOld: getNonFullMessagesFromNewToOld,
 }
 
 export type DbInputFullAttachment = DbMessageAttachment & {
@@ -465,6 +466,33 @@ async function getNonFullMessagesRange(chatId: number, offsetId: number, limit: 
     orderBy: desc(messages.messageId),
     limit: limit ?? 60,
   })
+
+  return result.map((msg) => ({
+    ...msg,
+    text:
+      msg.textEncrypted && msg.textIv && msg.textTag
+        ? decryptMessage({
+            encrypted: msg.textEncrypted,
+            iv: msg.textIv,
+            authTag: msg.textTag,
+          })
+        : // legacy fallback
+          msg.text,
+  }))
+}
+
+async function getNonFullMessagesFromNewToOld(input: {
+  chatId: number
+  newestMsgId: number
+  limit: number
+}): Promise<ProcessedMessage[]> {
+  let result = await db._query.messages.findMany({
+    where: and(eq(messages.chatId, input.chatId), lt(messages.messageId, input.newestMsgId)),
+    orderBy: desc(messages.messageId),
+    limit: input.limit,
+  })
+
+  result.reverse()
 
   return result.map((msg) => ({
     ...msg,
