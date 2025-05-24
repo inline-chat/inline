@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from "bun:test"
 import { setupTestDatabase, teardownTestDatabase, testUtils, cleanDatabase } from "../../setup"
-import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
+import { clearSpaceCache, getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
 import { db, schema } from "@in/server/db"
 
 describe("Space Cache", () => {
@@ -14,15 +14,10 @@ describe("Space Cache", () => {
 
   beforeEach(async () => {
     await cleanDatabase()
+    clearSpaceCache()
     // Clear the cache before each test
     // Note: We'll clear the cache by calling a mock function that clears the internal map
   })
-
-  // Helper function to access and clear cache
-  const clearCache = async () => {
-    // Import and access the module to clear its internal state
-    delete require.cache[require.resolve("@in/server/modules/cache/spaceCache")]
-  }
 
   test("should return undefined for non-existent space", async () => {
     const result = await getCachedSpaceInfo(99999)
