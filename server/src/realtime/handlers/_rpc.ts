@@ -20,6 +20,8 @@ import { addChatParticipant } from "@in/server/realtime/handlers/messages.addCha
 import { removeChatParticipant } from "@in/server/realtime/handlers/messages.removeChatParticipant"
 import { handleTranslateMessages } from "./translateMessages"
 import { handleGetChats } from "./messages.getChats"
+import { getUserSettingsHandler } from "./user.getUserSettings"
+import { updateUserSettingsHandler } from "./user.updateUserSettings"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -155,6 +157,22 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await handleGetChats(call.input.getChats, handlerContext)
       return { oneofKind: "getChats", getChats: result }
+    }
+
+    case Method.GET_USER_SETTINGS: {
+      if (call.input.oneofKind !== "getUserSettings") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await getUserSettingsHandler(call.input.getUserSettings, handlerContext)
+      return { oneofKind: "getUserSettings", getUserSettings: result }
+    }
+
+    case Method.UPDATE_USER_SETTINGS: {
+      if (call.input.oneofKind !== "updateUserSettings") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await updateUserSettingsHandler(call.input.updateUserSettings, handlerContext)
+      return { oneofKind: "updateUserSettings", updateUserSettings: result }
     }
 
     default:

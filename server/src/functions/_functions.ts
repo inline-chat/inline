@@ -11,6 +11,8 @@ import { inviteToSpace } from "./space.inviteToSpace"
 import { getChatParticipants } from "./messages.getChatParticipants"
 import { removeChatParticipant } from "./messages.removeChatParticipant"
 import { addChatParticipant } from "./messages.addChatParticipant"
+import { getUserSettings } from "./user.getUserSettings"
+import { updateUserSettings } from "./user.updateUserSettings"
 
 export const Functions = {
   messages: {
@@ -29,5 +31,9 @@ export const Functions = {
   spaces: {
     getSpaceMembers: getSpaceMembers,
     inviteToSpace: inviteToSpace,
+  },
+  user: {
+    getUserSettings: getUserSettings,
+    updateUserSettings: updateUserSettings,
   },
 }
