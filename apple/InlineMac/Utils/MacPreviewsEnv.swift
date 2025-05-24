@@ -8,5 +8,6 @@ public extension View {
       .environmentObject(NavigationModel())
       .environmentObject(Nav.main)
       .environmentObject(OverlayManager())
+      .environmentObject(INUserSettings.current.notification)
   }
 }

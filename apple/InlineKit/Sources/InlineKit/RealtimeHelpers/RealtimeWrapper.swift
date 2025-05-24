@@ -197,6 +197,9 @@ public extension Realtime {
         case let .getChats(result):
           try await handleResult_getChats(result)
 
+        case let .updateUserSettings(result):
+          try await handleResult_updateUserSettings(result)
+
         default:
           break
       }
@@ -505,5 +508,15 @@ public extension Realtime {
     }
 
     log.trace("getChats saved successfully")
+  }
+
+  private func handleResult_updateUserSettings(
+    _ result: InlineProtocol.UpdateUserSettingsResult,
+  ) async throws {
+    log.trace("updateNotificationSettings result: \(result)")
+
+    Task {
+      await updates.applyBatch(updates: result.updates)
+    }
   }
 }
