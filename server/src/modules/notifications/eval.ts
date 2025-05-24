@@ -113,7 +113,7 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
 
   # Instructions
   
-  - Evaluate which of the participants are mentioned in the messages, put the IDs in the mentioned list.
+  - Evaluate which of the participants are mentioned in the messages, put the IDs in the mentioned list. If message is replied to a user, or it's a DM to a user, consider it a mention.
   - Then evaluate which users not only are mentioned or referred to, but additionally must immediately get a special notification because something needs their attention or an incident, event, or an issue has happened that they must be aware of or take action, even if they are asleep. this is NOT for every mention. 
   -  IT IS IMPORTANT TO NOT WAKE UP THE USER UNNECESSARILY. Users enable this when they're alseep. Greetings, links, casual chats, etc should NOT be considered important.  Instead bug reports, company issues related to user, important DMs, things that explicitly require their attention etc should be considered important. If a user is mentioned, it's slightly more likely to be important.
   - Return user IDs of both groups.
