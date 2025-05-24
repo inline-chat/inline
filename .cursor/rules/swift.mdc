@@ -47,3 +47,7 @@ let info2 = BookInfo.with {
 
 # UI/UX
 Animations, hover & pressed styles, tooltips, etc are important for a high quality user experience. Use minimal subtle custom interaction styles for buttons for example. Capture errors using Logger. Be careful about concurrency, don't do heavy computations on main thread, move expensive work to Tasks, set correct qos on DispatchQueue and priority on Tasks to avoid delays for presenting user actions. 
+
+# Schemas
+"Inline (macOS)"
+"Inline (iOS)"
