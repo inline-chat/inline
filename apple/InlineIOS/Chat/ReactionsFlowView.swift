@@ -2,6 +2,9 @@ import Auth
 import InlineKit
 import UIKit
 
+// Import ReactionUser from MessageReactionView
+// Note: ReactionUser is defined in MessageReactionView.swift
+
 class ReactionsFlowView: UIView {
   // MARK: - Properties
 
@@ -50,10 +53,13 @@ class ReactionsFlowView: UIView {
 
   // MARK: - Public Methods
 
-  func configure(with reactions: [(emoji: String, count: Int, userIds: [Int64])], animatedEmoji: String? = nil) {
-    // Create a dictionary of new reactions
-    let newReactions = reactions.reduce(into: [String: (count: Int, userIds: [Int64])]()) {
-      $0[$1.emoji] = ($1.count, $1.userIds)
+  func configure(
+    with groupedReactions: [GroupedReaction],
+    animatedEmoji: String? = nil
+  ) {
+    // Create a dictionary of new reactions from GroupedReaction
+    let newReactions = groupedReactions.reduce(into: [String: GroupedReaction]()) {
+      $0[$1.emoji] = $1
     }
 
     // Find reactions to remove and add
@@ -83,24 +89,32 @@ class ReactionsFlowView: UIView {
     }
 
     // Create new views but don't add to layout yet
-    for reaction in reactions {
-      if addedEmojis.contains(reaction.emoji) {
-        let byCurrentUser = reaction.userIds.contains(Auth.shared.getCurrentUserId() ?? 0)
+    for groupedReaction in groupedReactions {
+      if addedEmojis.contains(groupedReaction.emoji) {
+        let userIds = groupedReaction.reactions.map(\.reaction.userId)
+        let byCurrentUser = userIds.contains(Auth.shared.getCurrentUserId() ?? 0)
+
+        // Create ReactionUser objects from FullReaction
+        let reactionUsers = groupedReaction.reactions.map { fullReaction in
+          ReactionUser(userId: fullReaction.reaction.userId, userInfo: fullReaction.userInfo)
+        }
+
         let view = MessageReactionView(
-          emoji: reaction.emoji,
-          count: reaction.count,
+          emoji: groupedReaction.emoji,
+          count: groupedReaction.reactions.count,
           byCurrentUser: byCurrentUser,
-          outgoing: outgoing
+          outgoing: outgoing,
+          reactionUsers: reactionUsers
         )
 
         view.onTap = { [weak self] emoji in
           self?.onReactionTap?(emoji)
         }
 
-        reactionViews[reaction.emoji] = view
+        reactionViews[groupedReaction.emoji] = view
 
         // Only animate if this is the specific emoji being added
-        if reaction.emoji == animatedEmoji {
+        if groupedReaction.emoji == animatedEmoji {
           viewsToAdd.append(view)
         }
       }
@@ -108,16 +122,29 @@ class ReactionsFlowView: UIView {
 
     // Update existing reactions
     for (emoji, view) in reactionViews {
-      if let newCount = newReactions[emoji]?.count, newCount != view.count {
-        // Animate count change only for the specific emoji
-        view.updateCount(newCount, animated: emoji == animatedEmoji)
+      if let groupedReaction = newReactions[emoji] {
+        let newCount = groupedReaction.reactions.count
+        let userIds = groupedReaction.reactions.map(\.reaction.userId)
+
+        // Update count if changed
+        if newCount != view.count {
+          view.updateCount(newCount, animated: emoji == animatedEmoji)
+        }
+
+        // Update user information
+        let reactionUsers = groupedReaction.reactions.map { fullReaction in
+          ReactionUser(userId: fullReaction.reaction.userId, userInfo: fullReaction.userInfo)
+        }
+        view.updateReactionUsers(reactionUsers)
       }
     }
 
     // Disable animations temporarily for layout rebuild
     UIView.performWithoutAnimation {
-      // Clear and rebuild the entire layout
-      rebuildLayout(with: Array(reactionViews.values))
+      // Clear and rebuild the entire layout only if there are structural changes
+      if !removedEmojis.isEmpty || !addedEmojis.isEmpty {
+        rebuildLayout(with: Array(reactionViews.values))
+      }
     }
 
     // Now animate removals using snapshots
