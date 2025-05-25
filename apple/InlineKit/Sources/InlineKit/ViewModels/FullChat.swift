@@ -42,6 +42,23 @@ public struct FullAttachment: FetchableRecord, Identifiable, Codable, Hashable, 
   }
 }
 
+public struct FullReaction: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
+  TableRecord,
+  Sendable, Equatable
+{
+  public var id: Int64 {
+    reaction.id ?? 0
+  }
+
+  public var reaction: Reaction
+  public var userInfo: UserInfo?
+
+  public init(reaction: Reaction, userInfo: UserInfo? = nil) {
+    self.reaction = reaction
+    self.userInfo = userInfo
+  }
+}
+
 public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
   Sendable, Equatable
@@ -49,7 +66,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var file: File?
   public var senderInfo: UserInfo?
   public var message: Message
-  public var reactions: [Reaction]
+  public var reactions: [FullReaction]
   public var repliedToMessage: Message?
   public var replyToMessageSender: User?
   public var replyToMessageFile: File?
@@ -71,9 +88,8 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     translation(for: UserLocale.getCurrentLanguage())
   }
 
-  /// Grouped reactions by emoji
   public var groupedReactions: [GroupedReaction] {
-    let groupedDictionary = Dictionary(grouping: reactions, by: { $0.emoji })
+    let groupedDictionary = Dictionary(grouping: reactions, by: { $0.reaction.emoji })
     return groupedDictionary.enumerated().map { _, item in
       let (emoji, reactions) = item
       return GroupedReaction(emoji: emoji, reactions: reactions)
@@ -93,7 +109,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public init(
     senderInfo: UserInfo?,
     message: Message,
-    reactions: [Reaction],
+    reactions: [FullReaction],
     repliedToMessage: Message?,
     attachments: [FullAttachment],
     translations: [Translation] = []
@@ -181,11 +197,12 @@ public extension FullMessage {
           .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
       )
       .including(optional: Message.file)
-      .including(all: Message.reactions)
       .including(
-        optional: Message.repliedToMessage.forKey("repliedToMessage")
-          .including(optional: Message.from.forKey("replyToMessageSender"))
-          .including(optional: Message.file.forKey("replyToMessageFile"))
+        all: Message.reactions
+          .including(
+            optional: Reaction.user.forKey("userInfo")
+              .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+          )
       )
       .including(
         all: Message.attachments
