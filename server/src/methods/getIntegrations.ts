@@ -14,6 +14,7 @@ export const Input = Type.Object({
 export const Response = Type.Object({
   hasLinearConnected: Type.Boolean(),
   hasNotionConnected: Type.Boolean(),
+  hasIntegrationAccess: Type.Boolean(),
   notionSpaces: Type.Optional(
     Type.Array(
       Type.Object({
@@ -35,6 +36,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
 
   let hasLinearConnected = false
   let hasNotionConnected = false
+  let hasIntegrationAccess = false
   let notionSpaces: Array<{ spaceId: number; spaceName: string }> | undefined
 
   // Check Linear integrations (user-specific)
@@ -50,6 +52,9 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
 
       const spaceIntegrations = await db.select().from(integrations).where(eq(integrations.spaceId, spaceId))
       hasNotionConnected = spaceIntegrations.some((integration) => integration.provider === "notion")
+
+      // User has integration access if they're a member of this space and it has integrations
+      hasIntegrationAccess = spaceIntegrations.length > 0 || hasLinearConnected
     }
   } else {
     // If no specific spaceId provided, check if user is member of any space with Notion integration
@@ -79,12 +84,16 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
           spaceName: space.spaceName,
         }))
       }
+
+      // Check if user has access to any integrations using the utility function
+      hasIntegrationAccess = await Authorize.hasIntegrationAccess(context.currentUserId)
     }
   }
 
   return {
     hasLinearConnected,
     hasNotionConnected,
+    hasIntegrationAccess,
     notionSpaces,
   }
 }
