@@ -147,7 +147,7 @@ class UIMessageView: UIView {
       guard let self else { return }
 
       if let reaction = fullMessage.reactions
-        .filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
+        .filter({ $0.reaction.emoji == emoji && $0.reaction.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
       {
         Transactions.shared.mutate(transaction: .deleteReaction(.init(
           message: message,
@@ -202,6 +202,9 @@ class UIMessageView: UIView {
     bubbleView.isUserInteractionEnabled = true
     messageLabel.isUserInteractionEnabled = true
     containerStack.isUserInteractionEnabled = true
+    reactionsFlowView.isUserInteractionEnabled = true
+    multiLineContainer.isUserInteractionEnabled = true
+    singleLineContainer.isUserInteractionEnabled = true
 
     addSubview(bubbleView)
     bubbleView.addSubview(containerStack)
@@ -296,27 +299,10 @@ class UIMessageView: UIView {
   func setupReactionsIfNeeded(animatedEmoji: String? = nil) {
     guard !fullMessage.reactions.isEmpty else { return }
 
-    var reactionsDict: [String: (count: Int, userIds: [Int64], latestDate: Date)] = [:]
-
-    for reaction in fullMessage.reactions {
-      if let existing = reactionsDict[reaction.emoji] {
-        let newCount = existing.count + 1
-        let newUserIds = existing.userIds + [reaction.userId]
-
-        let mostRecentDate = max(existing.latestDate, reaction.date)
-
-        reactionsDict[reaction.emoji] = (newCount, newUserIds, mostRecentDate)
-      } else {
-        reactionsDict[reaction.emoji] = (1, [reaction.userId], reaction.date)
-      }
-    }
-
-    let sortedReactions = reactionsDict.map {
-      (emoji: $0.key, count: $0.value.count, userIds: $0.value.userIds, date: $0.value.latestDate)
-    }.sorted { $0.date < $1.date }
-
+    // Configure reactions using groupedReactions from FullMessage
     reactionsFlowView.configure(
-      with: sortedReactions.map { (emoji: $0.emoji, count: $0.count, userIds: $0.userIds) }
+      with: fullMessage.groupedReactions,
+      animatedEmoji: animatedEmoji
     )
   }
 
@@ -398,6 +384,7 @@ class UIMessageView: UIView {
     if message.hasPhoto, message.hasText || fullMessage.reactions.count > 0 {
       let innerContainer = UIStackView()
       innerContainer.axis = .vertical
+      innerContainer.isUserInteractionEnabled = true
       innerContainer.translatesAutoresizingMaskIntoConstraints = false
       innerContainer.layoutMargins = UIEdgeInsets(
         top: 0,
@@ -431,7 +418,6 @@ class UIMessageView: UIView {
       }
 
       if fullMessage.reactions.count > 0 {
-        print("Setup reactions")
         setupReactionsIfNeeded()
         innerContainer.addArrangedSubview(reactionsFlowView)
       }
@@ -567,7 +553,8 @@ class UIMessageView: UIView {
     }
     let checkmark = "✔️"
     let currentUserId = Auth.shared.getCurrentUserId() ?? 0
-    let hasCheckmark = fullMessage.reactions.contains { $0.emoji == checkmark && $0.userId == currentUserId }
+    let hasCheckmark = fullMessage.reactions
+      .contains { $0.reaction.emoji == checkmark && $0.reaction.userId == currentUserId }
     // Heavy haptic
     let generator = UIImpactFeedbackGenerator(style: .heavy)
     generator.prepare()
