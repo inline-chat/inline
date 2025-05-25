@@ -573,8 +573,8 @@ class MessageViewAppKit: NSView {
 
     guard let currentUserId = Auth.shared.currentUserId else { return }
     let weReacted = fullMessage.groupedReactions.contains { reaction in
-      reaction.reactions.contains { reaction in
-        reaction.userId == currentUserId
+      reaction.reactions.contains { fullReaction in
+        fullReaction.reaction.userId == currentUserId
       }
     }
 

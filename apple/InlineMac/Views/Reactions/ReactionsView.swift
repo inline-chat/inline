@@ -100,8 +100,8 @@ struct ReactionItem: View {
 
   var weReacted: Bool {
     // TODO: move to group
-    group.reactions.contains { reaction in
-      reaction.userId == currentUserId
+    group.reactions.contains { fullReaction in
+      fullReaction.reaction.userId == currentUserId
     }
   }
 
