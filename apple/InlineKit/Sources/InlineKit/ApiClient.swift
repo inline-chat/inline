@@ -810,6 +810,7 @@ public struct NotionTaskResult: Codable, Sendable {
 public struct GetIntegrations: Codable, Sendable {
   public let hasLinearConnected: Bool
   public let hasNotionConnected: Bool
+  public let hasIntegrationAccess: Bool
   public let notionSpaces: [NotionSpace]?
 
   // Computed property for easy access to first Notion space
