@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
-import { and, eq } from "drizzle-orm"
-import { members, spaces, type DbMember, chatParticipants } from "@in/server/db/schema"
+import { and, eq, inArray } from "drizzle-orm"
+import { members, spaces, type DbMember, chatParticipants, integrations } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 
 /** Check if user is creator of space */
@@ -48,8 +48,35 @@ const chatParticipant = async (chatId: number, currentUserId: number) => {
   return { participant }
 }
 
+/** Check if user has access to integrations by being a member of any space with integrations */
+const hasIntegrationAccess = async (currentUserId: number): Promise<boolean> => {
+  // Get all spaces the user is a member of
+  const userSpaces = await db
+    .select({ spaceId: members.spaceId })
+    .from(members)
+    .where(eq(members.userId, currentUserId))
+
+  if (userSpaces.length === 0) {
+    return false
+  }
+
+  const spaceIds = userSpaces.map((space) => space.spaceId)
+
+  // Check if any of these spaces have integrations
+  const spacesWithIntegrations = await db
+    .select({ spaceId: integrations.spaceId })
+    .from(integrations)
+    .where(inArray(integrations.spaceId, spaceIds))
+
+  // Also check for user-specific integrations (like Linear)
+  const userIntegrations = await db.select().from(integrations).where(eq(integrations.userId, currentUserId))
+
+  return spacesWithIntegrations.length > 0 || userIntegrations.length > 0
+}
+
 export const Authorize = {
   spaceCreator,
   spaceMember,
   chatParticipant,
+  hasIntegrationAccess,
 }
