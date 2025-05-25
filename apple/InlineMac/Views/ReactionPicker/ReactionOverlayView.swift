@@ -37,7 +37,7 @@ struct ReactionOverlayView: View {
     // Check if user already reacted with this emoji
     let currentUserId = Auth.shared.getCurrentUserId() ?? 0
     let hasReaction = fullMessage.reactions.contains {
-      $0.emoji == emoji && $0.userId == currentUserId
+      $0.reaction.emoji == emoji && $0.reaction.userId == currentUserId
     }
 
     if hasReaction {
