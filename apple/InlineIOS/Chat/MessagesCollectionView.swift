@@ -1211,8 +1211,8 @@ private extension MessagesCollectionView {
         return []
       }
 
-      let startIndex = max(0, targetIndex - 10)
-      let endIndex = min(messages.count - 1, targetIndex + 10)
+      let startIndex = max(0, targetIndex - 50)
+      let endIndex = min(messages.count - 1, targetIndex + 50)
 
       return messages[startIndex ... endIndex].map(\.message.messageId)
     }
