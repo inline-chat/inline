@@ -35,8 +35,14 @@ public struct Reaction: FetchableRecord, Identifiable, Codable, Hashable, Persis
     Message.self,
     using: ForeignKey(["chatId", "messageId"], to: ["chatId", "messageId"])
   )
+
   public var message: QueryInterfaceRequest<Message> {
     request(for: Reaction.message)
+  }
+
+  public static let user = belongsTo(User.self, using: ForeignKey(["userId"], to: ["id"]))
+  public var user: QueryInterfaceRequest<User> {
+    request(for: Reaction.user)
   }
 
   enum CodingKeys: String, CodingKey {
@@ -121,13 +127,13 @@ public struct GroupedReaction: Hashable, Sendable, Identifiable, Codable, Equata
   }
 
   public var emoji: String
-  public var reactions: [Reaction]
+  public var reactions: [FullReaction]
   public var maxDate: Date
 
-  public init(emoji: String, reactions: [Reaction]) {
+  public init(emoji: String, reactions: [FullReaction]) {
     self.emoji = emoji
     self.reactions = reactions
 
-    maxDate = reactions.map(\.date).max() ?? Date()
+    maxDate = reactions.map(\.reaction.date).max() ?? Date()
   }
 }
