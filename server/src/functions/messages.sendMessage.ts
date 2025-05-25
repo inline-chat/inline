@@ -312,7 +312,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
   }
 
   // decrypt message text
-  let messageText = input.unencryptedText ?? "Empty message"
+  let messageText = input.unencryptedText
 
   // TODO: send to users who have it set to All immediately
   // Handle DMs and threads
@@ -348,7 +348,7 @@ async function sendNotificationToUser({
 }: {
   userId: number
   messageInfo: MessageInfo
-  messageText: string
+  messageText: string | undefined
   chat?: DbChat
   evalResult?: NotificationEvalResult
   // For explicit mac notification
