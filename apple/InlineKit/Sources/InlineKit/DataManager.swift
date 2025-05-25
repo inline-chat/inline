@@ -190,10 +190,15 @@ public class DataManager: ObservableObject {
         try Member
           .filter(Column("spaceId") == spaceId)
           .deleteAll(db)
-
+        
+        try Dialog.filter(Column("spaceId") == spaceId)
+          .deleteAll(db)
+        
         try Chat
           .filter(Column("spaceId") == spaceId)
           .deleteAll(db)
+        
+       
       }
 
       let _ = try await ApiClient.shared.deleteSpace(spaceId: spaceId)

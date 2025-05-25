@@ -126,12 +126,14 @@ struct SpaceSettingsView: View {
     alert.addAction(UIAlertAction(title: title, style: .destructive) { _ in
       Task {
         do {
-          navigation.pop()
           if isCreator {
             try await data.deleteSpace(spaceId: spaceId)
           } else {
             try await data.leaveSpace(spaceId: spaceId)
           }
+          navigation.pop()
+
+          TabsManager.shared.setSelectedTab(.chats)
         } catch {
           Log.shared.error("Failed to \(isCreator ? "delete" : "leave") space", error: error)
         }
