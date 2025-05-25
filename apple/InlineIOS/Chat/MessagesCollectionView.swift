@@ -790,7 +790,7 @@ private extension MessagesCollectionView {
       MessagesCollectionView.contextMenuOpen = false
       dismissContextMenuIfNeeded()
       if fullMessage.reactions
-        .filter({ $0.emoji == emoji && $0.userId == Auth.shared.getCurrentUserId() ?? 0 }).first != nil
+        .filter({ $0.reaction.emoji == emoji && $0.reaction.userId == Auth.shared.getCurrentUserId() ?? 0 }).first != nil
       {
         Transactions.shared.mutate(transaction: .deleteReaction(.init(
           message: message,
@@ -887,6 +887,26 @@ private extension MessagesCollectionView {
       let fullMessage = messages[indexPath.item]
       let message = fullMessage.message
       let cell = currentCollectionView?.cellForItem(at: indexPath) as! MessageCollectionViewCell
+
+      // Check if the touch point is within a view that has its own context menu interaction
+      if let messageView = cell.messageView {
+        let pointInMessageView = collectionView.convert(point, to: messageView)
+
+        // Check if the point is within any subview that has a context menu interaction
+        if let hitView = messageView.hitTest(pointInMessageView, with: nil) {
+          // Check if the hit view or any of its superviews (up to messageView) has a context menu interaction
+          var currentView: UIView? = hitView
+          while let view = currentView, view != messageView {
+            if view.interactions.contains(where: { $0 is UIContextMenuInteraction }) {
+              // Allow the inner view's context menu to handle this
+              return nil
+            }
+            currentView = view.superview
+          }
+        }
+      }
+
+      print("🔄 Using collection view context menu")
 
       return UIContextMenuConfiguration(identifier: indexPath as NSIndexPath, previewProvider: nil) { [weak self] _ in
         guard let self else { return UIMenu(children: []) }

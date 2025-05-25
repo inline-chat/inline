@@ -2,7 +2,7 @@ import InlineKit
 import SafariServices
 import UIKit
 
-class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate {
+class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
   private enum Constants {
     static let cornerRadius: CGFloat = 12
     static let rectangleWidth: CGFloat = 4
@@ -79,6 +79,17 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate {
 
     let interaction = UIContextMenuInteraction(delegate: self)
     addInteraction(interaction)
+
+    // Set delegate for any long press gesture recognizers to ensure they can compete with collection view
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      for gestureRecognizer in gestureRecognizers ?? [] {
+        if gestureRecognizer is UILongPressGestureRecognizer {
+          gestureRecognizer.delegate = self
+        }
+      }
+    }
+
     isUserInteractionEnabled = true
   }
 
@@ -149,6 +160,32 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate {
       responder = nextResponder
     }
     return nil
+  }
+
+  // MARK: - UIGestureRecognizerDelegate
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    // Allow simultaneous recognition with other gesture recognizers
+    true
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    // Don't require other gesture recognizers to fail
+    false
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    // Don't require this gesture recognizer to fail for others
+    false
   }
 }
 
