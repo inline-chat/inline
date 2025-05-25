@@ -457,6 +457,7 @@ private extension MessagesCollectionView {
     private var updateWorkItem: DispatchWorkItem?
     private var isApplyingSnapshot = false
     private var needsAnotherUpdate = false
+    private var hasIntegrationAccess: Bool = false
 
     func collectionView(
       _ collectionView: UICollectionView,
@@ -516,6 +517,9 @@ private extension MessagesCollectionView {
           dataSource.apply(snapshot, animatingDifferences: true)
         }
         .store(in: &cancellables)
+
+      // Check integration access on initialization
+      checkIntegrationAccess()
     }
 
     func setupDataSource(_ collectionView: UICollectionView) {
@@ -790,7 +794,8 @@ private extension MessagesCollectionView {
       MessagesCollectionView.contextMenuOpen = false
       dismissContextMenuIfNeeded()
       if fullMessage.reactions
-        .filter({ $0.reaction.emoji == emoji && $0.reaction.userId == Auth.shared.getCurrentUserId() ?? 0 }).first != nil
+        .filter({ $0.reaction.emoji == emoji && $0.reaction.userId == Auth.shared.getCurrentUserId() ?? 0 })
+        .first != nil
       {
         Transactions.shared.mutate(transaction: .deleteReaction(.init(
           message: message,
@@ -915,101 +920,11 @@ private extension MessagesCollectionView {
 
         var actions: [UIAction] = []
 
-        let createNotionTaskAction = UIAction(
-          title: "Will Do",
-          image: UIImage(systemName: "circle.badge.plus")
-        ) { [weak self] _ in
-          Task { [weak self] in
-            guard let self else { return }
-            do {
-              let targetSpaceId: Int64? = switch message.peerId {
-                case .thread:
-                  spaceId
-                case .user:
-                  nil
-              }
-
-              let integrations = try await ApiClient.shared.getIntegrations(
-                userId: Auth.shared.getCurrentUserId() ?? 0,
-                spaceId: targetSpaceId
-              )
-
-              guard integrations.hasNotionConnected else {
-                let errorMessage = switch message.peerId {
-                  case .thread:
-                    "Please connect Notion in Space Settings"
-                  case .user:
-                    "Please connect Notion in one of your Space Settings"
-                }
-                ToastManager.shared.showToast(
-                  errorMessage,
-                  type: .error,
-                  systemImage: "exclamationmark.triangle"
-                )
-                return
-              }
-
-              let notionSpaceId: Int64
-              switch message.peerId {
-                case .thread:
-                  notionSpaceId = spaceId
-                case .user:
-                  guard let firstSpace = integrations.firstNotionSpace else {
-                    ToastManager.shared.showToast(
-                      "No Notion integration found in your spaces",
-                      type: .error,
-                      systemImage: "exclamationmark.triangle"
-                    )
-                    return
-                  }
-                  notionSpaceId = firstSpace.spaceId
-              }
-
-              ToastManager.shared.showToast(
-                "Creating Notion task...",
-                type: .info,
-                systemImage: "circle.badge.plus",
-                shouldStayVisible: true
-              )
-
-              let result = try await ApiClient.shared.createNotionTask(
-                spaceId: notionSpaceId,
-                messagesIds: getMessagesWindow(around: message.messageId),
-                messageId: message.messageId,
-                chatId: message.chatId,
-                peerId: message.peerId,
-                fromId: message.fromId
-              )
-
-              let successMessage = switch message.peerId {
-                case .thread:
-                  "Notion task created"
-                case .user:
-                  "Notion task created"
-              }
-
-              ToastManager.shared.showToast(
-                successMessage,
-                type: .success,
-                systemImage: "checkmark.circle",
-                action: {
-                  if let url = URL(string: result.url) {
-                    UIApplication.shared.open(url)
-                  }
-                },
-                actionTitle: "Open"
-              )
-            } catch {
-              Log.shared.error("Error creating notion task: \(error)")
-              ToastManager.shared.showToast(
-                "Failed to create Notion task",
-                type: .error,
-                systemImage: "exclamationmark.triangle"
-              )
-            }
-          }
+        // Create "Will Do" menu with space options
+        let willDoMenu = createWillDoMenu(for: message)
+        if let willDoMenu {
+          actions.append(willDoMenu)
         }
-//        actions.append(createNotionTaskAction)
 
         if message.hasText {
           let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
@@ -1300,6 +1215,216 @@ private extension MessagesCollectionView {
       let endIndex = min(messages.count - 1, targetIndex + 10)
 
       return messages[startIndex ... endIndex].map(\.message.messageId)
+    }
+
+    private func checkIntegrationAccess() {
+      Task { [weak self] in
+        guard let self else { return }
+        do {
+          let integrations = try await ApiClient.shared.getIntegrations(
+            userId: Auth.shared.getCurrentUserId() ?? 0,
+            spaceId: peerId.isThread ? spaceId : nil
+          )
+
+          DispatchQueue.main.async {
+            self.hasIntegrationAccess = integrations.hasIntegrationAccess
+          }
+        } catch {
+          Log.shared.error("Error checking integration access: \(error)")
+          DispatchQueue.main.async {
+            self.hasIntegrationAccess = false
+          }
+        }
+      }
+    }
+
+    private func createWillDoMenu(for message: Message) -> UIAction? {
+      // Only show "Will Do" if user has integration access
+      guard hasIntegrationAccess else { return nil }
+
+      return UIAction(
+        title: "Will Do",
+        image: UIImage(systemName: "circle.badge.plus")
+      ) { [weak self] _ in
+        Task { [weak self] in
+          await self?.handleWillDoAction(for: message)
+        }
+      }
+    }
+
+    private func handleWillDoAction(for message: Message) async {
+      // For thread chats, use the current spaceId
+      if message.peerId.isThread {
+        await handleWillDoForSpace(message: message, spaceId: spaceId)
+        return
+      }
+
+      // For DM chats, handle without storing preferences
+      await handleWillDoForDM(message: message)
+    }
+
+    private func handleWillDoForSpace(message: Message, spaceId: Int64) async {
+      do {
+        // Check if user has access to integration
+        let integrations = try await ApiClient.shared.getIntegrations(
+          userId: Auth.shared.getCurrentUserId() ?? 0,
+          spaceId: spaceId
+        )
+
+        guard integrations.hasNotionConnected else {
+          ToastManager.shared.showToast(
+            "No Notion integration access for this space",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+          return
+        }
+
+        await createNotionTask(spaceId: spaceId, message: message)
+      } catch {
+        Log.shared.error("Error creating notion task: \(error)")
+        ToastManager.shared.showToast(
+          "Failed to create Notion task",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
+
+    private func handleWillDoForDM(message: Message) async {
+      do {
+        // Get all accessible integrations for DMs
+        let integrations = try await ApiClient.shared.getIntegrations(
+          userId: Auth.shared.getCurrentUserId() ?? 0,
+          spaceId: nil
+        )
+
+        guard integrations.hasNotionConnected else {
+          ToastManager.shared.showToast(
+            "No Notion integration found. Please connect your Notion account in one of your spaces.",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+          return
+        }
+
+        guard let notionSpaces = integrations.notionSpaces, !notionSpaces.isEmpty else {
+          ToastManager.shared.showToast(
+            "No accessible Notion integrations found",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+          return
+        }
+
+        // Always show space selection for DMs without remembering preferences
+        await showSpaceSelectionSheet(spaces: notionSpaces, message: message)
+      } catch {
+        Log.shared.error("Error handling will do for DM: \(error)")
+        ToastManager.shared.showToast(
+          "Failed to create Notion task",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
+
+    @MainActor
+    private func showSpaceSelectionSheet(
+      spaces: [NotionSpace],
+      message: Message
+    ) async {
+      // Find the view controller by traversing the responder chain from the collection view
+      func findViewController(from view: UIView?) -> UIViewController? {
+        guard let view else { return nil }
+
+        var responder: UIResponder? = view
+        while let nextResponder = responder?.next {
+          if let viewController = nextResponder as? UIViewController {
+            return viewController
+          }
+          responder = nextResponder
+        }
+        return nil
+      }
+
+      guard let viewController = findViewController(from: currentCollectionView) else { return }
+
+      let alert = UIAlertController(
+        title: "Select Space",
+        message: "Choose which space to create the Notion task in the selected database:",
+        preferredStyle: .actionSheet
+      )
+
+      for space in spaces {
+        let action = UIAlertAction(title: space.spaceName, style: .default) { [weak self] _ in
+          Task { [weak self] in
+            await self?.createNotionTask(
+              spaceId: space.spaceId,
+              message: message
+            )
+          }
+        }
+        alert.addAction(action)
+      }
+
+      alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+      // For iPad
+      if let popover = alert.popoverPresentationController {
+        popover.sourceView = viewController.view
+        popover.sourceRect = CGRect(
+          x: viewController.view.bounds.midX,
+          y: viewController.view.bounds.midY,
+          width: 0,
+          height: 0
+        )
+        popover.permittedArrowDirections = []
+      }
+
+      viewController.present(alert, animated: true)
+    }
+
+    private func createNotionTask(
+      spaceId: Int64,
+      message: Message
+    ) async {
+      ToastManager.shared.showToast(
+        "Creating Notion task...",
+        type: .info,
+        systemImage: "circle.badge.plus",
+        shouldStayVisible: true
+      )
+
+      do {
+        let result = try await ApiClient.shared.createNotionTask(
+          spaceId: spaceId,
+          messagesIds: getMessagesWindow(around: message.messageId),
+          messageId: message.messageId,
+          chatId: message.chatId,
+          peerId: message.peerId,
+          fromId: message.fromId
+        )
+
+        ToastManager.shared.showToast(
+          "Notion task created",
+          type: .success,
+          systemImage: "checkmark.circle",
+          action: {
+            if let url = URL(string: result.url) {
+              UIApplication.shared.open(url)
+            }
+          },
+          actionTitle: "Open"
+        )
+      } catch {
+        Log.shared.error("Error creating notion task: \(error)")
+        ToastManager.shared.showToast(
+          "Failed to create Notion task",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
     }
   }
 }
