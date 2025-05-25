@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { eq, inArray, and, or } from "drizzle-orm"
+import { eq, inArray, and, or, isNull } from "drizzle-orm"
 import { chats, members, spaces, dialogs } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
@@ -47,7 +47,11 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     // Check if current user is a member of the space
     await Authorize.spaceMember(spaceId, context.currentUserId)
 
-    const spaceResult = await db.select().from(spaces).where(eq(spaces.id, spaceId)).limit(1)
+    const spaceResult = await db
+      .select()
+      .from(spaces)
+      .where(and(eq(spaces.id, spaceId), isNull(spaces.deleted)))
+      .limit(1)
 
     if (!spaceResult[0]) {
       throw new InlineError(InlineError.ApiError.INTERNAL)
