@@ -89,8 +89,8 @@ struct NotificationSettingsButton: View {
         )
 
         NotificationSettingsItem(
-          systemImage: "slowmo",
-          title: "Important Only",
+          systemImage: "moon.stars.fill",
+          title: "Zen Mode",
           description: "Only things that need your attention",
           selected: notificationSettings.mode == .importantOnly,
           value: NotificationMode.importantOnly,
