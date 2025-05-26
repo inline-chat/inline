@@ -124,7 +124,7 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   
   - Evaluate which participants are mentioned in messages, put the IDs in the mentioned list. If message is replied to a user, or it's a DM to a user, consider it a mention.
   - Then evaluate which users not only are mentioned or referred to, but additionally must immediately get a special notification because something needs their attention or an incident, event, or an issue has happened that they must be aware of or take action, even if they are asleep. this is NOT for every mention. 
-  -  IT IS IMPORTANT TO NOT WAKE UP THE USER UNNECESSARILY. Users enable this when they're alseep. Greetings, links, casual chats, etc should NOT be considered important. Instead bug reports, company issues related to user, important DMs, things that explicitly require their attention etc should be considered important. If a user is mentioned, it's slightly more likely to be important. If someone is asking the user in DM or by mentioning/replying to them to wait or to make sure to look at something or as a follow up of an earlier request, also consider it important to see. Users want to be notified of messages that the sender is waiting for them to see/do something or help them.
+  -  IT IS IMPORTANT TO NOT WAKE UP THE USER UNNECESSARILY. Users enable this when they're alseep. Greetings, links, casual chats, etc should NOT be considered important. Instead bug reports, company issues related to user, important DMs, things that explicitly require their attention etc should be considered important. If a user is mentioned, it's slightly more likely to be important. If someone is asking the user in DM or by mentioning/replying to them to wait or to make sure to look at something or as a follow up of an earlier request, also consider it important to see. Users want to be notified of messages that the sender is waiting for them to see/do something or help them. If the user asks someone to wake up or to come back, it's important to see, especially if in DM. If user is getting requests multiple times in succession, it's important to see.
   - Return user IDs of both groups.
   - Only evaluate messages between <new_messages> tag.
 
@@ -133,23 +133,35 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
 <example_context>
 particiapants: Amy (user_id: 1), Hassan (user_id: 2), Ellie (user_id: 3)
 </example_context>
- <example_message id="0">
+ <example id="0">
 hey ellie!
-</example_message>
+</example>
 <assistant_response id="0">
 [{"msgId": 0, "mentioned": [3], "mustSee": []}]
 </assistant_response>
-<example_message id="1">
+<example id="1">
 amy can you see the new message, we need it now.
-</example_message>
+</example>
 <assistant_response id="1">
 [{"msgId": 1, "mentioned": [1], "mustSee": [1]}]
 </assistant_response>
-<example_message id="4">
+<example id="4">
 Ellie: website is down. @hasan
-</example_message>
+</example>
 <assistant_response id="4">
 [{"msgId": 4, "mentioned": [2], "mustSee": [2]}]
+</assistant_response>
+<example id="6">
+Amy: Are you there? One sec, sending you a code, can you read it? (replying to Ellie)
+</example>
+<assistant_response id="6">
+[{"msgId": 6, "mentioned": [3], "mustSee": [3]}]
+</assistant_response>
+<example id="7">
+Hassan: Amy are you awake? wake up please
+</example>
+<assistant_response id="7">
+[{"msgId": 7, "mentioned": [1], "mustSee": [1]}]
 </assistant_response>
 </examples>
 
