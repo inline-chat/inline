@@ -736,11 +736,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   public func createNotionTask(
     spaceId: Int64,
-    messagesIds: [Int64],
     messageId: Int64,
     chatId: Int64,
-    peerId: Peer,
-    fromId: Int64
+    peerId: Peer
   ) async throws -> NotionTaskResult {
     var peerIdObject: [String: Any] = [:]
 
@@ -754,11 +752,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       .createNotionTask,
       body: [
         "spaceId": spaceId,
-        "messagesIds": messagesIds,
         "messageId": messageId,
         "chatId": chatId,
         "peerId": peerIdObject,
-        "fromId": fromId,
       ],
       includeToken: true
     )

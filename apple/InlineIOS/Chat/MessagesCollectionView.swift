@@ -1399,11 +1399,9 @@ private extension MessagesCollectionView {
       do {
         let result = try await ApiClient.shared.createNotionTask(
           spaceId: spaceId,
-          messagesIds: getMessagesWindow(around: message.messageId),
           messageId: message.messageId,
           chatId: message.chatId,
-          peerId: message.peerId,
-          fromId: message.fromId
+          peerId: message.peerId
         )
 
         // Stop progress tracking
@@ -1474,7 +1472,7 @@ extension Notification.Name {
 @MainActor
 class NotionTaskProgressTracker {
   private let progressSteps: [(text: String, icon: String, estimatedDuration: TimeInterval)] = [
-    ("Processing", "cylinder.split.1x2", 2.0),
+    ("Processing", "cylinder.split.1x2", 3.0),
     ("Assigning users", "person.2.circle", 2.0),
     ("Generating issue", "brain.head.profile", 2.0),
     ("Creating Notion page", "notion-logo", 2.0),
