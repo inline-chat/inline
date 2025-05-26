@@ -16,6 +16,7 @@ struct IntegrationCard: View {
   var completion: () -> Void
   var hasOptions: Bool = false
   var navigateToOptions: (() -> Void)? = nil
+  var permissionCheck: (() -> Bool)? = nil
 
   @Environment(\.openURL) private var openURL
 
@@ -66,6 +67,7 @@ struct IntegrationCard: View {
             navigateToOptions()
           }
           .buttonStyle(.borderless)
+          .disabled(permissionCheck?() == false)
           .tint(Color(ThemeManager.shared.selected.accent))
           Spacer()
         }
@@ -94,7 +96,7 @@ struct IntegrationCard: View {
           }
         }
         .buttonStyle(.borderless)
-        .disabled(isConnecting || isConnected)
+        .disabled(isConnecting || isConnected || (permissionCheck?() == false))
         .tint(Color(ThemeManager.shared.selected.accent))
         Spacer()
       }
@@ -116,7 +118,8 @@ struct IntegrationCard: View {
         clipped: true,
         spaceId: 123,
         completion: {},
-        navigateToOptions: {}
+        navigateToOptions: {},
+        permissionCheck: { true }
       )
     }
   }
