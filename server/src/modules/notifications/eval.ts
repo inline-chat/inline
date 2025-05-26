@@ -208,7 +208,7 @@ const getContext = async (input: Input): Promise<string> => {
   return context
 }
 
-const formatMessage = (m: ProcessedMessage): string => {
+export const formatMessage = (m: ProcessedMessage): string => {
   return `<message 
 id="${m.messageId}"
 sentAt="${m.date.toISOString()}"
