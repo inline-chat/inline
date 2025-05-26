@@ -17,8 +17,17 @@ struct SpaceSettingsView: View {
     }
   }
 
+  private var currentUserMember: FullMemberItem? {
+    viewModel.members.first { $0.userInfo.user.id == Auth.shared.getCurrentUserId() }
+  }
+
   private var isCreator: Bool {
-    viewModel.members.first { $0.userInfo.user.id == Auth.shared.getCurrentUserId() }?.member.role == .owner
+    currentUserMember?.member.role == .owner
+  }
+
+  private var isAdminOrOwner: Bool {
+    let role = currentUserMember?.member.role
+    return role == .owner || role == .admin
   }
 
   var body: some View {
@@ -46,24 +55,7 @@ struct SpaceSettingsView: View {
           }
         }
       }
-      Section(header: Text("Space ID")) {
-        HStack {
-          Text("\(viewModel.space?.id ?? 0)")
 
-          Spacer()
-          Button(action: {
-            UIPasteboard.general.string = "\(viewModel.space?.id ?? 0)"
-            ToastManager.shared.showToast(
-              "Space ID copied to clipboard",
-              type: .success,
-              systemImage: "doc.on.doc.fill"
-            )
-          }) {
-            Image(systemName: "doc.on.doc.fill")
-              .foregroundColor(.secondary)
-          }
-        }
-      }
       Section {
         NavigationLink(destination: SpaceIntegrationsView(spaceId: spaceId)) {
           HStack {
@@ -90,7 +82,7 @@ struct SpaceSettingsView: View {
               .foregroundColor(.red)
           } else {
             Label("Leave Space", systemImage: "rectangle.portrait.and.arrow.right.fill")
-              .foregroundColor(.primary)
+              .foregroundColor(.red)
           }
         }
       }

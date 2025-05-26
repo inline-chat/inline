@@ -7,12 +7,25 @@ import SwiftUI
 struct SpaceIntegrationsView: View {
   @State private var isConnectingNotion = false
   @State private var isConnectedNotion = false
-  var spaceId: Int64?
+  @State private var isAdminOrOwner = false
+  @EnvironmentStateObject private var viewModel: FullSpaceViewModel
+  let spaceId: Int64
   @EnvironmentObject var nav: Navigation
+
+  init(spaceId: Int64) {
+    self.spaceId = spaceId
+    _viewModel = EnvironmentStateObject { env in
+      FullSpaceViewModel(db: env.appDatabase, spaceId: spaceId)
+    }
+  }
+
+  private var currentUserMember: FullMemberItem? {
+    viewModel.members.first { $0.userInfo.user.id == Auth.shared.getCurrentUserId() }
+  }
 
   var body: some View {
     List {
-      Section {
+      Section(footer: footerText) {
         IntegrationCard(
           image: "notion-logo",
           title: "Notion",
@@ -25,13 +38,18 @@ struct SpaceIntegrationsView: View {
           completion: checkIntegrationConnection,
           hasOptions: true,
           navigateToOptions: {
-            nav.push(.integrationOptions(spaceId: spaceId ?? 0, provider: "notion"))
+            nav.push(.integrationOptions(spaceId: spaceId, provider: "notion"))
+          },
+          permissionCheck: {
+            let role = currentUserMember?.member.role
+            return role == .owner || role == .admin
           }
         )
       }
     }
     .onAppear {
       checkIntegrationConnection()
+      updatePermissions()
     }
 
     .navigationBarTitleDisplayMode(.inline)
@@ -53,10 +71,19 @@ struct SpaceIntegrationsView: View {
     }
   }
 
+  private var footerText: Text? {
+    let role = currentUserMember?.member.role
+    let isAdminOrOwner = role == .owner || role == .admin
+    
+    if !isAdminOrOwner {
+      return Text("Only space admins and owners can connect and manage integrations.")
+    }
+    return nil
+  }
+
   func checkIntegrationConnection() {
     Task {
       do {
-        guard let spaceId else { return }
         let result = try await ApiClient.shared.getIntegrations(
           userId: Auth.shared.getCurrentUserId() ?? 0,
           spaceId: spaceId
@@ -71,10 +98,15 @@ struct SpaceIntegrationsView: View {
       }
     }
   }
+
+  func updatePermissions() {
+    let role = currentUserMember?.member.role
+    isAdminOrOwner = role == .owner || role == .admin
+  }
 }
 
 #Preview {
   NavigationView {
-    IntegrationsView()
+    SpaceIntegrationsView(spaceId: 1)
   }
 }
