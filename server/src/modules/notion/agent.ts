@@ -132,12 +132,23 @@ async function createNotionPage(input: {
 
   const propertiesData = parsedData.taskData || parsedData
 
+  // Extract task title from the properties
+  let taskTitle = null
+  if (propertiesData.Title?.title?.[0]?.text?.content) {
+    taskTitle = propertiesData.Title.title[0].text.content
+  } else if (propertiesData.title?.title?.[0]?.text?.content) {
+    taskTitle = propertiesData.title.title[0].text.content
+  } else if (propertiesData.Name?.title?.[0]?.text?.content) {
+    taskTitle = propertiesData.Name.title[0].text.content
+  }
+
   const page = await newNotionPage(input.spaceId, database.id, propertiesData)
   log.info("Created Notion page", { pageId: page.id, page })
 
   return {
     pageId: page.id,
     url: `https://notion.so/${page.id.replace(/-/g, "")}`,
+    taskTitle,
   }
 }
 
@@ -226,7 +237,7 @@ function taskPrompt(
   - Set the current user as assignee and creator of the page
   - Set the reported by user as the watch of the page (watch or any field that is related to overseer of the task)
   - Generate ONLY the properties object as a JSON object - do not include parent or top-level fields
-
+  
   # Examples
   <example_context>
   Messages: [
@@ -304,7 +315,17 @@ function taskPrompt(
   <chat_context>
   Full conversation context (analyze ALL messages for due dates):
   ${messages
-    .map((m: any, index: number) => `[${index}] ${m.from.firstName} (${m.date || m.date || ""}): ${m.text || ""}`)
+    .map(
+      (m: any, index: number) =>
+        `[${index}] 
+      messageId: ${m.messageId}
+       userId: ${m.from.id} 
+       sender name: ${m.from.firstName} 
+       Date: ${m.date || m.date || ""}
+       Text: ${m.text || ""}
+       replyToId: ${m.replyToMsgId || ""}
+    `,
+    )
     .join("\n")}
   </chat_context>
 
