@@ -1389,12 +1389,12 @@ private extension MessagesCollectionView {
       spaceId: Int64,
       message: Message
     ) async {
-      ToastManager.shared.showToast(
-        "Creating Notion task...",
-        type: .info,
-        systemImage: "circle.badge.plus",
-        shouldStayVisible: true
-      )
+      let progressTracker = NotionTaskProgressTracker()
+
+      // Start progress tracking
+      let progressTask = Task {
+        await progressTracker.startProgress()
+      }
 
       do {
         let result = try await ApiClient.shared.createNotionTask(
@@ -1406,8 +1406,12 @@ private extension MessagesCollectionView {
           fromId: message.fromId
         )
 
+        // Stop progress tracking
+        progressTracker.completeProgress()
+        progressTask.cancel()
+
         ToastManager.shared.showToast(
-          "Notion task created",
+          "Notion task created successfully",
           type: .success,
           systemImage: "checkmark.circle",
           action: {
@@ -1418,6 +1422,10 @@ private extension MessagesCollectionView {
           actionTitle: "Open"
         )
       } catch {
+        // Stop progress tracking on error
+        progressTracker.failProgress()
+        progressTask.cancel()
+
         Log.shared.error("Error creating notion task: \(error)")
         ToastManager.shared.showToast(
           "Failed to create Notion task",
@@ -1459,4 +1467,81 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
 
 extension Notification.Name {
   static let scrollToBottomChanged = Notification.Name("scrollToBottomChanged")
+}
+
+// MARK: - NotionTaskProgressTracker
+
+@MainActor
+class NotionTaskProgressTracker {
+  private let progressSteps: [(text: String, icon: String, estimatedDuration: TimeInterval)] = [
+    ("Processing", "cylinder.split.1x2", 2.0),
+    ("Assigning users", "person.2.circle", 2.0),
+    ("Generating issue", "brain.head.profile", 2.0),
+    ("Creating Notion page", "notion-logo", 2.0),
+  ]
+
+  private var currentStepIndex = 0
+  private var isCompleted = false
+  private var isFailed = false
+
+  func startProgress() async {
+    currentStepIndex = 0
+    isCompleted = false
+    isFailed = false
+
+    for (index, step) in progressSteps.enumerated() {
+      if isCompleted || isFailed {
+        return
+      }
+
+      currentStepIndex = index
+
+      ToastManager.shared.showProgressStep(
+        index + 1,
+        message: step.text,
+        systemImage: step.icon
+      )
+
+      try? await Task.sleep(nanoseconds: UInt64(step.estimatedDuration * 1_000_000_000))
+    }
+  }
+
+  func completeProgress() {
+    isCompleted = true
+  }
+
+  func failProgress() {
+    isFailed = true
+  }
+
+  func updateProgress(to stepText: String) {
+    guard !isCompleted, !isFailed else { return }
+
+    if let stepIndex = progressSteps.firstIndex(where: { $0.text == stepText }) {
+      currentStepIndex = stepIndex
+      let step = progressSteps[stepIndex]
+
+      ToastManager.shared.updateProgressToast(
+        message: step.text,
+        systemImage: step.icon
+      )
+    }
+  }
+
+  func advanceToStep(_ stepNumber: Int, customMessage: String? = nil) {
+    guard stepNumber >= 1, stepNumber <= progressSteps.count else { return }
+    guard !isCompleted, !isFailed else { return }
+
+    let stepIndex = stepNumber - 1
+    currentStepIndex = stepIndex
+    let step = progressSteps[stepIndex]
+
+    let message = customMessage ?? step.text
+
+    ToastManager.shared.showProgressStep(
+      stepNumber,
+      message: message,
+      systemImage: step.icon
+    )
+  }
 }
