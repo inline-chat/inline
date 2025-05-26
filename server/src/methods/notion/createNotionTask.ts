@@ -40,7 +40,7 @@ export const handler = async (
 
   try {
     // Create Notion page and check message existence in parallel
-    const [result, messageExists] = await Promise.all([
+    const [result, message] = await Promise.all([
       createNotionPage({
         spaceId,
         messageId,
@@ -48,13 +48,13 @@ export const handler = async (
         currentUserId: context.currentUserId,
       }),
       db
-        .select({ count: count() })
+        .select()
         .from(messages)
         .where(and(eq(messages.messageId, messageId), eq(messages.chatId, chatId)))
-        .then((result) => result[0]!.count > 0),
+        .then((result) => result[0]),
     ])
 
-    if (!messageExists) {
+    if (!message) {
       Log.shared.error("Message does not exist, cannot create task attachment", { messageId })
       throw new Error("Message does not exist")
     }
@@ -87,7 +87,7 @@ export const handler = async (
 
     // Create message attachment
     await db.insert(messageAttachments).values({
-      messageId: BigInt(messageId),
+      messageId: message.globalId,
       externalTaskId: BigInt(externalTask.id),
     })
 
