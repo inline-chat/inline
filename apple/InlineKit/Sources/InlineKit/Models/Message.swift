@@ -497,6 +497,7 @@ public extension Message {
       message.isSticker = message.isSticker ?? existing.isSticker
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
+      
 
       if protocolMessage.hasReactions {
         for reaction in protocolMessage.reactions.reactions {
@@ -510,14 +511,15 @@ public extension Message {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
       }
 
-      // 2. Then save attachments, using the now-persisted message.globalId
+
+      message = try message.saveMessage(db, publishChanges: false) 
+
+
       if protocolMessage.hasAttachments {
         for attachment in protocolMessage.attachments.attachments {
           try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
         }
       }
-
-      try message.saveMessage(db, publishChanges: false) // publish is below
     } else {
       // Process media attachments if present
       if protocolMessage.hasMedia {
@@ -530,7 +532,8 @@ public extension Message {
         }
       }
 
-      let message = try message.saveMessage(db, publishChanges: false) // publish is below
+      // Save the message first to get globalId
+      message = try message.saveMessage(db, publishChanges: false) // publish is below
 
       if protocolMessage.hasAttachments {
         for attachment in protocolMessage.attachments.attachments {
