@@ -401,9 +401,9 @@ class UIMessageView: UIView {
 
       // Insert URLPreviewView(s) for attachments with urlPreview
       for attachment in fullMessage.attachments {
-        if let externalTask = attachment.externalTask {
+        if let externalTask = attachment.externalTask, let userInfo = attachment.userInfo {
           messageAttachmentEmbed.configure(
-            userName: attachment.user?.firstName ?? attachment.user?.username ?? attachment.user?.email ?? "User",
+            userInfo: userInfo,
             outgoing: outgoing,
             url: URL(string: externalTask.url ?? ""),
             issueIdentifier: nil,
@@ -435,9 +435,9 @@ class UIMessageView: UIView {
 
       // Insert URLPreviewView(s) for attachments with urlPreview
       for attachment in fullMessage.attachments {
-        if let externalTask = attachment.externalTask {
+        if let externalTask = attachment.externalTask, let userInfo = attachment.userInfo {
           messageAttachmentEmbed.configure(
-            userName: attachment.user?.firstName ?? attachment.user?.username ?? attachment.user?.email ?? "User",
+            userInfo: userInfo,
             outgoing: outgoing,
             url: URL(string: externalTask.url ?? ""),
             issueIdentifier: nil,
@@ -662,15 +662,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-      case (true, false):
-        // File only
-        withFileConstraints
-      case (true, true):
-        // File with text
-        withFileAndTextConstraints
-      default:
-        // Text only
-        withoutFileConstraints
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)

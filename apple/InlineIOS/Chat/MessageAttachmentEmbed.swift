@@ -9,6 +9,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     static let contentSpacing: CGFloat = 6
     static let verticalPadding: CGFloat = 8
     static let horizontalPadding: CGFloat = 6
+    static let avatarSize: CGFloat = 20
   }
 
   static let height = 28.0
@@ -17,13 +18,10 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
   private var title: String?
   private var issueIdentifier: String?
 
-  private lazy var circleImageView: UIImageView = {
-    let imageView = UIImageView()
-    imageView.translatesAutoresizingMaskIntoConstraints = false
-    let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-    imageView.image = UIImage(systemName: "circle", withConfiguration: config)
-    imageView.contentMode = .scaleAspectFit
-    return imageView
+  private lazy var avatarView: UserAvatarView = {
+    let view = UserAvatarView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
   }()
 
   private lazy var messageLabel: UILabel = {
@@ -58,7 +56,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
   }
 
   func configure(
-    userName: String,
+    userInfo: UserInfo,
     outgoing: Bool,
     url: URL? = nil,
     issueIdentifier: String? = nil,
@@ -68,6 +66,12 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     self.url = url
     self.title = title
     self.issueIdentifier = issueIdentifier
+    
+    // Configure avatar
+    avatarView.configure(with: userInfo, size: Constants.avatarSize)
+    
+    // Get user name
+    let userName = userInfo.user.firstName ?? "User"
     messageLabel.text = "\(userName) will do"
     issueIdentifierLabel.text = issueIdentifier
     updateColors()
@@ -106,29 +110,21 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
       previewProvider: nil
     ) { [weak self] _ in
       let openAction = UIAction(
-        title: "Open in Safari",
+        title: "Open Issue URL",
         image: UIImage(systemName: "safari")
       ) { _ in
         guard let url = self?.url else { return }
         UIApplication.shared.open(url)
       }
 
-      var actions: [UIAction] = [openAction]
-
-      let copyTitleAction = UIAction(
-        title: "Copy Title",
+      let copyURLAction = UIAction(
+        title: "Copy Issue URL",
         image: UIImage(systemName: "doc.on.doc")
       ) { _ in
-        UIPasteboard.general.string = self?.title
+        UIPasteboard.general.string = self?.url?.absoluteString
       }
 
-      let copyIssueIdentifierAction = UIAction(
-        title: "Copy Issue Identifier",
-        image: UIImage(systemName: "doc.on.doc")
-      ) { _ in
-        UIPasteboard.general.string = self?.issueIdentifier
-      }
-      return UIMenu(title: "", children: actions + [copyTitleAction, copyIssueIdentifierAction])
+      return UIMenu(title: "", children: [openAction, copyURLAction])
     }
   }
 
@@ -193,21 +189,21 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
 
 private extension MessageAttachmentEmbed {
   func setupViews() {
-    addSubview(circleImageView)
+    addSubview(avatarView)
     addSubview(messageLabel)
     addSubview(issueIdentifierLabel)
 
     NSLayoutConstraint.activate([
-      circleImageView.leadingAnchor.constraint(
+      avatarView.leadingAnchor.constraint(
         equalTo: leadingAnchor,
         constant: Constants.horizontalPadding
       ),
-      circleImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-      circleImageView.widthAnchor.constraint(equalToConstant: 16),
-      circleImageView.heightAnchor.constraint(equalToConstant: 16),
+      avatarView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      avatarView.widthAnchor.constraint(equalToConstant: Constants.avatarSize),
+      avatarView.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
 
       messageLabel.leadingAnchor.constraint(
-        equalTo: circleImageView.trailingAnchor,
+        equalTo: avatarView.trailingAnchor,
         constant: Constants.contentSpacing
       ),
       messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -238,6 +234,6 @@ private extension MessageAttachmentEmbed {
 
     messageLabel.textColor = textColor
     issueIdentifierLabel.textColor = outgoing ? .white : .secondaryLabel
-    circleImageView.tintColor = textColor
+    avatarView.tintColor = textColor
   }
 }
