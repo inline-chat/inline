@@ -37,6 +37,7 @@ export const MessageModel = {
   insertMessage: insertMessage,
   getMessages: getMessages,
   getMessage: getMessage, // 1 msg
+  getMessagesAroundTarget: getMessagesAroundTarget,
   getNonFullMessagesRange: getNonFullMessagesRange,
   processMessage: processMessage,
   editMessage: editMessage,
@@ -495,6 +496,46 @@ async function getNonFullMessagesFromNewToOld(input: {
   result.reverse()
 
   return result.map((msg) => ({
+    ...msg,
+    text:
+      msg.textEncrypted && msg.textIv && msg.textTag
+        ? decryptMessage({
+            encrypted: msg.textEncrypted,
+            iv: msg.textIv,
+            authTag: msg.textTag,
+          })
+        : // legacy fallback
+          msg.text,
+  }))
+}
+
+async function getMessagesAroundTarget(
+  chatId: number,
+  targetMessageId: number,
+  beforeCount: number = 15,
+  afterCount: number = 15,
+): Promise<ProcessedMessage[]> {
+  // Get messages before the target (older messages)
+  const messagesBefore = await db._query.messages.findMany({
+    where: and(eq(messages.chatId, chatId), lt(messages.messageId, targetMessageId)),
+    orderBy: desc(messages.messageId),
+    limit: beforeCount,
+  })
+
+  // Get messages after the target (newer messages)
+  const messagesAfter = await db._query.messages.findMany({
+    where: and(eq(messages.chatId, chatId), gt(messages.messageId, targetMessageId)),
+    orderBy: asc(messages.messageId),
+    limit: afterCount,
+  })
+
+  // Reverse messagesBefore to get chronological order (oldest first)
+  messagesBefore.reverse()
+
+  // Combine all messages in chronological order
+  const allMessages = [...messagesBefore, ...messagesAfter]
+
+  return allMessages.map((msg) => ({
     ...msg,
     text:
       msg.textEncrypted && msg.textIv && msg.textTag
