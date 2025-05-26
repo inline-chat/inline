@@ -805,6 +805,7 @@ public enum APIResponse<T>: Decodable, Sendable where T: Decodable & Sendable {
 
 public struct NotionTaskResult: Codable, Sendable {
   public let url: String
+  public let taskTitle: String
 }
 
 public struct GetIntegrations: Codable, Sendable {
