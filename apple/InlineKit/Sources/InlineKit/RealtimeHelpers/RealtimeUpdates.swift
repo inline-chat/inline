@@ -58,8 +58,8 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
 
         case let .participantDelete(participantDelete):
           try participantDelete.apply(db)
-        
-      case let .newMessageNotification(newMessageNotification):
+
+        case let .newMessageNotification(newMessageNotification):
           try newMessageNotification.apply(db)
 
         default:

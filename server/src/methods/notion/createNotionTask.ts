@@ -12,6 +12,7 @@ import { connectionManager } from "../../ws/connections"
 import { MessageAttachmentExternalTask_Status, type Update } from "@in/protocol/core"
 import { RealtimeUpdates } from "../../realtime/message"
 import { Notifications } from "../../modules/notifications/notifications"
+import { decrypt, encrypt } from "@in/server/modules/encryption/encryption"
 
 export const Input = Type.Object({
   spaceId: Type.Number(),
@@ -24,6 +25,7 @@ export const Input = Type.Object({
 
 export const Response = Type.Object({
   url: Type.String(),
+  taskTitle: Type.String(),
 })
 
 export const handler = async (
@@ -41,6 +43,8 @@ export const handler = async (
       currentUserId: context.currentUserId,
     })
 
+    const encryptedTitle = await encrypt(result.taskTitle)
+
     const [externalTask] = await db
       .insert(externalTasks)
       .values({
@@ -48,9 +52,9 @@ export const handler = async (
         taskId: result.pageId,
         status: "todo",
         assignedUserId: BigInt(context.currentUserId),
-        title: null,
-        titleIv: null,
-        titleTag: null,
+        title: encryptedTitle.encrypted,
+        titleIv: encryptedTitle.iv,
+        titleTag: encryptedTitle.authTag,
         url: result.url,
         date: new Date(),
       })
@@ -105,7 +109,7 @@ export const handler = async (
       })
     }
 
-    return { url: result.url }
+    return { url: result.url, taskTitle: result.taskTitle }
   } catch (error) {
     Log.shared.error("Failed to create Notion task", { error })
     throw error
@@ -126,7 +130,6 @@ const messageAttachmentUpdate = async ({
   chatId: number
 }): Promise<void> => {
   try {
-    // Check if the message exists before trying to update it
     const messageExists = await db
       .select({ count: count() })
       .from(messages)
@@ -137,6 +140,18 @@ const messageAttachmentUpdate = async ({
       Log.shared.error("Message does not exist, skipping message attachment update", { messageId })
       return
     }
+
+    // decrypt title
+    if (!externalTask.titleTag || !externalTask.title || !externalTask.titleIv) {
+      Log.shared.error("Missing title tag, title, or title iv", { externalTask })
+      return
+    }
+
+    const decryptedTitle = await decrypt({
+      authTag: externalTask.titleTag,
+      encrypted: externalTask.title,
+      iv: externalTask.titleIv,
+    })
 
     const updateGroup = await getUpdateGroup(peerId, { currentUserId })
 
@@ -161,7 +176,7 @@ const messageAttachmentUpdate = async ({
                     number: "",
                     url: externalTask.url ?? "",
                     date: BigInt(Date.now().toString()),
-                    title: "",
+                    title: decryptedTitle,
                   },
                 },
               },
@@ -193,7 +208,7 @@ const messageAttachmentUpdate = async ({
                     number: "",
                     url: externalTask.url ?? "",
                     date: BigInt(Date.now().toString()),
-                    title: "",
+                    title: decryptedTitle,
                   },
                 },
               },
