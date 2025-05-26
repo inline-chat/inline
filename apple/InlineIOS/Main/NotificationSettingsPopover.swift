@@ -89,8 +89,8 @@ struct NotificationSettingsButton: View {
         )
 
         NotificationSettingsItem(
-          systemImage: "slowmo",
-          title: "Important Only",
+          systemImage: "moon.stars.fill",
+          title: "Zen Mode",
           description: "Only things that need your attention",
           selected: notificationSettings.mode == .importantOnly,
           value: NotificationMode.importantOnly,
@@ -118,7 +118,7 @@ struct NotificationSettingsButton: View {
     }
     .padding(.vertical, 20)
   }
-  
+
   private func close() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
       // Delay closing to allow animations to finish
