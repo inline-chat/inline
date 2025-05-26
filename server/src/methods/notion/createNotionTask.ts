@@ -47,13 +47,10 @@ export const handler = async (
         chatId,
         currentUserId: context.currentUserId,
       }),
-
-      // message exists check
       db
         .select({ count: count() })
         .from(messages)
-        .where(eq(messages.globalId, BigInt(messageId)))
-        // .where(and(eq(messages.globalId, BigInt(messageId)), eq(messages.chatId, chatId)))
+        .where(and(eq(messages.messageId, messageId), eq(messages.chatId, chatId)))
         .then((result) => result[0]!.count > 0),
     ])
 
