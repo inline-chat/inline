@@ -1457,7 +1457,6 @@ final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
     else {
       return nil
     }
-    
 
     attributes.transform = CGAffineTransform(translationX: 0, y: -30)
     return attributes
