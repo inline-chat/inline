@@ -48,7 +48,7 @@ export const externalTasks = pgTable("external_tasks", {
 
 export const messageAttachments = pgTable("message_attachments", {
   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
-  messageId: bigint("message_id", { mode: "bigint" }).references(() => messages.globalId),
+  messageId: bigint("message_id", { mode: "bigint" }).references(() => messages.globalId, { onDelete: "cascade" }),
 
   /** external task id */
   externalTaskId: bigint("external_task_id", { mode: "bigint" }).references(() => externalTasks.id),
