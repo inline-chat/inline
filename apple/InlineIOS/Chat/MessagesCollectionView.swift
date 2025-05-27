@@ -1163,12 +1163,7 @@ private extension MessagesCollectionView {
     }
 
     func scheduleUpdateItems() {
-      updateWorkItem?.cancel()
-      let workItem = DispatchWorkItem { [weak self] in
-        self?.updateItemsSafely()
-      }
-      updateWorkItem = workItem
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: workItem)
+      updateItemsSafely()
     }
 
     private func updateItemsSafely() {
@@ -1187,13 +1182,13 @@ private extension MessagesCollectionView {
         snapshot.appendSections([.main])
         let orderedIds = messages.map(\.id)
         snapshot.appendItems(orderedIds, toSection: .main)
-        DispatchQueue.main.async { [weak self] in
-          self?.dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-            guard let self else { return }
-            isApplyingSnapshot = false
-            if needsAnotherUpdate {
-              needsAnotherUpdate = false
-              scheduleUpdateItems()
+        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+          guard let self else { return }
+          isApplyingSnapshot = false
+          if needsAnotherUpdate {
+            needsAnotherUpdate = false
+            DispatchQueue.main.async { [weak self] in
+              self?.scheduleUpdateItems()
             }
           }
         }
@@ -1201,7 +1196,9 @@ private extension MessagesCollectionView {
         isApplyingSnapshot = false
         if needsAnotherUpdate {
           needsAnotherUpdate = false
-          scheduleUpdateItems()
+          DispatchQueue.main.async { [weak self] in
+            self?.scheduleUpdateItems()
+          }
         }
       }
     }
