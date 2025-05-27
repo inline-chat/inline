@@ -205,12 +205,18 @@ public extension FullMessage {
           )
       )
       .including(
+        optional: Message.repliedToMessage.forKey("repliedToMessage")
+          .including(optional: Message.from.forKey("replyToMessageSender"))
+          .including(optional: Message.file.forKey("replyToMessageFile"))
+      )
+      .including(
         all: Message.attachments
           .including(
             optional: Attachment.externalTask
-              .including(optional: ExternalTask.assignedUser
-              .forKey(FullAttachment.CodingKeys.userInfo)
-                .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+              .including(
+                optional: ExternalTask.assignedUser
+                  .forKey(FullAttachment.CodingKeys.userInfo)
+                  .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
               )
           )
           .including(
