@@ -920,12 +920,6 @@ private extension MessagesCollectionView {
 
         var actions: [UIAction] = []
 
-        // Create "Will Do" menu with space options
-        let willDoMenu = createWillDoMenu(for: message)
-        if let willDoMenu {
-          actions.append(willDoMenu)
-        }
-
         if message.hasText {
           let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
             UIPasteboard.general.string = message.text
@@ -1021,6 +1015,12 @@ private extension MessagesCollectionView {
             ChatState.shared.setEditingMessageId(peer: message.peerId, id: message.messageId)
           }
           actions.append(editAction)
+        }
+
+        // Create "Will Do" menu with space options
+        let willDoMenu = createWillDoMenu(for: message)
+        if let willDoMenu {
+          actions.append(willDoMenu)
         }
 
         // TODO: Add open link
