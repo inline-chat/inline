@@ -285,14 +285,19 @@ async function sendNotifications(input: SendPushForMsgInput) {
     const chatId = chat.id
     const chatInfo = await getCachedChatInfo(chatId)
     const chatInfoParticipants = chatInfo?.participantUserIds ?? []
-    const participantSettings = await Promise.all(chatInfoParticipants.map((userId) => getCachedUserSettings(userId)))
+    const participantSettings = await Promise.all(
+      chatInfoParticipants.map(async (userId) => {
+        const settings = await getCachedUserSettings(userId)
+        return { userId, settings: settings ?? null }
+      }),
+    )
 
     log.debug("Participant settings", { participantSettings })
 
     const hasAnyoneEnabledAI = participantSettings.some(
       (setting) =>
-        setting?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly ||
-        setting?.notifications.mode === UserSettingsNotificationsMode.Mentions,
+        setting.settings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly ||
+        setting.settings?.notifications.mode === UserSettingsNotificationsMode.Mentions,
     )
     const hasText = !!unencryptedText
 
@@ -304,6 +309,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
           text: unencryptedText,
           message: messageInfo.message,
         },
+        participantSettings,
       })
       evalResult = evalResults
     }
@@ -367,7 +373,7 @@ async function sendNotificationToUser({
 
   // Mentions
   if (userSettings?.notifications.mode === UserSettingsNotificationsMode.Mentions) {
-    if (!evalResult?.mentionedUserIds?.includes(userId) && !evalResult?.mustSeeUserIds?.includes(userId)) {
+    if (!evalResult?.mentionedUserIds?.includes(userId) && !evalResult?.notifyUserIds?.includes(userId)) {
       // Do not notify
       return
     }
@@ -377,7 +383,7 @@ async function sendNotificationToUser({
 
   // Important only
   if (userSettings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly) {
-    if (!evalResult?.mustSeeUserIds?.includes(userId)) {
+    if (!evalResult?.notifyUserIds?.includes(userId)) {
       // Do not notify
       return
     }

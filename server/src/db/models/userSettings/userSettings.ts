@@ -62,12 +62,13 @@ async function getGeneral(userId: number): Promise<UserSettingsGeneral | null> {
   }
 }
 
-async function updateGeneral(userId: number, general: UserSettingsGeneralInput): Promise<void> {
+async function updateGeneral(userId: number, general: UserSettingsGeneralInput): Promise<UserSettingsGeneral> {
   // Validate the input data
   const validatedGeneral = UserSettingsGeneralSchema.parse(general)
 
   // Encrypt the settings
   const generalJson = JSON.stringify(validatedGeneral)
+
   const encryptedGeneral = encrypt(generalJson)
 
   // Insert or update the user settings
@@ -89,4 +90,6 @@ async function updateGeneral(userId: number, general: UserSettingsGeneralInput):
     })
 
   log.debug("Updated general settings", { userId })
+
+  return validatedGeneral
 }

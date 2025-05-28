@@ -621,6 +621,15 @@ message NotificationSettings {
 
   // If true, no sound will be played for notifications
   optional bool silent = 2;
+
+  // If true, the notification requires mentioning the user
+  optional bool zen_mode_requires_mention = 3;
+
+  // If true, the default rules will be used
+  optional bool zen_mode_uses_default_rules = 4;
+
+  // Custom rules for notifications
+  optional string zen_mode_custom_rules = 5;
 }
 
 message UpdateUserSettingsInput { UserSettings user_settings = 1; }
