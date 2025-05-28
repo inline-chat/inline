@@ -16,20 +16,28 @@ struct SpacesView: View {
     if let activeSpaceId = tabsManager.getActiveSpaceId() {
       SpaceView(spaceId: activeSpaceId)
     } else {
-      List(homeViewModel.spaces.sorted { s1, s2 in
+      let sortedSpaces = homeViewModel.spaces.sorted { s1, s2 in
         s1.space.date > s2.space.date
-      }) { space in
-        Button {
-          tabsManager.setActiveSpaceId(space.space.id)
-        } label: {
-          HStack {
-            SpaceAvatar(space: space.space, size: 34)
-            Text(space.space.nameWithoutEmoji)
-          }
-        }
-        .padding(.vertical, 1)
       }
-      .listStyle(.plain)
+
+      Group {
+        if sortedSpaces.isEmpty {
+          EmptySpacesView()
+        } else {
+          List(sortedSpaces) { space in
+            Button {
+              tabsManager.setActiveSpaceId(space.space.id)
+            } label: {
+              HStack {
+                SpaceAvatar(space: space.space, size: 34)
+                Text(space.space.nameWithoutEmoji)
+              }
+            }
+            .padding(.vertical, 1)
+          }
+          .listStyle(.plain)
+        }
+      }
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
@@ -73,6 +81,24 @@ struct SpacesView: View {
           .tint(.secondary)
         }
       }
+    }
+  }
+}
+
+struct EmptySpacesView: View {
+  var body: some View {
+    VStack {
+      Spacer()
+      Image(systemName: "building.2.fill")
+        .foregroundColor(.secondary)
+        .font(.title)
+        .padding(.bottom, 6)
+      Text("No spaces")
+        .font(.title3)
+      Text("Create a space to get started")
+        .font(.subheadline)
+        .foregroundColor(.secondary)
+      Spacer()
     }
   }
 }
