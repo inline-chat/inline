@@ -36,11 +36,9 @@ public class INUserSettings {
   private func setupObservation() {
     // Save to UserDefaults whenever notification settings change
     notification.objectWillChange
+      .debounce(for: .seconds(0.2), scheduler: DispatchQueue.main)
       .sink { [weak self] _ in
         Task { @MainActor in
-          // wait a little
-          try await Task
-            .sleep(nanoseconds: UInt64(0.5) * 1_000_000_000) // 0.5 seconds
           self?.saveToUserDefaults()
           self?.saveToRealtime()
         }
@@ -61,6 +59,9 @@ public class INUserSettings {
       // Update current settings with cached values
       notification.mode = cachedSettings.mode
       notification.silent = cachedSettings.silent
+      notification.requiresMention = cachedSettings.requiresMention
+      notification.usesDefaultRules = cachedSettings.usesDefaultRules
+      notification.customRules = cachedSettings.customRules
     } catch {
       log.error("Failed to decode cached notification settings: \(error)")
     }

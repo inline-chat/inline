@@ -1631,6 +1631,24 @@ export interface NotificationSettings {
      * @generated from protobuf field: optional bool silent = 2;
      */
     silent?: boolean;
+    /**
+     * If true, the notification requires mentioning the user
+     *
+     * @generated from protobuf field: optional bool zen_mode_requires_mention = 3;
+     */
+    zenModeRequiresMention?: boolean;
+    /**
+     * If true, the default rules will be used
+     *
+     * @generated from protobuf field: optional bool zen_mode_uses_default_rules = 4;
+     */
+    zenModeUsesDefaultRules?: boolean;
+    /**
+     * Custom rules for notifications
+     *
+     * @generated from protobuf field: optional string zen_mode_custom_rules = 5;
+     */
+    zenModeCustomRules?: string;
 }
 /**
  * @generated from protobuf enum NotificationSettings.Mode
@@ -6494,7 +6512,10 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
     constructor() {
         super("NotificationSettings", [
             { no: 1, name: "mode", kind: "enum", opt: true, T: () => ["NotificationSettings.Mode", NotificationSettings_Mode, "MODE_"] },
-            { no: 2, name: "silent", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "silent", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "zen_mode_requires_mention", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "zen_mode_uses_default_rules", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "zen_mode_custom_rules", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<NotificationSettings>): NotificationSettings {
@@ -6514,6 +6535,15 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
                 case /* optional bool silent */ 2:
                     message.silent = reader.bool();
                     break;
+                case /* optional bool zen_mode_requires_mention */ 3:
+                    message.zenModeRequiresMention = reader.bool();
+                    break;
+                case /* optional bool zen_mode_uses_default_rules */ 4:
+                    message.zenModeUsesDefaultRules = reader.bool();
+                    break;
+                case /* optional string zen_mode_custom_rules */ 5:
+                    message.zenModeCustomRules = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6532,6 +6562,15 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
         /* optional bool silent = 2; */
         if (message.silent !== undefined)
             writer.tag(2, WireType.Varint).bool(message.silent);
+        /* optional bool zen_mode_requires_mention = 3; */
+        if (message.zenModeRequiresMention !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.zenModeRequiresMention);
+        /* optional bool zen_mode_uses_default_rules = 4; */
+        if (message.zenModeUsesDefaultRules !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.zenModeUsesDefaultRules);
+        /* optional string zen_mode_custom_rules = 5; */
+        if (message.zenModeCustomRules !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.zenModeCustomRules);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
