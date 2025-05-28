@@ -9,19 +9,17 @@ struct IntegrationsView: View {
   @State private var isConnectedLinear = false
 
   var body: some View {
-    List {
-      Section {
-        IntegrationCard(
-          image: "linear-icon",
-          title: "Linear",
-          description: "Connect your Linear to create issues from messages with AI",
-          isConnected: $isConnectedLinear,
-          isConnecting: $isConnectingLinear,
-          provider: "linear",
-          clipped: true,
-          completion: checkIntegrationConnection
-        )
-      }
+    Form {
+      IntegrationCard(
+        image: "linear-icon",
+        title: "Linear",
+        description: "Connect your Linear to create issues from messages with AI",
+        isConnected: $isConnectedLinear,
+        isConnecting: $isConnectingLinear,
+        provider: "linear",
+        clipped: true,
+        completion: checkIntegrationConnection
+      )
     }
     .onAppear {
       checkIntegrationConnection()

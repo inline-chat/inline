@@ -70,21 +70,23 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   private let log = Log.scoped("ApiClient")
 
-  public static let baseURL: String = {
+  public static let serverURL: String = {
     if ProjectConfig.useProductionApi {
-      return "https://api.inline.chat/v1"
+      return "https://api.inline.chat"
     }
 
     #if targetEnvironment(simulator)
-    return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://\(ProjectConfig.devHost):8000"
     #elseif DEBUG && os(iOS)
-    return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://\(ProjectConfig.devHost):8000"
     #elseif DEBUG && os(macOS)
-    return "http://\(ProjectConfig.devHost):8000/v1"
+    return "http://\(ProjectConfig.devHost):8000"
     #else
-    return "https://api.inline.chat/v1"
+    return "https://api.inline.chat"
     #endif
   }()
+
+  public static let baseURL: String = "\(serverURL)/v1"
 
   public var baseURL: String { Self.baseURL }
 
