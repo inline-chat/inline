@@ -75,10 +75,10 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
 
   const inputTokens = completion.usage?.prompt_tokens ?? 0
   const outputTokens = completion.usage?.completion_tokens ?? 0
-  // input per milion : $2
-  // output per milion : $8
-  const inputPrice = (inputTokens * 0.000002) / 1000
-  const outputPrice = (outputTokens * 0.000008) / 1000
+  // input per milion tokens : $2
+  // output per milion tokens : $8
+  const inputPrice = (inputTokens * 0.002) / 1000
+  const outputPrice = (outputTokens * 0.008) / 1000
   const totalPrice = inputPrice + outputPrice
   log.info(`Notion agent price: $${totalPrice.toFixed(4)} • ${completion.model}`)
 
