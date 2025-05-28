@@ -1010,27 +1010,20 @@ private extension MessagesCollectionView {
         }
         actions.append(replyAction)
 
+        var editAction: UIAction?
         if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText {
-          let editAction = UIAction(title: "Edit", image: UIImage(systemName: "bubble.and.pencil")) { _ in
+          editAction = UIAction(title: "Edit", image: UIImage(systemName: "bubble.and.pencil")) { _ in
             ChatState.shared.setEditingMessageId(peer: message.peerId, id: message.messageId)
           }
-          actions.append(editAction)
         }
 
-        // Create "Will Do" menu with space options
-        let willDoMenu = createWillDoMenu(for: message)
-        if let willDoMenu {
-          actions.append(willDoMenu)
-        }
-
-        // TODO: Add open link
+        let willDoAction = createWillDoMenu(for: message)
 
         let deleteAction = UIAction(
           title: "Delete",
           image: UIImage(systemName: "trash"),
           attributes: .destructive
         ) { _ in
-
           self.showDeleteConfirmation(
             messageId: message.messageId,
             peerId: message.peerId,
@@ -1038,9 +1031,27 @@ private extension MessagesCollectionView {
           )
         }
 
-        actions.append(deleteAction)
+        var menuChildren: [UIMenuElement] = []
 
-        return UIMenu(children: actions)
+        var basicActions = actions
+        if let editAction {
+          basicActions.append(editAction)
+        }
+
+        if !basicActions.isEmpty {
+          let basicMenu = UIMenu(title: "", options: .displayInline, children: basicActions)
+          menuChildren.append(basicMenu)
+        }
+
+        if let willDoAction {
+          let willDoMenu = UIMenu(title: "", options: .displayInline, children: [willDoAction])
+          menuChildren.append(willDoMenu)
+        }
+
+        let deleteMenu = UIMenu(title: "", options: .displayInline, children: [deleteAction])
+        menuChildren.append(deleteMenu)
+
+        return UIMenu(children: menuChildren)
       }
     }
 
