@@ -1,4 +1,5 @@
 import InlineKit
+import RealtimeAPI
 import SwiftUI
 
 struct ArchivedChatsView: View {
@@ -15,6 +16,9 @@ struct ArchivedChatsView: View {
   @Environment(\.appDatabase) private var database
   @EnvironmentObject private var fullSpaceViewModel: FullSpaceViewModel
 
+  @State var shouldShow = false
+  @State var apiState: RealtimeAPIState = .connecting
+
   var body: some View {
     Group {
       switch type {
@@ -27,9 +31,35 @@ struct ArchivedChatsView: View {
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .topBarLeading) {
-        Text("Archived Chats")
-          .font(.title3)
-          .fontWeight(.semibold)
+        VStack(alignment: .leading, spacing: 0) {
+          Text(shouldShow ? getStatusText(apiState) : "Archived Chats")
+            .font(.title3)
+            .fontWeight(.semibold)
+            .contentTransition(.numericText())
+            .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+            .animation(.spring(duration: 0.5), value: shouldShow)
+        }
+        .onAppear {
+          apiState = realtime.apiState
+
+          if apiState != .connected {
+            shouldShow = true
+          }
+        }
+        .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
+          apiState = nextApiState
+          if nextApiState == .connected {
+            Task { @MainActor in
+              try await Task.sleep(for: .seconds(1))
+              if nextApiState == .connected {
+                // second check
+                shouldShow = false
+              }
+            }
+          } else {
+            shouldShow = true
+          }
+        })
       }
     }
   }
