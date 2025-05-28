@@ -28,15 +28,13 @@ struct SpacesView: View {
       .listStyle(.plain)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .principal) {
+        ToolbarItem(placement: .topBarLeading) {
           Text("Spaces")
             .font(.title3)
             .fontWeight(.semibold)
         }
       }
-      
     }
-    
   }
 }
 

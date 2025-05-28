@@ -26,7 +26,7 @@ struct ArchivedChatsView: View {
     }
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      ToolbarItem(placement: .principal) {
+      ToolbarItem(placement: .topBarLeading) {
         Text("Archived Chats")
           .font(.title3)
           .fontWeight(.semibold)
