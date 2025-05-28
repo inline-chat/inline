@@ -83,10 +83,12 @@ export function generateNotionPropertiesSchema(database: any): z.ZodType<any> {
       case "date":
         schemaFields[propertyName] = z
           .object({
-            date: z.object({
-              start: z.string(), // YYYY-MM-DD format
-              end: z.string().nullable(),
-            }),
+            date: z
+              .object({
+                start: z.string(), // YYYY-MM-DD format
+                end: z.string().nullable(),
+              })
+              .nullable(),
           })
           .nullable()
         break
@@ -134,9 +136,11 @@ export function generateNotionPropertiesSchema(database: any): z.ZodType<any> {
       case "status":
         schemaFields[propertyName] = z
           .object({
-            status: z.object({
-              name: z.string(),
-            }),
+            status: z
+              .object({
+                name: z.string(),
+              })
+              .nullable(),
           })
           .nullable()
         break
@@ -173,6 +177,17 @@ export function generateNotionPropertiesSchema(database: any): z.ZodType<any> {
                   .nullable(),
               }),
             ),
+          })
+          .nullable()
+        break
+
+      case "unique_id":
+        schemaFields[propertyName] = z
+          .object({
+            unique_id: z.object({
+              number: z.number().nullable(),
+              prefix: z.string().nullable(),
+            }),
           })
           .nullable()
         break
