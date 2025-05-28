@@ -134,6 +134,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
   var selected: Bool
   var value: Value
   var onChange: (Value) -> Void
+  let theme = ThemeManager.shared.selected
 
   var body: some View {
     Button {
@@ -141,7 +142,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
     } label: {
       HStack(spacing: 12) {
         Circle()
-          .fill(selected ? Color.accentColor : Color(.systemGray5))
+          .fill(selected ? Color(theme.accent) : Color(.systemGray5))
           .frame(width: 36, height: 36)
           .overlay {
             Image(systemName: systemImage)
@@ -164,14 +165,14 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
         if selected {
           Image(systemName: "checkmark")
             .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(.blue)
+            .foregroundStyle(Color(theme.accent))
         }
       }
       .padding(.vertical, 8)
       .padding(.horizontal, 12)
       .background(
         RoundedRectangle(cornerRadius: 12)
-          .fill(selected ? Color.accentColor.opacity(0.1) : Color(.systemGray6))
+          .fill(selected ? Color(theme.accent).opacity(0.1) : Color(.systemGray6))
       )
     }
     .buttonStyle(.plain)
