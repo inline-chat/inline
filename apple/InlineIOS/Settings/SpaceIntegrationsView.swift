@@ -24,28 +24,28 @@ struct SpaceIntegrationsView: View {
   }
 
   var body: some View {
-    List {
-      Section(footer: footerText) {
-        IntegrationCard(
-          image: "notion-logo",
-          title: "Notion",
-          description: "Connect your Notion to create issues from messages with AI",
-          isConnected: $isConnectedNotion,
-          isConnecting: $isConnectingNotion,
-          provider: "notion",
-          clipped: false,
-          spaceId: spaceId,
-          completion: checkIntegrationConnection,
-          hasOptions: true,
-          navigateToOptions: {
-            nav.push(.integrationOptions(spaceId: spaceId, provider: "notion"))
-          },
-          permissionCheck: {
-            let role = currentUserMember?.member.role
-            return role == .owner || role == .admin
-          }
-        )
-      }
+    Form {
+      IntegrationCard(
+        image: "notion-logo",
+        title: "Notion",
+        description: "Connect your Notion to create issues from messages with AI",
+        isConnected: $isConnectedNotion,
+        isConnecting: $isConnectingNotion,
+        provider: "notion",
+        clipped: false,
+        spaceId: spaceId,
+        completion: checkIntegrationConnection,
+        hasOptions: true,
+        navigateToOptions: {
+          nav.push(.integrationOptions(spaceId: spaceId, provider: "notion"))
+        },
+        permissionCheck: {
+          let role = currentUserMember?.member.role
+          return role == .owner || role == .admin
+        }
+      )
+
+      // TODO: add footerText
     }
     .onAppear {
       checkIntegrationConnection()
@@ -74,7 +74,7 @@ struct SpaceIntegrationsView: View {
   private var footerText: Text? {
     let role = currentUserMember?.member.role
     let isAdminOrOwner = role == .owner || role == .admin
-    
+
     if !isAdminOrOwner {
       return Text("Only space admins and owners can connect and manage integrations.")
     }
