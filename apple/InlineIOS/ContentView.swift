@@ -56,7 +56,9 @@ struct ContentView: View {
         }
         .sheet(item: $nav.activeSheet) { destination in
           nav.sheetContent(for: destination)
-            .presentationDetents(destination == .alphaSheet ?[.medium, .large] : [.large])
+            .presentationDetents([.medium, .large])
+            .presentationBackground(.thickMaterial)
+            .presentationCornerRadius(28)
         }
 
       case .onboarding:
