@@ -15,6 +15,15 @@ export const UserSettingsGeneralSchema = z.object({
 
     /** If true, no sound will be played for notifications */
     silent: z.boolean(),
+
+    /** If true, the notification requires mentioning the user */
+    zenModeRequiresMention: z.boolean().optional().default(true),
+
+    /** If true, the default rules will be used */
+    zenModeUsesDefaultRules: z.boolean().optional().default(true),
+
+    /** Custom rules for notifications */
+    zenModeCustomRules: z.string().optional().default(""),
   }),
 })
 

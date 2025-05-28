@@ -6,12 +6,15 @@ struct NotificationSettingsButton: View {
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
   @State private var presented = false
+  @State private var customizingZen = false
 
   var body: some View {
     button
       .popover(isPresented: $presented, arrowEdge: .trailing) {
         popover
-        // .frame(width: 300, height: 400)
+          .padding(.vertical, 10)
+          .padding(.horizontal, 8)
+          .frame(width: 320)
       }
   }
 
@@ -37,6 +40,17 @@ struct NotificationSettingsButton: View {
     .buttonStyle(.plain)
   }
 
+  @ViewBuilder
+  private var popover: some View {
+    if customizingZen {
+      customize
+        .transition(.opacity)
+    } else {
+      picker
+        .transition(.opacity)
+    }
+  }
+
   var notificationIcon: String {
     switch notificationSettings.mode {
       case .all: "bell"
@@ -47,7 +61,7 @@ struct NotificationSettingsButton: View {
   }
 
   @ViewBuilder
-  private var popover: some View {
+  private var picker: some View {
     VStack(alignment: .leading, spacing: 4) {
       // Header
       HStack {
@@ -72,7 +86,7 @@ struct NotificationSettingsButton: View {
           value: NotificationMode.all,
           onChange: {
             notificationSettings.mode = $0
-            close()
+
           },
         )
 
@@ -84,20 +98,25 @@ struct NotificationSettingsButton: View {
           value: NotificationMode.mentions,
           onChange: {
             notificationSettings.mode = $0
-            close()
+
           },
         )
 
         NotificationSettingsItem(
           systemImage: "moon.stars.fill",
           title: "Zen Mode",
-          description: "Only things that need your attention",
+          description: "Only what's important to you via AI",
           selected: notificationSettings.mode == .importantOnly,
           value: NotificationMode.importantOnly,
           onChange: {
             notificationSettings.mode = $0
-            close()
           },
+          customizeAction: {
+            // Customize action for Zen Mode
+            withAnimation(.easeOut(duration: 0.2)) {
+              customizingZen = true
+            }
+          }
         )
 
         NotificationSettingsItem(
@@ -108,16 +127,91 @@ struct NotificationSettingsButton: View {
           value: NotificationMode.none,
           onChange: {
             notificationSettings.mode = $0
-            close()
           },
         )
       }
     }
-    .padding(.vertical, 10)
-    .padding(.horizontal, 8)
-    .frame(width: 260)
   }
-  
+
+  @ViewBuilder
+  private var customize: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      // Header
+      HStack {
+        VStack(alignment: .leading, spacing: 0) {
+          Text("Customize Zen Mode")
+            .font(.headline)
+
+          Text("Tell AI what do you want to be notified about")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+      }.padding(.horizontal, 6)
+
+      Divider().foregroundStyle(.tertiary)
+        .padding(.vertical, 6)
+
+      VStack(alignment: .leading, spacing: 8) {
+        Toggle(isOn: $notificationSettings.requiresMention) {
+          HStack {
+            Text("Require mentioning me")
+            Spacer()
+          }
+        }
+        .toggleStyle(.switch)
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        Picker("Rules", selection: $notificationSettings.usesDefaultRules) {
+          Text("Default").tag(true)
+          Text("Custom").tag(false)
+        }
+        .pickerStyle(.segmented)
+
+        Text("Notify me when...")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+
+        TextEditor(
+          text: notificationSettings.usesDefaultRules ? .constant(defaultRules) : $notificationSettings
+            .customRules
+        )
+        .font(.body)
+        .foregroundStyle(notificationSettings.usesDefaultRules ? .secondary : .primary)
+        .frame(height: 100)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .scrollContentBackground(.hidden)
+        .background(.secondary.opacity(0.2))
+        .cornerRadius(10)
+
+      }.padding(.horizontal, 8)
+
+      // Done button at the bottom
+      Button(action: {
+        withAnimation(.easeOut(duration: 0.2)) {
+          customizingZen = false
+        }
+      }) {
+        Spacer()
+        Text("Done")
+          .font(.body.weight(.bold))
+          .foregroundStyle(.primary)
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 8)
+          .cornerRadius(8)
+        Spacer()
+      }
+      .buttonStyle(.borderedProminent)
+      .padding(.horizontal, 8)
+      .padding(.top, 8)
+    }
+  }
+
+  let defaultRules = """
+  - Something urgent has came up (eg. a bug or an incident). 
+  - I must wake up for something.
+  """
+
   private func close() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
       // Delay closing to allow animations to finish
@@ -133,6 +227,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
   var selected: Bool
   var value: Value
   var onChange: (Value) -> Void
+  var customizeAction: (() -> Void)?
 
   @State private var hovered = false
 
@@ -161,6 +256,20 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
           .padding(.top, -1)
       }
       Spacer()
+      if let customizeAction {
+        Button(action: customizeAction) {
+          Circle()
+            .frame(width: 28, height: 28)
+            .foregroundStyle(.secondary.opacity(0.1))
+            .overlay {
+              Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.tertiary)
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+      }
     }
     .animation(.easeOut(duration: 0.08), value: selected)
     .padding(4)

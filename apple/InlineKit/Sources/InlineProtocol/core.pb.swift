@@ -2423,6 +2423,36 @@ public struct NotificationSettings: Sendable {
   /// Clears the value of `silent`. Subsequent reads from it will return its default value.
   public mutating func clearSilent() {self._silent = nil}
 
+  /// If true, the notification requires mentioning the user
+  public var zenModeRequiresMention: Bool {
+    get {return _zenModeRequiresMention ?? false}
+    set {_zenModeRequiresMention = newValue}
+  }
+  /// Returns true if `zenModeRequiresMention` has been explicitly set.
+  public var hasZenModeRequiresMention: Bool {return self._zenModeRequiresMention != nil}
+  /// Clears the value of `zenModeRequiresMention`. Subsequent reads from it will return its default value.
+  public mutating func clearZenModeRequiresMention() {self._zenModeRequiresMention = nil}
+
+  /// If true, the default rules will be used
+  public var zenModeUsesDefaultRules: Bool {
+    get {return _zenModeUsesDefaultRules ?? false}
+    set {_zenModeUsesDefaultRules = newValue}
+  }
+  /// Returns true if `zenModeUsesDefaultRules` has been explicitly set.
+  public var hasZenModeUsesDefaultRules: Bool {return self._zenModeUsesDefaultRules != nil}
+  /// Clears the value of `zenModeUsesDefaultRules`. Subsequent reads from it will return its default value.
+  public mutating func clearZenModeUsesDefaultRules() {self._zenModeUsesDefaultRules = nil}
+
+  /// Custom rules for notifications
+  public var zenModeCustomRules: String {
+    get {return _zenModeCustomRules ?? String()}
+    set {_zenModeCustomRules = newValue}
+  }
+  /// Returns true if `zenModeCustomRules` has been explicitly set.
+  public var hasZenModeCustomRules: Bool {return self._zenModeCustomRules != nil}
+  /// Clears the value of `zenModeCustomRules`. Subsequent reads from it will return its default value.
+  public mutating func clearZenModeCustomRules() {self._zenModeCustomRules = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum Mode: SwiftProtobuf.Enum, Swift.CaseIterable {
@@ -2475,6 +2505,9 @@ public struct NotificationSettings: Sendable {
 
   fileprivate var _mode: NotificationSettings.Mode? = nil
   fileprivate var _silent: Bool? = nil
+  fileprivate var _zenModeRequiresMention: Bool? = nil
+  fileprivate var _zenModeUsesDefaultRules: Bool? = nil
+  fileprivate var _zenModeCustomRules: String? = nil
 }
 
 public struct UpdateUserSettingsInput: Sendable {
@@ -7763,6 +7796,9 @@ extension NotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "mode"),
     2: .same(proto: "silent"),
+    3: .standard(proto: "zen_mode_requires_mention"),
+    4: .standard(proto: "zen_mode_uses_default_rules"),
+    5: .standard(proto: "zen_mode_custom_rules"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -7773,6 +7809,9 @@ extension NotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularEnumField(value: &self._mode) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self._silent) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._zenModeRequiresMention) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._zenModeUsesDefaultRules) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._zenModeCustomRules) }()
       default: break
       }
     }
@@ -7789,12 +7828,24 @@ extension NotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     try { if let v = self._silent {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._zenModeRequiresMention {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._zenModeUsesDefaultRules {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._zenModeCustomRules {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: NotificationSettings, rhs: NotificationSettings) -> Bool {
     if lhs._mode != rhs._mode {return false}
     if lhs._silent != rhs._silent {return false}
+    if lhs._zenModeRequiresMention != rhs._zenModeRequiresMention {return false}
+    if lhs._zenModeUsesDefaultRules != rhs._zenModeUsesDefaultRules {return false}
+    if lhs._zenModeCustomRules != rhs._zenModeCustomRules {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

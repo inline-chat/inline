@@ -1,4 +1,6 @@
+import type { NotificationSettings, UserSettings } from "@in/protocol/core"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
+import { UserSettingsNotificationsMode, type UserSettingsGeneral } from "@in/server/db/models/userSettings/types"
 import type { DbMessage } from "@in/server/db/schema"
 import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
 import { openaiClient } from "@in/server/libs/openAI"
@@ -21,6 +23,11 @@ type Input = {
   chatId: number
   // Text content of the message
   message: InputMessage
+
+  participantSettings: {
+    userId: number
+    settings: UserSettingsGeneral | null
+  }[]
 }
 
 const log = new Log("notifications.eval", LogLevel.DEBUG)
@@ -28,7 +35,7 @@ const log = new Log("notifications.eval", LogLevel.DEBUG)
 let outputSchema = z.object({
   msgId: z.number(),
   mentionedUserIds: z.array(z.number()).nullable(),
-  mustSeeUserIds: z.array(z.number()).nullable(),
+  notifyUserIds: z.array(z.number()).nullable(),
 })
 
 type Output = z.infer<typeof outputSchema>
@@ -46,7 +53,11 @@ export const batchEvaluate = async (input: Input): Promise<NotificationEvalResul
 
   // const model: ChatModel = "gpt-4.1-nano"
   // const model: ChatModel = "gpt-4.1-mini"
-  let model: ChatModel = "gpt-4o-mini" as ChatModel
+  //let model: ChatModel = "gpt-4o-mini" as ChatModel
+  let model: ChatModel = "gpt-4.1-mini" as ChatModel
+
+  log.debug(`Notification eval system prompt: ${systemPrompt}`)
+  log.debug(`Notification eval user prompt: ${userPrompt}`)
 
   const response = await openaiClient.chat.completions.create({
     model: model,
@@ -118,52 +129,48 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   const context = await getContext(input)
   const systemPrompt = `
   # Identity
-  You are a chat app assistant for Inline Chat app – a work chat app similar to Slack. You are given a new message in a chat and you evaluate who is mentioned and who must be notified immediately.
+  You are a chat app notification assistant for Inline Chat app – a work chat app similar to Slack. You are given a new message in a chat and you evaluate who is mentioned and who needs to be notified based on a set of rules for each user.
 
   # Instructions
   
-  - Evaluate which participants are mentioned in messages, put the IDs in the mentioned list. If message is replied to a user, or it's a DM to a user, consider it a mention.
-  - Then evaluate which users not only are mentioned or referred to, but additionally must immediately get a special notification because something needs their attention or an incident, event, or an issue has happened that they must be aware of or take action, even if they are asleep. this is NOT for every mention. 
-  -  IT IS IMPORTANT TO NOT WAKE UP THE USER UNNECESSARILY. Users enable this when they're alseep. Greetings, links, casual chats, etc should NOT be considered important. Instead bug reports, company issues related to user, important DMs, things that explicitly require their attention etc should be considered important. If a user is mentioned, it's slightly more likely to be important. If someone is asking the user in DM or by mentioning/replying to them to wait or to make sure to look at something or as a follow up of an earlier request, also consider it important to see. Users want to be notified of messages that the sender is waiting for them to see/do something or help them. If the user asks someone to wake up or to come back, it's important to see, especially if in DM. If user is getting requests multiple times in succession, it's important to see.
+  - Evaluate which participants are mentioned in a message. Mentioning means @username or their first name appearing in the message. 
+  - If message is a reply to the user, or it's a DM from someone to the user, consider it a mention for that user ID.
+  - For the next step, you are given a set of rules for each user ID to use as a criteria to determine if the user needs to be notified. Users set these rules so they can focus or sleep without being distracted by messages that aren't important to that user.
+  - If the message matches the criteria user has set, include the user ID in the notifyUserIds array. 
+  - Use the chat context, previous messages and meaning of messages to infer if the new message matches what user wants to be notified for more broadly. eg. if user is set to notify when something urgent has came up, and the message is about a bug or an incident, include the user ID in the notifyUserIds array even if the word "urgent" or "bug" is not in the message. The user is describing a situation, not a literal pattern matching.
   - Return user IDs of both groups.
-  - Only evaluate messages between <new_messages> tag.
 
- 
   # Examples
 <example_context>
 particiapants: Amy (user_id: 1), Hassan (user_id: 2), Ellie (user_id: 3)
+settings for user ids 1,2,3: notify when something urgent has came up (eg. a bug or an incident). 
 </example_context>
  <example id="0">
-hey ellie!
+hey Ellie!
 </example>
 <assistant_response id="0">
-[{"msgId": 0, "mentioned": [3], "mustSee": []}]
+[{"msgId": 0, "mentionedUserIds": [3], "notifyUserIds": []}]
 </assistant_response>
 <example id="1">
 amy can you see the new message, we need it now.
 </example>
 <assistant_response id="1">
-[{"msgId": 1, "mentioned": [1], "mustSee": [1]}]
+[{"msgId": 1, "mentionedUserIds": [1], "notifyUserIds": [1]}]
 </assistant_response>
 <example id="4">
 Ellie: website is down. @hasan
 </example>
 <assistant_response id="4">
-[{"msgId": 4, "mentioned": [2], "mustSee": [2]}]
+[{"msgId": 4, "mentionedUserIds": [2], "notifyUserIds": [2]}]
 </assistant_response>
-<example id="6">
-Amy: Are you there? One sec, sending you a code, can you read it? (replying to Ellie)
+<example id="5" chat_type="DM with Hassan">
+Ellie: hey
 </example>
-<assistant_response id="6">
-[{"msgId": 6, "mentioned": [3], "mustSee": [3]}]
-</assistant_response>
-<example id="7">
-Hassan: Amy are you awake? wake up please
-</example>
-<assistant_response id="7">
-[{"msgId": 7, "mentioned": [1], "mustSee": [1]}]
+<assistant_response id="5">
+[{"msgId": 5, "mentionedUserIds": [2], "notifyUserIds": []}]
 </assistant_response>
 </examples>
+
 
   # Context
   <context>
@@ -195,16 +202,18 @@ const getContext = async (input: Input): Promise<string> => {
   ${participantNames
     .map(
       (name) =>
-        `<participant userId="${name.id}">${name.firstName ?? ""} ${name.lastName ?? ""} @${
-          name.username
-        }</participant>`,
+        `<participant userId="${name.id}">
+      Name: ${name.firstName ?? ""} ${name.lastName ?? ""} 
+      Username: @${name.username}
+      Notifications: ${formatNotificationSettings(name.id, input)}
+      </participant>`,
     )
     .join("\n")}
   </participants>
 
   <chat_info>
   ${chatInfo?.title ? `Chat: ${chatInfo?.title}` : ""}
-  Chat type: ${chatInfo?.type === "thread" ? "group chat" : "DM"}
+  Chat type: ${chatInfo?.type === "thread" ? "group chat" : `DM between ${chatInfo?.participantUserIds.join(", ")}`}
   ${spaceInfo ? `Workspace: ${spaceInfo?.name}` : ""}
   ${spaceInfo ? `Workspace description: ${spaceInfo?.name?.includes("Wanver") ? WANVER_TRANSLATION_CONTEXT : ""}` : ""}
   </chat_info>
@@ -217,6 +226,35 @@ const getContext = async (input: Input): Promise<string> => {
   return context
 }
 
+const formatNotificationSettings = (userId: number, input: Input): string => {
+  const settings = input.participantSettings.find((p) => p.userId === userId)?.settings?.notifications
+
+  if (!settings) return "No settings"
+
+  const isZenMode = settings.mode === UserSettingsNotificationsMode.ImportantOnly
+  const isMentionMode = settings.mode === UserSettingsNotificationsMode.Mentions
+  const requiresMention = settings.zenModeRequiresMention
+
+  let rules = settings.zenModeUsesDefaultRules
+    ? `
+  <rules>
+${requiresMention ? "Only if mentioned or replied to in a message, AND rules below apply:" : ""}
+- Something urgent has came up (eg. a bug or an incident). 
+- I must wake up for something, I must handle something.
+- Someone is desperatly waiting for me to unblock them and cannot wait anymore.
+  </rules>`
+    : `<rules>
+${requiresMention ? "Only if mentioned or replied to in a message, AND rules below apply:" : ""}
+${settings.zenModeCustomRules}
+</rules>
+  `
+
+  return `
+  Notify ${userId} for: ${isMentionMode ? "Mentions" : isZenMode ? "Messages that match the criteria" : "None"}
+  ${isZenMode ? `User ${userId} wants to be notified when: "${rules}"` : ""}
+  `
+}
+
 export const formatMessage = (m: ProcessedMessage): string => {
   return `<message 
 id="${m.messageId}"
@@ -227,3 +265,39 @@ ${m.photoId ? "[photo attachment]" : ""} ${m.videoId ? "[video attachment]" : ""
     m.documentId ? "[document attachment]" : ""
   } ${m.text ? m.text : "[empty caption]"}</message>`
 }
+
+// # Examples
+// <example_context>
+// particiapants: Amy (user_id: 1), Hassan (user_id: 2), Ellie (user_id: 3)
+// </example_context>
+//  <example id="0">
+// hey ellie!
+// </example>
+// <assistant_response id="0">
+// [{"msgId": 0, "mentioned": [3], "mustSee": []}]
+// </assistant_response>
+// <example id="1">
+// amy can you see the new message, we need it now.
+// </example>
+// <assistant_response id="1">
+// [{"msgId": 1, "mentioned": [1], "mustSee": [1]}]
+// </assistant_response>
+// <example id="4">
+// Ellie: website is down. @hasan
+// </example>
+// <assistant_response id="4">
+// [{"msgId": 4, "mentioned": [2], "mustSee": [2]}]
+// </assistant_response>
+// <example id="6">
+// Amy: Are you there? One sec, sending you a code, can you read it? (replying to Ellie)
+// </example>
+// <assistant_response id="6">
+// [{"msgId": 6, "mentioned": [3], "mustSee": [3]}]
+// </assistant_response>
+// <example id="7">
+// Hassan: Amy are you awake? wake up please
+// </example>
+// <assistant_response id="7">
+// [{"msgId": 7, "mentioned": [1], "mustSee": [1]}]
+// </assistant_response>
+// </examples>
