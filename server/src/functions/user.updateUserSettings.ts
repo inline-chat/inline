@@ -41,7 +41,7 @@ export const updateUserSettings = async (
   }
 
   // Push update to the current user in real-time
-  RealtimeUpdates.pushToUser(context.currentUserId, [update])
+  RealtimeUpdates.pushToUser(context.currentUserId, [update], { skipSessionId: context.currentSessionId })
 
   return {
     updates: [update],
