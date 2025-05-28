@@ -154,9 +154,6 @@
     "Appearance" : {
 
     },
-    "Archived Chats" : {
-
-    },
     "Cancel" : {
       "localizations" : {
         "fa" : {
@@ -346,6 +343,9 @@
       }
     },
     "Create a new space (team)" : {
+
+    },
+    "Create a space to get started" : {
 
     },
     "Create Chat" : {
@@ -638,6 +638,9 @@
     "No messages yet" : {
 
     },
+    "No spaces" : {
+
+    },
     "No users found" : {
 
     },
@@ -772,9 +775,6 @@
 
     },
     "Settings" : {
-
-    },
-    "Spaces" : {
 
     },
     "Step" : {
