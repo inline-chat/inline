@@ -1,4 +1,5 @@
 import InlineKit
+import Logger
 import SafariServices
 import UIKit
 
@@ -16,6 +17,9 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
   private var url: URL?
   private var title: String?
   private var issueIdentifier: String?
+  private var externalTask: ExternalTask?
+  private var messageId: Int64?
+  private var chatId: Int64?
 
   private lazy var avatarView: UserAvatarView = {
     let view = UserAvatarView()
@@ -66,12 +70,18 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     outgoing: Bool,
     url: URL? = nil,
     issueIdentifier: String? = nil,
-    title: String? = nil
+    title: String? = nil,
+    externalTask: ExternalTask? = nil,
+    messageId: Int64? = nil,
+    chatId: Int64? = nil
   ) {
     self.outgoing = outgoing
     self.url = url
     self.title = title
     self.issueIdentifier = issueIdentifier
+    self.externalTask = externalTask
+    self.messageId = messageId
+    self.chatId = chatId
 
     print("TITLE is \(title)")
     avatarView.configure(with: userInfo, size: Constants.avatarSize)
@@ -135,8 +145,8 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
         title: "Delete",
         image: UIImage(systemName: "trash"),
         attributes: .destructive
-      ) { _ in
-        // TODO: Implement delete functionality
+      ) { [weak self] _ in
+        self?.showDeleteConfirmation()
       }
 
       return UIMenu(title: "", children: [
@@ -204,6 +214,68 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     // Don't require this gesture recognizer to fail for others
     false
   }
+
+  private func showDeleteConfirmation() {
+    guard let viewController = findViewController() else { return }
+
+    let alert = UIAlertController(
+      title: "Delete Task",
+      message: "This will delete the task from both Inline and Notion. This action cannot be undone.",
+      preferredStyle: .alert
+    )
+
+    let deleteAction = UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+      self?.deleteAttachment()
+    }
+
+    let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
+
+    alert.addAction(deleteAction)
+    alert.addAction(cancelAction)
+
+    viewController.present(alert, animated: true)
+  }
+
+  private func deleteAttachment() {
+    guard let externalTask,
+          let messageId,
+          let chatId
+    else {
+      Log.shared.error("Missing required data for attachment deletion")
+      return
+    }
+
+    Task {
+      do {
+        try await DataManager.shared.deleteAttachment(
+          externalTask: externalTask,
+          messageId: messageId,
+          chatId: chatId
+        )
+      } catch {
+        Log.shared.error("Failed to delete attachment", error: error)
+
+        DispatchQueue.main.async { [weak self] in
+          self?.showErrorAlert(error: error)
+        }
+      }
+    }
+  }
+
+  private func showErrorAlert(error: Error) {
+    guard let viewController = findViewController() else { return }
+
+    let alert = UIAlertController(
+      title: "Delete Failed",
+      message: "Failed to delete the task: \(error.localizedDescription)",
+      preferredStyle: .alert
+    )
+
+    let okAction = UIAlertAction(title: "OK", style: .default)
+    alert.addAction(okAction)
+
+    viewController.present(alert, animated: true)
+  }
 }
 
 // MARK: - Layout
@@ -253,7 +325,7 @@ private extension MessageAttachmentEmbed {
         equalTo: checkboxImageView.trailingAnchor,
         constant: Constants.contentSpacing
       ),
-      taskTitleLabel.topAnchor.constraint(equalTo: checkboxImageView.topAnchor, constant: -2),
+      taskTitleLabel.topAnchor.constraint(equalTo: checkboxImageView.topAnchor),
       taskTitleLabel.trailingAnchor.constraint(
         lessThanOrEqualTo: trailingAnchor,
         constant: -Constants.horizontalPadding

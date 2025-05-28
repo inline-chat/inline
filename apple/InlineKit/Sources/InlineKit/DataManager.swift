@@ -190,15 +190,13 @@ public class DataManager: ObservableObject {
         try Member
           .filter(Column("spaceId") == spaceId)
           .deleteAll(db)
-        
+
         try Dialog.filter(Column("spaceId") == spaceId)
           .deleteAll(db)
-        
+
         try Chat
           .filter(Column("spaceId") == spaceId)
           .deleteAll(db)
-        
-       
       }
 
       let _ = try await ApiClient.shared.deleteSpace(spaceId: spaceId)
@@ -544,6 +542,39 @@ public class DataManager: ObservableObject {
     } catch {
       log.error("Failed to update timezone", error: error)
       throw error
+    }
+  }
+
+  public func deleteAttachment(
+    externalTask: ExternalTask,
+    messageId: Int64,
+    chatId: Int64
+  ) async throws {
+    log.debug("deleteAttachment: \(externalTask.id)")
+    try await database.dbWriter.write { db in
+      try Attachment
+        .filter(Column("externalTaskId") == externalTask.id)
+        .filter(Column("messageId") == messageId)
+        .deleteAll(db)
+
+      try ExternalTask
+        .filter(Column("id") == externalTask.id)
+        .deleteAll(db)
+    }
+
+    let _ = try await ApiClient.shared.deleteAttachment(
+      externalTaskId: externalTask.id ?? 0,
+      pageId: externalTask.taskId ?? "",
+      messageId: messageId,
+      chatId: chatId
+    )
+
+    Task { @MainActor in
+      if let message = try? await database.reader.read({ db in
+        try Message.filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
+      }) {
+        MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
+      }
     }
   }
 }
