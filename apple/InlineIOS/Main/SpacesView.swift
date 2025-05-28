@@ -33,6 +33,15 @@ struct SpacesView: View {
             .font(.title3)
             .fontWeight(.semibold)
         }
+
+        ToolbarItem(placement: .topBarTrailing) {
+          Button {
+            nav.push(.createSpace)
+          } label: {
+            Image(systemName: "plus")
+          }
+          .tint(.secondary)
+        }
       }
     }
   }
