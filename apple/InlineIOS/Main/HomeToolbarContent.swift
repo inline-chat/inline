@@ -11,27 +11,8 @@ struct HomeToolbarContent: ToolbarContent {
   @State var apiState: RealtimeAPIState = .connecting
 
   var body: some ToolbarContent {
-    ToolbarItem(placement: .principal) {
-      header
-    }
-
     ToolbarItem(placement: .topBarLeading) {
-      Button(action: {
-        nav.push(.alphaSheet)
-      }, label: {
-        Text("ALPHA")
-          .monospaced()
-          .foregroundStyle(Color(.systemBackground))
-          .font(.caption)
-          .fontWeight(.bold)
-          .padding(.horizontal, 6)
-          .padding(.vertical, 3)
-          .background(
-            Capsule()
-              .fill(.primary)
-          )
-      })
-      .buttonStyle(.plain)
+      header
     }
 
     ToolbarItemGroup(placement: .topBarTrailing) {

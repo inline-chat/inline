@@ -31,12 +31,11 @@ struct CreateSpace: View {
           }
         }
       }
-      .background(.clear)
+      .listStyle(.plain)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar(content: {
         ToolbarItem(placement: .topBarLeading) {
           Text("Create a new space (team)")
-            .fontWeight(.bold)
         }
         ToolbarItem(placement: .topBarTrailing) {
           Button(formState.isLoading ? "Creating..." : "Create") {
@@ -51,6 +50,7 @@ struct CreateSpace: View {
         isFocused = true
       }
     }
+    .background(.clear)
   }
 
   func submit() {
