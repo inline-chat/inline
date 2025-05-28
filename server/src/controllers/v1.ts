@@ -200,6 +200,12 @@ import {
   Response as CreateNotionTaskResponse,
 } from "@in/server/methods/notion/createNotionTask"
 
+import {
+  handler as deleteNotionTaskHandler,
+  Input as DeleteNotionTaskInput,
+  Response as DeleteNotionTaskResponse,
+} from "@in/server/methods/notion/deleteNotionTask"
+
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return app
@@ -287,6 +293,7 @@ export const apiV1 = new Elysia({ name: "v1" })
         ),
       )
       .use(makeApiRoute("/createNotionTask", CreateNotionTaskInput, CreateNotionTaskResponse, createNotionTaskHandler))
+      .use(makeApiRoute("/deleteAttachment", DeleteNotionTaskInput, DeleteNotionTaskResponse, deleteNotionTaskHandler))
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }

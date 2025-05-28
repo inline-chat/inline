@@ -59,7 +59,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
 
   const completion = await openaiClient.chat.completions.create({
     //model: "gpt-4o-2024-08-06",
-    model: "gpt-4.1",
+    model: process.env.NODE_ENV === "production" ? "gpt-4.1" : "gpt-4.1-mini",
     messages: [
       {
         role: "system",

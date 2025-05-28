@@ -407,7 +407,10 @@ class UIMessageView: UIView {
             outgoing: outgoing,
             url: URL(string: externalTask.url ?? ""),
             issueIdentifier: nil,
-            title: externalTask.title
+            title: externalTask.title,
+            externalTask: externalTask,
+            messageId: message.messageId,
+            chatId: message.chatId
           )
           innerContainer.addArrangedSubview(messageAttachmentEmbed)
         }
@@ -441,7 +444,10 @@ class UIMessageView: UIView {
             outgoing: outgoing,
             url: URL(string: externalTask.url ?? ""),
             issueIdentifier: nil,
-            title: externalTask.title
+            title: externalTask.title,
+            externalTask: externalTask,
+            messageId: message.messageId,
+            chatId: message.chatId
           )
           multiLineContainer.addArrangedSubview(messageAttachmentEmbed)
         }
