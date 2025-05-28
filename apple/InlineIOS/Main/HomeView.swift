@@ -71,29 +71,53 @@ struct HomeView: View {
     .toolbar {
       ToolbarItemGroup(placement: .bottomBar) {
         Spacer()
+        Spacer()
+        Spacer()
 
-        Button(action: { tabsManager.setSelectedTab(.archived) }) {
+        Button(action: {
+          withAnimation(.smoothSnappy) {
+            tabsManager.setSelectedTab(.archived)
+          }
+        }) {
           Image(systemName: "archivebox.fill")
             .font(.body)
             .foregroundColor(tabsManager.selectedTab == .archived ? Color(ThemeManager.shared.selected.accent) : .gray)
+            .frame(minWidth: 80, minHeight: 80)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(NoOpacityButtonStyle())
 
         Spacer()
 
-        Button(action: { tabsManager.setSelectedTab(.chats) }) {
+        Button(action: {
+          withAnimation(.smoothSnappy) {
+            tabsManager.setSelectedTab(.chats)
+          }
+        }) {
           Image(systemName: "bubble.left.and.bubble.right.fill")
             .font(.body)
             .foregroundColor(tabsManager.selectedTab == .chats ? Color(ThemeManager.shared.selected.accent) : .gray)
+            .frame(minWidth: 80, minHeight: 80)
+            .contentShape(Rectangle())
         }
-
+        .buttonStyle(NoOpacityButtonStyle())
         Spacer()
 
-        Button(action: { tabsManager.setSelectedTab(.spaces) }) {
+        Button(action: {
+          withAnimation(.smoothSnappy) {
+            tabsManager.setSelectedTab(.spaces)
+          }
+        }) {
           Image(systemName: "building.2.fill")
             .font(.body)
             .foregroundColor(tabsManager.selectedTab == .spaces ? Color(ThemeManager.shared.selected.accent) : .gray)
+            .frame(minWidth: 80, minHeight: 80)
+            .contentShape(Rectangle())
         }
 
+        .buttonStyle(NoOpacityButtonStyle())
+        Spacer()
+        Spacer()
         Spacer()
       }
     }
