@@ -62,6 +62,9 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
         case let .newMessageNotification(newMessageNotification):
           try newMessageNotification.apply(db)
 
+        case let .updateUserSettings(userSettings):
+          userSettings.apply()
+
         default:
           break
       }
@@ -433,6 +436,16 @@ extension InlineProtocol.UpdateChatParticipantDelete {
           userInfo: ["chatId": chatID]
         )
       }
+    }
+  }
+}
+
+extension InlineProtocol.UpdateUserSettings {
+  func apply() {
+    guard let settings = hasSettings ? settings.notificationSettings : nil else { return }
+
+    Task { @MainActor in
+      INUserSettings.current.notification.update(from: settings)
     }
   }
 }

@@ -134,10 +134,19 @@ const sendRaw = (ws: Ws, message: ServerProtocolMessage) => {
   ws.raw.sendBinary(ServerProtocolMessage.toBinary(message), true)
 }
 
-export const sendMessageToRealtimeUser = async (userId: number, payload: ServerMessage["payload"]) => {
+export const sendMessageToRealtimeUser = async (
+  userId: number,
+  payload: ServerMessage["payload"],
+  options?: { skipSessionId?: number },
+) => {
   const connections = connectionManager.getUserConnections(userId)
 
   for (let conn of connections) {
+    if (options?.skipSessionId && conn.sessionId === options.skipSessionId) {
+      log.debug(`skipping session ${options.skipSessionId} for user ${userId}`)
+      continue
+    }
+
     // re-using id in different sockets should be fine, even beneficial as it avoid duplicate ones
     let id = genId()
     sendRaw(conn.ws, {
@@ -162,13 +171,17 @@ export const sendMessageToRealtimeSpace = async (spaceId: number, payload: Serve
 }
 
 export class RealtimeUpdates {
-  static pushToUser(userId: number, updates: UpdatesPayload["updates"]) {
-    sendMessageToRealtimeUser(userId, {
-      oneofKind: "update",
-      update: {
-        updates: updates,
+  static pushToUser(userId: number, updates: UpdatesPayload["updates"], options?: { skipSessionId?: number }) {
+    sendMessageToRealtimeUser(
+      userId,
+      {
+        oneofKind: "update",
+        update: {
+          updates: updates,
+        },
       },
-    })
+      options,
+    )
   }
 
   static pushToSpace(spaceId: number, updates: UpdatesPayload["updates"]) {
