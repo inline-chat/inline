@@ -245,51 +245,46 @@ class ChatViewAppKit: NSViewController {
   private func setupDragAndDrop() {
     guard let dropView = view as? ChatDropView else { return }
     dropView.dropHandler = { [weak self] sender in
-      self?.handleDrop(sender) ?? false
+      self?.handleAttachments(from: sender.draggingPasteboard) ?? false
     }
   }
 
-  private func handleDrop(_ sender: NSDraggingInfo) -> Bool {
-    let pasteboard = sender.draggingPasteboard
+  private func handleAttachments(from pasteboard: NSPasteboard) -> Bool {
+    Log.shared.debug("Handling attachments from pasteboard")
 
-    // Handle URLs (files)
-    if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
-      for url in urls {
-        // If PDF, handle as file
-        if url.pathExtension == "pdf" {
-          compose?.handleFileDrop([url])
-          continue
-        }
+    let attachments = InlinePasteboard.findAttachments(from: pasteboard)
 
-        // Try to load as image
-        Task { [weak self] in
-          guard let self else { return }
-
-          if let image = await loadImage(from: url) {
-            compose?.handleImageDropOrPaste(image)
-          } else {
-            // Otherwise handle as generic file
-            compose?.handleFileDrop([url])
-          }
-        }
-        continue
+    for attachment in attachments {
+      switch attachment {
+        case let .image(image, _):
+          handleDroppedImage(image)
+        case let .video(url, _):
+          handleDroppedVideo(url)
+        case let .file(url, _):
+          handleDroppedFile(url)
+        case let .text(text):
+          handleDroppedText(text)
       }
-      return true
     }
 
-    // Handle images directly
-    if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
-       let image = images.first
-    {
-      compose?.handleImageDropOrPaste(image)
+    if attachments.isEmpty {
+      Log.shared.debug("No attachments found in pasteboard")
+      return false
+    } else {
       return true
     }
-
-    return false
   }
 
   // FILE DROPPED
   private func handleDroppedFile(_ url: URL) {
+    compose?.handleFileDrop([url])
+  }
+
+  private func handleDroppedText(_ text: String) {
+    compose?.handleTextDropOrPaste(text)
+  }
+
+  private func handleDroppedVideo(_ url: URL) {
     compose?.handleFileDrop([url])
   }
 

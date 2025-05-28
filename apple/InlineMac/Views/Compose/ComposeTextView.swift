@@ -35,6 +35,11 @@ class ComposeNSTextView: NSTextView {
   private func logPasteboardTypes(_ pasteboard: NSPasteboard) {
     print("\n--- PASTEBOARD CONTENT ANALYSIS ---")
 
+    print("📋 PASTEBOARD items count: \(pasteboard.pasteboardItems?.count ?? 0)")
+    for item in pasteboard.pasteboardItems ?? [] {
+      print("📋 PASTEBOARD item types: \(item.types ?? [])")
+    }
+
     // 1. Get all available types in the pasteboard
     if let types = pasteboard.types {
       print("📋 Available pasteboard types:")
@@ -216,6 +221,32 @@ class ComposeNSTextView: NSTextView {
     return false
   }
 
+  private func handleAttachments(from pasteboard: NSPasteboard) -> Bool {
+    Log.shared.debug("Handling attachments from pasteboard")
+
+    let attachments = InlinePasteboard.findAttachments(from: pasteboard)
+
+    for attachment in attachments {
+      switch attachment {
+        case let .image(image, url):
+          notifyDelegateAboutImage(image, url)
+        case let .video(url, _):
+          notifyDelegateAboutVideo(url)
+        case let .file(url, _):
+          notifyDelegateAboutFile(url)
+        case let .text(text):
+          insertPlainText(text)
+      }
+    }
+
+    if attachments.isEmpty {
+      Log.shared.debug("No attachments found in pasteboard")
+      return false
+    } else {
+      return true
+    }
+  }
+
   private func notifyDelegateAboutImage(_ image: NSImage, _ url: URL? = nil) {
     Log.shared.debug("Notifying delegate about image paste")
     (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveImage: image, url: url)
@@ -233,8 +264,8 @@ class ComposeNSTextView: NSTextView {
 
   private func handlePasteboardContent(from pasteboard: NSPasteboard, fromPaste: Bool) -> Bool {
     // Try to handle images first
-    if handleImageInput(from: pasteboard, fromPaste: fromPaste) {
-      Log.shared.debug("Image content handled by custom handler")
+    if handleAttachments(from: pasteboard) {
+      Log.shared.debug("Attachment content handled")
       return true
     }
 

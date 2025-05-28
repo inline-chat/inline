@@ -589,6 +589,10 @@ extension ComposeAppKit {
     }
   }
 
+  func handleTextDropOrPaste(_ text: String) {
+    textEditor.insertText(text)
+  }
+
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL? = nil) {
     addImage(image, url)
   }
@@ -620,6 +624,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textView(_ textView: NSTextView, didReceiveVideo url: URL) {
     // TODO:
+    handleFileDrop([url])
   }
 
   func textDidChange(_ notification: Notification) {

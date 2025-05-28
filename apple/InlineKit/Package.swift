@@ -32,6 +32,10 @@ let package = Package(
       name: "RealtimeAPI",
       targets: ["RealtimeAPI"]
     ),
+    .library(
+      name: "FileAttachments",
+      targets: ["FileAttachments"]
+    ),
   ],
   dependencies: [
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "3.2.0"),
@@ -109,6 +113,14 @@ let package = Package(
         "InlineProtocol",
         "InlineConfig",
         "Auth",
+      ]
+    ),
+
+    .target(
+      name: "FileAttachments",
+      dependencies: [
+        "InlineKit",
+        "Logger",
       ]
     ),
 
