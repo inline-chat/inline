@@ -30,7 +30,7 @@ type Input = {
   }[]
 }
 
-const log = new Log("notifications.eval", LogLevel.DEBUG)
+const log = new Log("notifications.eval", LogLevel.INFO)
 
 let outputSchema = z.object({
   msgId: z.number(),
