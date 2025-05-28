@@ -48,7 +48,7 @@ struct NotificationSettingsButton: View {
       case .all: "bell"
       case .none: "bell.slash"
       case .mentions: "at"
-      case .importantOnly: "slowmo"
+      case .importantOnly: "moon.stars.fill"
     }
   }
 
