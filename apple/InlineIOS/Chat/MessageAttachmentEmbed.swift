@@ -4,15 +4,14 @@ import UIKit
 
 class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
   private enum Constants {
-    static let cornerRadius: CGFloat = 12
-    static let rectangleWidth: CGFloat = 4
+    static let cornerRadius: CGFloat = 10
     static let contentSpacing: CGFloat = 6
     static let verticalPadding: CGFloat = 8
-    static let horizontalPadding: CGFloat = 6
+    static let horizontalPadding: CGFloat = 8
     static let avatarSize: CGFloat = 20
+    static let lineSpacing: CGFloat = 4
   }
 
-  static let height = 28.0
   private var outgoing: Bool = false
   private var url: URL?
   private var title: String?
@@ -24,20 +23,27 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     return view
   }()
 
-  private lazy var messageLabel: UILabel = {
+  private lazy var usernameLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 17)
+    label.font = .systemFont(ofSize: 15, weight: .medium)
     label.numberOfLines = 1
     return label
   }()
 
-  private lazy var issueIdentifierLabel: UILabel = {
+  private lazy var checkboxImageView: UIImageView = {
+    let imageView = UIImageView()
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    imageView.image = UIImage(systemName: "square")
+    imageView.contentMode = .scaleAspectFit
+    return imageView
+  }()
+
+  private lazy var taskTitleLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 14, weight: .medium)
-    label.textAlignment = .right
-    label.numberOfLines = 1
+    label.font = .systemFont(ofSize: 15)
+    label.numberOfLines = 0
     return label
   }()
 
@@ -66,14 +72,15 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     self.url = url
     self.title = title
     self.issueIdentifier = issueIdentifier
-    
-    // Configure avatar
+
+    print("TITLE is \(title)")
     avatarView.configure(with: userInfo, size: Constants.avatarSize)
-    
-    // Get user name
+
     let userName = userInfo.user.firstName ?? "User"
-    messageLabel.text = "\(userName) will do"
-    issueIdentifierLabel.text = issueIdentifier
+    usernameLabel.text = "\(userName) will do"
+
+    taskTitleLabel.text = title ?? "Task"
+
     updateColors()
   }
 
@@ -110,7 +117,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
       previewProvider: nil
     ) { [weak self] _ in
       let openAction = UIAction(
-        title: "Open Issue URL",
+        title: "Open URL",
         image: UIImage(systemName: "safari")
       ) { _ in
         guard let url = self?.url else { return }
@@ -118,13 +125,27 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
       }
 
       let copyURLAction = UIAction(
-        title: "Copy Issue URL",
+        title: "Copy URL",
         image: UIImage(systemName: "doc.on.doc")
       ) { _ in
         UIPasteboard.general.string = self?.url?.absoluteString
       }
 
-      return UIMenu(title: "", children: [openAction, copyURLAction])
+      let deleteAction = UIAction(
+        title: "Delete",
+        image: UIImage(systemName: "trash"),
+        attributes: .destructive
+      ) { _ in
+        // TODO: Implement delete functionality
+      }
+
+      return UIMenu(title: "", children: [
+        openAction,
+        copyURLAction,
+        UIMenu(title: "", options: .displayInline, children: [
+          deleteAction,
+        ]),
+      ])
     }
   }
 
@@ -190,35 +211,58 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
 private extension MessageAttachmentEmbed {
   func setupViews() {
     addSubview(avatarView)
-    addSubview(messageLabel)
-    addSubview(issueIdentifierLabel)
+    addSubview(usernameLabel)
+    addSubview(checkboxImageView)
+    addSubview(taskTitleLabel)
 
     NSLayoutConstraint.activate([
+      // First line - Avatar and username
       avatarView.leadingAnchor.constraint(
         equalTo: leadingAnchor,
         constant: Constants.horizontalPadding
       ),
-      avatarView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      avatarView.topAnchor.constraint(
+        equalTo: topAnchor,
+        constant: Constants.verticalPadding
+      ),
       avatarView.widthAnchor.constraint(equalToConstant: Constants.avatarSize),
       avatarView.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
 
-      messageLabel.leadingAnchor.constraint(
+      usernameLabel.leadingAnchor.constraint(
         equalTo: avatarView.trailingAnchor,
         constant: Constants.contentSpacing
       ),
-      messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-      issueIdentifierLabel.leadingAnchor.constraint(
-        equalTo: messageLabel.trailingAnchor,
-        constant: Constants.contentSpacing
-      ),
-      issueIdentifierLabel.trailingAnchor.constraint(
-        equalTo: trailingAnchor,
+      usernameLabel.centerYAnchor.constraint(equalTo: avatarView.centerYAnchor),
+      usernameLabel.trailingAnchor.constraint(
+        lessThanOrEqualTo: trailingAnchor,
         constant: -Constants.horizontalPadding
       ),
-      issueIdentifierLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-      heightAnchor.constraint(equalToConstant: MessageAttachmentEmbed.height),
+      // Second line - Checkbox and task title
+      checkboxImageView.leadingAnchor.constraint(
+        equalTo: usernameLabel.leadingAnchor
+      ),
+      checkboxImageView.topAnchor.constraint(
+        equalTo: usernameLabel.bottomAnchor,
+        constant: Constants.lineSpacing
+      ),
+      checkboxImageView.widthAnchor.constraint(equalToConstant: Constants.avatarSize),
+      checkboxImageView.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
+
+      taskTitleLabel.leadingAnchor.constraint(
+        equalTo: checkboxImageView.trailingAnchor,
+        constant: Constants.contentSpacing
+      ),
+      taskTitleLabel.topAnchor.constraint(equalTo: checkboxImageView.topAnchor, constant: -2),
+      taskTitleLabel.trailingAnchor.constraint(
+        lessThanOrEqualTo: trailingAnchor,
+        constant: -Constants.horizontalPadding
+      ),
+
+      taskTitleLabel.bottomAnchor.constraint(
+        lessThanOrEqualTo: bottomAnchor,
+        constant: -Constants.verticalPadding
+      ),
     ])
   }
 
@@ -229,11 +273,13 @@ private extension MessageAttachmentEmbed {
 
   func updateColors() {
     let textColor: UIColor = outgoing ? .white : .label
+    let secondaryTextColor: UIColor = outgoing ? .white.withAlphaComponent(0.9) : .secondaryLabel
     let bgAlpha: CGFloat = outgoing ? 0.13 : 0.08
     backgroundColor = outgoing ? .white.withAlphaComponent(bgAlpha) : .systemGray.withAlphaComponent(bgAlpha)
 
-    messageLabel.textColor = textColor
-    issueIdentifierLabel.textColor = outgoing ? .white : .secondaryLabel
+    usernameLabel.textColor = textColor
+    taskTitleLabel.textColor = secondaryTextColor
+    checkboxImageView.tintColor = textColor
     avatarView.tintColor = textColor
   }
 }

@@ -407,7 +407,7 @@ class UIMessageView: UIView {
             outgoing: outgoing,
             url: URL(string: externalTask.url ?? ""),
             issueIdentifier: nil,
-            title: nil
+            title: externalTask.title
           )
           innerContainer.addArrangedSubview(messageAttachmentEmbed)
         }
@@ -441,7 +441,7 @@ class UIMessageView: UIView {
             outgoing: outgoing,
             url: URL(string: externalTask.url ?? ""),
             issueIdentifier: nil,
-            title: nil
+            title: externalTask.title
           )
           multiLineContainer.addArrangedSubview(messageAttachmentEmbed)
         }
@@ -662,15 +662,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
