@@ -1,12 +1,16 @@
 import InlineKit
 import InlineUI
+import RealtimeAPI
 import SwiftUI
 
 struct SpacesView: View {
   @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var homeViewModel: HomeViewModel
-
   @EnvironmentObject private var tabsManager: TabsManager
+  @Environment(\.realtime) var realtime
+
+  @State var shouldShow = false
+  @State var apiState: RealtimeAPIState = .connecting
 
   var body: some View {
     if let activeSpaceId = tabsManager.getActiveSpaceId() {
@@ -29,9 +33,35 @@ struct SpacesView: View {
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
-          Text("Spaces")
-            .font(.title3)
-            .fontWeight(.semibold)
+          VStack(alignment: .leading, spacing: 0) {
+            Text(shouldShow ? getStatusText(apiState) : "Spaces")
+              .font(.title3)
+              .fontWeight(.semibold)
+              .contentTransition(.numericText())
+              .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+              .animation(.spring(duration: 0.5), value: shouldShow)
+          }
+          .onAppear {
+            apiState = realtime.apiState
+
+            if apiState != .connected {
+              shouldShow = true
+            }
+          }
+          .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
+            apiState = nextApiState
+            if nextApiState == .connected {
+              Task { @MainActor in
+                try await Task.sleep(for: .seconds(1))
+                if nextApiState == .connected {
+                  // second check
+                  shouldShow = false
+                }
+              }
+            } else {
+              shouldShow = true
+            }
+          })
         }
 
         ToolbarItem(placement: .topBarTrailing) {
