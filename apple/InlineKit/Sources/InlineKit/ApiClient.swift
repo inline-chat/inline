@@ -62,6 +62,7 @@ public enum Path: String {
   case getNotionDatabases
   case saveNotionDatabaseId
   case createNotionTask
+  case deleteAttachment
 }
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
@@ -757,6 +758,24 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         "messageId": messageId,
         "chatId": chatId,
         "peerId": peerIdObject,
+      ],
+      includeToken: true
+    )
+  }
+
+  public func deleteAttachment(
+    externalTaskId: Int64,
+    pageId: String,
+    messageId: Int64,
+    chatId: Int64
+  ) async throws -> EmptyPayload {
+    try await postRequest(
+      .deleteAttachment,
+      body: [
+        "externalTaskId": externalTaskId,
+        "pageId": pageId,
+        "messageId": messageId,
+        "chatId": chatId,
       ],
       includeToken: true
     )

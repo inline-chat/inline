@@ -259,17 +259,34 @@ extension InlineProtocol.UpdateDeleteMessages {
 
 extension InlineProtocol.UpdateMessageAttachment {
   func apply(_ db: Database) throws {
-    guard let messageAttachment = attachment.attachment else {
-      Log.shared.error("Message attachment is nil")
-      return
+    if attachment.attachment == nil {
+      let attachmentId = attachment.id
+
+      try Attachment
+        .filter(Column("externalTaskId") == attachmentId)
+        .deleteAll(db)
+
+      try ExternalTask
+        .filter(Column("id") == attachmentId)
+        .deleteAll(db)
+
+      Log.shared.debug("Deleted attachment with ID: \(attachmentId)")
+    } else {
+      guard let messageAttachment = attachment.attachment else {
+        Log.shared.error("Message attachment is nil")
+        return
+      }
+
+      let message = try Message.filter(Column("messageId") == messageID).filter(Column("chatId") == chatID)
+        .fetchOne(db)
+
+      if let message {
+        _ = try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
+      }
     }
 
     let message = try Message.filter(Column("messageId") == messageID).filter(Column("chatId") == chatID)
       .fetchOne(db)
-
-    if let message {
-      _ = try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
-    }
 
     if let message {
       db.afterNextTransaction { _ in
