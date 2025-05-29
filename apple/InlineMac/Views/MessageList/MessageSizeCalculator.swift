@@ -22,7 +22,7 @@ class MessageSizeCalculator {
   /// in due to a bug
   private let emptyFallback = " "
 
-  private let log = Log.scoped("MessageSizeCalculator", enableTracing: false)
+  private let log = Log.scoped("MessageSizeCalculator", enableTracing: true)
   private var heightForSingleLine: CGFloat?
 
   static let safeAreaWidth: CGFloat = Theme.messageRowSafeAreaInset
@@ -252,7 +252,7 @@ class MessageSizeCalculator {
   // Use a more efficient cache key
   private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
     // Hash-based approach is faster than string concatenation
-    let hashValue = "\(message.id)_\(Int(width))_\(props.toString())"
+    let hashValue = "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())"
     return NSString(string: "\(hashValue)")
   }
 

@@ -19,10 +19,11 @@ class CacheAttrs {
     // TODO: cache language?
     var isTranslated: Bool
     var textCount: Int
+    var textHash: Int
     var stableId: Int64
 
     var stringValue: String {
-      "\(isTranslated ? "T": "")_\(textCount)_\(stableId)"
+      "\(isTranslated ? "T" : "")_\(textCount)_\(textHash)_\(stableId)"
     }
   }
 
@@ -31,6 +32,7 @@ class CacheAttrs {
       // TODO: Optimize
       isTranslated: message.translationText != nil,
       textCount: message.displayText?.count ?? 0,
+      textHash: message.message.text?.hashValue ?? 0,
       stableId: message.message.stableId
     )
   }
