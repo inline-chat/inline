@@ -189,9 +189,10 @@ private extension Color {
   private struct ColorAdjustmentKey: Hashable {
     let colorHash: Int
     let amount: Double
+    let colorScheme: ColorScheme
 
     // Round amount to reduce cache variations
-    init(color: Color, amount: Double) {
+    init(color: Color, amount: Double, colorScheme: ColorScheme) {
       // Create a consistent hash for the color
       #if os(iOS)
       colorHash = UIColor(color).hashValue
@@ -200,6 +201,7 @@ private extension Color {
       #endif
       // Round to 3 decimal places to prevent floating-point precision issues
       self.amount = (amount * 1_000).rounded() / 1_000
+      self.colorScheme = colorScheme
     }
   }
 
@@ -210,9 +212,29 @@ private extension Color {
     return cache
   }()
 
-  @MainActor public func adjustLuminosity(by amount: Double) -> Color {
-    let key = ColorAdjustmentKey(color: self, amount: amount)
-    let cacheKey = NSString(string: "\(key.colorHash):\(key.amount)")
+  @MainActor public func adjustLuminosity(by amount: Double, colorScheme: ColorScheme? = nil) -> Color {
+    // Get the current color scheme from the environment or parameter
+    let currentColorScheme: ColorScheme
+    if let providedColorScheme = colorScheme {
+      currentColorScheme = providedColorScheme
+    } else {
+      #if os(iOS)
+      if UITraitCollection.current.userInterfaceStyle == .dark {
+        currentColorScheme = .dark
+      } else {
+        currentColorScheme = .light
+      }
+      #else
+      if NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+        currentColorScheme = .dark
+      } else {
+        currentColorScheme = .light
+      }
+      #endif
+    }
+
+    let key = ColorAdjustmentKey(color: self, amount: amount, colorScheme: currentColorScheme)
+    let cacheKey = NSString(string: "\(key.colorHash):\(key.amount):\(key.colorScheme.hashValue)")
     // Try to get from cache
     #if os(iOS)
     if let cachedColor = Self.adjustmentCache.object(forKey: cacheKey) as? UIColor {
