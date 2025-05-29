@@ -7,7 +7,7 @@ import UIKit
 
 class DocumentView: UIView {
   // MARK: - Properties
-  
+
   let fullMessage: FullMessage?
   let outgoing: Bool
 
@@ -26,7 +26,7 @@ class DocumentView: UIView {
 
   private var previewController: QLPreviewController?
   private var documentURL: URL?
-  
+
   // Progress border
   private let progressLayer = CAShapeLayer()
 
@@ -41,15 +41,16 @@ class DocumentView: UIView {
   var textColor: UIColor {
     outgoing ? .white : .label
   }
-  
+
   var labelColor: UIColor {
-    outgoing ? .white.withAlphaComponent(0.4) :  ThemeManager.shared.selected.secondaryTextColor ?? .label.withAlphaComponent(0.4)
+    outgoing ? .white.withAlphaComponent(0.4) : ThemeManager.shared.selected.secondaryTextColor ?? .label
+      .withAlphaComponent(0.4)
   }
 
   var fileIconWrapperColor: UIColor {
     outgoing ? .white.withAlphaComponent(0.2) : .white.withAlphaComponent(0.08)
   }
-  
+
   var progressBarColor: UIColor {
     outgoing ? .white : ThemeManager.shared.selected.accent
   }
@@ -59,27 +60,27 @@ class DocumentView: UIView {
   init(fullMessage: FullMessage?, outgoing: Bool) {
     self.fullMessage = fullMessage
     self.outgoing = outgoing
-    
+
     super.init(frame: .zero)
-    
+
     setupViews()
     setupContent()
     setupProgressLayer()
-    
+
     // Determine initial state
-    if let document = document {
+    if let document {
       documentState = determineDocumentState(document)
     }
-    
+
     updateUIForDocumentState()
-    
+
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(handleDocumentTappedNotification(_:)),
       name: Notification.Name("DocumentTapped"),
       object: nil
     )
-    
+
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(viewTapped))
     addGestureRecognizer(tapGesture)
   }
@@ -123,25 +124,27 @@ class DocumentView: UIView {
       iconView.widthAnchor.constraint(equalToConstant: 22),
       iconView.heightAnchor.constraint(equalToConstant: 22),
     ])
-    
+
     fileIconButton.addTarget(self, action: #selector(fileIconButtonTapped), for: .touchUpInside)
   }
-  
+
   private func setupProgressLayer() {
     let circleRadius = 19
     let center = CGPoint(x: circleRadius, y: circleRadius)
-    let circlePath = UIBezierPath(arcCenter: center,
-                                  radius: CGFloat(circleRadius - 2),
-                                  startAngle: -CGFloat.pi / 2,
-                                  endAngle: 3 * CGFloat.pi / 2,
-                                  clockwise: true)
-    
+    let circlePath = UIBezierPath(
+      arcCenter: center,
+      radius: CGFloat(circleRadius - 2),
+      startAngle: -CGFloat.pi / 2,
+      endAngle: 3 * CGFloat.pi / 2,
+      clockwise: true
+    )
+
     progressLayer.path = circlePath.cgPath
     progressLayer.strokeColor = progressBarColor.cgColor
     progressLayer.fillColor = UIColor.clear.cgColor
     progressLayer.lineWidth = 2.0
     progressLayer.strokeEnd = 0.0
-    
+
     fileIconButton.layer.addSublayer(progressLayer)
   }
 
@@ -150,29 +153,29 @@ class DocumentView: UIView {
     fileNameLabel.textColor = textColor
     fileSizeLabel.textColor = labelColor
     fileIconButton.backgroundColor = fileIconWrapperColor
-    
+
     // Data
     fileNameLabel.text = document?.fileName ?? "Unknown File"
     fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
-    
+
     // Set fixed width for fileSizeLabel to prevent layout shifts
     let maxSizeTextWidth = fileSizeLabel.intrinsicContentSize.width * 1.5
     fileSizeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: maxSizeTextWidth).isActive = true
 
     updateFileIcon()
   }
-  
+
   @objc func fileIconButtonTapped() {
     switch documentState {
-    case .needsDownload:
-      downloadFile()
-    case .downloading:
-      cancelDownload()
-    case .locallyAvailable:
-      openFile()
+      case .needsDownload:
+        downloadFile()
+      case .downloading:
+        cancelDownload()
+      case .locallyAvailable:
+        openFile()
     }
   }
-  
+
   @objc func viewTapped() {
     if case .locallyAvailable = documentState {
       openFile()
@@ -180,135 +183,135 @@ class DocumentView: UIView {
       downloadFile()
     }
   }
-  
+
   private func updateFileIcon() {
     switch documentState {
-    case .needsDownload:
-      iconView.image = UIImage(systemName: "arrow.down")
-      iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
-      
-    case .downloading:
-      
-      iconView.image = UIImage(systemName: "xmark")
-      iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
-      
-    case .locallyAvailable:
-      // Show file type icon
-      if let mimeType = document?.mimeType {
-        var iconName = "document.fill"
+      case .needsDownload:
+        iconView.image = UIImage(systemName: "arrow.down")
+        iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
 
-        if mimeType.hasPrefix("image/") {
-          iconName = "photo.fill"
-        } else if mimeType.hasPrefix("video/") {
-          iconName = "video.fill"
-        } else if mimeType.hasPrefix("audio/") {
-          iconName = "music.note.fill"
-        } else if mimeType == "application/pdf" {
-          iconName = "text.document.fill"
-        } else if mimeType == "application/zip" || mimeType == "application/x-rar-compressed" {
-          iconName = "shippingbox.fill"
+      case .downloading:
+
+        iconView.image = UIImage(systemName: "xmark")
+        iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
+
+      case .locallyAvailable:
+        // Show file type icon
+        if let mimeType = document?.mimeType {
+          var iconName = "document.fill"
+
+          if mimeType.hasPrefix("image/") {
+            iconName = "photo.fill"
+          } else if mimeType.hasPrefix("video/") {
+            iconName = "video.fill"
+          } else if mimeType.hasPrefix("audio/") {
+            iconName = "music.note.fill"
+          } else if mimeType == "application/pdf" {
+            iconName = "text.document.fill"
+          } else if mimeType == "application/zip" || mimeType == "application/x-rar-compressed" {
+            iconName = "shippingbox.fill"
+          }
+
+          iconView.image = UIImage(systemName: iconName)
+          iconView.tintColor = outgoing ? .white : .systemGray
+        } else if let fileName = document?.fileName,
+                  let fileExtension = fileName.components(separatedBy: ".").last?.lowercased()
+        {
+          // Fallback to extension-based icon if mime type is not available
+          var iconName = "doc.circle.fill"
+
+          switch fileExtension {
+            case "pdf":
+              iconName = "document.fill"
+            case "jpg", "jpeg", "png", "gif", "heic":
+              iconName = "photo.fill"
+            case "mp4", "mov", "avi":
+              iconName = "video.fill"
+            case "mp3", "wav", "aac":
+              iconName = "music.note.fill"
+            case "zip", "rar", "7z":
+              iconName = "shippingbox.fill"
+            case "doc", "docx":
+              iconName = "text.document.fill"
+            case "xls", "xlsx":
+              iconName = "chart.pie.fill"
+            case "ppt", "pptx":
+              iconName = "videoprojector.fill"
+            default:
+              iconName = "document.fill"
+          }
+
+          iconView.image = UIImage(systemName: iconName)
+          iconView.tintColor = outgoing ? .white : .systemGray
         }
-
-        iconView.image = UIImage(systemName: iconName)
-        iconView.tintColor = outgoing ? .white : .systemGray
-      } else if let fileName = document?.fileName,
-                let fileExtension = fileName.components(separatedBy: ".").last?.lowercased()
-      {
-        // Fallback to extension-based icon if mime type is not available
-        var iconName = "doc.circle.fill"
-
-        switch fileExtension {
-        case "pdf":
-          iconName = "document.fill"
-        case "jpg", "jpeg", "png", "gif", "heic":
-          iconName = "photo.fill"
-        case "mp4", "mov", "avi":
-          iconName = "video.fill"
-        case "mp3", "wav", "aac":
-          iconName = "music.note.fill"
-        case "zip", "rar", "7z":
-          iconName = "shippingbox.fill"
-        case "doc", "docx":
-          iconName = "text.document.fill"
-        case "xls", "xlsx":
-          iconName = "chart.pie.fill"
-        case "ppt", "pptx":
-          iconName = "videoprojector.fill"
-        default:
-          iconName = "document.fill"
-        }
-
-        iconView.image = UIImage(systemName: iconName)
-        iconView.tintColor = outgoing ? .white : .systemGray
-      }
     }
   }
 
   private func updateUIForDocumentState() {
     UIView.performWithoutAnimation {
       switch documentState {
-      case .locallyAvailable:
-        
-        progressLayer.strokeEnd = 0.0
-        
-        fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
-        
-      case .needsDownload:
-        
-        progressLayer.strokeEnd = 0.0
-        fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
-        
-      case let .downloading(bytesReceived, totalBytes):
-        let progress = Double(bytesReceived) / Double(totalBytes)
-        
-        progressLayer.strokeEnd = CGFloat(progress)
-        
-        let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
-        let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
-        fileSizeLabel.text = "\(downloadedStr) / \(totalStr)"
+        case .locallyAvailable:
+
+          progressLayer.strokeEnd = 0.0
+
+          fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
+
+        case .needsDownload:
+
+          progressLayer.strokeEnd = 0.0
+          fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
+
+        case let .downloading(bytesReceived, totalBytes):
+          let progress = Double(bytesReceived) / Double(totalBytes)
+
+          progressLayer.strokeEnd = CGFloat(progress)
+
+          let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
+          let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
+          fileSizeLabel.text = "\(downloadedStr) / \(totalStr)"
       }
     }
-    
+
     updateFileIcon()
   }
 
   func downloadFile() {
-    guard let documentInfo = documentInfo, let document = document, let fullMessage = fullMessage else {
+    guard let documentInfo, let document, let fullMessage else {
       return
     }
-    
+
     if case .downloading = documentState {
       return
     }
-    
+
     documentState = .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
-    
+
     startMonitoringProgress()
-    
+
     FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { [weak self] result in
-      guard let self = self else { return }
-      
+      guard let self else { return }
+
       DispatchQueue.main.async {
         switch result {
-        case .success:
-          self.documentState = .locallyAvailable
-          
-        case let .failure(error):
-          Log.shared.error("Document download failed:", error: error)
-          self.documentState = .needsDownload
+          case .success:
+            self.documentState = .locallyAvailable
+
+          case let .failure(error):
+            Log.shared.error("Document download failed:", error: error)
+            self.documentState = .needsDownload
         }
       }
     }
   }
-  
+
   func cancelDownload() {
     if case .downloading = documentState {
-      if let document = document {
+      if let document {
         FileDownloader.shared.cancelDocumentDownload(documentId: document.documentId)
       }
-      
+
       documentState = .needsDownload
-      
+
       progressSubscription?.cancel()
       progressSubscription = nil
     }
@@ -316,7 +319,7 @@ class DocumentView: UIView {
 
   func openFile() {
     guard
-      let document = document,
+      let document,
       let localPath = document.localPath
     else {
       Log.shared.error("Cannot open document: No local path available")
@@ -352,48 +355,48 @@ class DocumentView: UIView {
     }
     return nil
   }
-  
+
   // MARK: - Document State Management
-  
+
   private func determineDocumentState(_ document: Document) -> DocumentState {
     if let localPath = document.localPath {
       let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
       let fileURL = cacheDirectory.appendingPathComponent(localPath)
-      
+
       if FileManager.default.fileExists(atPath: fileURL.path) {
         documentURL = fileURL
         return .locallyAvailable
       }
     }
-    
+
     let documentId = document.documentId
     if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
       return .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
     }
-    
+
     return .needsDownload
   }
-  
+
   // MARK: - Progress Monitoring
-  
+
   private func startMonitoringProgress() {
-    guard let document = document else { return }
-    
+    guard let document else { return }
+
     progressSubscription?.cancel()
-    
+
     let documentId = document.documentId
     progressSubscription = FileDownloader.shared.documentProgressPublisher(documentId: documentId)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] progress in
-        guard let self = self else { return }
-        
+        guard let self else { return }
+
         if progress.isComplete {
-          self.documentState = .locallyAvailable
+          documentState = .locallyAvailable
         } else if let error = progress.error {
           Log.shared.error("Document download failed:", error: error)
-          self.documentState = .needsDownload
+          documentState = .needsDownload
         } else if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
-          self.documentState = .downloading(
+          documentState = .downloading(
             bytesReceived: progress.bytesReceived,
             totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document.size ?? 0)
           )
@@ -468,7 +471,7 @@ extension DocumentView {
     label.translatesAutoresizingMaskIntoConstraints = false
     label.font = .systemFont(ofSize: 15)
     label.numberOfLines = 1
-    label.lineBreakMode = .byTruncatingTail
+    label.lineBreakMode = .byTruncatingMiddle
     return label
   }
 
@@ -484,13 +487,13 @@ extension DocumentView {
 
 extension DocumentView: QLPreviewControllerDataSource, QLPreviewControllerDelegate {
   func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-    return documentURL != nil ? 1 : 0
+    documentURL != nil ? 1 : 0
   }
-  
+
   func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-    return documentURL! as QLPreviewItem
+    documentURL! as QLPreviewItem
   }
-  
+
   func previewControllerDidDismiss(_ controller: QLPreviewController) {
     previewController = nil
   }
