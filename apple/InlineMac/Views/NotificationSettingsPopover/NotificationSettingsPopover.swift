@@ -103,7 +103,7 @@ struct NotificationSettingsButton: View {
         )
 
         NotificationSettingsItem(
-          systemImage: "moon.stars.fill",
+          systemImage: "apple.meditate",
           title: "Zen Mode",
           description: "Only what's important to you via AI",
           selected: notificationSettings.mode == .importantOnly,
