@@ -18,6 +18,8 @@ struct ChatItemView: View {
     self.props = props
   }
 
+  @Environment(\.colorScheme) private var colorScheme
+
   var dialog: Dialog {
     props.dialog
   }
@@ -46,6 +48,16 @@ struct ChatItemView: View {
     props.dialog.unreadCount ?? 0 > 0
   }
 
+  private var chatProfileColors: [Color] {
+    // This computed property will re-evaluate when colorScheme changes
+    // Reference colorScheme to ensure SwiftUI tracks the dependency
+    let _ = colorScheme
+    return [
+      Color(.systemGray3).adjustLuminosity(by: 0.2),
+      Color(.systemGray5).adjustLuminosity(by: 0),
+    ]
+  }
+
   var body: some View {
     VStack {
       HStack(alignment: .top, spacing: 14) {
@@ -65,10 +77,7 @@ struct ChatItemView: View {
     Circle()
       .fill(
         LinearGradient(
-          colors: [
-            Color(.systemGray3).adjustLuminosity(by: 0.2),
-            Color(.systemGray5).adjustLuminosity(by: 0),
-          ],
+          colors: chatProfileColors,
           startPoint: .top,
           endPoint: .bottom
         )
