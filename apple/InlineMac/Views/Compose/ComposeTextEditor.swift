@@ -234,6 +234,15 @@ class ComposeTextEditor: NSView {
     showPlaceholder(true)
   }
 
+  public func setString(_ string: String) {
+    textView.string = string
+    if string.isEmpty {
+      showPlaceholder(true)
+    } else {
+      showPlaceholder(false)
+    }
+  }
+
   func resetTextViewInsets() {
     if initiallySingleLine {
       textView.textContainerInset = NSSize(
