@@ -7,6 +7,8 @@ import SwiftUI
 class MessageTimeAndState: NSView {
   private var fullMessage: FullMessage
   private var currentState: MessageSendingStatus = .sent
+  private var tooltipText: String = ""
+  private var trackingArea: NSTrackingArea?
 
   private var isOverlay: Bool {
     fullMessage.message.text == nil || fullMessage.message.text?.isEmpty == true
@@ -185,6 +187,50 @@ class MessageTimeAndState: NSView {
     layer?.addSublayer(timeLayer)
     layer?.addSublayer(statusLayer)
     statusLayer.isHidden = !hasSymbol
+    updateTooltip()
+    setupMouseTracking()
+  }
+
+  private func updateTooltip() {
+    let tooltipText = Self.tooltipFormatter.string(from: fullMessage.message.date)
+    self.tooltipText = tooltipText
+  }
+
+  private func setupMouseTracking() {
+    updateTrackingAreas()
+  }
+
+  // MARK: - Mouse Tracking
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+
+    if let trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+
+    trackingArea = NSTrackingArea(
+      rect: bounds,
+      options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+      owner: self,
+      userInfo: nil
+    )
+
+    if let trackingArea {
+      addTrackingArea(trackingArea)
+    }
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    if !tooltipText.isEmpty {
+      SimpleTooltip.shared.show(text: tooltipText, near: self)
+    }
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    SimpleTooltip.shared.hide()
   }
 
   // MARK: - Layout
@@ -224,6 +270,9 @@ class MessageTimeAndState: NSView {
         height: symbolWidth - 2
       )
     }
+
+    // Update tracking areas when layout changes
+    updateTrackingAreas()
   }
 
   // MARK: - Content Updates
@@ -238,6 +287,7 @@ class MessageTimeAndState: NSView {
 
     if fullMessage.message.date != oldDate || fullMessage.message.out != oldOut {
       updateTimeContent()
+      updateTooltip()
     }
 
     if fullMessage.message.status != oldStatus {
@@ -292,6 +342,14 @@ class MessageTimeAndState: NSView {
   static var formatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.setLocalizedDateFormatFromTemplate("jmm")
+    formatter.locale = Locale.autoupdatingCurrent
+    return formatter
+  }()
+
+  static var tooltipFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .full
+    formatter.timeStyle = .medium
     formatter.locale = Locale.autoupdatingCurrent
     return formatter
   }()
