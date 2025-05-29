@@ -360,31 +360,6 @@ class SidebarItemRow: NSTableCellView {
     messageLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
   }
 
-  // MARK: - Context Menu
-
-  override func menu(for event: NSEvent) -> NSMenu? {
-    guard let item else { return nil }
-
-    let menu = NSMenu()
-
-    let pinItem = NSMenuItem(
-      title: isPinned ? "Unpin" : "Pin",
-      action: #selector(handlePinAction),
-      keyEquivalent: ""
-    )
-    pinItem.target = self
-    menu.addItem(pinItem)
-
-    return menu
-  }
-
-  @objc private func handlePinAction() {
-    guard let item else { return }
-    Task(priority: .userInitiated) {
-      try await DataManager.shared.updateDialog(peerId: item.peerId, pinned: !isPinned)
-    }
-  }
-
   func configure(with item: HomeChatItem) {
     preparingForReuse = false
     self.item = item
@@ -507,6 +482,131 @@ class SidebarItemRow: NSTableCellView {
     isSelected = false
   }
 
+  // MARK: - Context Menu
+
+  override func menu(for event: NSEvent) -> NSMenu? {
+    guard let item else { return nil }
+
+    let menu = NSMenu()
+
+    // Pin item
+    let pinItem = NSMenuItem(
+      title: isPinned ? "Unpin" : "Pin",
+      action: #selector(handlePinAction),
+      keyEquivalent: "p"
+    )
+    pinItem.target = self
+    menu.addItem(pinItem)
+
+    // Archive item
+    let archiveItem = NSMenuItem(
+      title: isArchived ? "Unarchive" : "Archive",
+      action: #selector(handleArchiveAction),
+      keyEquivalent: "a"
+    )
+    archiveItem.target = self
+    menu.addItem(archiveItem)
+
+    if isThread {
+      // Separator
+      menu.addItem(.separator())
+
+      // Delete item
+      let deleteItem = NSMenuItem(
+        title: "Delete",
+        action: #selector(handleDeleteAction),
+        keyEquivalent: ""
+      )
+      deleteItem.target = self
+      deleteItem.attributedTitle = NSAttributedString(
+        string: "Delete",
+        attributes: [.foregroundColor: NSColor.systemRed]
+      )
+      menu.addItem(deleteItem)
+    }
+
+    return menu
+  }
+
+  @objc private func handlePinAction() {
+    guard let item else { return }
+    Task(priority: .userInitiated) {
+      try await DataManager.shared.updateDialog(peerId: item.peerId, pinned: !isPinned)
+    }
+  }
+
+  @objc private func handleArchiveAction() {
+    guard let item else { return }
+    Task(priority: .userInitiated) {
+      try await DataManager.shared.updateDialog(peerId: item.peerId, archived: !isArchived)
+    }
+  }
+
+  @objc private func handleDeleteAction() {
+    // Ask for confirmation
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "Delete chat"
+    if let chatTitle = chat?.title {
+      alert
+        .informativeText =
+        "Are you sure you want to delete \(chatTitle)? This action cannot be undone. This will delete all messages in the chat."
+    } else {
+      alert.informativeText = "Are you sure you want to delete this chat?"
+    }
+
+    // Add Cancel button first to make it the default/primary button
+    let cancel = alert.addButton(withTitle: "Cancel")
+    cancel.keyEquivalent = "\r" // Return key
+    cancel.keyEquivalentModifierMask = []
+
+    // Add Delete button second - no keyboard shortcuts for safety
+    let delete = alert.addButton(withTitle: "Delete")
+    delete.contentTintColor = .systemRed
+    delete.hasDestructiveAction = true
+    delete.keyEquivalent = "" // No key equivalent
+
+    // Set Cancel as the default button (this prevents space from triggering Delete)
+    alert.window.defaultButtonCell = cancel.cell as? NSButtonCell
+
+    if alert.runModal() == .alertSecondButtonReturn { // Now Delete is the second button
+      Task(priority: .userInitiated) {
+        guard let peerId else { return }
+        do {
+          try await dependencies.realtime
+            .invokeWithHandler(.deleteChat, input: .deleteChat(.with {
+              $0.peerID = peerId.toInputPeer()
+            }))
+
+          // Delete in local db
+          if let dialog {
+            try await dialog.deleteFromLocalDatabase()
+          } else {
+            try await chat?.deleteFromLocalDatabase()
+          }
+
+          navigateOut()
+        } catch {
+          // Show alert
+          Log.shared.error("Failed to delete chat", error: error)
+          let alert = NSAlert()
+          alert.alertStyle = .warning
+          alert.messageText = "Failed to delete chat"
+          alert.informativeText = "Error \(error.localizedDescription)"
+          alert.addButton(withTitle: "OK")
+          alert.runModal()
+        }
+      }
+    }
+  }
+
+  private func navigateOut() {
+    if isSelected {
+      // TODO: replace route
+      dependencies.nav.open(.empty)
+    }
+  }
+
   // MARK: - Computed
 
   private var isThread: Bool {
@@ -524,12 +624,27 @@ class SidebarItemRow: NSTableCellView {
     return item.dialog.pinned ?? false
   }
 
+  private var isArchived: Bool {
+    guard let item else { return false }
+    return item.dialog.archived ?? false
+  }
+
+  private var dialog: Dialog? {
+    guard let item else { return nil }
+    return item.dialog
+  }
+
   /// PeerId for this item
   private var peerId: Peer? {
     guard let item else {
       return nil
     }
     return item.chat?.peerId.toPeer()
+  }
+
+  private var chat: Chat? {
+    guard let item else { return nil }
+    return item.chat
   }
 
   /// Route for this item
