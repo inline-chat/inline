@@ -1,7 +1,7 @@
 import { openaiClient } from "@in/server/libs/openAI"
 import { getActiveDatabaseData, getNotionUsers, newNotionPage, getSampleDatabasePages } from "./notion"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
-import { Log } from "@in/server/utils/log"
+import { Log, LogLevel } from "@in/server/utils/log"
 import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
 import { getCachedChatInfo, type CachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
@@ -16,7 +16,7 @@ import {
 } from "./schemaGenerator"
 import { formatMessage } from "@in/server/modules/notifications/eval"
 
-const log = new Log("NotionAgent")
+const log = new Log("NotionAgent", LogLevel.INFO)
 
 async function createNotionPage(input: { spaceId: number; chatId: number; messageId: number; currentUserId: number }) {
   if (!openaiClient) {
@@ -87,6 +87,8 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     throw new Error("Failed to generate task data")
   }
 
+  log.info("Notion agent response", { response: parsedResponse })
+
   // Parse and validate the response against our Zod schema
   const validatedData = generateNotionPropertiesSchema(database).parse(JSON.parse(parsedResponse))
 
@@ -136,21 +138,15 @@ Instructions
 	•	Each property must use the exact property name and type structure from the database schema
 	•	Follow Notion's API format for each property type
 	•	Include only properties that exist in the database schema
-  • You don't need to fill out every property, leave properties empty (null) if they are not relevant to the task with the context provided. For example, a task can be created if it just has a title and an assignee. 
+  • You don't need to fill out every property, leave properties empty (null, not undefined or empty string) if they are not relevant to the task with the context provided. For example, a task can be created if it just has a title and an assignee (or DRI, or a field with person data type).
+  • It is important to not create invalid properties by using "undefined" or empty strings "" in the properties object where it may be invalid in Notion's create page/database entry API.
 	•	Match the tone and format of the example pages provided 
 	•	Never set task in progress or done status - keep tasks in initial state
 	•	For date properties (eg. "Due date"), if no date is specified, DO NOT include the property at all
 	•	If a date is specified, use format: { "date": { "start": "YYYY-MM-DD" } } and calculate from today's date
-	•	Due Date Detection: Analyze ALL messages in the conversation context for time expressions, not just the target message
-	•	Context Analysis: Look for due dates mentioned in previous or subsequent messages that relate to the task
-	•	Date Sources: Check for dates in:
-		▪	Target message: "fix the bug till tomorrow"
-		▪	Previous messages: "We need this done by Friday" followed by "John can you handle this?"
-		▪	Subsequent messages: "Can you do this?" followed by "Sure, I'll have it ready by Monday"
-		▪	Related context: "The deadline is next week" mentioned earlier in conversation
 	•	User Assignment Rules:
-		▪	Creator and Assignee: ALWAYS set to the user that matches with currentUserId. (who will do the task)
-		▪	Reporter/Watcher: Set to the user that matches with target message sender or who sent the message/report that the task is created for.
+		▪	Creator and Assignee: ALWAYS set to the user that matches with the actor user ID who will do the task if found in the Notion users list.
+		▪	Reporter/Watcher: Set to the user that matches with target message sender or who sent the message/report that the task is created for. (who will be notified when the task is completed)
 		▪	Match chat participants with Notion users based on names, emails, or usernames from the notion_users list
 	•	Generate ONLY the properties object that matches the provided schema structure - do not include parent or top-level fields
 

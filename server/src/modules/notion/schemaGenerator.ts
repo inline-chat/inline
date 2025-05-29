@@ -213,7 +213,7 @@ export function generateNotionPropertiesSchema(database: any): z.ZodType<any> {
       default:
         // For unknown property types, create a flexible schema
         log.warn(`Unknown property type: ${propertyType} for property: ${propertyName}`)
-        schemaFields[propertyName] = z.any().nullable()
+        schemaFields[propertyName] = z.null()
         break
     }
   })
