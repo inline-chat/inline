@@ -299,19 +299,7 @@ class MessageViewAppKit: NSView {
   }()
 
   private var reactionsViewModel: ReactionsViewModel?
-  // private var reactionsView: NSHostingView<ReactionsView>?
   private var reactionsView: NSView?
-
-//  private var reactionItems: [ReactionItemView] = []
-//
-//  private struct ReactionItemConstraints {
-//    let top: NSLayoutConstraint
-//    let leading: NSLayoutConstraint
-//    let width: NSLayoutConstraint
-//    let height: NSLayoutConstraint
-//  }
-//
-//  private var reactionItemConstraints: [ReactionItemView: ReactionItemConstraints] = [:]
 
   // MARK: - Initialization
 
@@ -323,7 +311,6 @@ class MessageViewAppKit: NSView {
     setupView()
 
     DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-      // self?.addHoverTrackingArea()
       self?.setupScrollStateObserver()
     }
   }
