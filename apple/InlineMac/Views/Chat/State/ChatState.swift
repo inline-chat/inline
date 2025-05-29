@@ -27,7 +27,10 @@ class ChatState {
     data.replyingToMsgId
   }
 
+  public var editingMsgId: Int64?
+
   public let replyingToMsgIdPublisher = PassthroughSubject<Int64?, Never>()
+  public let editingMsgIdPublisher = PassthroughSubject<Int64?, Never>()
 
   init(peerId: Peer, chatId: Int64) {
     self.peerId = peerId
@@ -62,6 +65,17 @@ class ChatState {
     data.replyingToMsgId = nil
     replyingToMsgIdPublisher.send(nil)
     save()
+  }
+
+  public func setEditingMsgId(_ id: Int64) {
+    clearReplyingToMsgId()
+    editingMsgId = id
+    editingMsgIdPublisher.send(id)
+  }
+
+  public func clearEditingMsgId() {
+    editingMsgId = nil
+    editingMsgIdPublisher.send(nil)
   }
 
   // MARK: - Persistance
