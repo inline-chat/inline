@@ -48,7 +48,7 @@ struct NotificationSettingsButton: View {
       case .all: "bell"
       case .none: "bell.slash"
       case .mentions: "at"
-      case .importantOnly: "moon.stars.fill"
+      case .importantOnly: "apple.meditate.circle"
     }
   }
 
@@ -89,9 +89,9 @@ struct NotificationSettingsButton: View {
         )
 
         NotificationSettingsItem(
-          systemImage: "moon.stars.fill",
+          systemImage: "apple.meditate",
           title: "Zen Mode",
-          description: "Only things that need your attention",
+          description: "Only messages that need your attention",
           selected: notificationSettings.mode == .importantOnly,
           value: NotificationMode.importantOnly,
           onChange: {
