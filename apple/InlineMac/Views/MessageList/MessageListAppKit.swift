@@ -918,6 +918,7 @@ class MessageListAppKit: NSViewController {
         } else {
           tableView
             .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
+          tableView.noteHeightOfRows(withIndexesChanged: IndexSet(indexSet))
           if shouldScroll { scrollToBottom(animated: true) }
           isPerformingUpdate = false
         }
