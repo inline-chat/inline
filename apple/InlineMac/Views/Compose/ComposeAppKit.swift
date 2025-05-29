@@ -62,12 +62,12 @@ class ComposeAppKit: NSView {
     return view
   }()
 
-  // Add reply view
-  private lazy var replyView: ComposeReplyView = {
-    let view = ComposeReplyView(
-      kind: .replyingInCompose,
+  // Reply/Edit
+  private lazy var messageView: ComposeMessageView = {
+    let view = ComposeMessageView(
       onClose: { [weak self] in
         self?.state.clearReplyingToMsgId()
+        self?.state.clearEditingMsgId()
       }
     )
 
@@ -143,7 +143,7 @@ class ComposeAppKit: NSView {
     addSubview(border)
 
     // from top
-    addSubview(replyView)
+    addSubview(messageView)
 
     addSubview(attachments)
 
@@ -183,13 +183,13 @@ class ComposeAppKit: NSView {
       menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
 
       // reply (height handled internally)
-      replyView.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
-      replyView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+      messageView.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
+      messageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
 
       // attachments
       attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
       attachments.trailingAnchor.constraint(equalTo: textEditor.trailingAnchor),
-      attachments.topAnchor.constraint(equalTo: replyView.bottomAnchor),
+      attachments.topAnchor.constraint(equalTo: messageView.bottomAnchor),
 
       // text editor
       textEditor.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor),
@@ -224,7 +224,14 @@ class ComposeAppKit: NSView {
     state.replyingToMsgIdPublisher
       .sink { [weak self] replyingToMsgId in
         guard let self else { return }
-        updateReplyingView(to: replyingToMsgId, animate: true)
+        updateMessageView(to: replyingToMsgId, kind: .replying, animate: true)
+        focus()
+      }.store(in: &cancellables)
+
+    state.editingMsgIdPublisher
+      .sink { [weak self] editingMsgId in
+        guard let self else { return }
+        updateMessageView(to: editingMsgId, kind: .editing, animate: true)
         focus()
       }.store(in: &cancellables)
   }
@@ -261,7 +268,7 @@ class ComposeAppKit: NSView {
     var height = getTextViewHeight()
 
     // Reply view
-    if state.replyingToMsgId != nil {
+    if state.replyingToMsgId != nil || state.editingMsgId != nil {
       height += Theme.embeddedMessageHeight
     }
 
@@ -311,8 +318,11 @@ class ComposeAppKit: NSView {
 
   private func setupReplyingView() {
     if let replyingToMsgId = state.replyingToMsgId {
-      print("setupReplyingView: \(replyingToMsgId)")
-      updateReplyingView(to: replyingToMsgId, animate: false, shouldUpdateHeight: false)
+      updateMessageView(to: replyingToMsgId, kind: .replying, animate: false, shouldUpdateHeight: false)
+    }
+
+    if let editingMessageId = state.editingMsgId {
+      updateMessageView(to: editingMessageId, kind: .editing, animate: false, shouldUpdateHeight: false)
     }
   }
 
@@ -324,6 +334,7 @@ class ComposeAppKit: NSView {
       handler: { [weak self] _ in
         guard let self else { return }
         state.clearReplyingToMsgId()
+        state.clearEditingMsgId()
         removeReplyEscHandler()
       }
     )
@@ -334,18 +345,33 @@ class ComposeAppKit: NSView {
     keyMonitorEscUnsubscribe = nil
   }
 
-  private func updateReplyingView(to replyingToMsgId: Int64?, animate: Bool = false, shouldUpdateHeight: Bool = true) {
-    if let replyingToMsgId {
+  private func updateMessageView(
+    to msgId: Int64?,
+    kind: ComposeMessageView.Kind,
+    animate: Bool = false,
+    shouldUpdateHeight: Bool = true
+  ) {
+    if let msgId {
       // Update and show the reply view
-      if let message = try? FullMessage.get(messageId: replyingToMsgId, chatId: chatId ?? 0) {
-        replyView.update(with: message)
-        replyView.open(animated: animate)
+      if let message = try? FullMessage.get(messageId: msgId, chatId: chatId ?? 0) {
+        messageView.update(with: message, kind: kind)
+        messageView.open(animated: animate)
         addReplyEscHandler()
+
+        if kind == .editing {
+          // set string to the message
+          setText(message.message.text ?? "", animate: animate, shouldUpdateHeight: false)
+        }
       }
     } else {
       // Hide and remove the reply view
-      replyView.close(animated: true)
+      messageView.close(animated: true)
       removeReplyEscHandler()
+
+      if kind == .editing {
+        // clear string
+        setText("", animate: animate, shouldUpdateHeight: false)
+      }
     }
 
     if shouldUpdateHeight {
@@ -462,6 +488,7 @@ class ComposeAppKit: NSView {
     attachmentItems.removeAll()
     sendButton.updateCanSend(false)
     state.clearReplyingToMsgId()
+    state.clearEditingMsgId()
 
     // Views
     attachments.clearViews()
@@ -483,6 +510,8 @@ class ComposeAppKit: NSView {
       let replyToMsgId = self.state.replyingToMsgId
       let attachmentItems = self.attachmentItems
       let canSend = !rawText.isEmpty || attachmentItems.count > 0
+      // keep a copy of editingMessageId before we clear it
+      let editingMessageId = self.state.editingMsgId
 
       // make it nil if empty
       let text = if rawText.isEmpty, !attachmentItems.isEmpty {
@@ -496,8 +525,20 @@ class ComposeAppKit: NSView {
       // Clear immediately
       self.clear()
 
-      // Add message
-      if attachmentItems.isEmpty {
+      // Edit message
+      if let editingMessageId {
+        // Edit message
+
+        Transactions.shared.mutate(transaction: .editMessage(.init(
+          messageId: editingMessageId,
+          text: text ?? "",
+          chatId: self.chatId ?? 0,
+          peerId: self.peerId
+        )))
+      }
+
+      // Send message
+      else if attachmentItems.isEmpty {
         // Text-only
         let _ = Transactions.shared.mutate(
           transaction:
@@ -511,8 +552,10 @@ class ComposeAppKit: NSView {
             )
           )
         )
-      } else {
-        // With image/file/video
+      }
+
+      // With image/file/video
+      else {
         for (index, (_, attachment)) in attachmentItems.enumerated() {
           let isFirst = index == 0
           let _ = Transactions.shared.mutate(
@@ -546,6 +589,14 @@ class ComposeAppKit: NSView {
 
   func focus() {
     textEditor.focus()
+  }
+
+  func setText(_ text: String, animate: Bool = false, shouldUpdateHeight: Bool = true) {
+    textEditor.setString(text)
+    updateContentHeight(for: textEditor.textView)
+    if shouldUpdateHeight {
+      updateHeight(animate: animate)
+    }
   }
 
   private var keyMonitorUnsubscribe: (() -> Void)?
@@ -605,6 +656,18 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool {
     // Send
     send()
+    return true // handled
+  }
+
+  func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool {
+    // only if empty
+    guard textView.string.count == 0 else { return false }
+
+    // only if there is a last message
+    guard let lastMsgId = chat?.lastMsgId else { return false }
+
+    // Trigger edit mode for last message
+    state.setEditingMsgId(lastMsgId)
     return true // handled
   }
 
@@ -671,7 +734,11 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     return layoutManager.usedRect(for: textContainer).height
   }
 
-  func updateHeightIfNeeded(for textView: NSTextView) {
+  func updateContentHeight(for textView: NSTextView) {
+    textViewContentHeight = calculateContentHeight(for: textView)
+  }
+
+  func updateHeightIfNeeded(for textView: NSTextView, animate: Bool = false) {
     guard let layoutManager = textView.layoutManager,
           let textContainer = textView.textContainer
     else { return }
@@ -686,7 +753,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
     textViewContentHeight = contentHeight
 
-    updateHeight()
+    updateHeight(animate: animate)
   }
 
   func textViewDidChangeSelection(_ notification: Notification) {

@@ -1,20 +1,25 @@
 import AppKit
 import InlineKit
 
-// TODO: Remove alpha animation
+class ComposeMessageView: NSView {
+  // MARK: - Types
 
-class ComposeReplyView: NSView {
+  enum Kind {
+    case replying
+    case editing
+  }
+
   // MARK: - Properties
 
   private var onClose: () -> Void
-  private var kind: EmbeddedMessageView.Kind
+  private var kind: Kind = .replying
   private var heightConstraint: NSLayoutConstraint!
   private let defaultHeight: CGFloat = Theme.embeddedMessageHeight
   private let buttonSize: CGFloat = Theme.composeButtonSize
-  
+
   // MARK: - Constants
-  
-  private let hiddenAlpha: CGFloat = 0.8
+
+  private let hiddenAlpha: CGFloat = 0.95
   private let visibleAlpha: CGFloat = 1.0
 
   // MARK: - Views
@@ -27,7 +32,7 @@ class ComposeReplyView: NSView {
   }()
 
   private lazy var messageView: EmbeddedMessageView = {
-    let view = EmbeddedMessageView(kind: kind, style: .colored)
+    let view = EmbeddedMessageView(style: .colored)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -47,11 +52,9 @@ class ComposeReplyView: NSView {
   // MARK: - Initialization
 
   init(
-    kind: EmbeddedMessageView.Kind,
     onClose: @escaping () -> Void
   ) {
     self.onClose = onClose
-    self.kind = kind
     super.init(frame: .zero)
     setupView()
   }
@@ -104,17 +107,20 @@ class ComposeReplyView: NSView {
 
   @objc private func handleClose() {
     close(animated: true)
-    self.onClose()
+    onClose()
   }
 
   // MARK: - Public Methods
 
-  func update(with fullMessage: FullMessage) {
+  func update(with fullMessage: FullMessage, kind: Kind) {
+    self.kind = kind
+
     messageView
       .update(
         with: fullMessage.message,
         from: fullMessage.from!,
-        file: fullMessage.file
+        file: fullMessage.file,
+        kind: kind == .replying ? .replyingInCompose : .editingInCompose
       )
   }
 
@@ -123,7 +129,7 @@ class ComposeReplyView: NSView {
 
     if animated {
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.15
+        context.duration = 0.2
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
 
         heightConstraint.animator().constant = defaultHeight
@@ -140,7 +146,7 @@ class ComposeReplyView: NSView {
 
     if animated {
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.15
+        context.duration = 0.2
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         context.completionHandler = {
           if callOnClose {

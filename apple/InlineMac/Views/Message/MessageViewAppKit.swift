@@ -184,10 +184,10 @@ class MessageViewAppKit: NSView {
   }()
 
   private lazy var replyView: EmbeddedMessageView = {
-    let view = EmbeddedMessageView(kind: .replyInMessage, style: outgoing ? .white : .colored)
+    let view = EmbeddedMessageView(style: outgoing ? .white : .colored)
     view.translatesAutoresizingMaskIntoConstraints = false
     if let message = fullMessage.repliedToMessage, let from = fullMessage.replyToMessageSender {
-      view.update(with: message, from: from, file: fullMessage.replyToMessageFile)
+      view.update(with: message, from: from, file: fullMessage.replyToMessageFile, kind: .replyInMessage)
     }
     return view
   }()
@@ -1189,6 +1189,16 @@ class MessageViewAppKit: NSView {
     state.setReplyingToMsgId(fullMessage.message.messageId)
   }
 
+  @objc private func editMessage() {
+    let state = ChatsManager
+      .get(
+        for: fullMessage.peerId,
+        chatId: fullMessage.chatId
+      )
+
+    state.setEditingMsgId(fullMessage.message.messageId)
+  }
+
   @objc private func saveDocument() {
     guard let documentInfo = fullMessage.documentInfo else { return }
 
@@ -1612,10 +1622,16 @@ extension MessageViewAppKit: NSMenuDelegate {
   func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil) -> NSMenu {
     let menu = NSMenu()
 
-    // Add reply action only if not sending
+    // Reply
     if message.status != .sending {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
       menu.addItem(replyItem)
+    }
+
+    // Edit
+    if message.out == true, message.status == .sent {
+      let editItem = NSMenuItem(title: "Edit", action: #selector(editMessage), keyEquivalent: "e")
+      menu.addItem(editItem)
     }
 
     // Add reaction action

@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool
+  func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool
   // Add new delegate method for image paste
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage, url: URL?)
   func textView(_ textView: NSTextView, didReceiveFile url: URL)
@@ -26,6 +27,13 @@ class ComposeNSTextView: NSTextView {
           if delegate.textViewDidPressReturn(self) {
             return
           }
+        }
+      }
+    }
+    if event.keyCode == 126 {
+      if let delegate = delegate as? ComposeTextViewDelegate {
+        if delegate.textViewDidPressArrowUp(self) {
+          return
         }
       }
     }

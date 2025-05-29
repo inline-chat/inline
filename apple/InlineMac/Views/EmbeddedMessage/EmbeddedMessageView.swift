@@ -19,9 +19,10 @@ class EmbeddedMessageView: NSView {
   enum Kind {
     case replyInMessage
     case replyingInCompose
+    case editingInCompose
   }
 
-  private var kind: Kind
+  private var kind: Kind = .replyInMessage
   private var style: EmbeddedMessageStyle
 
   private var message: Message?
@@ -91,8 +92,7 @@ class EmbeddedMessageView: NSView {
 
   // MARK: - Initialization
 
-  init(kind: Kind, style: EmbeddedMessageStyle) {
-    self.kind = kind
+  init(style: EmbeddedMessageStyle) {
     self.style = style
     super.init(frame: .zero)
     setupView()
@@ -162,16 +162,20 @@ class EmbeddedMessageView: NSView {
     chatState.scrollTo(msgId: messageId)
   }
 
-  func update(with message: Message, from: User, file: File?) {
+  func update(with message: Message, from: User, file: File?, kind: Kind) {
+    self.kind = kind
     self.message = message
 
     let senderName = from.fullName
-    nameLabel.stringValue = switch kind {
+    nameLabel.stringValue = switch self.kind {
       case .replyInMessage:
         "\(senderName)"
 
       case .replyingInCompose:
         "Reply to \(senderName)"
+
+      case .editingInCompose:
+        "Edit Message"
     }
 //    nameLabel.textColor = if style == .colored {
 //      NSColor(InitialsCircle.ColorPalette.color(for: senderName))
