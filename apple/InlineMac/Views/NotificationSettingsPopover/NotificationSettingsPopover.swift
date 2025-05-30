@@ -105,7 +105,7 @@ struct NotificationSettingsButton: View {
         NotificationSettingsItem(
           systemImage: "apple.meditate",
           title: "Zen Mode",
-          description: "Only what's important to you via AI",
+          description: "Only what's important to you",
           selected: notificationSettings.mode == .importantOnly,
           value: NotificationMode.importantOnly,
           onChange: {
