@@ -104,10 +104,10 @@ const verifyAndGetData = async (externalTaskId: number, messageId: number, chatI
 const deleteFromNotion = async (pageId: string, chat: any) => {
   try {
     if (chat?.spaceId) {
-      const notion = await getNotionClient(Number(chat.spaceId))
+      const { client, databaseId } = await getNotionClient(Number(chat.spaceId))
 
       // Archive the page in Notion (Notion doesn't allow permanent deletion via API)
-      await notion.pages.update({
+      await client.pages.update({
         page_id: pageId,
         archived: true,
       })

@@ -350,7 +350,7 @@ private extension MessageAttachmentEmbed {
     backgroundColor = outgoing ? .white.withAlphaComponent(bgAlpha) : .systemGray.withAlphaComponent(bgAlpha)
 
     usernameLabel.textColor = textColor
-    taskTitleLabel.textColor = secondaryTextColor
+    taskTitleLabel.textColor = textColor
     checkboxImageView.tintColor = textColor
     avatarView.tintColor = textColor
   }

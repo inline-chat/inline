@@ -23,16 +23,25 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     throw new Error("OpenAI client not initialized")
   }
 
-  const notion = await getNotionClient(input.spaceId)
+  const { client, databaseId } = await getNotionClient(input.spaceId)
+
+  if (!databaseId) {
+    Log.shared.error("No databaseId found", { spaceId: input.spaceId })
+    throw new Error("No databaseId found")
+  }
 
   const [notionUsers, database, samplePages, targetMessage, messages, chatInfo] = await Promise.all([
-    getNotionUsers(input.spaceId, notion),
-    getActiveDatabaseData(input.spaceId, notion),
-    getSampleDatabasePages(input.spaceId, 10, notion),
+    getNotionUsers(input.spaceId, client),
+    getActiveDatabaseData(input.spaceId, databaseId, client),
+    getSampleDatabasePages(input.spaceId, databaseId, 4, client),
     MessageModel.getMessage(input.messageId, input.chatId),
-    MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 15, 15),
+    MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 10, 10),
     getCachedChatInfo(input.chatId),
   ])
+
+  console.log("🌴🌴🌴🌴 notionUsers", notionUsers)
+  console.log("🌴🌴🌴🌴 database", database)
+  console.log("🌴🌴🌴🌴 samplePages", samplePages)
 
   let participantNames = (
     await Promise.all((chatInfo?.participantUserIds ?? []).map((userId) => getCachedUserName(userId)))
@@ -61,7 +70,10 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
 
   const completion = await openaiClient.chat.completions.create({
     //model: "gpt-4o-2024-08-06",
-    model: process.env.NODE_ENV === "production" ? "gpt-4.1" : "gpt-4.1-mini",
+    // model: process.env.NODE_ENV === "production" ? "gpt-4.1" : "gpt-4.1-mini",
+    model: "gpt-4.1",
+    // model: "o4-mini",
+    // reasoning_effort: "low",
     messages: [
       {
         role: "system",
@@ -94,11 +106,15 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
   // Parse and validate the response against our Zod schema
   const validatedData = generateNotionPropertiesSchema(database).parse(JSON.parse(parsedResponse))
 
+  // Extract properties and description from the validated data
+  const propertiesFromResponse = validatedData.properties || {}
+  const descriptionFromResponse = validatedData.description
+
   // Transform the Zod schema output to match Notion API format
   const propertiesData: Record<string, any> = {}
 
   // Filter out null values and transform to Notion API format
-  Object.entries(validatedData).forEach(([key, value]) => {
+  Object.entries(propertiesFromResponse).forEach(([key, value]) => {
     if (value !== null) {
       if (value && typeof value === "object" && "date" in value && value.date) {
         const dateObj = { ...value.date } as any
@@ -117,7 +133,14 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
   const titlePropertyName = findTitleProperty(database)
   const taskTitle = extractTaskTitle(propertiesData, titlePropertyName)
 
-  const page = await newNotionPage(input.spaceId, database.id, propertiesData)
+  // Create the page with properties and description
+  const page = await newNotionPage(
+    input.spaceId,
+    databaseId,
+    propertiesData,
+    client,
+    descriptionFromResponse || undefined,
+  )
   log.info("Created Notion page", { pageId: page.id, page })
 
   return {
@@ -134,8 +157,32 @@ const systemPrompt = `
 You are a task manager assistant for Inline Chat app. You create actionable tasks from chat messages by analyzing context and generating properly structured Notion database entries.
 
 Instructions
+  •	Create task titles that are actionable and accurate by reading chat context.
+  • Include important parts of the conversation around the task and include parts of it as quotes from the chat if it helps to show the context of the task in the page description.
+  • Although including full important detailed data, keep it concise. Do not summarize quotes and important parts of the conversation.
+  • The tone should be as if it were written by a reporter.
+  • Use line breaks to make it more readable. 
+  • Don't add any text like this : "The conversation context is:" - "Summery" - "Context"
+  • Make it after the properties object: properties: {
+    ...
+  },
+  description: [
+    {
+      object: "block",
+      type: "paragraph",
+      paragraph: {
+        rich_text: [
+          {
+            type: "text",
+            text: {
+              content: "Your page description here"
+            }
+          }
+        ]
+      }
+    }
+  ]
 	•	Analyze the chat title and the conversation context to understand the task is related to which team or project and match it with notion database properties and set the team and project properties if there are any.
-	•	Create task titles that are actionable and accurate by reading chat context around the target message
 	•	Generate a properties object that EXACTLY matches the database schema structure. For empty non-text fields use null. Because otherwise Notion API will throw an error.
 	•	Each property must use the exact property name and type structure from the database schema
 	•	Follow Notion's API format for each property type
@@ -146,87 +193,13 @@ Instructions
 	•	Never set task in progress or done status - keep tasks in initial state
 	•	For date properties (eg. "Due date"), if no date is specified, DO NOT include the property at all
 	•	If a date is specified, use format: { "date": { "start": "YYYY-MM-DD" } } and calculate from today's date
+
 	•	User Assignment Rules:
 		▪	Creator and Assignee: ALWAYS set to the user that matches with the actor user ID who will do the task if found in the Notion users list.
 		▪	Reporter/Watcher: Set to the user that matches with target message sender or who sent the message/report that the task is created for. (who will be notified when the task is completed)
 		▪	Match chat participants with Notion users based on names, emails, or usernames from the notion_users list
-	•	Generate ONLY the properties object that matches the provided schema structure - do not include parent or top-level fields
 
-# Examples
-Note: The examples below demonstrate the user assignment pattern. You must use the EXACT property names from the database schema provided.
 
-<example_context>
-Messages: [
-  "Sarah: We need to fix the login bug",
-  "Mike: The deadline is tomorrow", 
-  "John: Dena can you handle this?"
-]
-Target Message: "Dena can you handle this?" (fromId: 456)
-Current User ID: 123
-Database has properties: "Name" (title), "Due Date" (date), "Status" (status), "Assignee" (people), "Creator" (people), "Watcher" (people)
-Notion Users: [
-  {"id": "notion_user_123", "name": "Current User", "email": "current@example.com"},
-  {"id": "notion_user_456", "name": "John", "email": "john@example.com"}
-]
-</example_context>
-
-<assistant_response>
-{
-  "Name": {
-    "title": [{ "text": { "content": "Fix login bug" } }]
-  },
-  "Due Date": {
-    "date": { "start": "2024-01-16" }
-  },
-  "Status": {
-    "status": { "name": "Not started" }
-  },
-  "Assignee": {
-    "people": [{ "id": "notion_user_123" }]
-  },
-  "Creator": {
-    "people": [{ "id": "notion_user_123" }]
-  },
-  "Watcher": {
-    "people": [{ "id": "notion_user_456" }]
-  }
-}
-</assistant_response>
-
-<example_context>
-Messages: [
-  "Alex: Can you update the documentation?",
-  "Dena: Sure, when do you need it?",
-  "Alex: By Friday would be great"
-]
-Target Message: "Can you update the documentation?" (fromId: 789)
-Current User ID: 456
-Database has properties: "Task" (title), "Deadline" (date), "State" (status), "Assigned To" (people), "Reporter" (people)
-Notion Users: [
-  {"id": "notion_user_456", "name": "Dena", "email": "dena@example.com"},
-  {"id": "notion_user_789", "name": "Alex", "email": "alex@example.com"}
-]
-</example_context>
-
-<assistant_response>
-{
-  "Task": {
-    "title": [{ "text": { "content": "Update documentation" } }]
-  },
-  "Deadline": {
-    "date": { "start": "2024-01-19" }
-  },
-  "State": {
-    "status": { "name": "Not started" }
-  },
-  "Assigned To": {
-    "people": [{ "id": "notion_user_456" }]
-  },
-  "Reporter": {
-    "people": [{ "id": "notion_user_789" }]
-  }
-}
-</assistant_response>
 `
 
 function taskPrompt(
@@ -246,22 +219,16 @@ Actor user ID: ${currentUserId}
 Target message (the message that user started the task for in the chat):
 ${formatMessage(targetMessage)}
 
-<nearby_messages_context>
-Full conversation context (analyze ALL messages for due dates):
+<conversation_context>
+Full conversation:
 ${messages.map((message, index: number) => `[${index}] ${formatMessage(message)}`).join("\n")}
-</nearby_messages_context>
+</conversation_context>
 
-<team_context>
-Active team: Wanver
-if the team data I gave you was matched to this team, use the knowledge in it to create more accurate properties for the task
-Context: ${WANVER_TRANSLATION_CONTEXT}
-</team_context>
-
-<chat_context_analysis>
+<context>
+Active workspace: Wanver
+Space context: ${WANVER_TRANSLATION_CONTEXT}
 Chat title: "${chatInfo?.title}"
-Instructions for team identification:
-	•	Analyze the chat title and chat context to detect which team or project this task belongs to
-</chat_context_analysis>
+</context>
 
 <database_schema>
 Available properties: ${getPropertyDescriptions(database)}

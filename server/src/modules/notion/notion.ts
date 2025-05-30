@@ -10,12 +10,15 @@ import type {
 } from "@notionhq/client/build/src/api-endpoints"
 import { and, eq } from "drizzle-orm"
 
-export async function getNotionClient(spaceId: number): Promise<Client> {
-  const { accessToken } = await IntegrationsModel.getAuthTokenWithSpaceId(spaceId, "notion")
+export async function getNotionClient(spaceId: number): Promise<{ client: Client; databaseId: string | null }> {
+  const { accessToken, databaseId } = await IntegrationsModel.getAuthTokenWithSpaceId(spaceId, "notion")
 
-  return new Client({
-    auth: accessToken,
-  })
+  return {
+    client: new Client({
+      auth: accessToken,
+    }),
+    databaseId,
+  }
 }
 
 /**
@@ -55,23 +58,7 @@ export async function getDatabases(spaceId: number, pageSize = 50, notion: Clien
 }
 
 // get active database data
-export async function getActiveDatabaseData(spaceId: number, notion: Client) {
-  let [integration] = await db
-    .select()
-    .from(integrations)
-    .where(and(eq(integrations.spaceId, spaceId), eq(integrations.provider, "notion")))
-
-  if (!integration) {
-    Log.shared.error("No integration found for spaceId", { spaceId })
-    return null
-  }
-
-  const databaseId = integration.notionDatabaseId
-  if (!databaseId) {
-    Log.shared.error("No databaseId found for spaceId", { spaceId })
-    return null
-  }
-
+export async function getActiveDatabaseData(spaceId: number, databaseId: string, notion: Client) {
   const database = await notion.databases.retrieve({ database_id: databaseId })
   Log.shared.info("🔍 Database", { database })
   console.log("🔍 Database", database)
@@ -95,13 +82,19 @@ export async function newNotionPage(
   spaceId: number,
   databaseId: string,
   properties: CreatePageParameters["properties"],
+  client: Client,
+  children?: CreatePageParameters["children"],
 ) {
-  const notion = await getNotionClient(spaceId)
-
-  const page = await notion.pages.create({
+  const pageData: CreatePageParameters = {
     parent: { database_id: databaseId },
     properties,
-  })
+  }
+
+  if (children) {
+    pageData.children = children
+  }
+
+  const page = await client.pages.create(pageData)
 
   console.log("🔍 Page", page)
   return page
@@ -134,20 +127,10 @@ export async function getCurrentNotionUser(spaceId: number, currentUserId: numbe
  * @param {number} [limit=10] - Maximum number of pages to retrieve
  * @returns {Promise<any[]>} Array of sample pages with their properties
  */
-export async function getSampleDatabasePages(spaceId: number, limit = 10, notion: Client) {
-  let [integration] = await db
-    .select()
-    .from(integrations)
-    .where(and(eq(integrations.spaceId, spaceId), eq(integrations.provider, "notion")))
-
-  if (!integration?.notionDatabaseId) {
-    Log.shared.error("No active database found for spaceId", { spaceId })
-    return []
-  }
-
+export async function getSampleDatabasePages(spaceId: number, databaseId: string, limit = 10, notion: Client) {
   try {
     const response = await notion.databases.query({
-      database_id: integration.notionDatabaseId,
+      database_id: databaseId,
       page_size: limit,
       sorts: [
         {
@@ -159,7 +142,7 @@ export async function getSampleDatabasePages(spaceId: number, limit = 10, notion
 
     Log.shared.info("Retrieved sample pages", {
       count: response.results.length,
-      databaseId: integration.notionDatabaseId,
+      databaseId,
     })
 
     return response.results
