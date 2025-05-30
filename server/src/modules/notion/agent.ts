@@ -1,5 +1,5 @@
 import { openaiClient } from "@in/server/libs/openAI"
-import { getActiveDatabaseData, getNotionUsers, newNotionPage, getSampleDatabasePages } from "./notion"
+import { getActiveDatabaseData, getNotionUsers, newNotionPage, getSampleDatabasePages, getNotionClient } from "./notion"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
@@ -23,10 +23,12 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     throw new Error("OpenAI client not initialized")
   }
 
+  const notion = await getNotionClient(input.spaceId)
+
   const [notionUsers, database, samplePages, targetMessage, messages, chatInfo] = await Promise.all([
-    getNotionUsers(input.spaceId),
-    getActiveDatabaseData(input.spaceId),
-    getSampleDatabasePages(input.spaceId),
+    getNotionUsers(input.spaceId, notion),
+    getActiveDatabaseData(input.spaceId, notion),
+    getSampleDatabasePages(input.spaceId, 10, notion),
     MessageModel.getMessage(input.messageId, input.chatId),
     MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 15, 15),
     getCachedChatInfo(input.chatId),

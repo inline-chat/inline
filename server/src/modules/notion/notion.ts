@@ -44,9 +44,7 @@ function extract(db: DatabaseObjectResponse): SimplifiedDatabase {
  * @param {number} [pageSize=50] - The number of databases to return
  * @returns {Promise<SimplifiedDatabase[]>} A promise that resolves to an array of simplified database objects
  */
-export async function getDatabases(spaceId: number, pageSize = 50): Promise<SimplifiedDatabase[]> {
-  const notion = await getNotionClient(spaceId)
-
+export async function getDatabases(spaceId: number, pageSize = 50, notion: Client): Promise<SimplifiedDatabase[]> {
   const response: SearchResponse = await notion.search({
     filter: { property: "object", value: "database" },
     sort: { direction: "descending", timestamp: "last_edited_time" },
@@ -57,9 +55,7 @@ export async function getDatabases(spaceId: number, pageSize = 50): Promise<Simp
 }
 
 // get active database data
-export async function getActiveDatabaseData(spaceId: number) {
-  const notion = await getNotionClient(spaceId)
-
+export async function getActiveDatabaseData(spaceId: number, notion: Client) {
   let [integration] = await db
     .select()
     .from(integrations)
@@ -84,8 +80,7 @@ export async function getActiveDatabaseData(spaceId: number) {
 }
 
 // get all notion users
-export async function getNotionUsers(spaceId: number) {
-  const notion = await getNotionClient(spaceId)
+export async function getNotionUsers(spaceId: number, notion: Client) {
   const users = await notion.users.list({
     page_size: 100,
   })
@@ -112,8 +107,7 @@ export async function newNotionPage(
   return page
 }
 
-export async function getCurrentNotionUser(spaceId: number, currentUserId: number) {
-  const notion = await getNotionClient(spaceId)
+export async function getCurrentNotionUser(spaceId: number, currentUserId: number, notion: Client) {
   const notionUsers = await notion.users.list({
     page_size: 100,
   })
@@ -140,9 +134,7 @@ export async function getCurrentNotionUser(spaceId: number, currentUserId: numbe
  * @param {number} [limit=10] - Maximum number of pages to retrieve
  * @returns {Promise<any[]>} Array of sample pages with their properties
  */
-export async function getSampleDatabasePages(spaceId: number, limit = 10) {
-  const notion = await getNotionClient(spaceId)
-
+export async function getSampleDatabasePages(spaceId: number, limit = 10, notion: Client) {
   let [integration] = await db
     .select()
     .from(integrations)
