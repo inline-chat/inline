@@ -1417,7 +1417,7 @@ private extension MessagesCollectionView {
         progressTask.cancel()
 
         ToastManager.shared.showToast(
-          "Notion task created successfully",
+          "Done",
           type: .success,
           systemImage: "checkmark.circle",
           action: {
