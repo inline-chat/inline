@@ -218,7 +218,30 @@ export function generateNotionPropertiesSchema(database: any): z.ZodType<any> {
     }
   })
 
-  return z.object(schemaFields).strict()
+  // Add description field to the schema
+  const schemaWithDescription = z.object({
+    properties: z.object(schemaFields).strict(),
+    description: z
+      .array(
+        z.object({
+          object: z.literal("block"),
+          type: z.literal("paragraph"),
+          paragraph: z.object({
+            rich_text: z.array(
+              z.object({
+                type: z.literal("text"),
+                text: z.object({
+                  content: z.string(),
+                }),
+              }),
+            ),
+          }),
+        }),
+      )
+      .nullable(),
+  })
+
+  return schemaWithDescription
 }
 
 /**
