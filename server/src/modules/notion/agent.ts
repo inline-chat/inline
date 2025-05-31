@@ -1,5 +1,13 @@
 import { openaiClient } from "@in/server/libs/openAI"
-import { getActiveDatabaseData, getNotionUsers, newNotionPage, getSampleDatabasePages, getNotionClient } from "./notion"
+import {
+  getActiveDatabaseData,
+  getNotionUsers,
+  newNotionPage,
+  getSampleDatabasePages,
+  getNotionClient,
+  formatNotionUsers,
+  type NotionUser,
+} from "./notion"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
@@ -23,6 +31,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     throw new Error("OpenAI client not initialized")
   }
 
+  // First, get the Notion client and database info
   const { client, databaseId } = await getNotionClient(input.spaceId)
 
   if (!databaseId) {
@@ -30,22 +39,25 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     throw new Error("No databaseId found")
   }
 
-  const [notionUsers, database, samplePages, targetMessage, messages, chatInfo] = await Promise.all([
-    getNotionUsers(input.spaceId, client),
+  // Run all data fetching operations in parallel - this is the biggest optimization
+  const [notionUsers, database, samplePages, targetMessage, messages, chatInfo, participantNames] = await Promise.all([
+    getNotionUsers(input.spaceId, client).then(formatNotionUsers),
     getActiveDatabaseData(input.spaceId, databaseId, client),
     getSampleDatabasePages(input.spaceId, databaseId, 4, client),
     MessageModel.getMessage(input.messageId, input.chatId),
     MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 10, 10),
     getCachedChatInfo(input.chatId),
+    // Fetch participant names in parallel instead of sequentially
+    getCachedChatInfo(input.chatId).then(async (chatInfo) => {
+      if (!chatInfo?.participantUserIds) return []
+      const names = await Promise.all(chatInfo.participantUserIds.map((userId) => getCachedUserName(userId)))
+      return names.filter(filterFalsy)
+    }),
   ])
 
   console.log("🌴🌴🌴🌴 notionUsers", notionUsers)
   console.log("🌴🌴🌴🌴 database", database)
   console.log("🌴🌴🌴🌴 samplePages", samplePages)
-
-  let participantNames = (
-    await Promise.all((chatInfo?.participantUserIds ?? []).map((userId) => getCachedUserName(userId)))
-  ).filter(filterFalsy)
 
   log.info("Creating Notion page", { database: database?.id, chatTitle: chatInfo?.title, chatId: input.chatId })
 
@@ -69,11 +81,8 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
   )
 
   const completion = await openaiClient.chat.completions.create({
-    //model: "gpt-4o-2024-08-06",
-    // model: process.env.NODE_ENV === "production" ? "gpt-4.1" : "gpt-4.1-mini",
     model: "gpt-4.1",
-    // model: "o4-mini",
-    // reasoning_effort: "low",
+
     messages: [
       {
         role: "system",
@@ -189,7 +198,7 @@ Instructions
 `
 
 function taskPrompt(
-  notionUsers: any,
+  notionUsers: NotionUser[],
   database: any,
   samplePages: any[],
   messages: ProcessedMessage[],
@@ -198,41 +207,44 @@ function taskPrompt(
   participantNames: UserName[],
   currentUserId: number,
 ): string {
+  // Limit messages to reduce token usage and improve speed
+  const limitedMessages = messages.slice(-8) // Only use last 8 messages for context
+
+  // Simplify sample pages to reduce token usage
+  const simplifiedSamplePages = samplePages.slice(0, 2).map((page) => ({
+    properties: page.properties,
+    // Remove verbose fields to reduce tokens
+  }))
+
   return `
 Today's date: ${new Date().toISOString()}
 Actor user ID: ${currentUserId}
 
-The message that user started the task from in the chat:
-${formatMessage(targetMessage)}
+Target message: ${formatMessage(targetMessage)}
 
 <conversation_context>
-Full conversation:
-${messages.map((message, index: number) => `[${index}] ${formatMessage(message)}`).join("\n")}
+Recent conversation:
+${limitedMessages.map((message, index: number) => `[${index}] ${formatMessage(message)}`).join("\n")}
 </conversation_context>
 
 <context>
-Active workspace: Wanver
-Space context: ${WANVER_TRANSLATION_CONTEXT}
-Chat title: "${chatInfo?.title}"
+Chat: "${chatInfo?.title}"
 </context>
 
 <database_schema>
-Available properties: ${getPropertyDescriptions(database)}
-Full schema:
-${JSON.stringify(database, null, 2)}
+Properties: ${getPropertyDescriptions(database)}
 </database_schema>
 
-Use these as examples to understand the properties and the format of the Notion properties.
-<sample_notion_entries>
-${JSON.stringify(samplePages, null, 2)}
-</sample_notion_entries>
+<sample_entries>
+${JSON.stringify(simplifiedSamplePages, null, 2)}
+</sample_entries>
 
 <notion_users>
 ${JSON.stringify(notionUsers, null, 2)}
 </notion_users>
 
-<chat_participants>
- ${JSON.stringify(participantNames, null, 2)}
-</chat_participants>
+<participants>
+${JSON.stringify(participantNames, null, 2)}
+</participants>
 `
 }

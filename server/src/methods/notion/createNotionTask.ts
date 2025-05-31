@@ -59,39 +59,50 @@ export const handler = async (
       throw new Error("Message does not exist")
     }
 
-    // Encrypt title if it exists
+    // Encrypt title if it exists (this is fast, no need to parallelize)
     let encryptedTitle: EncryptedData | null = null
     if (result.taskTitle) {
       encryptedTitle = await encrypt(result.taskTitle)
     }
 
-    // Insert external task and message attachment in parallel
-    const [externalTask] = await db
-      .insert(externalTasks)
-      .values({
-        application: "notion",
-        taskId: result.pageId,
-        status: "todo",
-        assignedUserId: BigInt(context.currentUserId),
-        title: encryptedTitle?.encrypted ?? null,
-        titleIv: encryptedTitle?.iv ?? null,
-        titleTag: encryptedTitle?.authTag ?? null,
-        url: result.url,
-        date: new Date(),
-      })
-      .returning()
+    // Insert external task and get update group info in parallel
+    const [externalTaskResult, updateGroup] = await Promise.all([
+      db
+        .insert(externalTasks)
+        .values({
+          application: "notion",
+          taskId: result.pageId,
+          status: "todo",
+          assignedUserId: BigInt(context.currentUserId),
+          title: encryptedTitle?.encrypted ?? null,
+          titleIv: encryptedTitle?.iv ?? null,
+          titleTag: encryptedTitle?.authTag ?? null,
+          url: result.url,
+          date: new Date(),
+        })
+        .returning()
+        .then(([task]) => task),
+      getUpdateGroup(peerId, { currentUserId: context.currentUserId }),
+    ])
 
-    if (!externalTask?.id) {
+    if (!externalTaskResult?.id) {
       throw new Error("Failed to create external task")
     }
 
-    // Create message attachment
-    await db.insert(messageAttachments).values({
-      messageId: message.globalId,
-      externalTaskId: BigInt(externalTask.id),
-    })
+    // Create message attachment and get sender user info in parallel
+    const [, senderUser] = await Promise.all([
+      db.insert(messageAttachments).values({
+        messageId: message.globalId,
+        externalTaskId: BigInt(externalTaskResult.id),
+      }),
+      db
+        .select()
+        .from(users)
+        .where(eq(users.id, context.currentUserId))
+        .then(([user]) => user),
+    ])
 
-    // Prepare parallel operations for updates and notifications
+    // Prepare all parallel operations for updates and notifications
     const parallelOperations: Promise<any>[] = []
 
     // Add message attachment update
@@ -100,41 +111,35 @@ export const handler = async (
         messageId,
         peerId,
         currentUserId: context.currentUserId,
-        externalTask,
+        externalTask: externalTaskResult,
         chatId,
         decryptedTitle: result.taskTitle,
+        updateGroup, // Pass the already fetched updateGroup
       }),
     )
 
     // Add notifications for other participants about task creation
-    if (result.taskTitle) {
-      parallelOperations.push(
-        (async () => {
-          try {
-            const updateGroup = await getUpdateGroup(peerId, { currentUserId: context.currentUserId })
-            const [senderUser] = await db.select().from(users).where(eq(users.id, context.currentUserId))
+    if (result.taskTitle && senderUser) {
+      // Notify other users in the chat (excluding the creator)
+      const otherUserIds = updateGroup.userIds.filter((userId) => userId !== context.currentUserId)
 
-            if (senderUser) {
-              // Notify other users in the chat (excluding the creator)
-              const otherUserIds = updateGroup.userIds.filter((userId) => userId !== context.currentUserId)
-
-              await Promise.all(
-                otherUserIds.map((userId) =>
-                  Notifications.sendToUser({
-                    userId,
-                    senderUserId: context.currentUserId,
-                    threadId: `chat_${chatId}`,
-                    title: `${senderUser.firstName ?? "Someone"} created a Notion task`,
-                    body: `"${result.taskTitle}" - A new task has been created from a message`,
-                  }),
-                ),
-              )
-            }
-          } catch (error) {
+      if (otherUserIds.length > 0) {
+        parallelOperations.push(
+          Promise.all(
+            otherUserIds.map((userId) =>
+              Notifications.sendToUser({
+                userId,
+                senderUserId: context.currentUserId,
+                threadId: `chat_${chatId}`,
+                title: `${senderUser.firstName ?? "Someone"} created a Notion task`,
+                body: `"${result.taskTitle}" - A new task has been created from a message`,
+              }),
+            ),
+          ).catch((error) => {
             Log.shared.error("Failed to send task creation notifications", { error })
-          }
-        })(),
-      )
+          }),
+        )
+      }
     }
 
     // Execute all parallel operations
@@ -154,6 +159,7 @@ const messageAttachmentUpdate = async ({
   externalTask,
   chatId,
   decryptedTitle,
+  updateGroup, // Accept updateGroup as parameter to avoid refetching
 }: {
   messageId: number
   peerId: TPeerInfo
@@ -161,9 +167,11 @@ const messageAttachmentUpdate = async ({
   externalTask: any
   chatId: number
   decryptedTitle: string | null
+  updateGroup?: any // Add this parameter
 }): Promise<void> => {
   try {
-    const updateGroup = await getUpdateGroup(peerId, { currentUserId })
+    // Use passed updateGroup or fetch if not provided (for backward compatibility)
+    const finalUpdateGroup = updateGroup || (await getUpdateGroup(peerId, { currentUserId }))
 
     // Create the MessageAttachment object
     const attachment: MessageAttachment = {
@@ -188,8 +196,8 @@ const messageAttachmentUpdate = async ({
     const inputPeer = ProtocolConvertors.zodPeerToProtocolInputPeer(peerId)
 
     // Send updates to appropriate users
-    if (updateGroup.type === "dmUsers" || updateGroup.type === "threadUsers") {
-      updateGroup.userIds.forEach((userId: number) => {
+    if (finalUpdateGroup.type === "dmUsers" || finalUpdateGroup.type === "threadUsers") {
+      finalUpdateGroup.userIds.forEach((userId: number) => {
         const update = encodeMessageAttachmentUpdate({
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
@@ -199,8 +207,8 @@ const messageAttachmentUpdate = async ({
         })
         RealtimeUpdates.pushToUser(userId, [update])
       })
-    } else if (updateGroup.type === "spaceUsers") {
-      const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
+    } else if (finalUpdateGroup.type === "spaceUsers") {
+      const userIds = connectionManager.getSpaceUserIds(finalUpdateGroup.spaceId)
       userIds.forEach((userId) => {
         const update = encodeMessageAttachmentUpdate({
           messageId: BigInt(messageId),
