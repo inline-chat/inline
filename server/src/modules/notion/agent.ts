@@ -158,30 +158,16 @@ You are a task manager assistant for Inline Chat app. You create actionable task
 
 Instructions
   •	Create task titles that are actionable and accurate by reading chat context.
-  • Include important parts of the conversation around the task and include parts of it as quotes from the chat if it helps to show the context of the task in the page description.
+  • Include important parts of the conversation around the task in the page description. Include the decision making process and the reasoning behind the task if present in the full conversation.
   • Although including full important detailed data, keep it concise. Do not summarize quotes and important parts of the conversation.
   • The tone should be as if it were written by a reporter.
   • Use line breaks to make it more readable. 
-  • Don't add any text like this : "The conversation context is:" - "Summery" - "Context"
-  • Make it after the properties object: properties: {
-    ...
-  },
-  description: [
-    {
-      object: "block",
-      type: "paragraph",
-      paragraph: {
-        rich_text: [
-          {
-            type: "text",
-            text: {
-              content: "Your page description here"
-            }
-          }
-        ]
-      }
-    }
-  ]
+  • Don't add any text like this: "The conversation context is:" - "Summery" - "Context"
+  • Make it after the properties object: 
+  {
+    properties: { ... },
+    description: [{object: "block",type: "paragraph",paragraph: {rich_text: [{type: "text",text: {content: "Your page description here"}}]}}]
+  }
 	•	Analyze the chat title and the conversation context to understand the task is related to which team or project and match it with notion database properties and set the team and project properties if there are any.
 	•	Generate a properties object that EXACTLY matches the database schema structure. For empty non-text fields use null. Because otherwise Notion API will throw an error.
 	•	Each property must use the exact property name and type structure from the database schema
@@ -216,7 +202,7 @@ function taskPrompt(
 Today's date: ${new Date().toISOString()}
 Actor user ID: ${currentUserId}
 
-Target message (the message that user started the task for in the chat):
+The message that user started the task from in the chat:
 ${formatMessage(targetMessage)}
 
 <conversation_context>
@@ -236,6 +222,7 @@ Full schema:
 ${JSON.stringify(database, null, 2)}
 </database_schema>
 
+Use these as examples to understand the properties and the format of the Notion properties.
 <sample_notion_entries>
 ${JSON.stringify(samplePages, null, 2)}
 </sample_notion_entries>
