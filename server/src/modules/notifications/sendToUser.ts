@@ -11,6 +11,7 @@ type SendPushNotificationToUserInput = {
   threadId: string
   title: string
   body: string
+  subtitle?: string
   isThread?: boolean
 }
 
@@ -24,6 +25,7 @@ export const sendPushNotificationToUser = async ({
   threadId,
   title,
   body,
+  subtitle,
   isThread = false,
 }: SendPushNotificationToUserInput) => {
   try {
@@ -61,6 +63,7 @@ export const sendPushNotificationToUser = async ({
       notification.alert = {
         title,
         body,
+        subtitle,
       }
 
       let apnProvider = getApnProvider()
