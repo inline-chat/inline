@@ -154,3 +154,28 @@ export async function getSampleDatabasePages(spaceId: number, databaseId: string
     return []
   }
 }
+
+export interface NotionUser {
+  id: string
+  name: string
+  email: string
+}
+
+export function formatNotionUsers(notionUsers: any): NotionUser[] {
+  const users: NotionUser[] = []
+
+  for (const user of notionUsers.results) {
+    let email = undefined
+    if (user.type === "person" && user.person?.email) {
+      email = user.person.email
+    }
+
+    users.push({
+      id: user.id,
+      name: user.name,
+      email: email,
+    })
+  }
+
+  return users
+}

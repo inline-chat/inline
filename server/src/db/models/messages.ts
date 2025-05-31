@@ -25,7 +25,7 @@ import { type DbMessageAttachment } from "@in/server/db/schema/attachments"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { and, asc, desc, eq, gt, inArray, lt } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, lt, or } from "drizzle-orm"
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 
@@ -515,27 +515,28 @@ async function getMessagesAroundTarget(
   beforeCount: number = 15,
   afterCount: number = 15,
 ): Promise<ProcessedMessage[]> {
-  // Get messages before the target (older messages)
-  const messagesBefore = await db._query.messages.findMany({
-    where: and(eq(messages.chatId, chatId), lt(messages.messageId, targetMessageId)),
-    orderBy: desc(messages.messageId),
-    limit: beforeCount,
-  })
-
-  // Get messages after the target (newer messages)
-  const messagesAfter = await db._query.messages.findMany({
-    where: and(eq(messages.chatId, chatId), gt(messages.messageId, targetMessageId)),
-    orderBy: asc(messages.messageId),
-    limit: afterCount,
-  })
+  const [messagesBefore, messagesAfter] = await Promise.all([
+    // Get messages before the target (older messages) - optimized query
+    db._query.messages.findMany({
+      where: and(eq(messages.chatId, chatId), lt(messages.messageId, targetMessageId)),
+      orderBy: desc(messages.messageId),
+      limit: beforeCount,
+    }),
+    // Get messages after the target (newer messages) - optimized query
+    db._query.messages.findMany({
+      where: and(eq(messages.chatId, chatId), gt(messages.messageId, targetMessageId)),
+      orderBy: asc(messages.messageId),
+      limit: afterCount,
+    }),
+  ])
 
   // Reverse messagesBefore to get chronological order (oldest first)
   messagesBefore.reverse()
 
-  // Combine all messages in chronological order
-  const allMessages = [...messagesBefore, ...messagesAfter]
+  // Combine in chronological order
+  const combinedMessages = [...messagesBefore, ...messagesAfter]
 
-  return allMessages.map((msg) => ({
+  return combinedMessages.map((msg) => ({
     ...msg,
     text:
       msg.textEncrypted && msg.textIv && msg.textTag
