@@ -176,16 +176,13 @@ struct ChatInfoView: View {
               ProfileRow(userInfo: userInfo, isChatInfo: true)
                 .swipeActions {
                   if isOwnerOrAdmin {
-                    Button(action: {
+                    Button(role: .destructive, action: {
                       Task {
                         do {
-                          try await Realtime.shared.invokeWithHandler(
-                            .removeChatParticipant,
-                            input: .removeChatParticipant(.with { input in
-                              input.chatID = chatItem.chat?.id ?? 0
-                              input.userID = userInfo.user.id
-                            })
-                          )
+                          try await Realtime.shared.invokeWithHandler(.removeChatParticipant, input: .removeChatParticipant(.with { input in
+                            input.chatID = chatItem.chat?.id ?? 0
+                            input.userID = userInfo.user.id
+                          }))
                         } catch {
                           Log.shared.error("Failed to remove participant", error: error)
                         }
@@ -193,7 +190,6 @@ struct ChatInfoView: View {
                     }) {
                       Text("Remove")
                     }
-                    .tint(ThemeManager.shared.selected.deleteAction.map(Color.init) ?? .red)
                   }
                 }
             }
