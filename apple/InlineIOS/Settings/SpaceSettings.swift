@@ -74,17 +74,16 @@ struct SpaceSettingsView: View {
       }
 
       Section {
-        Button(role: .destructive) {
+        Button {
           showSpaceActionAlert()
         } label: {
           if isCreator {
             Label("Delete Space", systemImage: "trash.fill")
-              .foregroundColor(.red)
           } else {
             Label("Leave Space", systemImage: "rectangle.portrait.and.arrow.right.fill")
-              .foregroundColor(.red)
           }
         }
+        .themeDestructive()
       }
 
       .toolbarRole(.editor)

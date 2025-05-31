@@ -4,7 +4,7 @@ struct ToastView: View {
   let toast: ToastData
   @State private var animationProgress: Double = 0
   @State private var previousMessage: String = ""
-
+  let theme = ThemeManager.shared.selected
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
       if let systemImage = toast.systemImage {
@@ -20,7 +20,10 @@ struct ToastView: View {
             .id(systemImage)
         } else {
           Image(systemName: systemImage)
-            .foregroundColor(toast.type == .success ? .green : .secondary)
+            .foregroundColor(
+              toast
+                .type == .success ? Color(theme.toastSuccess ?? .green) : .primary.opacity(0.6)
+            )
             .padding(.top, 2)
             .transition(.asymmetric(
               insertion: .scale.combined(with: .opacity),
@@ -90,7 +93,10 @@ struct ToastView: View {
         Button(actionTitle) {
           toast.action?()
         }
-        .foregroundColor(toast.type == .success ? .green : toast.type == .error ? .red : .blue)
+        .foregroundColor(
+          toast.type == .success ? Color(theme.toastSuccess ?? .green) : toast.type == .error
+            ? Color(theme.toastFailed ?? .red) : Color(theme.toastInfo ?? .blue)
+        )
         .padding(.leading, 4)
         .transition(.opacity)
         .id(actionTitle)
@@ -107,11 +113,14 @@ struct ToastView: View {
         RoundedRectangle(cornerRadius: 20)
           .fill(
             toast.type == .success ?
-              Color.green.opacity(0.1) : toast.type == .error ? Color.red.opacity(0.1) : Color(uiColor: .systemGray6)
+              Color(theme.toastSuccess ?? .green).opacity(0.1) : toast
+              .type == .error ? Color(theme.toastFailed ?? .red)
+              .opacity(0.1) : Color(theme.toastInfo ?? .systemGray6).opacity(0.1)
           )
           .strokeBorder(
             toast.type == .success ?
-              Color.green.opacity(0.2) : toast.type == .error ? Color.red.opacity(0.1) : Color.primary.opacity(0.08),
+              Color(theme.toastSuccess ?? .green).opacity(0.2) : toast.type == .error
+              ? Color(theme.toastFailed ?? .red).opacity(0.1) : Color(theme.toastInfo ?? .label).opacity(0.08),
 
             lineWidth: 1
           )
