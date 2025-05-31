@@ -944,7 +944,7 @@ private extension MessagesCollectionView {
             actions.append(copyPhotoAction)
           }
 
-          let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { [weak self] _ in
+          let cancelAction = UIAction.createDeleteAction(title: "Cancel") { [weak self] _ in
             if let transactionId = message.transactionId, !transactionId.isEmpty {
               Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
 
@@ -1019,11 +1019,7 @@ private extension MessagesCollectionView {
 
         let willDoAction = createWillDoMenu(for: message)
 
-        let deleteAction = UIAction(
-          title: "Delete",
-          image: UIImage(systemName: "trash"),
-          attributes: .destructive
-        ) { _ in
+        let deleteAction = UIAction.createDeleteAction { _ in
           self.showDeleteConfirmation(
             messageId: message.messageId,
             peerId: message.peerId,

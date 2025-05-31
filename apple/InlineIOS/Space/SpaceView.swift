@@ -244,7 +244,7 @@ private struct ChatItemRow: View {
       ))
     }
     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-      Button(role: .destructive) {
+      Button {
         Task {
           try await data.updateDialog(
             peerId: item.peerId,
@@ -254,7 +254,7 @@ private struct ChatItemRow: View {
       } label: {
         Image(systemName: "tray.and.arrow.down.fill")
       }
-      .tint(Color(.systemGray2))
+      .tint(ThemeManager.shared.selected.deleteAction.map(Color.init) ?? .red)
 
       Button {
         Task {
