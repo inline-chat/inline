@@ -141,7 +141,11 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
         UIPasteboard.general.string = self?.url?.absoluteString
       }
 
-      let deleteAction = UIAction.createDeleteAction { [weak self] _ in
+      let deleteAction = UIAction(
+        title: "Delete",
+        image: UIImage(systemName: "trash"),
+        attributes: .destructive
+      ) { [weak self] _ in
         self?.showDeleteConfirmation()
       }
 
