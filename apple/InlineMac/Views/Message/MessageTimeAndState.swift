@@ -348,8 +348,8 @@ class MessageTimeAndState: NSView {
 
   static var tooltipFormatter: DateFormatter = {
     let formatter = DateFormatter()
-    formatter.dateStyle = .full
-    formatter.timeStyle = .medium
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .short
     formatter.locale = Locale.autoupdatingCurrent
     return formatter
   }()
