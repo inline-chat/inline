@@ -77,55 +77,61 @@ final class UserAvatarView: UIView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    layer.cornerRadius = bounds.width / 2
-    gradientLayer.frame = bounds
+    UIView.performWithoutAnimation {
+      layer.cornerRadius = bounds.width / 2
+      gradientLayer.frame = bounds
+    }
   }
 
   // MARK: - Configuration
 
   func configure(with userInfo: UserInfo, size: CGFloat = 32) {
-    self.size = size
+    UIView.performWithoutAnimation {
+      self.size = size
 
-    // Only set size constraints if they haven't been set externally
-    if constraints.isEmpty {
-      NSLayoutConstraint.activate([
-        widthAnchor.constraint(equalToConstant: size),
-        heightAnchor.constraint(equalToConstant: size),
-      ])
-    }
+      // Only set size constraints if they haven't been set externally
+      if constraints.isEmpty {
+        NSLayoutConstraint.activate([
+          widthAnchor.constraint(equalToConstant: size),
+          heightAnchor.constraint(equalToConstant: size),
+        ])
+      }
 
-    // Get name for initials
-    let user = userInfo.user
-    nameForInitials = AvatarColorUtility.formatNameForHashing(
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.email
-    )
+      // Get name for initials
+      let user = userInfo.user
+      nameForInitials = AvatarColorUtility.formatNameForHashing(
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email
+      )
 
-    // Update initials
-    initialsLabel.text = nameForInitials.first.map(String.init)?.uppercased() ?? ""
+      // Update initials
+      initialsLabel.text = nameForInitials.first.map(String.init)?.uppercased() ?? ""
 
-    // Update gradient colors
-    let baseColor = AvatarColorUtility.uiColorFor(name: nameForInitials)
-    let isDarkMode = traitCollection.userInterfaceStyle == .dark
-    let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
+      // Update gradient colors
+      let baseColor = AvatarColorUtility.uiColorFor(name: nameForInitials)
+      let isDarkMode = traitCollection.userInterfaceStyle == .dark
+      let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
 
-    gradientLayer.colors = [
-      adjustedColor.adjustLuminosity(by: 0.2).cgColor,
-      adjustedColor.cgColor,
-    ]
+      gradientLayer.colors = [
+        adjustedColor.adjustLuminosity(by: 0.2).cgColor,
+        adjustedColor.cgColor,
+      ]
 
-    // Load image if available
-    if var photo = userInfo.profilePhoto?.first {
-      loadProfileImage(photo: photo)
-    } else {
-      showInitials()
+      // Load image if available
+      if var photo = userInfo.profilePhoto?.first {
+        loadProfileImage(photo: photo)
+      } else {
+        showInitials()
+      }
     }
   }
 
   private func loadProfileImage(photo: InlineKit.File) {
-    // Show initials initially while loading
-    initialsLabel.isHidden = false
+    // Hide initials immediately if we have a photo to load
+    UIView.performWithoutAnimation {
+      initialsLabel.isHidden = true
+    }
 
     if let localUrl = photo.getLocalURL() {
       imageView.request = ImageRequest(
@@ -137,7 +143,9 @@ final class UserAvatarView: UIView {
       // Set up success/failure handlers
       imageView.onSuccess = { [weak self] _ in
         DispatchQueue.main.async {
-          self?.initialsLabel.isHidden = true
+          UIView.performWithoutAnimation {
+            self?.initialsLabel.isHidden = true
+          }
         }
       }
 
@@ -157,7 +165,9 @@ final class UserAvatarView: UIView {
       // Set up success/failure handlers
       imageView.onSuccess = { [weak self] _ in
         DispatchQueue.main.async {
-          self?.initialsLabel.isHidden = true
+          UIView.performWithoutAnimation {
+            self?.initialsLabel.isHidden = true
+          }
         }
       }
 
@@ -195,8 +205,10 @@ final class UserAvatarView: UIView {
   }
 
   private func showInitials() {
-    initialsLabel.isHidden = false
-    imageView.request = nil
+    UIView.performWithoutAnimation {
+      initialsLabel.isHidden = false
+      imageView.request = nil
+    }
   }
 
   // MARK: - Private Helpers
