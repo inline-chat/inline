@@ -83,6 +83,7 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
     super.init(frame: .zero)
     setupView()
     setupInteractions()
+    preloadAvatarImages()
   }
 
   @available(*, unavailable)
@@ -145,6 +146,26 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
       for gestureRecognizer in gestureRecognizers ?? [] {
         if gestureRecognizer is UILongPressGestureRecognizer {
           gestureRecognizer.delegate = self
+        }
+      }
+    }
+  }
+
+  private func preloadAvatarImages() {
+    // Preload avatar images in the background for better context menu performance
+    Task.detached(priority: .utility) { [weak self] in
+      guard let self else { return }
+
+      for user in reactionUsers {
+        guard let userInfo = user.userInfo,
+              let photo = userInfo.profilePhoto?.first,
+              let remoteUrl = photo.getRemoteURL() else { continue }
+
+        // Check if already cached
+        let request = ImageRequest(url: remoteUrl, processors: [.resize(width: 48)])
+        if ImagePipeline.shared.cache.cachedImage(for: request) == nil {
+          // Preload the image
+          try? await ImagePipeline.shared.image(for: request)
         }
       }
     }
@@ -267,8 +288,14 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
 
       // Check Nuke's cache for remote images
       if let remoteUrl = photo.getRemoteURL() {
-        let request = ImageRequest(url: remoteUrl)
+        let request = ImageRequest(url: remoteUrl, processors: [.resize(width: 48)])
         if let cachedImage = ImagePipeline.shared.cache.cachedImage(for: request)?.image {
+          return resizeImage(cachedImage, to: CGSize(width: 24, height: 24))
+        }
+
+        // Also check without processors in case it was cached differently
+        let simpleRequest = ImageRequest(url: remoteUrl)
+        if let cachedImage = ImagePipeline.shared.cache.cachedImage(for: simpleRequest)?.image {
           return resizeImage(cachedImage, to: CGSize(width: 24, height: 24))
         }
       }
