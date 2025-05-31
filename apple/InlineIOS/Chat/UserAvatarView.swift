@@ -86,8 +86,13 @@ final class UserAvatarView: UIView {
   func configure(with userInfo: UserInfo, size: CGFloat = 32) {
     self.size = size
 
-    // Set frame size
-    frame = CGRect(x: frame.origin.x, y: frame.origin.y, width: size, height: size)
+    // Only set size constraints if they haven't been set externally
+    if constraints.isEmpty {
+      NSLayoutConstraint.activate([
+        widthAnchor.constraint(equalToConstant: size),
+        heightAnchor.constraint(equalToConstant: size),
+      ])
+    }
 
     // Get name for initials
     let user = userInfo.user
@@ -101,7 +106,6 @@ final class UserAvatarView: UIView {
     initialsLabel.text = nameForInitials.first.map(String.init)?.uppercased() ?? ""
 
     // Update gradient colors
-
     let baseColor = AvatarColorUtility.uiColorFor(name: nameForInitials)
     let isDarkMode = traitCollection.userInterfaceStyle == .dark
     let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
@@ -113,44 +117,86 @@ final class UserAvatarView: UIView {
 
     // Load image if available
     if var photo = userInfo.profilePhoto?.first {
-      initialsLabel.isHidden = true
-      if let localUrl = photo.getLocalURL() {
-        imageView.request = ImageRequest(
-          url: localUrl,
-          processors: [.resize(width: 96)],
-          priority: .high
-        )
-      } else if let remoteUrl = photo.getRemoteURL() {
-        imageView.request = ImageRequest(
-          url: remoteUrl,
-          processors: [.resize(width: 96)],
-          priority: .high
-        )
+      loadProfileImage(photo: photo)
+    } else {
+      showInitials()
+    }
+  }
 
-        // Save image locally when loaded
-        Task.detached(priority: .userInitiated) { [weak self] in
-          guard self != nil else { return }
-          if let image = try? await ImagePipeline.shared.image(for: remoteUrl) {
-            let directory = FileHelpers.getDocumentsDirectory()
-            let fileName = photo.fileName ?? ""
-            if let (pathString, _) = try? image.save(
-              to: directory,
-              withName: fileName,
-              format: photo.imageFormat
-            ) {
-              photo.localPath = pathString
-              let file_ = photo
-              try? await AppDatabase.shared.dbWriter.write { db in
-                try file_.save(db)
-              }
+  private func loadProfileImage(photo: InlineKit.File) {
+    // Show initials initially while loading
+    initialsLabel.isHidden = false
+
+    if let localUrl = photo.getLocalURL() {
+      imageView.request = ImageRequest(
+        url: localUrl,
+        processors: [.resize(width: 96)],
+        priority: .high
+      )
+
+      // Set up success/failure handlers
+      imageView.onSuccess = { [weak self] _ in
+        DispatchQueue.main.async {
+          self?.initialsLabel.isHidden = true
+        }
+      }
+
+      imageView.onFailure = { [weak self] _ in
+        DispatchQueue.main.async {
+          self?.showInitials()
+        }
+      }
+
+    } else if let remoteUrl = photo.getRemoteURL() {
+      imageView.request = ImageRequest(
+        url: remoteUrl,
+        processors: [.resize(width: 96)],
+        priority: .high
+      )
+
+      // Set up success/failure handlers
+      imageView.onSuccess = { [weak self] _ in
+        DispatchQueue.main.async {
+          self?.initialsLabel.isHidden = true
+        }
+      }
+
+      imageView.onFailure = { [weak self] _ in
+        DispatchQueue.main.async {
+          self?.showInitials()
+        }
+      }
+
+      // Save image locally when loaded
+      Task.detached(priority: .userInitiated) { [weak self] in
+        guard self != nil else { return }
+        do {
+          let image = try await ImagePipeline.shared.image(for: remoteUrl)
+          let directory = FileHelpers.getDocumentsDirectory()
+          let fileName = photo.fileName ?? ""
+          if let (pathString, _) = try? image.save(
+            to: directory,
+            withName: fileName,
+            format: photo.imageFormat
+          ) {
+            var updatedPhoto = photo
+            updatedPhoto.localPath = pathString
+            try? await AppDatabase.shared.dbWriter.write { db in
+              try updatedPhoto.save(db)
             }
           }
+        } catch {
+          Log.shared.error("Failed to load and cache profile image", error: error)
         }
       }
     } else {
-      initialsLabel.isHidden = false
-      imageView.url = nil
+      showInitials()
     }
+  }
+
+  private func showInitials() {
+    initialsLabel.isHidden = false
+    imageView.request = nil
   }
 
   // MARK: - Private Helpers
