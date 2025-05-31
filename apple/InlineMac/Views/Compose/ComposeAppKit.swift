@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import GRDB
 import InlineKit
 import Logger
 import SwiftUI
@@ -13,7 +14,10 @@ class ComposeAppKit: NSView {
 
   // State
   weak var messageList: MessageListAppKit?
-  private weak var viewModel: FullChatViewModel?
+
+  var viewModel: MessagesProgressiveViewModel? {
+    messageList?.viewModel
+  }
 
   // [uniqueId: FileMediaItem]
   private var attachmentItems: [String: FileMediaItem] = [:]
@@ -32,10 +36,6 @@ class ComposeAppKit: NSView {
 
   // Features
   private var feature_animateHeightChanges = false // for now until fixing how to update list view smoothly
-
-  func update(viewModel: FullChatViewModel) {
-    self.viewModel = viewModel
-  }
 
   // MARK: Views
 
@@ -663,8 +663,18 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     // only if empty
     guard textView.string.count == 0 else { return false }
 
-    // only if there is a last message
-    guard let lastMsgId = chat?.lastMsgId else { return false }
+    // fetch last message of ours in this chat that isn't sending or failed
+    let lastMsgId = try? dependencies.database.reader.read { db in
+      let lastMsg = try InlineKit.Message
+        .filter { $0.chatId == chatId }
+        .filter { $0.out == true }
+        .filter { $0.status == MessageSendingStatus.sent }
+        .order { $0.date.desc }
+        .limit(1)
+        .fetchOne(db)
+      return lastMsg?.messageId
+    }
+    guard let lastMsgId else { return false }
 
     // Trigger edit mode for last message
     state.setEditingMsgId(lastMsgId)
