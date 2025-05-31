@@ -294,14 +294,18 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
     log.debug("Participant settings", { participantSettings })
 
-    const hasAnyoneEnabledAI = participantSettings.some(
+    const hasAnyoneEnabledAIForThreads = participantSettings.some(
       (setting) =>
         setting.settings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly ||
         setting.settings?.notifications.mode === UserSettingsNotificationsMode.Mentions,
     )
+    const hasAnyoneEnabledAIForDMs = participantSettings.some(
+      (setting) => setting.settings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly,
+    )
+    const needsAIEval = chatInfo?.type === "thread" ? hasAnyoneEnabledAIForThreads : hasAnyoneEnabledAIForDMs
     const hasText = !!unencryptedText
 
-    if (hasAnyoneEnabledAI && hasText) {
+    if (needsAIEval && hasText) {
       let evalResults = await batchEvaluate({
         chatId: chatId,
         message: {
@@ -373,7 +377,14 @@ async function sendNotificationToUser({
 
   // Mentions
   if (userSettings?.notifications.mode === UserSettingsNotificationsMode.Mentions) {
-    if (!evalResult?.mentionedUserIds?.includes(userId) && !evalResult?.notifyUserIds?.includes(userId)) {
+    if (
+      // Not mentioned
+      !evalResult?.mentionedUserIds?.includes(userId) &&
+      // Not notified
+      !evalResult?.notifyUserIds?.includes(userId) &&
+      // Not DMs - always send for DMs if it's set to "Mentions"
+      inputPeer.type.oneofKind !== "user"
+    ) {
       // Do not notify
       return
     }
@@ -396,7 +407,7 @@ async function sendNotificationToUser({
   const userName = await getCachedUserName(messageInfo.message.fromId)
 
   if (!userName) {
-    Log.shared.debug("No user name found for user", { userId })
+    Log.shared.warn("No user name found for user", { userId })
     return
   }
 
