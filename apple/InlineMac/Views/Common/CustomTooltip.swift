@@ -29,9 +29,9 @@ enum TooltipConfig {
   // MARK: - Timing
 
   static let showDelay: TimeInterval = 1.0
-  static let hideDelay: TimeInterval = 0.1
-  static let animationShowDuration: TimeInterval = 0.1
-  static let animationHideDuration: TimeInterval = 0.2
+  static let hideDelay: TimeInterval = 0.01
+  static let animationShowDuration: TimeInterval = 0.15
+  static let animationHideDuration: TimeInterval = 0.15
   static let quickShowDelay: TimeInterval = 0.3 // When moving between tooltips
 
   // MARK: - Sizing & Spacing
