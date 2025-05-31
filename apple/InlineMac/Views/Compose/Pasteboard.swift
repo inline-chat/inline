@@ -81,6 +81,13 @@ class InlinePasteboard {
       }
     }
 
+    // 5. Check for text
+    if types.contains(.string) {
+      if let text = item.string(forType: .string) {
+        return .text(text)
+      }
+    }
+
     return nil
   }
 
