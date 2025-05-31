@@ -87,25 +87,25 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var isSticker: Bool?
 
   public enum Columns {
-    static let globalId = Column(CodingKeys.globalId)
-    static let messageId = Column(CodingKeys.messageId)
-    static let randomId = Column(CodingKeys.randomId)
-    static let date = Column(CodingKeys.date)
-    static let text = Column(CodingKeys.text)
-    static let peerUserId = Column(CodingKeys.peerUserId)
-    static let peerThreadId = Column(CodingKeys.peerThreadId)
-    static let chatId = Column(CodingKeys.chatId)
-    static let fromId = Column(CodingKeys.fromId)
-    static let mentioned = Column(CodingKeys.mentioned)
-    static let out = Column(CodingKeys.out)
-    static let pinned = Column(CodingKeys.pinned)
-    static let editDate = Column(CodingKeys.editDate)
-    static let status = Column(CodingKeys.status)
-    static let repliedToMessageId = Column(CodingKeys.repliedToMessageId)
-    static let isSticker = Column(CodingKeys.isSticker)
-    static let photoId = Column(CodingKeys.photoId)
-    static let videoId = Column(CodingKeys.videoId)
-    static let documentId = Column(CodingKeys.documentId)
+    public static let globalId = Column(CodingKeys.globalId)
+    public static let messageId = Column(CodingKeys.messageId)
+    public static let randomId = Column(CodingKeys.randomId)
+    public static let date = Column(CodingKeys.date)
+    public static let text = Column(CodingKeys.text)
+    public static let peerUserId = Column(CodingKeys.peerUserId)
+    public static let peerThreadId = Column(CodingKeys.peerThreadId)
+    public static let chatId = Column(CodingKeys.chatId)
+    public static let fromId = Column(CodingKeys.fromId)
+    public static let mentioned = Column(CodingKeys.mentioned)
+    public static let out = Column(CodingKeys.out)
+    public static let pinned = Column(CodingKeys.pinned)
+    public static let editDate = Column(CodingKeys.editDate)
+    public static let status = Column(CodingKeys.status)
+    public static let repliedToMessageId = Column(CodingKeys.repliedToMessageId)
+    public static let isSticker = Column(CodingKeys.isSticker)
+    public static let photoId = Column(CodingKeys.photoId)
+    public static let videoId = Column(CodingKeys.videoId)
+    public static let documentId = Column(CodingKeys.documentId)
   }
 
   public static let chat = belongsTo(Chat.self)
@@ -321,7 +321,7 @@ public extension Message {
 public extension InlineProtocol.Message {
   var stringRepresentationWithEmoji: String {
     if hasMessage {
-      self.message
+      message
     } else if isSticker == true {
       "🖼️ Sticker"
     } else if media.photo.hasPhoto {
@@ -642,3 +642,4 @@ public extension Message {
     videoId != nil
   }
 }
+

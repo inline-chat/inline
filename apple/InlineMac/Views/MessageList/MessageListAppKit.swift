@@ -11,7 +11,7 @@ class MessageListAppKit: NSViewController {
   private var peerId: Peer
   private var chat: Chat?
   private var chatId: Int64 { chat?.id ?? 0 }
-  private var viewModel: MessagesProgressiveViewModel
+  public var viewModel: MessagesProgressiveViewModel
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
 
