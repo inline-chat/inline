@@ -28,14 +28,16 @@ import ObjectiveC
 enum TooltipConfig {
   // MARK: - Timing
 
-  static let showDelay: TimeInterval = 0.9
+  static let showDelay: TimeInterval = 1.0
   static let hideDelay: TimeInterval = 0.1
-  static let animationDuration: TimeInterval = 0.15
-  static let quickShowDelay: TimeInterval = 0.1 // When moving between tooltips
+  static let animationShowDuration: TimeInterval = 0.1
+  static let animationHideDuration: TimeInterval = 0.2
+  static let quickShowDelay: TimeInterval = 0.3 // When moving between tooltips
 
   // MARK: - Sizing & Spacing
 
-  static let contentPadding: CGFloat = 6
+  static let contentPaddingHorizontal: CGFloat = 8
+  static let contentPaddingVertical: CGFloat = 6
   static let shadowPadding: CGFloat = 6
   static let maxWidth: CGFloat = 200
   static let cornerRadius: CGFloat = 10
@@ -272,8 +274,8 @@ class SimpleTooltip {
 
     // Create container view with padding
     let containerSize = NSSize(
-      width: textSize.width + TooltipConfig.contentPadding * 2,
-      height: textSize.height + TooltipConfig.contentPadding * 2
+      width: textSize.width + TooltipConfig.contentPaddingHorizontal * 2,
+      height: textSize.height + TooltipConfig.contentPaddingVertical * 2
     )
 
     // Add extra space for shadow (so it doesn't get clipped)
@@ -343,8 +345,8 @@ class SimpleTooltip {
 
     // Position label in container
     textView.frame = NSRect(
-      x: TooltipConfig.contentPadding,
-      y: TooltipConfig.contentPadding,
+      x: TooltipConfig.contentPaddingHorizontal,
+      y: TooltipConfig.contentPaddingVertical,
       width: textSize.width,
       height: textSize.height
     )
@@ -404,7 +406,7 @@ class SimpleTooltip {
 
     // Create smooth combined animation
     let animationGroup = CAAnimationGroup()
-    animationGroup.duration = TooltipConfig.animationDuration
+    animationGroup.duration = TooltipConfig.animationShowDuration
     animationGroup.timingFunction = CAMediaTimingFunction(
       controlPoints: Float(TooltipConfig.animationControlPoints.0),
       Float(TooltipConfig.animationControlPoints.1),
@@ -442,7 +444,7 @@ class SimpleTooltip {
     let containerView = (window.contentView?.subviews.first)
 
     NSAnimationContext.runAnimationGroup({ context in
-      context.duration = TooltipConfig.animationDuration * 0.8 // Slightly faster hide
+      context.duration = TooltipConfig.animationHideDuration
       context.timingFunction = CAMediaTimingFunction(name: .easeIn)
       context.allowsImplicitAnimation = true
 
