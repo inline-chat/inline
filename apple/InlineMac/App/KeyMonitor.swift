@@ -8,9 +8,11 @@ import OrderedCollections
 @MainActor
 public class KeyMonitor: Sendable {
   private let ESCAPE_KEY_CODE: UInt16 = 53
+  private let V_KEY_CODE: UInt16 = 9
   private let log = Log.scoped("KeyMonitor", enableTracing: false)
   private var escapeHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var textInputCatchAllHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
+  private var pasteHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
 
   private var localEventMonitor: Any?
   private var window: NSWindow
@@ -25,6 +27,7 @@ public class KeyMonitor: Sendable {
   enum HandlerType {
     case escape
     case textInputCatchAll
+    case paste
   }
 
   /// Add a handler for a specific event type
@@ -36,6 +39,8 @@ public class KeyMonitor: Sendable {
         escapeHandlers[key] = handler
       case .textInputCatchAll:
         textInputCatchAllHandlers[key] = handler
+      case .paste:
+        pasteHandlers[key] = handler
     }
 
     return { [weak self] in
@@ -45,17 +50,21 @@ public class KeyMonitor: Sendable {
           self?.escapeHandlers.removeValue(forKey: key)
         case .textInputCatchAll:
           self?.textInputCatchAllHandlers.removeValue(forKey: key)
+        case .paste:
+          self?.pasteHandlers.removeValue(forKey: key)
       }
     }
   }
 
   func removeHandler(for type: HandlerType, key: String) {
-    self.log.trace("Removing handler for \(type) with key \(key)")
+    log.trace("Removing handler for \(type) with key \(key)")
     switch type {
       case .escape:
-        self.escapeHandlers.removeValue(forKey: key)
+        escapeHandlers.removeValue(forKey: key)
       case .textInputCatchAll:
-        self.textInputCatchAllHandlers.removeValue(forKey: key)
+        textInputCatchAllHandlers.removeValue(forKey: key)
+      case .paste:
+        pasteHandlers.removeValue(forKey: key)
     }
   }
 
@@ -73,6 +82,15 @@ public class KeyMonitor: Sendable {
 
       if event.keyCode == ESCAPE_KEY_CODE {
         let handled = callHandler(for: .escape, event: event)
+        if handled { return nil }
+      }
+
+      // Check for Cmd+V (paste) when no text input is focused
+      if event.keyCode == V_KEY_CODE,
+         event.modifierFlags.contains(.command),
+         !isTextInputCurrentlyFocused()
+      {
+        let handled = callPasteHandler(event: event)
         if handled { return nil }
       }
 
@@ -146,6 +164,18 @@ public class KeyMonitor: Sendable {
         } else {
           return false
         }
+      case .paste:
+        return callPasteHandler(event: event)
+    }
+  }
+
+  private func callPasteHandler(event: NSEvent) -> Bool {
+    // only call the last one as otherwise multiple handlers will fight
+    if let last = pasteHandlers.values.last {
+      last(event)
+      return true
+    } else {
+      return false
     }
   }
 

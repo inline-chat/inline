@@ -600,6 +600,7 @@ class ComposeAppKit: NSView {
   }
 
   private var keyMonitorUnsubscribe: (() -> Void)?
+  private var keyMonitorPasteUnsubscribe: (() -> Void)?
 
   private func setupKeyDownHandler() {
     keyMonitorUnsubscribe = dependencies.keyMonitor?.addHandler(
@@ -616,16 +617,40 @@ class ComposeAppKit: NSView {
         )
       }
     )
+
+    // Add paste handler
+    keyMonitorPasteUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .paste,
+      key: "compose_paste_\(peerId)",
+      handler: { [weak self] _ in
+        self?.handleGlobalPaste()
+      }
+    )
+  }
+
+  private func handleGlobalPaste() {
+    let pasteboard = NSPasteboard.general
+
+    // Use the existing pasteboard handling from the text view
+    let handled = textEditor.textView.handleAttachments(from: pasteboard)
+
+    if handled {
+      focus()
+    }
   }
 
   override func viewDidHide() {
     keyMonitorUnsubscribe?()
     keyMonitorUnsubscribe = nil
+    keyMonitorPasteUnsubscribe?()
+    keyMonitorPasteUnsubscribe = nil
   }
 
   deinit {
     keyMonitorUnsubscribe?()
     keyMonitorUnsubscribe = nil
+    keyMonitorPasteUnsubscribe?()
+    keyMonitorPasteUnsubscribe = nil
 
     Log.shared.debug("🗑️🧹 deinit ComposeAppKit: \(self)")
   }
