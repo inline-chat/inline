@@ -17,6 +17,7 @@ import {
 import { RealtimeUpdates } from "../../realtime/message"
 import { Notifications } from "../../modules/notifications/notifications"
 import { decrypt, encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
+import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { encodeMessageAttachmentUpdate } from "../../realtime/encoders/encodeMessageAttachment"
 import { ProtocolConvertors } from "../../types/protocolConvertors"
 
@@ -124,6 +125,16 @@ export const handler = async (
       const otherUserIds = updateGroup.userIds.filter((userId) => userId !== context.currentUserId)
 
       if (otherUserIds.length > 0) {
+        // Decrypt message text for notification description
+        let messageText = message.text || ""
+        if (message.textEncrypted && message.textIv && message.textTag) {
+          messageText = decryptMessage({
+            encrypted: message.textEncrypted,
+            iv: message.textIv,
+            authTag: message.textTag,
+          })
+        }
+
         parallelOperations.push(
           Promise.all(
             otherUserIds.map((userId) =>
@@ -131,8 +142,10 @@ export const handler = async (
                 userId,
                 senderUserId: context.currentUserId,
                 threadId: `chat_${chatId}`,
-                title: `${senderUser.firstName ?? "Someone"} created a Notion task`,
-                body: `"${result.taskTitle}" - A new task has been created from a message`,
+                title: `${senderUser.firstName ?? "Someone"} will do`,
+                subtitle: result.taskTitle ?? undefined,
+                body: messageText || "A new task has been created from a message",
+                isThread: updateGroup.type === "threadUsers",
               }),
             ),
           ).catch((error) => {
