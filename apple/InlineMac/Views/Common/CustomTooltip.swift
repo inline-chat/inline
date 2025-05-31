@@ -28,9 +28,9 @@ import ObjectiveC
 enum TooltipConfig {
   // MARK: - Timing
 
-  static let showDelay: TimeInterval = 0.8
+  static let showDelay: TimeInterval = 0.9
   static let hideDelay: TimeInterval = 0.1
-  static let animationDuration: TimeInterval = 0.2
+  static let animationDuration: TimeInterval = 0.15
   static let quickShowDelay: TimeInterval = 0.1 // When moving between tooltips
 
   // MARK: - Sizing & Spacing
@@ -86,6 +86,11 @@ class SimpleTooltip {
   private var hideTimer: Timer?
   private var lastTooltipTime: Date?
   private var isTooltipVisible = false
+  private var scrollEventMonitor: Any?
+  private var windowEventMonitor: Any?
+
+  /// Used to disable tooltips while scrolling
+  private var isScrolling = false
 
   private init() {
     // Listen for appearance changes
@@ -95,29 +100,97 @@ class SimpleTooltip {
       name: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
       object: nil
     )
+
+    setupScrollEventMonitoring()
   }
 
   deinit {
     DistributedNotificationCenter.default.removeObserver(self)
+    cleanupScrollEventMonitoring()
+  }
+
+  // MARK: - Scroll Event Monitoring
+
+  private func setupScrollEventMonitoring() {
+    // Also listen for scroll view notifications
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(scrollViewDidEndScroll),
+      name: NSScrollView.didEndLiveScrollNotification,
+      object: nil
+    )
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(scrollViewDidStartScroll),
+      name: NSScrollView.willStartLiveScrollNotification,
+      object: nil
+    )
+  }
+
+  private func setupWindowEventMonitoring(for window: NSWindow) {
+    // Monitor scroll events at the window level
+    // windowEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
+    //   print("scrollWheel")
+    //   if event.window == window, self?.isTooltipVisible == true {
+    //     self?.hideImmediately()
+    //   }
+    //   return event
+    // }
+  }
+
+  @objc private func scrollViewDidStartScroll() {
+    isScrolling = true
+    print("scrollViewDidStartScroll")
+    if isTooltipVisible {
+      hideImmediately()
+    }
+  }
+
+  @objc private func scrollViewDidEndScroll() {
+    isScrolling = false
+    print("scrollViewDidEndScroll")
+    if isTooltipVisible {
+      hideImmediately()
+    }
+  }
+
+  private func cleanupScrollEventMonitoring() {
+    if let monitor = scrollEventMonitor {
+      NSEvent.removeMonitor(monitor)
+      scrollEventMonitor = nil
+    }
+
+    if let monitor = windowEventMonitor {
+      NSEvent.removeMonitor(monitor)
+      windowEventMonitor = nil
+    }
+
+    NotificationCenter.default.removeObserver(self, name: NSScrollView.didLiveScrollNotification, object: nil)
+    NotificationCenter.default.removeObserver(self, name: NSScrollView.willStartLiveScrollNotification, object: nil)
   }
 
   @objc private func appearanceChanged() {
     // If a tooltip is currently showing, hide it so it can be reshown with new appearance
     if tooltipWindow != nil {
-      hide()
+      hideImmediately()
     }
   }
 
   // MARK: - Public API
 
   func show(text: String, near view: NSView) {
-    hide() // Always hide any existing tooltip first
+    if isScrolling {
+      return
+    }
 
     showTimer?.invalidate()
 
     // Determine if we should use quick show delay (when moving between tooltips)
     let shouldUseQuickDelay = shouldSkipDelay()
     let delay = shouldUseQuickDelay ? TooltipConfig.quickShowDelay : TooltipConfig.showDelay
+
+    hideImmediately() // Always hide any existing tooltip first
 
     showTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
       self?.createAndShowTooltip(text: text, near: view)
@@ -135,13 +208,23 @@ class SimpleTooltip {
     }
   }
 
+  func hideImmediately() {
+    showTimer?.invalidate()
+    hideTimer?.invalidate()
+    dismissTooltip()
+    lastTooltipTime = nil
+  }
+
   // MARK: - Smart Delay Logic
 
   private func shouldSkipDelay() -> Bool {
     guard let lastTime = lastTooltipTime else { return false }
     let timeSinceLastTooltip = Date().timeIntervalSince(lastTime)
+    if isScrolling {
+      return false
+    }
     // If less than 2 seconds since last tooltip, use quick delay
-    return timeSinceLastTooltip < 2.0
+    return timeSinceLastTooltip < 1.0
   }
 
   // MARK: - Private Implementation
@@ -153,25 +236,44 @@ class SimpleTooltip {
     // Get current appearance for adaptive styling
     let isDarkMode = NSApp.effectiveAppearance.isDarkMode
 
-    // Create tooltip content
-    let label = NSTextField(labelWithString: text)
-    label.font = NSFont.systemFont(ofSize: TooltipConfig.fontSize, weight: TooltipConfig.fontWeight)
-    label.textColor = .labelColor
-    label.backgroundColor = .clear
-    label.maximumNumberOfLines = 0
-    label.preferredMaxLayoutWidth = TooltipConfig.maxWidth
+    // Create tooltip content with NSTextView for better text handling
+    let textView = NSTextView()
+    textView.string = text
+    textView.font = NSFont.systemFont(ofSize: TooltipConfig.fontSize, weight: TooltipConfig.fontWeight)
+    textView.textColor = .labelColor
+    textView.backgroundColor = .clear
+    textView.isEditable = false
+    textView.isSelectable = false
+    textView.isRichText = false
+    textView.drawsBackground = false
 
-    // Calculate label size
-    label.sizeToFit()
-    let labelSize = label.fittingSize
+    // Configure text container for proper wrapping
+    let textContainer = textView.textContainer!
+    textContainer.containerSize = NSSize(width: TooltipConfig.maxWidth, height: CGFloat.greatestFiniteMagnitude)
+    textContainer.widthTracksTextView = false
+    textContainer.heightTracksTextView = false
+    textContainer.lineFragmentPadding = 0
+
+    // Force layout to calculate proper size
+    textView.layoutManager?.ensureLayout(for: textContainer)
+
+    // Get the actual size needed for the text
+    let usedRect = textView.layoutManager!.usedRect(for: textContainer)
+    let textSize = NSSize(
+      width: ceil(usedRect.width),
+      height: ceil(usedRect.height)
+    )
 
     // Ensure minimum size
-    guard labelSize.width > 0, labelSize.height > 0 else { return }
+    guard textSize.width > 0, textSize.height > 0 else { return }
+
+    // Set the text view frame to the calculated size
+    textView.frame = NSRect(origin: .zero, size: textSize)
 
     // Create container view with padding
     let containerSize = NSSize(
-      width: labelSize.width + TooltipConfig.contentPadding * 2,
-      height: labelSize.height + TooltipConfig.contentPadding * 2
+      width: textSize.width + TooltipConfig.contentPadding * 2,
+      height: textSize.height + TooltipConfig.contentPadding * 2
     )
 
     // Add extra space for shadow (so it doesn't get clipped)
@@ -240,13 +342,13 @@ class SimpleTooltip {
     layer.borderColor = NSColor.white.withAlphaComponent(isDarkMode ? 0.1 : 0.1).cgColor
 
     // Position label in container
-    label.frame = NSRect(
+    textView.frame = NSRect(
       x: TooltipConfig.contentPadding,
       y: TooltipConfig.contentPadding,
-      width: labelSize.width,
-      height: labelSize.height
+      width: textSize.width,
+      height: textSize.height
     )
-    containerView.addSubview(label)
+    containerView.addSubview(textView)
 
     // Create tooltip window as a child window
     let window = NSWindow(
@@ -291,6 +393,9 @@ class SimpleTooltip {
     parentWindow = viewWindow
     isTooltipVisible = true
     lastTooltipTime = Date()
+
+    // Setup window-specific event monitoring
+    setupWindowEventMonitoring(for: viewWindow)
 
     // Show with smooth combined scale + opacity animation
     window.alphaValue = 0
@@ -358,6 +463,12 @@ class SimpleTooltip {
       }
       window.orderOut(nil)
       self?.isTooltipVisible = false
+
+      // Cleanup window event monitoring
+      if let monitor = self?.windowEventMonitor {
+        NSEvent.removeMonitor(monitor)
+        self?.windowEventMonitor = nil
+      }
     })
 
     tooltipWindow = nil
