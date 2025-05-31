@@ -445,7 +445,7 @@ extension InlineProtocol.UpdateUserSettings {
     guard let settings = hasSettings ? settings.notificationSettings : nil else { return }
 
     Task { @MainActor in
-      INUserSettings.current.notification.update(from: settings)
+      INUserSettings.current.updateFromServer(settings)
     }
   }
 }

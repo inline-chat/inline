@@ -17,6 +17,8 @@ public class INUserSettings {
 
   private var cancellables = Set<AnyCancellable>()
   private static let notificationSettingsKey = "notificationSettings"
+  private var isApplyingServerUpdate = false
+  private var pendingServerUpdateTask: Task<Void, Never>?
 
   // MARK: - Initialization
 
@@ -36,11 +38,15 @@ public class INUserSettings {
   private func setupObservation() {
     // Save to UserDefaults whenever notification settings change
     notification.objectWillChange
-      .debounce(for: .seconds(0.2), scheduler: DispatchQueue.main)
       .sink { [weak self] _ in
+        let wasTriggeredBecauseOfServerUpdate = self?.isApplyingServerUpdate == true
         Task { @MainActor in
+          // sleep a bit to use fresh values
           self?.saveToUserDefaults()
-          self?.saveToRealtime()
+          // Only sync to server if this is not a server update
+          if !wasTriggeredBecauseOfServerUpdate {
+            self?.debouncedSaveToRealtime()
+          }
         }
       }
       .store(in: &cancellables)
@@ -77,17 +83,47 @@ public class INUserSettings {
     }
   }
 
-  private func saveToRealtime() {
+  private func debouncedSaveToRealtime() {
+    // Cancel any pending server update task
+    pendingServerUpdateTask?.cancel()
+
+    // Schedule a new debounced task
+    pendingServerUpdateTask = Task { @MainActor in
+      do {
+        // Wait for debounce period
+        try await Task.sleep(nanoseconds: 300_000_000) // 300ms
+
+        // Check if task was cancelled
+        try Task.checkCancellation()
+
+        // Execute the actual save
+        await saveToRealtime()
+
+        // Clear the pending task reference
+        pendingServerUpdateTask = nil
+      } catch is CancellationError {
+        // Task was cancelled, which is expected behavior
+        log.trace("Server update task was cancelled (superseded by newer change)")
+      } catch {
+        log.error("Error in debounced server update", error: error)
+        pendingServerUpdateTask = nil
+      }
+    }
+  }
+
+  private func saveToRealtime() async {
     log.debug("Saving notification settings to Realtime")
     let notificationProtocol = notification.toProtocol()
-    Task.detached {
-      try await Realtime.shared
+    do {
+      _ = try await Realtime.shared
         .invoke(
           .updateUserSettings,
           input: .updateUserSettings((.with { $0.userSettings = .with {
             $0.notificationSettings = notificationProtocol
           } }))
         )
+    } catch {
+      log.error("Failed to save notification settings to server", error: error)
     }
   }
 
@@ -117,9 +153,23 @@ public class INUserSettings {
     log.debug("Updating from user settings")
 
     if data.userSettings.hasNotificationSettings {
+      isApplyingServerUpdate = true
       notification.update(from: data.userSettings.notificationSettings)
+      DispatchQueue.main.async {
+        self.isApplyingServerUpdate = false
+      }
       // Save updated settings to UserDefaults
       saveToUserDefaults()
     }
+  }
+
+  // Add a public method for server updates
+  public func updateFromServer(_ settings: InlineProtocol.NotificationSettings) {
+    isApplyingServerUpdate = true
+    notification.update(from: settings)
+    DispatchQueue.main.async {
+      self.isApplyingServerUpdate = false
+    }
+    saveToUserDefaults()
   }
 }
