@@ -97,9 +97,6 @@
     "🫙" : {
 
     },
-    "12:34" : {
-
-    },
     "Account" : {
       "localizations" : {
         "fa" : {
@@ -573,12 +570,6 @@
         }
       }
     },
-    "JD" : {
-
-    },
-    "John Doe" : {
-
-    },
     "Key" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -600,9 +591,6 @@
 
     },
     "Logout" : {
-
-    },
-    "Message" : {
 
     },
     "name@example.com" : {
@@ -666,9 +654,6 @@
 
     },
     "OK" : {
-
-    },
-    "Online" : {
 
     },
     "Only space admins and owners can connect and manage integrations." : {
@@ -792,9 +777,6 @@
     "Settings" : {
 
     },
-    "Spaces" : {
-
-    },
     "Step" : {
 
     },
@@ -818,9 +800,6 @@
 
     },
     "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
-
-    },
-    "Today" : {
 
     },
     "Translate" : {
