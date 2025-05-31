@@ -67,8 +67,9 @@ class MainSplitViewController: NSSplitViewController {
     guard let sidebarItem = splitViewItems.first else { return }
 
     NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.25
+      context.duration = 0.3
       context.allowsImplicitAnimation = true
+      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
       sidebarItem.animator().isCollapsed.toggle()
     }
   }
