@@ -562,13 +562,6 @@ public class DataManager: ObservableObject {
         .deleteAll(db)
     }
 
-    let _ = try await ApiClient.shared.deleteAttachment(
-      externalTaskId: externalTask.id ?? 0,
-      pageId: externalTask.taskId ?? "",
-      messageId: messageId,
-      chatId: chatId
-    )
-
     Task { @MainActor in
       if let message = try? await database.reader.read({ db in
         try Message.filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
@@ -576,5 +569,12 @@ public class DataManager: ObservableObject {
         MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
       }
     }
+
+    let _ = try await ApiClient.shared.deleteAttachment(
+      externalTaskId: externalTask.id ?? 0,
+      pageId: externalTask.taskId ?? "",
+      messageId: messageId,
+      chatId: chatId
+    )
   }
 }
