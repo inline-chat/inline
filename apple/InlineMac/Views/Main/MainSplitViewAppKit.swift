@@ -42,6 +42,14 @@ class MainSplitViewController: NSSplitViewController {
       name: NSApplication.didBecomeActiveNotification,
       object: nil
     )
+
+    // Add observer for toggle sidebar
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(toggleCurrentSidebar),
+      name: .toggleSidebar,
+      object: nil
+    )
   }
 
   @objc private func refetchChats() {
@@ -52,6 +60,16 @@ class MainSplitViewController: NSSplitViewController {
       } catch {
         Log.shared.error("Error refetching getChats", error: error)
       }
+    }
+  }
+
+  @objc private func toggleCurrentSidebar() {
+    guard let sidebarItem = splitViewItems.first else { return }
+
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.25
+      context.allowsImplicitAnimation = true
+      sidebarItem.animator().isCollapsed.toggle()
     }
   }
 

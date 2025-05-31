@@ -1,6 +1,10 @@
 import AppKit
 import InlineKit
 
+extension Notification.Name {
+  static let toggleSidebar = Notification.Name("toggleSidebar")
+}
+
 final class AppMenu: NSObject {
   static let shared = AppMenu()
   private let mainMenu = NSMenu()
@@ -325,6 +329,17 @@ final class AppMenu: NSObject {
     viewMenuItem.submenu = viewMenu
     mainMenu.addItem(viewMenuItem)
 
+    let toggleSidebarItem = NSMenuItem(
+      title: "Toggle Sidebar",
+      action: #selector(toggleSidebar(_:)),
+      keyEquivalent: "s"
+    )
+    toggleSidebarItem.keyEquivalentModifierMask = [.command]
+    toggleSidebarItem.target = self
+    viewMenu.addItem(toggleSidebarItem)
+
+    viewMenu.addItem(NSMenuItem.separator())
+
     viewMenu.addItem(
       withTitle: "Toggle Full Screen",
       action: #selector(NSWindow.toggleFullScreen(_:)),
@@ -422,5 +437,9 @@ final class AppMenu: NSObject {
       window.level = .floating
       sender.state = .on
     }
+  }
+
+  @objc private func toggleSidebar(_ sender: NSMenuItem) {
+    NotificationCenter.default.post(name: .toggleSidebar, object: nil)
   }
 }
