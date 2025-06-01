@@ -600,11 +600,11 @@ private extension MessagesCollectionView {
             snapshot.appendItems(newIds, toSection: .main)
           }
 
-          // Mark as read if we're at bottom or message is from current user
-          if shouldScroll {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self else { return }
+
             updateUnreadIfNeeded()
           }
-
           UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .curveEaseInOut]) {
             self.dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
               if shouldScroll {
@@ -1164,6 +1164,7 @@ private extension MessagesCollectionView {
         )
         wasPreviouslyAtBottom = isAtBottom
       }
+
       if isUserScrollInEffect {
         let isAtBottom = scrollView.contentOffset.y >= (scrollView.contentSize.height - scrollView.bounds.size.height)
         if isAtBottom {
