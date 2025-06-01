@@ -4122,6 +4122,8 @@ public struct GetChatParticipantsResult: Sendable {
 
   public var participants: [ChatParticipant] = []
 
+  public var users: [User] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -10646,6 +10648,7 @@ extension GetChatParticipantsResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
   public static let protoMessageName: String = "GetChatParticipantsResult"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "participants"),
+    2: .same(proto: "users"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10655,6 +10658,7 @@ extension GetChatParticipantsResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.participants) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
       default: break
       }
     }
@@ -10664,11 +10668,15 @@ extension GetChatParticipantsResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
     if !self.participants.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.participants, fieldNumber: 1)
     }
+    if !self.users.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.users, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetChatParticipantsResult, rhs: GetChatParticipantsResult) -> Bool {
     if lhs.participants != rhs.participants {return false}
+    if lhs.users != rhs.users {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
