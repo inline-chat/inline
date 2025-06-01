@@ -7,14 +7,24 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool
   func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool
+  func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool
+  func textViewDidPressTab(_ textView: NSTextView) -> Bool
+  func textViewDidPressEscape(_ textView: NSTextView) -> Bool
   // Add new delegate method for image paste
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage, url: URL?)
   func textView(_ textView: NSTextView, didReceiveFile url: URL)
   func textView(_ textView: NSTextView, didReceiveVideo url: URL)
+  // Mention handling
+  func textView(_ textView: NSTextView, didDetectMentionWith query: String, at location: Int)
+  func textViewDidCancelMention(_ textView: NSTextView)
+  // Focus handling
+  func textViewDidGainFocus(_ textView: NSTextView)
+  func textViewDidLoseFocus(_ textView: NSTextView)
 }
 
 class ComposeNSTextView: NSTextView {
   override func keyDown(with event: NSEvent) {
+    // Handle return key
     if event.keyCode == 36 {
       if event.modifierFlags.contains(.command) {
         if let delegate = delegate as? ComposeTextViewDelegate {
@@ -30,6 +40,8 @@ class ComposeNSTextView: NSTextView {
         }
       }
     }
+
+    // Handle arrow up key
     if event.keyCode == 126 {
       if let delegate = delegate as? ComposeTextViewDelegate {
         if delegate.textViewDidPressArrowUp(self) {
@@ -37,7 +49,53 @@ class ComposeNSTextView: NSTextView {
         }
       }
     }
+
+    // Handle arrow down key
+    if event.keyCode == 125 {
+      if let delegate = delegate as? ComposeTextViewDelegate {
+        if delegate.textViewDidPressArrowDown(self) {
+          return
+        }
+      }
+    }
+
+    // Handle tab key
+    if event.keyCode == 48 {
+      if let delegate = delegate as? ComposeTextViewDelegate {
+        if delegate.textViewDidPressTab(self) {
+          return
+        }
+      }
+    }
+
+    // Handle escape key
+    if event.keyCode == 53 {
+      if let delegate = delegate as? ComposeTextViewDelegate {
+        if delegate.textViewDidPressEscape(self) {
+          return
+        }
+      }
+    }
+
     super.keyDown(with: event)
+  }
+
+  @discardableResult
+  override func becomeFirstResponder() -> Bool {
+    let result = super.becomeFirstResponder()
+    if result {
+      (delegate as? ComposeTextViewDelegate)?.textViewDidGainFocus(self)
+    }
+    return result
+  }
+
+  @discardableResult
+  override func resignFirstResponder() -> Bool {
+    let result = super.resignFirstResponder()
+    if result {
+      (delegate as? ComposeTextViewDelegate)?.textViewDidLoseFocus(self)
+    }
+    return result
   }
 
   public func handleAttachments(from pasteboard: NSPasteboard) -> Bool {

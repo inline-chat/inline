@@ -14,6 +14,7 @@ class ComposeAppKit: NSView {
 
   // State
   weak var messageList: MessageListAppKit?
+  weak var parentChatView: ChatViewAppKit?
 
   var viewModel: MessagesProgressiveViewModel? {
     messageList?.viewModel
@@ -21,6 +22,14 @@ class ComposeAppKit: NSView {
 
   // [uniqueId: FileMediaItem]
   private var attachmentItems: [String: FileMediaItem] = [:]
+
+  // Mention completion
+  private var mentionCompletionMenu: MentionCompletionMenu?
+  private var mentionDetector = MentionDetector()
+  private var chatParticipantsViewModel: InlineKit.ChatParticipantsWithMembersViewModel?
+  private var currentMentionRange: MentionRange?
+  private var mentionKeyMonitorEscUnsubscribe: (() -> Void)?
+  private var mentionMenuConstraints: [NSLayoutConstraint] = []
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
@@ -108,15 +117,25 @@ class ComposeAppKit: NSView {
 
     // Focus the text editor
     focus()
+
+    // Set up mention menu positioning now that we have a window
+    addMentionMenuToSuperview()
   }
 
   // MARK: Initialization
 
-  init(peerId: Peer, messageList: MessageListAppKit, chat: Chat?, dependencies: AppDependencies) {
+  init(
+    peerId: Peer,
+    messageList: MessageListAppKit,
+    chat: Chat?,
+    dependencies: AppDependencies,
+    parentChatView: ChatViewAppKit? = nil
+  ) {
     self.peerId = peerId
     self.messageList = messageList
     self.chat = chat
     self.dependencies = dependencies
+    self.parentChatView = parentChatView
 
     super.init(frame: .zero)
     setupView()
@@ -134,6 +153,9 @@ class ComposeAppKit: NSView {
   func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
+
+    Log.shared
+      .debug("🔍 ComposeAppKit setupView: chat=\(String(describing: chat)), chatId=\(String(describing: chatId))")
 
     // More distinct background
     // layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5).cgColor
@@ -155,6 +177,7 @@ class ComposeAppKit: NSView {
     setupReplyingView()
     setUpConstraints()
     setupTextEditor()
+    setupMentionCompletion()
   }
 
   private func setUpConstraints() {
@@ -241,6 +264,113 @@ class ComposeAppKit: NSView {
     textEditor.delegate = self
   }
 
+  // MARK: - Mention Completion
+
+  private func setupMentionCompletion() {
+    guard let chatId else {
+      return
+    }
+
+    // Initialize chat participants view model
+    chatParticipantsViewModel = InlineKit.ChatParticipantsWithMembersViewModel(
+      db: dependencies.database,
+      chatId: chatId
+    )
+
+    // Create mention completion menu
+    mentionCompletionMenu = MentionCompletionMenu()
+    mentionCompletionMenu?.delegate = self
+    mentionCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
+
+    // Subscribe to participants updates
+    chatParticipantsViewModel?.$participants
+      .sink { [weak self] participants in
+        Log.shared.trace("🔍 Participants updated: \(participants.count) participants")
+        self?.mentionCompletionMenu?.updateParticipants(participants)
+      }
+      .store(in: &cancellables)
+
+    // Fetch participants from server
+    Task {
+      Log.shared.trace("🔍 Fetching chat participants from server...")
+      await chatParticipantsViewModel?.refetchParticipants()
+    }
+  }
+
+  private func addMentionMenuToSuperview() {
+    guard let menu = mentionCompletionMenu,
+          menu.superview == nil,
+          let parentView = parentChatView?.view
+    else {
+      Log.shared.debug("🔍 addMentionMenuToSuperview: menu already has superview, is nil, or no parent chat view")
+      return
+    }
+
+    Log.shared.debug("🔍 addMentionMenuToSuperview: adding menu to ChatViewAppKit's view")
+
+    // Add menu to the parent chat view
+    parentView.addSubview(menu)
+
+    // Remove any existing constraints
+    NSLayoutConstraint.deactivate(mentionMenuConstraints)
+    mentionMenuConstraints.removeAll()
+
+    // Create new constraints to position above compose with full width
+    mentionMenuConstraints = [
+      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
+      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
+      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -8),
+    ]
+
+    NSLayoutConstraint.activate(mentionMenuConstraints)
+    Log.shared.debug("🔍 addMentionMenuToSuperview: menu positioned above compose view")
+  }
+
+  private func showMentionCompletion(for query: String) {
+    Log.shared.debug("🔍 showMentionCompletion: query='\(query)'")
+
+    // Ensure menu is added to view hierarchy
+    addMentionMenuToSuperview()
+
+    mentionCompletionMenu?.filterParticipants(with: query)
+    mentionCompletionMenu?.show()
+
+    // Add escape handler for mention menu
+    mentionKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .escape,
+      key: "compose_mention_\(peerId)",
+      handler: { [weak self] _ in
+        self?.hideMentionCompletion()
+      }
+    )
+  }
+
+  private func hideMentionCompletion() {
+    Log.shared.debug("🔍 hideMentionCompletion")
+    currentMentionRange = nil
+    mentionCompletionMenu?.hide()
+
+    // Remove escape handler
+    mentionKeyMonitorEscUnsubscribe?()
+    mentionKeyMonitorEscUnsubscribe = nil
+  }
+
+  private func detectMentionAtCursor() {
+    let cursorPosition = textEditor.textView.selectedRange().location
+    let text = textEditor.string
+
+    Log.shared.debug("🔍 detectMentionAtCursor: cursor=\(cursorPosition), text='\(text)'")
+
+    if let mentionRange = mentionDetector.detectMentionAt(cursorPosition: cursorPosition, in: text) {
+      currentMentionRange = mentionRange
+      Log.shared.debug("🔍 Mention detected: '\(mentionRange.query)' at \(mentionRange.range)")
+      showMentionCompletion(for: mentionRange.query)
+    } else {
+      Log.shared.debug("🔍 No mention detected")
+      hideMentionCompletion()
+    }
+  }
+
   // MARK: - Public Interface
 
   var text: String {
@@ -310,6 +440,28 @@ class ComposeAppKit: NSView {
       attachments.updateHeight(animated: false)
       messageList?.updateInsetForCompose(wrapperHeight)
     }
+
+    // Update mention menu position if it's visible
+    if mentionCompletionMenu?.isVisible == true {
+      updateMentionMenuPosition()
+    }
+  }
+
+  private func updateMentionMenuPosition() {
+    guard let menu = mentionCompletionMenu, menu.superview != nil else { return }
+
+    // Remove existing constraints
+    NSLayoutConstraint.deactivate(mentionMenuConstraints)
+    mentionMenuConstraints.removeAll()
+
+    // Create new constraints with updated position
+    mentionMenuConstraints = [
+      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
+      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
+      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -8),
+    ]
+
+    NSLayoutConstraint.activate(mentionMenuConstraints)
   }
 
   private var ignoreNextHeightChange = false
@@ -644,6 +796,10 @@ class ComposeAppKit: NSView {
     keyMonitorUnsubscribe = nil
     keyMonitorPasteUnsubscribe?()
     keyMonitorPasteUnsubscribe = nil
+
+    // Clean up mention resources
+    hideMentionCompletion()
+    mentionCompletionMenu?.removeFromSuperview()
   }
 
   deinit {
@@ -651,6 +807,13 @@ class ComposeAppKit: NSView {
     keyMonitorUnsubscribe = nil
     keyMonitorPasteUnsubscribe?()
     keyMonitorPasteUnsubscribe = nil
+
+    // Clean up mention resources
+    mentionKeyMonitorEscUnsubscribe?()
+    mentionKeyMonitorEscUnsubscribe = nil
+    NSLayoutConstraint.deactivate(mentionMenuConstraints)
+    mentionMenuConstraints.removeAll()
+    mentionCompletionMenu?.removeFromSuperview()
 
     Log.shared.debug("🗑️🧹 deinit ComposeAppKit: \(self)")
   }
@@ -685,6 +848,12 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool {
+    // If mention menu is visible, let it handle the arrow key
+    if mentionCompletionMenu?.isVisible == true {
+      mentionCompletionMenu?.selectPrevious()
+      return true
+    }
+
     // only if empty
     guard textView.string.count == 0 else { return false }
 
@@ -707,6 +876,12 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool {
+    // If mention menu is visible, select current item with Enter
+    if mentionCompletionMenu?.isVisible == true {
+      mentionCompletionMenu?.selectCurrentItem()
+      return true
+    }
+
     // Send
     send()
     return true // handled
@@ -738,6 +913,9 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     if !ignoreNextHeightChange {
       updateHeightIfNeeded(for: textView)
     }
+
+    // Detect mentions
+    detectMentionAtCursor()
 
     if textView.string.isEmpty {
       // Handle empty text
@@ -795,6 +973,54 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     // guard let textView = notification.object as? NSTextView else { return }
     // Handle selection changes if needed
   }
+
+  func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool {
+    // If mention menu is visible, let it handle the arrow key
+    if mentionCompletionMenu?.isVisible == true {
+      mentionCompletionMenu?.selectNext()
+      return true
+    }
+
+    return false // not handled
+  }
+
+  func textViewDidPressTab(_ textView: NSTextView) -> Bool {
+    // If mention menu is visible, select current item
+    if mentionCompletionMenu?.isVisible == true {
+      mentionCompletionMenu?.selectCurrentItem()
+      return true
+    }
+
+    return false // not handled
+  }
+
+  func textViewDidPressEscape(_ textView: NSTextView) -> Bool {
+    // If mention menu is visible, hide it
+    if mentionCompletionMenu?.isVisible == true {
+      hideMentionCompletion()
+      return true
+    }
+
+    return false // not handled
+  }
+
+  func textView(_ textView: NSTextView, didDetectMentionWith query: String, at location: Int) {
+    // This method is called from text change detection
+    // Implementation will be in textDidChange
+  }
+
+  func textViewDidCancelMention(_ textView: NSTextView) {
+    hideMentionCompletion()
+  }
+
+  func textViewDidGainFocus(_ textView: NSTextView) {
+    // No specific action needed when gaining focus
+  }
+
+  func textViewDidLoseFocus(_ textView: NSTextView) {
+    // Hide mention menu when text view loses focus
+    hideMentionCompletion()
+  }
 }
 
 // MARK: ComposeMenuButtonDelegate
@@ -810,5 +1036,32 @@ extension ComposeAppKit: ComposeMenuButtonDelegate {
 
   func composeMenuButton(didCaptureImage image: NSImage) {
     handleImageDropOrPaste(image)
+  }
+}
+
+// MARK: MentionCompletionMenuDelegate
+
+extension ComposeAppKit: MentionCompletionMenuDelegate {
+  func mentionMenu(_ menu: MentionCompletionMenu, didSelectUser user: UserInfo, withText text: String) {
+    guard let mentionRange = currentMentionRange else { return }
+
+    let currentText = textEditor.string
+    let result = mentionDetector.replaceMention(in: currentText, range: mentionRange.range, with: text)
+
+    // Update text and cursor position
+    ignoreNextHeightChange = true
+    textEditor.string = result.newText
+    textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
+    ignoreNextHeightChange = false
+
+    // Hide the menu
+    hideMentionCompletion()
+
+    // Update height if needed
+    updateHeightIfNeeded(for: textEditor.textView)
+  }
+
+  func mentionMenuDidRequestClose(_ menu: MentionCompletionMenu) {
+    hideMentionCompletion()
   }
 }
