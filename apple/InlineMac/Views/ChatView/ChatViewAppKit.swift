@@ -154,7 +154,8 @@ class ChatViewAppKit: NSViewController {
       peerId: peerId,
       messageList: messageListVC!,
       chat: chat,
-      dependencies: dependencies
+      dependencies: dependencies,
+      parentChatView: self
     )
     view.addSubview(compose)
     compose.translatesAutoresizingMaskIntoConstraints = false
