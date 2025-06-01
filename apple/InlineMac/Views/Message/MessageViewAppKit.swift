@@ -1164,7 +1164,13 @@ class MessageViewAppKit: NSView {
 
   @objc private func copyMessage() {
     NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(message.text ?? "", forType: .string)
+
+    // Old
+    // NSPasteboard.general.setString(message.text ?? "", forType: .string)
+
+    // Copy Translation
+    NSPasteboard.general
+      .setString(fullMessage.displayText ?? "", forType: .string)
   }
 
   @objc private func deleteMessage() {
