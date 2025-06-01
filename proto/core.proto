@@ -1025,7 +1025,10 @@ message InviteToSpaceResult {
 
 message GetChatParticipantsInput { int64 chat_id = 1; }
 
-message GetChatParticipantsResult { repeated ChatParticipant participants = 1; }
+message GetChatParticipantsResult {
+  repeated ChatParticipant participants = 1;
+  repeated User users = 2;
+}
 
 message AddChatParticipantInput {
   int64 chat_id = 1;

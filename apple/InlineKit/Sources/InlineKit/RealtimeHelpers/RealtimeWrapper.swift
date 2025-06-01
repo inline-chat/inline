@@ -356,6 +356,15 @@ public extension Realtime {
     }
 
     try await db.dbWriter.write { db in
+      // Save users
+      for user in result.users {
+        do {
+          _ = try User.save(db, user: user)
+        } catch {
+          Log.shared.error("Failed to save user", error: error)
+        }
+      }
+
       for participant in result.participants {
         do {
           ChatParticipant.save(db, from: participant, chatId: getChatParticipantsInput.chatID)

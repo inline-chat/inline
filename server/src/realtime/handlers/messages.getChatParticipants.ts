@@ -18,8 +18,5 @@ export const getChatParticipants = async (
       currentUserId: handlerContext.userId,
     },
   )
-
-  return {
-    participants: result,
-  }
+  return result
 }
