@@ -10,10 +10,10 @@ public struct ChatParticipant: Codable, FetchableRecord, PersistableRecord {
   public var date: Date
 
   public enum Columns {
-    static let id = Column(CodingKeys.id)
-    static let chatId = Column(CodingKeys.chatId)
-    static let userId = Column(CodingKeys.userId)
-    static let date = Column(CodingKeys.date)
+    public static let id = Column(CodingKeys.id)
+    public static let chatId = Column(CodingKeys.chatId)
+    public static let userId = Column(CodingKeys.userId)
+    public static let date = Column(CodingKeys.date)
   }
 
   static let chat = belongsTo(Chat.self)
@@ -26,8 +26,7 @@ public struct ChatParticipant: Codable, FetchableRecord, PersistableRecord {
     request(for: ChatParticipant.user)
   }
 
-  public init(id: Int64? = Int64.random(in: 1 ... 50_000), chatId: Int64, userId: Int64, date: Date) {
-    self.id = id
+  public init(chatId: Int64, userId: Int64, date: Date) {
     self.chatId = chatId
     self.userId = userId
     self.date = date
@@ -35,7 +34,7 @@ public struct ChatParticipant: Codable, FetchableRecord, PersistableRecord {
 }
 
 public extension ChatParticipant {
-  init(from: InlineProtocol.ChatParticipant, chatId: Int64, id: Int64) {
+  init(from: InlineProtocol.ChatParticipant, chatId: Int64) {
     self.chatId = chatId
     userId = from.userID
     date = Date(timeIntervalSince1970: TimeInterval(from.date))
@@ -44,16 +43,20 @@ public extension ChatParticipant {
   static func save(_ db: Database, from: InlineProtocol.ChatParticipant, chatId: Int64) {
     do {
       let existingParticipant = try ChatParticipant
-        .filter(Column("chatId") == chatId && Column("userId") == from.userID)
+        .filter(Column("chatId") == chatId)
+        .filter(Column("userId") == from.userID)
         .fetchOne(db)
 
-      let participant = if let existing = existingParticipant {
-        ChatParticipant(from: from, chatId: chatId, id: existing.id ?? Int64.random(in: 1 ... 50_000))
+      var participant: ChatParticipant
+
+      if let existingId = existingParticipant?.id {
+        participant = ChatParticipant(from: from, chatId: chatId)
+        participant.id = existingId // reuse existing ID
       } else {
-        ChatParticipant(from: from, chatId: chatId, id: Int64.random(in: 1 ... 50_000))
+        participant = ChatParticipant(from: from, chatId: chatId)
       }
 
-      try participant.save(db)
+      try participant.save(db, onConflict: .replace) // replace bc previous we used random IDs
     } catch {
       Log.shared.error("Error saving chat participant:", error: error)
     }
