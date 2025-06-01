@@ -319,7 +319,7 @@ class ComposeAppKit: NSView {
     mentionMenuConstraints = [
       menu.leadingAnchor.constraint(equalTo: leadingAnchor),
       menu.trailingAnchor.constraint(equalTo: trailingAnchor),
-      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -8),
+      menu.bottomAnchor.constraint(equalTo: topAnchor),
     ]
 
     NSLayoutConstraint.activate(mentionMenuConstraints)
