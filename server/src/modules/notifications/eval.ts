@@ -241,7 +241,9 @@ const formatNotificationSettings = (userId: number, input: Input): string => {
 ${requiresMention ? "Only if mentioned or replied to in a message, AND rules below apply:" : ""}
 - Something urgent has came up (eg. a bug or an incident). 
 - I must wake up for something, I must handle something.
-- Someone is desperatly waiting for me to unblock them and cannot wait anymore.
+- Someone is waiting for me to unblock them and is asking me to come back/wake up.
+- A service, app, website, work tool, etc. is down/not working and needs fixing to unblock them.
+- I'm repeatedly mentioned/pinged and need to take action/review something.
   </rules>`
     : `<rules>
 ${requiresMention ? "Only if mentioned or replied to in a message, AND rules below apply:" : ""}
