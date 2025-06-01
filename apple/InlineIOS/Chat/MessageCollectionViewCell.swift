@@ -128,7 +128,11 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     guard let bubble = messageView?.bubbleView else { return }
     let originalColor = bubble.backgroundColor ?? .systemGray6
     let isEmojiOrSticker = messageView?.isEmojiOnlyMessage == true || messageView?.isSticker == true
-    let highlightColor = isEmojiOrSticker ? ThemeManager.shared.selected.accent.withAlphaComponent(0.3) : originalColor
+    // let highlightColor = isEmojiOrSticker ? ThemeManager.shared.selected.accent.withAlphaComponent(0.3) :
+    // originalColor
+    let highlightColor = messageView?.outgoing == true ? ThemeManager.shared.selected.bubbleBackground
+      .lighten(by: 0.3)
+      : ThemeManager.shared.selected.accent.withAlphaComponent(0.4)
     UIView.animate(withDuration: 0.18, animations: {
       bubble.backgroundColor = highlightColor
     }) { _ in
