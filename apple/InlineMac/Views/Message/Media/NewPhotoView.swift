@@ -583,10 +583,13 @@ extension NewPhotoView {
     // Write the image data
     pasteboard.writeObjects([image])
 
+    // TODO:
     // If we have a local URL, add it too
-    if let url = imageLocalUrl() {
-      pasteboard.writeObjects([url as NSURL])
-    }
+//    if let url = imageLocalUrl() {
+//      pasteboard.writeObjects([image, url as NSURL])
+//    } else {
+//      pasteboard.writeObjects([image])
+//    }
   }
 
   @objc func saveImage() {
