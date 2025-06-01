@@ -45,7 +45,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     getActiveDatabaseData(input.spaceId, databaseId, client),
     getSampleDatabasePages(input.spaceId, databaseId, 4, client),
     MessageModel.getMessage(input.messageId, input.chatId),
-    MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 10, 10),
+    MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 20, 10),
     getCachedChatInfo(input.chatId),
     // Fetch participant names in parallel instead of sequentially
     getCachedChatInfo(input.chatId).then(async (chatInfo) => {
