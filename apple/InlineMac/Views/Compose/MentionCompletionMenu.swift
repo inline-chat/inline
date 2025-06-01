@@ -1,4 +1,5 @@
 import AppKit
+import Auth
 import Combine
 import InlineKit
 import InlineUI
@@ -24,17 +25,20 @@ class MentionCompletionMenu: NSView {
   private(set) var isVisible: Bool = false
 
   private var heightConstraint: NSLayoutConstraint!
+  private var currentUserId: Int64? {
+    Auth.shared.currentUserId
+  }
 
   // Extract size constants
   public enum Layout {
-    static let maxHeight: CGFloat = 200
-    static let rowHeight: CGFloat = 42
+    static let maxHeight: CGFloat = 144
+    static let rowHeight: CGFloat = 36
     static let cornerRadius: CGFloat = 0
-    static let avatarSize: CGFloat = 30
+    static let avatarSize: CGFloat = 28
     static let horizontalPadding: CGFloat = 8
-    static let verticalPadding: CGFloat = 4
+    static let verticalPadding: CGFloat = 2
     static let avatarNameSpacing: CGFloat = 8
-    static let nameUsernameSpacing: CGFloat = 2
+    static let nameUsernameSpacing: CGFloat = 0
   }
 
   override init(frame frameRect: NSRect) {
@@ -137,11 +141,35 @@ class MentionCompletionMenu: NSView {
     log.debug("🔍 MentionMenu filterParticipants: query='\(query)', total participants=\(participants.count)")
 
     if query.isEmpty {
-      filteredParticipants = participants
+      filteredParticipants = participants.filter { participant in
+        // exclude pending setup users
+        if participant.user.pendingSetup == true {
+          return false
+        }
+
+        // exclude self
+        if participant.user.id == currentUserId {
+          return false
+        }
+
+        return true
+      }
     } else {
       filteredParticipants = participants.filter { participant in
+        // include users with matching display name or username
         let displayName = participant.user.displayName.localizedCaseInsensitiveContains(query)
         let username = participant.user.username?.localizedCaseInsensitiveContains(query) ?? false
+
+        // exclude pending setup users
+        if participant.user.pendingSetup == true {
+          return false
+        }
+
+        // exclude self
+        if participant.user.id == currentUserId {
+          return false
+        }
+
         return displayName || username
       }
     }
