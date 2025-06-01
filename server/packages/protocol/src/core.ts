@@ -2737,6 +2737,10 @@ export interface GetChatParticipantsResult {
      * @generated from protobuf field: repeated ChatParticipant participants = 1;
      */
     participants: ChatParticipant[];
+    /**
+     * @generated from protobuf field: repeated User users = 2;
+     */
+    users: User[];
 }
 /**
  * @generated from protobuf message AddChatParticipantInput
@@ -9766,12 +9770,14 @@ export const GetChatParticipantsInput = new GetChatParticipantsInput$Type();
 class GetChatParticipantsResult$Type extends MessageType<GetChatParticipantsResult> {
     constructor() {
         super("GetChatParticipantsResult", [
-            { no: 1, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ChatParticipant }
+            { no: 1, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ChatParticipant },
+            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
         ]);
     }
     create(value?: PartialMessage<GetChatParticipantsResult>): GetChatParticipantsResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.participants = [];
+        message.users = [];
         if (value !== undefined)
             reflectionMergePartial<GetChatParticipantsResult>(this, message, value);
         return message;
@@ -9783,6 +9789,9 @@ class GetChatParticipantsResult$Type extends MessageType<GetChatParticipantsResu
             switch (fieldNo) {
                 case /* repeated ChatParticipant participants */ 1:
                     message.participants.push(ChatParticipant.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated User users */ 2:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -9799,6 +9808,9 @@ class GetChatParticipantsResult$Type extends MessageType<GetChatParticipantsResu
         /* repeated ChatParticipant participants = 1; */
         for (let i = 0; i < message.participants.length; i++)
             ChatParticipant.internalBinaryWrite(message.participants[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated User users = 2; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
