@@ -46,7 +46,7 @@ class MentionTableCellView: NSTableCellView {
     nameLabel.isBordered = false
     nameLabel.isEditable = false
     nameLabel.backgroundColor = .clear
-    nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+    nameLabel.font = .systemFont(ofSize: 13, weight: .regular)
     nameLabel.textColor = .labelColor
     nameLabel.lineBreakMode = .byTruncatingTail
     nameLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -56,7 +56,7 @@ class MentionTableCellView: NSTableCellView {
     usernameLabel.isBordered = false
     usernameLabel.isEditable = false
     usernameLabel.backgroundColor = .clear
-    usernameLabel.font = .systemFont(ofSize: 11)
+    usernameLabel.font = .systemFont(ofSize: 11, weight: .regular)
     usernameLabel.textColor = .secondaryLabelColor
     usernameLabel.lineBreakMode = .byTruncatingTail
     usernameLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -98,15 +98,27 @@ class MentionTableCellView: NSTableCellView {
         equalTo: newAvatarView.trailingAnchor,
         constant: MentionCompletionMenu.Layout.avatarNameSpacing
       ),
-      nameLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 6),
-      nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: -8),
+      nameLabel.topAnchor.constraint(
+        equalTo: containerView.topAnchor,
+        constant: MentionCompletionMenu.Layout.verticalPadding
+      ),
+      nameLabel.trailingAnchor.constraint(
+        lessThanOrEqualTo: containerView.trailingAnchor,
+        constant: -MentionCompletionMenu.Layout.horizontalPadding
+      ),
 
       usernameLabel.leadingAnchor.constraint(
         equalTo: newAvatarView.trailingAnchor,
         constant: MentionCompletionMenu.Layout.avatarNameSpacing
       ),
-      usernameLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
-      usernameLabel.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: -8),
+      usernameLabel.topAnchor.constraint(
+        equalTo: nameLabel.bottomAnchor,
+        constant: MentionCompletionMenu.Layout.nameUsernameSpacing
+      ),
+      usernameLabel.trailingAnchor.constraint(
+        lessThanOrEqualTo: containerView.trailingAnchor,
+        constant: -MentionCompletionMenu.Layout.horizontalPadding
+      ),
     ])
 
     // Set content compression resistance so username can shrink if needed
