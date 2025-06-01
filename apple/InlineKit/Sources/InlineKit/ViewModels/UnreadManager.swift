@@ -45,12 +45,16 @@ public final class UnreadManager: Sendable {
           .updateAll(db, [Column("unreadCount").set(to: 0)])
       }
     } catch {
-      log.error("Failed to update local DB with unread count: \(error)")
+      log.error("Failed to update local DB with unread count", error: error)
     }
 
     // Update remote server
     Task {
-      try? await apiClient.readMessages(peerId: peerId, maxId: nil)
+      do {
+        _ = try await apiClient.readMessages(peerId: peerId, maxId: nil)
+      } catch {
+        log.error("Failed to update remote server", error: error)
+      }
     }
   }
 }
