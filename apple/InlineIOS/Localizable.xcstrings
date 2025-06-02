@@ -97,6 +97,9 @@
     "🫙" : {
 
     },
+    "A fresh chatting experience" : {
+
+    },
     "Account" : {
       "localizations" : {
         "fa" : {
@@ -152,6 +155,9 @@
       }
     },
     "Appearance" : {
+
+    },
+    "By continuing, you acknowledge that you understand and agree to the [Terms & Conditions](https://inline.chat/legal) and [Privacy Policy](https://inline.chat/legal)." : {
 
     },
     "Cancel" : {
@@ -291,6 +297,7 @@
     },
     "Continue with Email" : {
       "comment" : "Continue with email button",
+      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -308,6 +315,7 @@
     },
     "Continue with Phone Number" : {
       "comment" : "Continue with phone number button",
+      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -541,6 +549,9 @@
         }
       }
     },
+    "Get Started" : {
+
+    },
     "Integration Options" : {
 
     },
@@ -555,6 +566,7 @@
     },
     "It's an all new way to chat with your team." : {
       "comment" : "Welcome subheading",
+      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
