@@ -157,6 +157,9 @@
     "Appearance" : {
 
     },
+    "Archived conversations will appear here" : {
+
+    },
     "By continuing, you acknowledge that you understand and agree to the [Terms & Conditions](https://inline.chat/legal) and [Privacy Policy](https://inline.chat/legal)." : {
 
     },
@@ -297,7 +300,6 @@
     },
     "Continue with Email" : {
       "comment" : "Continue with email button",
-      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -312,6 +314,9 @@
           }
         }
       }
+    },
+    "Continue with Phone" : {
+
     },
     "Continue with Phone Number" : {
       "comment" : "Continue with phone number button",
@@ -467,7 +472,7 @@
 
     },
     "Enter the code" : {
-      "comment" : "Code input label",
+      "comment" : "Code input title",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -485,6 +490,7 @@
     },
     "Enter your email" : {
       "comment" : "Email input label",
+      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -502,6 +508,7 @@
     },
     "Enter your phone number" : {
       "comment" : "Phone number input label",
+      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -548,9 +555,6 @@
           }
         }
       }
-    },
-    "Get Started" : {
-
     },
     "Integration Options" : {
 
@@ -605,8 +609,18 @@
     "Logout" : {
 
     },
+    "Message @dena" : {
+
+    },
+    "Message @mo" : {
+
+    },
+    "Message someone or create a space for your team" : {
+
+    },
     "name@example.com" : {
       "comment" : "Email placeholder",
+      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -641,16 +655,16 @@
     "No archived chats" : {
 
     },
-    "No chats" : {
+    "No chats or spaces yet" : {
 
     },
-    "No chats or spaces yet" : {
+    "No Chats Yet" : {
 
     },
     "No messages yet" : {
 
     },
-    "No spaces" : {
+    "No Spaces Yet" : {
 
     },
     "No users found" : {
@@ -789,6 +803,15 @@
     "Settings" : {
 
     },
+    "Setup your profile" : {
+      "comment" : "Profile setup title"
+    },
+    "Sign in with email" : {
+      "comment" : "Email sign in title"
+    },
+    "Sign in with phone" : {
+      "comment" : "Phone sign in title"
+    },
     "Step" : {
 
     },
@@ -891,6 +914,9 @@
           }
         }
       }
+    },
+    "Your Email" : {
+      "comment" : "Email input placeholder"
     }
   },
   "version" : "1.0"

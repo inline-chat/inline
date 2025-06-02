@@ -21,36 +21,59 @@ struct PhoneNumber: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      AnimatedLabel(
-        animate: $animate,
-        text: NSLocalizedString("Enter your phone number", comment: "Phone number input label")
-      )
-      iPhoneNumberField(placeHolder, text: $phoneNumber)
-        .flagHidden(false)
-        .flagSelectable(true)
-        .prefixHidden(false)
-        .focused($isFocused)
-        .keyboardType(.phonePad)
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled(true)
-        .font(.title2)
-        .fontWeight(.semibold)
-        .padding(.vertical, 8)
-        .onSubmit {
-          submit()
-        }
-        .onChange(of: isFocused) { _, newValue in
-          withAnimation(.smooth(duration: 0.15)) {
-            animate = newValue
+    VStack(spacing: 20) {
+      Spacer()
+
+      // Icon and title section
+      VStack(spacing: 12) {
+        Image(systemName: "phone.fill")
+          .resizable()
+          .scaledToFit()
+          .frame(width: 34, height: 34)
+          .foregroundColor(.primary)
+
+        Text(NSLocalizedString("Sign in with phone", comment: "Phone sign in title"))
+          .font(.system(size: 21.0, weight: .semibold))
+          .foregroundStyle(.primary)
+      }
+
+      // Phone input field
+      VStack(spacing: 8) {
+        iPhoneNumberField(placeHolder, text: $phoneNumber)
+          .flagHidden(false)
+          .flagSelectable(true)
+          .prefixHidden(false)
+          .focused($isFocused)
+          .keyboardType(.phonePad)
+          .textInputAutocapitalization(.never)
+          .autocorrectionDisabled(true)
+          .font(.body)
+          .padding(.horizontal, 20)
+          .padding(.vertical, 16)
+          .background(
+            RoundedRectangle(cornerRadius: 16)
+              .fill(.ultraThinMaterial)
+              .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                  .stroke(Color(.systemGray4), lineWidth: 0.5)
+              )
+          )
+          .clipShape(RoundedRectangle(cornerRadius: 16))
+          .onSubmit {
+            submit()
           }
+
+        if !errorMsg.isEmpty {
+          Text(errorMsg)
+            .font(.callout)
+            .foregroundColor(.red)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-      Text(errorMsg)
-        .font(.callout)
-        .foregroundColor(.red)
+      }
+      .padding(.horizontal, OnboardingUtils.shared.hPadding)
+
+      Spacer()
     }
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     .safeAreaInset(edge: .bottom) {
       Button(
         formState
