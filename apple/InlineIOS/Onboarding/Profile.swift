@@ -43,13 +43,38 @@ struct Profile: View {
   // MARK: - Body
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      nameSection
-      usernameSection
-      errorSection
+    VStack(spacing: 20) {
+      Spacer()
+
+      // Icon and title section
+      VStack(spacing: 12) {
+        Image(systemName: "person.circle.fill")
+          .resizable()
+          .scaledToFit()
+          .frame(width: 34, height: 34)
+          .foregroundColor(.primary)
+
+        Text(NSLocalizedString("Setup your profile", comment: "Profile setup title"))
+          .font(.system(size: 21.0, weight: .semibold))
+          .foregroundStyle(.primary)
+      }
+
+      // Input fields
+      VStack(spacing: 16) {
+        nameSection
+        usernameSection
+
+        if !errorMsg.isEmpty {
+          Text(errorMsg)
+            .font(.callout)
+            .foregroundColor(.red)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+      .padding(.horizontal, OnboardingUtils.shared.hPadding)
+
+      Spacer()
     }
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     .safeAreaInset(edge: .bottom) { bottomButton }
     .onChange(of: fullName) { validateInput() }
     .onChange(of: username) { validateInput() }
@@ -142,22 +167,23 @@ extension Profile {
 extension Profile {
   @ViewBuilder
   private var nameSection: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      AnimatedLabel(animate: $animate, text: "Setup your profile")
-      TextField(placeHolder, text: $fullName)
-        .focused($focusedField, equals: .fullName)
-        .textContentType(.name)
-        .textInputAutocapitalization(.words)
-        .font(.title2)
-        .fontWeight(.semibold)
-        .padding(.vertical, 8)
-        .onChange(of: focusedField) { _, newValue in
-          withAnimation(.smooth(duration: 0.15)) {
-            animate = newValue == .fullName
-          }
-        }
-        .onSubmit { focusedField = .username }
-    }
+    TextField(placeHolder, text: $fullName)
+      .focused($focusedField, equals: .fullName)
+      .textContentType(.name)
+      .textInputAutocapitalization(.words)
+      .font(.body)
+      .padding(.horizontal, 20)
+      .padding(.vertical, 16)
+      .background(
+        RoundedRectangle(cornerRadius: 16)
+          .fill(.ultraThinMaterial)
+          .overlay(
+            RoundedRectangle(cornerRadius: 16)
+              .stroke(Color(.systemGray4), lineWidth: 0.5)
+          )
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 16))
+      .onSubmit { focusedField = .username }
   }
 
   @ViewBuilder
@@ -167,14 +193,24 @@ extension Profile {
       .textContentType(.username)
       .textInputAutocapitalization(.never)
       .autocorrectionDisabled(true)
-      .font(.title2)
-      .fontWeight(.semibold)
-      .padding(.vertical, 8)
+      .font(.body)
+      .padding(.horizontal, 20)
+      .padding(.vertical, 16)
+      .background(
+        RoundedRectangle(cornerRadius: 16)
+          .fill(.ultraThinMaterial)
+          .overlay(
+            RoundedRectangle(cornerRadius: 16)
+              .stroke(Color(.systemGray4), lineWidth: 0.5)
+          )
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 16))
       .onChange(of: username) { _, newValue in
         handleUsernameChange(newValue)
       }
       .overlay(alignment: .trailing) {
         usernameStatusIndicator
+          .padding(.trailing, 20)
       }
       .onSubmit { submitAccount() }
   }
@@ -197,13 +233,6 @@ extension Profile {
             .foregroundColor(.red)
       }
     }
-  }
-
-  private var errorSection: some View {
-    Text(errorMsg)
-      .font(.callout)
-      .foregroundColor(.red)
-      .padding(.top, 8)
   }
 
   @ViewBuilder

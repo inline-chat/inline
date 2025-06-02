@@ -5,7 +5,7 @@ struct Welcome: View {
   @EnvironmentObject var nav: OnboardingNavigation
 
   var animation: Animation {
-    .easeOut(duration: 0.5)
+    .easeOut(duration: 0.25)
   }
 
   var body: some View {
@@ -15,7 +15,7 @@ struct Welcome: View {
       Image("AppIconSmall")
         .opacity(isVisible ? 1 : 0)
         .offset(y: isVisible ? 0 : -30)
-        .animation(animation.delay(0.1), value: isVisible)
+        .animation(animation.delay(0.05), value: isVisible)
 
       Text("Welcome to Inline")
         .font(.largeTitle)
@@ -23,7 +23,7 @@ struct Welcome: View {
         .padding(.bottom, 0.5)
         .opacity(isVisible ? 1 : 0)
         .offset(y: isVisible ? 0 : 20)
-        .animation(animation.delay(0.4), value: isVisible)
+        .animation(animation.delay(0.2), value: isVisible)
 
       Text("A fresh chatting experience")
         .font(.system(size: 20.0, weight: .regular))
@@ -31,24 +31,37 @@ struct Welcome: View {
         .multilineTextAlignment(.center)
         .opacity(isVisible ? 1 : 0)
         .offset(y: isVisible ? 0 : 20)
-        .animation(animation.delay(0.5), value: isVisible)
+        .animation(animation.delay(0.25), value: isVisible)
 
       Spacer()
 
-      Button {
-        nav.push(.email())
-      } label: {
-        Text("Get Started").padding(.horizontal, 40)
+      VStack(spacing: 12) {
+        Button {
+          nav.push(.email())
+        } label: {
+          Text("Continue with Email").padding(.horizontal, 40)
+        }
+        .buttonStyle(SimpleButtonStyle())
+        .frame(maxWidth: .infinity)
+        .opacity(isVisible ? 1 : 0)
+        .offset(y: isVisible ? 0 : 20)
+        .animation(animation.delay(0.3), value: isVisible)
+
+        Button("Continue with Phone") {
+          nav.push(.phoneNumber())
+        }
+        .buttonStyle(SimpleWhiteButtonStyle())
+        .frame(maxWidth: .infinity)
+        .opacity(isVisible ? 1 : 0)
+        .offset(y: isVisible ? 0 : 20)
+        .animation(animation.delay(0.35), value: isVisible)
       }
-      .buttonStyle(SimpleButtonStyle())
-      .padding(.bottom, 20)
-      .opacity(isVisible ? 1 : 0)
-      .offset(y: isVisible ? 0 : 20)
-      .animation(animation.delay(0.6), value: isVisible)
+      // .padding(.horizontal, OnboardingUtils.shared.hPadding)
+      .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
 
       Footer()
         .opacity(isVisible ? 1 : 0)
-        .animation(animation.delay(0.9), value: isVisible)
+        .animation(animation.delay(0.45), value: isVisible)
     }
     .padding()
     .frame(minHeight: 400)
