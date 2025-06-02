@@ -30,13 +30,37 @@ struct Code: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      AnimatedLabel(animate: $animate, text: NSLocalizedString("Enter the code", comment: "Code input label"))
-      codeInput
-      hint
+    VStack(spacing: 20) {
+      Spacer()
+
+      // Icon and title section
+      VStack(spacing: 12) {
+        Image(systemName: "key.fill")
+          .resizable()
+          .scaledToFit()
+          .frame(width: 34, height: 34)
+          .foregroundColor(.primary)
+
+        Text(NSLocalizedString("Enter the code", comment: "Code input title"))
+          .font(.system(size: 21.0, weight: .semibold))
+          .foregroundStyle(.primary)
+      }
+
+      // Code input field
+      VStack(spacing: 8) {
+        codeInput
+
+        if !errorMsg.isEmpty {
+          Text(errorMsg)
+            .font(.callout)
+            .foregroundColor(.red)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+      .padding(.horizontal, OnboardingUtils.shared.hPadding)
+
+      Spacer()
     }
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     .safeAreaInset(edge: .bottom) {
       bottomArea
     }
@@ -73,7 +97,7 @@ extension Code {
         }
 
         formState.reset()
-        if result.user.firstName == nil || result.user.firstName?.isEmpty == true {
+        if result.user.firstName == nil || result.user.firstName?.isEmpty == true || result.user.pendingSetup == true {
           nav.push(.profile)
         } else {
           mainViewRouter.setRoute(route: .main)
@@ -108,21 +132,20 @@ extension Code {
       .autocorrectionDisabled(true)
       .font(.title2)
       .fontWeight(.semibold)
-      .padding(.vertical, 8)
+      .multilineTextAlignment(.center)
+      .padding(.horizontal, 20)
+      .padding(.vertical, 16)
+      .background(
+        RoundedRectangle(cornerRadius: 16)
+          .fill(.ultraThinMaterial)
+          .overlay(
+            RoundedRectangle(cornerRadius: 16)
+              .stroke(Color(.systemGray4), lineWidth: 0.5)
+          )
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 16))
       .onSubmit {
         submitCode()
-      }
-      .onChange(of: isFocused) { _, newValue in
-        withAnimation(.smooth(duration: 0.15)) {
-          animate = newValue
-        }
-      }
-      .onChange(of: isInputValid) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-          withAnimation {
-            isInputValid = true
-          }
-        }
       }
       .onChange(of: code) { _, newValue in
         if newValue.count > characterLimit {
@@ -133,13 +156,6 @@ extension Code {
           submitCode()
         }
       }
-  }
-
-  @ViewBuilder
-  var hint: some View {
-    Text(errorMsg)
-      .font(.callout)
-      .foregroundColor(.red)
   }
 
   @ViewBuilder

@@ -7,9 +7,9 @@ struct SimpleWhiteButtonStyle: ButtonStyle {
     configuration.label
       .foregroundColor(.black)
       .font(.body)
-      .fontWeight(.semibold)
       .frame(height: 52)
       .frame(maxWidth: .infinity)
+      .fontWeight(.medium)
       .background(colorScheme == .light ? Color(.systemGray6) : .white.opacity(0.96))
       .cornerRadius(16)
       .opacity(configuration.isPressed ? 0.8 : 1)
@@ -25,9 +25,9 @@ struct SimpleButtonStyle: ButtonStyle {
     configuration.label
       .foregroundColor(.white)
       .font(.body)
-      .fontWeight(.medium)
       .frame(height: 52)
       .frame(maxWidth: .infinity)
+      .fontWeight(.medium)
       .background(colorScheme == .dark ? Color(hex: "#8b77dc") : Color(hex: "#a28cf2"))
       .cornerRadius(16)
       .opacity(configuration.isPressed ? 0.8 : 1)
