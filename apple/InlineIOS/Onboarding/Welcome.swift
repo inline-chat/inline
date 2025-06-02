@@ -1,229 +1,84 @@
-import CoreHaptics
 import SwiftUI
 
 struct Welcome: View {
-  let fullText = NSLocalizedString("Welcome to Inline", comment: "Welcome to Inline")
-  let typingSpeed: TimeInterval = 0.08
-
-  @State private var engine: CHHapticEngine?
-  @State private var displayedText = ""
-  @State private var showCaret = false
-  @State private var animationCompleted = false
-  @State private var viewIsVisible = false
-  @State private var hasRunAnimation = false
-
+  @State private var isVisible = false
   @EnvironmentObject var nav: OnboardingNavigation
 
-  var body: some View {
-    VStack(alignment: .leading) {
-      heading
-      subheading
-    }
-    .onAppear {
-      viewIsVisible = true
+  var animation: Animation {
+    .easeOut(duration: 0.5)
+  }
 
-      if !hasRunAnimation {
-        prepareHaptics()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-          if viewIsVisible {
-            animateText()
-          }
-        }
+  var body: some View {
+    VStack {
+      Spacer()
+
+      Image("AppIconSmall")
+        .opacity(isVisible ? 1 : 0)
+        .offset(y: isVisible ? 0 : -30)
+        .animation(animation.delay(0.1), value: isVisible)
+
+      Text("Welcome to Inline")
+        .font(.largeTitle)
+        .fontWeight(.bold)
+        .padding(.bottom, 0.5)
+        .opacity(isVisible ? 1 : 0)
+        .offset(y: isVisible ? 0 : 20)
+        .animation(animation.delay(0.4), value: isVisible)
+
+      Text("A fresh chatting experience")
+        .font(.system(size: 20.0, weight: .regular))
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .opacity(isVisible ? 1 : 0)
+        .offset(y: isVisible ? 0 : 20)
+        .animation(animation.delay(0.5), value: isVisible)
+
+      Spacer()
+
+      Button {
+        nav.push(.email())
+      } label: {
+        Text("Get Started").padding(.horizontal, 40)
       }
+      .buttonStyle(SimpleButtonStyle())
+      .padding(.bottom, 20)
+      .opacity(isVisible ? 1 : 0)
+      .offset(y: isVisible ? 0 : 20)
+      .animation(animation.delay(0.6), value: isVisible)
+
+      Footer()
+        .opacity(isVisible ? 1 : 0)
+        .animation(animation.delay(0.9), value: isVisible)
     }
-    .onDisappear {
-      viewIsVisible = false
-      stopHapticEngine()
-    }
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    .safeAreaInset(edge: .bottom) {
-      bottomArea
-    }
-    .safeAreaInset(edge: .top) {
-      topArea
+    .padding()
+    .frame(minHeight: 400)
+    .onAppear {
+      isVisible = true
     }
     .navigationBarBackButtonHidden()
   }
-}
 
-// MARK: - Views
+  struct Footer: View {
+    var body: some View {
+      HStack(alignment: .bottom) {
+        Spacer()
 
-extension Welcome {
-  @ViewBuilder
-  var heading: some View {
-    ZStack(alignment: .leading) {
-      // Placeholder to maintain layout
-      Text(fullText)
-        .font(.largeTitle)
-        .fontWeight(.bold)
-        .opacity(0)
+        Text(
+          "By continuing, you acknowledge that you understand and agree to the [Terms & Conditions](https://inline.chat/legal) and [Privacy Policy](https://inline.chat/legal)."
+        )
+        .font(.footnote)
+        .tint(Color.secondary)
+        .foregroundStyle(.tertiary)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 300)
 
-      HStack(alignment: .center, spacing: 2) {
-        Text(animationCompleted ? fullText : displayedText)
-          .font(.largeTitle)
-          .fontWeight(.bold)
-
-        Rectangle()
-          .frame(width: 4, height: 28)
-          .background(.secondary)
-          .opacity(showCaret ? 1 : 0)
+        Spacer()
       }
-    }
-  }
-
-  @ViewBuilder
-  var subheading: some View {
-    Text(NSLocalizedString("It's an all new way to chat with your team.", comment: "Welcome subheading"))
-      .foregroundColor(.secondary)
-      .font(.title3)
-      .multilineTextAlignment(.leading)
-  }
-
-  @ViewBuilder
-  var bottomArea: some View {
-    VStack {
-      Button(NSLocalizedString("Continue with Email", comment: "Continue with email button")) {
-        submitToEmailRoute()
-      }
-      .buttonStyle(SimpleButtonStyle())
-      .frame(maxWidth: .infinity)
-
-      Button(NSLocalizedString("Continue with Phone Number", comment: "Continue with phone number button")) {
-        submitToPhoneNumberRoute()
-      }
-      .buttonStyle(SimpleWhiteButtonStyle())
-      .frame(maxWidth: .infinity)
-    }
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
-    .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-  }
-
-  @ViewBuilder
-  var topArea: some View {
-    HStack {
-      Image("OnboardingLogoType")
-        .renderingMode(.template)
-        .foregroundColor(.primary)
-        .padding(.horizontal, OnboardingUtils.shared.hPadding)
-        .padding(.top, 28)
-      Spacer()
-    }
-  }
-}
-
-// MARK: - Helper Methods
-
-extension Welcome {
-  private func submitToEmailRoute() {
-    hasRunAnimation = true
-
-    stopHapticEngine()
-
-    displayedText = ""
-    nav.push(.email())
-  }
-
-  private func submitToPhoneNumberRoute() {
-    hasRunAnimation = true
-
-    stopHapticEngine()
-
-    displayedText = ""
-    nav.push(.phoneNumber())
-  }
-
-  private func animateText() {
-    guard !animationCompleted, viewIsVisible else { return }
-
-    withAnimation(.bouncy) {
-      showCaret = true
-    }
-
-    hasRunAnimation = true
-
-    for (index, character) in fullText.enumerated() {
-      DispatchQueue.main.asyncAfter(deadline: .now() + typingSpeed * Double(index)) {
-        guard viewIsVisible else { return }
-
-        displayedText += String(character)
-
-        if !animationCompleted, viewIsVisible {
-          playHapticFeedback()
-        }
-
-        if index == fullText.count - 1 {
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            guard viewIsVisible else { return }
-
-            withAnimation(.bouncy) {
-              showCaret = false
-              animationCompleted = true
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-// MARK: - Haptic setup
-
-extension Welcome {
-  private func prepareHaptics() {
-    guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
-
-    do {
-      engine = try CHHapticEngine()
-
-      // Add engine reset handler
-      engine?.resetHandler = { [self] in
-        do {
-          try engine?.start()
-        } catch {
-          print("Failed to restart the engine: \(error.localizedDescription)")
-        }
-      }
-
-      // Add engine stopped handler
-      engine?.stoppedHandler = { reason in
-        print("The engine stopped: \(reason)")
-      }
-
-      try engine?.start()
-    } catch {
-      print("There was an error creating the engine: \(error.localizedDescription)")
-    }
-  }
-
-  private func stopHapticEngine() {
-    engine?.stop(completionHandler: { error in
-      if let error {
-        print("Error stopping haptic engine: \(error.localizedDescription)")
-      }
-    })
-  }
-
-  private func playHapticFeedback() {
-    guard CHHapticEngine.capabilitiesForHardware().supportsHaptics,
-          !animationCompleted,
-          viewIsVisible
-    else {
-      return
-    }
-
-    let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.5)
-    let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
-    let event = CHHapticEvent(
-      eventType: .hapticTransient, parameters: [intensity, sharpness], relativeTime: 0
-    )
-
-    do {
-      let pattern = try CHHapticPattern(events: [event], parameters: [])
-      let player = try engine?.makePlayer(with: pattern)
-      try player?.start(atTime: 0)
-    } catch {
-      print("Failed to play pattern: \(error.localizedDescription).")
+      // .overlay(alignment: .bottomLeading) {
+      //   Text("[inline.chat](https://inline.chat)")
+      //     .font(.footnote)
+      //     .tint(Color.secondary)
+      // }
     }
   }
 }
