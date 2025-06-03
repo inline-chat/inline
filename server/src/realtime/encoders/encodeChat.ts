@@ -36,6 +36,7 @@ export function encodeChat(chat: DbChat, { encodingForUserId }: { encodingForUse
     title: chat.title ?? "",
     spaceId: chat.spaceId ? BigInt(chat.spaceId) : undefined,
     description: chat.description ?? undefined,
+
     emoji: chat.emoji ?? undefined,
     isPublic: chat.publicThread ?? false,
     lastMsgId: chat.lastMsgId ? BigInt(chat.lastMsgId) : undefined,

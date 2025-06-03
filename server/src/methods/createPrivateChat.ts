@@ -1,5 +1,13 @@
 import { db } from "@in/server/db"
-import { chats, dialogs, users, type DbDialog } from "@in/server/db/schema"
+import {
+  chats,
+  dialogs,
+  users,
+  type DbChat,
+  type DbDialog,
+  type DbUser,
+  type DbUserWithProfile,
+} from "@in/server/db/schema"
 import {
   encodeChatInfo,
   encodeDialogInfo,
@@ -17,6 +25,11 @@ import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { and, eq, inArray, not, or } from "drizzle-orm"
 import { TInputId } from "../types/methods"
+import { User, type Update } from "@in/protocol/core"
+import { Updates } from "@in/server/modules/updates/updates"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { RealtimeUpdates } from "@in/server/realtime/message"
+import { UsersModel } from "@in/server/db/models/users"
 
 export const Input = Type.Object({
   userId: Type.String(),
@@ -43,12 +56,14 @@ export const handler = async (
   const minUserId = isSelfChat ? context.currentUserId : Math.min(context.currentUserId, peerId)
   const maxUserId = isSelfChat ? context.currentUserId : Math.max(context.currentUserId, peerId)
 
-  const currentUserName = await db
-    .select({ name: users.firstName })
-    .from(users)
-    .where(eq(users.id, context.currentUserId))
-    .then((result) => result[0]?.name)
+  const currentUser = await UsersModel.getUserWithProfile(context.currentUserId)
 
+  if (!currentUser) {
+    Log.shared.error("Failed to get current user")
+    throw new InlineError(InlineError.ApiError.INTERNAL)
+  }
+
+  const currentUserName = currentUser?.firstName
   const title = isSelfChat ? `${currentUserName} (You)` : null
 
   // Create or get existing chat
@@ -132,7 +147,7 @@ export const handler = async (
   }
 
   // Fetch peer users (both current user and the peer)
-  const [user] = await db.select().from(users).where(eq(users.id, peerId))
+  const user = await UsersModel.getUserWithProfile(peerId)
 
   if (!user) {
     Log.shared.error("Failed to get user")
@@ -146,6 +161,19 @@ export const handler = async (
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 
+  // Push update to both users
+  pushUpdate({
+    chat,
+    user: currentUser,
+    pushToUserId: user.id,
+  }).catch((error) => {
+    Log.shared.error("Failed to push update to user", { error })
+  })
+
+  pushUpdate({ chat, user, pushToUserId: context.currentUserId }).catch((error) => {
+    Log.shared.error("Failed to push update to user", { error })
+  })
+
   return {
     chat: encodeChatInfo(chat, { currentUserId: context.currentUserId }),
     dialog: encodeDialogInfo({
@@ -156,4 +184,25 @@ export const handler = async (
     // Deprecated
     user: encodeMinUserInfo(user),
   }
+}
+
+const pushUpdate = async (input: { chat: DbChat; user: DbUserWithProfile; pushToUserId: number }) => {
+  const { chat, user, pushToUserId } = input
+
+  const encodingForUserId = pushToUserId
+  const update: Update = {
+    update: {
+      oneofKind: "newChat",
+      newChat: {
+        chat: Encoders.chat(chat, { encodingForUserId }),
+        user: Encoders.user({
+          user,
+          //min: true,
+          photoFile: user.photoFile ?? undefined,
+        }),
+      },
+    },
+  }
+
+  RealtimeUpdates.pushToUser(pushToUserId, [update])
 }

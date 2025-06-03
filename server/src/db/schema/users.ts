@@ -63,4 +63,7 @@ export const usersRelations = relations(users, ({ one }) => ({
 
 export type DbUser = typeof users.$inferSelect
 export type DbUserWithPhoto = DbUser & { photo?: (DbFile & { thumbs?: DbFile[] | null }) | null }
+export type DbUserWithProfile = DbUser & {
+  photoFile: DbFile | undefined | null
+}
 export type DbNewUser = typeof users.$inferInsert
