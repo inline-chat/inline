@@ -158,9 +158,6 @@
     "Appearance" : {
 
     },
-    "Archived conversations will appear here" : {
-
-    },
     "By continuing, you acknowledge that you understand and agree to the [Terms & Conditions](https://inline.chat/legal) and [Privacy Policy](https://inline.chat/legal)." : {
 
     },
@@ -357,9 +354,6 @@
       }
     },
     "Create a new space (team)" : {
-
-    },
-    "Create a space to get started" : {
 
     },
     "Create Chat" : {
@@ -610,15 +604,6 @@
     "Logout" : {
 
     },
-    "Message @dena" : {
-
-    },
-    "Message @mo" : {
-
-    },
-    "Message someone or create a space for your team" : {
-
-    },
     "name@example.com" : {
       "comment" : "Email placeholder",
       "extractionState" : "stale",
@@ -653,13 +638,10 @@
         }
       }
     },
-    "No archived chats" : {
+    "No Archived Chats Yet" : {
 
     },
     "No chats or spaces yet" : {
-
-    },
-    "No Chats Yet" : {
 
     },
     "No messages yet" : {
@@ -725,6 +707,9 @@
 
     },
     "Please search a username or start a new chat or message                               , or create a new space by clicking the + button" : {
+
+    },
+    "Please search for a username to start a DM or create a space." : {
 
     },
     "Please try again." : {
@@ -821,6 +806,9 @@
     },
     "Sign in with phone" : {
       "comment" : "Phone sign in title"
+    },
+    "Start a chat" : {
+
     },
     "Step" : {
 
@@ -925,8 +913,14 @@
         }
       }
     },
+    "Your archived chats will appear here" : {
+
+    },
     "Your Email" : {
       "comment" : "Email input placeholder"
+    },
+    "Your spaces will appear here" : {
+
     }
   },
   "version" : "1.0"
