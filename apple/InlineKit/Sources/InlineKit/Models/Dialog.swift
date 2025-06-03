@@ -116,17 +116,21 @@ public extension Dialog {
   }
 
   init(optimisticForChat chat: Chat) {
-    peerUserId = nil
-    peerThreadId = chat.id
-    id = Self.getDialogId(peerThreadId: chat.id)
+    if let chatPeerUserId = chat.peerUserId {
+      peerUserId = chatPeerUserId
+      id = Self.getDialogId(peerUserId: chatPeerUserId)
+    } else {
+      peerThreadId = chat.id
+      id = Self.getDialogId(peerThreadId: chat.id)
+    }
 
     spaceId = chat.spaceId
-    unreadCount = nil
+    unreadCount = 0
     readInboxMaxId = nil
     readOutboxMaxId = nil
     pinned = nil
     draft = nil
-    archived = nil
+    archived = false
     unreadCount = nil
     chatId = chat.id
   }

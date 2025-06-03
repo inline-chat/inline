@@ -177,7 +177,7 @@ public extension Chat {
   init(from: InlineProtocol.Chat) {
     id = from.id
     date = from.hasDate ? Date(timeIntervalSince1970: Double(from.date)) : Date(timeIntervalSince1970: Double(0))
-    title = from.title
+    title =  from.title
     spaceId = from.hasSpaceID ? from.spaceID : nil
     lastMsgId = from.hasLastMsgID ? from.lastMsgID : nil
     emoji = from.hasEmoji ? from.emoji : nil
