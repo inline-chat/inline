@@ -179,10 +179,14 @@ extension Profile {
           .fill(.ultraThinMaterial)
           .overlay(
             RoundedRectangle(cornerRadius: 16)
-              .stroke(Color(.systemGray4), lineWidth: 0.5)
+              .stroke(
+                focusedField == .fullName ? Color.accentColor : Color(.systemGray4),
+                lineWidth: focusedField == .fullName ? 2 : 0.5
+              )
           )
       )
       .clipShape(RoundedRectangle(cornerRadius: 16))
+      .animation(.easeInOut(duration: 0.2), value: focusedField)
       .onSubmit { focusedField = .username }
   }
 
@@ -201,10 +205,14 @@ extension Profile {
           .fill(.ultraThinMaterial)
           .overlay(
             RoundedRectangle(cornerRadius: 16)
-              .stroke(Color(.systemGray4), lineWidth: 0.5)
+              .stroke(
+                focusedField == .username ? Color.accentColor : Color(.systemGray4),
+                lineWidth: focusedField == .username ? 2 : 0.5
+              )
           )
       )
       .clipShape(RoundedRectangle(cornerRadius: 16))
+      .animation(.easeInOut(duration: 0.2), value: focusedField)
       .onChange(of: username) { _, newValue in
         handleUsernameChange(newValue)
       }
@@ -249,6 +257,40 @@ extension Profile {
   }
 }
 
-#Preview {
+#Preview("Profile - Light Mode") {
   Profile()
+    .preferredColorScheme(.light)
+    .environmentObject(Navigation())
+    .environmentObject(ApiClient.shared)
+    .environmentObject(MainViewRouter())
+    .environment(\.appDatabase, AppDatabase.empty())
+}
+
+#Preview("Profile - Dark Mode") {
+  Profile()
+    .preferredColorScheme(.dark)
+    .environmentObject(Navigation())
+    .environmentObject(ApiClient.shared)
+    .environmentObject(MainViewRouter())
+    .environment(\.appDatabase, AppDatabase.empty())
+}
+
+#Preview("Profile - Compact") {
+  Profile()
+    .preferredColorScheme(.light)
+    .environmentObject(Navigation())
+    .environmentObject(ApiClient.shared)
+    .environmentObject(MainViewRouter())
+    .environment(\.appDatabase, AppDatabase.empty())
+    .previewDevice("iPhone SE (3rd generation)")
+}
+
+#Preview("Profile - Large Text") {
+  Profile()
+    .preferredColorScheme(.light)
+    .environmentObject(Navigation())
+    .environmentObject(ApiClient.shared)
+    .environmentObject(MainViewRouter())
+    .environment(\.appDatabase, AppDatabase.empty())
+    .environment(\.sizeCategory, .accessibilityExtraExtraExtraLarge)
 }
