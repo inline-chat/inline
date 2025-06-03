@@ -69,7 +69,7 @@ struct Profile: View {
       }
 
       // Input fields
-      VStack(spacing: 16) {
+      VStack(spacing: 8) {
         nameSection
         usernameSection
 
