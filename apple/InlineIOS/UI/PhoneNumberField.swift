@@ -6,6 +6,7 @@ struct PhoneNumberField: View {
   @State private var showingCountryPicker = false
   @State private var searchText = ""
   @FocusState private var isFocused: Bool
+  @Environment(\.colorScheme) private var colorScheme
 
   enum Size {
     case small
@@ -19,6 +20,14 @@ struct PhoneNumberField: View {
     _phoneNumber = phoneNumber
     _selectedCountry = country
     self.size = size
+  }
+
+  private func buttonColor() -> Color {
+    if colorScheme == .dark {
+      Color(red: 0x8B / 255.0, green: 0x77 / 255.0, blue: 0xDC / 255.0)
+    } else {
+      Color(red: 0xA2 / 255.0, green: 0x8C / 255.0, blue: 0xF2 / 255.0)
+    }
   }
 
   var filteredCountries: [Country] {
@@ -143,7 +152,7 @@ struct PhoneNumberField: View {
         .overlay(
           RoundedRectangle(cornerRadius: cornerRadius)
             .stroke(
-              isFocused ? Color.accentColor : Color(.systemGray4),
+              isFocused ? buttonColor() : Color(.systemGray4),
               lineWidth: isFocused ? 2 : 0.5
             )
         )

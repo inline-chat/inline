@@ -13,6 +13,7 @@ struct Code: View {
   @State var animate: Bool = false
   @State var errorMsg: String = ""
   @State var isInputValid: Bool = false
+  @Environment(\.colorScheme) private var colorScheme
 
   @FocusState private var isFocused: Bool
   @FormState var formState
@@ -27,6 +28,14 @@ struct Code: View {
 
   init(email: String) {
     self.email = email
+  }
+
+  private var focusColor: Color {
+    if colorScheme == .dark {
+      Color(hex: "#8b77dc")
+    } else {
+      Color(hex: "#a28cf2")
+    }
   }
 
   var body: some View {
@@ -141,7 +150,7 @@ extension Code {
           .overlay(
             RoundedRectangle(cornerRadius: 16)
               .stroke(
-                isFocused ? Color.accentColor : Color(.systemGray4),
+                isFocused ? focusColor : Color(.systemGray4),
                 lineWidth: isFocused ? 2 : 0.5
               )
           )
