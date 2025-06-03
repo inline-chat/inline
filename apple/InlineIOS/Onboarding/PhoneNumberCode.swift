@@ -13,6 +13,7 @@ struct PhoneNumberCode: View {
   @State var animate: Bool = false
   @State var errorMsg: String = ""
   @State var isInputValid: Bool = false
+  @Environment(\.colorScheme) private var colorScheme
 
   @FocusState private var isFocused: Bool
   @FormState var formState
@@ -27,6 +28,14 @@ struct PhoneNumberCode: View {
 
   init(phoneNumber: String) {
     self.phoneNumber = phoneNumber
+  }
+
+  private func buttonColor() -> Color {
+    if colorScheme == .dark {
+      Color(red: 0x8B / 255.0, green: 0x77 / 255.0, blue: 0xDC / 255.0)
+    } else {
+      Color(red: 0xA2 / 255.0, green: 0x8C / 255.0, blue: 0xF2 / 255.0)
+    }
   }
 
   var body: some View {
@@ -141,7 +150,7 @@ extension PhoneNumberCode {
           .overlay(
             RoundedRectangle(cornerRadius: 16)
               .stroke(
-                isFocused ? Color.accentColor : Color(.systemGray4),
+                isFocused ? buttonColor() : Color(.systemGray4),
                 lineWidth: isFocused ? 2 : 0.5
               )
           )

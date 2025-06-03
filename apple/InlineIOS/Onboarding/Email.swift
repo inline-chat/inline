@@ -7,12 +7,21 @@ struct Email: View {
   @FocusState private var isFocused: Bool
   @FormState var formState
   @State private var errorMsg: String = ""
+  @Environment(\.colorScheme) private var colorScheme
 
   @EnvironmentObject var nav: OnboardingNavigation
   @EnvironmentObject var api: ApiClient
 
   init(prevEmail: String? = nil) {
     self.prevEmail = prevEmail
+  }
+
+  private func buttonColor() -> Color {
+    if colorScheme == .dark {
+      return Color(red: 0x8b/255.0, green: 0x77/255.0, blue: 0xdc/255.0)
+    } else {
+      return Color(red: 0xa2/255.0, green: 0x8c/255.0, blue: 0xf2/255.0)
+    }
   }
 
   var body: some View {
@@ -49,7 +58,7 @@ struct Email: View {
               .overlay(
                 RoundedRectangle(cornerRadius: 16)
                   .stroke(
-                    isFocused ? Color.accentColor : Color(.systemGray4),
+                    isFocused ? buttonColor() : Color(.systemGray4),
                     lineWidth: isFocused ? 2 : 0.5
                   )
               )
