@@ -24,13 +24,10 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var header: some View {
     HStack(spacing: 8) {
-      // if apiState != .connected {
-      //   Spinner(size: 16)
-      //     .padding(.trailing, 4)
-      // } else {
-      //   Image(systemName: "house.fill")
-      //     .font(.caption)
-      // }
+      if apiState != .connected {
+        Spinner(size: 16)
+          .padding(.trailing, 4)
+      }
 
       VStack(alignment: .leading, spacing: 0) {
         Text(shouldShow ? getStatusText(apiState) : "Chats")
