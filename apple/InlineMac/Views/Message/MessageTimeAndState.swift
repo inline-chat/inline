@@ -11,14 +11,15 @@ class MessageTimeAndState: NSView {
   private var trackingArea: NSTrackingArea?
 
   private var isOverlay: Bool {
-    fullMessage.message.text == nil || fullMessage.message.text?.isEmpty == true
+    let isEmpty = fullMessage.message.text == nil || fullMessage.message.text?.isEmpty == true
+    return isEmpty
   }
 
   private var textColor: NSColor {
     if isOverlay {
       .white.withAlphaComponent(0.8)
     } else {
-      fullMessage.message.out == true ? .white.withAlphaComponent(0.5) : .tertiaryLabelColor
+      fullMessage.message.out == true ? .white.withAlphaComponent(0.7) : .tertiaryLabelColor
     }
   }
 
@@ -358,7 +359,7 @@ class MessageTimeAndState: NSView {
     12
   }
 
-  static var font: NSFont = .systemFont(ofSize: 10, weight: .regular).withTraits(.italic)
+  static var font: NSFont = .systemFont(ofSize: 10, weight: .regular) // .withTraits(.italic)
 
   static var timeWidth: CGFloat = 0.0
   static var timeHeight: CGFloat = 0.0
