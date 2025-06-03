@@ -48,10 +48,14 @@ struct Email: View {
               .fill(.ultraThinMaterial)
               .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                  .stroke(Color(.systemGray4), lineWidth: 0.5)
+                  .stroke(
+                    isFocused ? Color.accentColor : Color(.systemGray4),
+                    lineWidth: isFocused ? 2 : 0.5
+                  )
               )
           )
           .clipShape(RoundedRectangle(cornerRadius: 16))
+          .animation(.easeInOut(duration: 0.2), value: isFocused)
           .disabled(formState.isLoading)
           .onSubmit {
             sendCode()
@@ -119,6 +123,30 @@ struct Email: View {
   }
 }
 
-#Preview {
+#Preview("Email - Light Mode") {
   Email()
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+}
+
+#Preview("Email - Dark Mode") {
+  Email()
+    .preferredColorScheme(.dark)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+}
+
+#Preview("Email - With Previous Email") {
+  Email(prevEmail: "user@example.com")
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+}
+
+#Preview("Email - Error State") {
+  Email()
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
 }
