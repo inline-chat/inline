@@ -2,7 +2,7 @@
 
 import { eq, inArray, and, not, sql } from "drizzle-orm"
 import { db } from "@in/server/db"
-import { dialogs, users, files, type DbUser, type DbFile } from "@in/server/db/schema"
+import { dialogs, users, files, type DbUser, type DbFile, type DbUserWithProfile } from "@in/server/db/schema"
 import parsePhoneNumber from "libphonenumber-js"
 import { RpcError } from "@in/protocol/core"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -21,6 +21,17 @@ export class UsersModel {
   static async getUserById(id: number): Promise<DbUser | undefined> {
     const user = await db._query.users.findFirst({
       where: eq(users.id, id),
+    })
+
+    return user
+  }
+
+  static async getUserWithProfile(id: number): Promise<DbUserWithProfile | undefined> {
+    let user = await db.query.users.findFirst({
+      where: { id },
+      with: {
+        photoFile: true,
+      },
     })
 
     return user
