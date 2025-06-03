@@ -1,16 +1,15 @@
 import InlineKit
-import iPhoneNumberField
 import SwiftUI
 
 struct PhoneNumber: View {
   var prevPhoneNumber: String?
   @State private var phoneNumber = ""
+  @State private var selectedCountry = Country.getCurrentCountry()
   @FocusState private var isFocused: Bool
   @State private var animate: Bool = false
   @State var errorMsg: String = ""
   @FormState var formState
 
-  private var placeHolder: String = NSLocalizedString("+1 555 555 5555", comment: "Phone number placeholder")
   private let minPhoneLength = 10
 
   @EnvironmentObject var nav: OnboardingNavigation
@@ -39,26 +38,8 @@ struct PhoneNumber: View {
 
       // Phone input field
       VStack(spacing: 8) {
-        iPhoneNumberField(placeHolder, text: $phoneNumber)
-          .flagHidden(false)
-          .flagSelectable(true)
-          .prefixHidden(false)
+        PhoneNumberField(phoneNumber: $phoneNumber, country: $selectedCountry)
           .focused($isFocused)
-          .keyboardType(.phonePad)
-          .textInputAutocapitalization(.never)
-          .autocorrectionDisabled(true)
-          .font(.body)
-          .padding(.horizontal, 20)
-          .padding(.vertical, 16)
-          .background(
-            RoundedRectangle(cornerRadius: 16)
-              .fill(.ultraThinMaterial)
-              .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                  .stroke(Color(.systemGray4), lineWidth: 0.5)
-              )
-          )
-          .clipShape(RoundedRectangle(cornerRadius: 16))
           .onSubmit {
             submit()
           }
@@ -91,13 +72,30 @@ struct PhoneNumber: View {
     }
     .onAppear {
       if let prevPhoneNumber {
-        phoneNumber = prevPhoneNumber
+        // Parse the previous phone number to extract country and number
+        parsePreviousPhoneNumber(prevPhoneNumber)
       }
       isFocused = true
     }
     .onChange(of: phoneNumber) { _, _ in
-      // Removed validateInput()
+      // Clear error when user starts typing
+      if !errorMsg.isEmpty {
+        errorMsg = ""
+      }
     }
+  }
+
+  func parsePreviousPhoneNumber(_ fullNumber: String) {
+    // Try to find matching country by dial code
+    for country in Country.allCountries {
+      if fullNumber.hasPrefix(country.dialCode) {
+        selectedCountry = country
+        phoneNumber = String(fullNumber.dropFirst(country.dialCode.count))
+        return
+      }
+    }
+    // If no match found, just use the full number
+    phoneNumber = fullNumber
   }
 
   func submit() {
@@ -109,14 +107,17 @@ struct PhoneNumber: View {
       return
     }
     errorMsg = ""
+
+    let fullPhoneNumber = selectedCountry.dialCode + phoneNumber
+
     Task {
       do {
         formState.startLoading()
-        let result = try await api.sendSmsCode(phoneNumber: phoneNumber)
+        let result = try await api.sendSmsCode(phoneNumber: fullPhoneNumber)
 
         print("result is \(result)")
         formState.reset()
-        nav.push(.phoneNumberCode(phoneNumber: phoneNumber))
+        nav.push(.phoneNumberCode(phoneNumber: fullPhoneNumber))
       } catch let error as APIError {
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isPhoneNumber: true)
         formState.reset()
@@ -125,6 +126,34 @@ struct PhoneNumber: View {
   }
 }
 
-#Preview {
+#Preview("PhoneNumber - Light Mode") {
   PhoneNumber()
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+}
+
+#Preview("PhoneNumber - Dark Mode") {
+  PhoneNumber()
+    .preferredColorScheme(.dark)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+}
+
+#Preview("PhoneNumber - With Previous Number") {
+  PhoneNumber(prevPhoneNumber: "+15555555555")
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+}
+
+#Preview("PhoneNumber - Different Country") {
+  @Previewable @State var phoneNumber = ""
+  @Previewable @State var selectedCountry = Country.allCountries.first { $0.code == "GB" } ?? Country
+    .getCurrentCountry()
+
+  PhoneNumber()
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
 }

@@ -35,7 +35,7 @@ struct Welcome: View {
 
       Spacer()
 
-      VStack(spacing: 12) {
+      VStack(spacing: 8) {
         Button {
           nav.push(.email())
         } label: {
@@ -93,5 +93,24 @@ struct Welcome: View {
       //     .tint(Color.secondary)
       // }
     }
+  }
+}
+
+#Preview("Welcome - Light Mode") {
+  Welcome()
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+}
+
+#Preview("Welcome - Dark Mode") {
+  Welcome()
+    .preferredColorScheme(.dark)
+    .environmentObject(OnboardingNavigation())
+}
+
+#Preview("Welcome - Interactive") {
+  NavigationView {
+    Welcome()
+      .environmentObject(OnboardingNavigation())
   }
 }

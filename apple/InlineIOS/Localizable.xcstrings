@@ -70,6 +70,7 @@
     },
     "+1 555 555 5555" : {
       "comment" : "Phone number placeholder",
+      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -697,6 +698,9 @@
     "Participants" : {
 
     },
+    "Phone number" : {
+
+    },
     "Phone number must be at least %d digits." : {
       "comment" : "Phone number validation error",
       "localizations" : {
@@ -755,6 +759,9 @@
     "Search by username" : {
 
     },
+    "Search countries..." : {
+
+    },
     "Search for people" : {
       "localizations" : {
         "fa" : {
@@ -778,6 +785,9 @@
 
     },
     "Select a database to help AI understand your data" : {
+
+    },
+    "Select Country" : {
 
     },
     "Sending Code..." : {

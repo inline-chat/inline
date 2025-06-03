@@ -140,10 +140,14 @@ extension PhoneNumberCode {
           .fill(.ultraThinMaterial)
           .overlay(
             RoundedRectangle(cornerRadius: 16)
-              .stroke(Color(.systemGray4), lineWidth: 0.5)
+              .stroke(
+                isFocused ? Color.accentColor : Color(.systemGray4),
+                lineWidth: isFocused ? 2 : 0.5
+              )
           )
       )
       .clipShape(RoundedRectangle(cornerRadius: 16))
+      .animation(.easeInOut(duration: 0.2), value: isFocused)
       .onSubmit {
         submitCode()
       }
@@ -188,6 +192,53 @@ extension PhoneNumberCode {
   }
 }
 
-#Preview {
+#Preview("PhoneNumberCode - Light Mode") {
   PhoneNumberCode(phoneNumber: "+15555555555")
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+    .environmentObject(UserData())
+    .environmentObject(MainViewRouter())
+    .environment(\.appDatabase, AppDatabase.empty())
+}
+
+#Preview("PhoneNumberCode - Dark Mode") {
+  PhoneNumberCode(phoneNumber: "+15555555555")
+    .preferredColorScheme(.dark)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+    .environmentObject(UserData())
+    .environmentObject(MainViewRouter())
+    .environment(\.appDatabase, AppDatabase.empty())
+}
+
+#Preview("PhoneNumberCode - International") {
+  PhoneNumberCode(phoneNumber: "+447911123456")
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+    .environmentObject(UserData())
+    .environmentObject(MainViewRouter())
+    .environment(\.appDatabase, AppDatabase.empty())
+}
+
+#Preview("PhoneNumberCode - Long Number") {
+  PhoneNumberCode(phoneNumber: "+33123456789012")
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+    .environmentObject(UserData())
+    .environmentObject(MainViewRouter())
+    .environment(\.appDatabase, AppDatabase.empty())
+}
+
+#Preview("PhoneNumberCode - Compact") {
+  PhoneNumberCode(phoneNumber: "+15555555555")
+    .preferredColorScheme(.light)
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(ApiClient.shared)
+    .environmentObject(UserData())
+    .environmentObject(MainViewRouter())
+    .environment(\.appDatabase, AppDatabase.empty())
+    .previewDevice("iPhone SE (3rd generation)")
 }
