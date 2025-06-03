@@ -93,15 +93,7 @@ struct EmptySpacesView: View {
     VStack(spacing: 20) {
       Spacer()
 
-      // Icon with subtle animation
-      Image(systemName: "building.2.fill")
-        .font(.system(size: 56, weight: .light))
-        .foregroundColor(.secondary)
-        .opacity(isVisible ? 1 : 0)
-        .scaleEffect(isVisible ? 1 : 0.8)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8).delay(0.1), value: isVisible)
-
-      VStack(spacing: 12) {
+      VStack(spacing: 8) {
         Text("No Spaces Yet")
           .font(.title2)
           .fontWeight(.semibold)
@@ -109,7 +101,7 @@ struct EmptySpacesView: View {
           .offset(y: isVisible ? 0 : 20)
           .animation(.easeOut(duration: 0.25).delay(0.15), value: isVisible)
 
-        Text("Create a space to get started")
+        Text("Your spaces will appear here")
           .font(.subheadline)
           .foregroundColor(.secondary)
           .multilineTextAlignment(.center)
@@ -118,27 +110,9 @@ struct EmptySpacesView: View {
           .animation(.easeOut(duration: 0.25).delay(0.2), value: isVisible)
       }
 
-      // Action button
-      HStack(spacing: 8) {
-        Button(action: {
-          nav.push(.createSpace)
-        }) {
-          Text("Create Space")
-            .font(.callout)
-            .fontWeight(.medium)
-            .foregroundColor(.primary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        }
-        .buttonStyle(ScaleButtonStyle())
-      }
-      .opacity(isVisible ? 1 : 0)
-      .offset(y: isVisible ? 0 : 30)
-      .animation(.easeOut(duration: 0.3).delay(0.25), value: isVisible)
-
       Spacer()
     }
+    .padding(.horizontal, 60)
     .onAppear {
       withAnimation(.easeOut(duration: 0.3).delay(0.05)) {
         isVisible = true
