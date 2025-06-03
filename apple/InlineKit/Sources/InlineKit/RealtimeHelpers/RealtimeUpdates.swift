@@ -367,10 +367,31 @@ extension InlineProtocol.UpdateEditMessage {
 
 extension InlineProtocol.UpdateNewChat {
   func apply(_ db: Database) throws {
-    let chat = Chat(from: chat)
-    try chat.save(db)
-    let dialog = Dialog(optimisticForChat: chat)
-    try dialog.save(db)
+    if hasUser {
+      Log.shared.debug("saving user \(user)")
+      do {
+        // Save user if it's a private chat
+        let _ = try User.save(db, user: user)
+      } catch {
+        Log.shared.error("Failed to save user", error: error)
+      }
+    }
+
+    Log.shared.debug("saving chat \(chat)")
+    do {
+      let chat = Chat(from: chat)
+      try chat.save(db)
+    } catch {
+      Log.shared.error("Failed to save chat", error: error)
+    }
+
+    do {
+      let dialog = Dialog(optimisticForChat: Chat(from: chat))
+      Log.shared.debug("saving dialog \(dialog)")
+      try dialog.save(db)
+    } catch {
+      Log.shared.error("Failed to save dialog", error: error)
+    }
   }
 }
 
