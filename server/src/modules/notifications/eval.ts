@@ -134,7 +134,7 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   # Instructions
   
   - Evaluate which participants are mentioned in a message. Mentioning means @username or their first name appearing in the message. 
-  - If message is a reply to the user, or it's a DM from someone to the user, consider it a mention for that user ID.
+  - If message is a reply to the user, or it's a direct message to a user, consider it a mention for that user ID.
   - For the next step, you are given a set of rules for each user ID to use as a criteria to determine if the user needs to be notified. Users set these rules so they can focus or sleep without being distracted by messages that aren't important to that user.
   - If the message matches the criteria user has set, include the user ID in the notifyUserIds array. 
   - Use the chat context, previous messages and meaning of messages to infer if the new message matches what user wants to be notified for more broadly. eg. if user is set to notify when something urgent has came up, and the message is about a bug or an incident, include the user ID in the notifyUserIds array even if the word "urgent" or "bug" is not in the message. The user is describing a situation, not a literal pattern matching.
@@ -246,7 +246,9 @@ ${requiresMention ? "Only if mentioned or replied to in a message, AND rules bel
 - I'm repeatedly mentioned/pinged and need to take action/review something.
   </rules>`
     : `<rules>
-${requiresMention ? "Only if mentioned or replied to in a message, AND rules below apply:" : ""}
+${
+  requiresMention ? "Only if mentioned, a direct message to me, or replied to in a message, AND rules below apply:" : ""
+}
 ${settings.zenModeCustomRules}
 </rules>
   `
