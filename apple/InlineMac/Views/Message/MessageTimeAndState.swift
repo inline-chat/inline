@@ -12,6 +12,14 @@ class MessageTimeAndState: NSView {
 
   private var isOverlay: Bool {
     let isEmpty = fullMessage.message.text == nil || fullMessage.message.text?.isEmpty == true
+    let hasDocument = fullMessage.message.documentId != nil
+
+    // If we have a document and the message is empty, we don't want to show the time overlay
+    if hasDocument, isEmpty {
+      return false
+    }
+
+    // for photos, we want to show the time overlay if the message is empty
     return isEmpty
   }
 
