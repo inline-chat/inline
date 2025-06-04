@@ -1462,6 +1462,12 @@ export interface RpcCall {
          */
         getUserSettings: GetUserSettingsInput;
     } | {
+        oneofKind: "sendComposeAction";
+        /**
+         * @generated from protobuf field: SendComposeActionInput sendComposeAction = 21;
+         */
+        sendComposeAction: SendComposeActionInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1591,6 +1597,12 @@ export interface RpcResult {
          */
         getUserSettings: GetUserSettingsResult;
     } | {
+        oneofKind: "sendComposeAction";
+        /**
+         * @generated from protobuf field: SendComposeActionResult sendComposeAction = 21;
+         */
+        sendComposeAction: SendComposeActionResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1692,6 +1704,28 @@ export interface UpdateUserSettingsResult {
      * @generated from protobuf field: repeated Update updates = 1;
      */
     updates: Update[];
+}
+/**
+ * @generated from protobuf message SendComposeActionInput
+ */
+export interface SendComposeActionInput {
+    /**
+     * Peer - where user is typing/uploading
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Compose action (optional, null means stop action)
+     *
+     * @generated from protobuf field: optional UpdateComposeAction.ComposeAction action = 2;
+     */
+    action?: UpdateComposeAction_ComposeAction;
+}
+/**
+ * @generated from protobuf message SendComposeActionResult
+ */
+export interface SendComposeActionResult {
 }
 /**
  * @generated from protobuf message GetChatsInput
@@ -2865,7 +2899,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_USER_SETTINGS = 19;
      */
-    GET_USER_SETTINGS = 19
+    GET_USER_SETTINGS = 19,
+    /**
+     * @generated from protobuf enum value: SEND_COMPOSE_ACTION = 20;
+     */
+    SEND_COMPOSE_ACTION = 20
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -5941,7 +5979,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 17, name: "translateMessages", kind: "message", oneof: "input", T: () => TranslateMessagesInput },
             { no: 18, name: "getChats", kind: "message", oneof: "input", T: () => GetChatsInput },
             { no: 19, name: "updateUserSettings", kind: "message", oneof: "input", T: () => UpdateUserSettingsInput },
-            { no: 20, name: "getUserSettings", kind: "message", oneof: "input", T: () => GetUserSettingsInput }
+            { no: 20, name: "getUserSettings", kind: "message", oneof: "input", T: () => GetUserSettingsInput },
+            { no: 21, name: "sendComposeAction", kind: "message", oneof: "input", T: () => SendComposeActionInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -6074,6 +6113,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getUserSettings: GetUserSettingsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getUserSettings)
                     };
                     break;
+                case /* SendComposeActionInput sendComposeAction */ 21:
+                    message.input = {
+                        oneofKind: "sendComposeAction",
+                        sendComposeAction: SendComposeActionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).sendComposeAction)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6146,6 +6191,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetUserSettingsInput getUserSettings = 20; */
         if (message.input.oneofKind === "getUserSettings")
             GetUserSettingsInput.internalBinaryWrite(message.input.getUserSettings, writer.tag(20, WireType.LengthDelimited).fork(), options).join();
+        /* SendComposeActionInput sendComposeAction = 21; */
+        if (message.input.oneofKind === "sendComposeAction")
+            SendComposeActionInput.internalBinaryWrite(message.input.sendComposeAction, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6179,7 +6227,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 17, name: "translateMessages", kind: "message", oneof: "result", T: () => TranslateMessagesResult },
             { no: 18, name: "getChats", kind: "message", oneof: "result", T: () => GetChatsResult },
             { no: 19, name: "updateUserSettings", kind: "message", oneof: "result", T: () => UpdateUserSettingsResult },
-            { no: 20, name: "getUserSettings", kind: "message", oneof: "result", T: () => GetUserSettingsResult }
+            { no: 20, name: "getUserSettings", kind: "message", oneof: "result", T: () => GetUserSettingsResult },
+            { no: 21, name: "sendComposeAction", kind: "message", oneof: "result", T: () => SendComposeActionResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -6312,6 +6361,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getUserSettings: GetUserSettingsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getUserSettings)
                     };
                     break;
+                case /* SendComposeActionResult sendComposeAction */ 21:
+                    message.result = {
+                        oneofKind: "sendComposeAction",
+                        sendComposeAction: SendComposeActionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).sendComposeAction)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6384,6 +6439,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetUserSettingsResult getUserSettings = 20; */
         if (message.result.oneofKind === "getUserSettings")
             GetUserSettingsResult.internalBinaryWrite(message.result.getUserSettings, writer.tag(20, WireType.LengthDelimited).fork(), options).join();
+        /* SendComposeActionResult sendComposeAction = 21; */
+        if (message.result.oneofKind === "sendComposeAction")
+            SendComposeActionResult.internalBinaryWrite(message.result.sendComposeAction, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6678,6 +6736,84 @@ class UpdateUserSettingsResult$Type extends MessageType<UpdateUserSettingsResult
  * @generated MessageType for protobuf message UpdateUserSettingsResult
  */
 export const UpdateUserSettingsResult = new UpdateUserSettingsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SendComposeActionInput$Type extends MessageType<SendComposeActionInput> {
+    constructor() {
+        super("SendComposeActionInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "action", kind: "enum", opt: true, T: () => ["UpdateComposeAction.ComposeAction", UpdateComposeAction_ComposeAction] }
+        ]);
+    }
+    create(value?: PartialMessage<SendComposeActionInput>): SendComposeActionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SendComposeActionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SendComposeActionInput): SendComposeActionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional UpdateComposeAction.ComposeAction action */ 2:
+                    message.action = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SendComposeActionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional UpdateComposeAction.ComposeAction action = 2; */
+        if (message.action !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.action);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SendComposeActionInput
+ */
+export const SendComposeActionInput = new SendComposeActionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SendComposeActionResult$Type extends MessageType<SendComposeActionResult> {
+    constructor() {
+        super("SendComposeActionResult", []);
+    }
+    create(value?: PartialMessage<SendComposeActionResult>): SendComposeActionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SendComposeActionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SendComposeActionResult): SendComposeActionResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: SendComposeActionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SendComposeActionResult
+ */
+export const SendComposeActionResult = new SendComposeActionResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetChatsInput$Type extends MessageType<GetChatsInput> {
     constructor() {

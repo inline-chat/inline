@@ -21,3 +21,6 @@ We use Drizzle ORM for database calls, for complex queries we use the default sy
 Our testing utilities are at /server/src/__tests__/setup.ts.
 
 To enable debug logging in tests, set process.env["DEBUG"] = "1".
+
+## Updates
+when encoding updates, make sure you encode update object for each user separately because it affects how Peer and data is encoded.

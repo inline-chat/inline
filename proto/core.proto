@@ -547,6 +547,7 @@ enum Method {
   GET_CHATS = 17;
   UPDATE_USER_SETTINGS = 18;
   GET_USER_SETTINGS = 19;
+  SEND_COMPOSE_ACTION = 20;
 }
 
 message RpcCall {
@@ -571,6 +572,7 @@ message RpcCall {
     GetChatsInput getChats = 18;
     UpdateUserSettingsInput updateUserSettings = 19;
     GetUserSettingsInput getUserSettings = 20;
+    SendComposeActionInput sendComposeAction = 21;
   }
 }
 
@@ -597,6 +599,7 @@ message RpcResult {
     GetChatsResult getChats = 18;
     UpdateUserSettingsResult updateUserSettings = 19;
     GetUserSettingsResult getUserSettings = 20;
+    SendComposeActionResult sendComposeAction = 21;
   }
 }
 
@@ -635,6 +638,16 @@ message NotificationSettings {
 message UpdateUserSettingsInput { UserSettings user_settings = 1; }
 
 message UpdateUserSettingsResult { repeated Update updates = 1; }
+
+message SendComposeActionInput {
+  // Peer - where user is typing/uploading
+  InputPeer peer_id = 1;
+
+  // Compose action (optional, null means stop action)
+  optional UpdateComposeAction.ComposeAction action = 2;
+}
+
+message SendComposeActionResult {}
 
 message GetChatsInput {}
 
