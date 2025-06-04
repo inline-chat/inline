@@ -417,6 +417,11 @@ class MessageSizeCalculator {
       isSingleLine = false
     }
 
+    // Force multiline mode for documents without caption text
+    if isSingleLine, hasDocument, !hasText {
+      isSingleLine = false
+    }
+
     // MARK: - Layout Plans
 
     // we prepare our plans and after done with calculations we will use them to calculate the final size
@@ -680,6 +685,9 @@ class MessageSizeCalculator {
       if !isSingleLine, hasText {
         bubbleHeight += timePlan.size.height
         bubbleHeight += timePlan.spacing.verticalTotal // ??? probably too much
+      }
+      if !isSingleLine, hasDocument, !hasText {
+        bubbleHeight += timePlan.size.height
       }
       // ensure we have enough width for the time when multiline
       bubbleWidth = max(bubbleWidth, timePlan.size.width + timePlan.spacing.horizontalTotal)
