@@ -173,6 +173,15 @@ class Navigation: ObservableObject, @unchecked Sendable {
   }
 
   func navigateToChatFromNotification(peer: Peer) {
+    // Check if user is already in the chat from the notification
+    if let currentDestination = pathComponents.last,
+       case let .chat(currentPeer) = currentDestination,
+       currentPeer == peer
+    {
+      // User is already in the correct chat, no need to navigate
+      return
+    }
+
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
       self.popToRoot()
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
