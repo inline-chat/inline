@@ -117,9 +117,6 @@ final class ChatStatusView: NSView {
   private var timer: Timer?
   private var dependencies: AppDependencies
 
-  // Track the current typing text
-  private var currentTypingText: String? = nil
-
   // Connection state tracking
   private var connectionState: RealtimeAPIState = .connected
   private var connectionStateSubscription: AnyCancellable?
@@ -155,14 +152,8 @@ final class ChatStatusView: NSView {
     // typing... updates
     ComposeActions.shared.$actions.sink { [weak self] _ in
       guard let self else { return }
-
-      // Update typing text asynchronously
-      Task {
-        let newTypingText = await ComposeActions.shared.getTypingDisplayText(for: self.peer)
-        await MainActor.run {
-          self.currentTypingText = newTypingText
-          self.updateLabel()
-        }
+      DispatchQueue.main.async {
+        self.updateLabel()
       }
     }.store(in: &cancellables)
 
@@ -272,8 +263,8 @@ final class ChatStatusView: NSView {
       return .connecting(connectionState.toHumanReadable())
     }
 
-    // Check for typing text first (this will show user names for typing)
-    if let typingText = currentTypingText, !typingText.isEmpty {
+    // Check for typing text first (synchronously)
+    if let typingText = ComposeActions.shared.getTypingDisplayText(for: peer), !typingText.isEmpty {
       return .composing(typingText)
     }
 
