@@ -119,7 +119,8 @@ struct ArchivedChatsView: View {
         let pinned1 = item1.dialog.pinned ?? false
         let pinned2 = item2.dialog.pinned ?? false
         if pinned1 != pinned2 { return pinned1 }
-        return item1.message?.date ?? item1.chat?.date ?? Date.now > item2.message?.date ?? item2.chat?.date ?? Date.now
+        return item1.lastMessage?.message.date ?? item1.chat?.date ?? Date.now > item2.lastMessage?.message
+          .date ?? item2.chat?.date ?? Date.now
       }
   }
 
@@ -171,8 +172,10 @@ struct ArchivedChatsView: View {
             dialog: memberChat.dialog,
             user: memberChat.userInfo,
             chat: memberChat.chat,
-            message: memberChat.message,
-            from: memberChat.from,
+            lastMessage: memberChat.message != nil ? EmbeddedMessage(
+              message: memberChat.message!,
+              senderInfo: memberChat.from
+            ) : nil,
             space: nil
           ),
           onTap: {
@@ -208,8 +211,10 @@ struct ArchivedChatsView: View {
             dialog: chat.dialog,
             user: chat.userInfo,
             chat: chat.chat,
-            message: chat.message,
-            from: chat.from,
+            lastMessage: chat.message != nil ? EmbeddedMessage(
+              message: chat.message!,
+              senderInfo: chat.from
+            ) : nil,
             space: chat.chat?.spaceId != nil ? fullSpaceViewModel.space : nil
           ),
           onTap: {

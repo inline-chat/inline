@@ -56,36 +56,18 @@ struct HomeSidebar: View {
 
   // MARK: - Computed
 
-  private func sortChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
-    chats.sorted { item1, item2 in
-      // First sort by pinned status
-      let pinned1 = item1.dialog.pinned ?? false
-      let pinned2 = item2.dialog.pinned ?? false
-      if pinned1 != pinned2 { return pinned1 }
-
-      // Then sort by date
-      let date1 = item1.message?.date ?? item1.chat?.date ?? Date.distantPast
-      let date2 = item2.message?.date ?? item2.chat?.date ?? Date.distantPast
-      return date1 > date2
-    }
-  }
-
   private func filterArchived(_ chats: [HomeChatItem], archived: Bool) -> [HomeChatItem] {
     chats.filter { $0.dialog.archived == archived }
   }
 
   var items: [SideItem] {
-    let sortedChats = sortChats(home.chats)
-
     if tab == .archive {
-      return filterArchived(sortedChats, archived: true)
+      return home.archivedChats
         .map { SideItem.chat($0) }
     }
 
-    let users = filterArchived(sortedChats, archived: false)
+    return home.myChats
       .map { SideItem.chat($0) }
-
-    return users
   }
 
   // MARK: - Views
