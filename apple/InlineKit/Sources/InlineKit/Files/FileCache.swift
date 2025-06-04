@@ -132,6 +132,26 @@ public actor FileCache: Sendable {
     triggerMessageReload(message: message)
   }
 
+  // MARK: - Helpers
+
+  #if os(macOS)
+  /// Gets the actual pixel dimensions of an NSImage, not just the logical size
+  private static func getActualPixelSize(from image: NSImage) -> CGSize {
+    // Try to get the best representation first
+    if let bitmapRep = image.representations.first(where: { $0 is NSBitmapImageRep }) as? NSBitmapImageRep {
+      return CGSize(width: bitmapRep.pixelsWide, height: bitmapRep.pixelsHigh)
+    }
+
+    // Fallback: Create a CGImage and get its dimensions
+    if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+      return CGSize(width: cgImage.width, height: cgImage.height)
+    }
+
+    // Last resort: use logical size
+    return image.size
+  }
+  #endif
+
   // MARK: - Local Saves
 
   public static func savePhoto(
@@ -139,14 +159,27 @@ public actor FileCache: Sendable {
     preferredFormat: ImageFormat? = nil,
     optimize: Bool = false
   ) throws -> InlineKit.PhotoInfo {
-    // Info
-    let w = Int(image.size.width)
-    let h = Int(image.size.height)
+    // Info - get actual pixel dimensions, not just logical size
+    let actualSize: CGSize
+    #if os(macOS)
+    actualSize = getActualPixelSize(from: image)
+    #else
+    // On iOS, image.size already gives pixel dimensions
+    actualSize = image.size
+    #endif
+
+    let w = Int(actualSize.width)
+    let h = Int(actualSize.height)
     let format: ImageFormat = preferredFormat ?? (hasAlphaChannel(image: image) ? .png : .jpeg)
     let protoFormat = format.toProtocol()
     let ext = protoFormat.toExtension()
     let mimeType = protoFormat.toMimeType()
     let fileName = UUID().uuidString + ext
+
+    Log.shared
+      .debug(
+        "Saving photo \(fileName) with format \(format) and mimeType \(mimeType), w: \(w), h: \(h), optimize: \(optimize)"
+      )
 
     // Save in files
     let directory = FileHelpers.getLocalCacheDirectory(for: .photos)
