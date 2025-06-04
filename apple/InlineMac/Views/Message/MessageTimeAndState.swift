@@ -195,6 +195,8 @@ class MessageTimeAndState: NSView {
   private func updateTooltip() {
     let tooltipText = Self.tooltipFormatter.string(from: fullMessage.message.date)
     self.tooltipText = tooltipText
+
+    toolTip = tooltipText
   }
 
   private func setupMouseTracking() {
@@ -224,14 +226,14 @@ class MessageTimeAndState: NSView {
 
   override func mouseEntered(with event: NSEvent) {
     super.mouseEntered(with: event)
-    if !tooltipText.isEmpty {
-      SimpleTooltip.shared.show(text: tooltipText, near: self)
-    }
+//    if !tooltipText.isEmpty {
+//      SimpleTooltip.shared.show(text: tooltipText, near: self)
+//    }
   }
 
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
-    SimpleTooltip.shared.hide()
+    // SimpleTooltip.shared.hide()
   }
 
   // MARK: - Layout
