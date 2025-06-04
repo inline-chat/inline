@@ -23,6 +23,7 @@ extension ChatView {
 
   enum ChatSubtitle {
     case apiState(RealtimeAPIState)
+    case typing(String)
     case composeAction(ApiComposeAction)
     case timezone(String)
     case empty
@@ -31,6 +32,8 @@ extension ChatView {
       switch self {
         case let .apiState(state):
           getStatusTextForChatHeader(state)
+        case let .typing(text):
+          text
         case let .composeAction(action):
           action.toHumanReadableForIOS()
         case let .timezone(timezone):
@@ -42,7 +45,7 @@ extension ChatView {
 
     var isComposeAction: Bool {
       switch self {
-        case .composeAction:
+        case .typing, .composeAction:
           true
         default:
           false
@@ -52,16 +55,18 @@ extension ChatView {
     @ViewBuilder
     var animatedIndicator: some View {
       switch self {
+        case .typing:
+          AnimatedDots(dotSize: 3, dotColor: Color(ThemeManager.shared.selected.accent))
         case let .composeAction(action):
           switch action {
-            case .typing:
-              AnimatedDots(dotSize: 3, dotColor: Color(ThemeManager.shared.selected.accent))
             case .uploadingPhoto:
               AnimatedPhotoUpload()
             case .uploadingDocument:
               AnimatedDocumentUpload()
             case .uploadingVideo:
               AnimatedVideoUpload()
+            default:
+              EmptyView()
           }
         default:
           EmptyView()
@@ -74,12 +79,32 @@ extension ChatView {
       return .apiState(apiState)
     } else if isPrivateChat {
       if let composeAction = currentComposeAction() {
-        return .composeAction(composeAction)
+        if composeAction == .typing {
+          if let typingText = composeActions.getTypingDisplayText(for: peerId, length: .min), !typingText.isEmpty {
+            return .typing(typingText)
+          } else {
+            return .empty
+          }
+        } else {
+          return .composeAction(composeAction)
+        }
       } else if let user = fullChatViewModel.peerUserInfo?.user,
                 let timeZone = user.timeZone,
                 timeZone != TimeZone.current.identifier
       {
         return .timezone(timeZone)
+      }
+    } else {
+      if let composeAction = currentComposeAction() {
+        if composeAction == .typing {
+          if let typingText = composeActions.getTypingDisplayText(for: peerId, length: .min), !typingText.isEmpty {
+            return .typing(typingText)
+          } else {
+            return .empty
+          }
+        } else {
+          return .composeAction(composeAction)
+        }
       }
     }
     return .empty
@@ -153,8 +178,11 @@ struct ChatSubtitlePreview: View {
     ChatSubtitlePreview(subtitle: .apiState(.updating))
     ChatSubtitlePreview(subtitle: .apiState(.waitingForNetwork))
 
+    // Typing
+    ChatSubtitlePreview(subtitle: .typing("John is typing..."))
+    ChatSubtitlePreview(subtitle: .typing("John and Jane are typing..."))
+
     // Compose Actions
-    ChatSubtitlePreview(subtitle: .composeAction(.typing))
     ChatSubtitlePreview(subtitle: .composeAction(.uploadingPhoto))
     ChatSubtitlePreview(subtitle: .composeAction(.uploadingDocument))
     ChatSubtitlePreview(subtitle: .composeAction(.uploadingVideo))

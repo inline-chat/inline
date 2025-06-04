@@ -109,6 +109,88 @@ public class ComposeActions: ObservableObject {
     removeAllComposeActions(for: peer)
   }
 
+  // MARK: - Synchronous Typing Display Text Methods
+
+  /// Get display names for typing users synchronously
+  public func getTypingUsersDisplayNames(for peer: Peer) -> [String] {
+    let typingUserIds = getTypingUsers(for: peer)
+
+    return typingUserIds.compactMap { userId in
+      ObjectCache.shared.getUser(id: userId)?.user.displayName
+    }
+  }
+
+  /// Get formatted typing text for display (synchronous)
+  public func getTypingDisplayText(for peer: Peer, length: TypingDisplayLength = .full) -> String? {
+    let displayNames = getTypingUsersDisplayNames(for: peer)
+
+    // For DMs (user peers), use simpler copy since there's only one other user
+    if peer.isPrivate {
+      switch displayNames.count {
+        case 0:
+          return nil
+        case 1:
+          if length == .min {
+            return "typing"
+          } else {
+            return "typing..."
+          }
+        default:
+          // This shouldn't happen in a DM, but fallback to regular behavior
+          if length == .min {
+            return "typing"
+          } else {
+            return "typing..."
+          }
+      }
+    }
+
+    // For threads (group chats), show names as before
+    if length == .full {
+      switch displayNames.count {
+        case 0:
+          return nil
+        case 1:
+          return "\(displayNames[0]) is typing..."
+        case 2:
+          return "\(displayNames[0]) and \(displayNames[1]) are typing..."
+        case 3:
+          return "\(displayNames[0]), \(displayNames[1]) and \(displayNames[2]) are typing..."
+        default:
+          return "\(displayNames[0]), \(displayNames[1]) and \(displayNames.count - 2) others are typing..."
+      }
+    } else if length == .short {
+      switch displayNames.count {
+        case 0:
+          return nil
+        case 1:
+          return "\(displayNames[0]) is typing..."
+        case 2:
+          return "\(displayNames[0]) and \(displayNames[1]) are typing..."
+        default:
+          return "\(displayNames[0]) and \(displayNames.count - 1) others are typing..."
+      }
+    } else {
+      switch displayNames.count {
+        case 0:
+          return nil
+        case 1:
+          return "\(displayNames[0])"
+        case 2:
+          return "\(displayNames[0]) and \(displayNames[1])"
+        default:
+          return "\(displayNames[0]) and \(displayNames.count - 1) others"
+      }
+    }
+  }
+
+  /// Display length options for typing text
+  public enum TypingDisplayLength {
+    case full // "User is typing..."
+    case short // "User is typing..."
+    case min // "User"
+  }
+
   // MARK: - Sending Methods
 
   // Sending side
@@ -246,107 +328,5 @@ public extension ComposeActions {
   /// Starts a video upload compose action
   func startVideoUpload(for peerId: Peer) -> @Sendable () -> Void {
     startUpload(for: peerId, action: .uploadingVideo)
-  }
-}
-
-// MARK: - User Name Helper
-
-public extension ComposeActions {
-  /// Get display names for typing users asynchronously
-  func getTypingUsersDisplayNames(for peer: Peer) async -> [String] {
-    let typingUserIds = getTypingUsers(for: peer)
-
-    return await withTaskGroup(of: (Int64, String?).self) { group in
-      for userId in typingUserIds {
-        group.addTask {
-          // Fetch user info in background
-          let userInfo = await MainActor.run {
-            ObjectCache.shared.getUser(id: userId)
-          }
-          return (userId, userInfo?.user.displayName)
-        }
-      }
-
-      var results: [(Int64, String?)] = []
-      for await result in group {
-        results.append(result)
-      }
-
-      // Sort by original order and filter out nil names
-      return typingUserIds.compactMap { userId in
-        results.first { $0.0 == userId }?.1
-      }
-    }
-  }
-
-  /// Get formatted typing text for display
-  func getTypingDisplayText(for peer: Peer, length: TypingDisplayLength = .full) async -> String? {
-    let displayNames = await getTypingUsersDisplayNames(for: peer)
-
-    // For DMs (user peers), use simpler copy since there's only one other user
-    if peer.isPrivate {
-      switch displayNames.count {
-        case 0:
-          return nil
-        case 1:
-          if length == .min {
-            return "typing"
-          } else {
-            return "typing..."
-          }
-        default:
-          // This shouldn't happen in a DM, but fallback to regular behavior
-          if length == .min {
-            return "typing"
-          } else {
-            return "typing..."
-          }
-      }
-    }
-
-    // For threads (group chats), show names as before
-    if length == .full {
-      switch displayNames.count {
-        case 0:
-          return nil
-        case 1:
-          return "\(displayNames[0]) is typing..."
-        case 2:
-          return "\(displayNames[0]) and \(displayNames[1]) are typing..."
-        case 3:
-          return "\(displayNames[0]), \(displayNames[1]) and \(displayNames[2]) are typing..."
-        default:
-          return "\(displayNames[0]), \(displayNames[1]) and \(displayNames.count - 2) others are typing..."
-      }
-    } else if length == .short {
-      switch displayNames.count {
-        case 0:
-          return nil
-        case 1:
-          return "\(displayNames[0]) is typing..."
-        case 2:
-          return "\(displayNames[0]) and \(displayNames[1]) are typing..."
-        default:
-          return "\(displayNames[0]) and \(displayNames.count - 1) others are typing..."
-      }
-    } else {
-      switch displayNames.count {
-        case 0:
-          return nil
-        case 1:
-          return "\(displayNames[0])"
-        case 2:
-          return "\(displayNames[0]) and \(displayNames[1])"
-        default:
-          return "\(displayNames[0]) and \(displayNames.count - 1) others"
-      }
-    }
-  }
-
-  /// Display length options for typing text
-  enum TypingDisplayLength {
-    case full // "User is typing..."
-    case short // "User is typing..."
-    case min // "User"
   }
 }
