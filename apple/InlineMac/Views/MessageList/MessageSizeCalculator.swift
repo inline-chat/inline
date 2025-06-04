@@ -320,12 +320,30 @@ class MessageSizeCalculator {
       // todo video
     }
 
+    // Calculate document width first if we have a document
+    var documentWidth: CGFloat?
+    if hasDocument {
+      // Documents have minimum width but can expand up to parent available width
+      // Start with the minimum document width, but don't exceed parent available width
+      documentWidth = min(parentAvailableWidth, Theme.documentViewWidth)
+    }
+
     // What's the available width for the text
     var availableWidth = min(parentAvailableWidth, photoSize?.width ?? parentAvailableWidth)
 
     if let photoSize {
       // if we have photo, min available width is the photo width
       availableWidth = max(availableWidth, photoSize.width)
+    }
+
+    // When we have media that constrains the width, we need to account for bubble padding
+    // to ensure text doesn't overflow the bubble bounds
+    if hasMedia, let photoSize {
+      // Photos strictly constrain text width
+      availableWidth = photoSize.width - (Theme.messageBubbleContentHorizontalInset * 2)
+    } else if hasDocument {
+      // Documents don't restrict text width like photos - text can use full parent width
+      availableWidth = parentAvailableWidth - (Theme.messageBubbleContentHorizontalInset * 2)
     }
 
     #if DEBUG
@@ -381,6 +399,13 @@ class MessageSizeCalculator {
 
     let textHeight = textSize?.height ?? 0.0
     let textWidth = textSize?.width ?? 0.0
+
+    // Update document width based on content (if we have a document with text)
+    if hasDocument, hasText, let currentDocumentWidth = documentWidth {
+      // Document can expand to fit text content, but has minimum and maximum bounds
+      let textWidthWithPadding = textWidth + (Theme.messageBubbleContentHorizontalInset * 2)
+      documentWidth = max(currentDocumentWidth, min(parentAvailableWidth, textWidthWithPadding))
+    }
 
     // Re-evaluate if we are single line based on space left after the text width
     if isSingleLine, textWidth > availableWidth - MessageTimeAndState.timeWidth {
@@ -503,9 +528,10 @@ class MessageSizeCalculator {
 
     // MARK: - Document
 
-    if hasDocument {
+    if hasDocument, let documentWidth {
       documentPlan = LayoutPlan(size: .zero, spacing: .zero)
-      documentPlan!.size = CGSize(width: 200, height: Theme.documentViewHeight)
+      // Use the shared document width calculated above
+      documentPlan!.size = CGSize(width: documentWidth, height: Theme.documentViewHeight)
 
       if hasText {
         // documentPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
