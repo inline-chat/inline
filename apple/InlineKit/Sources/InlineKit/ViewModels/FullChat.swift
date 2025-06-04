@@ -67,9 +67,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var senderInfo: UserInfo?
   public var message: Message
   public var reactions: [FullReaction]
-  public var repliedToMessage: Message?
-  public var replyToMessageSender: User?
-  public var replyToMessageFile: File?
+  public var repliedToMessage: EmbeddedMessage?
   public var attachments: [FullAttachment]
   public var photoInfo: PhotoInfo?
   public var videoInfo: VideoInfo?
@@ -110,7 +108,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     senderInfo: UserInfo?,
     message: Message,
     reactions: [FullReaction],
-    repliedToMessage: Message?,
+    repliedToMessage: EmbeddedMessage?,
     attachments: [FullAttachment],
     translations: [Translation] = []
   ) {
@@ -168,7 +166,6 @@ public extension FullMessage {
         message: \(message),
         reactions: \(reactions),
         repliedToMessage: \(String(describing: repliedToMessage)),
-        replyToMessageSender: \(String(describing: replyToMessageSender)),
         attachments: \(attachments)
     )
     """
@@ -206,8 +203,12 @@ public extension FullMessage {
       )
       .including(
         optional: Message.repliedToMessage.forKey("repliedToMessage")
-          .including(optional: Message.from.forKey("replyToMessageSender"))
-          .including(optional: Message.file.forKey("replyToMessageFile"))
+          .including(
+            optional: Message.from
+              .forKey(EmbeddedMessage.CodingKeys.senderInfo)
+              .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+          )
+          .including(all: Message.translations.forKey(EmbeddedMessage.CodingKeys.translations))
       )
       .including(
         all: Message.attachments

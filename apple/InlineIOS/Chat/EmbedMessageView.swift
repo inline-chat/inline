@@ -86,10 +86,13 @@ class EmbedMessageView: UIView {
     updateColors()
   }
 
-  func configure(message: Message, senderName: String, outgoing: Bool, isOnlyEmoji: Bool) {
+  func configure(embeddedMessage: EmbeddedMessage, senderName: String, outgoing: Bool, isOnlyEmoji: Bool) {
     self.outgoing = outgoing
     self.isOnlyEmoji = isOnlyEmoji
     headerLabel.text = senderName
+
+    let message = embeddedMessage.message
+    let displayText = embeddedMessage.displayText
 
     if message.hasUnsupportedTypes {
       imageIconView.isHidden = true
@@ -108,16 +111,16 @@ class EmbedMessageView: UIView {
       let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
       imageIconView.image = UIImage(systemName: "document.fill", withConfiguration: config)
       imageIconView.isHidden = false
-      messageLabel.text = message.text?.replacingOccurrences(of: "\n", with: " ")
+      messageLabel.text = displayText?.replacingOccurrences(of: "\n", with: " ")
     } else if message.hasPhoto, message.hasText {
       imageIconView.isHidden = false
-      messageLabel.text = message.text?.replacingOccurrences(of: "\n", with: " ")
+      messageLabel.text = displayText?.replacingOccurrences(of: "\n", with: " ")
     } else if message.hasPhoto, !message.hasText {
       imageIconView.isHidden = true
       messageLabel.text = "Photo"
     } else if !message.hasPhoto, message.hasText {
       imageIconView.isHidden = true
-      messageLabel.text = message.text?.replacingOccurrences(of: "\n", with: " ")
+      messageLabel.text = displayText?.replacingOccurrences(of: "\n", with: " ")
     }
 
     updateColors()
