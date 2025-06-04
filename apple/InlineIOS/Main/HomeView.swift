@@ -40,7 +40,8 @@ struct HomeView: View {
       let pinned1 = item1.dialog.pinned ?? false
       let pinned2 = item2.dialog.pinned ?? false
       if pinned1 != pinned2 { return pinned1 }
-      return item1.message?.date ?? item1.chat?.date ?? Date.now > item2.message?.date ?? item2.chat?.date ?? Date.now
+      return item1.lastMessage?.message.date ?? item1.chat?.date ?? Date.now > item2.lastMessage?.message.date ?? item2
+        .chat?.date ?? Date.now
     }
   }
 

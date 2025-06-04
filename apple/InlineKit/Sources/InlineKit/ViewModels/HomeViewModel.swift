@@ -41,6 +41,62 @@ public struct UserInfo: Codable, FetchableRecord, PersistableRecord, Hashable, S
   public static let preview = Self(user: .preview, profilePhotos: nil)
 }
 
+public struct EmbeddedMessage: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable, Identifiable {
+  public var message: Message
+  public var senderInfo: UserInfo?
+  public var translations: [Translation]
+
+  public var id: Int64 { message.id }
+
+  public var from: User? {
+    senderInfo?.user
+  }
+
+  public func translation(for language: String) -> Translation? {
+    translations.first { $0.language == language }
+  }
+
+  public var currentTranslation: Translation? {
+    translation(for: UserLocale.getCurrentLanguage())
+  }
+
+  /// Translation text for the message, without falling back to the original text
+  public var translationText: String? {
+    if TranslationState.shared.isTranslationEnabled(for: message.peerId) {
+      currentTranslation?.translation
+    } else {
+      nil
+    }
+  }
+
+  public var isTranslated: Bool {
+    translationText != nil
+  }
+
+  /// Display text for the message
+  /// If translation is enabled, use the current translation
+  /// Otherwise, use the message text
+  public var displayText: String? {
+    if let translationText {
+      translationText
+    } else {
+      message.text
+    }
+  }
+
+  public enum CodingKeys: String, CodingKey {
+    case message
+    case senderInfo
+    case translations
+  }
+
+  public init(message: Message, senderInfo: UserInfo? = nil, translations: [Translation] = []) {
+    self.message = message
+    self.senderInfo = senderInfo
+    self.translations = translations
+  }
+}
+
 public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable,
   Identifiable
 {
@@ -48,8 +104,7 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   /// peerUser
   public var user: UserInfo?
   public var chat: Chat?
-  public var message: Message?
-  public var from: UserInfo?
+  public var lastMessage: EmbeddedMessage?
 
   // public var spaceName: String?
   public var space: Space?
@@ -63,16 +118,14 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
     dialog: Dialog,
     user: UserInfo?,
     chat: Chat?,
-    message: Message?,
-    from: UserInfo?,
-    space: Space?,
+    lastMessage: EmbeddedMessage?,
+    space: Space?
     // spaceName: String? = nil
   ) {
     self.dialog = dialog
     self.user = user
     self.chat = chat
-    self.message = message
-    self.from = from
+    self.lastMessage = lastMessage
     self.space = space
     // self.spaceName = spaceName
   }
@@ -91,12 +144,13 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
           .forKey(CodingKeys.chat)
           .including(
             optional: Chat.lastMessage
-              .forKey(CodingKeys.message)
+              .forKey(CodingKeys.lastMessage)
               .including(
                 optional: Message.from
-                  .forKey(CodingKeys.from)
+                  .forKey(EmbeddedMessage.CodingKeys.senderInfo)
                   .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
               )
+              .including(all: Message.translations.forKey(EmbeddedMessage.CodingKeys.translations))
           )
       )
 
@@ -117,30 +171,6 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
 //              )
 //          )
 //      )
-      .asRequest(of: HomeChatItem.self)
-  }
-
-  // Add a static method to create the request for space chats
-  static func spaceChats(spaceId: Int64) -> QueryInterfaceRequest<HomeChatItem> {
-    Dialog
-      .filter(Column("spaceId") == spaceId)
-      .including(
-        required: Dialog.peerUser
-          .forKey(CodingKeys.user)
-          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-      )
-      .including(
-        optional: Dialog.peerUserChat
-          .forKey(CodingKeys.chat)
-          .including(
-            optional: Chat.lastMessage
-              .forKey(CodingKeys.message)
-              .including(
-                optional: Message.from
-                  .forKey(CodingKeys.from)
-              )
-          )
-      )
       .asRequest(of: HomeChatItem.self)
   }
 }
@@ -230,8 +260,8 @@ extension HomeViewModel {
       if pinned1 != pinned2 { return pinned1 }
 
       // Then sort by date
-      let date1 = item1.message?.date ?? item1.chat?.date ?? Date.distantPast
-      let date2 = item2.message?.date ?? item2.chat?.date ?? Date.distantPast
+      let date1 = item1.lastMessage?.message.date ?? item1.chat?.date ?? Date.distantPast
+      let date2 = item2.lastMessage?.message.date ?? item2.chat?.date ?? Date.distantPast
       return date1 > date2
     }
   }

@@ -81,6 +81,16 @@ class SidebarItemRow: NSTableCellView {
         isSelected = currentRoute == route
       }
       .store(in: &cancellables)
+
+    // Subscribe to translation state changes
+    TranslationState.shared.subject.sink { [weak self] peer, _ in
+      guard let self, let currentPeer = peerId else { return }
+
+      // Only reconfigure if the translation change is for this item's peer
+      if peer == currentPeer, let item {
+        configure(with: item)
+      }
+    }.store(in: &cancellables)
   }
 
   private func handleEvent(_ event: SidebarEvents) {
@@ -291,7 +301,7 @@ class SidebarItemRow: NSTableCellView {
 
   private func createSenderView() -> SidebarSenderView {
     let view = SidebarSenderView(
-      userInfo: item?.from ?? .deleted
+      userInfo: item?.lastMessage?.senderInfo ?? .deleted
     )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -415,8 +425,8 @@ class SidebarItemRow: NSTableCellView {
     messageLabel.textContainer?.lineBreakMode = .byTruncatingTail
     // messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
-    if let message = item.message {
-      messageLabel.string = message.stringRepresentationWithEmoji ?? ""
+    if let lastMessage = item.lastMessage {
+      messageLabel.string = lastMessage.displayText ?? lastMessage.message.stringRepresentationWithEmoji ?? ""
       Log.shared.debug("SidebarItemRow message set to: \(messageLabel.string)")
     } else {
       messageLabel.string = "Empty chat"
@@ -456,12 +466,12 @@ class SidebarItemRow: NSTableCellView {
     }
 
     // Update sender view
-    if isThread, let from = item.from {
+    if isThread, let senderInfo = item.lastMessage?.senderInfo {
       if senderView == nil {
         senderView = createSenderView()
         contentStackView.insertArrangedSubview(senderView!, at: 1)
       } else {
-        senderView?.configure(with: from)
+        senderView?.configure(with: senderInfo)
       }
     } else {
       senderView?.removeFromSuperview()
