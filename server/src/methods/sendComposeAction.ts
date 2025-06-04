@@ -1,14 +1,7 @@
-import { db } from "@in/server/db"
 import { Type, type Static } from "@sinclair/typebox"
-import { presenceManager } from "@in/server/ws/presence"
-import { TComposeAction, TOptional, TPeerInfo, TUpdateComposeAction } from "@in/server/api-types"
-import { Log } from "@in/server/utils/log"
+import { TComposeAction, TOptional, TUpdateComposeAction } from "@in/server/api-types"
 import { peerFromInput, reversePeerId, TApiInputPeer, type HandlerContext } from "@in/server/controllers/helpers"
 import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
-import { ApiError, InlineError } from "@in/server/types/errors"
-import { UpdateComposeAction_ComposeAction, type Update } from "@in/protocol/core"
-import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { RealtimeUpdates } from "@in/server/realtime/message"
 
 export const Input = Type.Object({
   action: TOptional(TComposeAction),

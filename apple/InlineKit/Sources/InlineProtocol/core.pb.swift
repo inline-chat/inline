@@ -43,6 +43,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getChats // = 17
   case updateUserSettings // = 18
   case getUserSettings // = 19
+  case sendComposeAction // = 20
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -71,6 +72,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 17: self = .getChats
     case 18: self = .updateUserSettings
     case 19: self = .getUserSettings
+    case 20: self = .sendComposeAction
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -97,6 +99,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getChats: return 17
     case .updateUserSettings: return 18
     case .getUserSettings: return 19
+    case .sendComposeAction: return 20
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -123,6 +126,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getChats,
     .updateUserSettings,
     .getUserSettings,
+    .sendComposeAction,
   ]
 
 }
@@ -2122,6 +2126,14 @@ public struct RpcCall: Sendable {
     set {input = .getUserSettings(newValue)}
   }
 
+  public var sendComposeAction: SendComposeActionInput {
+    get {
+      if case .sendComposeAction(let v)? = input {return v}
+      return SendComposeActionInput()
+    }
+    set {input = .sendComposeAction(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2144,6 +2156,7 @@ public struct RpcCall: Sendable {
     case getChats(GetChatsInput)
     case updateUserSettings(UpdateUserSettingsInput)
     case getUserSettings(GetUserSettingsInput)
+    case sendComposeAction(SendComposeActionInput)
 
   }
 
@@ -2317,6 +2330,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .getUserSettings(newValue)}
   }
 
+  public var sendComposeAction: SendComposeActionResult {
+    get {
+      if case .sendComposeAction(let v)? = _storage._result {return v}
+      return SendComposeActionResult()
+    }
+    set {_uniqueStorage()._result = .sendComposeAction(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2339,6 +2360,7 @@ public struct RpcResult: @unchecked Sendable {
     case getChats(GetChatsResult)
     case updateUserSettings(UpdateUserSettingsResult)
     case getUserSettings(GetUserSettingsResult)
+    case sendComposeAction(SendComposeActionResult)
 
   }
 
@@ -2537,6 +2559,49 @@ public struct UpdateUserSettingsResult: Sendable {
   // methods supported on all messages.
 
   public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct SendComposeActionInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Peer - where user is typing/uploading
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Compose action (optional, null means stop action)
+  public var action: UpdateComposeAction.ComposeAction {
+    get {return _action ?? .none}
+    set {_action = newValue}
+  }
+  /// Returns true if `action` has been explicitly set.
+  public var hasAction: Bool {return self._action != nil}
+  /// Clears the value of `action`. Subsequent reads from it will return its default value.
+  public mutating func clearAction() {self._action = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _action: UpdateComposeAction.ComposeAction? = nil
+}
+
+public struct SendComposeActionResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4212,6 +4277,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     17: .same(proto: "GET_CHATS"),
     18: .same(proto: "UPDATE_USER_SETTINGS"),
     19: .same(proto: "GET_USER_SETTINGS"),
+    20: .same(proto: "SEND_COMPOSE_ACTION"),
   ]
 }
 
@@ -6919,6 +6985,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     18: .same(proto: "getChats"),
     19: .same(proto: "updateUserSettings"),
     20: .same(proto: "getUserSettings"),
+    21: .same(proto: "sendComposeAction"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -7175,6 +7242,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .getUserSettings(v)
         }
       }()
+      case 21: try {
+        var v: SendComposeActionInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .sendComposeAction(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .sendComposeAction(v)
+        }
+      }()
       default: break
       }
     }
@@ -7265,6 +7345,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .getUserSettings(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
     }()
+    case .sendComposeAction?: try {
+      guard case .sendComposeAction(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -7301,6 +7385,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     18: .same(proto: "getChats"),
     19: .same(proto: "updateUserSettings"),
     20: .same(proto: "getUserSettings"),
+    21: .same(proto: "sendComposeAction"),
   ]
 
   fileprivate class _StorageClass {
@@ -7588,6 +7673,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .getUserSettings(v)
           }
         }()
+        case 21: try {
+          var v: SendComposeActionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .sendComposeAction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .sendComposeAction(v)
+          }
+        }()
         default: break
         }
       }
@@ -7679,6 +7777,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .getUserSettings?: try {
         guard case .getUserSettings(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
+      }()
+      case .sendComposeAction?: try {
+        guard case .sendComposeAction(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
       }()
       case nil: break
       }
@@ -7926,6 +8028,67 @@ extension UpdateUserSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
   public static func ==(lhs: UpdateUserSettingsResult, rhs: UpdateUserSettingsResult) -> Bool {
     if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension SendComposeActionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SendComposeActionInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .same(proto: "action"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self._action) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._action {
+      try visitor.visitSingularEnumField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SendComposeActionInput, rhs: SendComposeActionInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs._action != rhs._action {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension SendComposeActionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SendComposeActionResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SendComposeActionResult, rhs: SendComposeActionResult) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
