@@ -554,7 +554,7 @@ class ComposeAppKit: NSView {
     }
 
     // Too small
-    if image.size.width < 50 || image.size.height < 50 {
+    if image.size.width < 50, image.size.height < 50 {
       return true
     }
 
