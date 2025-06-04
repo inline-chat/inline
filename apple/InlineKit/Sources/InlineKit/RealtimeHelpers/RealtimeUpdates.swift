@@ -207,8 +207,8 @@ extension InlineProtocol.UpdateComposeAction {
     if let action {
       Task { await ComposeActions.shared.addComposeAction(for: peerID.toPeer(), action: action, userId: userID) }
     } else {
-      // cancel
-      Task { await ComposeActions.shared.removeComposeAction(for: peerID.toPeer()) }
+      // cancel - remove action for specific user, not all users
+      Task { await ComposeActions.shared.removeComposeAction(for: peerID.toPeer(), userId: userID) }
     }
   }
 }

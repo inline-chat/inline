@@ -1,3 +1,4 @@
+import Auth
 import Combine
 import Logger
 import SwiftUI
@@ -12,44 +13,103 @@ public struct ComposeActionInfo {
 public class ComposeActions: ObservableObject {
   public static let shared = ComposeActions()
 
-  // for now support only one action per chat (peer)
-  @Published public var actions: [Peer: ComposeActionInfo] = [:]
+  // New structure: [Peer: [UserId: ComposeActionInfo]]
+  @Published public var actions: [Peer: [Int64: ComposeActionInfo]] = [:]
   private var _activeUploads: Set<Peer> = []
 
-  private var cancelTasks: [Peer: Task<Void, Never>] = [:]
+  private var cancelTasks: [Peer: [Int64: Task<Void, Never>]] = [:]
   private var log = Log.scoped("ComposeActions", enableTracing: false)
   private var lastTypingSent: [Peer: Date] = [:]
 
   public init() {}
 
-  public func getComposeAction(for peer: Peer) -> ComposeActionInfo? {
-    actions[peer]
+  // MARK: - New Group-Aware Methods
+
+  /// Get all compose actions for a peer
+  public func getComposeActions(for peer: Peer) -> [Int64: ComposeActionInfo] {
+    actions[peer] ?? [:]
   }
 
-  public func addComposeAction(for peer: Peer, action: ApiComposeAction, userId: Int64) {
-    log.trace("action added for \(peer)")
-    cancelTasks[peer]?.cancel()
-    cancelTasks[peer] = nil
+  /// Get active typing users for a peer
+  public func getTypingUsers(for peer: Peer) -> [Int64] {
+    let currentActions = getComposeActions(for: peer)
+    return currentActions.compactMap { userId, actionInfo in
+      actionInfo.action == .typing ? userId : nil
+    }
+  }
 
-    actions[peer] = ComposeActionInfo(userId: userId, action: action, expiresAt: Date().addingTimeInterval(6))
+  /// Add compose action for a specific user in a peer
+  public func addComposeAction(for peer: Peer, action: ApiComposeAction, userId: Int64) {
+    log.trace("action \(action) added for user \(userId) in \(peer)")
+
+    // Cancel existing task for this user in this peer
+    cancelTasks[peer]?[userId]?.cancel()
+    if cancelTasks[peer] == nil {
+      cancelTasks[peer] = [:]
+    }
+
+    // Initialize actions for peer if needed
+    if actions[peer] == nil {
+      actions[peer] = [:]
+    }
+
+    actions[peer]![userId] = ComposeActionInfo(userId: userId, action: action, expiresAt: Date().addingTimeInterval(6))
 
     // Expire after 6s if not updated
-    cancelTasks[peer] = Task {
-      self.log.trace("typing action expired for \(peer)")
+    cancelTasks[peer]![userId] = Task {
+      self.log.trace("typing action expired for user \(userId) in \(peer)")
       try? await Task.sleep(for: .seconds(6))
       guard !Task.isCancelled else { return }
       await MainActor.run {
-        self.removeComposeAction(for: peer)
+        self.removeComposeAction(for: peer, userId: userId)
       }
     }
   }
 
-  public func removeComposeAction(for peer: Peer) {
-    log.trace("removed action for \(peer)")
-    actions[peer] = nil
-    cancelTasks[peer]?.cancel()
-    cancelTasks[peer] = nil
+  /// Remove compose action for a specific user in a peer
+  public func removeComposeAction(for peer: Peer, userId: Int64) {
+    log.trace("removed action for user \(userId) in \(peer)")
+    actions[peer]?[userId] = nil
+
+    // Clean up empty peer entries
+    if actions[peer]?.isEmpty == true {
+      actions[peer] = nil
+    }
+
+    cancelTasks[peer]?[userId]?.cancel()
+    cancelTasks[peer]?[userId] = nil
+
+    // Clean up empty peer entries in cancel tasks
+    if cancelTasks[peer]?.isEmpty == true {
+      cancelTasks[peer] = nil
+    }
   }
+
+  /// Remove all compose actions for a peer
+  public func removeAllComposeActions(for peer: Peer) {
+    log.trace("removed all actions for \(peer)")
+
+    // Cancel all tasks for this peer
+    cancelTasks[peer]?.values.forEach { $0.cancel() }
+    cancelTasks[peer] = nil
+
+    // Remove all actions for this peer
+    actions[peer] = nil
+  }
+
+  // MARK: - Backwards Compatibility Methods
+
+  /// Get the first compose action for a peer (backwards compatibility)
+  public func getComposeAction(for peer: Peer) -> ComposeActionInfo? {
+    actions[peer]?.values.first
+  }
+
+  /// Remove compose action for peer (backwards compatibility - removes all)
+  public func removeComposeAction(for peer: Peer) {
+    removeAllComposeActions(for: peer)
+  }
+
+  // MARK: - Sending Methods
 
   // Sending side
   private func sendComposeAction(for peerId: Peer, action: ApiComposeAction?) async throws {
@@ -94,6 +154,8 @@ public class ComposeActions: ObservableObject {
   }
 }
 
+// MARK: - Upload Actions Extension
+
 public extension ComposeActions {
   /// Manages upload compose actions (photo, document, video) for a peer during file upload
   /// - Parameters:
@@ -136,15 +198,19 @@ public extension ComposeActions {
       }
     }
 
-    // Store the task with the peer
-    cancelTasks[peerId] = uploadTask
+    // Store the task with the peer (use current user ID for upload tasks)
+    let currentUserId = Auth.shared.getCurrentUserId() ?? 0
+    if cancelTasks[peerId] == nil {
+      cancelTasks[peerId] = [:]
+    }
+    cancelTasks[peerId]![currentUserId] = uploadTask
 
     // Return a completion function
     return {
       Task { @MainActor in
         // Cancel the task first
-        self.cancelTasks[peerId]?.cancel()
-        self.cancelTasks[peerId] = nil
+        self.cancelTasks[peerId]?[currentUserId]?.cancel()
+        self.cancelTasks[peerId]?[currentUserId] = nil
 
         // Remove from active uploads
         self._activeUploads.remove(peerId)
@@ -177,5 +243,83 @@ public extension ComposeActions {
   /// Starts a video upload compose action
   func startVideoUpload(for peerId: Peer) -> @Sendable () -> Void {
     startUpload(for: peerId, action: .uploadingVideo)
+  }
+}
+
+// MARK: - User Name Helper
+
+public extension ComposeActions {
+  /// Get display names for typing users asynchronously
+  func getTypingUsersDisplayNames(for peer: Peer) async -> [String] {
+    let typingUserIds = getTypingUsers(for: peer)
+
+    return await withTaskGroup(of: (Int64, String?).self) { group in
+      for userId in typingUserIds {
+        group.addTask {
+          // Fetch user info in background
+          let userInfo = await MainActor.run {
+            ObjectCache.shared.getUser(id: userId)
+          }
+          return (userId, userInfo?.user.displayName)
+        }
+      }
+
+      var results: [(Int64, String?)] = []
+      for await result in group {
+        results.append(result)
+      }
+
+      // Sort by original order and filter out nil names
+      return typingUserIds.compactMap { userId in
+        results.first { $0.0 == userId }?.1
+      }
+    }
+  }
+
+  /// Get formatted typing text for display
+  func getTypingDisplayText(for peer: Peer, length: TypingDisplayLength = .full) async -> String? {
+    let displayNames = await getTypingUsersDisplayNames(for: peer)
+
+    if length == .full {
+      switch displayNames.count {
+        case 0:
+          return nil
+        case 1:
+          return "\(displayNames[0]) is typing..."
+        case 2:
+          return "\(displayNames[0]) and \(displayNames[1]) are typing..."
+        case 3:
+          return "\(displayNames[0]), \(displayNames[1]) and \(displayNames[2]) are typing..."
+        default:
+          return "\(displayNames[0]), \(displayNames[1]) and \(displayNames.count - 2) others are typing..."
+      }
+    } else if length == .short {
+      switch displayNames.count {
+        case 0:
+          return nil
+        case 1:
+          return "\(displayNames[0]) is typing..."
+        default:
+          return "\(displayNames[0]) and \(displayNames.count - 1) others are typing..."
+      }
+    } else {
+      switch displayNames.count {
+        case 0:
+          return nil
+        case 1:
+          return "\(displayNames[0])"
+        case 2:
+          return "\(displayNames[0]) and \(displayNames[1])"
+        default:
+          return "\(displayNames[0]) and \(displayNames.count - 1) others"
+      }
+    }
+  }
+
+  /// Display length options for typing text
+  enum TypingDisplayLength {
+    case full // "User is typing..."
+    case short // "User is typing..."
+    case min // "User"
   }
 }

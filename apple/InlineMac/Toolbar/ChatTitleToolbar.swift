@@ -117,6 +117,9 @@ final class ChatStatusView: NSView {
   private var timer: Timer?
   private var dependencies: AppDependencies
 
+  // Track the current typing text
+  private var currentTypingText: String? = nil
+
   // Connection state tracking
   private var connectionState: RealtimeAPIState = .connected
   private var connectionStateSubscription: AnyCancellable?
@@ -153,12 +156,14 @@ final class ChatStatusView: NSView {
     ComposeActions.shared.$actions.sink { [weak self] _ in
       guard let self else { return }
 
-      // If changed
-      // if actions[peer]?.action != currentComposeAction {
-      DispatchQueue.main.async {
-        self.updateLabel()
+      // Update typing text asynchronously
+      Task {
+        let newTypingText = await ComposeActions.shared.getTypingDisplayText(for: self.peer)
+        await MainActor.run {
+          self.currentTypingText = newTypingText
+          self.updateLabel()
+        }
       }
-      // }
     }.store(in: &cancellables)
 
     // user online updates
@@ -206,7 +211,7 @@ final class ChatStatusView: NSView {
     case connecting(String)
     case publicChat
     case privateChat
-    case composing(ApiComposeAction)
+    case composing(String) // Changed to String to support custom typing text
     case online(User)
     case offline(User)
     case timezone(String)
@@ -217,7 +222,7 @@ final class ChatStatusView: NSView {
         case let .connecting(message): message
         case .publicChat: "public"
         case .privateChat: "private"
-        case let .composing(action): action.toHumanReadable()
+        case let .composing(text): text // Use custom typing text
         case let .online(user): getOnlineText(user: user)
         case let .offline(user): getOfflineText(user: user)
         case let .timezone(timeZone): getTimeZoneText(timeZone: timeZone)
@@ -281,9 +286,14 @@ final class ChatStatusView: NSView {
     guard let user else { return .empty }
     if user.isCurrentUser() { return .empty }
 
-    // Check compose action
-    if let action = currentComposeAction {
-      return .composing(action)
+    // Check for typing text first (this will show user names for typing)
+    if let typingText = currentTypingText, !typingText.isEmpty {
+      return .composing(typingText)
+    }
+
+    // Fallback to old compose action behavior for non-typing actions
+    if let action = currentComposeAction, action != .typing {
+      return .composing(action.toHumanReadable())
     }
 
     if user.online == true {
