@@ -272,6 +272,11 @@ final class ChatStatusView: NSView {
       return .connecting(connectionState.toHumanReadable())
     }
 
+    // Check for typing text first (this will show user names for typing)
+    if let typingText = currentTypingText, !typingText.isEmpty {
+      return .composing(typingText)
+    }
+
     // Check chat state
     if let chat {
       if chat.isPublic == true {
@@ -285,11 +290,6 @@ final class ChatStatusView: NSView {
     // Check user state
     guard let user else { return .empty }
     if user.isCurrentUser() { return .empty }
-
-    // Check for typing text first (this will show user names for typing)
-    if let typingText = currentTypingText, !typingText.isEmpty {
-      return .composing(typingText)
-    }
 
     // Fallback to old compose action behavior for non-typing actions
     if let action = currentComposeAction, action != .typing {

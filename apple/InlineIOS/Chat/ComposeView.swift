@@ -806,13 +806,13 @@ extension ComposeView: UITextViewDelegate {
     if isEmpty {
       clearDraft()
       buttonDisappear()
-      if let peerId, case .user = peerId {
+      if let peerId {
         Task {
           await ComposeActions.shared.stoppedTyping(for: peerId)
         }
       }
     } else {
-      if let peerId, case .user = peerId {
+      if let peerId {
         Task {
           await ComposeActions.shared.startedTyping(for: peerId)
         }
