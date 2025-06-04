@@ -21,16 +21,14 @@ struct ChatListItem: View {
           dialog: item.dialog,
           user: user,
           chat: item.chat,
-          message: item.lastMessage?.message,
-          from: item.lastMessage?.from
+          message: item.lastMessage
         ))
       } else if let chat = item.chat {
         ChatItemView(props: ChatItemProps(
           dialog: item.dialog,
           user: item.user,
           chat: chat,
-          message: item.lastMessage?.message,
-          from: item.lastMessage?.senderInfo,
+          message: item.lastMessage,
           space: item.space
         ))
       }
