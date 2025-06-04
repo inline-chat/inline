@@ -22,6 +22,7 @@ import { handleTranslateMessages } from "./translateMessages"
 import { handleGetChats } from "./messages.getChats"
 import { getUserSettingsHandler } from "./user.getUserSettings"
 import { updateUserSettingsHandler } from "./user.updateUserSettings"
+import { sendComposeActionHandler } from "./messages.sendComposeAction"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -173,6 +174,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await updateUserSettingsHandler(call.input.updateUserSettings, handlerContext)
       return { oneofKind: "updateUserSettings", updateUserSettings: result }
+    }
+
+    case Method.SEND_COMPOSE_ACTION: {
+      if (call.input.oneofKind !== "sendComposeAction") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await sendComposeActionHandler(call.input.sendComposeAction, handlerContext)
+      return { oneofKind: "sendComposeAction", sendComposeAction: result }
     }
 
     default:
