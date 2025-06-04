@@ -311,15 +311,14 @@ class UIMessageView: UIView {
 
     containerStack.addArrangedSubview(embedView)
 
-    // Add tap gesture to embedView for scroll-to-reply
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEmbedViewTap))
     embedView.isUserInteractionEnabled = true
     embedView.addGestureRecognizer(tapGesture)
 
-    if let repliedMessage = fullMessage.repliedToMessage {
-      let senderName = fullMessage.replyToMessageSender?.firstName ?? "User"
+    if let embeddedMessage = fullMessage.repliedToMessage {
+      let senderName = embeddedMessage.from?.firstName ?? "User"
       embedView.configure(
-        message: repliedMessage,
+        embeddedMessage: embeddedMessage,
         senderName: senderName,
         outgoing: outgoing,
         isOnlyEmoji: isEmojiOnlyMessage

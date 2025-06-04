@@ -186,8 +186,8 @@ class MessageViewAppKit: NSView {
   private lazy var replyView: EmbeddedMessageView = {
     let view = EmbeddedMessageView(style: outgoing ? .white : .colored)
     view.translatesAutoresizingMaskIntoConstraints = false
-    if let message = fullMessage.repliedToMessage, let from = fullMessage.replyToMessageSender {
-      view.update(with: message, from: from, file: fullMessage.replyToMessageFile, kind: .replyInMessage)
+    if let embeddedMessage = fullMessage.repliedToMessage {
+      view.update(with: embeddedMessage, kind: .replyInMessage)
     }
     return view
   }()
