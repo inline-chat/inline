@@ -283,6 +283,28 @@ public extension ComposeActions {
   func getTypingDisplayText(for peer: Peer, length: TypingDisplayLength = .full) async -> String? {
     let displayNames = await getTypingUsersDisplayNames(for: peer)
 
+    // For DMs (user peers), use simpler copy since there's only one other user
+    if peer.isPrivate {
+      switch displayNames.count {
+        case 0:
+          return nil
+        case 1:
+          if length == .min {
+            return "typing"
+          } else {
+            return "typing..."
+          }
+        default:
+          // This shouldn't happen in a DM, but fallback to regular behavior
+          if length == .min {
+            return "typing"
+          } else {
+            return "typing..."
+          }
+      }
+    }
+
+    // For threads (group chats), show names as before
     if length == .full {
       switch displayNames.count {
         case 0:
@@ -302,6 +324,8 @@ public extension ComposeActions {
           return nil
         case 1:
           return "\(displayNames[0]) is typing..."
+        case 2:
+          return "\(displayNames[0]) and \(displayNames[1]) are typing..."
         default:
           return "\(displayNames[0]) and \(displayNames.count - 1) others are typing..."
       }
