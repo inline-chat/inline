@@ -429,7 +429,7 @@ class SidebarItemRow: NSTableCellView {
       messageLabel.string = lastMessage.displayText ?? lastMessage.message.stringRepresentationWithEmoji ?? ""
       Log.shared.debug("SidebarItemRow message set to: \(messageLabel.string)")
     } else {
-      messageLabel.string = "Empty chat"
+      messageLabel.string = ""
       Log.shared.debug("SidebarItemRow no message")
     }
 
