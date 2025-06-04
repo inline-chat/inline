@@ -24,7 +24,7 @@ enum CombinedItem: Identifiable {
   var date: Date {
     switch self {
       case let .space(space): space.space.date
-      case let .chat(chat): chat.message?.date ?? chat.chat?.date ?? Date()
+      case let .chat(chat): chat.lastMessage?.message.date ?? chat.chat?.date ?? Date()
     }
   }
 }
