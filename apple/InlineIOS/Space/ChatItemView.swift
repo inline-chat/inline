@@ -6,9 +6,32 @@ struct ChatItemProps {
   let dialog: Dialog
   let user: UserInfo?
   let chat: Chat?
-  let message: Message?
-  let from: UserInfo?
+  let message: EmbeddedMessage?
   let space: Space?
+
+  // Backward compatibility
+  init(dialog: Dialog, user: UserInfo?, chat: Chat?, message: EmbeddedMessage?, space: Space?) {
+    self.dialog = dialog
+    self.user = user
+    self.chat = chat
+    self.message = message
+    self.space = space
+  }
+
+  // Backward compatibility initializer for old Message/UserInfo structure
+  init(dialog: Dialog, user: UserInfo?, chat: Chat?, message: Message?, from: UserInfo?, space: Space?) {
+    self.dialog = dialog
+    self.user = user
+    self.chat = chat
+    self.space = space
+
+    // Convert old structure to EmbeddedMessage
+    if let message {
+      self.message = EmbeddedMessage(message: message, senderInfo: from, translations: [])
+    } else {
+      self.message = nil
+    }
+  }
 }
 
 struct ChatItemView: View {
@@ -32,12 +55,12 @@ struct ChatItemView: View {
     props.chat
   }
 
-  var message: Message? {
+  var message: EmbeddedMessage? {
     props.message
   }
 
   var from: UserInfo? {
-    props.from
+    props.message?.senderInfo
   }
 
   var space: Space? {
@@ -144,7 +167,7 @@ struct ChatItemView: View {
 
   @ViewBuilder
   var lastMessageView: some View {
-    if message?.isSticker == true {
+    if message?.message.isSticker == true {
       HStack(spacing: 4) {
         Image(systemName: "cup.and.saucer.fill")
           .font(.callout)
@@ -157,39 +180,45 @@ struct ChatItemView: View {
           .truncationMode(.tail)
       }
       .padding(.top, 1)
-    } else if message?.documentId != nil {
+    } else if message?.message.documentId != nil {
       HStack {
         Image(systemName: "document.fill")
           .font(.callout)
           .foregroundColor(.secondary)
 
-        Text((message?.hasText == true ? message?.text ?? "" : "Document").replacingOccurrences(of: "\n", with: " "))
-          .font(.callout)
-          .foregroundColor(.secondary)
-          .lineLimit(2)
-          .truncationMode(.tail)
+        Text(
+          (message?.message.hasText == true ? message?.displayText ?? "" : "Document")
+            .replacingOccurrences(of: "\n", with: " ")
+        )
+        .font(.callout)
+        .foregroundColor(.secondary)
+        .lineLimit(2)
+        .truncationMode(.tail)
       }
       .padding(.top, 1)
-    } else if message?.photoId != nil || message?.fileId != nil {
+    } else if message?.message.photoId != nil || message?.message.fileId != nil {
       HStack {
         Image(systemName: "photo.fill")
           .font(.callout)
 
-        Text((message?.hasText == true ? message?.text ?? "" : "Photo").replacingOccurrences(of: "\n", with: " "))
-          .font(.callout)
-          .foregroundColor(.secondary)
-          .lineLimit(2)
-          .truncationMode(.tail)
+        Text(
+          (message?.message.hasText == true ? message?.displayText ?? "" : "Photo")
+            .replacingOccurrences(of: "\n", with: " ")
+        )
+        .font(.callout)
+        .foregroundColor(.secondary)
+        .lineLimit(2)
+        .truncationMode(.tail)
       }
       .padding(.top, 1)
-    } else if message?.hasUnsupportedTypes == true {
+    } else if message?.message.hasUnsupportedTypes == true {
       Text("Unsupported message")
         .italic()
         .font(.callout)
         .foregroundColor(.secondary)
 
     } else {
-      Text((message?.text ?? "").replacingOccurrences(of: "\n", with: " "))
+      Text((message?.displayText ?? "").replacingOccurrences(of: "\n", with: " "))
         .font(.callout)
         .foregroundColor(.secondary)
     }

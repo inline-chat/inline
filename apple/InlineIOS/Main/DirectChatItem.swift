@@ -7,8 +7,30 @@ struct Props {
   let dialog: Dialog
   let user: UserInfo?
   let chat: Chat?
-  let message: Message?
-  let from: User?
+  let message: EmbeddedMessage?
+
+  // Primary initializer
+  init(dialog: Dialog, user: UserInfo?, chat: Chat?, message: EmbeddedMessage?) {
+    self.dialog = dialog
+    self.user = user
+    self.chat = chat
+    self.message = message
+  }
+
+  // Backward compatibility initializer for old Message/User structure
+  init(dialog: Dialog, user: UserInfo?, chat: Chat?, message: Message?, from: User?) {
+    self.dialog = dialog
+    self.user = user
+    self.chat = chat
+
+    // Convert old structure to EmbeddedMessage
+    if let message {
+      let userInfo = from.map { UserInfo(user: $0) }
+      self.message = EmbeddedMessage(message: message, senderInfo: userInfo, translations: [])
+    } else {
+      self.message = nil
+    }
+  }
 }
 
 struct DirectChatItem: View {
@@ -30,12 +52,12 @@ struct DirectChatItem: View {
     props.chat
   }
 
-  var lastMsg: Message? {
+  var lastMsg: EmbeddedMessage? {
     props.message
   }
 
   var from: User? {
-    props.from
+    props.message?.from
   }
 
   var hasUnreadMessages: Bool {
@@ -143,7 +165,7 @@ struct DirectChatItem: View {
           .foregroundStyle(.secondary)
       }
       .padding(.top, 1)
-    } else if lastMsg?.isSticker == true {
+    } else if lastMsg?.message.isSticker == true {
       HStack(spacing: 4) {
         Image(systemName: "cup.and.saucer.fill")
           .font(.customCaption())
@@ -155,33 +177,39 @@ struct DirectChatItem: View {
           .truncationMode(.tail)
       }
       .padding(.top, 1)
-    } else if lastMsg?.documentId != nil {
+    } else if lastMsg?.message.documentId != nil {
       HStack {
         Image(systemName: "document.fill")
           .font(.customCaption())
           .foregroundColor(.secondary)
 
-        Text((lastMsg?.hasText == true ? lastMsg?.text ?? "" : "Document").replacingOccurrences(of: "\n", with: " "))
-          .font(.customCaption())
-          .foregroundColor(.secondary)
-          .lineLimit(1)
-          .truncationMode(.tail)
+        Text(
+          (lastMsg?.message.hasText == true ? lastMsg?.displayText ?? "" : "Document")
+            .replacingOccurrences(of: "\n", with: " ")
+        )
+        .font(.customCaption())
+        .foregroundColor(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
       }
       .padding(.top, 1)
-    } else if lastMsg?.photoId != nil || lastMsg?.fileId != nil {
+    } else if lastMsg?.message.photoId != nil || lastMsg?.message.fileId != nil {
       HStack {
         Image(systemName: "photo.fill")
           .font(.customCaption())
           .foregroundColor(.secondary)
 
-        Text((lastMsg?.hasText == true ? lastMsg?.text ?? "" : "Photo").replacingOccurrences(of: "\n", with: " "))
-          .font(.customCaption())
-          .foregroundColor(.secondary)
-          .lineLimit(1)
-          .truncationMode(.tail)
+        Text(
+          (lastMsg?.message.hasText == true ? lastMsg?.displayText ?? "" : "Photo")
+            .replacingOccurrences(of: "\n", with: " ")
+        )
+        .font(.customCaption())
+        .foregroundColor(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
       }
       .padding(.top, 1)
-    } else if lastMsg?.hasUnsupportedTypes == true {
+    } else if lastMsg?.message.hasUnsupportedTypes == true {
       Text("Unsupported message")
         .italic()
         .font(.customCaption())
@@ -190,7 +218,7 @@ struct DirectChatItem: View {
         .truncationMode(.tail)
         .padding(.top, 1)
     } else {
-      Text((lastMsg?.text ?? "").replacingOccurrences(of: "\n", with: " "))
+      Text((lastMsg?.displayText ?? "").replacingOccurrences(of: "\n", with: " "))
         .font(.customCaption())
         .foregroundColor(.secondary)
         .lineLimit(2)
@@ -201,7 +229,7 @@ struct DirectChatItem: View {
 
   @ViewBuilder
   var messageDate: some View {
-    Text(lastMsg?.date.formatted() ?? "")
+    Text(lastMsg?.message.date.formatted() ?? "")
       .font(.smallLabel())
       .foregroundColor(Color(.tertiaryLabel))
   }
