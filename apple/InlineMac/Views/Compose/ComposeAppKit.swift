@@ -20,8 +20,20 @@ class ComposeAppKit: NSView {
     messageList?.viewModel
   }
 
+  private var isEmpty: Bool {
+    textEditor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  private var canSend: Bool {
+    !isEmpty || attachmentItems.count > 0
+  }
+
   // [uniqueId: FileMediaItem]
-  private var attachmentItems: [String: FileMediaItem] = [:]
+  private var attachmentItems: [String: FileMediaItem] = [:] {
+    didSet {
+      updateSendButtonIfNeeded()
+    }
+  }
 
   // Mention completion
   private var mentionCompletionMenu: MentionCompletionMenu?
@@ -661,7 +673,6 @@ class ComposeAppKit: NSView {
       let rawText = self.textEditor.string.trimmingCharacters(in: .whitespacesAndNewlines)
       let replyToMsgId = self.state.replyingToMsgId
       let attachmentItems = self.attachmentItems
-      let canSend = !rawText.isEmpty || attachmentItems.count > 0
       // keep a copy of editingMessageId before we clear it
       let editingMessageId = self.state.editingMsgId
 
@@ -672,10 +683,7 @@ class ComposeAppKit: NSView {
         rawText
       }
 
-      if !canSend { return }
-
-      // Clear immediately
-      self.clear()
+      if !self.canSend { return }
 
       // Edit message
       if let editingMessageId {
@@ -724,6 +732,9 @@ class ComposeAppKit: NSView {
           )
         }
       }
+
+      // Clear immediately
+      self.clear()
 
       // Cancel typing
       Task {
@@ -920,7 +931,6 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     if textView.string.isEmpty {
       // Handle empty text
       textEditor.showPlaceholder(true)
-      sendButton.updateCanSend(false)
 
       // Cancel typing
       Task {
@@ -929,13 +939,19 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     } else {
       // Handle non-empty text
       textEditor.showPlaceholder(false)
-      sendButton.updateCanSend(true)
 
       // Start typing
       Task {
         await ComposeActions.shared.startedTyping(for: self.peerId)
       }
     }
+
+    updateSendButtonIfNeeded()
+  }
+
+  /// Reflect state changes in send button
+  func updateSendButtonIfNeeded() {
+    sendButton.updateCanSend(canSend)
   }
 
   func calculateContentHeight(for textView: NSTextView) -> CGFloat {
