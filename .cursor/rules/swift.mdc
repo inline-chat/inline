@@ -51,3 +51,6 @@ Animations, hover & pressed styles, tooltips, etc are important for a high quali
 # Schemas
 "Inline (macOS)"
 "Inline (iOS)"
+
+# Editing packages
+When editing packages, generating protocol buffers, or adding new files, the swift compiler may report them as not available. You just need to rebuild the xcode project to have them appear. Don't try to re-create or import files.

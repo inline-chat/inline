@@ -431,11 +431,14 @@ struct SidebarItem: View {
   }
 
   /// Called when the compose action changes, check if it is the same
-  private func onComposeActionReceive(actions: [Peer: ComposeActionInfo]) {
+  private func onComposeActionReceive(actions: [Peer: [Int64: ComposeActionInfo]]) {
     guard let peerId else { return }
 
+    // Get the first compose action for backwards compatibility
+    let newComposeAction = actions[peerId]?.values.first?.action
+
     // If changed
-    if actions[peerId]?.action != currentComposeAction {
+    if newComposeAction != currentComposeAction {
       DispatchQueue.main.async {
         setComposeAction()
       }
@@ -489,7 +492,7 @@ struct SidebarItem: View {
         selected: false
       )
     }
-    
+
     Section("pinned with last message") {
       SidebarItem(
         type: .user(UserInfo.preview, chat: nil),
