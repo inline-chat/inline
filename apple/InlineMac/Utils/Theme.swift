@@ -20,7 +20,8 @@ enum Theme {
       NSColor(red: 146 / 255, green: 146 / 255, blue: 146 / 255, alpha: 1) :
       NSColor(red: 188 / 255, green: 188 / 255, blue: 188 / 255, alpha: 1)
   }
-static let colorTitleTextGray: NSColor = .init(name: "colorTitleTextGray") { appearance in
+
+  static let colorTitleTextGray: NSColor = .init(name: "colorTitleTextGray") { appearance in
     appearance.name == .darkAqua ?
       NSColor(red: 160 / 255, green: 160 / 255, blue: 160 / 255, alpha: 1) :
       NSColor(red: 158 / 255, green: 158 / 255, blue: 158 / 255, alpha: 1)
@@ -46,7 +47,7 @@ static let colorTitleTextGray: NSColor = .init(name: "colorTitleTextGray") { app
   static let sidebarItemSpacing: CGFloat = 1
   static let sidebarTopItemFont: Font = .body.weight(.regular)
   static let sidebarTopItemHeight: CGFloat = 24
-  
+
   static let sidebarIconSpacing: CGFloat = 9
   static let sidebarTitleIconSize: CGFloat = 24
   static let sidebarIconSize: CGFloat = 24
@@ -121,6 +122,7 @@ static let colorTitleTextGray: NSColor = .init(name: "colorTitleTextGray") { app
   static let messageListBottomInset: CGFloat = 10
   static let embeddedMessageHeight: CGFloat = 40.0
   static let documentViewHeight: CGFloat = 36.0
+  static let documentViewWidth: CGFloat = 200.0
   static let scrollButtonSize: CGFloat = 32.0
 
   static let composeMinHeight: CGFloat = 44
