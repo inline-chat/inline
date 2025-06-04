@@ -58,10 +58,10 @@ struct ChatRowView: View {
   private var senderName: String {
     switch item {
       case let .home(homeItem):
-        if homeItem.from?.id == Auth.shared.getCurrentUserId() {
+        if homeItem.lastMessage?.from?.id == Auth.shared.getCurrentUserId() {
           "You"
         } else {
-          homeItem.from?.user.firstName ?? ""
+          homeItem.lastMessage?.from?.firstName ?? ""
         }
       case let .space(spaceItem):
         if let user = spaceItem.user {
@@ -134,7 +134,7 @@ struct ChatRowView: View {
         }
         .overlay(alignment: .topTrailing) {
           Group {
-            if pinned && showPinned && !hasUnread {
+            if pinned, showPinned, !hasUnread {
               Image(systemName: "pin.fill")
                 .foregroundColor(.secondary)
                 .font(.caption)
@@ -158,7 +158,7 @@ struct ChatRowView: View {
   private func getMessage() -> Message? {
     switch item {
       case let .home(homeItem):
-        homeItem.message
+        homeItem.lastMessage?.message
       case let .space(spaceItem):
         spaceItem.message
     }

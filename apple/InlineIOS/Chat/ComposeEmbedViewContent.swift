@@ -174,6 +174,8 @@ class ComposeEmbedViewContent: UIView {
     }
 
     if let message = viewModel.fullMessage?.message {
+      let text = (viewModel.fullMessage?.displayText ?? message.text)?.replacingOccurrences(of: "\n", with: " ")
+
       if message.hasUnsupportedTypes {
         imageIconView.isHidden = true
         messageLabel.text = "Unsupported message"
@@ -191,16 +193,16 @@ class ComposeEmbedViewContent: UIView {
         let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
         imageIconView.image = UIImage(systemName: "document.fill", withConfiguration: config)
         imageIconView.isHidden = false
-        messageLabel.text = message.text?.replacingOccurrences(of: "\n", with: " ")
+        messageLabel.text = text
       } else if message.hasPhoto, message.hasText {
         imageIconView.isHidden = false
-        messageLabel.text = message.text?.replacingOccurrences(of: "\n", with: " ")
+        messageLabel.text = text
       } else if message.hasPhoto, !message.hasText {
         imageIconView.isHidden = false
         messageLabel.text = "Photo"
       } else if !message.hasPhoto, message.hasText {
         imageIconView.isHidden = true
-        messageLabel.text = message.text?.replacingOccurrences(of: "\n", with: " ")
+        messageLabel.text = text
       } else {
         imageIconView.isHidden = true
         messageLabel.text = "Not loaded"

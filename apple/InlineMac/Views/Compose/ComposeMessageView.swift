@@ -117,9 +117,7 @@ class ComposeMessageView: NSView {
 
     messageView
       .update(
-        with: fullMessage.message,
-        from: fullMessage.from!,
-        file: fullMessage.file,
+        with: fullMessage,
         kind: kind == .replying ? .replyingInCompose : .editingInCompose
       )
   }

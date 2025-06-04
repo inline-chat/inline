@@ -162,9 +162,14 @@ class EmbeddedMessageView: NSView {
     chatState.scrollTo(msgId: messageId)
   }
 
-  func update(with message: Message, from: User, file: File?, kind: Kind) {
+  func update(with embeddedMessage: EmbeddedMessage, kind: Kind) {
     self.kind = kind
-    self.message = message
+    self.message = embeddedMessage.message
+
+    guard let from = embeddedMessage.from else {
+      messageLabel.stringValue = "Unknown sender"
+      return
+    }
 
     let senderName = from.fullName
     nameLabel.stringValue = switch self.kind {
@@ -177,21 +182,18 @@ class EmbeddedMessageView: NSView {
       case .editingInCompose:
         "Edit Message"
     }
-//    nameLabel.textColor = if style == .colored {
-//      NSColor(InitialsCircle.ColorPalette.color(for: senderName))
-//    } else {
-//      .white
-//    }
+
     nameLabel.textColor = if style == .colored {
       NSColor.controlAccentColor // rect color
     } else {
       NSColor.white
     }
 
-    if let text = message.text, !text.isEmpty {
-      messageLabel.stringValue = text
-    } else if let file {
-      messageLabel.stringValue = file.fileType == .photo ? "🖼️ Photo" : "📄 File"
+    let message = embeddedMessage.message
+
+    // Use display text which handles translations
+    if let displayText = embeddedMessage.displayText, !displayText.isEmpty {
+      messageLabel.stringValue = displayText
     } else if message.isSticker == true {
       messageLabel.stringValue = "🖼️ Sticker"
     } else if let _ = message.photoId {
@@ -199,6 +201,49 @@ class EmbeddedMessageView: NSView {
     } else if let _ = message.videoId {
       messageLabel.stringValue = "🎥 Video"
     } else if let _ = message.documentId {
+      messageLabel.stringValue = "📄 Document"
+    } else {
+      messageLabel.stringValue = "Message"
+    }
+  }
+
+  func update(with fullMessage: FullMessage, kind: Kind) {
+    self.kind = kind
+    message = fullMessage.message
+
+    guard let from = fullMessage.from else {
+      messageLabel.stringValue = "Unknown sender"
+      return
+    }
+
+    let senderName = from.fullName
+    nameLabel.stringValue = switch self.kind {
+      case .replyInMessage:
+        "\(senderName)"
+
+      case .replyingInCompose:
+        "Reply to \(senderName)"
+
+      case .editingInCompose:
+        "Edit Message"
+    }
+
+    nameLabel.textColor = if style == .colored {
+      NSColor.controlAccentColor // rect color
+    } else {
+      NSColor.white
+    }
+
+    // Use display text which handles translations
+    if let displayText = fullMessage.displayText, !displayText.isEmpty {
+      messageLabel.stringValue = displayText
+    } else if fullMessage.message.isSticker == true {
+      messageLabel.stringValue = "🖼️ Sticker"
+    } else if let _ = fullMessage.message.photoId {
+      messageLabel.stringValue = "🖼️ Photo"
+    } else if let _ = fullMessage.message.videoId {
+      messageLabel.stringValue = "🎥 Video"
+    } else if let _ = fullMessage.message.documentId {
       messageLabel.stringValue = "📄 Document"
     } else {
       messageLabel.stringValue = "Message"
