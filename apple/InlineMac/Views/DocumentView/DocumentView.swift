@@ -266,6 +266,15 @@ class DocumentView: NSView {
     let tapGesture = NSClickGestureRecognizer(target: self, action: #selector(cancelDownload))
     cancelIcon.addGestureRecognizer(tapGesture)
     cancelIcon.isEnabled = true
+
+    // Add gesture recognizers to icon and filename for showing in Finder
+    let iconTapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleIconOrNameClick))
+    iconView.addGestureRecognizer(iconTapGesture)
+    iconView.isEnabled = true
+
+    let nameTapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleIconOrNameClick))
+    fileNameLabel.addGestureRecognizer(nameTapGesture)
+    fileNameLabel.isEnabled = true
   }
 
   private func updateUI() {
@@ -410,6 +419,7 @@ class DocumentView: NSView {
     switch documentState {
       case .locallyAvailable:
         showInFinder()
+
       case .needsDownload:
         downloadAction()
 
@@ -426,6 +436,13 @@ class DocumentView: NSView {
 
   @objc private func handleClose() {
     removeAction?()
+  }
+
+  @objc private func handleIconOrNameClick() {
+    // Only show in Finder if the file is locally available
+    if case .locallyAvailable = documentState {
+      showInFinder()
+    }
   }
 
   func update(with documentInfo: DocumentInfo) {
