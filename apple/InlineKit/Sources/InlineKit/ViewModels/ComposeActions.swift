@@ -113,7 +113,10 @@ public class ComposeActions: ObservableObject {
 
   // Sending side
   private func sendComposeAction(for peerId: Peer, action: ApiComposeAction?) async throws {
-    let _ = try await ApiClient.shared.sendComposeAction(peerId: peerId, action: action)
+    let _ = try await InlineKit.Realtime.shared.invoke(.sendComposeAction, input: .sendComposeAction(.with {
+      $0.peerID = peerId.toInputPeer()
+      $0.action = action?.toProtocolComposeAction() ?? .none
+    }))
   }
 
   public func startedTyping(for peerId: Peer) async {
