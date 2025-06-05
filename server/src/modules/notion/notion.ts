@@ -125,7 +125,7 @@ export async function getCurrentNotionUser(spaceId: number, currentUserId: numbe
  * Get a sample of pages from a Notion database to understand the tone and format
  * @param {number} spaceId - The ID of the space who connected to the integration
  * @param {number} [limit=10] - Maximum number of pages to retrieve
- * @returns {Promise<any[]>} Array of sample pages with their properties
+ * @returns {Promise<any[]>} Array of sample pages with their properties and content
  */
 export async function getSampleDatabasePages(spaceId: number, databaseId: string, limit = 10, notion: Client) {
   try {
@@ -140,12 +140,40 @@ export async function getSampleDatabasePages(spaceId: number, databaseId: string
       ],
     })
 
-    Log.shared.info("Retrieved sample pages", {
-      count: response.results.length,
+    // Fetch page content (blocks) for each page
+    const pagesWithContent = await Promise.all(
+      response.results.map(async (page) => {
+        try {
+          // Get the page blocks (content)
+          const blocks = await notion.blocks.children.list({
+            block_id: page.id,
+            page_size: 50, // Limit blocks to avoid too much content
+          })
+
+          return {
+            ...page,
+            content: blocks.results,
+          }
+        } catch (error) {
+          Log.shared.warn("Failed to retrieve blocks for page", {
+            pageId: page.id,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          // Return page without content if blocks fetch fails
+          return {
+            ...page,
+            content: [],
+          }
+        }
+      }),
+    )
+
+    Log.shared.info("Retrieved sample pages with content", {
+      count: pagesWithContent.length,
       databaseId,
     })
 
-    return response.results
+    return pagesWithContent
   } catch (error) {
     Log.shared.error("Failed to retrieve sample pages", {
       spaceId,
