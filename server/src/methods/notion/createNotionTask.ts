@@ -38,9 +38,12 @@ export const handler = async (
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
   const { spaceId, messageId, chatId, peerId } = input
+  const startTime = Date.now()
+  Log.shared.info("🕐 Starting Notion task creation", { ...input, currentUserId: context.currentUserId })
 
   try {
     // Create Notion page and check message existence in parallel
+    const parallelStart = Date.now()
     const [result, message] = await Promise.all([
       createNotionPage({
         spaceId,
@@ -54,6 +57,9 @@ export const handler = async (
         .where(and(eq(messages.messageId, messageId), eq(messages.chatId, chatId)))
         .then((result) => result[0]),
     ])
+    Log.shared.info("🕐 Completed parallel operations (Notion page + message check)", {
+      durationSeconds: ((Date.now() - parallelStart) / 1000).toFixed(3),
+    })
 
     if (!message) {
       Log.shared.error("Message does not exist, cannot create task attachment", { messageId })
@@ -61,12 +67,17 @@ export const handler = async (
     }
 
     // Encrypt title if it exists (this is fast, no need to parallelize)
+    const encryptStart = Date.now()
     let encryptedTitle: EncryptedData | null = null
     if (result.taskTitle) {
       encryptedTitle = await encrypt(result.taskTitle)
     }
+    Log.shared.info("🕐 Title encryption completed", {
+      durationSeconds: ((Date.now() - encryptStart) / 1000).toFixed(3),
+    })
 
     // Insert external task and get update group info in parallel
+    const dbOperationsStart = Date.now()
     const [externalTaskResult, updateGroup] = await Promise.all([
       db
         .insert(externalTasks)
@@ -85,12 +96,16 @@ export const handler = async (
         .then(([task]) => task),
       getUpdateGroup(peerId, { currentUserId: context.currentUserId }),
     ])
+    Log.shared.info("🕐 Database operations completed (external task + update group)", {
+      durationSeconds: ((Date.now() - dbOperationsStart) / 1000).toFixed(3),
+    })
 
     if (!externalTaskResult?.id) {
       throw new Error("Failed to create external task")
     }
 
     // Create message attachment and get sender user info in parallel
+    const attachmentStart = Date.now()
     const [, senderUser] = await Promise.all([
       db.insert(messageAttachments).values({
         messageId: message.globalId,
@@ -102,8 +117,12 @@ export const handler = async (
         .where(eq(users.id, context.currentUserId))
         .then(([user]) => user),
     ])
+    Log.shared.info("🕐 Message attachment and user info completed", {
+      durationSeconds: ((Date.now() - attachmentStart) / 1000).toFixed(3),
+    })
 
     // Prepare all parallel operations for updates and notifications
+    const updatesStart = Date.now()
     const parallelOperations: Promise<any>[] = []
 
     // Add message attachment update
@@ -119,12 +138,11 @@ export const handler = async (
       }),
     )
 
-    // Add notifications for other participants about task creation
     if (result.taskTitle && senderUser) {
-      // Notify other users in the chat (excluding the creator)
-      const otherUserIds = updateGroup.userIds.filter((userId) => userId !== context.currentUserId)
+      // Notify only the message sender
+      const messageSenderId = message.fromId
 
-      if (otherUserIds.length > 0) {
+      if (messageSenderId !== context.currentUserId) {
         // Decrypt message text for notification description
         let messageText = message.text || ""
         if (message.textEncrypted && message.textIv && message.textTag) {
@@ -136,20 +154,16 @@ export const handler = async (
         }
 
         parallelOperations.push(
-          Promise.all(
-            otherUserIds.map((userId) =>
-              Notifications.sendToUser({
-                userId,
-                senderUserId: context.currentUserId,
-                threadId: `chat_${chatId}`,
-                title: `${senderUser.firstName ?? "Someone"} will do`,
-                subtitle: result.taskTitle ?? undefined,
-                body: messageText || "A new task has been created from a message",
-                isThread: updateGroup.type === "threadUsers",
-              }),
-            ),
-          ).catch((error) => {
-            Log.shared.error("Failed to send task creation notifications", { error })
+          Notifications.sendToUser({
+            userId: messageSenderId,
+            senderUserId: context.currentUserId,
+            threadId: `chat_${chatId}`,
+            title: `${senderUser.firstName ?? "Someone"} will do`,
+            subtitle: result.taskTitle ?? undefined,
+            body: messageText || "A new task has been created from a message",
+            isThread: updateGroup.type === "threadUsers",
+          }).catch((error) => {
+            Log.shared.error("Failed to send task creation notification", { error })
           }),
         )
       }
@@ -157,10 +171,24 @@ export const handler = async (
 
     // Execute all parallel operations
     await Promise.allSettled(parallelOperations)
+    Log.shared.info("🕐 Updates and notifications completed", {
+      durationSeconds: ((Date.now() - updatesStart) / 1000).toFixed(3),
+    })
+
+    const totalDuration = Date.now() - startTime
+    Log.shared.info("🕐 Notion task creation completed successfully", {
+      totalDurationSeconds: (totalDuration / 1000).toFixed(3),
+      pageId: result.pageId,
+      taskTitle: result.taskTitle,
+    })
 
     return { url: result.url, taskTitle: result.taskTitle }
   } catch (error) {
-    Log.shared.error("Failed to create Notion task", { error })
+    const totalDuration = Date.now() - startTime
+    Log.shared.error("🕐 Failed to create Notion task", {
+      error,
+      totalDurationSeconds: (totalDuration / 1000).toFixed(3),
+    })
     throw error
   }
 }

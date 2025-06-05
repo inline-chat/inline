@@ -3,6 +3,26 @@ import { Log } from "@in/server/utils/log"
 
 const log = new Log("NotionSchemaGenerator")
 
+// Simplified schema with minimal nesting because OpenAI gets 5 levels of nested schema.
+const richTextSchema = z.object({
+  content: z.string(),
+  url: z.string().nullable(),
+})
+
+const blockSchema = z.object({
+  type: z.enum(["paragraph", "bulleted_list_item"]),
+  rich_text: z.array(richTextSchema),
+})
+
+// Simplified icon schema
+const iconSchema = z
+  .object({
+    type: z.enum(["emoji", "external", "file"]).nullable(),
+    emoji: z.string().nullable(),
+    url: z.string().nullable(),
+  })
+  .nullable()
+
 /**
  * Generates a dynamic Zod schema based on Notion database properties
  * @param database - The Notion database object with properties
@@ -12,7 +32,86 @@ export function generateNotionPropertiesSchema(database: any): z.ZodType<any> {
   const properties = database.properties || {}
   const schemaFields: Record<string, z.ZodType<any>> = {}
 
+  // Priority order for property types (most important first)
+  const priorityTypes = [
+    "title",
+    "rich_text",
+    "select",
+    "multi_select",
+    "people",
+    "date",
+    "checkbox",
+    "status",
+    "number",
+    "url",
+    "email",
+    "phone_number",
+  ]
+
+  // Skip read-only and auto-managed properties, and complex types that cause issues
+  const skipTypes = [
+    "formula",
+    "rollup",
+    "created_time",
+    "last_edited_time",
+    "created_by",
+    "last_edited_by",
+    "relation", // Skip relation properties as they're complex and cause schema issues
+    "files", // Skip files as they're complex
+    "unique_id", // Skip unique_id as it's auto-managed
+  ]
+
+  // First, collect properties by priority
+  const prioritizedProperties: Array<[string, any]> = []
+  const otherProperties: Array<[string, any]> = []
+
   Object.entries(properties).forEach(([propertyName, propertyConfig]: [string, any]) => {
+    const propertyType = propertyConfig.type
+
+    if (skipTypes.includes(propertyType)) {
+      return // Skip read-only properties and complex types
+    }
+
+    const priorityIndex = priorityTypes.indexOf(propertyType)
+    if (priorityIndex !== -1) {
+      prioritizedProperties.push([propertyName, propertyConfig])
+    } else {
+      otherProperties.push([propertyName, propertyConfig])
+    }
+  })
+
+  // Sort prioritized properties by their priority order
+  prioritizedProperties.sort(([, a], [, b]) => {
+    const aIndex = priorityTypes.indexOf(a.type)
+    const bIndex = priorityTypes.indexOf(b.type)
+    return aIndex - bIndex
+  })
+
+  // Combine prioritized and other properties, but limit total count
+  const allProperties = [...prioritizedProperties, ...otherProperties]
+
+  // Limit to ~25 properties to stay well under the 100 parameter limit
+  // (accounting for the nested structure which multiplies parameters)
+  const maxProperties = 25
+  const limitedProperties = allProperties.slice(0, maxProperties)
+
+  if (allProperties.length > maxProperties) {
+    log.warn(
+      `Database has ${allProperties.length} properties, limiting to ${maxProperties} to stay under OpenAI's 100 parameter limit`,
+    )
+    log.info(
+      "Included properties:",
+      limitedProperties.map(([name, config]) => `${name} (${config.type})`),
+    )
+    log.info(
+      "Excluded properties:",
+      allProperties.slice(maxProperties).map(([name, config]) => `${name} (${config.type})`),
+    )
+  } else {
+    log.info(`Including all ${allProperties.length} properties in schema`)
+  }
+
+  limitedProperties.forEach(([propertyName, propertyConfig]: [string, any]) => {
     const propertyType = propertyConfig.type
 
     switch (propertyType) {
@@ -145,103 +244,21 @@ export function generateNotionPropertiesSchema(database: any): z.ZodType<any> {
           .nullable()
         break
 
-      case "relation":
-        schemaFields[propertyName] = z
-          .object({
-            relation: z.array(
-              z.object({
-                id: z.string(),
-              }),
-            ),
-          })
-          .nullable()
-        break
-
-      case "files":
-        schemaFields[propertyName] = z
-          .object({
-            files: z.array(
-              z.object({
-                name: z.string(),
-                type: z.enum(["external", "file"]),
-                external: z
-                  .object({
-                    url: z.string(),
-                  })
-                  .nullable(),
-                file: z
-                  .object({
-                    url: z.string(),
-                    expiry_time: z.string(),
-                  })
-                  .nullable(),
-              }),
-            ),
-          })
-          .nullable()
-        break
-
-      case "unique_id":
-        schemaFields[propertyName] = z
-          .object({
-            unique_id: z.object({
-              number: z.number().nullable(),
-              prefix: z.string().nullable(),
-            }),
-          })
-          .nullable()
-        break
-
-      case "formula":
-        // Formula properties are read-only, so we don't include them in the schema
-        break
-
-      case "rollup":
-        // Rollup properties are read-only, so we don't include them in the schema
-        break
-
-      case "created_time":
-      case "last_edited_time":
-        // These are automatically managed by Notion
-        break
-
-      case "created_by":
-      case "last_edited_by":
-        // These are automatically managed by Notion
-        break
-
       default:
-        // For unknown property types, create a flexible schema
-        log.warn(`Unknown property type: ${propertyType} for property: ${propertyName}`)
-        schemaFields[propertyName] = z.null()
+        // For unknown property types, skip them entirely to avoid schema issues
+        log.warn(`Skipping unknown property type: ${propertyType} for property: ${propertyName}`)
         break
     }
   })
 
-  // Add description field to the schema
-  const schemaWithDescription = z.object({
-    properties: z.object(schemaFields).strict(),
-    description: z
-      .array(
-        z.object({
-          object: z.literal("block"),
-          type: z.literal("paragraph"),
-          paragraph: z.object({
-            rich_text: z.array(
-              z.object({
-                type: z.literal("text"),
-                text: z.object({
-                  content: z.string(),
-                }),
-              }),
-            ),
-          }),
-        }),
-      )
-      .nullable(),
+  // Create a much simpler schema structure
+  const schemaWithDescriptionAndIcon = z.object({
+    properties: z.object(schemaFields),
+    description: z.array(blockSchema).nullable(),
+    icon: iconSchema,
   })
 
-  return schemaWithDescription
+  return schemaWithDescriptionAndIcon
 }
 
 /**
