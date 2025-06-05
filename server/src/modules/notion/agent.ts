@@ -23,16 +23,22 @@ import {
   getPropertyDescriptions,
 } from "./schemaGenerator"
 import { formatMessage } from "@in/server/modules/notifications/eval"
+import { systemPrompt12, systemPrompt14 } from "./prompts"
 
 const log = new Log("NotionAgent", LogLevel.INFO)
 
 async function createNotionPage(input: { spaceId: number; chatId: number; messageId: number; currentUserId: number }) {
+  const startTime = Date.now()
+  log.info("🕐 Starting Notion page creation", { ...input })
+
   if (!openaiClient) {
     throw new Error("OpenAI client not initialized")
   }
 
   // First, get the Notion client and database info
+  const clientStart = Date.now()
   const { client, databaseId } = await getNotionClient(input.spaceId)
+  log.info("🕐 Got Notion client", { durationSeconds: ((Date.now() - clientStart) / 1000).toFixed(3) })
 
   if (!databaseId) {
     Log.shared.error("No databaseId found", { spaceId: input.spaceId })
@@ -40,10 +46,11 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
   }
 
   // Run all data fetching operations in parallel - this is the biggest optimization
+  const dataFetchStart = Date.now()
   const [notionUsers, database, samplePages, targetMessage, messages, chatInfo, participantNames] = await Promise.all([
     getNotionUsers(input.spaceId, client).then(formatNotionUsers),
     getActiveDatabaseData(input.spaceId, databaseId, client),
-    getSampleDatabasePages(input.spaceId, databaseId, 4, client),
+    getSampleDatabasePages(input.spaceId, databaseId, 3, client),
     MessageModel.getMessage(input.messageId, input.chatId),
     MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 20, 10),
     getCachedChatInfo(input.chatId),
@@ -54,10 +61,11 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
       return names.filter(filterFalsy)
     }),
   ])
-
-  console.log("🌴🌴🌴🌴 notionUsers", notionUsers)
-  console.log("🌴🌴🌴🌴 database", database)
-  console.log("🌴🌴🌴🌴 samplePages", samplePages)
+  console.log("🌴 messages", messages)
+  console.log("🌴 SMAPLE PAGES", samplePages)
+  log.info("🕐 Completed parallel data fetching", {
+    durationSeconds: ((Date.now() - dataFetchStart) / 1000).toFixed(3),
+  })
 
   log.info("Creating Notion page", { database: database?.id, chatTitle: chatInfo?.title, chatId: input.chatId })
 
@@ -69,6 +77,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     throw new Error("Could not find chat information in database")
   }
 
+  const promptStart = Date.now()
   let userPrompt = taskPrompt(
     notionUsers,
     database,
@@ -79,22 +88,40 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     participantNames,
     input.currentUserId,
   )
+  console.log("🌴 userPrompt", userPrompt)
+  log.info("🕐 Generated user prompt", { durationSeconds: ((Date.now() - promptStart) / 1000).toFixed(3) })
 
+  const openaiStart = Date.now()
+
+  if (!openaiClient) {
+    throw new Error("OpenAI client not initialized")
+  }
+
+  // Generate and validate the schema before sending to OpenAI
+  const schema = generateNotionPropertiesSchema(database)
+  log.info("Generated Notion properties schema", {
+    databaseId: database.id,
+    totalProperties: Object.keys(database.properties || {}).length,
+  })
+
+  // throw new Error("test")
   const completion = await openaiClient.chat.completions.create({
     model: "gpt-4.1",
 
     messages: [
       {
         role: "system",
-        content: systemPrompt,
+        content: systemPrompt14,
       },
       {
         role: "user",
         content: userPrompt,
       },
     ],
-    response_format: zodResponseFormat(generateNotionPropertiesSchema(database), "notionProperties"),
+    // response_format: { type: "text" },
+    response_format: zodResponseFormat(schema, "notionProperties"),
   })
+  log.info("🕐 OpenAI completion finished", { durationSeconds: ((Date.now() - openaiStart) / 1000).toFixed(3) })
 
   const inputTokens = completion.usage?.prompt_tokens ?? 0
   const outputTokens = completion.usage?.completion_tokens ?? 0
@@ -112,14 +139,73 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
 
   log.info("Notion agent response", { response: parsedResponse })
 
-  // Parse and validate the response against our Zod schema
-  const validatedData = generateNotionPropertiesSchema(database).parse(JSON.parse(parsedResponse))
+  const parseStart = Date.now()
+  const validatedData = schema.parse(JSON.parse(parsedResponse))
+  log.info("🕐 Parsed and validated response", { durationSeconds: ((Date.now() - parseStart) / 1000).toFixed(3) })
 
   // Extract properties and description from the validated data
   const propertiesFromResponse = validatedData.properties || {}
   const descriptionFromResponse = validatedData.description
 
+  // Transform simplified blocks to proper Notion format
+  const transformedDescription =
+    descriptionFromResponse?.map((block: any) => {
+      const notionBlock: any = {
+        object: "block",
+        type: block.type,
+      }
+
+      if (block.type === "paragraph") {
+        notionBlock.paragraph = {
+          rich_text:
+            block.rich_text?.map((rt: any) => ({
+              type: "text",
+              text: {
+                content: rt.content || "",
+                link: rt.url ? { url: rt.url } : null,
+              },
+              annotations: {
+                bold: false,
+                italic: false,
+                strikethrough: false,
+                underline: false,
+                code: false,
+                color: "default",
+              },
+              plain_text: rt.content || "",
+              href: rt.url || null,
+            })) || [],
+          color: "default",
+        }
+      } else if (block.type === "bulleted_list_item") {
+        notionBlock.bulleted_list_item = {
+          rich_text:
+            block.rich_text?.map((rt: any) => ({
+              type: "text",
+              text: {
+                content: rt.content || "",
+                link: rt.url ? { url: rt.url } : null,
+              },
+              annotations: {
+                bold: false,
+                italic: false,
+                strikethrough: false,
+                underline: false,
+                code: false,
+                color: "default",
+              },
+              plain_text: rt.content || "",
+              href: rt.url || null,
+            })) || [],
+          color: "default",
+        }
+      }
+
+      return notionBlock
+    }) || undefined
+
   // Transform the Zod schema output to match Notion API format
+  const transformStart = Date.now()
   const propertiesData: Record<string, any> = {}
 
   // Filter out null values and transform to Notion API format
@@ -141,16 +227,33 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
   // Extract task title using the dynamic helper
   const titlePropertyName = findTitleProperty(database)
   const taskTitle = extractTaskTitle(propertiesData, titlePropertyName)
+  log.info("🕐 Transformed properties data", { durationSeconds: ((Date.now() - transformStart) / 1000).toFixed(3) })
 
   // Create the page with properties and description
+  const pageCreateStart = Date.now()
+
+  if (!databaseId) {
+    throw new Error("Database ID is required but was null")
+  }
+
   const page = await newNotionPage(
     input.spaceId,
     databaseId,
     propertiesData,
     client,
-    descriptionFromResponse || undefined,
+    transformedDescription || undefined,
   )
-  log.info("Created Notion page", { pageId: page.id, page })
+  log.info("🕐 Created Notion page", {
+    pageId: page.id,
+    durationSeconds: ((Date.now() - pageCreateStart) / 1000).toFixed(3),
+  })
+
+  const totalDuration = Date.now() - startTime
+  log.info("🕐 Notion page creation completed", {
+    pageId: page.id,
+    totalDurationSeconds: (totalDuration / 1000).toFixed(3),
+    taskTitle,
+  })
 
   return {
     pageId: page.id,
@@ -160,42 +263,6 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
 }
 
 export { createNotionPage }
-
-const systemPrompt = `
-# Identity
-You are a task manager assistant for Inline Chat app. You create actionable tasks from chat messages by analyzing context and generating properly structured Notion database entries.
-
-Instructions
-  •	Create task titles that are actionable and accurate by reading chat context.
-  • Include important parts of the conversation around the task in the page description. Include the decision making process and the reasoning behind the task if present in the full conversation.
-  • Although including full important detailed data, keep it concise. Do not summarize quotes and important parts of the conversation.
-  • The tone should be as if it were written by a reporter.
-  • Use line breaks to make it more readable. 
-  • Don't add any text like this: "The conversation context is:" - "Summery" - "Context"
-  • Make it after the properties object: 
-  {
-    properties: { ... },
-    description: [{object: "block",type: "paragraph",paragraph: {rich_text: [{type: "text",text: {content: "Your page description here"}}]}}]
-  }
-	•	Analyze the chat title and the conversation context to understand the task is related to which team or project and match it with notion database properties and set the team and project properties if there are any.
-	•	Generate a properties object that EXACTLY matches the database schema structure. For empty non-text fields use null. Because otherwise Notion API will throw an error.
-	•	Each property must use the exact property name and type structure from the database schema
-	•	Follow Notion's API format for each property type
-	•	Include only properties that exist in the database schema
-  • You don't need to fill out every property, leave properties empty (null, not undefined or empty string) if they are not relevant to the task with the context provided. For example, a task can be created if it just has a title and an assignee (or DRI, or a field with person data type).
-  • It is important to not create invalid properties by using "undefined" or empty strings "" in the properties object where it may be invalid in Notion's create page/database entry API.
-	•	Match the tone and format of the example pages provided 
-	•	Never set task in progress or done status - keep tasks in initial state
-	•	For date properties (eg. "Due date"), if no date is specified, DO NOT include the property at all
-	•	If a date is specified, use format: { "date": { "start": "YYYY-MM-DD" } } and calculate from today's date
-
-	•	User Assignment Rules:
-		▪	Creator and Assignee: ALWAYS set to the user that matches with the actor user ID who will do the task if found in the Notion users list.
-		▪	Reporter/Watcher: Set to the user that matches with target message sender or who sent the message/report that the task is created for. (who will be notified when the task is completed)
-		▪	Match chat participants with Notion users based on names, emails, or usernames from the notion_users list
-
-
-`
 
 function taskPrompt(
   notionUsers: NotionUser[],
@@ -210,17 +277,25 @@ function taskPrompt(
   // Limit messages to reduce token usage and improve speed
   const limitedMessages = messages.slice(-8) // Only use last 8 messages for context
 
-  // Simplify sample pages to reduce token usage
+  // Simplify sample pages to reduce token usage - now includes content
   const simplifiedSamplePages = samplePages.slice(0, 2).map((page) => ({
     properties: page.properties,
-    // Remove verbose fields to reduce tokens
+    content: page.content, // Now includes the page content/body
   }))
+
+  // Extract status options from database schema
+  const statusProperty = database.properties?.Status || database.properties?.status
+  const statusOptions = statusProperty?.status?.options?.map((option: any) => option.name) || []
 
   return `
 Today's date: ${new Date().toISOString()}
 Actor user ID: ${currentUserId}
 
 Target message: ${formatMessage(targetMessage)}
+
+<active-team-context>
+${JSON.stringify(process.env.WANVER_TRANSLATION_CONTEXT, null, 2)}
+</active-team-context>
 
 <conversation_context>
 Recent conversation:
@@ -233,6 +308,8 @@ Chat: "${chatInfo?.title}"
 
 <database_schema>
 Properties: ${getPropertyDescriptions(database)}
+
+${statusOptions.length > 0 ? `Available Status Options: ${statusOptions.join(", ")}` : ""}
 </database_schema>
 
 <sample_entries>

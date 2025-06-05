@@ -49,6 +49,7 @@ declare global {
       OPENAI_API_KEY?: string
       NOTION_CLIENT_ID?: string
       NOTION_CLIENT_SECRET?: string
+      WANVER_TRANSLATION_CONTEXT?: string
       // Allow for additional dynamic environment variables
       [key: string]: string | undefined
     }
