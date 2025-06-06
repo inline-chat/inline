@@ -73,8 +73,9 @@ When Sara tried to create a product, she couldn't because the serial number fiel
 - For multi-choice fields, pick the appropriate option from the list of available options. 
 - For people fields, pick the user from the list of Notion users that matches with the participant in the conversation.
 
-### Watcher / Observer
-- Set it to target the message sender or the person who reported/requested the request or reported the issue if found in the Notion users list.
+### Watcher
+- Set it to target the message sender or the person who reported the task the issue if found in the Notion users list.
+- For people fields, pick the user from the list of Notion users that matches with the participant in the conversation.
 
 ### Due date
 - If there is a deadline is mentioned in the conversation, set it to the due date field in correct Notion ISO format.
