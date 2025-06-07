@@ -23,6 +23,7 @@ import { handleGetChats } from "./messages.getChats"
 import { getUserSettingsHandler } from "./user.getUserSettings"
 import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
+import { createBotHandler } from "./createBot"
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
@@ -182,6 +183,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await sendComposeActionHandler(call.input.sendComposeAction, handlerContext)
       return { oneofKind: "sendComposeAction", sendComposeAction: result }
+    }
+
+    case Method.CREATE_BOT: {
+      if (call.input.oneofKind !== "createBot") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await createBotHandler(call.input.createBot, handlerContext)
+      return { oneofKind: "createBot", createBot: result }
     }
 
     default:

@@ -39,6 +39,7 @@ export const encodeUser = ({
           lastOnline: { date: user.lastOnline ? encodeDate(user.lastOnline) : undefined },
         },
     timeZone: user.timeZone ?? undefined,
+    bot: user.bot === true ? true : undefined,
     profilePhoto: cdnUrl
       ? {
           cdnUrl: cdnUrl,

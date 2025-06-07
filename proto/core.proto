@@ -105,6 +105,8 @@ message User {
   optional bool pending_setup = 11;
 
   optional string time_zone = 12;
+
+  optional bool bot = 13;
 }
 
 message UserProfilePhoto {
@@ -548,6 +550,7 @@ enum Method {
   UPDATE_USER_SETTINGS = 18;
   GET_USER_SETTINGS = 19;
   SEND_COMPOSE_ACTION = 20;
+  CREATE_BOT = 21;
 }
 
 message RpcCall {
@@ -573,6 +576,7 @@ message RpcCall {
     UpdateUserSettingsInput updateUserSettings = 19;
     GetUserSettingsInput getUserSettings = 20;
     SendComposeActionInput sendComposeAction = 21;
+    CreateBotInput createBot = 22;
   }
 }
 
@@ -600,7 +604,26 @@ message RpcResult {
     UpdateUserSettingsResult updateUserSettings = 19;
     GetUserSettingsResult getUserSettings = 20;
     SendComposeActionResult sendComposeAction = 21;
+    CreateBotResult createBot = 22;
   }
+}
+
+message CreateBotInput {
+  // Name of the bot
+  string name = 1;
+
+  // Username of the bot
+  string username = 2;
+
+  // If not null, add the bot to this space
+  optional int64 add_to_space = 3;
+}
+
+message CreateBotResult {
+  User bot = 1;
+
+  // Token to use for the bot
+  string token = 2;
 }
 
 message GetUserSettingsInput {}

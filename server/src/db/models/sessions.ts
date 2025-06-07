@@ -21,7 +21,7 @@ export interface CreateSessionData {
   tokenHash: string
   personalData: SessionPersonalData
   applePushToken?: string
-  clientType: "ios" | "macos" | "web"
+  clientType: "ios" | "macos" | "web" | "api"
   clientVersion?: string | undefined
   osVersion?: string | undefined
   deviceId?: string | undefined

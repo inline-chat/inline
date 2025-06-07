@@ -1,9 +1,18 @@
 import { db } from "@in/server/db"
-import { members, spaces, type DbSpace } from "@in/server/db/schema"
+import { members, spaces, type DbSpace, type DbMemberRole } from "@in/server/db/schema"
 import { eq, or } from "drizzle-orm"
+import { Log } from "@in/server/utils/log"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { MembersModel } from "./members"
+
+const log = new Log("SpaceModel")
 
 export const SpaceModel = {
   getSpaceById,
+  addUserToSpace,
+  removeUserFromSpace,
+  validateSpaceAccess,
+  isValidSpaceId,
 }
 
 /**
@@ -17,6 +26,105 @@ async function getSpaceById(id: number): Promise<DbSpace | undefined> {
   })
 
   return result
+}
+
+/**
+ * Add a user to a space with validation and error handling
+ * @param spaceId - The ID of the space
+ * @param userId - The ID of the user to add
+ * @param role - The role to assign (defaults to 'member')
+ * @param options - Additional options
+ * @returns The created member
+ */
+async function addUserToSpace(
+  spaceId: number,
+  userId: number,
+  role: DbMemberRole = "member",
+  options: {
+    invitedBy?: number
+    skipExistingCheck?: boolean
+  } = {},
+): Promise<void> {
+  // Validate space exists
+  const space = await getSpaceById(spaceId)
+  if (!space) {
+    log.error("Attempted to add user to non-existent space", { spaceId, userId })
+    throw RealtimeRpcError.SpaceIdInvalid
+  }
+
+  try {
+    await MembersModel.addMemberToSpace(spaceId, userId, role, {
+      invitedBy: options.invitedBy,
+      allowDuplicates: options.skipExistingCheck,
+    })
+
+    log.info("Successfully added user to space", {
+      spaceId: space.id,
+      spaceName: space.name,
+      userId,
+      role,
+    })
+  } catch (error) {
+    // Re-throw known errors, wrap unknown ones
+    if (error === RealtimeRpcError.UserAlreadyMember || error === RealtimeRpcError.SpaceIdInvalid) {
+      throw error
+    }
+
+    log.error("Failed to add user to space", { spaceId, userId, role, error })
+    throw RealtimeRpcError.InternalError
+  }
+}
+
+/**
+ * Remove a user from a space
+ * @param spaceId - The ID of the space
+ * @param userId - The ID of the user to remove
+ * @returns True if the user was removed, false if they weren't a member
+ */
+async function removeUserFromSpace(spaceId: number, userId: number): Promise<boolean> {
+  const removed = await MembersModel.removeMemberFromSpace(spaceId, userId)
+
+  if (removed) {
+    log.info("User removed from space", { spaceId, userId })
+  }
+
+  return removed
+}
+
+/**
+ * Validate that a space exists and optionally check user access
+ * @param spaceId - The ID of the space
+ * @param userId - Optional user ID to check membership
+ * @returns The space if valid
+ */
+async function validateSpaceAccess(spaceId: number, userId?: number): Promise<DbSpace> {
+  const space = await getSpaceById(spaceId)
+  if (!space) {
+    throw RealtimeRpcError.SpaceIdInvalid
+  }
+
+  if (userId) {
+    const isMember = await MembersModel.isUserMemberOfSpace(spaceId, userId)
+    if (!isMember) {
+      throw RealtimeRpcError.SpaceAdminRequired // or create a new "not a member" error
+    }
+  }
+
+  return space
+}
+
+/**
+ * Check if a space ID is valid (exists)
+ * @param spaceId - The ID to validate
+ * @returns True if the space exists
+ */
+async function isValidSpaceId(spaceId: number): Promise<boolean> {
+  if (isNaN(spaceId) || spaceId <= 0) {
+    return false
+  }
+
+  const space = await getSpaceById(spaceId)
+  return !!space
 }
 
 export const getSpaceIdsForUser = async (userId: number): Promise<number[]> => {

@@ -47,6 +47,10 @@ export const users = pgTable(
     photoFileId: integer("photo_file_id").references((): AnyPgColumn => files.id),
     pendingSetup: boolean("pending_setup").default(false),
     timeZone: varchar("time_zone", { length: 256 }),
+
+    // bot
+    bot: boolean("bot").default(false),
+    botCreatorId: integer("bot_creator_id").references((): AnyPgColumn => users.id),
   },
   (table) => ({
     users_username_unique: uniqueIndex("users_username_unique").on(lower(table.username)),

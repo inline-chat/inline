@@ -13,6 +13,7 @@ import { removeChatParticipant } from "./messages.removeChatParticipant"
 import { addChatParticipant } from "./messages.addChatParticipant"
 import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
+import { createBot } from "./createBot"
 
 export const Functions = {
   messages: {
@@ -35,5 +36,8 @@ export const Functions = {
   user: {
     getUserSettings: getUserSettings,
     updateUserSettings: updateUserSettings,
+  },
+  bot: {
+    createBot: createBot,
   },
 }
