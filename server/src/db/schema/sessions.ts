@@ -2,7 +2,7 @@ import { bytea } from "@in/server/db/schema/common"
 import { users } from "@in/server/db/schema/users"
 import { integer, pgEnum, pgTable, serial, varchar, boolean, timestamp, text, unique } from "drizzle-orm/pg-core"
 
-export const clientTypeEnum = pgEnum("client_type", ["ios", "macos", "web"])
+export const clientTypeEnum = pgEnum("client_type", ["ios", "macos", "web", "api", "android", "windows", "linux"])
 
 export const sessions = pgTable(
   "sessions",

@@ -44,6 +44,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case updateUserSettings // = 18
   case getUserSettings // = 19
   case sendComposeAction // = 20
+  case createBot // = 21
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -73,6 +74,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 18: self = .updateUserSettings
     case 19: self = .getUserSettings
     case 20: self = .sendComposeAction
+    case 21: self = .createBot
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -100,6 +102,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .updateUserSettings: return 18
     case .getUserSettings: return 19
     case .sendComposeAction: return 20
+    case .createBot: return 21
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -127,6 +130,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .updateUserSettings,
     .getUserSettings,
     .sendComposeAction,
+    .createBot,
   ]
 
 }
@@ -600,6 +604,15 @@ public struct User: Sendable {
   /// Clears the value of `timeZone`. Subsequent reads from it will return its default value.
   public mutating func clearTimeZone() {self._timeZone = nil}
 
+  public var bot: Bool {
+    get {return _bot ?? false}
+    set {_bot = newValue}
+  }
+  /// Returns true if `bot` has been explicitly set.
+  public var hasBot: Bool {return self._bot != nil}
+  /// Clears the value of `bot`. Subsequent reads from it will return its default value.
+  public mutating func clearBot() {self._bot = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -614,6 +627,7 @@ public struct User: Sendable {
   fileprivate var _profilePhoto: UserProfilePhoto? = nil
   fileprivate var _pendingSetup: Bool? = nil
   fileprivate var _timeZone: String? = nil
+  fileprivate var _bot: Bool? = nil
 }
 
 public struct UserProfilePhoto: @unchecked Sendable {
@@ -2134,6 +2148,14 @@ public struct RpcCall: Sendable {
     set {input = .sendComposeAction(newValue)}
   }
 
+  public var createBot: CreateBotInput {
+    get {
+      if case .createBot(let v)? = input {return v}
+      return CreateBotInput()
+    }
+    set {input = .createBot(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2157,6 +2179,7 @@ public struct RpcCall: Sendable {
     case updateUserSettings(UpdateUserSettingsInput)
     case getUserSettings(GetUserSettingsInput)
     case sendComposeAction(SendComposeActionInput)
+    case createBot(CreateBotInput)
 
   }
 
@@ -2338,6 +2361,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .sendComposeAction(newValue)}
   }
 
+  public var createBot: CreateBotResult {
+    get {
+      if case .createBot(let v)? = _storage._result {return v}
+      return CreateBotResult()
+    }
+    set {_uniqueStorage()._result = .createBot(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2361,12 +2392,65 @@ public struct RpcResult: @unchecked Sendable {
     case updateUserSettings(UpdateUserSettingsResult)
     case getUserSettings(GetUserSettingsResult)
     case sendComposeAction(SendComposeActionResult)
+    case createBot(CreateBotResult)
 
   }
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct CreateBotInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Name of the bot
+  public var name: String = String()
+
+  /// Username of the bot
+  public var username: String = String()
+
+  /// If not null, add the bot to this space
+  public var addToSpace: Int64 {
+    get {return _addToSpace ?? 0}
+    set {_addToSpace = newValue}
+  }
+  /// Returns true if `addToSpace` has been explicitly set.
+  public var hasAddToSpace: Bool {return self._addToSpace != nil}
+  /// Clears the value of `addToSpace`. Subsequent reads from it will return its default value.
+  public mutating func clearAddToSpace() {self._addToSpace = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _addToSpace: Int64? = nil
+}
+
+public struct CreateBotResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var bot: User {
+    get {return _bot ?? User()}
+    set {_bot = newValue}
+  }
+  /// Returns true if `bot` has been explicitly set.
+  public var hasBot: Bool {return self._bot != nil}
+  /// Clears the value of `bot`. Subsequent reads from it will return its default value.
+  public mutating func clearBot() {self._bot = nil}
+
+  /// Token to use for the bot
+  public var token: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _bot: User? = nil
 }
 
 public struct GetUserSettingsInput: Sendable {
@@ -4278,6 +4362,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     18: .same(proto: "UPDATE_USER_SETTINGS"),
     19: .same(proto: "GET_USER_SETTINGS"),
     20: .same(proto: "SEND_COMPOSE_ACTION"),
+    21: .same(proto: "CREATE_BOT"),
   ]
 }
 
@@ -5103,6 +5188,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     9: .standard(proto: "profile_photo"),
     11: .standard(proto: "pending_setup"),
     12: .standard(proto: "time_zone"),
+    13: .same(proto: "bot"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -5122,6 +5208,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       case 9: try { try decoder.decodeSingularMessageField(value: &self._profilePhoto) }()
       case 11: try { try decoder.decodeSingularBoolField(value: &self._pendingSetup) }()
       case 12: try { try decoder.decodeSingularStringField(value: &self._timeZone) }()
+      case 13: try { try decoder.decodeSingularBoolField(value: &self._bot) }()
       default: break
       }
     }
@@ -5165,6 +5252,9 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     try { if let v = self._timeZone {
       try visitor.visitSingularStringField(value: v, fieldNumber: 12)
     } }()
+    try { if let v = self._bot {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 13)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -5180,6 +5270,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     if lhs._profilePhoto != rhs._profilePhoto {return false}
     if lhs._pendingSetup != rhs._pendingSetup {return false}
     if lhs._timeZone != rhs._timeZone {return false}
+    if lhs._bot != rhs._bot {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -6986,6 +7077,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     19: .same(proto: "updateUserSettings"),
     20: .same(proto: "getUserSettings"),
     21: .same(proto: "sendComposeAction"),
+    22: .same(proto: "createBot"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -7255,6 +7347,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .sendComposeAction(v)
         }
       }()
+      case 22: try {
+        var v: CreateBotInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .createBot(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .createBot(v)
+        }
+      }()
       default: break
       }
     }
@@ -7349,6 +7454,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .sendComposeAction(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
     }()
+    case .createBot?: try {
+      guard case .createBot(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -7386,6 +7495,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     19: .same(proto: "updateUserSettings"),
     20: .same(proto: "getUserSettings"),
     21: .same(proto: "sendComposeAction"),
+    22: .same(proto: "createBot"),
   ]
 
   fileprivate class _StorageClass {
@@ -7686,6 +7796,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .sendComposeAction(v)
           }
         }()
+        case 22: try {
+          var v: CreateBotResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createBot(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createBot(v)
+          }
+        }()
         default: break
         }
       }
@@ -7782,6 +7905,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
         guard case .sendComposeAction(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
       }()
+      case .createBot?: try {
+        guard case .createBot(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+      }()
       case nil: break
       }
     }
@@ -7799,6 +7926,96 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension CreateBotInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CreateBotInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "name"),
+    2: .same(proto: "username"),
+    3: .standard(proto: "add_to_space"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.username) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self._addToSpace) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 1)
+    }
+    if !self.username.isEmpty {
+      try visitor.visitSingularStringField(value: self.username, fieldNumber: 2)
+    }
+    try { if let v = self._addToSpace {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CreateBotInput, rhs: CreateBotInput) -> Bool {
+    if lhs.name != rhs.name {return false}
+    if lhs.username != rhs.username {return false}
+    if lhs._addToSpace != rhs._addToSpace {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension CreateBotResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CreateBotResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "bot"),
+    2: .same(proto: "token"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._bot) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.token) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._bot {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.token.isEmpty {
+      try visitor.visitSingularStringField(value: self.token, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CreateBotResult, rhs: CreateBotResult) -> Bool {
+    if lhs._bot != rhs._bot {return false}
+    if lhs.token != rhs.token {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
