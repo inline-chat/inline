@@ -580,6 +580,9 @@ private extension MessagesCollectionView {
 
       snapshot.appendItems(itemIdentifiers, toSection: .main)
 
+      // Reconfigure all items to ensure cells are reloaded
+      snapshot.reconfigureItems(itemIdentifiers)
+
       dataSource.apply(snapshot, animatingDifferences: animated ?? false)
     }
 
