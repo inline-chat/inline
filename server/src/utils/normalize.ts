@@ -3,7 +3,7 @@ export const normalizeEmail = (email: string): string => {
 }
 
 export const normalizeUsername = (username: string): string => {
-  return username.trim().toLowerCase()
+  return username.trim() //.toLowerCase()
 }
 
 export const normalizePhoneNumber = (phoneNumber: string): string => {

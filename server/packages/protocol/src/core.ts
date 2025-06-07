@@ -329,6 +329,10 @@ export interface User {
      * @generated from protobuf field: optional string time_zone = 12;
      */
     timeZone?: string;
+    /**
+     * @generated from protobuf field: optional bool bot = 13;
+     */
+    bot?: boolean;
 }
 /**
  * @generated from protobuf message UserProfilePhoto
@@ -1468,6 +1472,12 @@ export interface RpcCall {
          */
         sendComposeAction: SendComposeActionInput;
     } | {
+        oneofKind: "createBot";
+        /**
+         * @generated from protobuf field: CreateBotInput createBot = 22;
+         */
+        createBot: CreateBotInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1603,8 +1613,52 @@ export interface RpcResult {
          */
         sendComposeAction: SendComposeActionResult;
     } | {
+        oneofKind: "createBot";
+        /**
+         * @generated from protobuf field: CreateBotResult createBot = 22;
+         */
+        createBot: CreateBotResult;
+    } | {
         oneofKind: undefined;
     };
+}
+/**
+ * @generated from protobuf message CreateBotInput
+ */
+export interface CreateBotInput {
+    /**
+     * Name of the bot
+     *
+     * @generated from protobuf field: string name = 1;
+     */
+    name: string;
+    /**
+     * Username of the bot
+     *
+     * @generated from protobuf field: string username = 2;
+     */
+    username: string;
+    /**
+     * If not null, add the bot to this space
+     *
+     * @generated from protobuf field: optional int64 add_to_space = 3;
+     */
+    addToSpace?: bigint;
+}
+/**
+ * @generated from protobuf message CreateBotResult
+ */
+export interface CreateBotResult {
+    /**
+     * @generated from protobuf field: User bot = 1;
+     */
+    bot?: User;
+    /**
+     * Token to use for the bot
+     *
+     * @generated from protobuf field: string token = 2;
+     */
+    token: string;
 }
 /**
  * @generated from protobuf message GetUserSettingsInput
@@ -2903,7 +2957,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: SEND_COMPOSE_ACTION = 20;
      */
-    SEND_COMPOSE_ACTION = 20
+    SEND_COMPOSE_ACTION = 20,
+    /**
+     * @generated from protobuf enum value: CREATE_BOT = 21;
+     */
+    CREATE_BOT = 21
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -3783,7 +3841,8 @@ class User$Type extends MessageType<User> {
             { no: 8, name: "status", kind: "message", T: () => UserStatus },
             { no: 9, name: "profile_photo", kind: "message", T: () => UserProfilePhoto },
             { no: 11, name: "pending_setup", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 12, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 12, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 13, name: "bot", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<User>): User {
@@ -3831,6 +3890,9 @@ class User$Type extends MessageType<User> {
                 case /* optional string time_zone */ 12:
                     message.timeZone = reader.string();
                     break;
+                case /* optional bool bot */ 13:
+                    message.bot = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3876,6 +3938,9 @@ class User$Type extends MessageType<User> {
         /* optional string time_zone = 12; */
         if (message.timeZone !== undefined)
             writer.tag(12, WireType.LengthDelimited).string(message.timeZone);
+        /* optional bool bot = 13; */
+        if (message.bot !== undefined)
+            writer.tag(13, WireType.Varint).bool(message.bot);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5980,7 +6045,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 18, name: "getChats", kind: "message", oneof: "input", T: () => GetChatsInput },
             { no: 19, name: "updateUserSettings", kind: "message", oneof: "input", T: () => UpdateUserSettingsInput },
             { no: 20, name: "getUserSettings", kind: "message", oneof: "input", T: () => GetUserSettingsInput },
-            { no: 21, name: "sendComposeAction", kind: "message", oneof: "input", T: () => SendComposeActionInput }
+            { no: 21, name: "sendComposeAction", kind: "message", oneof: "input", T: () => SendComposeActionInput },
+            { no: 22, name: "createBot", kind: "message", oneof: "input", T: () => CreateBotInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -6119,6 +6185,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         sendComposeAction: SendComposeActionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).sendComposeAction)
                     };
                     break;
+                case /* CreateBotInput createBot */ 22:
+                    message.input = {
+                        oneofKind: "createBot",
+                        createBot: CreateBotInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createBot)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6194,6 +6266,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* SendComposeActionInput sendComposeAction = 21; */
         if (message.input.oneofKind === "sendComposeAction")
             SendComposeActionInput.internalBinaryWrite(message.input.sendComposeAction, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
+        /* CreateBotInput createBot = 22; */
+        if (message.input.oneofKind === "createBot")
+            CreateBotInput.internalBinaryWrite(message.input.createBot, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6228,7 +6303,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 18, name: "getChats", kind: "message", oneof: "result", T: () => GetChatsResult },
             { no: 19, name: "updateUserSettings", kind: "message", oneof: "result", T: () => UpdateUserSettingsResult },
             { no: 20, name: "getUserSettings", kind: "message", oneof: "result", T: () => GetUserSettingsResult },
-            { no: 21, name: "sendComposeAction", kind: "message", oneof: "result", T: () => SendComposeActionResult }
+            { no: 21, name: "sendComposeAction", kind: "message", oneof: "result", T: () => SendComposeActionResult },
+            { no: 22, name: "createBot", kind: "message", oneof: "result", T: () => CreateBotResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -6367,6 +6443,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         sendComposeAction: SendComposeActionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).sendComposeAction)
                     };
                     break;
+                case /* CreateBotResult createBot */ 22:
+                    message.result = {
+                        oneofKind: "createBot",
+                        createBot: CreateBotResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createBot)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6442,6 +6524,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* SendComposeActionResult sendComposeAction = 21; */
         if (message.result.oneofKind === "sendComposeAction")
             SendComposeActionResult.internalBinaryWrite(message.result.sendComposeAction, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
+        /* CreateBotResult createBot = 22; */
+        if (message.result.oneofKind === "createBot")
+            CreateBotResult.internalBinaryWrite(message.result.createBot, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6452,6 +6537,122 @@ class RpcResult$Type extends MessageType<RpcResult> {
  * @generated MessageType for protobuf message RpcResult
  */
 export const RpcResult = new RpcResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateBotInput$Type extends MessageType<CreateBotInput> {
+    constructor() {
+        super("CreateBotInput", [
+            { no: 1, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "username", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "add_to_space", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateBotInput>): CreateBotInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.name = "";
+        message.username = "";
+        if (value !== undefined)
+            reflectionMergePartial<CreateBotInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateBotInput): CreateBotInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string name */ 1:
+                    message.name = reader.string();
+                    break;
+                case /* string username */ 2:
+                    message.username = reader.string();
+                    break;
+                case /* optional int64 add_to_space */ 3:
+                    message.addToSpace = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateBotInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string name = 1; */
+        if (message.name !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.name);
+        /* string username = 2; */
+        if (message.username !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.username);
+        /* optional int64 add_to_space = 3; */
+        if (message.addToSpace !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.addToSpace);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateBotInput
+ */
+export const CreateBotInput = new CreateBotInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateBotResult$Type extends MessageType<CreateBotResult> {
+    constructor() {
+        super("CreateBotResult", [
+            { no: 1, name: "bot", kind: "message", T: () => User },
+            { no: 2, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateBotResult>): CreateBotResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.token = "";
+        if (value !== undefined)
+            reflectionMergePartial<CreateBotResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateBotResult): CreateBotResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User bot */ 1:
+                    message.bot = User.internalBinaryRead(reader, reader.uint32(), options, message.bot);
+                    break;
+                case /* string token */ 2:
+                    message.token = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateBotResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User bot = 1; */
+        if (message.bot)
+            User.internalBinaryWrite(message.bot, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* string token = 2; */
+        if (message.token !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.token);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateBotResult
+ */
+export const CreateBotResult = new CreateBotResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetUserSettingsInput$Type extends MessageType<GetUserSettingsInput> {
     constructor() {
