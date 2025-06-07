@@ -147,6 +147,14 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
   const propertiesFromResponse = validatedData.properties || {}
   const descriptionFromResponse = validatedData.description
 
+  // Use hardcoded icon instead of AI-generated one
+  const iconFromResponse = {
+    type: "external" as const,
+    external: {
+      url: "https://www.notion.so/icons/circle_lightgray.svg",
+    },
+  }
+
   // Transform simplified blocks to proper Notion format
   const transformedDescription =
     descriptionFromResponse?.map((block: any) => {
@@ -242,6 +250,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     propertiesData,
     client,
     transformedDescription || undefined,
+    iconFromResponse,
   )
   log.info("🕐 Created Notion page", {
     pageId: page.id,

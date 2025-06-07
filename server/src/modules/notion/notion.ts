@@ -84,6 +84,7 @@ export async function newNotionPage(
   properties: CreatePageParameters["properties"],
   client: Client,
   children?: CreatePageParameters["children"],
+  icon?: CreatePageParameters["icon"],
 ) {
   const pageData: CreatePageParameters = {
     parent: { database_id: databaseId },
@@ -92,6 +93,10 @@ export async function newNotionPage(
 
   if (children) {
     pageData.children = children
+  }
+
+  if (icon) {
+    pageData.icon = icon
   }
 
   const page = await client.pages.create(pageData)
