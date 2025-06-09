@@ -40,9 +40,9 @@ export const ProtocolConvertors = {
     if ("threadId" in peer) {
       return {
         type: {
-          oneofKind: "user",
-          user: {
-            userId: BigInt(peer.threadId),
+          oneofKind: "chat",
+          chat: {
+            chatId: BigInt(peer.threadId),
           },
         },
       }
