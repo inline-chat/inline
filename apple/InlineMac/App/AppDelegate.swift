@@ -39,6 +39,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainWindow()
     setupMainMenu()
 
+    // Register for URL events
+    NSAppleEventManager.shared().setEventHandler(
+      self,
+      andSelector: #selector(handleURLEvent(_:withReplyEvent:)),
+      forEventClass: AEEventClass(kInternetEventClass),
+      andEventID: AEEventID(kAEGetURL)
+    )
+
     // Send timezone to server
 
     Task {
@@ -92,6 +100,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       setupMainWindow()
     }
     return true
+  }
+
+  func application(_ application: NSApplication, open urls: [URL]) {
+    // Handle URLs when app is already running
+    for url in urls {
+      log.debug("Received URL via application:open: \(url)")
+      handleCustomURL(url)
+    }
+  }
+
+  private func handleCustomURL(_ url: URL) {
+    // Ensure we have the inline:// scheme
+    guard url.scheme == "inline" else {
+      log.warning("Received non-inline URL scheme: \(url.scheme ?? "nil")")
+      return
+    }
+
+    Task(priority: .userInitiated) { @MainActor in
+      // Bring app to foreground
+      NSApp.activate(ignoringOtherApps: true)
+      setupMainWindow()
+
+      // Parse the URL path
+      let pathComponents = url.pathComponents
+
+      // Handle different URL patterns
+      switch url.host {
+        case "user":
+          handleUserURL(pathComponents: pathComponents)
+        default:
+          log.warning("Unhandled URL host: \(url.host ?? "nil")")
+      }
+    }
+  }
+
+  @MainActor private func handleUserURL(pathComponents: [String]) {
+    // Expected format: inline://user/<id>
+    // pathComponents will be ["/", "<id>"]
+    guard pathComponents.count >= 2,
+          let userIdString = pathComponents.last,
+          let userId = Int64(userIdString)
+    else {
+      log.error("Invalid user URL format. Expected: inline://user/<id>")
+      return
+    }
+
+    log.debug("Opening chat for user ID: \(userId)")
+
+    // Navigate to the user chat
+    dependencies.nav.open(.chat(peer: .user(id: userId)))
   }
 
   private func initializeServices() {
@@ -189,5 +247,21 @@ extension AppDelegate {
       // Stop WebSocket
       await dependencies.realtime.loggedOut()
     }
+  }
+}
+
+// MARK: - URL Scheme Handling
+
+extension AppDelegate {
+  @objc func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent replyEvent: NSAppleEventDescriptor) {
+    guard let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+          let url = URL(string: urlString)
+    else {
+      log.error("Failed to parse URL from event")
+      return
+    }
+
+    log.debug("Received URL: \(url)")
+    handleCustomURL(url)
   }
 }

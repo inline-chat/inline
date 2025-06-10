@@ -10,5 +10,16 @@
 	<false/>
 	<key>USE_PRODUCTION_API</key>
 	<string>$(USE_PRODUCTION_API)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.inline.mac.url</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>inline</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
