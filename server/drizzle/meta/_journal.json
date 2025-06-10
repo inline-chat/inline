@@ -267,6 +267,13 @@
       "when": 1749319040335,
       "tag": "0037_session_more_client_types",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1749575153880,
+      "tag": "0038_entities",
+      "breakpoints": true
     }
   ]
 }

@@ -36,9 +36,13 @@ export interface EncryptedData {
 
 export type OptionalEncryptedData = EmptyEncryptedData | EncryptedData
 
-export function encrypt(text: string): EncryptedData {
+/**
+ * Low-level binary data encryption function
+ * Encrypts raw binary data (Buffer or Uint8Array)
+ */
+export function encryptBinary(data: Buffer | Uint8Array): EncryptedData {
   const ENCRYPTION_KEY = getEncryptionKey()
-  validateText(text)
+  validateBinaryData(data)
   const startTime = process.hrtime()
   const key = new Uint8Array(Buffer.from(ENCRYPTION_KEY, "hex"))
   validateKey(key)
@@ -47,9 +51,12 @@ export function encrypt(text: string): EncryptedData {
     const iv = new Uint8Array(randomBytes(IV_LENGTH))
     const cipher = createCipheriv(ALGORITHM, key, iv)
 
-    // Convert cipher outputs to Uint8Array
+    // Convert input to Uint8Array if it's a Buffer
+    const inputArray = data instanceof Buffer ? new Uint8Array(data) : data
+
+    // Encrypt the binary data
     const encryptedArray = new Uint8Array(
-      Buffer.concat([new Uint8Array(cipher.update(text, "utf8")), new Uint8Array(cipher.final())]),
+      Buffer.concat([new Uint8Array(cipher.update(inputArray)), new Uint8Array(cipher.final())]),
     )
 
     return {
@@ -59,8 +66,9 @@ export function encrypt(text: string): EncryptedData {
     }
   } catch (error) {
     if (error instanceof Error) {
-      log.error("Encryption failed", {
+      log.error("Binary encryption failed", {
         error: error.message,
+        dataLength: data.length,
         duration: process.hrtime(startTime),
       })
     }
@@ -70,7 +78,11 @@ export function encrypt(text: string): EncryptedData {
   }
 }
 
-export function decrypt(data: EncryptedData): string {
+/**
+ * Low-level binary data decryption function
+ * Decrypts to raw binary data (Buffer)
+ */
+export function decryptBinary(data: EncryptedData): Buffer {
   const ENCRYPTION_KEY = getEncryptionKey()
   try {
     if (!data.encrypted || !data.iv || !data.authTag) {
@@ -91,13 +103,32 @@ export function decrypt(data: EncryptedData): string {
     )
 
     key.fill(0)
-    return Buffer.from(decryptedArray).toString("utf8")
+    return Buffer.from(decryptedArray)
   } catch (error) {
     if (error instanceof Error) {
-      throw new Error(`Decryption failed: ${error.message}`)
+      throw new Error(`Binary decryption failed: ${error.message}`)
     }
     throw error
   }
+}
+
+/**
+ * High-level text encryption function (uses binary encryption internally)
+ * Encrypts text strings
+ */
+export function encrypt(text: string): EncryptedData {
+  validateText(text)
+  const textBuffer = Buffer.from(text, "utf8")
+  return encryptBinary(textBuffer)
+}
+
+/**
+ * High-level text decryption function (uses binary decryption internally)
+ * Decrypts to text strings
+ */
+export function decrypt(data: EncryptedData): string {
+  const decryptedBuffer = decryptBinary(data)
+  return decryptedBuffer.toString("utf8")
 }
 
 // Add key validation
@@ -116,6 +147,15 @@ const validateText = (text: string): void => {
   }
   if (text.length > MAX_ENCRYPTED_DATA_LENGTH) {
     throw new Error("Message exceeds maximum length")
+  }
+}
+
+const validateBinaryData = (data: Buffer | Uint8Array): void => {
+  if (!data || data.length === 0) {
+    throw new Error("Binary data to encrypt cannot be empty")
+  }
+  if (data.length > MAX_ENCRYPTED_DATA_LENGTH) {
+    throw new Error("Binary data exceeds maximum length")
   }
 }
 

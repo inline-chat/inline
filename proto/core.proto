@@ -794,6 +794,9 @@ message SendMessageInput {
 
   // Whether the message is a sticker
   optional bool is_sticker = 6;
+
+  // Entities in the message (bold, italic, mention, etc)
+  optional MessageEntities entities = 7;
 }
 
 message SendMessageResult { repeated Update updates = 2; }
