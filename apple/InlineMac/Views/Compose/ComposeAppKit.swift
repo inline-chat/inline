@@ -2,13 +2,14 @@ import AppKit
 import Combine
 import GRDB
 import InlineKit
+import InlineProtocol
 import Logger
 import SwiftUI
 
 class ComposeAppKit: NSView {
   // Props
-  private var peerId: Peer
-  private var chat: Chat?
+  private var peerId: InlineKit.Peer
+  private var chat: InlineKit.Chat?
   private var chatId: Int64? { chat?.id }
   private var dependencies: AppDependencies
 
@@ -21,7 +22,7 @@ class ComposeAppKit: NSView {
   }
 
   private var isEmpty: Bool {
-    textEditor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    textEditor.isAttributedTextEmpty
   }
 
   private var canSend: Bool {
@@ -137,9 +138,9 @@ class ComposeAppKit: NSView {
   // MARK: Initialization
 
   init(
-    peerId: Peer,
+    peerId: InlineKit.Peer,
     messageList: MessageListAppKit,
-    chat: Chat?,
+    chat: InlineKit.Chat?,
     dependencies: AppDependencies,
     parentChatView: ChatViewAppKit? = nil
   ) {
@@ -369,11 +370,12 @@ class ComposeAppKit: NSView {
 
   private func detectMentionAtCursor() {
     let cursorPosition = textEditor.textView.selectedRange().location
-    let text = textEditor.string
+    let attributedText = textEditor.attributedString
+    let text = textEditor.plainText
 
     Log.shared.debug("🔍 detectMentionAtCursor: cursor=\(cursorPosition), text='\(text)'")
 
-    if let mentionRange = mentionDetector.detectMentionAt(cursorPosition: cursorPosition, in: text) {
+    if let mentionRange = mentionDetector.detectMentionAt(cursorPosition: cursorPosition, in: attributedText) {
       currentMentionRange = mentionRange
       Log.shared.debug("🔍 Mention detected: '\(mentionRange.query)' at \(mentionRange.range)")
       showMentionCompletion(for: mentionRange.query)
@@ -670,11 +672,20 @@ class ComposeAppKit: NSView {
   func send() {
     DispatchQueue.main.async(qos: .userInteractive) {
       self.ignoreNextHeightChange = true
-      let rawText = self.textEditor.string.trimmingCharacters(in: .whitespacesAndNewlines)
+      let attributedText = self.textEditor.attributedString
+      let rawText = self.textEditor.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
       let replyToMsgId = self.state.replyingToMsgId
       let attachmentItems = self.attachmentItems
       // keep a copy of editingMessageId before we clear it
       let editingMessageId = self.state.editingMsgId
+
+      // Extract mention entities from attributed text
+      let mentionEntities = self.mentionDetector.extractMentionEntities(from: attributedText)
+      let entities = if mentionEntities.isEmpty {
+        nil as MessageEntities?
+      } else {
+        MessageEntities.with { $0.entities = mentionEntities }
+      }
 
       // make it nil if empty
       let text = if rawText.isEmpty, !attachmentItems.isEmpty {
@@ -708,7 +719,9 @@ class ComposeAppKit: NSView {
               peerId: self.peerId,
               chatId: self.chatId ?? 0, // FIXME: chatId fallback
               mediaItems: [],
-              replyToMsgId: replyToMsgId
+              replyToMsgId: replyToMsgId,
+              isSticker: nil,
+              entities: entities
             )
           )
         )
@@ -726,7 +739,9 @@ class ComposeAppKit: NSView {
                 peerId: self.peerId,
                 chatId: self.chatId ?? 0, // FIXME: chatId fallback
                 mediaItems: [attachment],
-                replyToMsgId: isFirst ? replyToMsgId : nil
+                replyToMsgId: isFirst ? replyToMsgId : nil,
+                isSticker: nil,
+                entities: isFirst ? entities : nil
               )
             )
           )
@@ -755,11 +770,14 @@ class ComposeAppKit: NSView {
   }
 
   func setText(_ text: String, animate: Bool = false, shouldUpdateHeight: Bool = true) {
-    textEditor.setString(text)
+    let attributedString = textEditor.createAttributedString(text)
+    textEditor.replaceAttributedString(attributedString)
     updateContentHeight(for: textEditor.textView)
     if shouldUpdateHeight {
       updateHeight(animate: animate)
     }
+    // reevaluate placeholder
+    textEditor.showPlaceholder(text.isEmpty)
   }
 
   private var keyMonitorUnsubscribe: (() -> Void)?
@@ -927,8 +945,13 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   func textDidChange(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView else { return }
 
+    let text = textView.string
+
+    // Prevent mention style leakage to new text
+    textView.updateTypingAttributesIfNeeded()
+
     // TODO: This is slow
-    if textView.string.isRTL {
+    if text.isRTL {
       textView.baseWritingDirection = .rightToLeft
     } else {
       textView.baseWritingDirection = .leftToRight
@@ -941,7 +964,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     // Detect mentions
     detectMentionAtCursor()
 
-    if textView.string.isEmpty {
+    if textEditor.isAttributedTextEmpty {
       // Handle empty text
       textEditor.showPlaceholder(true)
 
@@ -999,8 +1022,10 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidChangeSelection(_ notification: Notification) {
-    // guard let textView = notification.object as? NSTextView else { return }
-    // Handle selection changes if needed
+    guard let textView = notification.object as? NSTextView else { return }
+
+    // Reset typing attributes when cursor moves to prevent mention style leakage
+    textView.updateTypingAttributesIfNeeded()
   }
 
   func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool {
@@ -1071,15 +1096,20 @@ extension ComposeAppKit: ComposeMenuButtonDelegate {
 // MARK: MentionCompletionMenuDelegate
 
 extension ComposeAppKit: MentionCompletionMenuDelegate {
-  func mentionMenu(_ menu: MentionCompletionMenu, didSelectUser user: UserInfo, withText text: String) {
+  func mentionMenu(_ menu: MentionCompletionMenu, didSelectUser user: UserInfo, withText text: String, userId: Int64) {
     guard let mentionRange = currentMentionRange else { return }
 
-    let currentText = textEditor.string
-    let result = mentionDetector.replaceMention(in: currentText, range: mentionRange.range, with: text)
+    let currentAttributedText = textEditor.attributedString
+    let result = mentionDetector.replaceMention(
+      in: currentAttributedText,
+      range: mentionRange.range,
+      with: text,
+      userId: userId
+    )
 
-    // Update text and cursor position
+    // Update attributed text and cursor position
     ignoreNextHeightChange = true
-    textEditor.string = result.newText
+    textEditor.setAttributedString(result.newAttributedText)
     textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
     ignoreNextHeightChange = false
 

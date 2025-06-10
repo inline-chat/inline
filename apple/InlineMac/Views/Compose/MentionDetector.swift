@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import InlineProtocol
 import Logger
 
 struct MentionRange {
@@ -12,7 +14,8 @@ class MentionDetector {
 
   /// Detects if there's an active mention at the cursor position
   /// Returns the mention range and query if found, nil otherwise
-  func detectMentionAt(cursorPosition: Int, in text: String) -> MentionRange? {
+  func detectMentionAt(cursorPosition: Int, in attributedText: NSAttributedString) -> MentionRange? {
+    let text = attributedText.string
     guard cursorPosition <= text.count else {
       log.trace("Cursor position \(cursorPosition) is beyond text length \(text.count)")
       return nil
@@ -88,19 +91,33 @@ class MentionDetector {
     )
   }
 
-  /// Replace a mention range with the selected mention text
+  /// Replace a mention range with the selected mention text and user ID
   func replaceMention(
-    in text: String,
+    in attributedText: NSAttributedString,
     range: NSRange,
-    with mentionText: String
-  ) -> (newText: String, newCursorPosition: Int) {
-    let nsString = text as NSString
-    let newText = nsString.replacingCharacters(in: range, with: mentionText + " ")
-    let newCursorPosition = range.location + mentionText.count + 1 // +1 for the space
+    with mentionText: String,
+    userId: Int64
+  ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
+    let mentionString = mentionText + " "
+    let newAttributedText = AttributedStringHelpers.replaceMentionInAttributedString(
+      attributedText,
+      range: range,
+      with: mentionString,
+      userId: userId
+    )
 
-    log.trace("Replaced mention at \(range) with '\(mentionText)', new cursor: \(newCursorPosition)")
+    let newCursorPosition = range.location + mentionString.count
 
-    return (newText, newCursorPosition)
+    log.trace("Replaced mention at \(range) with '\(mentionText)' for user \(userId), new cursor: \(newCursorPosition)")
+
+    return (newAttributedText, newCursorPosition)
+  }
+
+  /// Extract mention entities from attributed text for sending
+  func extractMentionEntities(from attributedText: NSAttributedString) -> [MessageEntity] {
+    let entities = AttributedStringHelpers.extractMentionEntities(from: attributedText)
+    log.debug("Extracted \(entities.count) mention entities")
+    return entities
   }
 
   /// Check if character being typed should trigger mention detection
