@@ -3094,6 +3094,16 @@ public struct SendMessageInput: Sendable {
   /// Clears the value of `isSticker`. Subsequent reads from it will return its default value.
   public mutating func clearIsSticker() {self._isSticker = nil}
 
+  /// Entities in the message (bold, italic, mention, etc)
+  public var entities: MessageEntities {
+    get {return _entities ?? MessageEntities()}
+    set {_entities = newValue}
+  }
+  /// Returns true if `entities` has been explicitly set.
+  public var hasEntities: Bool {return self._entities != nil}
+  /// Clears the value of `entities`. Subsequent reads from it will return its default value.
+  public mutating func clearEntities() {self._entities = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3105,6 +3115,7 @@ public struct SendMessageInput: Sendable {
   fileprivate var _media: InputMedia? = nil
   fileprivate var _temporarySendDate: Int64? = nil
   fileprivate var _isSticker: Bool? = nil
+  fileprivate var _entities: MessageEntities? = nil
 }
 
 public struct SendMessageResult: Sendable {
@@ -8997,6 +9008,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     5: .same(proto: "media"),
     1000: .standard(proto: "temporary_send_date"),
     6: .standard(proto: "is_sticker"),
+    7: .same(proto: "entities"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -9011,6 +9023,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 4: try { try decoder.decodeSingularInt64Field(value: &self._randomID) }()
       case 5: try { try decoder.decodeSingularMessageField(value: &self._media) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self._isSticker) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._entities) }()
       case 1000: try { try decoder.decodeSingularInt64Field(value: &self._temporarySendDate) }()
       default: break
       }
@@ -9040,6 +9053,9 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     try { if let v = self._isSticker {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 6)
     } }()
+    try { if let v = self._entities {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
     try { if let v = self._temporarySendDate {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 1000)
     } }()
@@ -9054,6 +9070,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs._media != rhs._media {return false}
     if lhs._temporarySendDate != rhs._temporarySendDate {return false}
     if lhs._isSticker != rhs._isSticker {return false}
+    if lhs._entities != rhs._entities {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

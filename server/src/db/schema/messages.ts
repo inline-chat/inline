@@ -25,11 +25,16 @@ export const messages = pgTable(
     // random id, used for optimistic update and deduplication
     randomId: bigint("random_id", { mode: "bigint" }),
 
-    /** message raw text, optional */
-    text: text(), // @deprecated
+    /** message raw text, optional @deprecated */
+    text: text(),
     textEncrypted: bytea("text_encrypted"),
     textIv: bytea("text_iv"),
     textTag: bytea("text_tag"),
+
+    /** entities */
+    entitiesEncrypted: bytea("entities_encrypted"),
+    entitiesIv: bytea("entities_iv"),
+    entitiesTag: bytea("entities_tag"),
 
     /** required, chat it belongs to */
     chatId: integer("chat_id")

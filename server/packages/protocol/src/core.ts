@@ -2081,6 +2081,12 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional bool is_sticker = 6;
      */
     isSticker?: boolean;
+    /**
+     * Entities in the message (bold, italic, mention, etc)
+     *
+     * @generated from protobuf field: optional MessageEntities entities = 7;
+     */
+    entities?: MessageEntities;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -7917,7 +7923,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 4, name: "random_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "media", kind: "message", T: () => InputMedia },
             { no: 1000, name: "temporary_send_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 6, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 6, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 7, name: "entities", kind: "message", T: () => MessageEntities }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -7952,6 +7959,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional bool is_sticker */ 6:
                     message.isSticker = reader.bool();
                     break;
+                case /* optional MessageEntities entities */ 7:
+                    message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7985,6 +7995,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional bool is_sticker = 6; */
         if (message.isSticker !== undefined)
             writer.tag(6, WireType.Varint).bool(message.isSticker);
+        /* optional MessageEntities entities = 7; */
+        if (message.entities)
+            MessageEntities.internalBinaryWrite(message.entities, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
