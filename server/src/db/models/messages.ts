@@ -1,4 +1,4 @@
-import type { InputPeer, MessageEntities, MessageTranslation } from "@in/protocol/core"
+import { MessageEntities, type InputPeer, type MessageTranslation } from "@in/protocol/core"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -26,7 +26,7 @@ import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/en
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, asc, desc, eq, gt, inArray, lt, or } from "drizzle-orm"
-import { decrypt } from "@in/server/modules/encryption/encryption"
+import { decrypt, decryptBinary } from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 
 const log = new Log("MessageModel", LogLevel.TRACE)
@@ -71,7 +71,11 @@ export type ProcessedMessageAndTranslation = ProcessedMessage & {
   translation: ProcessedMessageTranslation | null
 }
 
-export type DbFullMessage = Omit<DbMessage, "textEncrypted" | "textIv" | "textTag"> & {
+export type DbFullMessage = Omit<
+  DbMessage,
+  "textEncrypted" | "textIv" | "textTag" | "entitiesEncrypted" | "entitiesIv" | "entitiesTag"
+> & {
+  entities: MessageEntities | null
   from: DbUser
   reactions: DbReaction[]
   photo: DbFullPhoto | null
@@ -188,6 +192,16 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
             authTag: message.textTag,
           })
         : message.text,
+    entities:
+      message.entitiesEncrypted && message.entitiesIv && message.entitiesTag
+        ? MessageEntities.fromBinary(
+            decryptBinary({
+              encrypted: message.entitiesEncrypted,
+              iv: message.entitiesIv,
+              authTag: message.entitiesTag,
+            }),
+          )
+        : null,
     photo: message.photo ? FileModel.processFullPhoto(message.photo) : null,
     video: message.video ? FileModel.processFullVideo(message.video) : null,
     document: message.document ? FileModel.processFullDocument(message.document) : null,
