@@ -1,4 +1,4 @@
-import type { NotificationSettings, UserSettings } from "@in/protocol/core"
+import type { MessageEntities, NotificationSettings, UserSettings } from "@in/protocol/core"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
 import { UserSettingsNotificationsMode, type UserSettingsGeneral } from "@in/server/db/models/userSettings/types"
 import type { DbMessage } from "@in/server/db/schema"
@@ -16,6 +16,7 @@ import z from "zod"
 type InputMessage = {
   id: number
   text: string
+  entities: MessageEntities | null
   message: DbMessage // or Protocol message?
 }
 
@@ -118,7 +119,7 @@ const getUserPrompt = async (input: Input): Promise<string> => {
   let messages = [input.message]
   const userPrompt = `
   <new_messages>
-  ${messages.map((m) => formatMessage({ ...m.message, text: m.text })).join("\n")}
+  ${messages.map((m) => formatMessage({ ...m.message, text: m.text, entities: m.entities })).join("\n")}
   </new_messages>
   `
 
@@ -264,10 +265,22 @@ export const formatMessage = (m: ProcessedMessage): string => {
 id="${m.messageId}"
 sentAt="${m.date.toISOString()}"
 senderId="${m.fromId}" 
+${m.entities ? `entities="${formatEntities(m.entities)}"` : ""}
 ${m.replyToMsgId ? `replyToId="${m.replyToMsgId}"` : ""}>
 ${m.photoId ? "[photo attachment]" : ""} ${m.videoId ? "[video attachment]" : ""} ${
     m.documentId ? "[document attachment]" : ""
   } ${m.text ? m.text : "[empty caption]"}</message>`
+}
+
+export const formatEntities = (entities: MessageEntities): string => {
+  return entities.entities
+    .map(
+      (e) =>
+        `type="${e.type}" offset="${e.offset}" length="${e.length}" ${
+          "userId" in e.entity ? `userId="${e.entity.userId}"` : ""
+        }`,
+    )
+    .join(",")
 }
 
 // # Examples

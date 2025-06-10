@@ -1,9 +1,9 @@
 import { db } from "@in/server/db"
 import { messages, translations } from "@in/server/db/schema"
 import { eq, and, gt, desc, inArray } from "drizzle-orm"
-import { encrypt } from "@in/server/modules/encryption/encryption"
+import { decryptBinary, encrypt } from "@in/server/modules/encryption/encryption"
 import { Log } from "@in/server/utils/log"
-import type { InputPeer, MessageTranslation } from "@in/protocol/core"
+import { MessageEntities, type InputPeer, type MessageTranslation } from "@in/protocol/core"
 import {
   MessageModel,
   type ProcessedMessage,
@@ -192,6 +192,13 @@ async function getMessagesAndTranslations(input: {
               })
             : // legacy fallback
               msg.text,
+
+        entities:
+          msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
+            ? MessageEntities.fromBinary(
+                decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
+              )
+            : null,
 
         // Get translation in language
         translation: translation ? processMessageTranslation(translation) : null,
