@@ -1,4 +1,4 @@
-import { InputPeer, Update, UpdateNewMessageNotification_Reason } from "@in/protocol/core"
+import { InputPeer, MessageEntities, Update, UpdateNewMessageNotification_Reason } from "@in/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument } from "@in/server/db/models/files"
@@ -17,7 +17,8 @@ import { batchEvaluate, type NotificationEvalResult } from "@in/server/modules/n
 import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
-import { Updates } from "@in/server/modules/updates/updates"
+import { encryptBinary } from "@in/server/modules/encryption/encryption"
+
 type Input = {
   peerId: InputPeer
   message?: string
@@ -28,6 +29,7 @@ type Input = {
   documentId?: bigint
   sendDate?: number
   isSticker?: boolean
+  entities?: MessageEntities
 }
 
 type Output = {
@@ -66,6 +68,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     mediaType = "document"
   }
 
+  // encrypt entities
+  const binaryEntities = input.entities ? MessageEntities.toBinary(input.entities) : undefined
+  const encryptedEntities = binaryEntities ? encryptBinary(binaryEntities) : undefined
+
   // insert new msg with new ID
   const newMessage = await MessageModel.insertMessage({
     chatId: chatId,
@@ -81,6 +87,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     videoId: dbFullVideo?.id ?? null,
     documentId: dbFullDocument?.id ?? null,
     isSticker: input.isSticker ?? false,
+    entitiesEncrypted: encryptedEntities?.encrypted ?? null,
+    entitiesIv: encryptedEntities?.iv ?? null,
+    entitiesTag: encryptedEntities?.authTag ?? null,
   })
 
   // Process Loom links in the message if any

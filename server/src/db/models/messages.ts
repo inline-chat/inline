@@ -1,4 +1,4 @@
-import type { InputPeer, MessageTranslation } from "@in/protocol/core"
+import type { InputPeer, MessageEntities, MessageTranslation } from "@in/protocol/core"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
 import { ChatModel } from "@in/server/db/models/chats"
