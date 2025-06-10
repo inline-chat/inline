@@ -26,6 +26,7 @@ public struct TransactionSendMessage: Transaction {
   public var attachments: [SendMessageAttachment]
   public var replyToMsgId: Int64? = nil
   public var isSticker: Bool? = nil
+  public var entities: MessageEntities? = nil
 
   // Config
   public var id = UUID().uuidString
@@ -91,7 +92,8 @@ public struct TransactionSendMessage: Transaction {
       videoId: media?.asVideoId(),
       documentId: media?.asDocumentId(),
       transactionId: id,
-      isSticker: isSticker
+      isSticker: isSticker,
+      entities: entities
     )
 
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
@@ -202,6 +204,7 @@ public struct TransactionSendMessage: Transaction {
       if let text { $0.message = text }
       if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
       if let inputMedia { $0.media = inputMedia }
+      if let entities { $0.entities = entities }
     }
 
     let result_ = try await Realtime.shared.invoke(
