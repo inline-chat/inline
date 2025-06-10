@@ -246,6 +246,7 @@ export const encodeFullMessage = ({
           reactions: message.reactions.map((reaction) => encodeReaction({ reaction })),
         }
       : undefined,
+    entities: message.entities ?? undefined,
   }
 
   return messageProto
