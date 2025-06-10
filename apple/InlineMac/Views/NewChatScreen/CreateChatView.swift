@@ -35,7 +35,7 @@ public struct CreateChatView: View {
   public var body: some View {
     mainForm
       .formStyle(.grouped)
-      .padding()
+      //.padding()
       .scrollContentBackground(.hidden)
       .navigationTitle("Create Chat")
   }
