@@ -774,10 +774,22 @@ class ComposeAppKit: NSView {
 
         focus()
 
-        textEditor.textView.insertText(
-          event.characters ?? "",
-          replacementRange: NSRange(location: NSNotFound, length: 0)
-        )
+        // Only insert valid printable characters, not control/navigation keys
+        if let characters = event.characters,
+           !characters.isEmpty,
+           characters.allSatisfy({ char in
+             // Check if character is printable (not a control character)
+             if let scalar = char.unicodeScalars.first {
+               return scalar.properties.isAlphabetic || scalar.properties.isMath
+             }
+             return false
+           })
+        {
+          textEditor.textView.insertText(
+            characters,
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+          )
+        }
       }
     )
 
