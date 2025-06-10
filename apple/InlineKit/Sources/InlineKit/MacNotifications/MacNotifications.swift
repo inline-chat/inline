@@ -3,7 +3,7 @@ import InlineProtocol
 import UserNotifications
 
 actor MacNotifications: Sendable {
-  static var shared = MacNotifications()
+  static let shared = MacNotifications()
 
   func requestPermission() async throws -> Bool {
     try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])

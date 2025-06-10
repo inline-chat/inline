@@ -118,7 +118,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 }
 
 actor AuthManager: Sendable {
-  public static var shared = AuthManager()
+  public static let shared = AuthManager()
 
   private let log = Log.scoped("AuthManager")
 
