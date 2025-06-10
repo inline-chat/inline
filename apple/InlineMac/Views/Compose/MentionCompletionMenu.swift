@@ -285,11 +285,14 @@ class MentionCompletionMenu: NSView {
     }
   }
 
-  func selectCurrentItem() {
-    guard selectedIndex >= 0, selectedIndex < filteredParticipants.count else { return }
+  /// Selects the current item and returns true if successful, false otherwise
+  @discardableResult
+  func selectCurrentItem() -> Bool {
+    guard selectedIndex >= 0, selectedIndex < filteredParticipants.count else { return false }
     let participant = filteredParticipants[selectedIndex]
     let mentionText = "@\(participant.user.username ?? participant.user.displayName)"
     delegate?.mentionMenu(self, didSelectUser: participant, withText: mentionText)
+    return true
   }
 
   @objc private func tableViewClicked() {
