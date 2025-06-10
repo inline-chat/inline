@@ -109,14 +109,18 @@ class MessageListAppKit: NSViewController {
   private lazy var toolbarBgView: NSVisualEffectView = ChatToolbarView(dependencies: dependencies)
 
   private func toggleToolbarVisibility(_ hide: Bool) {
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.08
-      context.allowsImplicitAnimation = true
+    if #available(macOS 26.0, *) {
+      // No toolbar on macOS 14
+    } else {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.08
+        context.allowsImplicitAnimation = true
 
-      toolbarBgView.alphaValue = hide ? 0 : 1
-    } completionHandler: { [weak self] in
-      guard let self else { return }
-      toolbarBgView.isHidden = true
+        toolbarBgView.alphaValue = hide ? 0 : 1
+      } completionHandler: { [weak self] in
+        guard let self else { return }
+        toolbarBgView.isHidden = true
+      }
     }
   }
 
@@ -314,7 +318,6 @@ class MessageListAppKit: NSViewController {
       scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
     ])
 
     if #available(macOS 26.0, *) {
