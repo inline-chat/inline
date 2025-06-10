@@ -51,7 +51,8 @@ class ChatTitleToolbar: NSToolbarItem {
     super.init(itemIdentifier: .chatTitle)
 
     visibilityPriority = .high
-
+    self.isBordered = false
+    
     setupView()
     setupConstraints()
     setupInteraction()

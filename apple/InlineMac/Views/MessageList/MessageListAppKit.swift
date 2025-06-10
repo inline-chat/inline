@@ -114,6 +114,9 @@ class MessageListAppKit: NSViewController {
       context.allowsImplicitAnimation = true
 
       toolbarBgView.alphaValue = hide ? 0 : 1
+    } completionHandler: { [weak self] in
+      guard let self else { return }
+      toolbarBgView.isHidden = true
     }
   }
 
@@ -291,22 +294,19 @@ class MessageListAppKit: NSViewController {
 
   private func updateToolbar() {
     // make window toolbar layout and have background to fight the swiftui defaUlt behaviour
-    guard let window = view.window else { return }
     log.trace("Adjusting view's toolbar")
 
-    let atTop = isAtTop()
-    isToolbarVisible = !atTop
-    // window.titlebarAppearsTransparent = atTop
-//    window.titlebarAppearsTransparent = true
-//    window.titlebarSeparatorStyle = .automatic
-//    window.isMovableByWindowBackground = false
-
-    toggleToolbarVisibility(atTop)
+    if #available(macOS 26.0, *) {
+      isToolbarVisible = false
+    } else {
+      let atTop = isAtTop()
+      isToolbarVisible = !atTop
+      toggleToolbarVisibility(atTop)
+    }
   }
 
   private func setupViews() {
     view.addSubview(scrollView)
-    view.addSubview(toolbarBgView)
 
     // Set up constraints
     NSLayoutConstraint.activate([
@@ -315,11 +315,20 @@ class MessageListAppKit: NSViewController {
       scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-      toolbarBgView.topAnchor.constraint(equalTo: view.topAnchor),
-      toolbarBgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      toolbarBgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      toolbarBgView.heightAnchor.constraint(equalToConstant: toolbarHeight),
     ])
+
+    if #available(macOS 26.0, *) {
+      // No BG
+    } else {
+      view.addSubview(toolbarBgView)
+
+      NSLayoutConstraint.activate([
+        toolbarBgView.topAnchor.constraint(equalTo: view.topAnchor),
+        toolbarBgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+        toolbarBgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        toolbarBgView.heightAnchor.constraint(equalToConstant: toolbarHeight),
+      ])
+    }
 
     // Set column width to match scroll view width
     // updateColumnWidth()
