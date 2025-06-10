@@ -900,14 +900,15 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool {
     // If mention menu is visible, select current item with Enter
-    if mentionCompletionMenu?.isVisible == true {
-      mentionCompletionMenu?.selectCurrentItem()
-      return true
+    if let mentionCompletionMenu, mentionCompletionMenu.isVisible {
+      if mentionCompletionMenu.selectCurrentItem() {
+        return true
+      }
     }
 
     // Send
     send()
-    return true // handled
+    return true
   }
 
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage, url: URL? = nil) {
