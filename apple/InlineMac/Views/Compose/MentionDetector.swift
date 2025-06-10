@@ -30,7 +30,14 @@ class MentionDetector {
 
     while searchPosition >= 0 {
       let char = nsString.character(at: searchPosition)
-      log.trace("Checking character at \(searchPosition): '\(Character(UnicodeScalar(char)!))'")
+
+      #if DEBUG
+      if let scalar = UnicodeScalar(char) {
+        log.trace("Checking character at \(searchPosition): '\(Character(scalar))'")
+      } else {
+        log.trace("Checking character at \(searchPosition): [invalid unicode: \(char)]")
+      }
+      #endif // DEBUG
 
       if char == 64 { // '@' character
         atSymbolLocation = searchPosition
@@ -57,7 +64,11 @@ class MentionDetector {
       let charBeforeAt = nsString.character(at: atSymbolLocation - 1)
       if charBeforeAt != 32, charBeforeAt != 10, charBeforeAt != 9 { // space, newline, tab
         // @ is part of another word, not a mention
-        log.trace("@ symbol is part of another word (char before: '\(Character(UnicodeScalar(charBeforeAt)!))')")
+        if let scalar = UnicodeScalar(charBeforeAt) {
+          log.trace("@ symbol is part of another word (char before: '\(Character(scalar))')")
+        } else {
+          log.trace("@ symbol is part of another word (char before: [invalid unicode: \(charBeforeAt)])")
+        }
         return nil
       }
     }
