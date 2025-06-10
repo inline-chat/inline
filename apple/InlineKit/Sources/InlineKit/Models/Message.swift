@@ -85,6 +85,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var documentId: Int64?
   public var transactionId: String?
   public var isSticker: Bool?
+  public var entities: MessageEntities?
 
   public enum Columns {
     public static let globalId = Column(CodingKeys.globalId)
@@ -106,6 +107,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let photoId = Column(CodingKeys.photoId)
     public static let videoId = Column(CodingKeys.videoId)
     public static let documentId = Column(CodingKeys.documentId)
+    public static let entities = Column(CodingKeys.entities)
   }
 
   public static let chat = belongsTo(Chat.self)
@@ -210,7 +212,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     videoId: Int64? = nil,
     documentId: Int64? = nil,
     transactionId: String? = nil,
-    isSticker: Bool? = nil
+    isSticker: Bool? = nil,
+    entities: MessageEntities? = nil
   ) {
     self.messageId = messageId
     self.randomId = randomId
@@ -232,6 +235,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.documentId = documentId
     self.transactionId = transactionId
     self.isSticker = isSticker
+    self.entities = entities
 
     if peerUserId == nil, peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
@@ -280,7 +284,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       photoId: from.media.photo.hasPhoto ? from.media.photo.photo.id : nil,
       videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
       documentId: from.media.document.hasDocument ? from.media.document.document.id : nil,
-      isSticker: from.isSticker
+      isSticker: from.isSticker,
+      entities: from.hasEntities ? from.entities : nil
     )
   }
 
@@ -642,4 +647,3 @@ public extension Message {
     videoId != nil
   }
 }
-
