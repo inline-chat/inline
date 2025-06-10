@@ -115,6 +115,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     messageInfo,
     currentUserId,
     chat,
+    unencryptedEntities: input.entities,
     unencryptedText: input.message,
     inputPeer,
   })
@@ -280,12 +281,13 @@ type SendPushForMsgInput = {
   currentUserId: number
   chat: DbChat
   unencryptedText: string | undefined
+  unencryptedEntities: MessageEntities | undefined
   inputPeer: InputPeer
 }
 
 /** Send push notifications for this message */
 async function sendNotifications(input: SendPushForMsgInput) {
-  const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, inputPeer } = input
+  const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, unencryptedEntities, inputPeer } = input
 
   // AI
   let evalResult: NotificationEvalResult | undefined
@@ -320,6 +322,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
         message: {
           id: messageInfo.message.messageId,
           text: unencryptedText,
+          entities: unencryptedEntities ?? null,
           message: messageInfo.message,
         },
         participantSettings,
