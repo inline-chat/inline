@@ -59,8 +59,12 @@ export type DbInputFullMessage = DbMessage & {
   messageAttachments?: DbInputFullAttachment[]
 }
 
-export type ProcessedMessage = Omit<DbMessage, "textEncrypted" | "textIv" | "textTag"> & {
+export type ProcessedMessage = Omit<
+  DbMessage,
+  "textEncrypted" | "textIv" | "textTag" | "entitiesEncrypted" | "entitiesIv" | "entitiesTag"
+> & {
   text: string | null
+  entities: MessageEntities | null
 }
 
 export type ProcessedMessageTranslation = Omit<DbTranslation, "translation" | "translationIv" | "translationTag"> & {
@@ -493,6 +497,12 @@ async function getNonFullMessagesRange(chatId: number, offsetId: number, limit: 
           })
         : // legacy fallback
           msg.text,
+    entities:
+      msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
+        ? MessageEntities.fromBinary(
+            decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
+          )
+        : null,
   }))
 }
 
@@ -520,6 +530,12 @@ async function getNonFullMessagesFromNewToOld(input: {
           })
         : // legacy fallback
           msg.text,
+    entities:
+      msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
+        ? MessageEntities.fromBinary(
+            decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
+          )
+        : null,
   }))
 }
 
@@ -561,5 +577,11 @@ async function getMessagesAroundTarget(
           })
         : // legacy fallback
           msg.text,
+    entities:
+      msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
+        ? MessageEntities.fromBinary(
+            decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
+          )
+        : null,
   }))
 }
