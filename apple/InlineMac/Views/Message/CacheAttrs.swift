@@ -21,9 +21,10 @@ class CacheAttrs {
     var textCount: Int
     var textHash: Int
     var stableId: Int64
+    var entitiesHash: Int?
 
     var stringValue: String {
-      "\(isTranslated ? "T" : "")_\(textCount)_\(textHash)_\(stableId)"
+      "\(isTranslated ? "T" : "")_\(textCount)_\(textHash)_\(stableId)_\(entitiesHash)"
     }
   }
 
@@ -33,7 +34,8 @@ class CacheAttrs {
       isTranslated: message.translationText != nil,
       textCount: message.displayText?.count ?? 0,
       textHash: message.message.text?.hashValue ?? 0,
-      stableId: message.message.stableId
+      stableId: message.message.stableId,
+      entitiesHash: message.message.entities?.hashValue ?? 0
     )
   }
 

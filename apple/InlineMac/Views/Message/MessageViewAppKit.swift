@@ -113,6 +113,14 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  private var mentionColor: NSColor {
+    if outgoing {
+      NSColor.white
+    } else {
+      NSColor.systemBlue
+    }
+  }
+
   private var senderFont: NSFont {
     .systemFont(
       ofSize: 12,
@@ -1054,6 +1062,25 @@ class MessageViewAppKit: NSView {
             .foregroundColor: linkColor,
             .underlineStyle: NSUnderlineStyle.single.rawValue,
           ], range: match.range)
+        }
+      }
+    }
+
+    // Add mention styling
+    if let entities = fullMessage.message.entities {
+      for entity in entities.entities {
+        if entity.type == .mention, case let .mention(mention) = entity.entity {
+          let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
+
+          // Validate range is within bounds
+          if range.location >= 0, range.location + range.length <= text.utf16.count {
+            attributedString.addAttributes([
+              .foregroundColor: mentionColor,
+              .underlineStyle: NSUnderlineStyle.single.rawValue,
+              .cursor: NSCursor.pointingHand,
+              .link: "inline://user/\(mention.userID)", // Custom URL scheme for mentions
+            ], range: range)
+          }
         }
       }
     }
