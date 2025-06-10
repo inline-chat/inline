@@ -27,7 +27,7 @@ struct OnboardingWelcome: View {
         .offset(y: isVisible ? 0 : 20)
         .animation(animation.delay(0.4), value: isVisible)
 
-      Text("A fresh chatting experience")
+      Text("A fast, tranquil, AI native work chat app")
         .font(.system(size: 20.0, weight: .regular))
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
