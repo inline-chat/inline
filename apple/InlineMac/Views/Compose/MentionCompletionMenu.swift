@@ -7,7 +7,7 @@ import Logger
 import SwiftUI
 
 protocol MentionCompletionMenuDelegate: AnyObject {
-  func mentionMenu(_ menu: MentionCompletionMenu, didSelectUser user: UserInfo, withText text: String)
+  func mentionMenu(_ menu: MentionCompletionMenu, didSelectUser user: UserInfo, withText text: String, userId: Int64)
   func mentionMenuDidRequestClose(_ menu: MentionCompletionMenu)
 }
 
@@ -290,8 +290,10 @@ class MentionCompletionMenu: NSView {
   func selectCurrentItem() -> Bool {
     guard selectedIndex >= 0, selectedIndex < filteredParticipants.count else { return false }
     let participant = filteredParticipants[selectedIndex]
-    let mentionText = "@\(participant.user.username ?? participant.user.displayName)"
-    delegate?.mentionMenu(self, didSelectUser: participant, withText: mentionText)
+    // Use first name of user as mention text
+    let firstName = participant.user.displayName.components(separatedBy: " ").first ?? participant.user.displayName
+    let mentionText = "@\(firstName)"
+    delegate?.mentionMenu(self, didSelectUser: participant, withText: mentionText, userId: participant.user.id)
     return true
   }
 
