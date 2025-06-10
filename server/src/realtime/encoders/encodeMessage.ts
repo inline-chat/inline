@@ -1,15 +1,24 @@
 import type { TPeerInfo } from "@in/server/api-types"
 import type { DbFile, DbMessage } from "@in/server/db/schema"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
-import type { InputPeer, Message, MessageMedia, MessageAttachment, MessageAttachments, Peer } from "@in/protocol/core"
+import {
+  type InputPeer,
+  type Message,
+  type MessageMedia,
+  type MessageAttachment,
+  type MessageAttachments,
+  type Peer,
+  MessageEntities,
+} from "@in/protocol/core"
 import { encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodePhoto, encodePhotoLegacy } from "@in/server/realtime/encoders/encodePhoto"
 import type { DbFullDocument, DbFullPhoto, DbFullVideo } from "@in/server/db/models/files"
 import { encodeVideo } from "@in/server/realtime/encoders/encodeVideo"
 import { encodeDocument } from "@in/server/realtime/encoders/encodeDocument"
 import type { DbFullMessage } from "@in/server/db/models/messages"
-import { encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodeReaction } from "@in/server/realtime/encoders/encodeReaction"
+import { decryptBinary } from "@in/server/modules/encryption/encryption"
 
 export const encodeMessage = ({
   message,
@@ -37,6 +46,16 @@ export const encodeMessage = ({
       authTag: message.textTag,
     })
     text = decryptedText
+  }
+
+  let entities: MessageEntities | undefined = undefined
+  if (message.entitiesEncrypted && message.entitiesIv && message.entitiesTag) {
+    const decryptedEntities = decryptBinary({
+      encrypted: message.entitiesEncrypted,
+      iv: message.entitiesIv,
+      authTag: message.entitiesTag,
+    })
+    entities = MessageEntities.fromBinary(decryptedEntities)
   }
 
   let peerId: Peer
@@ -97,6 +116,7 @@ export const encodeMessage = ({
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker ?? false,
+    entities: entities,
   }
 
   return messageProto
