@@ -246,7 +246,7 @@ class MessageViewAppKit: NSView {
       // does not have any effect.
       textView.linkTextAttributes = [
         .foregroundColor: linkColor,
-        .underlineStyle: NSUnderlineStyle.single.rawValue,
+        //.underlineStyle: NSUnderlineStyle.single.rawValue,
         .cursor: NSCursor.pointingHand,
       ]
 
@@ -1076,7 +1076,7 @@ class MessageViewAppKit: NSView {
           if range.location >= 0, range.location + range.length <= text.utf16.count {
             attributedString.addAttributes([
               .foregroundColor: mentionColor,
-              .underlineStyle: NSUnderlineStyle.single.rawValue,
+              // .underlineStyle: NSUnderlineStyle.single.rawValue,
               .cursor: NSCursor.pointingHand,
               .link: "inline://user/\(mention.userID)", // Custom URL scheme for mentions
             ], range: range)
