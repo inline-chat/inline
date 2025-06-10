@@ -82,6 +82,15 @@ class MainWindowController: NSWindowController {
     reloadToolbar()
   }
 
+  private var titlebarAppearsTransparent: Bool {
+    if #available(macOS 26.0, *) {
+      false
+    } else {
+      // Fallback on earlier versions
+      true
+    }
+  }
+
   private func setupMainSplitView() {
     log.debug("Setting up main split view")
 
@@ -97,7 +106,7 @@ class MainWindowController: NSWindowController {
 
     window?.titleVisibility = .hidden
     window?.isMovableByWindowBackground = false
-    window?.titlebarAppearsTransparent = true
+    window?.titlebarAppearsTransparent = titlebarAppearsTransparent
     // window background is set based on current route
 
     setupWindowFor(route: nav.currentRoute)
@@ -195,7 +204,7 @@ class MainWindowController: NSWindowController {
 
       default:
         window?.backgroundColor = .controlBackgroundColor
-        window?.titlebarAppearsTransparent = true
+        window?.titlebarAppearsTransparent = titlebarAppearsTransparent
         window?.isMovableByWindowBackground = false
     }
   }
