@@ -45,12 +45,14 @@ public struct TransactionSendMessage: Transaction {
     chatId: Int64,
     mediaItems: [FileMediaItem] = [],
     replyToMsgId: Int64? = nil,
-    isSticker: Bool? = nil
+    isSticker: Bool? = nil,
+    entities: MessageEntities? = nil
   ) {
     self.text = text
     self.peerId = peerId
     self.chatId = chatId
     self.isSticker = isSticker
+    self.entities = entities
     attachments = mediaItems.map { SendMessageAttachment(media: $0) }
     self.replyToMsgId = replyToMsgId
     randomId = Int64.random(in: 0 ... Int64.max)
