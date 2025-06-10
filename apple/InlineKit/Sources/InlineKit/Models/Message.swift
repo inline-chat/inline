@@ -363,6 +363,7 @@ public extension Message {
         photoId = photoId ?? existing.photoId
         documentId = documentId ?? existing.documentId
         videoId = videoId ?? existing.videoId
+        entities = entities ?? existing.entities
 
         transactionId = existing.transactionId
         isExisting = true

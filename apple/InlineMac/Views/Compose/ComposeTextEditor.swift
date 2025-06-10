@@ -28,6 +28,19 @@ class ComposeTextEditor: NSView {
     }
   }
 
+  var attributedString: NSAttributedString {
+    textView.attributedString()
+  }
+
+  func setAttributedString(_ attributedString: NSAttributedString) {
+    textView.setAttributedText(attributedString, preserveSelection: true)
+  }
+
+  // Does not preserve selection
+  func replaceAttributedString(_ attributedString: NSAttributedString) {
+    textView.setAttributedText(attributedString, preserveSelection: false)
+  }
+
   private lazy var paragraphStyle = {
     let paragraph = NSParagraphStyle.default.mutableCopy() as! NSMutableParagraphStyle
     paragraph.lineSpacing = 0.0
@@ -230,17 +243,25 @@ class ComposeTextEditor: NSView {
   }
 
   func clear() {
-    textView.string = ""
+    let emptyAttributedString = createEmptyAttributedString()
+    textView.setAttributedText(emptyAttributedString, preserveSelection: false)
     showPlaceholder(true)
   }
 
   public func setString(_ string: String) {
-    textView.string = string
+    let attributedString = createAttributedString(string)
+    textView.setAttributedText(attributedString, preserveSelection: false)
     if string.isEmpty {
       showPlaceholder(true)
     } else {
       showPlaceholder(false)
     }
+  }
+
+  func insertText(_ text: String) {
+    // Ensure proper typing attributes before inserting text
+    textView.updateTypingAttributesIfNeeded()
+    textView.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
   }
 
   func resetTextViewInsets() {
@@ -285,5 +306,88 @@ class ComposeTextEditor: NSView {
       textView.selectedRange = NSMakeRange(currentRange.location, 0)
       textView.setNeedsDisplay(textView.bounds)
     }
+  }
+}
+
+// MARK: - NSTextView Extensions for Attributed String Helpers
+
+extension NSTextView {
+  /// Default attributes for this text view
+  var defaultTypingAttributes: [NSAttributedString.Key: Any] {
+    [
+      .font: font ?? NSFont.preferredFont(forTextStyle: .body),
+      .foregroundColor: NSColor.labelColor,
+    ]
+  }
+
+  /// Check if cursor is positioned after a mention
+  var isCursorAfterMention: Bool {
+    let selectedRange = selectedRange()
+    guard selectedRange.length == 0, selectedRange.location > 0 else { return false }
+
+    let checkPosition = selectedRange.location - 1
+    let attributes = attributedString().attributes(at: checkPosition, effectiveRange: nil)
+    return attributes[.mentionUserId] != nil
+  }
+
+  /// Check if current typing attributes have mention styling
+  var hasTypingAttributesMentionStyling: Bool {
+    let currentTypingAttributes = typingAttributes
+    return currentTypingAttributes[.mentionUserId] != nil ||
+      (currentTypingAttributes[.foregroundColor] as? NSColor) == NSColor.systemBlue
+  }
+
+  /// Reset typing attributes to default to prevent mention style leakage
+  func resetTypingAttributesToDefault() {
+    typingAttributes = defaultTypingAttributes
+  }
+
+  /// Update typing attributes based on cursor position to prevent style leakage
+  func updateTypingAttributesIfNeeded() {
+    let selectedRange = selectedRange()
+
+    // If cursor is after a mention or typing attributes have mention styling, reset to default
+    if selectedRange.length == 0, isCursorAfterMention || hasTypingAttributesMentionStyling {
+      resetTypingAttributesToDefault()
+    }
+  }
+
+  /// Set attributed text while preserving selection
+  func setAttributedText(_ attributedString: NSAttributedString, preserveSelection: Bool = true) {
+    let selectedRanges = preserveSelection ? selectedRanges : []
+    textStorage?.setAttributedString(attributedString)
+    if preserveSelection {
+      self.selectedRanges = selectedRanges
+    }
+  }
+}
+
+// MARK: - ComposeTextEditor Extensions
+
+extension ComposeTextEditor {
+  /// Create attributed string using this editor's font
+  func createAttributedString(_ text: String) -> NSAttributedString {
+    NSAttributedString(string: text, attributes: [
+      .font: font,
+      .foregroundColor: NSColor.labelColor,
+    ])
+  }
+
+  /// Create empty attributed string using this editor's font
+  func createEmptyAttributedString() -> NSAttributedString {
+    NSAttributedString(string: "", attributes: [
+      .font: font,
+      .foregroundColor: NSColor.labelColor,
+    ])
+  }
+
+  /// Check if the attributed text in this editor is empty
+  var isAttributedTextEmpty: Bool {
+    attributedString.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  /// Get plain text from this editor's attributed string
+  var plainText: String {
+    attributedString.string
   }
 }
