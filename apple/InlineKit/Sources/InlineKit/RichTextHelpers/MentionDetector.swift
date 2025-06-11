@@ -16,9 +16,9 @@ public struct MentionRange {
 
 public class MentionDetector {
   private let log = Log.scoped("MentionDetector")
-  
+
   public init() {}
-  
+
   /// Detects if there's an active mention at the cursor position
   /// Returns the mention range and query if found, nil otherwise
   public func detectMentionAt(cursorPosition: Int, in attributedText: NSAttributedString) -> MentionRange? {
