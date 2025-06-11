@@ -1,3 +1,4 @@
+import InlineKit
 import Logger
 import ObjectiveC
 import UIKit
@@ -670,5 +671,51 @@ extension UIImage {
     }
 
     return nonTransparentCount < (sampleSize / 20)
+  }
+}
+
+// MARK: - UITextView Extensions for Mention Style Management
+
+extension UITextView {
+  /// Default attributes for this text view
+  var defaultTypingAttributes: [NSAttributedString.Key: Any] {
+    [
+      .font: font ?? UIFont.systemFont(ofSize: 17),
+      .foregroundColor: UIColor.label,
+    ]
+  }
+
+  /// Check if cursor is positioned after a mention
+  var isCursorAfterMention: Bool {
+    let selectedRange = selectedRange
+    guard selectedRange.length == 0, selectedRange.location > 0 else { return false }
+
+    let checkPosition = selectedRange.location - 1
+    guard checkPosition < attributedText.length else { return false }
+
+    let attributes = attributedText.attributes(at: checkPosition, effectiveRange: nil)
+    return attributes[.mentionUserId] != nil
+  }
+
+  /// Check if current typing attributes have mention styling
+  var hasTypingAttributesMentionStyling: Bool {
+    let currentTypingAttributes = typingAttributes
+    return currentTypingAttributes[.mentionUserId] != nil ||
+      (currentTypingAttributes[.foregroundColor] as? UIColor) == UIColor.systemBlue
+  }
+
+  /// Reset typing attributes to default to prevent mention style leakage
+  func resetTypingAttributesToDefault() {
+    typingAttributes = defaultTypingAttributes
+  }
+
+  /// Update typing attributes based on cursor position to prevent style leakage
+  func updateTypingAttributesIfNeeded() {
+    let selectedRange = selectedRange
+
+    // If cursor is after a mention or typing attributes have mention styling, reset to default
+    if selectedRange.length == 0, isCursorAfterMention || hasTypingAttributesMentionStyling {
+      resetTypingAttributesToDefault()
+    }
   }
 }

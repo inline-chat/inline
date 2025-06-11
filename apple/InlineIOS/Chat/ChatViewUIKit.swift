@@ -2,7 +2,7 @@ import InlineKit
 import SwiftUI
 import UIKit
 
-class ChatContainerView: UIView {
+public class ChatContainerView: UIView {
   let peerId: Peer
   let chatId: Int64?
   let spaceId: Int64
@@ -29,6 +29,14 @@ class ChatContainerView: UIView {
   lazy var composeEmbedViewWrapper: UIView = {
     let view = UIView()
 
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  var mentionCompletionView: MentionCompletionView?
+
+  lazy var mentionCompletionViewWrapper: UIView = {
+    let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -85,6 +93,7 @@ class ChatContainerView: UIView {
 
   private var composeEmbedHeightConstraint: NSLayoutConstraint!
   private var composeEmbedBottomConstraint: NSLayoutConstraint?
+  private var mentionCompletionHeightConstraint: NSLayoutConstraint!
 
   private func setupViews() {
     backgroundColor = ThemeManager.shared.selected.backgroundColor
@@ -93,6 +102,7 @@ class ChatContainerView: UIView {
     addSubview(blurView)
     blurView.contentView.addSubview(borderView)
     addSubview(composeEmbedViewWrapper)
+    addSubview(mentionCompletionViewWrapper)
     addSubview(composeView)
     addSubview(scrollButton)
     scrollButton.isHidden = true
@@ -103,6 +113,10 @@ class ChatContainerView: UIView {
     // initialize the height constraint
     composeEmbedHeightConstraint = composeEmbedViewWrapper.heightAnchor
       .constraint(equalToConstant: hasEmbed ? ComposeEmbedView.height : 0)
+
+    // initialize mention completion height constraint
+    mentionCompletionHeightConstraint = mentionCompletionViewWrapper.heightAnchor
+      .constraint(equalToConstant: 0)
 
     if hasEmbed {
       addReplyView()
@@ -132,6 +146,17 @@ class ChatContainerView: UIView {
         constant: -ComposeView.textViewHorizantalMargin
       ),
       composeEmbedHeightConstraint,
+
+      mentionCompletionViewWrapper.bottomAnchor.constraint(equalTo: composeEmbedViewWrapper.topAnchor),
+      mentionCompletionViewWrapper.leadingAnchor.constraint(
+        equalTo: leadingAnchor,
+        constant: ComposeView.textViewHorizantalMargin
+      ),
+      mentionCompletionViewWrapper.trailingAnchor.constraint(
+        equalTo: trailingAnchor,
+        constant: -ComposeView.textViewHorizantalMargin
+      ),
+      mentionCompletionHeightConstraint,
 
       composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
       composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
@@ -286,6 +311,90 @@ class ChatContainerView: UIView {
     ])
 
     composeEmbedView = newComposeEmbedView
+  }
+
+  private func addMentionCompletionView() {
+    let newMentionCompletionView = MentionCompletionView()
+    newMentionCompletionView.translatesAutoresizingMaskIntoConstraints = false
+    mentionCompletionViewWrapper.clipsToBounds = true
+    mentionCompletionViewWrapper.addSubview(newMentionCompletionView)
+
+    NSLayoutConstraint.activate([
+      newMentionCompletionView.leadingAnchor.constraint(
+        equalTo: mentionCompletionViewWrapper.leadingAnchor,
+        constant: 6
+      ),
+      newMentionCompletionView.trailingAnchor.constraint(
+        equalTo: mentionCompletionViewWrapper.trailingAnchor,
+        constant: -6
+      ),
+      newMentionCompletionView.bottomAnchor.constraint(
+        equalTo: mentionCompletionViewWrapper.bottomAnchor,
+        constant: -4
+      ),
+      newMentionCompletionView.topAnchor.constraint(equalTo: mentionCompletionViewWrapper.topAnchor),
+    ])
+
+    mentionCompletionView = newMentionCompletionView
+  }
+
+  public func showMentionCompletion(_ completionView: MentionCompletionView, with height: CGFloat) {
+    // Remove existing mention completion view if different
+    if mentionCompletionView != completionView {
+      mentionCompletionView?.removeFromSuperview()
+      mentionCompletionView = completionView
+
+      // Add the new completion view to wrapper
+      completionView.translatesAutoresizingMaskIntoConstraints = false
+      mentionCompletionViewWrapper.clipsToBounds = true
+      mentionCompletionViewWrapper.addSubview(completionView)
+
+      NSLayoutConstraint.activate([
+        completionView.leadingAnchor.constraint(
+          equalTo: mentionCompletionViewWrapper.leadingAnchor,
+          constant: 6
+        ),
+        completionView.trailingAnchor.constraint(
+          equalTo: mentionCompletionViewWrapper.trailingAnchor,
+          constant: -6
+        ),
+        completionView.bottomAnchor.constraint(
+          equalTo: mentionCompletionViewWrapper.bottomAnchor,
+          constant: -4
+        ),
+        completionView.topAnchor.constraint(equalTo: mentionCompletionViewWrapper.topAnchor),
+      ])
+    }
+
+    mentionCompletionHeightConstraint.constant = height
+    completionView.show()
+
+    UIView.animate(withDuration: 0.2) {
+      self.layoutIfNeeded()
+    }
+  }
+
+  func showMentionCompletion(with height: CGFloat) {
+    if mentionCompletionView == nil {
+      addMentionCompletionView()
+    }
+
+    mentionCompletionHeightConstraint.constant = height
+
+    UIView.animate(withDuration: 0.2) {
+      self.layoutIfNeeded()
+    }
+  }
+
+  public func hideMentionCompletion() {
+    mentionCompletionHeightConstraint.constant = 0
+
+    UIView.animate(withDuration: 0.2) {
+      self.layoutIfNeeded()
+    } completion: { _ in
+      self.mentionCompletionView?.removeFromSuperview()
+      self.mentionCompletionView = nil
+    }
   }
 
   @objc private func setReply() {
