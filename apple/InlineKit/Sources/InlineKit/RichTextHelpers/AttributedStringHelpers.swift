@@ -10,6 +10,7 @@ import InlineProtocol
 public class AttributedStringHelpers {
   // MARK: - Mention Attributes
 
+  #if os(macOS)
   public static func mentionAttributes(
     userId: Int64,
     font: NSFont = .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -20,6 +21,19 @@ public class AttributedStringHelpers {
       .font: font,
     ]
   }
+
+  #elseif os(iOS)
+  public static func mentionAttributes(
+    userId: Int64,
+    font: UIFont = UIFont.systemFont(ofSize: 17, weight: .regular)
+  ) -> [NSAttributedString.Key: Any] {
+    [
+      .mentionUserId: userId,
+      .foregroundColor: UIColor.systemBlue,
+      .font: font,
+    ]
+  }
+  #endif
 
   // MARK: - Mention Creation
 
