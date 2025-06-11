@@ -14,7 +14,7 @@ final class MessagesCollectionView: UICollectionView {
   private var chatId: Int64
   private var spaceId: Int64
   private var coordinator: Coordinator
-  var accessoryProvider: ((IndexPath) -> ([Any]))?
+  var accessoryProvider: ((IndexPath) -> [Any])?
   static var contextMenuOpen: Bool = false
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
@@ -61,6 +61,15 @@ final class MessagesCollectionView: UICollectionView {
     delegate = coordinator
     autoresizingMask = [.flexibleHeight]
     alwaysBounceVertical = true
+
+
+    if #available(iOS 26.0, *) {
+      topEdgeEffect.isHidden = true
+    } else {
+      
+    }
+
+
     register(
       MessageCollectionViewCell.self,
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier

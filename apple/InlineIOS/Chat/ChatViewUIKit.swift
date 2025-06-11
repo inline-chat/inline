@@ -34,12 +34,22 @@ class ChatContainerView: UIView {
   }()
 
   private let blurView: UIVisualEffectView = {
-    let effect = UIBlurEffect(style: .regular)
-    let view = UIVisualEffectView(effect: effect)
-    view.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.6)
+    if #available(iOS 26.0, *) {
+      let glassEffect = UIGlassEffect()
+      let view = UIVisualEffectView()
+      UIView.animate {
+        view.effect = glassEffect
+      }
+      view.translatesAutoresizingMaskIntoConstraints = false
 
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
+      return view
+    } else {
+      let effect = UIBlurEffect(style: .regular)
+      let view = UIVisualEffectView(effect: effect)
+      view.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.6)
+      view.translatesAutoresizingMaskIntoConstraints = false
+      return view
+    }
   }()
 
   private lazy var borderView: UIView = {
