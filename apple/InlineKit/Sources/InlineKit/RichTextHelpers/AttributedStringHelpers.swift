@@ -1,11 +1,16 @@
+#if os(macOS)
 import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
+
 import InlineProtocol
 
 /// Helper class for mention-specific attributed string operations
-class AttributedStringHelpers {
+public class AttributedStringHelpers {
   // MARK: - Mention Attributes
 
-  static func mentionAttributes(
+  public static func mentionAttributes(
     userId: Int64,
     font: NSFont = .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
   ) -> [NSAttributedString.Key: Any] {
@@ -18,13 +23,13 @@ class AttributedStringHelpers {
 
   // MARK: - Mention Creation
 
-  static func createMentionAttributedString(_ text: String, userId: Int64) -> NSAttributedString {
+  public static func createMentionAttributedString(_ text: String, userId: Int64) -> NSAttributedString {
     NSAttributedString(string: text, attributes: mentionAttributes(userId: userId))
   }
 
   // MARK: - Mention Manipulation
 
-  static func replaceMentionInAttributedString(
+  public static func replaceMentionInAttributedString(
     _ attributedString: NSAttributedString,
     range: NSRange,
     with mentionText: String,
@@ -36,7 +41,7 @@ class AttributedStringHelpers {
     return mutableAttributedString.copy() as! NSAttributedString
   }
 
-  static func extractMentionEntities(from attributedString: NSAttributedString) -> [MessageEntity] {
+  public static func extractMentionEntities(from attributedString: NSAttributedString) -> [MessageEntity] {
     var entities: [MessageEntity] = []
     let text = attributedString.string
 
@@ -63,6 +68,6 @@ class AttributedStringHelpers {
 
 // MARK: - NSAttributedString.Key Extension
 
-extension NSAttributedString.Key {
+public extension NSAttributedString.Key {
   static let mentionUserId = NSAttributedString.Key("mentionUserId")
 }

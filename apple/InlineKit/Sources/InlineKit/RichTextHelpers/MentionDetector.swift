@@ -1,20 +1,27 @@
+#if os(macOS)
 import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
+
 import Foundation
 import InlineProtocol
 import Logger
 
-struct MentionRange {
-  let range: NSRange
-  let query: String
-  let atSymbolLocation: Int
+public struct MentionRange {
+  public let range: NSRange
+  public let query: String
+  public let atSymbolLocation: Int
 }
 
-class MentionDetector {
+public class MentionDetector {
   private let log = Log.scoped("MentionDetector")
-
+  
+  public init() {}
+  
   /// Detects if there's an active mention at the cursor position
   /// Returns the mention range and query if found, nil otherwise
-  func detectMentionAt(cursorPosition: Int, in attributedText: NSAttributedString) -> MentionRange? {
+  public func detectMentionAt(cursorPosition: Int, in attributedText: NSAttributedString) -> MentionRange? {
     let text = attributedText.string
     guard cursorPosition <= text.count else {
       log.trace("Cursor position \(cursorPosition) is beyond text length \(text.count)")
@@ -103,7 +110,7 @@ class MentionDetector {
   }
 
   /// Replace a mention range with the selected mention text and user ID
-  func replaceMention(
+  public func replaceMention(
     in attributedText: NSAttributedString,
     range: NSRange,
     with mentionText: String,
@@ -125,26 +132,26 @@ class MentionDetector {
   }
 
   /// Extract mention entities from attributed text for sending
-  func extractMentionEntities(from attributedText: NSAttributedString) -> [MessageEntity] {
+  public func extractMentionEntities(from attributedText: NSAttributedString) -> [MessageEntity] {
     let entities = AttributedStringHelpers.extractMentionEntities(from: attributedText)
     log.debug("Extracted \(entities.count) mention entities")
     return entities
   }
 
   /// Check if character being typed should trigger mention detection
-  func shouldTriggerMentionDetection(for character: String) -> Bool {
+  public func shouldTriggerMentionDetection(for character: String) -> Bool {
     character == "@"
   }
 
   /// Check if typing should continue mention detection
-  func shouldContinueMentionDetection(for character: String) -> Bool {
+  public func shouldContinueMentionDetection(for character: String) -> Bool {
     // Continue if it's alphanumeric or underscore
     let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_"))
     return character.unicodeScalars.allSatisfy { allowedCharacters.contains($0) }
   }
 
   /// Check if character should cancel mention detection
-  func shouldCancelMentionDetection(for character: String) -> Bool {
+  public func shouldCancelMentionDetection(for character: String) -> Bool {
     // Cancel on whitespace, newline, or special characters
     let cancelCharacters = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: " \t\n@#"))
     return character.unicodeScalars.allSatisfy { cancelCharacters.contains($0) }
