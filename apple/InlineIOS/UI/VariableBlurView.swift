@@ -185,7 +185,7 @@ public struct VariableBlurView: UIViewRepresentable {
   /// A variable blur view.
   public init(
     gradientMask: UIImage = VariableBlurViewConstants.defaultGradientMask,
-    maxBlurRadius: CGFloat = 20,
+    maxBlurRadius: CGFloat = 2,
     filterType: String = "variableBlur"
   ) {
     self.gradientMask = gradientMask
