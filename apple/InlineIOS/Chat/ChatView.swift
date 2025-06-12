@@ -189,6 +189,22 @@ struct ChatView: View {
         nav.pop()
       }
     }
+    .onReceive(
+      NotificationCenter.default
+        .publisher(for: Notification.Name("MentionTapped"))
+    ) { notification in
+      if let userId = notification.userInfo?["userId"] as? Int64 {
+        Task {
+          // TODO: hacky
+          do {
+            let peer = try await data.createPrivateChat(userId: userId)
+            nav.push(.chat(peer: peer))
+          } catch {
+            Log.shared.error("Failed to create private chat for mention", error: error)
+          }
+        }
+      }
+    }
     .environmentObject(fullChatViewModel)
   }
 

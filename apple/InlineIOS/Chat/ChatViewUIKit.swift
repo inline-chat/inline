@@ -146,7 +146,9 @@ public class ChatContainerView: UIView {
         constant: -ComposeView.textViewHorizantalMargin
       ),
       composeEmbedHeightConstraint,
-
+      composeEmbedViewWrapper.heightAnchor.constraint(
+        greaterThanOrEqualToConstant: ComposeEmbedView.height
+      ),
       mentionCompletionViewWrapper.bottomAnchor.constraint(equalTo: composeEmbedViewWrapper.topAnchor),
       mentionCompletionViewWrapper.leadingAnchor.constraint(
         equalTo: leadingAnchor,
