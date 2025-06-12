@@ -41,32 +41,48 @@ public class MentionCompletionView: UIView {
     return stackView
   }()
 
-  private lazy var backgroundView: UIVisualEffectView = {
-    if #available(iOS 26.0, *) {
-      let glassEffect = UIGlassEffect()
-      let view = UIVisualEffectView()
-      UIView.animate {
-        view.effect = glassEffect
-      }
-      view.layer.cornerRadius = 12
-      view.layer.shadowColor = UIColor.black.cgColor
-      view.layer.shadowOpacity = 0.1
-      view.layer.shadowOffset = CGSize(width: 0, height: 2)
-      view.layer.shadowRadius = 8
-      view.translatesAutoresizingMaskIntoConstraints = false
-      return view
-    } else {
-      let effect = UIBlurEffect(style: .regular)
-      let view = UIVisualEffectView(effect: effect)
-      view.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.6)
-      view.layer.cornerRadius = 12
-      view.layer.shadowColor = UIColor.black.cgColor
-      view.layer.shadowOpacity = 0.1
-      view.layer.shadowOffset = CGSize(width: 0, height: 2)
-      view.layer.shadowRadius = 8
-      view.translatesAutoresizingMaskIntoConstraints = false
-      return view
-    }
+  private lazy var backgroundView: UIView = {
+    let view = UIView()
+
+    // Create blur effect
+    let blurEffect = UIBlurEffect(style: .systemMaterial)
+    let blurEffectView = UIVisualEffectView(effect: blurEffect)
+    blurEffectView.translatesAutoresizingMaskIntoConstraints = false
+    blurEffectView.layer.cornerRadius = 12
+    blurEffectView.clipsToBounds = true
+
+    view.addSubview(blurEffectView)
+
+    // Add subtle tint over blur
+    let tintView = UIView()
+    tintView.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.1)
+    tintView.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(tintView)
+
+    NSLayoutConstraint.activate([
+      blurEffectView.topAnchor.constraint(equalTo: view.topAnchor),
+      blurEffectView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      blurEffectView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      blurEffectView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+      tintView.topAnchor.constraint(equalTo: view.topAnchor),
+      tintView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      tintView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      tintView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+    ])
+
+    view.layer.cornerRadius = 12
+    view.layer.borderWidth = 1.0
+    view.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.2).cgColor
+
+    view.layer.shadowColor = UIColor.label.cgColor
+    view.layer.shadowOffset = CGSize(width: 0, height: 2)
+    view.layer.shadowRadius = 8
+    view.layer.shadowOpacity = 0.08
+    view.layer.masksToBounds = false
+
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
   }()
 
   var isVisible: Bool {
@@ -120,7 +136,7 @@ public class MentionCompletionView: UIView {
 
   func filterParticipants(with query: String) {
     if query.isEmpty {
-      filteredParticipants = participants
+      filteredParticipants = participants.filter { !$0.user.isCurrentUser() }
     } else {
       filteredParticipants = participants.filter { userInfo in
         userInfo.user.fullName.lowercased().contains(query.lowercased()) ||
@@ -196,12 +212,10 @@ public class MentionCompletionView: UIView {
     containerView.translatesAutoresizingMaskIntoConstraints = false
     containerView.tag = index
 
-    // Avatar
     let avatarView = UserAvatarView()
     avatarView.configure(with: user, size: 36)
     avatarView.translatesAutoresizingMaskIntoConstraints = false
 
-    // Name label (like ComposeEmbedView's nameLabel)
     let nameLabel = UILabel()
     nameLabel.font = .systemFont(ofSize: 17, weight: .medium)
     nameLabel.textColor = .label
@@ -209,9 +223,8 @@ public class MentionCompletionView: UIView {
     nameLabel.text = user.user.fullName.isEmpty ? (user.user.username ?? "Unknown") : user.user.fullName
     nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
-    // Username label (like ComposeEmbedView's messageLabel)
     let usernameLabel = UILabel()
-    usernameLabel.font = .systemFont(ofSize: 17, weight: .regular)
+    usernameLabel.font = .systemFont(ofSize: 15, weight: .regular)
     usernameLabel.textColor = .secondaryLabel
     usernameLabel.numberOfLines = 1
     usernameLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -223,17 +236,15 @@ public class MentionCompletionView: UIView {
       usernameLabel.isHidden = true
     }
 
-    // Labels stack (like ComposeEmbedView's labelsStackView)
     let labelsStackView = UIStackView(arrangedSubviews: [nameLabel, usernameLabel])
     labelsStackView.axis = .vertical
     labelsStackView.spacing = 4
     labelsStackView.alignment = .leading
     labelsStackView.translatesAutoresizingMaskIntoConstraints = false
 
-    // Container stack (like ComposeEmbedView's containerStackView)
     let containerStackView = UIStackView(arrangedSubviews: [avatarView, labelsStackView])
     containerStackView.axis = .horizontal
-    containerStackView.spacing = 12
+    containerStackView.spacing = 6
     containerStackView.alignment = .center
     containerStackView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -244,18 +255,14 @@ public class MentionCompletionView: UIView {
       avatarView.heightAnchor.constraint(equalToConstant: 36),
 
       containerStackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10),
-      containerStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 6),
-      // Match ComposeEmbedView internal margin
-      containerStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -6),
-      // Match ComposeEmbedView internal margin
-      containerStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -4),
-      // Match ComposeEmbedView internal margin
+      containerStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+      containerStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+      containerStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
       containerStackView.heightAnchor.constraint(equalToConstant: 36),
 
       containerView.heightAnchor.constraint(equalToConstant: Self.itemHeight),
     ])
 
-    // Add tap gesture
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(rowTapped(_:)))
     containerView.addGestureRecognizer(tapGesture)
 

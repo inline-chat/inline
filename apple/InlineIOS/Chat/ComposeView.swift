@@ -3,6 +3,7 @@ import Combine
 import CoreServices
 import ImageIO
 import InlineKit
+import InlineProtocol
 import Logger
 import MobileCoreServices
 import PhotosUI
@@ -44,8 +45,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   var attachmentItems: [UIImage: FileMediaItem] = [:]
 
   var onHeightChange: ((CGFloat) -> Void)?
-  var peerId: Peer?
+  var peerId: InlineKit.Peer?
   var chatId: Int64?
+
+  // Mention functionality
+  private var mentionManager: MentionManager?
 
   // MARK: - UI Components
 
@@ -116,11 +120,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     super.didMoveToWindow()
     if window != nil {
       loadDraft()
+      setupMentionManager()
     }
   }
 
   override func removeFromSuperview() {
     saveDraft()
+    mentionManager?.cleanup()
+    mentionManager = nil
     super.removeFromSuperview()
   }
 
@@ -170,6 +177,22 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   }
 
   // MARK: - Setup & Layout
+
+  private func setupMentionManager() {
+    guard let peerId,
+          let chatId,
+          let window,
+          let windowScene = window.windowScene,
+          let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+          let rootView = keyWindow.rootViewController?.view
+    else {
+      return
+    }
+
+    mentionManager = MentionManager(database: AppDatabase.shared, chatId: chatId, peerId: peerId)
+    mentionManager?.delegate = self
+    mentionManager?.attachTo(textView: textView, parentView: rootView)
+  }
 
   private func setupViews() {
     backgroundColor = .clear
@@ -414,6 +437,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     else { return }
     guard let chatId else { return }
 
+    // Extract mention entities from attributed text
+    let attributedText = textView.attributedText ?? NSAttributedString()
+    let mentionEntities = mentionManager?.extractMentionEntities(from: attributedText) ?? []
+    let entities = if mentionEntities.isEmpty {
+      nil as MessageEntities?
+    } else {
+      MessageEntities.with { $0.entities = mentionEntities }
+    }
+
     if isEditing {
       // Handle message edit
       Transactions.shared.mutate(transaction: .editMessage(.init(
@@ -431,7 +463,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         text: text,
         peerId: peerId,
         chatId: chatId,
-        replyToMsgId: replyToMessageId
+        mediaItems: [],
+        replyToMsgId: replyToMessageId,
+        isSticker: nil,
+        entities: entities
       )))
       ChatState.shared.clearReplyingMessageId(peer: peerId)
     }
@@ -479,7 +514,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     }
   }
 
-  public func getDraft(peerId: Peer) -> String? {
+  public func getDraft(peerId: InlineKit.Peer) -> String? {
     // FIXME: retrieve draft without an extra database call
 //    try? AppDatabase.shared.dbWriter.read { db in
 //      let dialog = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
@@ -788,12 +823,62 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
       responder = nextResponder
     }
   }
+
+  // MARK: - Keyboard Handling for Mentions
+
+  override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+    guard let key = presses.first?.key else {
+      super.pressesBegan(presses, with: event)
+      return
+    }
+
+    var keyString = ""
+    switch key.keyCode {
+      case .keyboardUpArrow:
+        keyString = "ArrowUp"
+      case .keyboardDownArrow:
+        keyString = "ArrowDown"
+      case .keyboardReturnOrEnter:
+        keyString = "Enter"
+      case .keyboardTab:
+        keyString = "Tab"
+      case .keyboardEscape:
+        keyString = "Escape"
+      default:
+        super.pressesBegan(presses, with: event)
+        return
+    }
+
+    // Let mention manager handle the key press
+    if mentionManager?.handleKeyPress(keyString) == true {
+      // Key was handled by mention manager
+      return
+    }
+
+    super.pressesBegan(presses, with: event)
+  }
+}
+
+// MARK: - MentionManagerDelegate
+
+extension ComposeView: MentionManagerDelegate {
+  func mentionManager(_ manager: MentionManager, didSelectMention text: String, userId: Int64, for range: NSRange) {
+    // Update height if needed after mention replacement
+    updateHeight()
+  }
+
+  func mentionManagerDidDismiss(_ manager: MentionManager) {
+    // Handle mention menu dismissal if needed
+  }
 }
 
 // MARK: - UITextViewDelegate
 
 extension ComposeView: UITextViewDelegate {
   func textViewDidChange(_ textView: UITextView) {
+    // Prevent mention style leakage to new text
+    textView.updateTypingAttributesIfNeeded()
+
     // Height Management
     UIView.animate(withDuration: 0.1) { self.updateHeight() }
 
@@ -802,6 +887,9 @@ extension ComposeView: UITextViewDelegate {
 
     (textView as? ComposeTextView)?.showPlaceholder(isEmpty)
     // (textView as? ComposeTextView)?.checkForNewAttachments()
+
+    // Handle mention detection
+    mentionManager?.handleTextChange(in: textView)
 
     if isEmpty {
       clearDraft()
@@ -829,6 +917,11 @@ extension ComposeView: UITextViewDelegate {
     }
 
     return true
+  }
+
+  func textViewDidChangeSelection(_ textView: UITextView) {
+    // Reset typing attributes when cursor moves to prevent mention style leakage
+    textView.updateTypingAttributesIfNeeded()
   }
 }
 

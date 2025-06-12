@@ -518,8 +518,6 @@ class UIMessageView: UIView {
   }
 
   @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-    guard !links.isEmpty else { return }
-
     // Get tap location in the label's coordinate space
     let tapLocation = gesture.location(in: messageLabel)
 
@@ -543,7 +541,27 @@ class UIMessageView: UIView {
       fractionOfDistanceBetweenInsertionPoints: nil
     )
 
-    // Check if tap is on a link
+    // First check if tap is on a mention
+    if let attributedText = messageLabel.attributedText {
+      attributedText.enumerateAttribute(.init("mention_user_id"), in: NSRange(
+        location: 0,
+        length: attributedText.length
+      )) { value, range, _ in
+        if NSLocationInRange(characterIndex, range),
+           let userId = value as? Int64
+        {
+          print("Mention tapped for user ID: \(userId)")
+          NotificationCenter.default.post(
+            name: Notification.Name("MentionTapped"),
+            object: nil,
+            userInfo: ["userId": userId]
+          )
+          return
+        }
+      }
+    }
+
+    // Then check if tap is on a regular link
     for link in links where NSLocationInRange(characterIndex, link.range) {
       print("Link tapped: \(link.url)")
       linkTapHandler?(link.url)
@@ -692,11 +710,12 @@ class UIMessageView: UIView {
     bubbleView.backgroundColor = bubbleColor
 
     guard let text = fullMessage.displayText else { return }
+
     if let cachedString = Self.attributedCache.object(forKey: NSString(string: cacheKey)) {
       messageLabel.attributedText = cachedString
-      // Re-detect links even with cached string to ensure links array is populated
       if let attributedString = cachedString.mutableCopy() as? NSMutableAttributedString {
         detectAndStyleLinks(in: text, attributedString: attributedString)
+        detectAndStyleMentions(in: text, attributedString: attributedString)
       }
       return
     }
@@ -711,6 +730,7 @@ class UIMessageView: UIView {
     )
 
     detectAndStyleLinks(in: text, attributedString: attributedString)
+    detectAndStyleMentions(in: text, attributedString: attributedString)
 
     Self.attributedCache.setObject(attributedString, forKey: cacheKey as NSString)
 
@@ -728,13 +748,32 @@ class UIMessageView: UIView {
       guard let url = match.url else { return nil }
 
       let linkAttributes: [NSAttributedString.Key: Any] = [
-        .foregroundColor: outgoing ? UIColor.white.withAlphaComponent(0.9) : ThemeManager.shared.selected
-          .primaryTextColor ?? .label,
+        .foregroundColor: MessageMentionRenderer.linkColor(for: outgoing),
         .underlineStyle: NSUnderlineStyle.single.rawValue,
       ]
       attributedString.addAttributes(linkAttributes, range: match.range)
 
       return (range: match.range, url: url)
+    }
+  }
+
+  func detectAndStyleMentions(in text: String, attributedString: NSMutableAttributedString) {
+    if let entities = fullMessage.message.entities {
+      for entity in entities.entities {
+        if entity.type == .mention, case let .mention(mention) = entity.entity {
+          let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
+
+          // Validate range is within bounds
+          if range.location >= 0, range.location + range.length <= text.utf16.count {
+            let mentionColor = MessageMentionRenderer.mentionColor(for: outgoing)
+            print("DEBUG: Applying mention color \(mentionColor) for outgoing: \(outgoing)")
+            attributedString.addAttributes([
+              .foregroundColor: mentionColor,
+              .init("mention_user_id"): mention.userID,
+            ], range: range)
+          }
+        }
+      }
     }
   }
 
