@@ -117,9 +117,6 @@ class MessageListAppKit: NSViewController {
         context.allowsImplicitAnimation = true
 
         toolbarBgView.alphaValue = hide ? 0 : 1
-      } completionHandler: { [weak self] in
-        guard let self else { return }
-        toolbarBgView.isHidden = true
       }
     }
   }
