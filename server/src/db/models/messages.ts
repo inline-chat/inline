@@ -302,13 +302,11 @@ async function deleteMessages(messageIds: bigint[], chatId: number) {
 }
 
 async function editMessage(messageId: number, chatId: number, text: string) {
-  log.trace("editMessage", { messageId, chatId, text })
   const encryptedMessage = text ? encryptMessage(text) : undefined
 
   let updated = await db
     .update(messages)
     .set({
-      text: text,
       textEncrypted: encryptedMessage?.encrypted,
       textIv: encryptedMessage?.iv,
       textTag: encryptedMessage?.authTag,
