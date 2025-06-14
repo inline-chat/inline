@@ -119,7 +119,8 @@ extension ChatView {
 
         Text(subtitle.text.lowercased())
           .font(.caption)
-          .foregroundStyle(subtitle.isComposeAction ? Color(ThemeManager.shared.selected.accent) : .secondary)
+//          .foregroundStyle(subtitle.isComposeAction ? Color(ThemeManager.shared.selected.accent) : .secondary)
+          .foregroundStyle(.secondary)
       }
       .padding(.top, -2)
       .fixedSize()
