@@ -246,7 +246,7 @@ class MessageViewAppKit: NSView {
       // does not have any effect.
       textView.linkTextAttributes = [
         .foregroundColor: linkColor,
-        //.underlineStyle: NSUnderlineStyle.single.rawValue,
+        // .underlineStyle: NSUnderlineStyle.single.rawValue,
         .cursor: NSCursor.pointingHand,
       ]
 
@@ -1658,53 +1658,72 @@ extension MessageViewAppKit: NSMenuDelegate {
     // Reply
     if message.status != .sending {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
+      replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
       menu.addItem(replyItem)
     }
 
     // Edit
     if message.out == true, message.status == .sent {
       let editItem = NSMenuItem(title: "Edit", action: #selector(editMessage), keyEquivalent: "e")
+      editItem.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "Edit")
       menu.addItem(editItem)
     }
 
     // Add reaction action
     let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "e")
+    addReactionItem.image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: "Add Reaction")
     menu.addItem(addReactionItem)
 
     menu.addItem(NSMenuItem.separator())
 
-    // Add native copy for selected text if in text view context
-    if context == .textView, let nativeMenu {
-      if let nativeCopyItem = nativeMenu.items.first(where: { $0.title == "Copy" }) {
-        let newItem = nativeCopyItem.copy() as! NSMenuItem
-        newItem.title = "Copy Selection"
-        menu.addItem(newItem)
-      }
-    }
+    var rendersCopyText = false
 
-    // Add copy message action for text
-    if hasText {
-      let copyItem = NSMenuItem(title: "Copy Message", action: #selector(copyMessage), keyEquivalent: "c")
-      menu.addItem(copyItem)
+    // Add native copy for selected text if in text view context
+    if context == .textView,
+       let nativeMenu,
+       let nativeCopyItem = nativeMenu.items.first(where: { $0.title == "Copy" })
+    {
+      let newItem = nativeCopyItem.copy() as! NSMenuItem
+      newItem.title = "Copy Selected Text"
+      menu.addItem(newItem)
+
+      rendersCopyText = true
+    } else {
+      // Add copy message action for text
+      if hasText {
+        let copyItem = NSMenuItem(title: "Copy Text", action: #selector(copyMessage), keyEquivalent: "c")
+        copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: "Copy")
+        menu.addItem(copyItem)
+        rendersCopyText = true
+      }
     }
 
     // Add photo actions
     if hasPhoto {
-      let saveItem = NSMenuItem(title: "Save Image", action: #selector(newPhotoView.saveImage), keyEquivalent: "m")
-      saveItem.target = newPhotoView
-      saveItem.isEnabled = true
-      menu.addItem(saveItem)
-
       let copyItem = NSMenuItem(title: "Copy Image", action: #selector(newPhotoView.copyImage), keyEquivalent: "i")
       copyItem.target = newPhotoView
       copyItem.isEnabled = true
+      if !rendersCopyText {
+        copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: "Copy")
+      }
       menu.addItem(copyItem)
+    }
+
+    if hasPhoto {
+      menu.addItem(NSMenuItem.separator())
+      let saveItem = NSMenuItem(title: "Save Image", action: #selector(newPhotoView.saveImage), keyEquivalent: "m")
+      saveItem.target = newPhotoView
+      saveItem.isEnabled = true
+      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Image")
+      menu.addItem(saveItem)
     }
 
     // Add document actions
     if hasDocument {
-      let saveDocumentItem = NSMenuItem(title: "Save Document", action: #selector(saveDocument), keyEquivalent: "s")
-      menu.addItem(saveDocumentItem)
+      menu.addItem(NSMenuItem.separator())
+      let saveItem = NSMenuItem(title: "Save Document", action: #selector(saveDocument), keyEquivalent: "s")
+      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Document")
+      menu.addItem(saveItem)
     }
 
     // Add other native menu items if in text view context
@@ -1712,24 +1731,31 @@ extension MessageViewAppKit: NSMenuDelegate {
       menu.addItem(NSMenuItem.separator())
 
       for item in nativeMenu.items {
-        if item.title.hasPrefix("Look Up") || item.title.hasPrefix("Translate") {
+        if item.title.hasPrefix("Look Up") {
+          let newItem = item.copy() as! NSMenuItem
+          newItem.image = NSImage(systemSymbolName: "character.bubble", accessibilityDescription: "Save Document")
+          menu.addItem(newItem)
+        }
+        
+        if item.title.hasPrefix("Translate") {
           let newItem = item.copy() as! NSMenuItem
           menu.addItem(newItem)
         }
       }
     }
 
-    // Add delete/cancel action based on message state
     menu.addItem(NSMenuItem.separator())
+    
+    // Delete or cancel button
     if message.status == .sending {
-      let cancelItem = NSMenuItem(title: "Cancel", action: #selector(cancelMessage), keyEquivalent: "i")
+      let cancelItem = NSMenuItem(title: "Cancel", action: #selector(cancelMessage), keyEquivalent: "delete")
       cancelItem.target = self
-      cancelItem.isEnabled = true
+      cancelItem.image = NSImage(systemSymbolName: "x.circle", accessibilityDescription: "Cancel")
       menu.addItem(cancelItem)
     } else {
-      let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "i")
+      let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "delete")
       deleteItem.target = self
-      deleteItem.isEnabled = true
+      deleteItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Delete")
       menu.addItem(deleteItem)
     }
 
