@@ -445,9 +445,14 @@ struct ChatViewUIKit: UIViewRepresentable {
   let chatId: Int64?
   let spaceId: Int64
   @EnvironmentObject var data: DataManager
+  @EnvironmentObject var fullChatViewModel: FullChatViewModel
 
   func makeUIView(context: Context) -> ChatContainerView {
     let view = ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId)
+
+    if let draftMessage = fullChatViewModel.chatItem?.dialog.draftMessage {
+      view.composeView.loadDraft(from: draftMessage)
+    }
 
     // Mark messages as read when view appears
     UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
