@@ -42,6 +42,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       photoId: input.photoId ? BigInt(input.photoId) : undefined,
       sendDate: Math.floor(messageDate.getTime() / 1000),
       isSticker: false,
+      parseMarkdown: true,
     },
     {
       currentSessionId: context.currentSessionId,

@@ -219,6 +219,8 @@ message MessageEntity {
     TYPE_EMAIL = 4;
     TYPE_BOLD = 5;
     TYPE_ITALIC = 6;
+    TYPE_USERNAME_MENTION = 7;
+    TYPE_CODE = 8;
   }
 
   Type type = 1;
