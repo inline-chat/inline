@@ -1082,3 +1082,9 @@ message RemoveChatParticipantInput {
 }
 
 message RemoveChatParticipantResult {}
+
+// Apple only types
+message DraftMessage {
+  string text = 1;
+  optional MessageEntities entities = 2;
+}
