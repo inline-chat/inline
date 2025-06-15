@@ -76,4 +76,12 @@ describe("Markdown removal", () => {
     expect(result.text).toBe("Hello https://example.com world")
     expect(result.entities).toEqual({ entities: [] })
   })
+
+  test("keeps list bullets", () => {
+    const text = "- hello\n- wow"
+    const result = processMessageText({ text, entities: { entities: [] } })
+
+    expect(result.text).toBe("- hello\n- wow")
+    expect(result.entities).toEqual({ entities: [] })
+  })
 })
