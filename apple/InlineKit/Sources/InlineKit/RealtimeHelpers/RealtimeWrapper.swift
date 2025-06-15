@@ -508,8 +508,21 @@ public extension Realtime {
       // Save dialogs
       for dialog in result.dialogs {
         do {
-          let dialogModel = Dialog(from: dialog)
-          try dialogModel.save(db)
+          let existing = try Dialog.fetchOne(
+            db,
+            id: Dialog.getDialogId(peerId: dialog.peer.toPeer())
+          )
+          var newDialog = Dialog(from: dialog)
+
+          if let existing {
+            print("🌴 Dialog draft \(newDialog.draftMessage)")
+            print("🌴 Existing draftMessage \(existing.draftMessage)")
+            newDialog.draftMessage = existing.draftMessage
+            try newDialog.save(db)
+          } else {
+            try newDialog.save(db, onConflict: .replace)
+          }
+
         } catch {
           Log.shared.error("Failed to save dialog", error: error)
         }

@@ -17,7 +17,6 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var editDate: Int?
   public var date: Int
   public var repliedToMessageId: Int64?
-
   public var photo: [ApiPhoto]?
   public var replyToMsgId: Int64?
   public var isSticker: Bool?
