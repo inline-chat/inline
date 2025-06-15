@@ -21,7 +21,6 @@
 		B7C0676B2DB7F44900EAADA4 /* iMessageUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; };
 		B7C0676C2DB7F44900EAADA4 /* iMessageUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B7F71EB92DDB3BA70091C872 /* RenderMeThis in Frameworks */ = {isa = PBXBuildFile; productRef = B7F71EB82DDB3BA70091C872 /* RenderMeThis */; };
-		B7F71EC02DDB46500091C872 /* Glur in Frameworks */ = {isa = PBXBuildFile; productRef = B7F71EBF2DDB464F0091C872 /* Glur */; };
 		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
 		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
@@ -220,7 +219,6 @@
 				B7C0676B2DB7F44900EAADA4 /* iMessageUI.framework in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
-				B7F71EC02DDB46500091C872 /* Glur in Frameworks */,
 				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -383,7 +381,6 @@
 				C37F343F2D5A4D4800D7D7CC /* MCEmojiPicker */,
 				B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */,
 				B7F71EB82DDB3BA70091C872 /* RenderMeThis */,
-				B7F71EBF2DDB464F0091C872 /* Glur */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -469,7 +466,6 @@
 				C37F343E2D5A4D4800D7D7CC /* XCRemoteSwiftPackageReference "MCEmojiPicker" */,
 				B77EE8062DC91CFD00C42B9E /* XCRemoteSwiftPackageReference "iPhoneNumberField" */,
 				B7F71EB72DDB3BA70091C872 /* XCRemoteSwiftPackageReference "RenderMeThis" */,
-				B7F71EBE2DDB464F0091C872 /* XCRemoteSwiftPackageReference "Glur" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CD2661052CA01CAE00EB186F /* Products */;
@@ -1235,14 +1231,6 @@
 				minimumVersion = 2.0.0;
 			};
 		};
-		B7F71EBE2DDB464F0091C872 /* XCRemoteSwiftPackageReference "Glur" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/joogps/Glur";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.4;
-			};
-		};
 		C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/getsentry/sentry-cocoa";
@@ -1360,11 +1348,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B7F71EB72DDB3BA70091C872 /* XCRemoteSwiftPackageReference "RenderMeThis" */;
 			productName = RenderMeThis;
-		};
-		B7F71EBF2DDB464F0091C872 /* Glur */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B7F71EBE2DDB464F0091C872 /* XCRemoteSwiftPackageReference "Glur" */;
-			productName = Glur;
 		};
 		C35092C92CAEA7DB00AE3E23 /* Sentry */ = {
 			isa = XCSwiftPackageProductDependency;
