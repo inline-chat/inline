@@ -4,7 +4,7 @@ struct SidebarSearchBar: View {
   var text: Binding<String>
 
   var body: some View {
-    OutlineField("Search", text: text, prompt: Text("Search").foregroundColor(.secondary), size: .regular)
+    OutlineField("Search (⌘K)", text: text, prompt: Text("Search").foregroundColor(.secondary), size: .regular)
       .submitLabel(.search)
       .autocorrectionDisabled()
   }

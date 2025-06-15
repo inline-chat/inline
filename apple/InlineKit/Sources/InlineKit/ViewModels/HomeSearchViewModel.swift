@@ -46,6 +46,7 @@ public enum HomeSearchResultItem: Identifiable, Sendable, Hashable, Equatable {
 @MainActor
 public final class HomeSearchViewModel: ObservableObject {
   @Published public private(set) var results: [HomeSearchResultItem] = []
+  @Published public private(set) var isSearching: Bool = false
 
   private var db: AppDatabase
 
@@ -53,14 +54,19 @@ public final class HomeSearchViewModel: ObservableObject {
     self.db = db
   }
 
-  public func search(query: String) async {
+  public func search(query: String) {
+    isSearching = true
+    defer {
+      isSearching = false
+    }
+
     guard !query.isEmpty else {
       results = []
       return
     }
 
     do {
-      let chats = try await db.reader.read { db in
+      let chats = try db.reader.read { db in
         let threads = try Chat
           .filter {
             $0.title.like("%\(query)%") &&
