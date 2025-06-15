@@ -13,6 +13,8 @@ public class KeyMonitor: Sendable {
   private var escapeHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var textInputCatchAllHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var pasteHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
+  private var arrowKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
+  private var returnKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
 
   private var localEventMonitor: Any?
   private var window: NSWindow
@@ -28,6 +30,8 @@ public class KeyMonitor: Sendable {
     case escape
     case textInputCatchAll
     case paste
+    case arrowKeys
+    case returnKey
   }
 
   /// Add a handler for a specific event type
@@ -41,6 +45,10 @@ public class KeyMonitor: Sendable {
         textInputCatchAllHandlers[key] = handler
       case .paste:
         pasteHandlers[key] = handler
+      case .arrowKeys:
+        arrowKeyHandlers[key] = handler
+      case .returnKey:
+        returnKeyHandlers[key] = handler
     }
 
     return { [weak self] in
@@ -52,6 +60,10 @@ public class KeyMonitor: Sendable {
           self?.textInputCatchAllHandlers.removeValue(forKey: key)
         case .paste:
           self?.pasteHandlers.removeValue(forKey: key)
+        case .arrowKeys:
+          self?.arrowKeyHandlers.removeValue(forKey: key)
+        case .returnKey:
+          self?.returnKeyHandlers.removeValue(forKey: key)
       }
     }
   }
@@ -65,6 +77,10 @@ public class KeyMonitor: Sendable {
         textInputCatchAllHandlers.removeValue(forKey: key)
       case .paste:
         pasteHandlers.removeValue(forKey: key)
+      case .arrowKeys:
+        arrowKeyHandlers.removeValue(forKey: key)
+      case .returnKey:
+        returnKeyHandlers.removeValue(forKey: key)
     }
   }
 
@@ -82,6 +98,18 @@ public class KeyMonitor: Sendable {
 
       if event.keyCode == ESCAPE_KEY_CODE {
         let handled = callHandler(for: .escape, event: event)
+        if handled { return nil }
+      }
+
+      // Check for arrow keys
+      if event.keyCode == 125 || event.keyCode == 126 || event.keyCode == 123 || event.keyCode == 124 {
+        let handled = callHandler(for: .arrowKeys, event: event)
+        if handled { return nil }
+      }
+
+      // Check for return key
+      if event.keyCode == 36 {
+        let handled = callHandler(for: .returnKey, event: event)
         if handled { return nil }
       }
 
@@ -166,6 +194,22 @@ public class KeyMonitor: Sendable {
         }
       case .paste:
         return callPasteHandler(event: event)
+      case .arrowKeys:
+        // only call the last one as otherwise multiple handlers will fight
+        if let last = arrowKeyHandlers.values.last {
+          last(event)
+          return true
+        } else {
+          return false
+        }
+      case .returnKey:
+        // only call the last one as otherwise multiple handlers will fight
+        if let last = returnKeyHandlers.values.last {
+          last(event)
+          return true
+        } else {
+          return false
+        }
     }
   }
 
