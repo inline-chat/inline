@@ -10,7 +10,7 @@ public struct InviteToSpaceView: View {
   @Environment(\.dismiss) private var dismiss
 
   @FormState var formState
-  @StateObject private var search = GlobalSearch()
+  @StateObject private var search = SpaceInviteSearchViewModel()
   @State private var searchQuery = ""
   @State private var emailInput = ""
   @State private var phoneInput = ""
@@ -164,8 +164,9 @@ public struct InviteToSpaceView: View {
       .textFieldStyle(.automatic)
       .font(.body)
       .onChange(of: searchQuery) { newValue in
-        search.query = newValue
-        search.search()
+        Task {
+          await search.search(query: newValue)
+        }
       }
     } else if selectedInviteType == .email {
       TextField(
@@ -235,16 +236,13 @@ public struct InviteToSpaceView: View {
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 4)
-      } else if search.hasResults {
-        ForEach(search.results, id: \.self) { result in
-          switch result {
-            case let .users(user):
-              RemoteUserItem(user: user) {
-                selectedUser = user
-                showInviteConfirmation = true
-              }
-              .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+      } else if !search.results.isEmpty {
+        ForEach(search.results, id: \.id) { user in
+          RemoteUserItem(user: user) {
+            selectedUser = user
+            showInviteConfirmation = true
           }
+          .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
         }
       } else if !searchQuery.isEmpty {
         Text("No users found")
