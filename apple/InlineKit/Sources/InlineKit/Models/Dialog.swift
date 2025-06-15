@@ -13,7 +13,10 @@ public struct ApiDialog: Codable, Hashable, Sendable {
   public var archived: Bool?
 }
 
-public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
+public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
+  TableRecord,
+  Sendable, Equatable
+{
   // Equal to peerId it contains information about. For threads bit sign will be "-" and users positive.
   public var id: Int64
   public var peerUserId: Int64?
@@ -23,7 +26,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var readInboxMaxId: Int64?
   public var readOutboxMaxId: Int64?
   public var pinned: Bool?
-  public var draft: String?
+  public var draftMessage: DraftMessage?
   public var archived: Bool?
   public var chatId: Int64?
 
@@ -36,7 +39,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     static let readInboxMaxId = Column(CodingKeys.readInboxMaxId)
     static let readOutboxMaxId = Column(CodingKeys.readOutboxMaxId)
     static let pinned = Column(CodingKeys.pinned)
-    static let draft = Column(CodingKeys.draft)
+    static let draftMessage = Column(CodingKeys.draftMessage)
     static let archived = Column(CodingKeys.archived)
     static let chatId = Column(CodingKeys.chatId)
   }
@@ -109,7 +112,7 @@ public extension Dialog {
     readInboxMaxId = nil
     readOutboxMaxId = nil
     pinned = nil
-    draft = nil
+    draftMessage = nil
     archived = nil
     unreadCount = nil
     chatId = nil
@@ -129,7 +132,7 @@ public extension Dialog {
     readInboxMaxId = nil
     readOutboxMaxId = nil
     pinned = nil
-    draft = nil
+    draftMessage = nil
     archived = false
     unreadCount = nil
     chatId = chat.id
@@ -155,7 +158,7 @@ public extension Dialog {
     readOutboxMaxId = nil
     pinned = from.pinned
     archived = from.archived
-    draft = nil
+    draftMessage = nil
     chatId = from.hasChatID ? from.chatID : nil
   }
 
@@ -202,7 +205,7 @@ public extension Dialog {
       readInboxMaxId: nil,
       readOutboxMaxId: nil,
       pinned: false,
-      draft: nil,
+      draftMessage: nil,
       archived: false
     )
   }
@@ -217,7 +220,7 @@ public extension Dialog {
       readInboxMaxId: nil,
       readOutboxMaxId: nil,
       pinned: false,
-      draft: nil,
+      draftMessage: nil,
       archived: false
     )
   }
@@ -235,8 +238,8 @@ public extension ApiDialog {
     var dialog = Dialog(from: self)
 
     if let existing {
-      dialog.draft = existing.draft
-      try dialog.save(db, onConflict: .replace)
+      dialog.draftMessage = existing.draftMessage
+      try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)
     }
