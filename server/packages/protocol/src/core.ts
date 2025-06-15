@@ -641,7 +641,15 @@ export enum MessageEntity_Type {
     /**
      * @generated from protobuf enum value: TYPE_ITALIC = 6;
      */
-    ITALIC = 6
+    ITALIC = 6,
+    /**
+     * @generated from protobuf enum value: TYPE_USERNAME_MENTION = 7;
+     */
+    USERNAME_MENTION = 7,
+    /**
+     * @generated from protobuf enum value: TYPE_CODE = 8;
+     */
+    CODE = 8
 }
 /**
  * @generated from protobuf message MessageReactions

@@ -18,6 +18,7 @@ import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
+import { processMessageText } from "@in/server/modules/message/processText"
 
 type Input = {
   peerId: InputPeer
@@ -30,6 +31,9 @@ type Input = {
   sendDate?: number
   isSticker?: boolean
   entities?: MessageEntities
+
+  /** whether to process markdown string */
+  parseMarkdown?: boolean
 }
 
 type Output = {
@@ -48,8 +52,20 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const chatId = chat.id
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
 
-  // encrypt
-  const encryptedMessage = input.message ? encryptMessage(input.message) : undefined
+  let text = input.message
+  let entities = input.entities
+
+  // Process message text
+  if (input.parseMarkdown) {
+    const textContent = input.message
+      ? processMessageText({ text: input.message, entities: input.entities })
+      : undefined
+    text = textContent?.text
+    entities = textContent?.entities
+  }
+
+  // Encrypt
+  const encryptedMessage = text ? encryptMessage(text) : undefined
 
   // photo, video, document ids
   let dbFullPhoto: DbFullPhoto | undefined
@@ -69,7 +85,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   }
 
   // encrypt entities
-  const binaryEntities = input.entities ? MessageEntities.toBinary(input.entities) : undefined
+  const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities ? encryptBinary(binaryEntities) : undefined
 
   // insert new msg with new ID
@@ -93,9 +109,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   })
 
   // Process Loom links in the message if any
-  if (input.message) {
+  if (text) {
     // Process Loom links in parallel with message sending
-    processLoomLink(newMessage, input.message, BigInt(chatId), currentUserId, inputPeer)
+    processLoomLink(newMessage, text, BigInt(chatId), currentUserId, inputPeer)
   }
 
   // encode message info
@@ -115,8 +131,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     messageInfo,
     currentUserId,
     chat,
-    unencryptedEntities: input.entities,
-    unencryptedText: input.message,
+    unencryptedEntities: entities,
+    unencryptedText: text,
     inputPeer,
   })
 
