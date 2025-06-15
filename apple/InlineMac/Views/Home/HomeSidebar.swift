@@ -200,13 +200,13 @@ struct HomeSidebar: View {
           isSearching = false
         }
       }
-      .onChange(of: searchQuery) { _ in
+      .onChange(of: searchQuery) { searchQuery in
         search.updateQuery(searchQuery)
-        Task { @MainActor in
-          await localSearch.search(query: searchQuery)
-          // Reset selection when search query changes
-          selectedResultIndex = 0
-        }
+        // Task(priority: .userInitiated) { @MainActor in
+         localSearch.search(query: searchQuery)
+        // Reset selection when search query changes
+        selectedResultIndex = 0
+        // }
       }
       .onChange(of: isSearching) { isSearching in
         if isSearching {
