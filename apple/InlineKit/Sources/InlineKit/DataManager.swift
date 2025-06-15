@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 import Logger
 
 enum DataManagerError: Error {
@@ -421,7 +422,7 @@ public class DataManager: ObservableObject {
   public func updateDialog(
     peerId: Peer,
     pinned: Bool? = nil,
-    draft: String? = nil,
+    draft: MessageDraft? = nil,
     archived: Bool? = nil
   ) async throws {
     try await database.dbWriter.write { db in
@@ -431,7 +432,14 @@ public class DataManager: ObservableObject {
         dialog?.pinned = pinned
       }
       if let draft {
-        dialog?.draft = draft
+        // Convert string draft to DraftMessage for storage
+        let draftMessage = InlineProtocol.DraftMessage.with {
+          $0.text = draft.text
+          if let entities = draft.entities {
+            $0.entities = entities
+          }
+        }
+        dialog?.draftMessage = draftMessage
       }
       if let archived {
         dialog?.archived = archived
