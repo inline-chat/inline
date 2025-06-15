@@ -4,28 +4,6 @@ import Logger
 import SwiftUI
 
 struct HomeSidebar: View {
-  // MARK: - Types
-
-  enum SideItem: Identifiable, Equatable {
-    case space(InlineKit.Space)
-    case chat(InlineKit.HomeChatItem)
-
-    var id: String {
-      switch self {
-        case let .space(space):
-          "\(space.id)\(space.name)"
-        case let .chat(chat):
-          "\(chat.dialog.id)dialog"
-      }
-    }
-  }
-
-  enum Tab: String, Hashable {
-    case inbox
-    case archive
-    case spaces
-  }
-
   // MARK: - State
 
   @Environment(\.appDatabase) var db
@@ -35,16 +13,12 @@ struct HomeSidebar: View {
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager
   @EnvironmentStateObject var home: HomeViewModel
+  @EnvironmentStateObject var localSearch: HomeSearchViewModel
   @StateObject var search = GlobalSearch()
   @FocusState private var isSearching: Bool
-
-  private var showSearchBar: Bool {
-    search.hasResults || (isSearching && search.canSearch)
-  }
-
-  private var tab: Tab {
-    nav.selectedTab
-  }
+  @State private var selectedResultIndex: Int = 0
+  @State private var searchQuery = ""
+  @State private var keyMonitorSearchUnsubscriber: (() -> Void)?
 
   // MARK: - Initializer
 
@@ -52,22 +26,28 @@ struct HomeSidebar: View {
     _home = EnvironmentStateObject { env in
       HomeViewModel(db: env.appDatabase)
     }
+    _localSearch = EnvironmentStateObject { env in
+      HomeSearchViewModel(db: env.appDatabase)
+    }
   }
 
   // MARK: - Computed
 
-  private func filterArchived(_ chats: [HomeChatItem], archived: Bool) -> [HomeChatItem] {
-    chats.filter { $0.dialog.archived == archived }
+  private var showSearchBar: Bool {
+    // search.hasResults || (isSearching && search.canSearch)
+    search.hasResults || isSearching
   }
 
-  var items: [SideItem] {
-    if tab == .archive {
-      return home.archivedChats
-        .map { SideItem.chat($0) }
-    }
+  private var tab: Tab {
+    nav.selectedTab
+  }
 
-    return home.myChats
-      .map { SideItem.chat($0) }
+  // MARK: - Types
+
+  enum Tab: String, Hashable {
+    case inbox
+    case archive
+    case spaces
   }
 
   // MARK: - Views
@@ -93,6 +73,7 @@ struct HomeSidebar: View {
             searchView
           }
           .listStyle(.sidebar)
+          .listRowBackground(Color.clear)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
           NewSidebarWrapper(dependencies: dependencies!, tab: tab)
@@ -143,6 +124,18 @@ struct HomeSidebar: View {
     }
     .onAppear {
       subscribeNavKeyMonitor()
+      // Add notification observer for focus search
+      NotificationCenter.default.addObserver(
+        forName: .focusSearch,
+        object: nil,
+        queue: .main
+      ) { _ in
+        isSearching = true
+      }
+    }
+    .onDisappear {
+      // Remove notification observer
+      NotificationCenter.default.removeObserver(self, name: .focusSearch, object: nil)
     }
   }
 
@@ -163,20 +156,89 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var searchBar: some View {
-    SidebarSearchBar(text: $search.query)
+    SidebarSearchBar(text: $searchQuery)
       .focused($isSearching)
-      .onChange(of: search.query) { _ in
-        search.search()
+      .overlay(alignment: .trailing) {
+        if isSearching {
+          Button {
+            search.clear()
+            searchQuery = ""
+            isSearching = false
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+              .font(.system(size: 13, weight: .medium))
+          }
+          .labelsHidden()
+          .buttonStyle(.plain)
+          .foregroundStyle(.secondary)
+          .padding(.trailing, 8)
+        }
+      }
+      .onSubmit {
+        let totalResults = localSearch.results.count + search.results.count
+        if totalResults > 0 {
+          if selectedResultIndex < localSearch.results.count {
+            // Local result
+            let result = localSearch.results[selectedResultIndex]
+            switch result {
+              case let .thread(threadInfo):
+                nav.open(.chat(peer: .thread(id: threadInfo.chat.id)))
+              case let .user(user):
+                userPressed(user: user)
+            }
+          } else {
+            // Global result
+            let globalIndex = selectedResultIndex - localSearch.results.count
+            let result = search.results[globalIndex]
+            switch result {
+              case let .users(user):
+                remoteUserPressed(user: user)
+            }
+          }
+          search.clear()
+          searchQuery = ""
+          isSearching = false
+        }
+      }
+      .onChange(of: searchQuery) { _ in
+        search.updateQuery(searchQuery)
+        Task { @MainActor in
+          await localSearch.search(query: searchQuery)
+          // Reset selection when search query changes
+          selectedResultIndex = 0
+        }
       }
       .onChange(of: isSearching) { isSearching in
         if isSearching {
+          // Subscribe to escape key
           keyMonitorUnsubscriber = keyMonitor?.addHandler(for: .escape, key: "home_search") { _ in
             search.clear()
+            searchQuery = ""
             self.isSearching = false
             unsubcribeKeyMonitor()
           }
+
+          // Subscribe to arrow keys
+          keyMonitorSearchUnsubscriber = keyMonitor?.addHandler(for: .arrowKeys, key: "home_search_arrows") { event in
+            let totalResults = localSearch.results.count + search.results.count
+            guard totalResults > 0 else { return }
+
+            switch event.keyCode {
+              case 126: // Up arrow
+                if selectedResultIndex > 0 {
+                  selectedResultIndex -= 1
+                }
+              case 125: // Down arrow
+                if selectedResultIndex < totalResults - 1 {
+                  selectedResultIndex += 1
+                }
+              default:
+                break
+            }
+          }
         } else {
           unsubcribeKeyMonitor()
+          unsubcribeSearchKeyMonitor()
         }
       }
   }
@@ -280,40 +342,70 @@ struct HomeSidebar: View {
     .buttonStyle(.plain)
   }
 
+  var hasAnyResults: Bool {
+    search.hasResults || localSearch.results.count > 0
+  }
+
+  var searchLoadingResults: Bool {
+    search.isLoading
+  }
+
   // The view when user focuses the search input shows up
   @ViewBuilder
   var searchView: some View {
-    if search.hasResults {
-      Section("Users") {
-        ForEach(search.results, id: \.self) { result in
-          switch result {
-            case let .users(user):
-              RemoteUserItem(user: user, action: {
-                remoteUserPressed(user: user)
-              })
+    if isSearching {
+      if hasAnyResults {
+        if localSearch.results.count > 0 {
+          Section {
+            ForEach(Array(localSearch.results.enumerated()), id: \.element.id) { index, result in
+              LocalSearchItem(item: result, highlighted: selectedResultIndex == index) {
+                handleLocalResult(result)
+              }
               .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+            }
           }
         }
-      }
-    } else {
-      HStack {
-        if search.isLoading {
-          Text("Searching...")
-        } else if let error = search.error {
-          Text("Failed to load: \(error.localizedDescription)")
-        } else if !search.query.isEmpty {
-          // User searched, loading is done, but we didn't find a result
-          Text("No user found.")
-        } else {
-          Text("Search by username to start a chat.")
+
+        if search.hasResults {
+          Section("Global Search") {
+            ForEach(Array(search.results.enumerated()), id: \.element.id) { index, result in
+              let globalIndex = index + localSearch.results.count
+              switch result {
+                case let .users(user):
+                  RemoteUserItem(user: user, highlighted: selectedResultIndex == globalIndex, action: {
+                    handleRemoteUser(user)
+                  })
+                  .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+              }
+            }
+          }
         }
+      } else {
+        HStack {
+          if searchLoadingResults {
+            ProgressView()
+              .progressViewStyle(.circular)
+              .tint(.secondary)
+          } else if let error = search.error {
+            Text("Failed to load: \(error.localizedDescription)")
+              .font(.body)
+              .foregroundStyle(.secondary)
+          } else if !searchQuery.isEmpty, !hasAnyResults {
+            // User searched, loading is done, but we didn't find a result
+            Image(systemName: "x.circle")
+              .font(.system(size: 32, weight: .medium))
+              .foregroundStyle(.tertiary)
+          } else {
+            Image(systemName: "magnifyingglass")
+              .font(.system(size: 32, weight: .medium))
+              .foregroundStyle(.tertiary)
+          }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .lineLimit(2)
+        .multilineTextAlignment(.center)
+        .padding()
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .lineLimit(2)
-      .font(.body)
-      .foregroundStyle(.secondary)
-      .multilineTextAlignment(.center)
-      .padding()
     }
   }
 
@@ -342,6 +434,11 @@ struct HomeSidebar: View {
   private func unsubcribeKeyMonitor() {
     keyMonitorUnsubscriber?()
     keyMonitorUnsubscriber = nil
+  }
+
+  private func unsubcribeSearchKeyMonitor() {
+    keyMonitorSearchUnsubscriber?()
+    keyMonitorSearchUnsubscriber = nil
   }
 
   // MARK: - Actions
@@ -373,6 +470,33 @@ struct HomeSidebar: View {
   private func openInWindow(_ peer: Peer) {
     // TODO: implement when we support multiple windows
     nav.open(.chat(peer: peer))
+  }
+
+  private func handleLocalResult(_ result: HomeSearchResultItem) {
+    switch result {
+      case let .thread(threadInfo):
+        nav.open(.chat(peer: .thread(id: threadInfo.chat.id)))
+      case let .user(user):
+        nav.open(.chat(peer: .user(id: user.id)))
+    }
+    search.clear()
+    searchQuery = ""
+    isSearching = false
+  }
+
+  private func handleRemoteUser(_ user: ApiUser) {
+    Task { @MainActor in
+      do {
+        try await dependencies?.data.createPrivateChatWithOptimistic(user: user)
+        nav.open(.chat(peer: .user(id: user.id)))
+        search.clear()
+        searchQuery = ""
+        isSearching = false
+      } catch {
+        Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
+        overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
+      }
+    }
   }
 }
 

@@ -3,6 +3,7 @@ import InlineKit
 
 extension Notification.Name {
   static let toggleSidebar = Notification.Name("toggleSidebar")
+  static let focusSearch = Notification.Name("focusSearch")
 }
 
 final class AppMenu: NSObject {
@@ -329,6 +330,15 @@ final class AppMenu: NSObject {
     viewMenuItem.submenu = viewMenu
     mainMenu.addItem(viewMenuItem)
 
+    let quickSearchItem = NSMenuItem(
+      title: "Quick Search",
+      action: #selector(focusSearch(_:)),
+      keyEquivalent: "k"
+    )
+    quickSearchItem.keyEquivalentModifierMask = [.command]
+    quickSearchItem.target = self
+    viewMenu.addItem(quickSearchItem)
+
     let toggleSidebarItem = NSMenuItem(
       title: "Toggle Sidebar",
       action: #selector(toggleSidebar(_:)),
@@ -441,5 +451,9 @@ final class AppMenu: NSObject {
 
   @objc private func toggleSidebar(_ sender: NSMenuItem) {
     NotificationCenter.default.post(name: .toggleSidebar, object: nil)
+  }
+
+  @objc private func focusSearch(_ sender: NSMenuItem) {
+    NotificationCenter.default.post(name: .focusSearch, object: nil)
   }
 }

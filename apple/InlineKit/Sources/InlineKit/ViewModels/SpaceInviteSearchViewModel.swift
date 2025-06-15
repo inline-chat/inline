@@ -1,51 +1,29 @@
-import InlineKit
+import Auth
+import Combine
+import GRDB
+import Logger
 import SwiftUI
 
-enum GlobalSearchResult: Hashable, Identifiable {
-  case users(ApiUser)
-
-  var id: Int64 {
-    switch self {
-      case let .users(user):
-        user.id
-    }
-  }
-}
-
 @MainActor
-class GlobalSearch: ObservableObject {
-  @Published private(set) var isLoading = false
-  @Published private(set) var results = [] as [GlobalSearchResult]
-  @Published private(set) var error: Error?
-
-  var canSearch: Bool {
-    query.count >= 2
-  }
-
-  var hasResults: Bool {
-    !results.isEmpty
-  }
+public final class SpaceInviteSearchViewModel: ObservableObject {
+  @Published public private(set) var results: [ApiUser] = []
+  @Published public private(set) var isLoading = false
+  @Published public private(set) var error: Error?
 
   private var searchTask: Task<Void, Never>?
-  private var query: String
+  private var query: String = ""
 
-  init(query: String = "") {
-    self.query = query
-  }
+  public init() {}
 
-  func updateQuery(_ newQuery: String) {
-    query = newQuery
-    search()
-  }
-
-  func search() {
+  public func search(query: String) async {
     // Cancel previous search
     searchTask?.cancel()
 
     error = nil
+    self.query = query
 
-    // Clear immediately if user clears search query
-    if !canSearch {
+    // Clear immediately if query is too short
+    if query.count < 2 {
       results = []
       isLoading = false
       return
@@ -68,7 +46,7 @@ class GlobalSearch: ObservableObject {
         guard !Task.isCancelled else { return }
 
         // Update results on main thread
-        self.results = result.users.map { .users($0) }
+        self.results = result.users
         self.isLoading = false
       } catch {
         // Check if cancelled before updating error
@@ -80,7 +58,11 @@ class GlobalSearch: ObservableObject {
     }
   }
 
-  func clear() {
-    updateQuery("")
+  public func clear() {
+    searchTask?.cancel()
+    query = ""
+    results = []
+    isLoading = false
+    error = nil
   }
 }

@@ -2,12 +2,12 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
-struct RemoteUserItem: View {
+struct LocalSearchItem: View {
   @EnvironmentObject var nav: NavigationModel
   @State private var isHovered: Bool = false
   @FocusState private var isFocused: Bool
 
-  var user: ApiUser
+  var item: HomeSearchResultItem
   var highlighted: Bool = false
   var action: (() -> Void)?
 
@@ -18,20 +18,33 @@ struct RemoteUserItem: View {
       }
     } label: {
       HStack(spacing: 0) {
-        UserAvatar(apiUser: user)
-          .padding(.trailing, Theme.sidebarIconSpacing)
+        switch item {
+          case let .thread(threadInfo):
+            ChatIcon(peer: .chat(threadInfo.chat))
+              .padding(.trailing, Theme.sidebarIconSpacing)
 
-        VStack(alignment: .leading, spacing: 0) {
-          Text(user.firstName ?? user.username ?? "")
-            .lineLimit(1)
+            VStack(alignment: .leading, spacing: 0) {
+              Text(threadInfo.chat.title ?? "")
+                .lineLimit(1)
 
-          if let username = user.username {
-            Text("@\(username)")
-              .lineLimit(1)
-              .foregroundStyle(.secondary)
-              .font(.caption)
-          }
+              if let spaceName = threadInfo.space?.name {
+                Text(spaceName)
+                  .lineLimit(1)
+                  .foregroundStyle(.secondary)
+                  .font(.caption)
+              }
+            }
+
+          case let .user(user):
+            ChatIcon(peer: .user(UserInfo(user: user)))
+              .padding(.trailing, Theme.sidebarIconSpacing)
+
+            VStack(alignment: .leading, spacing: 0) {
+              Text(user.displayName)
+                .lineLimit(1)
+            }
         }
+
         Spacer()
       }
       .frame(height: Theme.sidebarItemHeight)
@@ -71,12 +84,21 @@ struct RemoteUserItem: View {
 
 #Preview {
   VStack(spacing: 0) {
-    RemoteUserItem(user: ApiUser.preview)
-    RemoteUserItem(
-      user: ApiUser.preview,
-      highlighted: true,
-      action: {}
-    )
+    LocalSearchItem(item: .thread(ThreadInfo(
+      chat: Chat(
+        id: 1,
+        date: Date(),
+        type: .thread,
+        title: "Team Chat",
+        spaceId: 1,
+        peerUserId: nil,
+        lastMsgId: nil,
+        emoji: "👥"
+      ),
+      space: Space(id: 1, name: "Engineering", date: Date())
+    )))
+
+    LocalSearchItem(item: .user(User.preview), highlighted: true)
   }
   .frame(width: 200)
   .previewsEnvironmentForMac(.populated)
