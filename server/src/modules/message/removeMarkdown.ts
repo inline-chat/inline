@@ -12,7 +12,8 @@ export const removeMarkdown = function (md: string) {
   output = output.replace(/^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/gm, "")
 
   try {
-    output = output.replace(/^([\s\t]*)([\*\-\+]|\d+\.)\s+/gm, "$1")
+    // Replace lists
+    // output = output.replace(/^([\s\t]*)([\*\-\+]|\d+\.)\s+/gm, "$1")
 
     output = output
       // Header
