@@ -51,6 +51,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   // Mention functionality
   private var mentionManager: MentionManager?
 
+  // Draft auto-save timer
+  private var draftSaveTimer: Timer?
+  private let draftSaveInterval: TimeInterval = 2.0 // Save every 2 seconds
+
   // MARK: - UI Components
 
   lazy var textView: ComposeTextView = {
@@ -79,6 +83,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+    stopDraftSaveTimer()
   }
 
   override init(frame: CGRect) {
@@ -119,13 +124,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window != nil {
-      loadDraft()
       setupMentionManager()
     }
   }
 
   override func removeFromSuperview() {
     saveDraft()
+    stopDraftSaveTimer()
     mentionManager?.cleanup()
     mentionManager = nil
     super.removeFromSuperview()
@@ -472,6 +477,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     }
 
     clearDraft()
+    stopDraftSaveTimer()
     textView.text = ""
     resetHeight()
     textView.showPlaceholder(true)
@@ -495,48 +501,111 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   //   }
   // }
 
+  // MARK: - Draft Auto-Save Timer
+
+  private func startDraftSaveTimer() {
+    stopDraftSaveTimer() // Stop any existing timer
+    draftSaveTimer = Timer.scheduledTimer(withTimeInterval: draftSaveInterval, repeats: true) { [weak self] _ in
+      self?.saveDraftIfNeeded()
+    }
+    Log.shared.debug("🌴 Draft auto-save timer started")
+  }
+
+  private func stopDraftSaveTimer() {
+    if draftSaveTimer != nil {
+      Log.shared.debug("🌴 Draft auto-save timer stopped")
+    }
+    draftSaveTimer?.invalidate()
+    draftSaveTimer = nil
+  }
+
+  private func saveDraftIfNeeded() {
+    guard let peerId else { return }
+    guard let text = textView.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      // If text is empty, clear the draft
+      Drafts.shared.clear(peerId: peerId)
+      return
+    }
+
+    // Extract mention entities from attributed text for draft
+    let attributedText = textView.attributedText ?? NSAttributedString()
+    let mentionEntities = mentionManager?.extractMentionEntities(from: attributedText) ?? []
+    let entities = if mentionEntities.isEmpty {
+      nil as MessageEntities?
+    } else {
+      MessageEntities.with { $0.entities = mentionEntities }
+    }
+
+    Log.shared.debug("🌴 Auto-saving draft: \(text.prefix(50))...")
+    Drafts.shared.update(peerId: peerId, text: text, entities: entities)
+  }
+
   // MARK: - Draft Management
 
-  func applyDraft(_ draft: String?) {
+  func loadDraft(from draftMessage: InlineProtocol.DraftMessage?) {
+    guard let draftMessage else { return }
+
+    print("🌴 draftMessage in loadDraft im compose", draftMessage)
+    let draft = MessageDraft(
+      text: draftMessage.text,
+      entities: draftMessage.hasEntities ? draftMessage.entities : nil
+    )
+
+    applyDraft(draft.text, entities: draft.entities)
+  }
+
+  func applyDraft(_ draft: String?, entities: MessageEntities? = nil) {
     if let draft, !draft.isEmpty {
       textView.text = draft
+
+      if let entities {
+        for entity in entities.entities {
+          if entity.type == .mention, case let .mention(mention) = entity.entity {
+            let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
+
+            if range.location >= 0 && range.location + range.length <= draft.utf16.count {
+              let attributedText = NSMutableAttributedString(attributedString: textView.attributedText)
+
+              attributedText.addAttributes([
+                .foregroundColor: ThemeManager.shared.selected.accent,
+                NSAttributedString.Key("mention_user_id"): mention.userID,
+              ], range: range)
+
+              textView.attributedText = attributedText
+            }
+          }
+        }
+      }
+
       textView.showPlaceholder(false)
       buttonAppear()
       updateHeight()
+
+      // Start timer since we now have text content
+      startDraftSaveTimer()
     }
   }
 
-  func loadDraft() {
-    guard let peerId else { return }
+  /// Set the initial draft from ChatView (call this after setting peerId and chatId)
+  public func setInitialDraft(from draftMessage: InlineProtocol.DraftMessage?) {
+    guard let draftMessage else { return }
 
-    if let draft = getDraft(peerId: peerId) {
-      applyDraft(draft)
-    }
-  }
+    let draft = MessageDraft(
+      text: draftMessage.text,
+      entities: draftMessage.hasEntities ? draftMessage.entities : nil
+    )
 
-  public func getDraft(peerId: InlineKit.Peer) -> String? {
-    // FIXME: retrieve draft without an extra database call
-//    try? AppDatabase.shared.dbWriter.read { db in
-//      let dialog = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
-//      return dialog?.draft
-//    }
-    nil
+    applyDraft(draft.text, entities: draft.entities)
   }
 
   private func saveDraft() {
-    guard let peerId else { return }
-
-    if let text = textView.text, !text.isEmpty {
-      // FIXME: store draft
-    }
+    // Use the timer-based save method for consistency
+    saveDraftIfNeeded()
   }
 
   func clearDraft() {
     guard let peerId else { return }
-
-    Task {
-      // FIXME: store empty draft
-    }
+    Drafts.shared.clear(peerId: peerId)
   }
 
   @objc private func saveCurrentDraft() {
@@ -594,6 +663,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     updateSendButtonForEditing(isEditing)
 
     if isEditing {
+      // Stop draft timer when editing a message
+      stopDraftSaveTimer()
+
       if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
          let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
       {
@@ -603,6 +675,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
         DispatchQueue.main.async { [weak self] in
           self?.updateHeight()
         }
+      }
+    } else {
+      // Resume draft timer when exiting edit mode if there's text
+      if let text = textView.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        startDraftSaveTimer()
       }
     }
 
@@ -893,6 +970,7 @@ extension ComposeView: UITextViewDelegate {
 
     if isEmpty {
       clearDraft()
+      stopDraftSaveTimer()
       buttonDisappear()
       if let peerId {
         Task {
@@ -900,6 +978,7 @@ extension ComposeView: UITextViewDelegate {
         }
       }
     } else {
+      startDraftSaveTimer()
       if let peerId {
         Task {
           await ComposeActions.shared.startedTyping(for: peerId)
