@@ -55,6 +55,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   private var draftSaveTimer: Timer?
   private let draftSaveInterval: TimeInterval = 2.0 // Save every 2 seconds
 
+  // Track original draft entities to preserve them when not being modified
+  private var originalDraftEntities: MessageEntities?
+
   // MARK: - UI Components
 
   lazy var textView: ComposeTextView = {
@@ -524,20 +527,43 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     guard let text = textView.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       // If text is empty, clear the draft
       Drafts.shared.clear(peerId: peerId)
+      originalDraftEntities = nil
       return
     }
 
     // Extract mention entities from attributed text for draft
     let attributedText = textView.attributedText ?? NSAttributedString()
     let mentionEntities = mentionManager?.extractMentionEntities(from: attributedText) ?? []
-    let entities = if mentionEntities.isEmpty {
-      nil as MessageEntities?
-    } else {
+
+    // Determine final entities to save
+    let entities: MessageEntities? = if !mentionEntities.isEmpty {
+      // We have current mention entities, use them
       MessageEntities.with { $0.entities = mentionEntities }
+    } else if let originalEntities = originalDraftEntities {
+      // No current mentions but we had original entities, preserve them if they're still valid
+      validateAndPreserveEntities(originalEntities, for: text)
+    } else {
+      // No mentions at all
+      nil
     }
 
     Log.shared.debug("🌴 Auto-saving draft: \(text.prefix(50))...")
     Drafts.shared.update(peerId: peerId, text: text, entities: entities)
+  }
+
+  private func validateAndPreserveEntities(_ originalEntities: MessageEntities, for text: String) -> MessageEntities? {
+    // Validate that the original entities are still within bounds of the current text
+    let textLength = text.utf16.count
+    let validEntities = originalEntities.entities.filter { entity in
+      let endPosition = Int(entity.offset) + Int(entity.length)
+      return entity.offset >= 0 && endPosition <= textLength
+    }
+
+    if validEntities.isEmpty {
+      return nil
+    } else {
+      return MessageEntities.with { $0.entities = validEntities }
+    }
   }
 
   // MARK: - Draft Management
@@ -558,12 +584,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
     if let draft, !draft.isEmpty {
       textView.text = draft
 
+      // Store original entities for preservation during auto-save
+      originalDraftEntities = entities
+
       if let entities {
         for entity in entities.entities {
           if entity.type == .mention, case let .mention(mention) = entity.entity {
             let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
 
-            if range.location >= 0 && range.location + range.length <= draft.utf16.count {
+            if range.location >= 0, range.location + range.length <= draft.utf16.count {
               let attributedText = NSMutableAttributedString(attributedString: textView.attributedText)
 
               attributedText.addAttributes([
@@ -606,6 +635,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   func clearDraft() {
     guard let peerId else { return }
     Drafts.shared.clear(peerId: peerId)
+    originalDraftEntities = nil
   }
 
   @objc private func saveCurrentDraft() {
@@ -615,7 +645,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate, UIImagePickerControllerD
   // MARK: - Observers Setup
 
   private func setupScenePhaseObserver() {
-    NotificationCenter.default.removeObserver(self) // Remove any existing observers first
+    NotificationCenter.default.removeObserver(self)
 
     NotificationCenter.default.addObserver(
       forName: UIApplication.didEnterBackgroundNotification,
@@ -942,6 +972,9 @@ extension ComposeView: MentionManagerDelegate {
   func mentionManager(_ manager: MentionManager, didSelectMention text: String, userId: Int64, for range: NSRange) {
     // Update height if needed after mention replacement
     updateHeight()
+
+    // Clear original entities since we've modified mentions
+    originalDraftEntities = nil
   }
 
   func mentionManagerDidDismiss(_ manager: MentionManager) {
@@ -992,6 +1025,19 @@ extension ComposeView: UITextViewDelegate {
     if text.contains("￼") {
       DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
         self?.textView.textDidChange()
+      }
+    }
+
+    // Check if the change might affect existing mentions
+    if let originalEntities = originalDraftEntities, !originalEntities.entities.isEmpty {
+      // Check if the change overlaps with any existing mention ranges
+      for entity in originalEntities.entities {
+        let entityRange = NSRange(location: Int(entity.offset), length: Int(entity.length))
+        if NSIntersectionRange(range, entityRange).length > 0 {
+          // The change affects a mention, clear original entities
+          originalDraftEntities = nil
+          break
+        }
       }
     }
 
