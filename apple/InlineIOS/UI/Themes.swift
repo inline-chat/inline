@@ -21,6 +21,18 @@ struct Default: ThemeConfig {
   })
 
   var accent: UIColor = .init(hex: "#52A5FF")!
+
+  var reactionOutgoingPrimary: UIColor? = .white
+  var reactionOutgoingSecoundry: UIColor? = .white.withAlphaComponent(0.08)
+
+  var reactionIncomingPrimary: UIColor? { accent }
+  var reactionIncomingSecoundry: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#3c3b43")!
+    } else {
+      UIColor(hex: "#e2e5e5")!
+    }
+  })
 }
 
 struct Lavender: ThemeConfig {
@@ -62,6 +74,18 @@ struct Lavender: ThemeConfig {
   })
 
   var accent: UIColor = .init(hex: "#8293FF")!
+
+  var reactionOutgoingPrimary: UIColor? = .white
+  var reactionOutgoingSecoundry: UIColor? = .white.withAlphaComponent(0.08)
+
+  var reactionIncomingPrimary: UIColor? { accent }
+  var reactionIncomingSecoundry: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#41435d")!
+    } else {
+      UIColor(hex: "#dddfe6")!
+    }
+  })
 }
 
 struct PeonyPink: ThemeConfig {
@@ -85,6 +109,17 @@ struct PeonyPink: ThemeConfig {
   })
 
   var accent: UIColor = .init(hex: "#FF82B8")!
+  var reactionOutgoingPrimary: UIColor? = .white
+  var reactionOutgoingSecoundry: UIColor? = .white.withAlphaComponent(0.08)
+
+  var reactionIncomingPrimary: UIColor? { accent }
+  var reactionIncomingSecoundry: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#3c3b43")!
+    } else {
+      UIColor(hex: "#e2e5e5")!
+    }
+  })
 }
 
 struct Orchid: ThemeConfig {
@@ -114,4 +149,16 @@ struct Orchid: ThemeConfig {
   })
 
   var accent: UIColor = .init(hex: "#a28cf2")!
+
+  var reactionOutgoingPrimary: UIColor? = .white
+  var reactionOutgoingSecoundry: UIColor? = .white.withAlphaComponent(0.08)
+
+  var reactionIncomingPrimary: UIColor? { accent }
+  var reactionIncomingSecoundry: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#3c3b43")!
+    } else {
+      UIColor(hex: "#e2e5e5")!
+    }
+  })
 }

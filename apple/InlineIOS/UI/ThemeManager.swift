@@ -12,6 +12,13 @@ protocol ThemeConfig {
   var primaryTextColor: UIColor? { get }
   var secondaryTextColor: UIColor? { get }
 
+  var reactionOutgoingPrimary: UIColor? { get }
+  var reactionOutgoingSecoundry: UIColor? { get }
+
+  var reactionIncomingPrimary: UIColor? { get }
+  var reactionIncomingSecoundry: UIColor? { get }
+
+  
   var id: String { get }
   var name: String { get }
 }
