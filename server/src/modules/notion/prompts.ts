@@ -35,9 +35,9 @@ Use the following guidelines, examples and context data provided to fulfill the 
    icon: {
       type: "external",
       external: {
-        url: "https://www.notion.so/icons/circle-dot_gray.svg",
+        url: "https://www.notion.so/icons/circle_gray.svg",
       },
-    }
+    },
 </icon>
 
 ## Description (page content)
