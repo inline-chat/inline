@@ -96,11 +96,23 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   private func setupView() {
     // Configure container appearance
     containerView.backgroundColor = byCurrentUser ?
-      (outgoing ? UIColor.reactionBackgroundOutgoingSelf : UIColor.reactionBackgroundIncomingSelf) :
-      (outgoing ? UIColor.reactionBackgroundOutgoing : UIColor.reactionBackgroundIncoming)
+      (
+        outgoing ? ThemeManager.shared.selected.reactionOutgoingPrimary : ThemeManager.shared.selected
+          .reactionIncomingPrimary
+      ) :
+      (
+        outgoing ? ThemeManager.shared.selected.reactionOutgoingSecoundry : ThemeManager.shared.selected
+          .reactionIncomingSecoundry
+      )
 
     // Configure text colors
-    countLabel.textColor = outgoing ? .white : .label
+    countLabel.textColor = byCurrentUser ?
+      (
+        outgoing ? .black : .white
+      ) :
+      (
+        outgoing ? .white : .label
+      )
 
     // Center the emoji and count labels
     stackView.distribution = .equalSpacing
