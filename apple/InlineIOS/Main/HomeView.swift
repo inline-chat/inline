@@ -64,6 +64,27 @@ struct HomeView: View {
     }
   }
 
+  var localSearchResults: [SearchResult] {
+    guard let localResults = localSearch?.results else { return [] }
+
+    var results: [SearchResult] = []
+    for result in localResults {
+      switch result {
+        case let .user(user):
+          results.append(.localUser(user))
+        case let .thread(threadInfo):
+          results.append(.localThread(threadInfo))
+      }
+    }
+
+    // Sort local results by relevance to query
+    return results.sorted { result1, result2 in
+      let score1 = calculateRelevanceScore(for: result1, query: text)
+      let score2 = calculateRelevanceScore(for: result2, query: text)
+      return score1 > score2
+    }
+  }
+
   var mixedAndSortedSearchResults: [SearchResult] {
     var results: [SearchResult] = []
 
@@ -322,49 +343,63 @@ struct HomeView: View {
 
   private var searchResultsView: some View {
     List {
-      ForEach(mixedAndSortedSearchResults) { (result: SearchResult) in
-        Button {
-          handleSearchResult(result)
-        } label: {
-          HStack(alignment: .center, spacing: 9) {
-            // Avatar
-            switch result {
-              case let .localUser(user):
-                UserAvatar(user: user, size: 34)
-              case let .localThread(threadInfo):
-                InitialsCircle(
-                  name: threadInfo.chat.title ?? "Group Chat",
-                  size: 34,
-                  symbol: "bubble.fill",
-                  emoji: threadInfo.chat.emoji
-                )
-              case let .globalUser(apiUser):
-                UserAvatar(apiUser: apiUser, size: 34)
-            }
+      if !localSearchResults.isEmpty {
+        ForEach(localSearchResults) { (result: SearchResult) in
+          searchResultRow(for: result)
+        }
+      }
 
-            // Content
-            VStack(alignment: .leading, spacing: 0) {
-              Text(getDisplayName(for: result))
-                .font(.body)
-                .foregroundColor(.primary)
-                .lineLimit(1)
-
-              if let subtitle = getSubtitle(for: result) {
-                Text(subtitle)
-                  .font(.caption)
-                  .foregroundColor(.secondary)
-                  .lineLimit(1)
-              }
-            }
-
-            Spacer()
+      if !globalSearchResults.isEmpty {
+        Section("Global Search") {
+          ForEach(globalSearchResults.map { .globalUser($0) }) { (result: SearchResult) in
+            searchResultRow(for: result)
           }
         }
-        .buttonStyle(.plain)
-        .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 0))
       }
     }
     .listStyle(.plain)
+  }
+
+  private func searchResultRow(for result: SearchResult) -> some View {
+    Button {
+      handleSearchResult(result)
+    } label: {
+      HStack(alignment: .center, spacing: 9) {
+        // Avatar
+        switch result {
+          case let .localUser(user):
+            UserAvatar(user: user, size: 34)
+          case let .localThread(threadInfo):
+            InitialsCircle(
+              name: threadInfo.chat.title ?? "Group Chat",
+              size: 34,
+              symbol: "bubble.fill",
+              emoji: threadInfo.chat.emoji
+            )
+          case let .globalUser(apiUser):
+            UserAvatar(apiUser: apiUser, size: 34)
+        }
+
+        // Content
+        VStack(alignment: .leading, spacing: 0) {
+          Text(getDisplayName(for: result))
+            .font(.body)
+            .foregroundColor(.primary)
+            .lineLimit(1)
+
+          if let subtitle = getSubtitle(for: result) {
+            Text(subtitle)
+              .font(.caption)
+              .foregroundColor(.secondary)
+              .lineLimit(1)
+          }
+        }
+
+        Spacer()
+      }
+    }
+    .buttonStyle(.plain)
+    .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 0))
   }
 
   private func navigateToUser(_ userId: Int64) {
