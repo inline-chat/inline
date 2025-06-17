@@ -747,6 +747,9 @@
     "Search countries..." : {
 
     },
+    "Search for chats and people" : {
+
+    },
     "Search for people" : {
       "localizations" : {
         "fa" : {
@@ -844,7 +847,7 @@
     "Type a username to find someone to add. eg. dena, mo" : {
 
     },
-    "Type a username to find someone to chat with. eg. dena, mo" : {
+    "Type to find existing chats or search for people to start new conversations" : {
 
     },
     "Unknown User" : {

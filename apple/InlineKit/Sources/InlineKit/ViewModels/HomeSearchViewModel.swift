@@ -46,7 +46,6 @@ public enum HomeSearchResultItem: Identifiable, Sendable, Hashable, Equatable {
 @MainActor
 public final class HomeSearchViewModel: ObservableObject {
   @Published public private(set) var results: [HomeSearchResultItem] = []
-  @Published public private(set) var isSearching: Bool = false
 
   private var db: AppDatabase
 
@@ -55,43 +54,40 @@ public final class HomeSearchViewModel: ObservableObject {
   }
 
   public func search(query: String) {
-    isSearching = true
-    defer {
-      isSearching = false
-    }
-
     guard !query.isEmpty else {
       results = []
       return
     }
 
-    do {
-      let chats = try db.reader.read { db in
-        let threads = try Chat
-          .filter {
-            $0.title.like("%\(query)%") &&
-              $0.type == ChatType.thread.rawValue
-          }
-          .including(optional: Chat.space)
-          .asRequest(of: ThreadInfo.self)
-          .fetchAll(db)
+    Task {
+      do {
+        let chats = try await db.reader.read { db in
+          let threads = try Chat
+            .filter {
+              $0.title.like("%\(query)%") &&
+                $0.type == ChatType.thread.rawValue
+            }
+            .including(optional: Chat.space)
+            .asRequest(of: ThreadInfo.self)
+            .fetchAll(db)
 
-        let users = try User
-          .filter {
-            $0.firstName.like("%\(query)%") ||
-              $0.lastName.like("%\(query)%") ||
-              $0.email == query ||
-              $0.username == query
-          }
-          .fetchAll(db)
+          let users = try User
+            .filter {
+              $0.firstName.like("%\(query)%") ||
+                $0.lastName.like("%\(query)%") ||
+                $0.email == query ||
+                $0.username == query
+            }
+            .fetchAll(db)
 
-        return threads.map { HomeSearchResultItem.thread($0) } +
-          users.map { HomeSearchResultItem.user($0) }
+          return threads.map { HomeSearchResultItem.thread($0) } +
+            users.map { HomeSearchResultItem.user($0) }
+        }
+
+        results = chats.sorted(by: { $0.title ?? "" < $1.title ?? "" })
+      } catch {
+        Log.shared.error("Failed to search home items: \(error)")
       }
-
-      results = chats.sorted(by: { $0.title ?? "" < $1.title ?? "" })
-    } catch {
-      Log.shared.error("Failed to search home items: \(error)")
     }
   }
 }
