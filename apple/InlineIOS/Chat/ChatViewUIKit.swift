@@ -448,7 +448,7 @@ struct ChatViewUIKit: UIViewRepresentable {
     }
 
     // Mark messages as read when view appears
-    // UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
+     UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
 
     return view
   }
