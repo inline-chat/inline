@@ -40,8 +40,12 @@ struct SpaceIntegrationsView: View {
           nav.push(.integrationOptions(spaceId: spaceId, provider: "notion"))
         },
         permissionCheck: {
+          #if DEBUG
+          return true
+          #else
           let role = currentUserMember?.member.role
           return role == .owner || role == .admin
+          #endif
         }
       )
 
