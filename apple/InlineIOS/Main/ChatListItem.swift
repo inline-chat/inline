@@ -33,7 +33,7 @@ struct ChatListItem: View {
         ))
       }
     }
-    .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
+    .listRowInsets(.init(top: 8, leading: 16, bottom: 2, trailing: 0))
     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
       Button {
         onArchive()
