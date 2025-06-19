@@ -14,8 +14,8 @@ Use the following guidelines, examples and context data provided to fulfill the 
 ## Serious role
 - It is important to not create invalid properties by using "undefined" or empty strings "" in the properties object where it may be invalid in Notion's create page/database entry API.
 ## Title 
+- The title should be in the language of the user who triggered the will do. For example, if the user is English, it's not important how many languages are in the conversation; use English.
 - Should feel human-written, not AI-generated.
-- If user who trigred will do was from other language make the title in the user language.
 <good-example>
 - Research new javascript framework
 - Write email to client
@@ -55,15 +55,23 @@ Conversation:
 - John: Let me check. 
 - Sara: See: https://loom.com/xyz
 - John: Found the issue. I think when Jack coded this last year they didn't include the field for serial number. I'll fix it after lunch.
+- Sara: 谢谢约翰!
 
 Task title: "Fix serial number field blocking Sara from adding product"
 Task description:
 We need to add the new serial number field to the product creation form. 
-
 Context
 - Sara could not create a product because the serial number field was not working.
 - <link block>https://loom.com/xyz</link block>
 - John found the issue. He thinks it's because Jack coded it last year without the serial number field.
+
+我们需要在产品创建表单中添加新的序列号字段。
+背景 
+- Sara无法创建产品，因为序列号字段不起作用。
+- https://loom.com/xyz
+- John发现了问题。他认为这是因为Jack去年编写代码时没有包含序列号字段。
+- John说他会修复它。
+- John去吃午饭了。
 </good-example>
 <bad-example>
 Task title: "Include missed serial number field by Jack (reported by Sara)"
@@ -84,8 +92,10 @@ When Sara tried to create a product, she couldn't because the serial number fiel
 - Match chat participants with Notion users based on names, emails, or usernames from the notion_users list
 
 ### Watcher
-- Set to the user that matches with target message sender or who sent the message/report that the task is created for. (who will be notified when the task is completed)
-- Match chat participants with Notion users based on names, emails, or usernames from the notion_users list
+- Find out who is responsible for observing, will do, or review this task other than the main actor we assigned. It may involve multiple people; include them all. Always set the user that matches the target message sender by default. 
+- Match chat participants with Notion users based on names, emails, or usernames from the notion_users list.
+- You should not set the same assignee as the watcher.
+
 ### Due date
 - If there is a deadline is mentioned in the conversation, set it to the due date field in correct Notion ISO format.
 
