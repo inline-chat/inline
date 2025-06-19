@@ -95,11 +95,11 @@ struct DirectChatItem: View {
       if userInfo.user.id == Auth.shared.getCurrentUserId() {
         InitialsCircle(
           name: UserAvatar.getNameForInitials(user: userInfo.user),
-          size: 60,
-          symbol: "bookmark.fill"
+          size: 58,
+          symbol: "bookmark.fll"
         )
       } else {
-        UserAvatar(userInfo: userInfo, size: 60)
+        UserAvatar(userInfo: userInfo, size: 58)
       }
     }
   }

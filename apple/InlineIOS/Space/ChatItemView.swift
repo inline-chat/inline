@@ -105,7 +105,7 @@ struct ChatItemView: View {
           endPoint: .bottom
         )
       )
-      .frame(width: 60, height: 60)
+      .frame(width: 58, height: 58)
       .overlay {
         Group {
           if let emoji = chat?.emoji {
