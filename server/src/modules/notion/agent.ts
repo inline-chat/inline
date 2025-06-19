@@ -298,7 +298,7 @@ function taskPrompt(
 
   return `
 Today's date: ${new Date().toISOString()}
-Actor user ID: ${currentUserId}
+Actor user ID (who triggered the will do): ${currentUserId}
 
 Target message: ${formatMessage(targetMessage)}
 
