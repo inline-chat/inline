@@ -1,7 +1,7 @@
 import Auth
 import InlineKit
-import SwiftUI
 import Logger
+import SwiftUI
 
 struct LogoutSection: View {
   @EnvironmentObject private var mainRouter: MainViewRouter
@@ -65,8 +65,8 @@ struct LogoutSection: View {
       // 6. Update UI on main thread
       await MainActor.run {
         mainRouter.setRoute(route: .onboarding)
-        navigation.popToRoot()
         onboardingNavigation.push(.welcome)
+        navigation.popToRoot()
       }
     } catch {
       // Show error to user
@@ -77,6 +77,6 @@ struct LogoutSection: View {
 
 struct TimeoutError: Error {
   var localizedDescription: String {
-    return "Logout timed out."
+    "Logout timed out."
   }
 }
