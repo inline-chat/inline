@@ -47,7 +47,7 @@ Use the following guidelines, examples and context data provided to fulfill the 
 - Put it in the page content array.
 - Do not include unrelated messages to the task context (eg. "They ate lunch and then had a meeting" BAD, "Dena went to sleep" BAD)
 - Do not add prefix or suffix to links (eg. "here's the loom link for context" BAD)
-- If there were users from different languages in the conversation (for example, English and Chinese), write the translation of the English description in the other languages too.
+- If there are users from different languages in the conversation (for example, English and Chinese), write the translation of the English description in the other languages as well. Make sure you include both the English and the other language descriptions in the page content. The description in other languages should completely match the English description. Translate the same description from English to other languages.
 
 <good-example>
 Conversation: 
