@@ -33,6 +33,9 @@ struct ChatListItem: View {
         ))
       }
     }
+    .listRowBackground(
+      item.dialog.pinned == true ? Color(.systemGray6).opacity(0.6) : Color.clear
+    )
     .listRowInsets(.init(top: 8, leading: 16, bottom: 2, trailing: 0))
     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
       Button {
