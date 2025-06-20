@@ -23,6 +23,7 @@ struct ChatListView: View {
             onRead: { onRead(item) },
             isArchived: isArchived
           )
+
         }
       }
       .listStyle(.plain)
