@@ -56,28 +56,30 @@ struct ChatListItem: View {
       }
       .tint(.blue)
     }
-    .contextMenu {
-      Button {
-        onTap()
-      } label: {
-        Label("Open Chat", systemImage: "bubble.left")
-      }
-    } preview: {
-      if let user = item.user {
-        ChatView(peer: .user(id: user.user.id), preview: true)
-          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-          .environmentObject(nav)
-          .environmentObject(data)
-          .environment(\.realtime, realtime)
-          .environment(\.appDatabase, database)
-      } else if let chat = item.chat {
-        ChatView(peer: .thread(id: chat.id), preview: true)
-          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-          .environmentObject(nav)
-          .environmentObject(data)
-          .environment(\.realtime, realtime)
-          .environment(\.appDatabase, database)
-      }
-    }
+    .listRowInsets(.init(top: 8, leading: 16, bottom: 2, trailing: 0))
+
+//    .contextMenu {
+//      Button {
+//        onTap()
+//      } label: {
+//        Label("Open Chat", systemImage: "bubble.left")
+//      }
+//    } preview: {
+//      if let user = item.user {
+//        ChatView(peer: .user(id: user.user.id), preview: true)
+//          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+//          .environmentObject(nav)
+//          .environmentObject(data)
+//          .environment(\.realtime, realtime)
+//          .environment(\.appDatabase, database)
+//      } else if let chat = item.chat {
+//        ChatView(peer: .thread(id: chat.id), preview: true)
+//          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
+//          .environmentObject(nav)
+//          .environmentObject(data)
+//          .environment(\.realtime, realtime)
+//          .environment(\.appDatabase, database)
+//      }
+//    }
   }
 }
