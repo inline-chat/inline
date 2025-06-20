@@ -38,8 +38,6 @@ class UIMessageView: UIView {
     return cache
   }()
 
-  let metadataView: MessageTimeAndStatus
-
   var outgoing: Bool {
     fullMessage.message.out == true
   }
@@ -140,6 +138,7 @@ class UIMessageView: UIView {
   lazy var floatingMetadataView = createFloatingMetadataView()
   lazy var documentView = createDocumentView()
   lazy var messageAttachmentEmbed = createMessageAttachmentEmbed()
+  lazy var metadataView = createMessageTimeAndStatus()
 
   lazy var reactionsFlowView: ReactionsFlowView = {
     let view = ReactionsFlowView(outgoing: outgoing)
@@ -175,11 +174,7 @@ class UIMessageView: UIView {
 
   init(fullMessage: FullMessage, spaceId: Int64) {
     self.fullMessage = fullMessage
-
     self.spaceId = spaceId
-
-    // TODO: move to lazy var
-    metadataView = MessageTimeAndStatus(fullMessage)
 
     super.init(frame: .zero)
 
@@ -685,15 +680,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-      case (true, false):
-        // File only
-        withFileConstraints
-      case (true, true):
-        // File with text
-        withFileAndTextConstraints
-      default:
-        // Text only
-        withoutFileConstraints
+    case (true, false):
+      // File only
+      withFileConstraints
+    case (true, true):
+      // File with text
+      withFileAndTextConstraints
+    default:
+      // Text only
+      withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
