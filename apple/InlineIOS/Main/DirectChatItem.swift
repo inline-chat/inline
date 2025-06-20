@@ -100,7 +100,7 @@ struct DirectChatItem: View {
         InitialsCircle(
           name: UserAvatar.getNameForInitials(user: userInfo.user),
           size: 58,
-          symbol: "bookmark.fll"
+          symbol: "bookmark.fill"
         )
       } else {
         UserAvatar(userInfo: userInfo, size: 58)
