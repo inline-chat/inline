@@ -56,7 +56,7 @@ extension ChatView {
     var animatedIndicator: some View {
       switch self {
         case .typing:
-          AnimatedDots(dotSize: 3, dotColor: Color(ThemeManager.shared.selected.accent))
+        AnimatedDots(dotSize: 3, dotColor: .secondary)
         case let .composeAction(action):
           switch action {
             case .uploadingPhoto:
@@ -132,21 +132,21 @@ extension ChatView {
 
 private struct AnimatedPhotoUpload: View {
   var body: some View {
-    UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
+    UploadProgressIndicator(color: .secondary)
       .frame(width: 14)
   }
 }
 
 private struct AnimatedDocumentUpload: View {
   var body: some View {
-    UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
+    UploadProgressIndicator(color: .secondary)
       .frame(width: 14)
   }
 }
 
 private struct AnimatedVideoUpload: View {
   var body: some View {
-    UploadProgressIndicator(color: Color(ThemeManager.shared.selected.accent))
+    UploadProgressIndicator(color: .secondary)
       .frame(width: 14)
   }
 }
@@ -164,7 +164,7 @@ struct ChatSubtitlePreview: View {
 
         Text(subtitle.text.lowercased())
           .font(.caption)
-          .foregroundStyle(subtitle.isComposeAction ? Color(ThemeManager.shared.selected.accent) : .secondary)
+          .foregroundStyle(subtitle.isComposeAction ? .secondary : .secondary)
       }
       .padding(.top, -2)
       .fixedSize()
