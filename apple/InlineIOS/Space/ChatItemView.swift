@@ -71,6 +71,10 @@ struct ChatItemView: View {
     props.dialog.unreadCount ?? 0 > 0
   }
 
+  var isPinned: Bool {
+    props.dialog.pinned ?? false
+  }
+
   private var chatProfileColors: [Color] {
     // This computed property will re-evaluate when colorScheme changes
     // Reference colorScheme to ensure SwiftUI tracks the dependency
@@ -125,10 +129,18 @@ struct ChatItemView: View {
   @ViewBuilder
   var unreadAndProfileView: some View {
     HStack(alignment: .center, spacing: 5) {
-      Circle()
-        .fill(hasUnreadMessages ? ColorManager.shared.swiftUIColor : .clear)
-        .frame(width: 6, height: 6)
-        .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
+      if isPinned && !hasUnreadMessages {
+        Image(systemName: "pin.fill")
+          .resizable()
+          .foregroundColor(.secondary)
+          .frame(width: 8, height: 10)
+        
+      } else {
+        Circle()
+          .fill(hasUnreadMessages ? ColorManager.shared.swiftUIColor : .clear)
+          .frame(width: 8, height: 8)
+          .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
+      }
       chatProfile
     }
   }
