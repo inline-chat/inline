@@ -108,6 +108,13 @@ extension UIMessageView {
 
     return view
   }
+
+  func createMessageTimeAndStatus() -> MessageTimeAndStatus {
+    let view = MessageTimeAndStatus(fullMessage)
+    view.translatesAutoresizingMaskIntoConstraints = false
+
+    return view
+  }
 }
 
 // MARK: - UIGestureRecognizerDelegate
