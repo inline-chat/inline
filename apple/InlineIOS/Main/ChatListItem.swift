@@ -33,9 +33,8 @@ struct ChatListItem: View {
         ))
       }
     }
-    .listRowInsets(.init(top: 8, leading: 16, bottom: 2, trailing: 0))
     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-      Button {
+      Button(role: .destructive) {
         onArchive()
       } label: {
         Image(systemName: isArchived ? "tray.and.arrow.up.fill" : "tray.and.arrow.down.fill")
@@ -49,8 +48,8 @@ struct ChatListItem: View {
       }
       .tint(.indigo)
     }
-    .swipeActions(edge: .leading) {
-      Button {
+    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+      Button(role: .destructive) {
         onRead()
       } label: {
         Image(systemName: "checkmark.message.fill")
