@@ -34,8 +34,8 @@ public protocol Logging {
   func error(_ message: String, error: Error?, file: String, function: String, line: Int)
   func warning(_ message: String, file: String, function: String, line: Int)
   func info(_ message: String, file: String, function: String, line: Int)
-  func debug(_ message: String, file: String, function: String, line: Int)
-  func trace(_ message: String, file: String, function: String, line: Int)
+  func debug(_ message: @autoclosure () -> String, file: String, function: String, line: Int)
+  func trace(_ message: @autoclosure () -> String, file: String, function: String, line: Int)
 }
 
 public final class Log: @unchecked Sendable {
@@ -156,25 +156,25 @@ extension Log: Logging {
   }
 
   public func debug(
-    _ message: String,
+    _ message: @autoclosure () -> String,
     file: String = #file,
     function: String = #function,
     line: Int = #line
   ) {
     #if DEBUG
-    log(message, level: .debug, file: file, function: function, line: line)
+    log(message(), level: .debug, file: file, function: function, line: line)
     #endif
   }
 
   public func trace(
-    _ message: String,
+    _ message: @autoclosure () -> String,
     file: String = #file,
     function: String = #function,
     line: Int = #line
   ) {
     guard level == .trace else { return }
     #if DEBUG
-    log(message, level: .trace, file: file, function: function, line: line)
+    log(message(), level: .trace, file: file, function: function, line: line)
     #endif
   }
 }
