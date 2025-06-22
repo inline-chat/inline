@@ -10,6 +10,7 @@ import Logger
 import Nuke
 import NukeUI
 import SwiftUI
+import TextProcessing
 import Throttler
 
 class MessageViewAppKit: NSView {
@@ -1037,9 +1038,9 @@ class MessageViewAppKit: NSView {
     }
 
     // Create mutable attributed string
-    let attributedString = NSMutableAttributedString(
-      // Trim to avoid known issue with size calculator
-      string: text,
+    let attributedString = ProcessEntities.toAttributedString(
+      text: text,
+      entities: fullMessage.message.entities,
       attributes: [
         .font: MessageTextConfiguration.font,
         .foregroundColor: textColor,
@@ -1062,25 +1063,6 @@ class MessageViewAppKit: NSView {
             .foregroundColor: linkColor,
             .underlineStyle: NSUnderlineStyle.single.rawValue,
           ], range: match.range)
-        }
-      }
-    }
-
-    // Add mention styling
-    if let entities = fullMessage.message.entities {
-      for entity in entities.entities {
-        if entity.type == .mention, case let .mention(mention) = entity.entity {
-          let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
-
-          // Validate range is within bounds
-          if range.location >= 0, range.location + range.length <= text.utf16.count {
-            attributedString.addAttributes([
-              .foregroundColor: mentionColor,
-              // .underlineStyle: NSUnderlineStyle.single.rawValue,
-              .cursor: NSCursor.pointingHand,
-              .link: "inline://user/\(mention.userID)", // Custom URL scheme for mentions
-            ], range: range)
-          }
         }
       }
     }
@@ -1736,7 +1718,7 @@ extension MessageViewAppKit: NSMenuDelegate {
           newItem.image = NSImage(systemSymbolName: "character.bubble", accessibilityDescription: "Save Document")
           menu.addItem(newItem)
         }
-        
+
         if item.title.hasPrefix("Translate") {
           let newItem = item.copy() as! NSMenuItem
           menu.addItem(newItem)
@@ -1745,7 +1727,7 @@ extension MessageViewAppKit: NSMenuDelegate {
     }
 
     menu.addItem(NSMenuItem.separator())
-    
+
     // Delete or cancel button
     if message.status == .sending {
       let cancelItem = NSMenuItem(title: "Cancel", action: #selector(cancelMessage), keyEquivalent: "delete")
