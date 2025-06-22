@@ -56,6 +56,7 @@ class ComposeAppKit: NSView {
 
   // Draft
   private var draftDebounceTask: Task<Void, Never>?
+  private var initializedDraft = false
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
@@ -208,6 +209,17 @@ class ComposeAppKit: NSView {
     setUpConstraints()
     setupTextEditor()
     setupMentionCompletion()
+  }
+  
+  /// This method is called from ChatViewAppKit's viewDidLayout
+  /// Load draft, set initial height, etc here.
+  public func didLayout() {
+    guard !initializedDraft else { return }
+    let loaded = loadDraft()
+    if !loaded {
+      updateHeight(animate: false)
+    }
+    initializedDraft = true
   }
 
   private func setUpConstraints() {
@@ -1146,12 +1158,13 @@ extension ComposeAppKit: MentionCompletionMenuDelegate {
 // MARK: - Draft
 
 extension ComposeAppKit {
-  func loadDraft() {
+  /// Loads draft and if nothing found returns false
+  func loadDraft() -> Bool {
     // We should have the dialog, in the edge case we don't, just ignore draft for now
-    guard let dialog else { return }
+    guard let dialog else { return false }
 
     // Check if there is a draft message
-    guard let draft = dialog.draftMessage else { return }
+    guard let draft = dialog.draftMessage else { return false }
 
     // Convert to attributed string
     let attributedString = ProcessEntities.toAttributedString(
@@ -1161,6 +1174,7 @@ extension ComposeAppKit {
         font: ComposeTextEditor.font,
         textColor: ComposeTextEditor.textColor,
         linkColor: ComposeTextEditor.linkColor,
+        convertMentionsToLink: false
       )
     )
     
@@ -1174,12 +1188,11 @@ extension ComposeAppKit {
 
     // Measure new height
     updateContentHeight(for: textEditor.textView)
-
-    // Update vertical insets to ensure correctness for multi-line drafts
-    textEditor.updateTextViewInsets(contentHeight: textViewContentHeight)
-
+    
     // Update compose height
     updateHeight(animate: false)
+    
+    return true
   }
 
   private func saveDraft() {
