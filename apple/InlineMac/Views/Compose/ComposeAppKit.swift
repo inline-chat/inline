@@ -5,15 +5,25 @@ import InlineKit
 import InlineProtocol
 import Logger
 import SwiftUI
+import TextProcessing
 
 class ComposeAppKit: NSView {
-  // Props
+  // MARK: - Internals
+
+  private var log = Log.scoped("Compose", enableTracing: true)
+
+  // MARK: - Props
+
   private var peerId: InlineKit.Peer
   private var chat: InlineKit.Chat?
   private var chatId: Int64? { chat?.id }
   private var dependencies: AppDependencies
 
-  // State
+  // We load draft from the dialog passed from chat view model
+  private var dialog: InlineKit.Dialog?
+
+  // MARK: - State
+
   weak var messageList: MessageListAppKit?
   weak var parentChatView: ChatViewAppKit?
 
@@ -111,6 +121,7 @@ class ComposeAppKit: NSView {
     return border
   }()
 
+  // TODO: Only use this in pre-Tahoe
   lazy var background = {
     // Add vibrancy effect
     let material = NSVisualEffectView(frame: bounds)
@@ -142,18 +153,21 @@ class ComposeAppKit: NSView {
     messageList: MessageListAppKit,
     chat: InlineKit.Chat?,
     dependencies: AppDependencies,
-    parentChatView: ChatViewAppKit? = nil
+    parentChatView: ChatViewAppKit? = nil,
+    dialog: InlineKit.Dialog?
   ) {
     self.peerId = peerId
     self.messageList = messageList
     self.chat = chat
     self.dependencies = dependencies
     self.parentChatView = parentChatView
+    self.dialog = dialog
 
     super.init(frame: .zero)
     setupView()
     setupObservers()
     setupKeyDownHandler()
+    loadDraft()
   }
 
   @available(*, unavailable)
@@ -655,6 +669,7 @@ class ComposeAppKit: NSView {
     sendButton.updateCanSend(false)
     state.clearReplyingToMsgId()
     state.clearEditingMsgId()
+    clearDraft()
 
     // Views
     attachments.clearViews()
@@ -680,6 +695,7 @@ class ComposeAppKit: NSView {
       let editingMessageId = self.state.editingMsgId
 
       // Extract mention entities from attributed text
+      // TODO: replace with `fromAttributedString`
       let mentionEntities = self.mentionDetector.extractMentionEntities(from: attributedText)
       let entities = if mentionEntities.isEmpty {
         nil as MessageEntities?
@@ -769,6 +785,7 @@ class ComposeAppKit: NSView {
     textEditor.focus()
   }
 
+  // TODO: Abstract setAttributedString out of this
   func setText(_ text: String, animate: Bool = false, shouldUpdateHeight: Bool = true) {
     let attributedString = textEditor.createAttributedString(text)
     textEditor.replaceAttributedString(attributedString)
@@ -832,18 +849,10 @@ class ComposeAppKit: NSView {
     }
   }
 
-  override func viewDidHide() {
-    keyMonitorUnsubscribe?()
-    keyMonitorUnsubscribe = nil
-    keyMonitorPasteUnsubscribe?()
-    keyMonitorPasteUnsubscribe = nil
-
-    // Clean up mention resources
-    hideMentionCompletion()
-    mentionCompletionMenu?.removeFromSuperview()
-  }
-
   deinit {
+    saveDraft()
+
+    // Clean up
     keyMonitorUnsubscribe?()
     keyMonitorUnsubscribe = nil
     keyMonitorPasteUnsubscribe?()
@@ -856,7 +865,7 @@ class ComposeAppKit: NSView {
     mentionMenuConstraints.removeAll()
     mentionCompletionMenu?.removeFromSuperview()
 
-    Log.shared.debug("🗑️🧹 deinit ComposeAppKit: \(self)")
+    log.trace("deinit")
   }
 }
 
@@ -995,6 +1004,12 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
           let textContainer = textView.textContainer
     else { return 0 }
 
+    // Ensure correct size
+    textContainer.size = NSSize(
+      width: textEditor.bounds.width - textView.textContainerInset.width * 2.0 - textEditor.horizontalPadding * 2.0,
+      height: .greatestFiniteMagnitude
+    )
+
     layoutManager.ensureLayout(for: textContainer)
     return layoutManager.usedRect(for: textContainer).height
   }
@@ -1122,5 +1137,50 @@ extension ComposeAppKit: MentionCompletionMenuDelegate {
 
   func mentionMenuDidRequestClose(_ menu: MentionCompletionMenu) {
     hideMentionCompletion()
+  }
+}
+
+// MARK: - Draft
+
+extension ComposeAppKit {
+  func loadDraft() {
+    // We should have the dialog, in the edge case we don't, just ignore draft for now
+    guard let dialog else { return }
+
+    // Check if there is a draft message
+    guard let draft = dialog.draftMessage else { return }
+
+    // Convert to attributed string
+    let attributedString = ProcessEntities.toAttributedString(
+      text: draft.text,
+      entities: draft.entities,
+      configuration: .init(
+        font: ComposeTextEditor.font,
+        textColor: ComposeTextEditor.textColor,
+        linkColor: ComposeTextEditor.linkColor,
+      )
+    )
+
+    // Set as compose text
+    textEditor.replaceAttributedString(attributedString)
+    textEditor.showPlaceholder(text.isEmpty)
+
+    // Ensure layout before measuring text height
+    // layoutSubtreeIfNeeded()
+
+    // Update height
+    updateContentHeight(for: textEditor.textView)
+    updateHeight(animate: false)
+
+    // Update vertical insets to ensure correctness for multi-line drafts
+    textEditor.updateTextViewInsets(contentHeight: textViewContentHeight)
+  }
+
+  private func saveDraft() {
+    Drafts.shared.update(peerId: peerId, attributedString: textEditor.attributedString)
+  }
+
+  private func clearDraft() {
+    Drafts.shared.clear(peerId: peerId)
   }
 }

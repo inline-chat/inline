@@ -15,6 +15,10 @@ class ChatViewAppKit: NSViewController {
   let peerId: Peer
   let dependencies: AppDependencies
   private var viewModel: FullChatViewModel
+  
+  private var dialog: Dialog? {
+    viewModel.chatItem?.dialog
+  }
 
   private enum State {
     case initial(Chat?)
@@ -155,7 +159,8 @@ class ChatViewAppKit: NSViewController {
       messageList: messageListVC!,
       chat: chat,
       dependencies: dependencies,
-      parentChatView: self
+      parentChatView: self,
+      dialog: dialog
     )
     view.addSubview(compose)
     compose.translatesAutoresizingMaskIntoConstraints = false
