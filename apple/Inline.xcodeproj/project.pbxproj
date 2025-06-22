@@ -39,6 +39,8 @@
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
 		CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD2785702CFB0916008A0EEF /* InlineConfig */; };
 		CD4D56CD2D2D4393006072AE /* Throttler in Frameworks */ = {isa = PBXBuildFile; productRef = CD4D56CC2D2D4393006072AE /* Throttler */; };
+		CD4E8E2A2E088F6100CE6BC0 /* TextProcessing in Frameworks */ = {isa = PBXBuildFile; productRef = CD4E8E292E088F6100CE6BC0 /* TextProcessing */; };
+		CD4E8E2C2E088F6B00CE6BC0 /* TextProcessing in Frameworks */ = {isa = PBXBuildFile; productRef = CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */; };
 		CD70BF1E2DE72D5100E9830A /* FileAttachments in Frameworks */ = {isa = PBXBuildFile; productRef = CD70BF1D2DE72D5100E9830A /* FileAttachments */; };
 		CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D42D3E8066001AFC1A /* Nuke */; };
 		CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D62D3E8066001AFC1A /* NukeUI */; };
@@ -205,6 +207,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CD4E8E2C2E088F6B00CE6BC0 /* TextProcessing in Frameworks */,
 				C3AEE6AC2D4FCDD0005D1179 /* NukeUI in Frameworks */,
 				B77EE8082DC91CFD00C42B9E /* iPhoneNumberField in Frameworks */,
 				B7F71EB92DDB3BA70091C872 /* RenderMeThis in Frameworks */,
@@ -236,6 +239,7 @@
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
 				CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */,
 				CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */,
+				CD4E8E2A2E088F6100CE6BC0 /* TextProcessing in Frameworks */,
 				CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */,
 				CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */,
 				C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */,
@@ -381,6 +385,7 @@
 				C37F343F2D5A4D4800D7D7CC /* MCEmojiPicker */,
 				B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */,
 				B7F71EB82DDB3BA70091C872 /* RenderMeThis */,
+				CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -415,6 +420,7 @@
 				CDB123D62D3E8066001AFC1A /* NukeUI */,
 				CDC72E3C2D999C6D001E8A0C /* GRDB */,
 				CD70BF1D2DE72D5100E9830A /* FileAttachments */,
+				CD4E8E292E088F6100CE6BC0 /* TextProcessing */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -1429,6 +1435,14 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CD4D56CB2D2D4393006072AE /* XCRemoteSwiftPackageReference "Throttler" */;
 			productName = Throttler;
+		};
+		CD4E8E292E088F6100CE6BC0 /* TextProcessing */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TextProcessing;
+		};
+		CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TextProcessing;
 		};
 		CD70BF1D2DE72D5100E9830A /* FileAttachments */ = {
 			isa = XCSwiftPackageProductDependency;
