@@ -15,7 +15,7 @@ class ChatViewAppKit: NSViewController {
   let peerId: Peer
   let dependencies: AppDependencies
   private var viewModel: FullChatViewModel
-  
+
   private var dialog: Dialog? {
     viewModel.chatItem?.dialog
   }
@@ -66,12 +66,23 @@ class ChatViewAppKit: NSViewController {
   override func loadView() {
     view = ChatDropView()
     view.wantsLayer = true
+
+    transitionFromInitialState()
   }
 
   override func viewDidLoad() {
     super.viewDidLoad()
     setupDragAndDrop()
-    transitionFromInitialState()
+  }
+
+  private var loadedDraft = false
+
+  override func viewDidLayout() {
+    super.viewDidLayout()
+    if !loadedDraft {
+      compose?.loadDraft()
+      loadedDraft = true
+    }
   }
 
   private func transitionFromInitialState() {
@@ -179,9 +190,6 @@ class ChatViewAppKit: NSViewController {
       compose.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       compose.trailingAnchor.constraint(equalTo: view.trailingAnchor),
     ])
-
-    // Initial height sync
-    compose.updateHeight()
   }
 
   private func fetchChat() {
