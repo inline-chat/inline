@@ -54,6 +54,9 @@ class ComposeAppKit: NSView {
   private var mentionKeyMonitorEscUnsubscribe: (() -> Void)?
   private var mentionMenuConstraints: [NSLayoutConstraint] = []
 
+  // Draft
+  private var draftDebounceTask: Task<Void, Never>?
+
   // Internal
   private var heightConstraint: NSLayoutConstraint!
   private var textHeightConstraint: NSLayoutConstraint!
@@ -439,6 +442,8 @@ class ComposeAppKit: NSView {
   func updateHeight(animate: Bool = false) {
     let textEditorHeight = getTextViewHeight()
     let wrapperHeight = getHeight()
+
+    log.trace("updating height wrapper=\(wrapperHeight), textEditor=\(textEditorHeight)")
 
     if feature_animateHeightChanges || animate {
       // First update the height of scroll view immediately so it doesn't clip from top while animating
@@ -852,6 +857,9 @@ class ComposeAppKit: NSView {
   deinit {
     saveDraft()
 
+    draftDebounceTask?.cancel()
+    draftDebounceTask = nil
+
     // Clean up
     keyMonitorUnsubscribe?()
     keyMonitorUnsubscribe = nil
@@ -992,6 +1000,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
 
     updateSendButtonIfNeeded()
+    saveDraftWithDebounce()
   }
 
   /// Reflect state changes in send button
@@ -1003,12 +1012,6 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     guard let layoutManager = textView.layoutManager,
           let textContainer = textView.textContainer
     else { return 0 }
-
-    // Ensure correct size
-    textContainer.size = NSSize(
-      width: textEditor.bounds.width - textView.textContainerInset.width * 2.0 - textEditor.horizontalPadding * 2.0,
-      height: .greatestFiniteMagnitude
-    )
 
     layoutManager.ensureLayout(for: textContainer)
     return layoutManager.usedRect(for: textContainer).height
@@ -1083,7 +1086,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidGainFocus(_ textView: NSTextView) {
-    // No specific action needed when gaining focus
+    // TODO: Show mentions menu if needed
   }
 
   func textViewDidLoseFocus(_ textView: NSTextView) {
@@ -1160,20 +1163,23 @@ extension ComposeAppKit {
         linkColor: ComposeTextEditor.linkColor,
       )
     )
+    
+    // Layout for accurate height measurements. Without this, it doesn't use the
+    // correct width for text height calculations
+    layoutSubtreeIfNeeded()
 
     // Set as compose text
     textEditor.replaceAttributedString(attributedString)
     textEditor.showPlaceholder(text.isEmpty)
 
-    // Ensure layout before measuring text height
-    // layoutSubtreeIfNeeded()
-
-    // Update height
+    // Measure new height
     updateContentHeight(for: textEditor.textView)
-    updateHeight(animate: false)
 
     // Update vertical insets to ensure correctness for multi-line drafts
     textEditor.updateTextViewInsets(contentHeight: textViewContentHeight)
+
+    // Update compose height
+    updateHeight(animate: false)
   }
 
   private func saveDraft() {
@@ -1182,5 +1188,16 @@ extension ComposeAppKit {
 
   private func clearDraft() {
     Drafts.shared.clear(peerId: peerId)
+  }
+
+  /// Triggers save with a 300ms delay which cancels previous Task thus creating a basic debounced
+  /// version to be used on textDidChange.
+  private func saveDraftWithDebounce() {
+    draftDebounceTask?.cancel()
+    draftDebounceTask = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(300), tolerance: .milliseconds(100))
+      guard !Task.isCancelled else { return }
+      self?.saveDraft()
+    }
   }
 }
