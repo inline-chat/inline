@@ -75,14 +75,9 @@ class ChatViewAppKit: NSViewController {
     setupDragAndDrop()
   }
 
-  private var loadedDraft = false
-
   override func viewDidLayout() {
     super.viewDidLayout()
-    if !loadedDraft {
-      compose?.loadDraft()
-      loadedDraft = true
-    }
+    compose?.didLayout()
   }
 
   private func transitionFromInitialState() {
