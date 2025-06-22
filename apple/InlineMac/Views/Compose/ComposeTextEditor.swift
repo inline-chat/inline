@@ -93,8 +93,6 @@ class ComposeTextEditor: NSView {
   }
 
   private func setupViews() {
-    addSubview(placeholder)
-
     // Scroll view
     scrollView.drawsBackground = false
     scrollView.hasVerticalScroller = true
@@ -171,11 +169,6 @@ class ComposeTextEditor: NSView {
       scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
       scrollView.topAnchor.constraint(equalTo: topAnchor),
       heightConstraint, // don't anchor to bottom
-
-      // placeholder
-      placeholder.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
-      placeholder.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
-      placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
     ])
   }
 
@@ -196,6 +189,16 @@ class ComposeTextEditor: NSView {
   var isPlaceholderVisible: Bool = true
 
   func showPlaceholder(_ show: Bool) {
+    if show {
+      addSubview(placeholder)
+
+      NSLayoutConstraint.activate([
+        placeholder.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
+        placeholder.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
+        placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
+      ])
+    }
+
     if initialPlaceholderPosition == nil {
       initialPlaceholderPosition = placeholder.layer?.position
     }
@@ -209,9 +212,18 @@ class ComposeTextEditor: NSView {
     let offsetX = 15.0
     let offsetY = 0.0
 
+    CATransaction.begin()
+    
+    CATransaction.setCompletionBlock {
+      if !show {
+        self.placeholder.removeFromSuperview()
+      }
+    }
+    
     let animationGroup = CAAnimationGroup()
     animationGroup.duration = show ? 0.2 : 0.1
     animationGroup.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    
 
     let fade = CABasicAnimation(keyPath: "opacity")
     if show {
@@ -247,6 +259,8 @@ class ComposeTextEditor: NSView {
     placeholder.layer?.position = endPosition ?? .zero
 
     placeholder.layer?.add(animationGroup, forKey: nil)
+    CATransaction.commit()
+    
   }
 
   func getTypingLineHeight() -> CGFloat {
