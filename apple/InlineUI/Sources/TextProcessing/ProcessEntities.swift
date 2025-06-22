@@ -30,7 +30,7 @@ public class ProcessEntities {
 
     /// If enabled, mentions convert to in-app URLs
     var convertMentionsToLink: Bool
-    
+
     public init(
       font: PlatformFont,
       textColor: PlatformColor,
@@ -44,7 +44,9 @@ public class ProcessEntities {
     }
   }
 
+  ///
   /// Converts text and an array of entities to
+  ///
   public static func toAttributedString(
     text: String,
     entities: MessageEntities?,
@@ -85,5 +87,50 @@ public class ProcessEntities {
     }
 
     return attributedString
+  }
+
+  ///
+  /// Extract entities from attributed string
+  ///
+  public static func fromAttributedString(
+    _ attributedString: NSAttributedString
+  ) -> (text: String, entities: MessageEntities) {
+    var entities: [MessageEntity] = []
+    let text = attributedString.string
+
+    // Extract mention nodes from text
+    attributedString.enumerateAttribute(
+      .mentionUserId,
+      in: NSRange(location: 0, length: text.count),
+      options: []
+    ) { value, range, _ in
+      if let userId = value as? Int64 {
+        var entity = MessageEntity()
+        entity.type = .mention
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length - 1) // Subtract 1 for trailing space
+        entity.mention = MessageEntity.MessageEntityMention.with {
+          $0.userID = userId
+        }
+        entities.append(entity)
+      }
+    }
+
+    var messageEntities = MessageEntities()
+    messageEntities.entities = entities
+
+    return (text: text, entities: messageEntities)
+  }
+}
+
+// MARK: - Integrate with drafts for easier usage
+
+public extension Drafts {
+  func update(peerId: InlineKit.Peer, attributedString: NSAttributedString) {
+    // Extract entities from attributed string
+    let (text, entities) = ProcessEntities.fromAttributedString(attributedString)
+
+    // Update
+    update(peerId: peerId, text: text, entities: entities)
   }
 }
