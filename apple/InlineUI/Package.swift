@@ -3,35 +3,37 @@
 
 import PackageDescription
 
+let baseDependencies: [PackageDescription.Target.Dependency] = [
+  "InlineKit",
+]
+
 let package = Package(
   name: "InlineUI",
-  defaultLocalization: "en",
   platforms: [
     .iOS(.v17),
-    .macOS(.v13),
+    .macOS(.v14),
   ],
+  
   products: [
-    // Products define the executables and libraries a package produces, making them visible to other packages.
-    .library(
-      name: "InlineUI",
-      targets: ["InlineUI"]
-    ),
+    .library(name: "InlineUI", targets: ["InlineUI"]),
+    .library(name: "TextProcessing", targets: ["TextProcessing"]),
   ],
+  
   dependencies: [
-    .package(path: "../InlineKit"),
+    .package(name: "InlineKit", path: "../InlineKit"),
   ],
+  
   targets: [
-    // Targets are the basic building blocks of a package, defining a module or a test suite.
-    // Targets can depend on other targets in this package and products from dependencies.
     .target(
       name: "InlineUI",
-      dependencies: [
-        .product(name: "InlineKit", package: "InlineKit"),
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-      ]
+      dependencies: baseDependencies,
     ),
+
+    .target(
+      name: "TextProcessing",
+      dependencies: baseDependencies,
+    ),
+
     .testTarget(
       name: "InlineUITests",
       dependencies: ["InlineUI"]
