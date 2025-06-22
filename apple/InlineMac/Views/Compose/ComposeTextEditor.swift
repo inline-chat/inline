@@ -3,15 +3,29 @@ import InlineKit
 import Logger
 
 class ComposeTextEditor: NSView {
+  // MARK: - Internals
+
   public let scrollView: ComposeScrollView
   public let textView: ComposeNSTextView
-  private let font: NSFont = .preferredFont(forTextStyle: .body)
   private let log = Log.scoped("ComposeTextEditor", enableTracing: false)
+
+  // MARK: - Theme
+
+  static let font: NSFont = .preferredFont(forTextStyle: .body)
+  private var font: NSFont { Self.font }
+
+  static let textColor: NSColor = .labelColor
+  private var textColor: NSColor { Self.textColor }
+
+  static let linkColor: NSColor = .linkColor
+  private var linkColor: NSColor { Self.linkColor }
+
   let minHeight: CGFloat = Theme.composeMinHeight
   let minTextHeight: CGFloat = Theme.composeMinHeight - 2 * Theme.composeVerticalPadding
   let verticalPadding: CGFloat = Theme.composeVerticalPadding
-
   let horizontalPadding: CGFloat = Theme.composeTextViewHorizontalPadding
+
+  // MARK: - Computed
 
   weak var delegate: (NSTextViewDelegate & ComposeTextViewDelegate)? {
     didSet {
@@ -32,9 +46,11 @@ class ComposeTextEditor: NSView {
     textView.attributedString()
   }
 
-  func setAttributedString(_ attributedString: NSAttributedString) {
-    textView.setAttributedText(attributedString, preserveSelection: true)
-  }
+  // MARK: - Methods
+
+//  func setAttributedString(_ attributedString: NSAttributedString) {
+//    textView.setAttributedText(attributedString, preserveSelection: true)
+//  }
 
   // Does not preserve selection
   func replaceAttributedString(_ attributedString: NSAttributedString) {
@@ -250,6 +266,15 @@ class ComposeTextEditor: NSView {
 
   public func setString(_ string: String) {
     let attributedString = createAttributedString(string)
+    textView.setAttributedText(attributedString, preserveSelection: false)
+    if string.isEmpty {
+      showPlaceholder(true)
+    } else {
+      showPlaceholder(false)
+    }
+  }
+
+  public func setAttributedString(_ attributedString: NSAttributedString) {
     textView.setAttributedText(attributedString, preserveSelection: false)
     if string.isEmpty {
       showPlaceholder(true)
