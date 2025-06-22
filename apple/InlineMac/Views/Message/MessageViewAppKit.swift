@@ -1037,14 +1037,15 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    // Create mutable attributed string
+    /// Apply entities to text and create an NSAttributedString
     let attributedString = ProcessEntities.toAttributedString(
       text: text,
       entities: fullMessage.message.entities,
-      attributes: [
-        .font: MessageTextConfiguration.font,
-        .foregroundColor: textColor,
-      ]
+      configuration: .init(
+        font: MessageTextConfiguration.font,
+        textColor: textColor,
+        linkColor: mentionColor,
+      )
     )
 
     // Detect and add links
