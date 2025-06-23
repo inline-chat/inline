@@ -171,7 +171,6 @@ class ComposeAppKit: NSView {
     setupView()
     setupObservers()
     setupKeyDownHandler()
-    loadDraft()
   }
 
   @available(*, unavailable)
@@ -210,7 +209,7 @@ class ComposeAppKit: NSView {
     setupTextEditor()
     setupMentionCompletion()
   }
-  
+
   /// This method is called from ChatViewAppKit's viewDidLayout
   /// Load draft, set initial height, etc here.
   public func didLayout() {
@@ -218,6 +217,9 @@ class ComposeAppKit: NSView {
     let loaded = loadDraft()
     if !loaded {
       updateHeight(animate: false)
+
+      // If no draft is loaded, show placeholder
+      textEditor.showPlaceholder(true)
     }
     initializedDraft = true
   }
@@ -557,7 +559,14 @@ class ComposeAppKit: NSView {
 
         if kind == .editing {
           // set string to the message
-          setText(message.message.text ?? "", animate: animate, shouldUpdateHeight: false)
+          let attributedString = toAttributedString(
+            text: message.message.text ?? "",
+            entities: message.message.entities
+          )
+
+          // set manually without updating height
+          textEditor.replaceAttributedString(attributedString)
+          textEditor.showPlaceholder(text.isEmpty)
         }
       }
     } else {
@@ -704,7 +713,7 @@ class ComposeAppKit: NSView {
   func send() {
     DispatchQueue.main.async(qos: .userInteractive) {
       self.ignoreNextHeightChange = true
-      let attributedText = self.textEditor.attributedString
+      let attributedString = self.textEditor.attributedString
       let rawText = self.textEditor.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
       let replyToMsgId = self.state.replyingToMsgId
       let attachmentItems = self.attachmentItems
@@ -713,12 +722,7 @@ class ComposeAppKit: NSView {
 
       // Extract mention entities from attributed text
       // TODO: replace with `fromAttributedString`
-      let mentionEntities = self.mentionDetector.extractMentionEntities(from: attributedText)
-      let entities = if mentionEntities.isEmpty {
-        nil as MessageEntities?
-      } else {
-        MessageEntities.with { $0.entities = mentionEntities }
-      }
+      let (_, entities) = ProcessEntities.fromAttributedString(attributedString)
 
       // make it nil if empty
       let text = if rawText.isEmpty, !attachmentItems.isEmpty {
@@ -732,12 +736,12 @@ class ComposeAppKit: NSView {
       // Edit message
       if let editingMessageId {
         // Edit message
-
         Transactions.shared.mutate(transaction: .editMessage(.init(
           messageId: editingMessageId,
           text: text ?? "",
           chatId: self.chatId ?? 0,
-          peerId: self.peerId
+          peerId: self.peerId,
+          entities: entities
         )))
       }
 
@@ -1155,6 +1159,53 @@ extension ComposeAppKit: MentionCompletionMenuDelegate {
   }
 }
 
+// MARK: - Rich text loading
+
+extension ComposeAppKit {
+  func toAttributedString(text: String, entities: MessageEntities?) -> NSAttributedString {
+    let attributedString = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: .init(
+        font: ComposeTextEditor.font,
+        textColor: ComposeTextEditor.textColor,
+        linkColor: ComposeTextEditor.linkColor,
+        convertMentionsToLink: false
+      )
+    )
+
+    return attributedString
+  }
+
+  func setMessage(text: String, entities: MessageEntities?) {
+    // Convert to attributed string
+    let attributedString = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: .init(
+        font: ComposeTextEditor.font,
+        textColor: ComposeTextEditor.textColor,
+        linkColor: ComposeTextEditor.linkColor,
+        convertMentionsToLink: false
+      )
+    )
+
+    setAttributedString(attributedString)
+  }
+
+  func setAttributedString(_ attributedString: NSAttributedString) {
+    // Set as compose text
+    textEditor.replaceAttributedString(attributedString)
+    textEditor.showPlaceholder(text.isEmpty)
+
+    // Measure new height
+    updateContentHeight(for: textEditor.textView)
+
+    // Update compose height
+    updateHeight(animate: false)
+  }
+}
+
 // MARK: - Draft
 
 extension ComposeAppKit {
@@ -1167,31 +1218,18 @@ extension ComposeAppKit {
     guard let draft = dialog.draftMessage else { return false }
 
     // Convert to attributed string
-    let attributedString = ProcessEntities.toAttributedString(
+    let attributedString = toAttributedString(
       text: draft.text,
       entities: draft.entities,
-      configuration: .init(
-        font: ComposeTextEditor.font,
-        textColor: ComposeTextEditor.textColor,
-        linkColor: ComposeTextEditor.linkColor,
-        convertMentionsToLink: false
-      )
     )
-    
+
     // Layout for accurate height measurements. Without this, it doesn't use the
     // correct width for text height calculations
     layoutSubtreeIfNeeded()
 
     // Set as compose text
-    textEditor.replaceAttributedString(attributedString)
-    textEditor.showPlaceholder(text.isEmpty)
+    setAttributedString(attributedString)
 
-    // Measure new height
-    updateContentHeight(for: textEditor.textView)
-    
-    // Update compose height
-    updateHeight(animate: false)
-    
     return true
   }
 
