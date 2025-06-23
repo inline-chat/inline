@@ -86,7 +86,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   // encrypt entities
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
-  const encryptedEntities = binaryEntities ? encryptBinary(binaryEntities) : undefined
+  const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptBinary(binaryEntities) : undefined
 
   // insert new msg with new ID
   const newMessage = await MessageModel.insertMessage({
