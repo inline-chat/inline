@@ -72,6 +72,7 @@ public class ProcessEntities {
         if range.location >= 0, range.location + range.length <= text.utf16.count {
           if configuration.convertMentionsToLink {
             attributedString.addAttributes([
+              .mentionUserId: mention.userID,
               .foregroundColor: configuration.linkColor,
               // TODO: Enable on macOS
               // .cursor: NSCursor.pointingHand,

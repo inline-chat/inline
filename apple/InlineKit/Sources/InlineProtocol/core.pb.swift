@@ -2927,11 +2927,21 @@ public struct EditMessageInput: Sendable {
 
   public var text: String = String()
 
+  public var entities: MessageEntities {
+    get {return _entities ?? MessageEntities()}
+    set {_entities = newValue}
+  }
+  /// Returns true if `entities` has been explicitly set.
+  public var hasEntities: Bool {return self._entities != nil}
+  /// Clears the value of `entities`. Subsequent reads from it will return its default value.
+  public mutating func clearEntities() {self._entities = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _entities: MessageEntities? = nil
 }
 
 public struct EditMessageResult: Sendable {
@@ -8774,6 +8784,7 @@ extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     1: .standard(proto: "message_id"),
     2: .standard(proto: "peer_id"),
     3: .same(proto: "text"),
+    7: .same(proto: "entities"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8785,6 +8796,7 @@ extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.text) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._entities) }()
       default: break
       }
     }
@@ -8804,6 +8816,9 @@ extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if !self.text.isEmpty {
       try visitor.visitSingularStringField(value: self.text, fieldNumber: 3)
     }
+    try { if let v = self._entities {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -8811,6 +8826,7 @@ extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs.messageID != rhs.messageID {return false}
     if lhs._peerID != rhs._peerID {return false}
     if lhs.text != rhs.text {return false}
+    if lhs._entities != rhs._entities {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
