@@ -62,6 +62,7 @@ class ChatState {
   }
 
   public func clearReplyingToMsgId() {
+    guard data.replyingToMsgId != nil else { return }
     data.replyingToMsgId = nil
     replyingToMsgIdPublisher.send(nil)
     save()
@@ -73,7 +74,11 @@ class ChatState {
     editingMsgIdPublisher.send(id)
   }
 
+  /// Clears editing message ID and publishes the event if it was set
+  ///
+  /// Editing message ID does not need to be saved
   public func clearEditingMsgId() {
+    guard editingMsgId != nil else { return }
     editingMsgId = nil
     editingMsgIdPublisher.send(nil)
   }
