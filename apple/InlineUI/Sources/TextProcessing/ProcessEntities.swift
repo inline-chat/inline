@@ -71,15 +71,20 @@ public class ProcessEntities {
         // Validate range is within bounds
         if range.location >= 0, range.location + range.length <= text.utf16.count {
           if configuration.convertMentionsToLink {
-            attributedString.addAttributes([
+            var attributes: [NSAttributedString.Key: Any] = [
               .mentionUserId: mention.userID,
               .foregroundColor: configuration.linkColor,
-              // TODO: Enable on macOS
-              // .cursor: NSCursor.pointingHand,
               .link: "inline://user/\(mention.userID)", // Custom URL scheme for mentions
-            ], range: range)
+            ]
+
+            #if os(macOS)
+            attributes[.cursor] = NSCursor.pointingHand
+            #endif
+
+            attributedString.addAttributes(attributes, range: range)
           } else {
             attributedString.addAttributes([
+              .mentionUserId: mention.userID,
               .foregroundColor: configuration.linkColor,
             ], range: range)
           }
