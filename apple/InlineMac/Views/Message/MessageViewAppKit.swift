@@ -1638,8 +1638,10 @@ extension MessageViewAppKit: NSMenuDelegate {
   func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil) -> NSMenu {
     let menu = NSMenu()
 
+    let regularMessage = message.status != .sending && message.status != .failed
+
     // Reply
-    if message.status != .sending {
+    if regularMessage {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
       replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
       menu.addItem(replyItem)
@@ -1652,12 +1654,16 @@ extension MessageViewAppKit: NSMenuDelegate {
       menu.addItem(editItem)
     }
 
-    // Add reaction action
-    let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "e")
-    addReactionItem.image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: "Add Reaction")
-    menu.addItem(addReactionItem)
+    if regularMessage {
+      // Add reaction action
+      let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "e")
+      addReactionItem.image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: "Add Reaction")
+      menu.addItem(addReactionItem)
+    }
 
-    menu.addItem(NSMenuItem.separator())
+    if menu.items.count > 0 {
+      menu.addItem(NSMenuItem.separator())
+    }
 
     var rendersCopyText = false
 
@@ -1669,16 +1675,17 @@ extension MessageViewAppKit: NSMenuDelegate {
       let newItem = nativeCopyItem.copy() as! NSMenuItem
       newItem.title = "Copy Selected Text"
       menu.addItem(newItem)
-
       rendersCopyText = true
-    } else {
-      // Add copy message action for text
-      if hasText {
-        let copyItem = NSMenuItem(title: "Copy Text", action: #selector(copyMessage), keyEquivalent: "c")
+    }
+
+    // Add copy message action for text
+    if hasText {
+      let copyItem = NSMenuItem(title: "Copy Message", action: #selector(copyMessage), keyEquivalent: "c")
+      if !rendersCopyText {
         copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: "Copy")
-        menu.addItem(copyItem)
         rendersCopyText = true
       }
+      menu.addItem(copyItem)
     }
 
     // Add photo actions
