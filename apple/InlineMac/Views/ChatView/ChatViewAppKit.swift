@@ -36,7 +36,6 @@ class ChatViewAppKit: NSViewController {
   private var compose: ComposeAppKit?
   private var spinnerVC: NSHostingController<SpinnerView>?
   private var errorVC: NSHostingController<ErrorView>?
-
   private var didInitialRefetch = false
 
   init(peerId: Peer, chat: Chat? = nil, dependencies: AppDependencies) {
