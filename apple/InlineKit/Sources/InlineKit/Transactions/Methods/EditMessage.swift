@@ -12,17 +12,19 @@ public struct TransactionEditMessage: Transaction {
   public var text: String
   public var chatId: Int64
   public var peerId: Peer
+  public var entities: MessageEntities?
 
   // Config
   public var id = UUID().uuidString
   public var config = TransactionConfig.default
   public var date = Date()
 
-  public init(messageId: Int64, text: String, chatId: Int64, peerId: Peer) {
+  public init(messageId: Int64, text: String, chatId: Int64, peerId: Peer, entities: MessageEntities? = nil) {
     self.messageId = messageId
     self.text = text
     self.chatId = chatId
     self.peerId = peerId
+    self.entities = entities
   }
 
   // Methods
@@ -38,8 +40,10 @@ public struct TransactionEditMessage: Transaction {
           } else {
             message?.editDate = Date()
             message?.text = text
+            message?.entities = entities
           }
-          try message?.saveMessage(db)
+          print("edited message \(entities)")
+          let newMessage = try message?.saveMessage(db)
         }
       } catch {
         Log.shared.error("Failed to edit message \(error)")
@@ -65,6 +69,9 @@ public struct TransactionEditMessage: Transaction {
         $0.peerID = peerId.toInputPeer()
         $0.messageID = messageId
         $0.text = text
+        if let entities {
+          $0.entities = entities
+        }
       })
     )
 
@@ -98,45 +105,8 @@ public struct TransactionEditMessage: Transaction {
     await Realtime.shared.updates.applyBatch(updates: result)
   }
 
-  public func didFail(error: Error?) async {
-    Log.shared.error("Failed to delete message", error: error)
-    Task(priority: .userInitiated) {
-      try? await AppDatabase.shared.dbWriter.write { db in
-        var message = try Message
-          .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
-        if let current = message?.text, current == text {
-          message?.editDate = nil
-        } else {
-          message?.editDate = Date()
-          message?.text = text
-        }
-        try message?.saveMessage(db)
-      }
-
-      Task(priority: .userInitiated) { @MainActor in
-        MessagesPublisher.shared.messageUpdatedWithId(
-          messageId: messageId,
-          chatId: chatId,
-          peer: peerId,
-          animated: false
-        )
-      }
-    }
-  }
-
-  public func rollback() async {
-    let _ = try? await AppDatabase.shared.dbWriter.write { db in
-      var message = try Message
-        .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
-      if let current = message?.text, current == text {
-        message?.editDate = nil
-      } else {
-        message?.editDate = Date()
-        message?.text = text
-      }
-      try message?.saveMessage(db)
-    }
-  }
+  public func didFail(error: Error?) async {}
+  public func rollback() async {}
 
   enum EditMessageError: Error {
     case failed
