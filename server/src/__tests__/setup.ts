@@ -3,6 +3,9 @@ import { migrateDb } from "../../scripts/helpers/migrate-db"
 import postgres from "postgres"
 import { beforeEach, afterEach, beforeAll, afterAll } from "bun:test"
 import { sql, eq } from "drizzle-orm"
+import { chats, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { encrypt, encryptBinary } from "@in/server/modules/encryption/encryption"
+import { MessageEntities, MessageEntity_Type } from "@in/protocol/core"
 
 // Test database configuration
 const TEST_DB_NAME = "test_db"
@@ -364,6 +367,68 @@ export const testUtils = {
       chat,
       dialogA: dialogs.find((d) => d.userId === userA.id),
       dialogB: dialogs.find((d) => d.userId === userB.id),
+    }
+  },
+
+  async createTestChat(): Promise<DbChat> {
+    let result = await db
+      .insert(chats)
+      .values({
+        type: "private",
+      })
+      .returning()
+
+    return result[0]!
+  },
+
+  async createTestMessage({
+    messageId,
+    chatId,
+    fromId,
+    text,
+    entities,
+  }: {
+    messageId: number
+    chatId: number
+    fromId: number
+    text: string
+    entities?: MessageEntities
+  }): Promise<DbMessage> {
+    let encrypted = encrypt(text)
+    let encryptedEntities = entities ? encryptBinary(MessageEntities.toBinary(entities)) : undefined
+    let result = await db
+      .insert(messages)
+      .values({
+        fromId,
+        messageId,
+        chatId,
+        textEncrypted: encrypted.encrypted,
+        textIv: encrypted.iv,
+        textTag: encrypted.authTag,
+        entitiesEncrypted: encryptedEntities?.encrypted,
+        entitiesIv: encryptedEntities?.iv,
+        entitiesTag: encryptedEntities?.authTag,
+      })
+      .returning()
+
+    return result[0]!
+  },
+
+  mentionEntities(offset: number, length: number): MessageEntities {
+    return {
+      entities: [
+        {
+          type: MessageEntity_Type.MENTION,
+          offset: BigInt(offset),
+          length: BigInt(length),
+          entity: {
+            oneofKind: "mention",
+            mention: {
+              userId: 2n,
+            },
+          },
+        },
+      ],
     }
   },
 }

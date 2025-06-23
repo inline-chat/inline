@@ -1973,6 +1973,10 @@ export interface EditMessageInput {
      * @generated from protobuf field: string text = 3;
      */
     text: string;
+    /**
+     * @generated from protobuf field: optional MessageEntities entities = 7;
+     */
+    entities?: MessageEntities;
 }
 /**
  * @generated from protobuf message EditMessageResult
@@ -7622,7 +7626,8 @@ class EditMessageInput$Type extends MessageType<EditMessageInput> {
         super("EditMessageInput", [
             { no: 1, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "peer_id", kind: "message", T: () => InputPeer },
-            { no: 3, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "entities", kind: "message", T: () => MessageEntities }
         ]);
     }
     create(value?: PartialMessage<EditMessageInput>): EditMessageInput {
@@ -7647,6 +7652,9 @@ class EditMessageInput$Type extends MessageType<EditMessageInput> {
                 case /* string text */ 3:
                     message.text = reader.string();
                     break;
+                case /* optional MessageEntities entities */ 7:
+                    message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7668,6 +7676,9 @@ class EditMessageInput$Type extends MessageType<EditMessageInput> {
         /* string text = 3; */
         if (message.text !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.text);
+        /* optional MessageEntities entities = 7; */
+        if (message.entities)
+            MessageEntities.internalBinaryWrite(message.entities, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
