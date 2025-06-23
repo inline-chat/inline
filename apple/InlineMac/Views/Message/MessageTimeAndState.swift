@@ -103,7 +103,7 @@ class MessageTimeAndState: NSView {
 
   private func createStatusImage() -> CGImage? {
     let status = fullMessage.message.status ?? .sent
-    let color = isFailedMessage ? NSColor.systemRed : textColor
+    let color = textColor
     let scale = effectiveScaleFactor
     let cacheKey = CacheKey(
       status: status,
