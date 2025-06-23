@@ -40,7 +40,11 @@ export type OptionalEncryptedData = EmptyEncryptedData | EncryptedData
  * Low-level binary data encryption function
  * Encrypts raw binary data (Buffer or Uint8Array)
  */
-export function encryptBinary(data: Buffer | Uint8Array): EncryptedData {
+export function encryptBinary(data: Buffer | Uint8Array): EncryptedData | null {
+  if (data.length === 0) {
+    return null
+  }
+
   const ENCRYPTION_KEY = getEncryptionKey()
   validateBinaryData(data)
   const startTime = process.hrtime()
