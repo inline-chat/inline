@@ -42,8 +42,7 @@ public struct TransactionEditMessage: Transaction {
             message?.text = text
             message?.entities = entities
           }
-          print("edited message \(entities)")
-          let newMessage = try message?.saveMessage(db)
+          try message?.saveMessage(db)
         }
       } catch {
         Log.shared.error("Failed to edit message \(error)")
