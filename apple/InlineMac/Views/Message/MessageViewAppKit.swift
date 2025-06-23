@@ -1749,6 +1749,15 @@ extension MessageViewAppKit: NSMenuDelegate {
       menu.addItem(deleteItem)
     }
 
+    /// If message is edited, show edit date in context menu
+    if let editDate = message.editDate {
+      menu.addItem(NSMenuItem.separator())
+      let formatted = DateFormatter.localizedString(from: editDate, dateStyle: .medium, timeStyle: .short)
+      let editDateItem = NSMenuItem(title: "Edited \(formatted)", action: nil, keyEquivalent: "")
+      editDateItem.isEnabled = false
+      menu.addItem(editDateItem)
+    }
+
     #if DEBUG
     menu.addItem(NSMenuItem.separator())
 
