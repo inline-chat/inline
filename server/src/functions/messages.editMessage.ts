@@ -1,4 +1,4 @@
-import type { InputPeer, Update } from "@in/protocol/core"
+import type { InputPeer, MessageEntities, Update } from "@in/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -14,6 +14,7 @@ type Input = {
   messageId: bigint
   peer: InputPeer
   text: string
+  entities?: MessageEntities
 }
 
 type Output = {
@@ -25,7 +26,12 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const currentUserId = context.currentUserId
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
 
-  const message = await MessageModel.editMessage(Number(input.messageId), chatId, input.text)
+  const message = await MessageModel.editMessage({
+    messageId: Number(input.messageId),
+    chatId,
+    text: input.text,
+    entities: input.entities,
+  })
 
   if (!message) {
     Log.shared.error("Message not found")
@@ -39,7 +45,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     document: fullMessage.document ?? undefined,
   }
 
-  let { selfUpdates, updateGroup } = await pushUpdates({ inputPeer: input.peer, messageInfo, currentUserId })
+  let { selfUpdates } = await pushUpdates({ inputPeer: input.peer, messageInfo, currentUserId })
 
   return { updates: selfUpdates }
 }

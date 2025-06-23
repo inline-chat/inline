@@ -749,6 +749,7 @@ message EditMessageInput {
   int64 message_id = 1;
   InputPeer peer_id = 2;
   string text = 3;
+  optional MessageEntities entities = 7;
 }
 
 message EditMessageResult { repeated Update updates = 1; }

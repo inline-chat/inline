@@ -26,7 +26,7 @@ import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/en
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, asc, desc, eq, gt, inArray, lt, or } from "drizzle-orm"
-import { decrypt, decryptBinary } from "@in/server/modules/encryption/encryption"
+import { decrypt, decryptBinary, encryptBinary } from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 
 const log = new Log("MessageModel", LogLevel.TRACE)
@@ -301,16 +301,31 @@ async function deleteMessages(messageIds: bigint[], chatId: number) {
   //log.trace("refreshed last message id after deletion")
 }
 
-async function editMessage(messageId: number, chatId: number, text: string) {
+type EditMessageInput = {
+  messageId: number
+  chatId: number
+  text: string
+  entities?: MessageEntities
+}
+
+async function editMessage(input: EditMessageInput) {
+  let { messageId, chatId, text, entities } = input
   const encryptedMessage = text ? encryptMessage(text) : undefined
+  const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
+  const encryptedEntities = binaryEntities && binaryEntities?.length > 0 ? encryptBinary(binaryEntities) : undefined
 
   let updated = await db
     .update(messages)
     .set({
+      editDate: new Date(),
+      // text
       textEncrypted: encryptedMessage?.encrypted,
       textIv: encryptedMessage?.iv,
       textTag: encryptedMessage?.authTag,
-      editDate: new Date(),
+      // entities
+      entitiesEncrypted: encryptedEntities?.encrypted,
+      entitiesIv: encryptedEntities?.iv,
+      entitiesTag: encryptedEntities?.authTag,
     })
     .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
     .returning()
