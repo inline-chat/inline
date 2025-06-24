@@ -30,36 +30,34 @@ struct ArchivedChatsView: View {
     }
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      ToolbarItem(placement: .topBarLeading) {
-        VStack(alignment: .leading, spacing: 0) {
-          Text(shouldShow ? getStatusText(apiState) : "Archived Chats")
-            .font(.title3)
-            .fontWeight(.semibold)
-            .contentTransition(.numericText())
-            .animation(.spring(duration: 0.5), value: getStatusText(apiState))
-            .animation(.spring(duration: 0.5), value: shouldShow)
-        }
-        .onAppear {
-          apiState = realtime.apiState
+      ToolbarItem(placement: .principal) {
+        Text(shouldShow ? getStatusText(apiState) : "Archived Chats")
+          .font(.title3)
+          .fontWeight(.semibold)
+          .contentTransition(.numericText())
+          .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+          .animation(.spring(duration: 0.5), value: shouldShow)
+          .onAppear {
+            apiState = realtime.apiState
 
-          if apiState != .connected {
-            shouldShow = true
-          }
-        }
-        .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
-          apiState = nextApiState
-          if nextApiState == .connected {
-            Task { @MainActor in
-              try await Task.sleep(for: .seconds(1))
-              if nextApiState == .connected {
-                // second check
-                shouldShow = false
-              }
+            if apiState != .connected {
+              shouldShow = true
             }
-          } else {
-            shouldShow = true
           }
-        })
+          .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
+            apiState = nextApiState
+            if nextApiState == .connected {
+              Task { @MainActor in
+                try await Task.sleep(for: .seconds(1))
+                if nextApiState == .connected {
+                  // second check
+                  shouldShow = false
+                }
+              }
+            } else {
+              shouldShow = true
+            }
+          })
       }
     }
   }

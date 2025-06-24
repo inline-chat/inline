@@ -86,7 +86,6 @@ struct HomeToolbarContent: ToolbarContent {
       }
     } label: {
       Image(systemName: "ellipsis")
-
         .contentShape(Rectangle())
     }
   }
