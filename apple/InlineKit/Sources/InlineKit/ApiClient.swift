@@ -4,6 +4,69 @@ import Foundation
 import InlineConfig
 import Logger
 import MultipartFormDataKit
+import ObjectiveC
+
+// MARK: - Upload Session Delegate
+
+private final class UploadSessionDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+  let progress: @Sendable (Double) -> Void
+  var completion: CheckedContinuation<UploadFileResult, Error>?
+  private let decoder = JSONDecoder()
+  private var receivedData = Data()
+
+  init(progress: @escaping @Sendable (Double) -> Void) {
+    self.progress = progress
+    super.init()
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    didSendBodyData bytesSent: Int64,
+    totalBytesSent: Int64,
+    totalBytesExpectedToSend: Int64
+  ) {
+    let progressValue = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
+    DispatchQueue.main.async {
+      self.progress(progressValue)
+    }
+  }
+
+  func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    receivedData.append(data)
+  }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    if let error {
+      completion?.resume(throwing: APIError.networkError)
+      return
+    }
+
+    guard let httpResponse = task.response as? HTTPURLResponse else {
+      completion?.resume(throwing: APIError.invalidResponse)
+      return
+    }
+
+    switch httpResponse.statusCode {
+      case 200 ... 299:
+        do {
+          let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: receivedData)
+          switch apiResponse {
+            case let .success(result):
+              completion?.resume(returning: result)
+            case let .error(error, errorCode, description):
+              completion?.resume(throwing: APIError.error(error: error, errorCode: errorCode, description: description))
+          }
+        } catch {
+          completion?.resume(throwing: APIError.decodingError(error as! DecodingError))
+        }
+      case 429:
+        completion?.resume(throwing: APIError.rateLimited)
+      default:
+        completion?.resume(throwing: APIError.httpError(statusCode: httpResponse.statusCode))
+    }
+  }
+}
 
 #if canImport(UIKit)
 import UIKit
@@ -608,7 +671,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     data: Data,
     filename: String,
     mimeType: MIMEType,
-    progress: @escaping (Double) -> Void
+    progress: @escaping @Sendable (Double) -> Void
   ) async throws -> UploadFileResult {
     guard let url = URL(string: "\(baseURL)/uploadFile") else {
       throw APIError.invalidURL
@@ -637,40 +700,19 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue(multipartFormData.contentType, forHTTPHeaderField: "Content-Type")
-    request.httpBody = multipartFormData.body
 
     if let token = Auth.shared.getToken() {
       request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
-    do {
-      let (data, response) = try await URLSession.shared.data(for: request)
+    // Use custom URLSession with delegate for proper upload progress tracking
+    let delegate = UploadSessionDelegate(progress: progress)
+    let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
 
-      guard let httpResponse = response as? HTTPURLResponse else {
-        throw APIError.invalidResponse
-      }
-
-      switch httpResponse.statusCode {
-        case 200 ... 299:
-          let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: data)
-          switch apiResponse {
-            case let .success(data):
-              return data
-            case let .error(error, errorCode, description):
-              log.error("Error \(error): \(description ?? "")")
-              throw APIError.error(error: error, errorCode: errorCode, description: description)
-          }
-        case 429:
-          throw APIError.rateLimited
-        default:
-          throw APIError.httpError(statusCode: httpResponse.statusCode)
-      }
-    } catch let decodingError as DecodingError {
-      throw APIError.decodingError(decodingError)
-    } catch let apiError as APIError {
-      throw apiError
-    } catch {
-      throw APIError.networkError
+    return try await withCheckedThrowingContinuation { continuation in
+      delegate.completion = continuation
+      let task = session.uploadTask(with: request, from: multipartFormData.body)
+      task.resume()
     }
   }
 
