@@ -12,8 +12,8 @@ struct SpaceView: View {
 
   @Environment(\.appDatabase) private var database
   @Environment(\.realtime) private var realtime
-  @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var data: DataManager
+  @Environment(Router.self) private var router
   @EnvironmentStateObject private var viewModel: FullSpaceViewModel
   @EnvironmentObject private var tabsManager: TabsManager
 
@@ -107,14 +107,14 @@ struct SpaceView: View {
 
     ToolbarItemGroup(placement: .navigationBarTrailing) {
       Button {
-        nav.push(.spaceSettings(spaceId: spaceId))
+        router.push(.spaceSettings(spaceId: spaceId))
       } label: {
         Image(systemName: "gearshape")
           .tint(.secondary)
       }
 
       Menu {
-        Button(action: { nav.push(.createThread(spaceId: spaceId)) }) {
+        Button(action: { router.presentSheet(.createThread(spaceId: spaceId)) }) {
           Label("New Group Chat", systemImage: "plus.message.fill")
         }
         Button(action: { showAddMemberSheet = true }) {
@@ -204,11 +204,11 @@ private struct ChatListContent: View {
 private struct MemberItemRow: View {
   let member: FullMemberItem
   let hasUnread: Bool
-  @EnvironmentObject private var nav: Navigation
+  @Environment(Router.self) private var router
 
   var body: some View {
     Button {
-      nav.push(.chat(peer: .user(id: member.userInfo.user.id)))
+      router.push(.chat(peer: .user(id: member.userInfo.user.id)))
     } label: {
       HStack(alignment: .center, spacing: 9) {
         HStack(alignment: .center, spacing: 5) {
@@ -227,12 +227,12 @@ private struct MemberItemRow: View {
 
 private struct ChatItemRow: View {
   let item: SpaceChatItem
-  @EnvironmentObject private var nav: Navigation
+  @Environment(Router.self) private var router
   @EnvironmentObject private var data: DataManager
 
   var body: some View {
     Button {
-      nav.push(.chat(peer: item.peerId))
+      router.push(.chat(peer: item.peerId))
     } label: {
       ChatItemView(props: ChatItemProps(
         dialog: item.dialog,
@@ -283,14 +283,14 @@ private struct ChatItemRow: View {
         )
       }
       Button {
-        nav.push(.chat(peer: item.peerId))
+        router.push(.chat(peer: item.peerId))
       } label: {
         Label("Open Chat", systemImage: "bubble.left")
       }
     } preview: {
       ChatView(peer: item.peerId, preview: true)
         .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-        .environmentObject(nav)
+        .environment(router)
         .environmentObject(data)
     }
     .listRowBackground(item.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
