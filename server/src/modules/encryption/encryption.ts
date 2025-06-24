@@ -40,10 +40,10 @@ export type OptionalEncryptedData = EmptyEncryptedData | EncryptedData
  * Low-level binary data encryption function
  * Encrypts raw binary data (Buffer or Uint8Array)
  */
-export function encryptBinary(data: Buffer | Uint8Array): EncryptedData | null {
-  if (data.length === 0) {
-    return null
-  }
+export function encryptBinary(data: Buffer | Uint8Array): EncryptedData {
+  // if (data.length === 0) {
+  //   return null
+  // }
 
   const ENCRYPTION_KEY = getEncryptionKey()
   validateBinaryData(data)
@@ -155,9 +155,6 @@ const validateText = (text: string): void => {
 }
 
 const validateBinaryData = (data: Buffer | Uint8Array): void => {
-  if (!data || data.length === 0) {
-    throw new Error("Binary data to encrypt cannot be empty")
-  }
   if (data.length > MAX_ENCRYPTED_DATA_LENGTH) {
     throw new Error("Binary data exceeds maximum length")
   }
