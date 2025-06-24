@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from "bun:test"
 import { setupTestDatabase, teardownTestDatabase, testUtils, cleanDatabase } from "../../setup"
-import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
+import { clearChatInfoCache, getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { db, schema } from "@in/server/db"
 
 describe("Chat Info Cache", () => {
@@ -13,14 +13,9 @@ describe("Chat Info Cache", () => {
   })
 
   beforeEach(async () => {
+    clearChatInfoCache()
     await cleanDatabase()
   })
-
-  // Helper function to clear cache by deleting require cache
-  const clearCache = async () => {
-    delete require.cache[require.resolve("@in/server/modules/cache/chatInfo")]
-    delete require.cache[require.resolve("@in/server/modules/cache/spaceCache")]
-  }
 
   test("should return undefined for non-existent chat", async () => {
     const result = await getCachedChatInfo(99999)
