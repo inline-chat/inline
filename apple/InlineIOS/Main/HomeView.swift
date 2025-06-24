@@ -26,7 +26,6 @@ enum SearchResult: Identifiable, Hashable {
 struct HomeView: View {
   // MARK: - Environment
 
-  @EnvironmentObject private var nav: Navigation
   @EnvironmentObject private var onboardingNav: OnboardingNavigation
   @EnvironmentObject private var api: ApiClient
   @EnvironmentObject private var dataManager: DataManager
@@ -40,6 +39,7 @@ struct HomeView: View {
   @Environment(\.appDatabase) private var database
   @Environment(\.auth) private var auth
   @Environment(\.scenePhase) var scenePhase
+  @Environment(Router.self) private var router
 
   // MARK: - State
 
@@ -112,85 +112,22 @@ struct HomeView: View {
   }
 
   var body: some View {
-    VStack(spacing: 0) {
-      switch tabsManager.selectedTab {
-        case .archived:
-          ArchivedChatsView()
-        case .chats:
-          homeContent
-            .searchable(text: $text, prompt: "Find")
-            .onChange(of: text) { _, newValue in
-              searchUsers(query: newValue)
-            }
-            .toolbar {
-              HomeToolbarContent()
-            }
-        case .spaces:
-          SpacesView()
+    homeContent
+      .searchable(text: $text, prompt: "Find")
+      .onChange(of: text) { _, newValue in
+        searchUsers(query: newValue)
       }
-    }
-    .navigationBarTitleDisplayMode(.inline)
-    .navigationBarBackButtonHidden()
-    .toolbar {
-      ToolbarItemGroup(placement: .bottomBar) {
-        Spacer()
-        Spacer()
-        Spacer()
-
-        Button(action: {
-          withAnimation(.smoothSnappy) {
-            tabsManager.setSelectedTab(.archived)
-          }
-        }) {
-          Image(systemName: "archivebox.fill")
-            .font(.body)
-            .foregroundColor(tabsManager.selectedTab == .archived ? Color(ThemeManager.shared.selected.accent) : .gray)
-            .frame(minWidth: 80, minHeight: 80)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(NoOpacityButtonStyle())
-
-        Spacer()
-
-        Button(action: {
-          withAnimation(.smoothSnappy) {
-            tabsManager.setSelectedTab(.chats)
-          }
-        }) {
-          Image(systemName: "bubble.left.and.bubble.right.fill")
-            .font(.body)
-            .foregroundColor(tabsManager.selectedTab == .chats ? Color(ThemeManager.shared.selected.accent) : .gray)
-            .frame(minWidth: 80, minHeight: 80)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(NoOpacityButtonStyle())
-        Spacer()
-
-        Button(action: {
-          withAnimation(.smoothSnappy) {
-            tabsManager.setSelectedTab(.spaces)
-          }
-        }) {
-          Image(systemName: "building.2.fill")
-            .font(.body)
-            .foregroundColor(tabsManager.selectedTab == .spaces ? Color(ThemeManager.shared.selected.accent) : .gray)
-            .frame(minWidth: 80, minHeight: 80)
-            .contentShape(Rectangle())
-        }
-
-        .buttonStyle(NoOpacityButtonStyle())
-        Spacer()
-        Spacer()
-        Spacer()
+      .toolbar {
+        HomeToolbarContent()
       }
-    }
-
-    .task {
-      initalFetch()
-    }
-    .onAppear {
-      initalFetch()
-    }
+      .navigationBarTitleDisplayMode(.inline)
+      .navigationBarBackButtonHidden()
+      .task {
+        initalFetch()
+      }
+      .onAppear {
+        initalFetch()
+      }
   }
 
   @ViewBuilder
@@ -206,9 +143,9 @@ struct HomeView: View {
               isArchived: false,
               onItemTap: { item in
                 if let user = item.user {
-                  nav.push(.chat(peer: .user(id: user.user.id)))
+                  router.push(.chat(peer: .user(id: user.user.id)))
                 } else if let chat = item.chat {
-                  nav.push(.chat(peer: .thread(id: chat.id)))
+                  router.push(.chat(peer: .thread(id: chat.id)))
                 }
               },
               onArchive: { item in
@@ -406,7 +343,7 @@ struct HomeView: View {
     Task {
       do {
         let peer = try await dataManager.createPrivateChat(userId: userId)
-        nav.push(.chat(peer: peer))
+        router.push(.chat(peer: peer))
       } catch {
         Log.shared.error("Failed to create chat", error: error)
       }
@@ -417,7 +354,7 @@ struct HomeView: View {
     Task {
       do {
         try await dataManager.createPrivateChatWithOptimistic(user: apiUser)
-        nav.push(.chat(peer: .user(id: apiUser.id)))
+        router.push(.chat(peer: .user(id: apiUser.id)))
       } catch {
         Log.shared.error("Failed to open a private chat with \(apiUser.anyName)", error: error)
       }
@@ -427,9 +364,9 @@ struct HomeView: View {
   private func handleSearchResult(_ result: SearchResult) {
     switch result {
       case let .localUser(user):
-        nav.push(.chat(peer: .user(id: user.id)))
+        router.push(.chat(peer: .user(id: user.id)))
       case let .localThread(threadInfo):
-        nav.push(.chat(peer: .thread(id: threadInfo.chat.id)))
+        router.push(.chat(peer: .thread(id: threadInfo.chat.id)))
       case let .globalUser(apiUser):
         navigateToApiUser(apiUser)
     }
