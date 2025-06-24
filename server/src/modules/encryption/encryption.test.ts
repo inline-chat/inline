@@ -132,7 +132,10 @@ describe("encryption2", () => {
 
     it("should handle empty binary data gracefully", () => {
       const data = Buffer.alloc(0)
-      expect(() => encryptBinary(data)).toThrow("Binary data to encrypt cannot be empty")
+      const encrypted = encryptBinary(data)
+      const decrypted = decryptBinary(encrypted)
+
+      expect(decrypted).toEqual(Buffer.alloc(0))
     })
 
     it("should reject binary data exceeding maximum length", () => {
