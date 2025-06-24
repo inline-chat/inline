@@ -7,6 +7,140 @@ import NukeUI
 import SwiftUI
 import UIKit
 
+// MARK: - Upload Progress View
+
+struct UploadProgressView: View {
+  let progress: Double
+  let isProcessing: Bool
+  let onCancel: () -> Void
+  let shouldAnimate: Bool
+
+  @State private var animatedProgress: Double = 0
+  @State private var processingRotation: Double = 0
+  @State private var scale: Double = 0.1
+  @State private var opacity: Double = 0.0
+  @State private var backgroundScale: Double = 0.1
+  @State private var backgroundOpacity: Double = 0.0
+
+  var body: some View {
+    ZStack {
+      // Background circle with opacity
+      Circle()
+        .fill(Color.black.opacity(0.6))
+        .frame(width: 50, height: 50)
+        .scaleEffect(backgroundScale)
+        .opacity(backgroundOpacity)
+
+      // Progress ring or processing indicator
+      Circle()
+        .stroke(Color.clear, lineWidth: 3)
+        .frame(width: 40, height: 40)
+        .overlay(
+          Group {
+            if isProcessing {
+              // Processing spinner
+              Circle()
+                .trim(from: 0, to: 0.25)
+                .stroke(
+                  Color.white,
+                  style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .rotationEffect(.degrees(processingRotation))
+                .onAppear {
+                  withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                    processingRotation = 360
+                  }
+                }
+            } else {
+              // Progress ring that moves around the circle
+              ZStack {
+                // Background track (subtle)
+                Circle()
+                  .stroke(Color.white.opacity(0.3), lineWidth: 2)
+
+                // Progress arc
+                Circle()
+                  .trim(from: 0, to: animatedProgress)
+                  .stroke(
+                    Color.white,
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                  )
+                  .rotationEffect(.degrees(-90)) // Start from top
+                  .animation(.easeOut(duration: 0.6), value: animatedProgress)
+
+                // Moving progress indicator (like moon around earth)
+                if animatedProgress > 0 {
+                  Circle()
+                    .fill(Color.white)
+                    .frame(width: 6, height: 6)
+                    .offset(y: -17) // Position on the circle edge
+                    .rotationEffect(.degrees(-90 + (animatedProgress * 360)))
+                    .animation(.easeOut(duration: 0.6), value: animatedProgress)
+                }
+              }
+            }
+          }
+        )
+        .scaleEffect(scale)
+        .opacity(opacity)
+
+      // Cancel button (X)
+      Button(action: onCancel) {
+        Image(systemName: "xmark")
+          .font(.system(size: 16, weight: .medium))
+          .foregroundColor(.white)
+      }
+      .buttonStyle(PlainButtonStyle())
+      .scaleEffect(scale)
+      .opacity(opacity)
+    }
+    .onAppear {
+      if shouldAnimate {
+        // Animate in with spring effect
+        withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0)) {
+          backgroundScale = 1.0
+          backgroundOpacity = 1.0
+          scale = 1.0
+          opacity = 1.0
+        }
+      } else {
+        // Appear immediately without animation
+        backgroundScale = 1.0
+        backgroundOpacity = 1.0
+        scale = 1.0
+        opacity = 1.0
+      }
+
+      if !isProcessing {
+        withAnimation(.easeOut(duration: 0.2)) {
+          animatedProgress = progress
+        }
+      }
+    }
+    .onChange(of: progress) { newProgress in
+      if !isProcessing {
+        // Smooth progress animation
+        withAnimation(.easeOut(duration: 0.4)) {
+          animatedProgress = newProgress
+        }
+
+        // Check if upload is complete
+        if newProgress >= 1.0 {
+          // Complete the circle animation first, then fade out
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            withAnimation(.easeInOut(duration: 0.5)) {
+              backgroundScale = 0.1
+              backgroundOpacity = 0.0
+              scale = 0.1
+              opacity = 0.0
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 final class NewPhotoView: UIView {
   // MARK: - Properties
 
@@ -17,6 +151,11 @@ final class NewPhotoView: UIView {
   private let minWidth: CGFloat = 180
   private let cornerRadius: CGFloat = 16.0
   private let maskLayer = CAShapeLayer()
+
+  // Upload progress tracking
+  private var uploadProgressView: UIHostingController<UploadProgressView>?
+  private var isUploading: Bool = false
+  private var uploadProgress: Double = 0.0
 
   var isSticker: Bool {
     fullMessage.message.isSticker == true
@@ -57,6 +196,7 @@ final class NewPhotoView: UIView {
     super.init(frame: .zero)
 
     setupViews()
+    setupUploadTracking()
   }
 
   @available(*, unavailable)
@@ -239,6 +379,7 @@ final class NewPhotoView: UIView {
     }
     setupImageConstraints()
     updateImage()
+    setupUploadTracking() // Re-setup upload tracking for updated message
   }
 
   private func updateImage() {
@@ -327,6 +468,132 @@ final class NewPhotoView: UIView {
 
   override var canBecomeFirstResponder: Bool {
     true
+  }
+
+  // MARK: - Upload Progress Tracking
+
+  private func setupUploadTracking() {
+    guard let photoInfo = fullMessage.photoInfo,
+          let photoId = photoInfo.photo.id else { return }
+
+    Task {
+      let uploadId = "photo_\(photoId)"
+      let status = await FileUploader.shared.getUploadStatus(for: uploadId)
+
+      await MainActor.run {
+        switch status {
+          case let .inProgress(progress):
+            showUploadProgress(progress: progress)
+            setupProgressHandler(uploadId: uploadId)
+          case .processing:
+            showUploadProgress(progress: -1) // Processing state
+            setupProgressHandler(uploadId: uploadId)
+          case .completed, .notFound:
+            hideUploadProgress()
+        }
+      }
+    }
+  }
+
+  private func setupProgressHandler(uploadId: String) {
+    Task {
+      await FileUploader.shared.setProgressHandler(for: uploadId) { [weak self] progress in
+        Task { @MainActor in
+          self?.updateUploadProgress(progress: progress)
+        }
+      }
+    }
+  }
+
+  private func showUploadProgress(progress: Double) {
+    guard !isUploading else {
+      updateUploadProgress(progress: progress)
+      return
+    }
+
+    isUploading = true
+    uploadProgress = progress
+
+    let isProcessing = progress < 0
+    let progressView = UploadProgressView(
+      progress: max(0, progress), // Ensure progress is not negative for display
+      isProcessing: isProcessing,
+      onCancel: { [weak self] in
+        self?.cancelUpload()
+      },
+      shouldAnimate: true
+    )
+
+    let hostingController = UIHostingController(rootView: progressView)
+    hostingController.view.backgroundColor = UIColor.clear
+    hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+
+    addSubview(hostingController.view)
+
+    NSLayoutConstraint.activate([
+      hostingController.view.centerXAnchor.constraint(equalTo: centerXAnchor),
+      hostingController.view.centerYAnchor.constraint(equalTo: centerYAnchor),
+      hostingController.view.widthAnchor.constraint(equalToConstant: 50),
+      hostingController.view.heightAnchor.constraint(equalToConstant: 50),
+    ])
+
+    uploadProgressView = hostingController
+  }
+
+  private func updateUploadProgress(progress: Double) {
+    guard isUploading else { return }
+
+    uploadProgress = progress
+
+    // Update the SwiftUI view
+    let isProcessing = progress < 0
+    let progressView = UploadProgressView(
+      progress: max(0, progress), // Ensure progress is not negative for display
+      isProcessing: isProcessing,
+      onCancel: { [weak self] in
+        self?.cancelUpload()
+      },
+      shouldAnimate: false
+    )
+
+    uploadProgressView?.rootView = progressView
+
+    // Hide progress view when upload completes (after completion animation)
+    if progress >= 1.0 {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+        self?.hideUploadProgress()
+      }
+    }
+  }
+
+  private func hideUploadProgress() {
+    guard isUploading, let progressView = uploadProgressView else { return }
+
+    isUploading = false
+
+    // Animate out if not already animating
+    UIView.animate(withDuration: 0.2, animations: {
+      progressView.view.transform = CGAffineTransform(scaleX: 0.1, y: 0.1)
+      progressView.view.alpha = 0
+    }) { _ in
+      progressView.view.removeFromSuperview()
+    }
+
+    uploadProgressView = nil
+  }
+
+  private func cancelUpload() {
+    guard let photoInfo = fullMessage.photoInfo,
+          let photoId = photoInfo.photo.id else { return }
+
+    Task {
+      let uploadId = "photo_\(photoId)"
+      await FileUploader.shared.cancel(uploadId: uploadId)
+
+      await MainActor.run {
+        hideUploadProgress()
+      }
+    }
   }
 }
 
