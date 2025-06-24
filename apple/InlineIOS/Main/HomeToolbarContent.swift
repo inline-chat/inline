@@ -4,7 +4,7 @@ import RealtimeAPI
 import SwiftUI
 
 struct HomeToolbarContent: ToolbarContent {
-  @EnvironmentObject private var nav: Navigation
+  @Environment(Router.self) private var router
   @Environment(\.realtime) var realtime
 
   @State var shouldShow = false
@@ -12,11 +12,19 @@ struct HomeToolbarContent: ToolbarContent {
 
   var body: some ToolbarContent {
     ToolbarItem(placement: .topBarLeading) {
-      header
+      notificationsButton
     }
 
-    ToolbarItemGroup(placement: .topBarTrailing) {
-      notificationsButton
+    ToolbarItem(placement: .principal) {
+      Text(shouldShow ? getStatusText(apiState) : "Chats")
+        .font(.title3)
+        .fontWeight(.semibold)
+        .contentTransition(.numericText())
+        .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+        .animation(.spring(duration: 0.5), value: shouldShow)
+    }
+
+    ToolbarItem(placement: .topBarTrailing) {
       dotsButton
     }
   }
@@ -66,19 +74,19 @@ struct HomeToolbarContent: ToolbarContent {
   private var dotsButton: some View {
     Menu {
       Button {
-        nav.push(.createSpace)
+        router.presentSheet(.createSpace)
       } label: {
-        Label("Create Space", systemImage: "plus")
+        Label("Create Space", systemImage: "building.fill")
       }
 
       Button {
-        nav.push(.settings)
+        router.push(.settings)
       } label: {
         Label("Settings", systemImage: "gearshape")
       }
     } label: {
-      Image(systemName: "ellipsis.circle")
-        .tint(Color.secondary)
+      Image(systemName: "ellipsis")
+
         .contentShape(Rectangle())
     }
   }
@@ -91,7 +99,7 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var createSpaceButton: some View {
     Button {
-      nav.push(.createSpace)
+      router.presentSheet(.createSpace)
     } label: {
       Image(systemName: "plus")
         .tint(Color.secondary)
@@ -102,7 +110,7 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var settingsButton: some View {
     Button {
-      nav.push(.settings)
+      router.push(.settings)
     } label: {
       Image(systemName: "gearshape")
         .tint(Color.secondary)
