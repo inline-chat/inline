@@ -16,8 +16,8 @@ struct ChatView: View {
   @State var isTranslationEnabled = false
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
-  @EnvironmentObject var nav: Navigation
   @EnvironmentObject var data: DataManager
+  @Environment(Router.self) private var router
 
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
@@ -87,7 +87,7 @@ struct ChatView: View {
       ToolbarItem(placement: .principal) {
         Button(action: {
           if let chatItem = fullChatViewModel.chatItem {
-            nav.push(.chatInfo(chatItem: chatItem))
+            router.push(.chatInfo(chatItem: chatItem))
           }
         }) {
           header
@@ -140,7 +140,7 @@ struct ChatView: View {
         ToolbarItem(placement: .topBarTrailing) {
           Button(action: {
             if let chatItem = fullChatViewModel.chatItem {
-              nav.push(.chatInfo(chatItem: chatItem))
+              router.push(.chatInfo(chatItem: chatItem))
             }
           }) {
             UserAvatar(userInfo: user, size: 28)
@@ -186,7 +186,7 @@ struct ChatView: View {
       if let chatId = notification.userInfo?["chatId"] as? Int64,
          chatId == fullChatViewModel.chat?.id ?? 0
       {
-        nav.pop()
+        router.pop()
       }
     }
     .onReceive(
@@ -198,7 +198,7 @@ struct ChatView: View {
           // TODO: hacky
           do {
             let peer = try await data.createPrivateChat(userId: userId)
-            nav.push(.chat(peer: peer))
+            router.push(.chat(peer: peer))
           } catch {
             Log.shared.error("Failed to create private chat for mention", error: error)
           }
