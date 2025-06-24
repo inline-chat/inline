@@ -12,8 +12,9 @@ struct CreateSpace: View {
   @EnvironmentObject var nav: Navigation
   @Environment(\.appDatabase) var database
   @Environment(\.dismiss) var dismiss
+  @Environment(Router.self) private var router
   @EnvironmentObject var dataManager: DataManager
-  @EnvironmentObject var tabsManager: TabsManager
+
   var body: some View {
     NavigationStack {
       List {
@@ -60,15 +61,15 @@ struct CreateSpace: View {
         dismiss()
 
         if let id {
-          tabsManager.setSelectedTab(.spaces)
-          tabsManager.setActiveSpaceId(id)
+          router.selectedTab = .spaces
+          router.push(.space(id: id))
         }
 
       } catch {
         // TODO: handle error
         Log.shared.error("Failed to create space", error: error)
+        formState.failed(error: error.localizedDescription)
       }
-      dismiss()
     }
   }
 }
