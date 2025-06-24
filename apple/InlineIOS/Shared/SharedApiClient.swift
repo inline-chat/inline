@@ -4,89 +4,7 @@ import Foundation
 import InlineConfig
 import Logger
 import MultipartFormDataKit
-import ObjectiveC
 import UIKit
-
-// MARK: - Upload Session Delegate
-
-private final class SharedUploadSessionDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-  let progress: @Sendable (Double) -> Void
-  var completion: CheckedContinuation<UploadFileResult, Error>?
-  private let decoder = JSONDecoder()
-  private var receivedData = Data()
-
-  init(progress: @escaping @Sendable (Double) -> Void) {
-    self.progress = progress
-    super.init()
-  }
-
-  func urlSession(
-    _ session: URLSession,
-    task: URLSessionTask,
-    didSendBodyData bytesSent: Int64,
-    totalBytesSent: Int64,
-    totalBytesExpectedToSend: Int64
-  ) {
-    let progressValue = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
-    print("Upload progress: \(Int(progressValue * 100))% (\(totalBytesSent)/\(totalBytesExpectedToSend) bytes)")
-    DispatchQueue.main.async {
-      self.progress(progressValue)
-    }
-  }
-
-  func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-    receivedData.append(data)
-  }
-
-  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-    if let error {
-      print("Upload task failed with error: \(error)")
-      completion?.resume(throwing: APIError.networkError)
-      return
-    }
-
-    guard let httpResponse = task.response as? HTTPURLResponse else {
-      print("Invalid response type")
-      completion?.resume(throwing: APIError.invalidResponse)
-      return
-    }
-
-    print("Received response with status code: \(httpResponse.statusCode)")
-
-    // Print response body for debugging
-    if let responseString = String(data: receivedData, encoding: .utf8) {
-      print("Response body: \(responseString)")
-    }
-
-    switch httpResponse.statusCode {
-      case 200 ... 299:
-        print("Upload successful, decoding response")
-        do {
-          let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: receivedData)
-          switch apiResponse {
-            case let .success(result):
-              print("Successfully decoded upload response")
-              completion?.resume(returning: result)
-            case let .error(error, errorCode, description):
-              print("API returned error: \(error) (\(errorCode ?? 0)): \(description ?? "")")
-              completion?.resume(throwing: APIError.error(error: error, errorCode: errorCode, description: description))
-          }
-        } catch {
-          print("Decoding error: \(error)")
-          completion?.resume(throwing: APIError.decodingError(error as! DecodingError))
-        }
-      case 429:
-        print("Rate limited")
-        completion?.resume(throwing: APIError.rateLimited)
-      default:
-        print("HTTP error: \(httpResponse.statusCode)")
-        if let responseString = String(data: receivedData, encoding: .utf8) {
-          print("Error response body: \(responseString)")
-        }
-        completion?.resume(throwing: APIError.httpError(statusCode: httpResponse.statusCode))
-    }
-  }
-}
 
 public enum APIError: Error {
   case invalidURL
@@ -306,7 +224,7 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     data: Data,
     filename: String,
     mimeType: MIMEType,
-    progress: @escaping @Sendable (Double) -> Void
+    progress: @escaping (Double) -> Void
   ) async throws -> UploadFileResult {
     print("Preparing to upload file: \(filename) of type \(type.rawValue)")
     guard let url = URL(string: "\(baseURL)/uploadFile") else {
@@ -345,16 +263,54 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
       print("Warning: No authorization token available")
     }
 
-    // Use custom URLSession with delegate for proper upload progress tracking
-    let delegate = SharedUploadSessionDelegate(progress: progress)
-    let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+    do {
+      print("Sending file upload request...")
+      let (data, response) = try await URLSession.shared.data(for: request)
 
-    return try await withCheckedThrowingContinuation { continuation in
-      print("Creating upload task with delegate...")
-      delegate.completion = continuation
-      let task = session.uploadTask(with: request, from: multipartFormData.body)
-      print("Starting upload task...")
-      task.resume()
+      guard let httpResponse = response as? HTTPURLResponse else {
+        print("Invalid response type")
+        throw APIError.invalidResponse
+      }
+
+      print("Received response with status code: \(httpResponse.statusCode)")
+
+      // Print response body for debugging
+      if let responseString = String(data: data, encoding: .utf8) {
+        print("Response body: \(responseString)")
+      }
+
+      switch httpResponse.statusCode {
+        case 200 ... 299:
+          print("Upload successful, decoding response")
+          let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: data)
+          switch apiResponse {
+            case let .success(data):
+              print("Successfully decoded upload response")
+              return data
+            case let .error(error, errorCode, description):
+              print("API returned error: \(error) (\(errorCode ?? 0)): \(description ?? "")")
+              log.error("Error \(error): \(description ?? "")")
+              throw APIError.error(error: error, errorCode: errorCode, description: description)
+          }
+        case 429:
+          print("Rate limited")
+          throw APIError.rateLimited
+        default:
+          print("HTTP error: \(httpResponse.statusCode)")
+          if let responseString = String(data: data, encoding: .utf8) {
+            print("Error response body: \(responseString)")
+          }
+          throw APIError.httpError(statusCode: httpResponse.statusCode)
+      }
+    } catch let decodingError as DecodingError {
+      print("Decoding error: \(decodingError)")
+      throw APIError.decodingError(decodingError)
+    } catch let apiError as APIError {
+      print("API error: \(apiError)")
+      throw apiError
+    } catch {
+      print("Network error: \(error)")
+      throw APIError.networkError
     }
   }
 }
