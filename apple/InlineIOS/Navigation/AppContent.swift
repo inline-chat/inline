@@ -45,3 +45,23 @@ enum Sheet: SheetType, Codable {
     }
   }
 }
+
+extension Router {
+  func navigateFromNotification(peer: Peer) {
+    // Check if user is already in the chat from the notification
+    if let currentDestination = self[selectedTab].last,
+       case let .chat(currentPeer) = currentDestination,
+       currentPeer == peer
+    {
+      // User is already in the correct chat, no need to navigate
+      return
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+      self.popToRoot()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        self.push(.chat(peer: peer))
+      }
+    }
+  }
+}
