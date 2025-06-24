@@ -4,7 +4,7 @@ import RealtimeAPI
 import SwiftUI
 
 struct SpacesView: View {
-  @EnvironmentObject private var nav: Navigation
+  @Environment(Router.self) private var router
   @EnvironmentObject private var homeViewModel: HomeViewModel
   @EnvironmentObject private var tabsManager: TabsManager
   @Environment(\.realtime) var realtime
@@ -74,7 +74,7 @@ struct SpacesView: View {
 
         ToolbarItem(placement: .topBarTrailing) {
           Button {
-            nav.push(.createSpace)
+            router.presentSheet(.createSpace)
           } label: {
             Image(systemName: "plus")
           }

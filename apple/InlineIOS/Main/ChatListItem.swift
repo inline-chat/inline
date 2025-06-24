@@ -57,7 +57,6 @@ struct ChatListItem: View {
       .tint(.blue)
     }
     .listRowInsets(.init(top: 8, leading: 16, bottom: 2, trailing: 0))
-
 //    .contextMenu {
 //      Button {
 //        onTap()
