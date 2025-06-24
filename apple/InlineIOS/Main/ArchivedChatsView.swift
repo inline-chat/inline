@@ -10,7 +10,7 @@ struct ArchivedChatsView: View {
 
   var type: ArchivedChatsType = .home
   @EnvironmentObject private var home: HomeViewModel
-  @EnvironmentObject private var nav: Navigation
+  @Environment(Router.self) private var router
   @EnvironmentObject var data: DataManager
   @Environment(\.realtime) var realtime
   @Environment(\.appDatabase) private var database
@@ -70,9 +70,9 @@ struct ArchivedChatsView: View {
       isArchived: true,
       onItemTap: { item in
         if let user = item.user {
-          nav.push(.chat(peer: .user(id: user.user.id)))
+          router.push(.chat(peer: .user(id: user.user.id)))
         } else if let chat = item.chat {
-          nav.push(.chat(peer: .thread(id: chat.id)))
+          router.push(.chat(peer: .thread(id: chat.id)))
         }
       },
       onArchive: { item in
@@ -179,7 +179,7 @@ struct ArchivedChatsView: View {
             space: nil
           ),
           onTap: {
-            nav.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
+            router.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
           },
           onArchive: {
             Task {
@@ -218,7 +218,7 @@ struct ArchivedChatsView: View {
             space: chat.chat?.spaceId != nil ? fullSpaceViewModel.space : nil
           ),
           onTap: {
-            nav.push(.chat(peer: chat.peerId))
+            router.push(.chat(peer: chat.peerId))
           },
           onArchive: {
             Task {

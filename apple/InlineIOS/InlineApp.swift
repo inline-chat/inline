@@ -9,10 +9,12 @@ struct InlineApp: App {
 
   var body: some Scene {
     WindowGroup {
-      ContentView()
+      ContentView2()
+//      ContentView()
         .environment(\.auth, Auth.shared)
         .environment(\.realtime, Realtime.shared)
         .environment(\.transactions, Transactions.shared)
+        .environment(appDelegate.router)
         .appDatabase(AppDatabase.shared)
         .environmentObject(appDelegate.notificationHandler)
         .environmentObject(appDelegate.nav)
