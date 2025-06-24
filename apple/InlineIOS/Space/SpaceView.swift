@@ -20,6 +20,10 @@ struct SpaceView: View {
   @State private var showAddMemberSheet = false
   @State private var selectedSegment = 0
 
+  var space: Space? {
+    viewModel.space
+  }
+
   enum Segment: Int, CaseIterable {
     case chats
     case members
@@ -65,7 +69,6 @@ struct SpaceView: View {
     }
     .navigationBarTitleDisplayMode(.inline)
     .toolbar { toolbarContent }
-    .toolbarRole(.editor)
     .sheet(isPresented: $showAddMemberSheet) {
       AddMember(showSheet: $showAddMemberSheet, spaceId: spaceId)
         .presentationCornerRadius(28)
@@ -93,26 +96,11 @@ struct SpaceView: View {
 
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
-    ToolbarItem(placement: .topBarLeading) {
-      Button(action: {
-        tabsManager.setActiveSpaceId(nil)
-      }, label: {
-        Image(systemName: "chevron.left")
-          .fontWeight(.medium)
-      })
-    }
     ToolbarItem(placement: .principal) {
-      SpaceHeaderView(space: viewModel.space)
+      SpaceHeaderView(space: space)
     }
 
-    ToolbarItemGroup(placement: .navigationBarTrailing) {
-      Button {
-        router.push(.spaceSettings(spaceId: spaceId))
-      } label: {
-        Image(systemName: "gearshape")
-          .tint(.secondary)
-      }
-
+    ToolbarItem(placement: .topBarTrailing) {
       Menu {
         Button(action: { router.presentSheet(.createThread(spaceId: spaceId)) }) {
           Label("New Group Chat", systemImage: "plus.message.fill")
@@ -120,9 +108,14 @@ struct SpaceView: View {
         Button(action: { showAddMemberSheet = true }) {
           Label("Invite Member", systemImage: "person.badge.plus.fill")
         }
+
+        Button {
+          router.push(.spaceSettings(spaceId: spaceId))
+        } label: {
+          Label("Settings", systemImage: "gearshape")
+        }
       } label: {
-        Image(systemName: "plus")
-          .tint(.secondary)
+        Image(systemName: "ellipsis")
       }
     }
   }
@@ -161,7 +154,7 @@ private struct SpaceHeaderView: View {
       }
 
       Text(space?.nameWithoutEmoji ?? space?.name ?? "Space")
-        .font(.body)
+        .font(.title3)
         .fontWeight(.semibold)
     }
   }
@@ -198,102 +191,6 @@ private struct ChatListContent: View {
       }
     }
     .listStyle(.plain)
-  }
-}
-
-private struct MemberItemRow: View {
-  let member: FullMemberItem
-  let hasUnread: Bool
-  @Environment(Router.self) private var router
-
-  var body: some View {
-    Button {
-      router.push(.chat(peer: .user(id: member.userInfo.user.id)))
-    } label: {
-      HStack(alignment: .center, spacing: 9) {
-        HStack(alignment: .center, spacing: 5) {
-          Circle()
-            .fill(hasUnread ? ColorManager.shared.swiftUIColor : .clear)
-            .frame(width: 6, height: 6)
-            .animation(.easeInOut(duration: 0.3), value: hasUnread)
-          UserAvatar(user: member.userInfo.user, size: 34)
-        }
-        Text(member.userInfo.user.displayName)
-          .font(.body)
-      }
-    }
-  }
-}
-
-private struct ChatItemRow: View {
-  let item: SpaceChatItem
-  @Environment(Router.self) private var router
-  @EnvironmentObject private var data: DataManager
-
-  var body: some View {
-    Button {
-      router.push(.chat(peer: item.peerId))
-    } label: {
-      ChatItemView(props: ChatItemProps(
-        dialog: item.dialog,
-        user: item.userInfo,
-        chat: item.chat,
-        message: item.message,
-        from: item.from,
-        space: nil
-      ))
-    }
-    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-      Button(role: .destructive) {
-        Task {
-          try await data.updateDialog(
-            peerId: item.peerId,
-            archived: true
-          )
-        }
-      } label: {
-        Image(systemName: "tray.and.arrow.down.fill")
-      }
-      .tint(Color(.systemGray2))
-
-      Button {
-        Task {
-          try await data.updateDialog(
-            peerId: item.peerId,
-            pinned: !(item.dialog.pinned ?? false)
-          )
-        }
-      } label: {
-        Image(systemName: item.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-      }
-      .tint(.indigo)
-    }
-    .contextMenu {
-      Button {
-        Task {
-          try await data.updateDialog(
-            peerId: item.peerId,
-            pinned: !(item.dialog.pinned ?? false)
-          )
-        }
-      } label: {
-        Label(
-          item.dialog.pinned ?? false ? "Unpin" : "Pin",
-          systemImage: item.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill"
-        )
-      }
-      Button {
-        router.push(.chat(peer: item.peerId))
-      } label: {
-        Label("Open Chat", systemImage: "bubble.left")
-      }
-    } preview: {
-      ChatView(peer: item.peerId, preview: true)
-        .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-        .environment(router)
-        .environmentObject(data)
-    }
-    .listRowBackground(item.dialog.pinned ?? false ? Color(.systemGray6).opacity(0.5) : .clear)
   }
 }
 
