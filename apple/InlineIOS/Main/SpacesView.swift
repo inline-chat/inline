@@ -5,53 +5,63 @@ import SwiftUI
 
 struct SpacesView: View {
   @Environment(Router.self) private var router
-  @EnvironmentObject private var homeViewModel: HomeViewModel
-  @EnvironmentObject private var tabsManager: TabsManager
   @Environment(\.realtime) var realtime
+
+  @EnvironmentObject private var homeViewModel: HomeViewModel
 
   @State var shouldShow = false
   @State var apiState: RealtimeAPIState = .connecting
 
-  var body: some View {
-    if let activeSpaceId = tabsManager.getActiveSpaceId(), activeSpaceId != 0, homeViewModel.spaces.count > 0 {
-      SpaceView(spaceId: activeSpaceId)
-    } else {
-      let sortedSpaces = homeViewModel.spaces.sorted { s1, s2 in
-        s1.space.date > s2.space.date
-      }
+  var sortedSpaces: [HomeSpaceItem] {
+    homeViewModel.spaces.sorted { s1, s2 in
+      s1.space.date > s2.space.date
+    }
+  }
 
-      Group {
-        if sortedSpaces.isEmpty {
-          EmptySpacesView()
-        } else {
-          List(sortedSpaces) { space in
-            Button {
-              tabsManager.setActiveSpaceId(space.space.id)
-            } label: {
-              HStack {
-                SpaceAvatar(space: space.space, size: 34)
+  var body: some View {
+    Group {
+      if sortedSpaces.isEmpty {
+        EmptySpacesView()
+      } else {
+        List(sortedSpaces) { space in
+          Button {
+            router.push(.space(id: space.space.id))
+          } label: {
+            HStack {
+              SpaceAvatar(space: space.space, size: 45)
+              VStack(alignment: .leading, spacing: 0) {
                 Text(space.space.nameWithoutEmoji)
+                  .font(.body)
+                Text("\(space.members.count) \(space.members.count == 1 ? "member" : "members")")
+                  .font(.subheadline)
+                  .fontWeight(.regular)
+                  .foregroundColor(.secondary)
               }
             }
-            .padding(.vertical, 1)
           }
-          .listStyle(.plain)
+          .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
         }
+        .listStyle(.plain)
       }
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .topBarLeading) {
-          VStack(alignment: .leading, spacing: 0) {
-            Text(shouldShow ? getStatusText(apiState) : "Spaces")
-              .font(.title3)
-              .fontWeight(.semibold)
-              .contentTransition(.numericText())
-              .animation(.spring(duration: 0.5), value: getStatusText(apiState))
-              .animation(.spring(duration: 0.5), value: shouldShow)
-          }
+    }
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      toolbarContent
+    }
+  }
+
+  @ToolbarContentBuilder
+  var toolbarContent: some ToolbarContent {
+    Group {
+      ToolbarItem(placement: .principal) {
+        Text(shouldShow ? getStatusText(apiState) : "Spaces")
+          .font(.title3)
+          .fontWeight(.semibold)
+          .contentTransition(.numericText())
+          .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+          .animation(.spring(duration: 0.5), value: shouldShow)
           .onAppear {
             apiState = realtime.apiState
-
             if apiState != .connected {
               shouldShow = true
             }
@@ -70,15 +80,12 @@ struct SpacesView: View {
               shouldShow = true
             }
           })
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-          Button {
-            router.presentSheet(.createSpace)
-          } label: {
-            Image(systemName: "plus")
-          }
-          .tint(.secondary)
+      }
+      ToolbarItem(placement: .topBarTrailing) {
+        Button {
+          router.presentSheet(.createSpace)
+        } label: {
+          Image(systemName: "plus")
         }
       }
     }
