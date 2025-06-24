@@ -8,7 +8,7 @@ import UIKit
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
-  let nav = Navigation()
+   let nav = Navigation()
   let router = NavigationModel<AppTab, Destination, Sheet>(initialTab: .chats)
 
   func application(
@@ -139,7 +139,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       return
     }
 
-    nav.navigateToChatFromNotification(peer: peerId)
+    // nav.navigateToChatFromNotification(peer: peerId)
+    router.navigateFromNotification(peer: peerId)
   }
 }
 
