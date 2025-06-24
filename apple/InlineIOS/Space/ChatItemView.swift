@@ -76,8 +76,6 @@ struct ChatItemView: View {
   }
 
   private var chatProfileColors: [Color] {
-    // This computed property will re-evaluate when colorScheme changes
-    // Reference colorScheme to ensure SwiftUI tracks the dependency
     let _ = colorScheme
     return [
       Color(.systemGray3).adjustLuminosity(by: 0.2),
@@ -129,12 +127,12 @@ struct ChatItemView: View {
   @ViewBuilder
   var unreadAndProfileView: some View {
     HStack(alignment: .center, spacing: 5) {
-      if isPinned && !hasUnreadMessages {
+      if isPinned, !hasUnreadMessages {
         Image(systemName: "pin.fill")
           .resizable()
           .foregroundColor(.secondary)
           .frame(width: 8, height: 10)
-        
+
       } else {
         Circle()
           .fill(hasUnreadMessages ? ColorManager.shared.swiftUIColor : .clear)
