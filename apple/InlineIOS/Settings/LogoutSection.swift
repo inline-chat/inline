@@ -7,6 +7,7 @@ struct LogoutSection: View {
   @EnvironmentObject private var mainRouter: MainViewRouter
   @EnvironmentObject private var navigation: Navigation
   @EnvironmentObject private var onboardingNavigation: OnboardingNavigation
+  @Environment(Router.self) private var router
 
   var body: some View {
     Section(header: Text("Actions")) {
@@ -67,6 +68,7 @@ struct LogoutSection: View {
         mainRouter.setRoute(route: .onboarding)
         onboardingNavigation.push(.welcome)
         navigation.popToRoot()
+        router.reset()
       }
     } catch {
       // Show error to user

@@ -3,7 +3,7 @@ import SwiftUI
 
 typealias Router = NavigationModel<AppTab, Destination, Sheet>
 
-enum AppTab: String, TabType, CaseIterable {
+enum AppTab: String, TabType, CaseIterable, Codable {
   case archived, chats, spaces
 
   var id: String { rawValue }
@@ -16,7 +16,7 @@ enum AppTab: String, TabType, CaseIterable {
   }
 }
 
-enum Destination: DestinationType {
+enum Destination: DestinationType, Codable {
   case chats
   case archived
   case spaces
@@ -29,7 +29,7 @@ enum Destination: DestinationType {
   case integrationOptions(spaceId: Int64, provider: String)
 }
 
-enum Sheet: SheetType {
+enum Sheet: SheetType, Codable {
   case createSpace
   case createThread(spaceId: Int64)
   case alphaSheet

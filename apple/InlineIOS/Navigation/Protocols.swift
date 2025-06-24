@@ -1,9 +1,9 @@
 import SwiftUI
 
-public protocol DestinationType: Hashable {}
+public protocol DestinationType: Hashable, Codable {}
 
-public protocol TabType: Hashable, CaseIterable, Identifiable, Sendable {
+public protocol TabType: Hashable, CaseIterable, Identifiable, Sendable, Codable {
   var icon: String { get }
 }
 
-public protocol SheetType: Hashable, Identifiable {}
+public protocol SheetType: Hashable, Identifiable, Codable {}
