@@ -671,9 +671,6 @@
     "Only space admins and owners can connect and manage integrations." : {
 
     },
-    "Open Chat" : {
-
-    },
     "Options" : {
 
     },
@@ -702,9 +699,6 @@
           }
         }
       }
-    },
-    "Pin" : {
-
     },
     "Please enter a username to search for" : {
 
@@ -854,9 +848,6 @@
 
     },
     "Unknown User" : {
-
-    },
-    "Unpin" : {
 
     },
     "Unsupported message" : {
