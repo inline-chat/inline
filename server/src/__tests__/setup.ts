@@ -6,6 +6,7 @@ import { sql, eq } from "drizzle-orm"
 import { chats, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import { encrypt, encryptBinary } from "@in/server/modules/encryption/encryption"
 import { MessageEntities, MessageEntity_Type } from "@in/protocol/core"
+import type { FunctionContext } from "@in/server/functions/_types"
 
 // Test database configuration
 const TEST_DB_NAME = "test_db"
@@ -429,6 +430,13 @@ export const testUtils = {
           },
         },
       ],
+    }
+  },
+
+  functionContext: ({ sessionId, userId }: { sessionId?: number; userId?: number }): FunctionContext => {
+    return {
+      currentSessionId: sessionId ?? defaultTestContext.sessionId,
+      currentUserId: userId ?? defaultTestContext.userId,
     }
   },
 }
