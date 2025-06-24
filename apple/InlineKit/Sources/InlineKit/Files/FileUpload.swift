@@ -224,6 +224,9 @@ public actor FileUploader {
 
       Log.shared.debug("[FileUploader] Starting upload for \(uploadId)")
 
+      // Initialize progress to 0
+      await updateProgress(uploadId: uploadId, progress: 0.0)
+
       // Compress image if it's a photo
       let uploadUrl: URL
       if case .photo = media {
@@ -320,7 +323,11 @@ public actor FileUploader {
 
   public func getUploadStatus(for uploadId: String) -> UploadStatus {
     if let taskInfo = uploadTasks[uploadId] {
-      .inProgress(progress: taskInfo.progress)
+      if taskInfo.progress < 0 {
+        .processing
+      } else {
+        .inProgress(progress: taskInfo.progress)
+      }
     } else if finishedUploads[uploadId] != nil {
       .completed
     } else {
