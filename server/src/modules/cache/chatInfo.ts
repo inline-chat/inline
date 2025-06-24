@@ -15,6 +15,10 @@ const cachedChatInfo = new Map<number, CachedChatInfo>()
 const cacheValidTime = 10 * 60 * 1000 // 10 minutes
 const maxCacheSize = 10000 // 10k chats
 
+export function clearChatInfoCache() {
+  cachedChatInfo.clear()
+}
+
 export async function getCachedChatInfo(chatId: number): Promise<CachedChatInfo | undefined> {
   let cached = cachedChatInfo.get(chatId)
   if (cached) {
