@@ -8,6 +8,7 @@ export type UserName = {
   lastName: string | null
   username: string | null
   email: string | null
+  timeZone: string | null
   cacheDate: number
 }
 
@@ -39,6 +40,7 @@ export async function getCachedUserName(userId: number): Promise<UserName | unde
     username: user.username,
     email: user.email,
     cacheDate: Date.now(),
+    timeZone: user.timeZone,
   }
 
   cachedUserNames.set(userId, userName)
