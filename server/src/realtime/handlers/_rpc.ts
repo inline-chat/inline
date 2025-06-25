@@ -25,9 +25,11 @@ import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
 import { createBotHandler } from "./createBot"
 
+const log = new Log("rpc")
+
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
-  Log.shared.debug("rpc call", Method[call.method])
+  log.debug("rpc call", Method[call.method])
 
   switch (call.method) {
     case Method.GET_ME: {
