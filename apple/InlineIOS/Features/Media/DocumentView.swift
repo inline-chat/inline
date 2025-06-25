@@ -176,11 +176,12 @@ class DocumentView: UIView {
     let circleRadius = 19
     let center = CGPoint(x: circleRadius, y: circleRadius)
 
-    // Create a filled circular progress layer
+    // Create a circular border progress layer
     progressLayer.frame = CGRect(x: 0, y: 0, width: circleRadius * 2, height: circleRadius * 2)
     progressLayer.fillColor = UIColor.clear.cgColor
-    progressLayer.strokeColor = UIColor.white.cgColor
+    progressLayer.strokeColor = progressBarColor.cgColor
     progressLayer.lineWidth = 2
+    progressLayer.lineCap = .round
 
     // Start with no progress (empty path)
     updateProgressPath(progress: 0.0)
@@ -199,13 +200,11 @@ class DocumentView: UIView {
       return
     }
 
-    // Create a filled arc based on progress
+    // Create a circular border progress indicator
     let startAngle: CGFloat = -CGFloat.pi / 2 // Start at top
     let endAngle: CGFloat = startAngle + (2 * CGFloat.pi * progress)
 
     let path = UIBezierPath()
-    path.move(to: center)
-    path.addLine(to: CGPoint(x: center.x, y: center.y - radius))
     path.addArc(
       withCenter: center,
       radius: radius,
@@ -213,7 +212,6 @@ class DocumentView: UIView {
       endAngle: endAngle,
       clockwise: true
     )
-    path.close()
 
     progressLayer.path = path.cgPath
   }
@@ -406,6 +404,11 @@ class DocumentView: UIView {
     }
 
     updateFileIcon()
+    updateProgressLayerColor()
+  }
+
+  private func updateProgressLayerColor() {
+    progressLayer.strokeColor = progressBarColor.cgColor
   }
 
   func downloadFile() {
@@ -439,8 +442,8 @@ class DocumentView: UIView {
 
   func cancelDownload() {
     if case .downloading = documentState {
-      if let document {
-        FileDownloader.shared.cancelDocumentDownload(documentId: document.documentId)
+      if let documentInfo {
+        FileDownloader.shared.cancelDocumentDownload(documentId: documentInfo.id)
       }
 
       documentState = .needsDownload
@@ -696,7 +699,9 @@ class DocumentView: UIView {
       }
     }
 
-    let documentId = document.documentId
+    // Use documentInfo.id to match what FileDownloader uses
+    guard let documentInfo else { return .needsDownload }
+    let documentId = documentInfo.id
     if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
       return .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
     }
@@ -707,15 +712,17 @@ class DocumentView: UIView {
   // MARK: - Progress Monitoring
 
   private func startMonitoringProgress() {
-    guard let document else { return }
+    guard let documentInfo else { return }
 
     progressSubscription?.cancel()
 
-    let documentId = document.documentId
+    let documentId = documentInfo.id
     progressSubscription = FileDownloader.shared.documentProgressPublisher(documentId: documentId)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] progress in
         guard let self else { return }
+
+        Log.shared.debug("📄 Document \(documentId) progress: \(progress)")
 
         if progress.isComplete {
           documentState = .locallyAvailable
@@ -725,7 +732,13 @@ class DocumentView: UIView {
         } else if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
           documentState = .downloading(
             bytesReceived: progress.bytesReceived,
-            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document.size ?? 0)
+            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document?.size ?? 0)
+          )
+        } else if progress.bytesReceived > 0 {
+          // We have progress but no active task - might be completing
+          documentState = .downloading(
+            bytesReceived: progress.bytesReceived,
+            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document?.size ?? 0)
           )
         }
       }
