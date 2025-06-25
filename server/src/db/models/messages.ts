@@ -43,6 +43,7 @@ export const MessageModel = {
   editMessage: editMessage,
   processAttachments: processAttachments,
   getNonFullMessagesFromNewToOld: getNonFullMessagesFromNewToOld,
+  getSenderIdForMessage: getSenderIdForMessage,
 }
 
 export type DbInputFullAttachment = DbMessageAttachment & {
@@ -597,4 +598,29 @@ async function getMessagesAroundTarget(
           )
         : null,
   }))
+}
+
+/**
+ * Get the sender ID for a message
+ * @param input - The input object containing the chat ID and message IDs
+ * @returns The sender ID or null if the message is not found
+ */
+async function getSenderIdForMessage({
+  chatId,
+  messageId,
+}: {
+  chatId: number
+  messageId: number
+}): Promise<number | undefined> {
+  const message = await db.query.messages.findFirst({
+    where: {
+      chatId,
+      messageId,
+    },
+    columns: {
+      fromId: true,
+    },
+  })
+
+  return message?.fromId ?? undefined
 }
