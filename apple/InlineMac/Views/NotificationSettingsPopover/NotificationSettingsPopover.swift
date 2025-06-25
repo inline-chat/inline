@@ -152,15 +152,6 @@ struct NotificationSettingsButton: View {
         .padding(.vertical, 6)
 
       VStack(alignment: .leading, spacing: 8) {
-        Toggle(isOn: $notificationSettings.requiresMention) {
-          HStack {
-            Text("Require mentioning me")
-            Spacer()
-          }
-        }
-        .toggleStyle(.switch)
-        .frame(maxWidth: .infinity, alignment: .leading)
-
         Picker("Rules", selection: $notificationSettings.usesDefaultRules) {
           Text("Default").tag(true)
           Text("Custom").tag(false)
