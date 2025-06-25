@@ -19,6 +19,7 @@ import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { processMessageText } from "@in/server/modules/message/processText"
+import { isUserMentioned } from "@in/server/modules/message/helpers"
 
 type Input = {
   peerId: InputPeer
@@ -305,6 +306,14 @@ type SendPushForMsgInput = {
 async function sendNotifications(input: SendPushForMsgInput) {
   const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, unencryptedEntities, inputPeer } = input
 
+  // get sender of replied message ID if any
+  const repliedToSenderId = messageInfo.message.replyToMsgId
+    ? await MessageModel.getSenderIdForMessage({
+        chatId: messageInfo.message.chatId,
+        messageId: messageInfo.message.replyToMsgId,
+      })
+    : undefined
+
   // AI
   let evalResult: NotificationEvalResult | undefined
 
@@ -321,15 +330,26 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
     log.debug("Participant settings", { participantSettings })
 
-    const hasAnyoneEnabledAIForThreads = participantSettings.some(
-      (setting) =>
-        setting.settings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly ||
-        setting.settings?.notifications.mode === UserSettingsNotificationsMode.Mentions,
-    )
-    const hasAnyoneEnabledAIForDMs = participantSettings.some(
-      (setting) => setting.settings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly,
-    )
-    const needsAIEval = chatInfo?.type === "thread" ? hasAnyoneEnabledAIForThreads : hasAnyoneEnabledAIForDMs
+    const isDM = inputPeer.type.oneofKind === "user"
+
+    // Only evaluate if any participant has set to ImportantOnly and is mentioned
+    const needsAIEval = participantSettings.some((setting) => {
+      let zenMode = setting.settings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly
+      let isReplyToUser = setting.userId === repliedToSenderId
+      let isExplicitlyMentioned = unencryptedEntities ? isUserMentioned(unencryptedEntities, setting.userId) : false
+      let isMentioned = isDM || isExplicitlyMentioned || isReplyToUser
+
+      log.debug("Evaluating notification", {
+        userId: setting.userId,
+        zenMode,
+        isReplyToUser,
+        isExplicitlyMentioned,
+        isMentioned,
+      })
+
+      return zenMode && isMentioned
+    })
+
     const hasText = !!unencryptedText
 
     if (needsAIEval && hasText) {
@@ -351,6 +371,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
   // decrypt message text
   let messageText = input.unencryptedText
+  let messageEntities = input.unencryptedEntities
 
   // TODO: send to users who have it set to All immediately
   // Handle DMs and threads
@@ -364,6 +385,8 @@ async function sendNotifications(input: SendPushForMsgInput) {
       userId,
       messageInfo,
       messageText,
+      messageEntities,
+      repliedToSenderId,
       chat,
       evalResult,
       updateGroup,
@@ -378,6 +401,8 @@ async function sendNotificationToUser({
   userId,
   messageInfo,
   messageText,
+  messageEntities,
+  repliedToSenderId,
   chat,
   evalResult,
   updateGroup,
@@ -387,6 +412,8 @@ async function sendNotificationToUser({
   userId: number
   messageInfo: MessageInfo
   messageText: string | undefined
+  messageEntities: MessageEntities | undefined
+  repliedToSenderId: number | undefined
   chat?: DbChat
   evalResult?: NotificationEvalResult
   // For explicit mac notification
@@ -403,15 +430,22 @@ async function sendNotificationToUser({
     return
   }
 
+  // TODO: evaluate reply to a user as a mention
+  const isDM = inputPeer.type.oneofKind === "user"
+  const isReplyToUser = repliedToSenderId === userId
+  const isExplicitlyMentioned = messageEntities ? isUserMentioned(messageEntities, userId) : false
+  const isMentioned = isDM || isExplicitlyMentioned || isReplyToUser
+  const requiresNotification = evalResult?.notifyUserIds?.includes(userId)
+
   // Mentions
   if (userSettings?.notifications.mode === UserSettingsNotificationsMode.Mentions) {
     if (
       // Not mentioned
-      !evalResult?.mentionedUserIds?.includes(userId) &&
+      !isMentioned &&
       // Not notified
-      !evalResult?.notifyUserIds?.includes(userId) &&
+      !requiresNotification &&
       // Not DMs - always send for DMs if it's set to "Mentions"
-      inputPeer.type.oneofKind !== "user"
+      !isDM
     ) {
       // Do not notify
       return
@@ -422,7 +456,7 @@ async function sendNotificationToUser({
 
   // Important only
   if (userSettings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly) {
-    if (!evalResult?.notifyUserIds?.includes(userId)) {
+    if (!isMentioned || !requiresNotification) {
       // Do not notify
       return
     }
