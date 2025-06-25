@@ -1,0 +1,392 @@
+import AVFoundation
+import Combine
+import CoreServices
+import ImageIO
+import InlineKit
+import InlineProtocol
+import Logger
+import MobileCoreServices
+import PhotosUI
+import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+
+class ComposeView: UIView, NSTextLayoutManagerDelegate {
+  // MARK: - Configuration Constants
+
+  let maxHeight: CGFloat = 350
+  let buttonSize: CGSize = .init(width: 32, height: 32)
+
+  static let minHeight: CGFloat = 38.0
+  static let textViewVerticalPadding: CGFloat = 0.0
+  static let textViewHorizantalPadding: CGFloat = 12.0
+  static let textViewHorizantalMargin: CGFloat = 7.0
+  static let textViewVerticalMargin: CGFloat = 4.0
+
+  // MARK: - Properties
+
+  var composeHeightConstraint: NSLayoutConstraint!
+  var prevTextHeight: CGFloat = 0.0
+  var overlayView: UIView?
+  var isOverlayVisible = false
+  var phaseObserver: AnyCancellable?
+
+  let buttonBottomPadding: CGFloat = -4.0
+  let buttonTrailingPadding: CGFloat = -6.0
+  let buttonLeadingPadding: CGFloat = 10.0
+
+  // MARK: - State Management
+
+  var isButtonVisible = false
+  var selectedImage: UIImage?
+  var showingPhotoPreview: Bool = false
+  var imageCaption: String = ""
+  var attachmentItems: [UIImage: FileMediaItem] = [:]
+  var onHeightChange: ((CGFloat) -> Void)?
+  var peerId: InlineKit.Peer?
+  var chatId: Int64?
+  var mentionManager: MentionManager?
+  var draftSaveTimer: Timer?
+  var originalDraftEntities: MessageEntities?
+
+  let previewViewModel = PhotoPreviewViewModel()
+  let draftSaveInterval: TimeInterval = 2.0 // Save every 2 seconds
+
+  // MARK: - UI Components
+
+  lazy var textView = makeTextView()
+  lazy var sendButton = makeSendButton()
+  lazy var plusButton = makePlusButton()
+
+  // MARK: - Initialization
+
+  deinit {
+    stopDraftSaveTimer()
+    removeObservers()
+  }
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    setupViews()
+    setupScenePhaseObserver()
+    setupChatStateObservers()
+    setupStickerObserver()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  @objc func handleStickerDetected(_ notification: Notification) {
+    if UIPasteboard.general.image != nil {
+      handlePastedImage()
+    } else {
+      if let image = notification.userInfo?["image"] as? UIImage {
+        // Ensure we're on the main thread
+        DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
+          self?.sendSticker(image)
+        }
+      }
+    }
+  }
+
+  // MARK: - View Lifecycle
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window != nil {
+      setupMentionManager()
+    }
+  }
+
+  override func removeFromSuperview() {
+    saveDraft()
+    stopDraftSaveTimer()
+    resetMentionManager()
+    super.removeFromSuperview()
+  }
+
+  func resetMentionManager() {
+    mentionManager?.cleanup()
+    mentionManager = nil
+  }
+
+  override func resignFirstResponder() -> Bool {
+    dismissOverlay()
+    return super.resignFirstResponder()
+  }
+
+  private func dismissOverlay() {
+    guard isOverlayVisible, let overlay = overlayView else { return }
+
+    UIView.animate(withDuration: 0.15, delay: 0, options: .curveEaseIn) {
+      overlay.alpha = 0
+      overlay.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+        .concatenating(CGAffineTransform(translationX: 0, y: 10))
+      self.plusButton.backgroundColor = .clear
+    } completion: { _ in
+      overlay.removeFromSuperview()
+      self.overlayView = nil
+      self.isOverlayVisible = false
+      self.gestureRecognizers?.removeAll()
+    }
+  }
+
+  public func sendSticker(_ image: UIImage) {
+    guard let peerId else {
+      Log.shared.debug("❌ COMPOSE - No peerId available")
+      return
+    }
+
+    Task.detached(priority: .userInitiated) {
+      let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
+
+      await Transactions.shared.mutate(
+        transaction: .sendMessage(
+          .init(
+            text: nil,
+            peerId: peerId,
+            chatId: self.chatId ?? 0,
+            mediaItems: [.photo(photoInfo)],
+            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
+            isSticker: true
+          )
+        )
+      )
+    }
+
+    ChatState.shared.clearEditingMessageId(peer: peerId)
+    ChatState.shared.clearReplyingMessageId(peer: peerId)
+
+    clearDraft()
+    textView.text = ""
+    resetHeight()
+    textView.showPlaceholder(true)
+    buttonDisappear()
+
+    sendButton.configuration?.showsActivityIndicator = false
+  }
+
+  func setupViews() {
+    clearBackground()
+
+    addSubview(textView)
+    addSubview(sendButton)
+    addSubview(plusButton)
+
+    setupInitialHeight()
+    setupConstraints()
+    addDropInteraction()
+  }
+
+  func clearBackground() {
+    backgroundColor = .clear
+  }
+
+  func setupInitialHeight() {
+    composeHeightConstraint = heightAnchor.constraint(equalToConstant: Self.minHeight)
+  }
+
+  func addDropInteraction() {
+    let dropInteraction = UIDropInteraction(delegate: self)
+    addInteraction(dropInteraction)
+  }
+
+  func setupConstraints() {
+    NSLayoutConstraint.activate([
+      composeHeightConstraint,
+
+      plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+      plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
+      plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
+      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
+
+      textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
+      textView.topAnchor.constraint(equalTo: topAnchor),
+      textView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -12),
+
+      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
+      sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
+      sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
+      sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
+    ])
+  }
+
+  func buttonDisappear() {
+    print("buttonDisappear")
+    isButtonVisible = false
+    UIView.animate(withDuration: 0.12, delay: 0.1, options: [.curveEaseOut, .allowUserInteraction]) {
+      self.sendButton.transform = CGAffineTransform(scaleX: 1.05, y: 1.05)
+      self.sendButton.alpha = 0
+    }
+  }
+
+  func buttonAppear() {
+    print("buttonAppear")
+    guard !isButtonVisible else { return }
+    isButtonVisible = true
+    sendButton.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
+    sendButton.alpha = 0.0
+    layoutIfNeeded()
+    UIView.animate(
+      withDuration: 0.21,
+      delay: 0,
+      usingSpringWithDamping: 0.8,
+      initialSpringVelocity: 0.5,
+      options: .curveEaseOut
+    ) {
+      // self.sendButtonContainer.alpha = 1
+      // self.sendButtonContainer.transform = .identity
+      self.sendButton.transform = .identity
+      self.sendButton.alpha = 1
+    } completion: { _ in
+    }
+  }
+
+  @objc func sendTapped() {
+    guard let peerId else { return }
+    let state = ChatState.shared.getState(peer: peerId)
+    let isEditing = state.editingMessageId != nil
+
+    guard let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !text.isEmpty
+    else { return }
+    guard let chatId else { return }
+
+    // Extract mention entities from attributed text
+    let attributedText = textView.attributedText ?? NSAttributedString()
+    let mentionEntities = mentionManager?.extractMentionEntities(from: attributedText) ?? []
+    let entities = if mentionEntities.isEmpty {
+      nil as MessageEntities?
+    } else {
+      MessageEntities.with { $0.entities = mentionEntities }
+    }
+
+    if isEditing {
+      // Handle message edit
+      Transactions.shared.mutate(transaction: .editMessage(.init(
+        messageId: state.editingMessageId ?? 0,
+        text: text,
+        chatId: chatId,
+        peerId: peerId
+      )))
+
+      ChatState.shared.clearEditingMessageId(peer: peerId)
+    } else {
+      // Original send message logic
+      let replyToMessageId = state.replyingMessageId
+      Transactions.shared.mutate(transaction: .sendMessage(.init(
+        text: text,
+        peerId: peerId,
+        chatId: chatId,
+        mediaItems: [],
+        replyToMsgId: replyToMessageId,
+        isSticker: nil,
+        entities: entities
+      )))
+      ChatState.shared.clearReplyingMessageId(peer: peerId)
+    }
+
+    clearDraft()
+    stopDraftSaveTimer()
+    textView.text = ""
+    resetHeight()
+    textView.showPlaceholder(true)
+    buttonDisappear()
+  }
+
+  func updateSendButtonForEditing(_ isEditing: Bool) {
+    let imageName = isEditing ? "checkmark" : "arrow.up"
+    sendButton.configuration?.image = UIImage(systemName: imageName)?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+    )
+  }
+
+  func setupScenePhaseObserver() {
+    NotificationCenter.default.removeObserver(self)
+
+    NotificationCenter.default.addObserver(
+      forName: UIApplication.didEnterBackgroundNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.saveCurrentDraft()
+    }
+
+    NotificationCenter.default.addObserver(
+      forName: UIApplication.willTerminateNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.saveCurrentDraft()
+    }
+
+    NotificationCenter.default.addObserver(
+      forName: UIApplication.willResignActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.saveCurrentDraft()
+    }
+  }
+
+  func setupChatStateObservers() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleEditingStateChange),
+      name: .init("ChatStateSetEditingCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleEditingStateChange),
+      name: .init("ChatStateClearEditingCalled"),
+      object: nil
+    )
+  }
+
+  func setupStickerObserver() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleStickerDetected(_:)),
+      name: NSNotification.Name("StickerDetected"),
+      object: nil
+    )
+  }
+
+  @objc func handleEditingStateChange() {
+    guard let peerId, let chatId else { return }
+    let isEditing = ChatState.shared.getState(peer: peerId).editingMessageId != nil
+    updateSendButtonForEditing(isEditing)
+
+    if isEditing {
+      // Stop draft timer when editing a message
+      stopDraftSaveTimer()
+
+      if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
+         let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
+      {
+        textView.text = message.message.text
+        textView.showPlaceholder(false)
+        buttonAppear()
+        DispatchQueue.main.async { [weak self] in
+          self?.updateHeight()
+        }
+      }
+    } else {
+      // Resume draft timer when exiting edit mode if there's text
+      if let text = textView.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        startDraftSaveTimer()
+      }
+    }
+
+    updateHeight()
+  }
+
+  func removeObservers() {
+    NotificationCenter.default.removeObserver(self)
+  }
+}
