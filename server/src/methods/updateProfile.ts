@@ -22,6 +22,8 @@ export const Response = Type.Object({
   user: TUserInfo,
 })
 
+const log = new Log("updateProfile")
+
 export const handler = async (input: Input, context: HandlerContext): Promise<Static<typeof Response>> => {
   try {
     if (input.username) {
@@ -56,23 +58,23 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
     }
     if ("timeZone" in input) {
       if (input.timeZone && !validateIanaTimezone(input.timeZone)) {
-        Log.shared.error("Invalid timeZone", { timeZone: input.timeZone })
+        log.error("Invalid timeZone", { timeZone: input.timeZone })
         throw new InlineError(InlineError.ApiError.INTERNAL)
       }
       if (input.timeZone) {
-        Log.shared.debug("Setting timeZone", { timeZone: input.timeZone })
+        log.debug("Setting timeZone", { timeZone: input.timeZone })
         props.timeZone = input.timeZone
       }
     }
 
     let user = await db.update(users).set(props).where(eq(users.id, context.currentUserId)).returning()
     if (!user[0]) {
-      Log.shared.error("Failed to set profile", { userId: context.currentUserId })
+      log.error("Failed to set profile", { userId: context.currentUserId })
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
     return { user: encodeUserInfo(user[0]) }
   } catch (error) {
-    Log.shared.error("Failed to set profile", error)
+    log.error("Failed to set profile", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
