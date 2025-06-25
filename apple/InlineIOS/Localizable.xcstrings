@@ -24,6 +24,7 @@
 
     },
     "%@:" : {
+      "extractionState" : "stale",
       "localizations" : {
         "fa" : {
           "stringUnit" : {
@@ -39,19 +40,6 @@
         }
       }
     },
-    "%@: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@: %2$@"
-          }
-        }
-      }
-    },
-    "%@..." : {
-
-    },
     "%lld" : {
 
     },
@@ -64,9 +52,6 @@
           }
         }
       }
-    },
-    "%lld members" : {
-
     },
     "+1 555 555 5555" : {
       "comment" : "Phone number placeholder",
@@ -645,9 +630,6 @@
 
     },
     "No chats or spaces yet" : {
-
-    },
-    "No messages yet" : {
 
     },
     "No Spaces Yet" : {

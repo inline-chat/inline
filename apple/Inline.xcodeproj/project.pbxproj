@@ -264,11 +264,11 @@
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				B7C0674F2DB7F2BA00EAADA4 /* iMessageUI */,
 				B7020C432DCE1534007099D9 /* share */,
+				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
 				C31675032CAC167D009A1FD8 /* Frameworks */,
 				CD2661052CA01CAE00EB186F /* Products */,
 				CD5326842CE113CD00EC348D /* Debug.xcconfig */,
 				CD5326862CE1149700EC348D /* Release.xcconfig */,
-				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
 			);
 			sourceTree = "<group>";
 		};
