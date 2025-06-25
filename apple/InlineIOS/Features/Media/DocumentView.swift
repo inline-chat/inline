@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import GRDB
 import InlineKit
 import Logger
 import QuickLook
@@ -10,11 +11,13 @@ class DocumentView: UIView {
 
   let fullMessage: FullMessage?
   let outgoing: Bool
+  private var isBeingRemoved = false
 
   enum DocumentState: Equatable {
     case locallyAvailable
     case needsDownload
     case downloading(bytesReceived: Int64, totalBytes: Int64)
+    case uploading(bytesSent: Int64, totalBytes: Int64)
   }
 
   private var progressSubscription: AnyCancellable?
@@ -25,10 +28,12 @@ class DocumentView: UIView {
   }
 
   private var previewController: QLPreviewController?
+  private var documentInteractionController: UIDocumentInteractionController?
   private var documentURL: URL?
 
   // Progress border
   private let progressLayer = CAShapeLayer()
+  private var rotationAnimation: CABasicAnimation?
 
   var documentInfo: DocumentInfo? {
     fullMessage?.documentInfo
@@ -72,12 +77,51 @@ class DocumentView: UIView {
       documentState = determineDocumentState(document)
     }
 
+    // Check if this is a sending message with document - show uploading state
+    if let message = fullMessage?.message,
+       message.status == .sending,
+       message.documentId != nil
+    {
+      Log.shared.debug("📤 Message is sending with document - setting uploading state")
+      documentState = .uploading(bytesSent: 0, totalBytes: Int64(document?.size ?? 0))
+    }
+
     updateUIForDocumentState()
 
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(handleDocumentTappedNotification(_:)),
       name: Notification.Name("DocumentTapped"),
+      object: nil
+    )
+
+    // Listen for upload notifications
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleDocumentUploadStarted(_:)),
+      name: NSNotification.Name("DocumentUploadStarted"),
+      object: nil
+    )
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleDocumentUploadCompleted(_:)),
+      name: NSNotification.Name("DocumentUploadCompleted"),
+      object: nil
+    )
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleDocumentUploadFailed(_:)),
+      name: NSNotification.Name("DocumentUploadFailed"),
+      object: nil
+    )
+
+    // Listen for message status changes
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleMessageStatusChanged(_:)),
+      name: NSNotification.Name("MessageStatusChanged"),
       object: nil
     )
 
@@ -131,21 +175,86 @@ class DocumentView: UIView {
   private func setupProgressLayer() {
     let circleRadius = 19
     let center = CGPoint(x: circleRadius, y: circleRadius)
-    let circlePath = UIBezierPath(
-      arcCenter: center,
-      radius: CGFloat(circleRadius - 2),
-      startAngle: -CGFloat.pi / 2,
-      endAngle: 3 * CGFloat.pi / 2,
+
+    // Create a filled circular progress layer
+    progressLayer.frame = CGRect(x: 0, y: 0, width: circleRadius * 2, height: circleRadius * 2)
+    progressLayer.fillColor = UIColor.clear.cgColor
+    progressLayer.strokeColor = UIColor.white.cgColor
+    progressLayer.lineWidth = 2
+
+    // Start with no progress (empty path)
+    updateProgressPath(progress: 0.0)
+
+    fileIconButton.layer.addSublayer(progressLayer)
+  }
+
+  private func updateProgressPath(progress: CGFloat) {
+    let circleRadius: CGFloat = 19
+    let center = CGPoint(x: circleRadius, y: circleRadius)
+    let radius = circleRadius - 1
+
+    if progress <= 0 {
+      // No progress - empty path
+      progressLayer.path = UIBezierPath().cgPath
+      return
+    }
+
+    // Create a filled arc based on progress
+    let startAngle: CGFloat = -CGFloat.pi / 2 // Start at top
+    let endAngle: CGFloat = startAngle + (2 * CGFloat.pi * progress)
+
+    let path = UIBezierPath()
+    path.move(to: center)
+    path.addLine(to: CGPoint(x: center.x, y: center.y - radius))
+    path.addArc(
+      withCenter: center,
+      radius: radius,
+      startAngle: startAngle,
+      endAngle: endAngle,
+      clockwise: true
+    )
+    path.close()
+
+    progressLayer.path = path.cgPath
+  }
+
+  private func showUploadingSpinner() {
+    let circleRadius: CGFloat = 19
+    let center = CGPoint(x: circleRadius, y: circleRadius)
+    let radius = circleRadius - 2 // Account for stroke width
+
+    // Create a 1/9 arc (40 degrees) as border
+    let segmentAngle: CGFloat = (2 * CGFloat.pi) / 9 // 40 degrees (1/9 of circle)
+    let startAngle: CGFloat = -CGFloat.pi / 2 // Start at top
+    let endAngle: CGFloat = startAngle + segmentAngle
+
+    let path = UIBezierPath()
+    path.addArc(
+      withCenter: center,
+      radius: radius,
+      startAngle: startAngle,
+      endAngle: endAngle,
       clockwise: true
     )
 
-    progressLayer.path = circlePath.cgPath
-    progressLayer.strokeColor = progressBarColor.cgColor
-    progressLayer.fillColor = UIColor.clear.cgColor
-    progressLayer.lineWidth = 2.0
-    progressLayer.strokeEnd = 0.0
+    progressLayer.path = path.cgPath
 
-    fileIconButton.layer.addSublayer(progressLayer)
+    // Create rotation animation - slower speed
+    let rotation = CABasicAnimation(keyPath: "transform.rotation")
+    rotation.fromValue = 0
+    rotation.toValue = 2 * CGFloat.pi
+    rotation.duration = 1.5 // Slower: 1.5 seconds per rotation
+    rotation.repeatCount = .infinity
+    rotation.isRemovedOnCompletion = false
+
+    progressLayer.add(rotation, forKey: "rotation")
+    rotationAnimation = rotation
+  }
+
+  private func hideUploadingSpinner() {
+    progressLayer.removeAnimation(forKey: "rotation")
+    rotationAnimation = nil
+    progressLayer.path = UIBezierPath().cgPath
   }
 
   func setupContent() {
@@ -171,16 +280,26 @@ class DocumentView: UIView {
         downloadFile()
       case .downloading:
         cancelDownload()
+      case .uploading:
+        cancelUpload()
       case .locallyAvailable:
         openFile()
     }
   }
 
   @objc func viewTapped() {
-    if case .locallyAvailable = documentState {
-      openFile()
-    } else {
-      downloadFile()
+    // Prevent interactions if view is being removed
+    guard !isBeingRemoved else { return }
+
+    switch documentState {
+      case .locallyAvailable:
+        openFile()
+      case .uploading:
+        cancelUpload()
+      case .downloading:
+        cancelDownload()
+      case .needsDownload:
+        downloadFile()
     }
   }
 
@@ -191,7 +310,10 @@ class DocumentView: UIView {
         iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
 
       case .downloading:
+        iconView.image = UIImage(systemName: "xmark")
+        iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
 
+      case .uploading:
         iconView.image = UIImage(systemName: "xmark")
         iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
 
@@ -251,24 +373,35 @@ class DocumentView: UIView {
     UIView.performWithoutAnimation {
       switch documentState {
         case .locallyAvailable:
-
-          progressLayer.strokeEnd = 0.0
-
+          hideUploadingSpinner()
+          updateProgressPath(progress: 0.0)
           fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
 
         case .needsDownload:
-
-          progressLayer.strokeEnd = 0.0
+          hideUploadingSpinner()
+          updateProgressPath(progress: 0.0)
           fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
 
         case let .downloading(bytesReceived, totalBytes):
+          hideUploadingSpinner()
           let progress = Double(bytesReceived) / Double(totalBytes)
-
-          progressLayer.strokeEnd = CGFloat(progress)
+          updateProgressPath(progress: CGFloat(progress))
 
           let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
           let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
           fileSizeLabel.text = "\(downloadedStr) / \(totalStr)"
+
+        case let .uploading(bytesSent, totalBytes):
+          showUploadingSpinner()
+
+          if bytesSent == 0 {
+            // Show "uploading..." when no progress yet
+            fileSizeLabel.text = "uploading..."
+          } else {
+            let uploadedStr = FileHelpers.formatFileSize(UInt64(bytesSent))
+            let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
+            fileSizeLabel.text = "\(uploadedStr) / \(totalStr)"
+          }
       }
     }
 
@@ -317,32 +450,180 @@ class DocumentView: UIView {
     }
   }
 
+  func cancelUpload() {
+    if case .uploading = documentState {
+      Log.shared.debug("Upload cancellation requested - cancelling message transaction")
+
+      // Mark as being removed to prevent further interactions
+      isBeingRemoved = true
+
+      // Cancel the message transaction if it exists
+      if let message = fullMessage?.message,
+         let transactionId = message.transactionId,
+         !transactionId.isEmpty
+      {
+        Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
+        Transactions.shared.cancel(transactionId: transactionId)
+
+        // Delete the message from the database
+        let chatId = message.chatId
+        let messageId = message.messageId
+        let peerId = message.peerId
+
+        Task(priority: .userInitiated) {
+          let _ = try? await AppDatabase.shared.dbWriter.write { db in
+            try Message
+              .filter(Column("chatId") == chatId)
+              .filter(Column("messageId") == messageId)
+              .deleteAll(db)
+          }
+
+          MessagesPublisher.shared
+            .messagesDeleted(messageIds: [messageId], peer: peerId)
+        }
+
+        // Don't immediately remove the view - let MessagesPublisher handle the UI updates
+        // The message collection view will properly remove the entire message cell
+      } else {
+        Log.shared.warning("No transaction ID found for message - cannot cancel upload")
+      }
+
+      hideUploadingSpinner()
+      progressSubscription?.cancel()
+      progressSubscription = nil
+    }
+  }
+
   func openFile() {
+    Log.shared.debug("📄 openFile() called")
+
     guard
       let document,
       let localPath = document.localPath
     else {
-      Log.shared.error("Cannot open document: No local path available")
+      Log.shared
+        .error(
+          "📄 Cannot open document: No local path available - document: \(document?.fileName ?? "nil"), localPath: \(document?.localPath ?? "nil")"
+        )
       return
     }
+
+    Log.shared
+      .debug(
+        "📄 Document details - fileName: \(document.fileName ?? "unknown"), localPath: \(localPath), size: \(document.size ?? 0)"
+      )
 
     let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
     let fileURL = cacheDirectory.appendingPathComponent(localPath)
 
+    Log.shared.debug("📄 Full file path: \(fileURL.path)")
+    Log.shared.debug("📄 Cache directory: \(cacheDirectory.path)")
+
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
-      Log.shared.error("File does not exist at path: \(fileURL.path)")
+      Log.shared.error("📄 File does not exist at path: \(fileURL.path)")
+      Log.shared
+        .debug("📄 Directory contents: \(try? FileManager.default.contentsOfDirectory(atPath: cacheDirectory.path))")
       documentState = .needsDownload
       return
     }
 
+    // Get file attributes for debugging
+    do {
+      let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+      Log.shared.debug("📄 File attributes: \(attributes)")
+    } catch {
+      Log.shared.error("📄 Failed to get file attributes: \(error)")
+    }
+
     documentURL = fileURL
+
+    // Check file extension to avoid QuickLook for problematic file types
+    let fileExtension = fileURL.pathExtension.lowercased()
+    let problematicExtensions = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"]
+
+    if problematicExtensions.contains(fileExtension) {
+      Log.shared
+        .debug("📄 File type .\(fileExtension) may cause QuickLook crashes - using UIDocumentInteractionController")
+      openWithDocumentInteraction(fileURL: fileURL)
+      return
+    }
+
+    Log.shared.debug("📄 About to check QLPreviewController.canPreview for: \(fileURL)")
+
+    // Check if QuickLook can preview this file
+    let canPreview = QLPreviewController.canPreview(fileURL as QLPreviewItem)
+    Log.shared.debug("📄 QLPreviewController.canPreview result: \(canPreview)")
+
+    if canPreview {
+      Log.shared.debug("📄 Using QuickLook for preview")
+      openWithQuickLook(fileURL: fileURL)
+    } else {
+      Log.shared.debug("📄 QuickLook can't preview, using UIDocumentInteractionController")
+      openWithDocumentInteraction(fileURL: fileURL)
+    }
+  }
+
+  private func openWithQuickLook(fileURL: URL) {
+    Log.shared.debug("📄 openWithQuickLook() called for: \(fileURL)")
 
     let previewController = QLPreviewController()
     previewController.dataSource = self
     previewController.delegate = self
     self.previewController = previewController
 
-    findViewController()?.present(previewController, animated: true)
+    guard let viewController = findViewController() else {
+      Log.shared.error("📄 Cannot find view controller to present QuickLook preview")
+      Log.shared.debug("📄 Falling back to document interaction")
+      openWithDocumentInteraction(fileURL: fileURL)
+      return
+    }
+
+    Log.shared.debug("📄 Found view controller: \(type(of: viewController))")
+    Log.shared.debug("📄 About to present QLPreviewController")
+
+    DispatchQueue.main.async {
+      Log.shared.debug("📄 Presenting QLPreviewController on main thread")
+      viewController.present(previewController, animated: true) {
+        Log.shared.debug("📄 QLPreviewController presentation completed")
+      }
+    }
+  }
+
+  private func openWithDocumentInteraction(fileURL: URL) {
+    let documentInteractionController = UIDocumentInteractionController(url: fileURL)
+    documentInteractionController.delegate = self
+    self.documentInteractionController = documentInteractionController
+
+    guard let viewController = findViewController() else {
+      Log.shared.error("Cannot find view controller to present document interaction")
+      return
+    }
+
+    // Try to present preview first
+    if documentInteractionController.presentPreview(animated: true) {
+      Log.shared.debug("Presented document preview using UIDocumentInteractionController")
+    } else {
+      // If preview fails, show options menu
+      let rect = bounds
+      if documentInteractionController.presentOptionsMenu(from: rect, in: self, animated: true) {
+        Log.shared.debug("Presented document options menu using UIDocumentInteractionController")
+      } else {
+        Log.shared.error("Failed to present document using UIDocumentInteractionController")
+        showDocumentError()
+      }
+    }
+  }
+
+  private func showDocumentError() {
+    guard let viewController = findViewController() else { return }
+
+    let alert = UIAlertController(
+      title: "Cannot Open Document",
+      message: "This document type is not supported for preview.",
+      preferredStyle: .alert
+    )
+    alert.addAction(UIAlertAction(title: "OK", style: .default))
+    viewController.present(alert, animated: true)
   }
 
   private func findViewController() -> UIViewController? {
@@ -354,6 +635,52 @@ class DocumentView: UIView {
       responder = nextResponder
     }
     return nil
+  }
+
+  // MARK: - Upload Management
+
+  func startUpload() {
+    guard let document else { return }
+
+    let fileSize = Int64(document.size ?? 0)
+    documentState = .uploading(bytesSent: 0, totalBytes: fileSize)
+
+    startMonitoringUploadProgress()
+  }
+
+  // Public method to be called when document upload begins
+  public func setUploadingState() {
+    startUpload()
+  }
+
+  func updateUploadProgress(bytesSent: Int64, totalBytes: Int64) {
+    documentState = .uploading(bytesSent: bytesSent, totalBytes: totalBytes)
+  }
+
+  func completeUpload() {
+    hideUploadingSpinner()
+    documentState = .locallyAvailable
+    progressSubscription?.cancel()
+    progressSubscription = nil
+  }
+
+  func failUpload() {
+    hideUploadingSpinner()
+    documentState = .locallyAvailable
+    progressSubscription?.cancel()
+    progressSubscription = nil
+  }
+
+  private func startMonitoringUploadProgress() {
+    // No longer needed since we're using a simple spinner
+    // Just show the uploading state
+    guard let document else { return }
+    let totalBytes = Int64(document.size ?? 0)
+    Log.shared.debug("Upload started - showing spinner animation")
+
+    DispatchQueue.main.async {
+      self.updateUploadProgress(bytesSent: 0, totalBytes: totalBytes)
+    }
   }
 
   // MARK: - Document State Management
@@ -410,6 +737,75 @@ class DocumentView: UIView {
        tappedMessage.message.messageId == selfMessage.message.messageId
     {
       viewTapped()
+    }
+  }
+
+  @objc func handleDocumentUploadStarted(_ notification: Notification) {
+    let notificationDocumentId = notification.userInfo?["documentId"] as? Int64
+    let currentDocumentId = document?.id
+
+    Log.shared
+      .debug(
+        "📤 Upload notification received - notification ID: \(notificationDocumentId ?? -1), current ID: \(currentDocumentId ?? -1)"
+      )
+
+    guard let documentId = notificationDocumentId,
+          let document,
+          document.id == documentId
+    else {
+      Log.shared.debug("📤 Upload notification ignored - IDs don't match")
+      return
+    }
+
+    Log.shared.debug("📤 Document upload started for document ID: \(documentId)")
+    DispatchQueue.main.async { [weak self] in
+      self?.setUploadingState()
+    }
+  }
+
+  @objc func handleDocumentUploadCompleted(_ notification: Notification) {
+    guard let documentId = notification.userInfo?["documentId"] as? Int64,
+          let document,
+          document.id == documentId
+    else { return }
+
+    Log.shared.debug("Document upload completed for document ID: \(documentId)")
+    DispatchQueue.main.async { [weak self] in
+      self?.completeUpload()
+    }
+  }
+
+  @objc func handleDocumentUploadFailed(_ notification: Notification) {
+    guard let documentId = notification.userInfo?["documentId"] as? Int64,
+          let document,
+          document.id == documentId
+    else { return }
+
+    let error = notification.userInfo?["error"] as? Error
+    Log.shared.error("Document upload failed for document ID: \(documentId)", error: error)
+    DispatchQueue.main.async { [weak self] in
+      self?.failUpload()
+    }
+  }
+
+  @objc func handleMessageStatusChanged(_ notification: Notification) {
+    guard let messageId = notification.userInfo?["messageId"] as? Int64,
+          let fullMessage,
+          fullMessage.message.messageId == messageId
+    else { return }
+
+    let newStatus = notification.userInfo?["status"] as? MessageSendingStatus
+    Log.shared.debug("📤 Message status changed for message \(messageId): \(String(describing: newStatus))")
+
+    // If message is no longer sending and has document, complete upload
+    if newStatus != .sending,
+       fullMessage.message.documentId != nil,
+       case .uploading = documentState
+    {
+      Log.shared.debug("📤 Message no longer sending - completing upload")
+      DispatchQueue.main.async { [weak self] in
+        self?.completeUpload()
+      }
     }
   }
 
@@ -487,14 +883,39 @@ extension DocumentView {
 
 extension DocumentView: QLPreviewControllerDataSource, QLPreviewControllerDelegate {
   func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-    documentURL != nil ? 1 : 0
+    Log.shared.debug("📄 numberOfPreviewItems called - returning: \(documentURL != nil ? 1 : 0)")
+    return documentURL != nil ? 1 : 0
   }
 
   func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-    documentURL! as QLPreviewItem
+    Log.shared.debug("📄 previewItemAt index: \(index) - URL: \(documentURL?.path ?? "nil")")
+    guard let documentURL else {
+      Log.shared.error("📄 No documentURL available for preview item")
+      fatalError("No document URL available")
+    }
+    return documentURL as QLPreviewItem
   }
 
   func previewControllerDidDismiss(_ controller: QLPreviewController) {
+    Log.shared.debug("📄 previewControllerDidDismiss called")
     previewController = nil
+  }
+}
+
+// MARK: - UIDocumentInteractionController Integration
+
+extension DocumentView: UIDocumentInteractionControllerDelegate {
+  func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController)
+    -> UIViewController
+  {
+    findViewController() ?? UIViewController()
+  }
+
+  func documentInteractionControllerDidDismissOptionsMenu(_ controller: UIDocumentInteractionController) {
+    documentInteractionController = nil
+  }
+
+  func documentInteractionControllerDidDismissOpenInMenu(_ controller: UIDocumentInteractionController) {
+    documentInteractionController = nil
   }
 }

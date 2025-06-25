@@ -129,7 +129,9 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
     do {
       let photoInfo = try FileCache.savePhoto(image: image)
-      attachmentItems[image] = .photo(photoInfo)
+      let mediaItem = FileMediaItem.photo(photoInfo)
+      let uniqueId = mediaItem.getItemUniqueId()
+      attachmentItems[uniqueId] = mediaItem
     } catch {
       Log.shared.error("Failed to save photo", error: error)
     }
@@ -191,6 +193,22 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
         break
       }
       responder = nextResponder
+    }
+  }
+
+  func addImage(_ image: UIImage) {
+    do {
+      let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
+      let mediaItem = FileMediaItem.photo(photoInfo)
+      let uniqueId = mediaItem.getItemUniqueId()
+
+      // Update state
+      attachmentItems[uniqueId] = mediaItem
+      updateSendButtonVisibility()
+
+      Log.shared.debug("Added image attachment with uniqueId: \(uniqueId)")
+    } catch {
+      Log.shared.error("Failed to save photo in attachments", error: error)
     }
   }
 }

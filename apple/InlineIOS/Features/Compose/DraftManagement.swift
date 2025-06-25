@@ -1,6 +1,7 @@
 import InlineKit
 import Logger
 import UIKit
+import InlineProtocol
 
 extension ComposeView {
   func startDraftSaveTimer() {
