@@ -41,7 +41,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var selectedImage: UIImage?
   var showingPhotoPreview: Bool = false
   var imageCaption: String = ""
-  var attachmentItems: [UIImage: FileMediaItem] = [:]
+
+  var attachmentItems: [String: FileMediaItem] = [:]
+
+  var canSend: Bool {
+    let hasText = !(textView.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    let hasAttachments = !attachmentItems.isEmpty
+    return hasText || hasAttachments
+  }
+
   var onHeightChange: ((CGFloat) -> Void)?
   var peerId: InlineKit.Peer?
   var chatId: Int64?
@@ -141,6 +149,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     Task.detached(priority: .userInitiated) {
       let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
+      let mediaItem = FileMediaItem.photo(photoInfo)
 
       await Transactions.shared.mutate(
         transaction: .sendMessage(
@@ -148,7 +157,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             text: nil,
             peerId: peerId,
             chatId: self.chatId ?? 0,
-            mediaItems: [.photo(photoInfo)],
+            mediaItems: [mediaItem],
             replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
             isSticker: true
           )
@@ -247,14 +256,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   @objc func sendTapped() {
+    sendMessage()
+  }
+
+  func sendMessage() {
     guard let peerId else { return }
     let state = ChatState.shared.getState(peer: peerId)
     let isEditing = state.editingMessageId != nil
-
-    guard let text = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-          !text.isEmpty
-    else { return }
     guard let chatId else { return }
+
+    let rawText = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let hasText = !rawText.isEmpty
+    let hasAttachments = !attachmentItems.isEmpty
+
+    // Can't send if no text and no attachments
+    guard hasText || hasAttachments else { return }
 
     // Extract mention entities from attributed text
     let attributedText = textView.attributedText ?? NSAttributedString()
@@ -265,32 +281,65 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       MessageEntities.with { $0.entities = mentionEntities }
     }
 
+    // Make text nil if empty and we have attachments
+    let text = if rawText.isEmpty, hasAttachments {
+      nil as String?
+    } else {
+      rawText
+    }
+
     if isEditing {
-      // Handle message edit
       Transactions.shared.mutate(transaction: .editMessage(.init(
         messageId: state.editingMessageId ?? 0,
-        text: text,
+        text: text ?? "",
         chatId: chatId,
-        peerId: peerId
+        peerId: peerId,
+        entities: entities
       )))
 
       ChatState.shared.clearEditingMessageId(peer: peerId)
     } else {
-      // Original send message logic
       let replyToMessageId = state.replyingMessageId
-      Transactions.shared.mutate(transaction: .sendMessage(.init(
-        text: text,
-        peerId: peerId,
-        chatId: chatId,
-        mediaItems: [],
-        replyToMsgId: replyToMessageId,
-        isSticker: nil,
-        entities: entities
-      )))
+
+      if attachmentItems.isEmpty {
+        Transactions.shared.mutate(transaction: .sendMessage(.init(
+          text: text,
+          peerId: peerId,
+          chatId: chatId,
+          mediaItems: [],
+          replyToMsgId: replyToMessageId,
+          isSticker: nil,
+          entities: entities
+        )))
+      } else {
+        for (index, (_, attachment)) in attachmentItems.enumerated() {
+          Log.shared.debug("Sending attachment: \(attachment)")
+          let isFirst = index == 0
+
+          // Verify attachment has valid local path before sending
+          guard attachment.getLocalPath() != nil else {
+            Log.shared.error("Attachment has no local path, skipping: \(attachment)")
+            continue
+          }
+
+          Transactions.shared.mutate(transaction: .sendMessage(.init(
+            text: isFirst ? text : nil,
+            peerId: peerId,
+            chatId: chatId,
+            mediaItems: [attachment],
+            replyToMsgId: isFirst ? replyToMessageId : nil,
+            isSticker: nil,
+            entities: isFirst ? entities : nil
+          )))
+        }
+      }
+
       ChatState.shared.clearReplyingMessageId(peer: peerId)
     }
 
+    // Clear everything
     clearDraft()
+    clearAttachments()
     stopDraftSaveTimer()
     textView.text = ""
     resetHeight()
@@ -388,5 +437,39 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   func removeObservers() {
     NotificationCenter.default.removeObserver(self)
+  }
+
+  // MARK: - Attachment Management
+
+  func removeAttachment(_ id: String) {
+    // TODO: Delete from cache as well
+
+    // Update state
+    attachmentItems.removeValue(forKey: id)
+    updateSendButtonVisibility()
+
+    Log.shared.debug("Removed attachment with id: \(id)")
+  }
+
+  func removeImage(_ id: String) {
+    removeAttachment(id)
+  }
+
+  func removeFile(_ id: String) {
+    removeAttachment(id)
+  }
+
+  func clearAttachments() {
+    attachmentItems.removeAll()
+    updateSendButtonVisibility()
+    Log.shared.debug("Cleared all attachments")
+  }
+
+  func updateSendButtonVisibility() {
+    if canSend {
+      buttonAppear()
+    } else {
+      buttonDisappear()
+    }
   }
 }

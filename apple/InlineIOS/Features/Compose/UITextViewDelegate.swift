@@ -24,7 +24,6 @@ extension ComposeView: UITextViewDelegate {
     if isEmpty {
       clearDraft()
       stopDraftSaveTimer()
-      buttonDisappear()
       if let peerId {
         Task {
           await ComposeActions.shared.stoppedTyping(for: peerId)
@@ -37,7 +36,13 @@ extension ComposeView: UITextViewDelegate {
           await ComposeActions.shared.startedTyping(for: peerId)
         }
       }
+    }
+
+    // Update button visibility based on canSend (text or attachments)
+    if canSend {
       buttonAppear()
+    } else {
+      buttonDisappear()
     }
   }
 
