@@ -10,7 +10,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   let notificationHandler = NotificationHandler()
    let nav = Navigation()
   let router = NavigationModel<AppTab, Destination, Sheet>(initialTab: .chats)
-
+//
   func application(
     _ application: UIApplication,
     willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
