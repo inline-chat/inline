@@ -227,6 +227,7 @@ const formatZenModeRules = async (userId: number, input: Input): Promise<string>
 <rules userId="${userId}">
 ${settings.zenModeCustomRules}
 - An urgent matter has come up.
+- Someone is depending on me to unblock them in an important matter and I need to come back now/wake up.
 </rules>
   `
 
