@@ -134,7 +134,7 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   - Analyse the message, previous messages, participants, and the context of where chat is happening
   - Some of participants have enabled a notification filter with custom rules to limit what they want to get notification for. They use it when sleeping at night or when they're in focus to avoid waking up for unimportant messages. For example is user A receives a message: "hey @userA, watch this cool video" and User A has set a rule to notify them only if there is an incident, then this message should not be notified to user A.
   - Even if the message is a direct mention, but doesn't strictly follow user's criteria of importance, you should not trigger the notification for that user. People mention/DM/reply frequently but not all of them should wake up the user.
-  - For each user, if the message matches the criteria user has set, include their user ID in the notifyUserIds array. 
+  - For each user, if the message matches the criteria they have set, include their user ID in the notifyUserIds array. 
   - For example, user A (ID: 1) says: "notify me when John DMs me, or there is a bug/incident in production". In this case you should check if message is from John, or message is in another chat and matches the criteria (is about an website incident) and if it matches include user ID "1" in the result array. 
   - It's important to be accurate in your evaluation otherwise users may lose important messages which they wanted and lose trust in the system. 
   - If message is only a few @ mentions, there is a high chance these users need to take action and should be notified. consider the previous messages for the context of evaluation.
@@ -177,11 +177,11 @@ const getContext = async (input: Input): Promise<string> => {
   ${participantNames
     .map(
       (name) =>
-        `<participant userId="${name.id}" localTime="${
+        `<user userId="${name.id}" localTime="${
           name.timeZone ? date.toLocaleTimeString("en-US", { timeZone: name.timeZone }) : ""
         }">
       ${name.firstName ?? ""} ${name.lastName ?? ""} (@${name.username})
-      </participant>`,
+      </user>`,
     )
     .join("\n")}
   </participants>
@@ -232,7 +232,7 @@ ${settings.zenModeCustomRules}
 
   return `Include userId "${userId}" ${
     displayName ? `for ${displayName}` : ""
-  } in the result if the message matches the criteria user has set: "${rules}"`
+  } in the result if the message matches any of the criteria they have set: "${rules}"`
 }
 
 const fullDisplayName = (userName: UserName | undefined) => {
