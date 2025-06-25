@@ -16,7 +16,7 @@ import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
 
-const log = new Log("realtime", LogLevel.DEBUG)
+const log = new Log("realtime")
 
 export const handleMessage = async (message: ClientMessage, rootContext: RootContext) => {
   const { ws, connectionId } = rootContext
