@@ -1,14 +1,14 @@
-import type { MessageEntities, NotificationSettings, UserSettings } from "@in/protocol/core"
+import { MessageEntity_Type, type MessageEntities } from "@in/protocol/core"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
 import { UserSettingsNotificationsMode, type UserSettingsGeneral } from "@in/server/db/models/userSettings/types"
 import type { DbMessage } from "@in/server/db/schema"
-import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
+import { isProd, WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
 import { openaiClient } from "@in/server/libs/openAI"
 import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
-import { getCachedUserName } from "@in/server/modules/cache/userNames"
+import { getCachedUserName, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
-import { Log, LogLevel } from "@in/server/utils/log"
+import { Log } from "@in/server/utils/log"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import type { ChatModel } from "openai/resources/chat/chat.mjs"
 import z from "zod"
@@ -31,12 +31,13 @@ type Input = {
   }[]
 }
 
-const log = new Log("notifications.eval", LogLevel.INFO)
+const log = new Log("notifications.eval")
+
+const DEBUG_AI = !isProd
 
 let outputSchema = z.object({
-  msgId: z.number(),
-  mentionedUserIds: z.array(z.number()).nullable(),
   notifyUserIds: z.array(z.number()).nullable(),
+  ...(DEBUG_AI ? { reason: z.string().nullable() } : {}),
 })
 
 type Output = z.infer<typeof outputSchema>
@@ -78,9 +79,7 @@ export const batchEvaluate = async (input: Input): Promise<NotificationEvalResul
   }
 
   try {
-    log.debug(`Notification eval result: ${response.choices[0]?.message.content}`)
-    // log.debug(`Notification eval system prompt: ${systemPrompt}`)
-    // log.debug(`Notification eval user prompt: ${userPrompt}`)
+    log.info(`Notification eval result: ${response.choices[0]?.message.content}`)
     log.debug("AI usage", response.usage)
 
     let inputTokens = response.usage?.prompt_tokens ?? 0
@@ -116,11 +115,8 @@ export const batchEvaluate = async (input: Input): Promise<NotificationEvalResul
 }
 
 const getUserPrompt = async (input: Input): Promise<string> => {
-  let messages = [input.message]
   const userPrompt = `
-  <new_messages>
-  ${messages.map((m) => formatMessage({ ...m.message, text: m.text, entities: m.entities })).join("\n")}
-  </new_messages>
+  ${formatMessage({ ...input.message.message, text: input.message.text, entities: input.message.entities })}
   `
 
   return userPrompt
@@ -130,53 +126,23 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   const context = await getContext(input)
   const systemPrompt = `
   # Identity
-  You are a chat app notification assistant for Inline Chat app – a work chat app similar to Slack. You are given a new message in a chat and you evaluate who is mentioned and who needs to be notified based on a set of rules for each user.
+  You are an assistant for Inline – a chat app similar to Slack. You are given a message and you must evaluate who needs to get a notification on their phones based on a criteria that each user has set. 
 
   # Instructions
-  
-  - Evaluate which participants are mentioned in a message. Mentioning means @username or their first name appearing in the message. 
-  - If message is a reply to the user, or it's a direct message to a user, consider it a mention for that user ID.
-  - For the next step, you are given a set of rules for each user ID to use as a criteria to determine if the user needs to be notified. Users set these rules so they can focus or sleep without being distracted by messages that aren't important to that user.
-  - If the message matches the criteria user has set, include the user ID in the notifyUserIds array. 
-  - Use the chat context, previous messages and meaning of messages to infer if the new message matches what user wants to be notified for more broadly. eg. if user is set to notify when something urgent has came up, and the message is about a bug or an incident, include the user ID in the notifyUserIds array even if the word "urgent" or "bug" is not in the message. The user is describing a situation, not a literal pattern matching.
-  - Return user IDs of both groups.
 
-  # Examples
-<example_context>
-particiapants: Amy (user_id: 1), Hassan (user_id: 2), Ellie (user_id: 3)
-settings for user ids 1,2,3: notify when something urgent has came up (eg. a bug or an incident). 
-</example_context>
- <example id="0">
-hey Ellie!
-</example>
-<assistant_response id="0">
-[{"msgId": 0, "mentionedUserIds": [3], "notifyUserIds": []}]
-</assistant_response>
-<example id="1">
-amy can you see the new message, we need it now.
-</example>
-<assistant_response id="1">
-[{"msgId": 1, "mentionedUserIds": [1], "notifyUserIds": [1]}]
-</assistant_response>
-<example id="4">
-Ellie: website is down. @hasan
-</example>
-<assistant_response id="4">
-[{"msgId": 4, "mentionedUserIds": [2], "notifyUserIds": [2]}]
-</assistant_response>
-<example id="5" chat_type="DM with Hassan">
-Ellie: hey
-</example>
-<assistant_response id="5">
-[{"msgId": 5, "mentionedUserIds": [2], "notifyUserIds": []}]
-</assistant_response>
-</examples>
-
+  - You are given a message that mentions a user or a few users. 
+  - Analyse the message, previous messages, participants, and the context of where chat is happening
+  - Some of participants have enabled a notification filter with custom rules to limit what they want to get notification for. They use it when sleeping at night or when they're in focus to avoid waking up for unimportant messages. For example is user A receives a message: "hey @userA, watch this cool video" and User A has set a rule to notify them only if there is an incident, then this message should not be notified to user A.
+  - Even if the message is a direct mention, but doesn't strictly follow user's criteria of importance, you should not trigger the notification for that user. People mention/DM/reply frequently but not all of them should wake up the user.
+  - For each user, if the message matches the criteria user has set, include their user ID in the notifyUserIds array. 
+  - For example, user A (ID: 1) says: "notify me when John DMs me, or there is a bug/incident in production". In this case you should check if message is from John, or message is in another chat and matches the criteria (is about an website incident) and if it matches include user ID "1" in the result array. 
+  - It's important to be accurate in your evaluation otherwise users may lose important messages which they wanted and lose trust in the system. 
+  - If message is only a few @ mentions, there is a high chance these users need to take action and should be notified. consider the previous messages for the context of evaluation.
+  - If it doesn't concern any of the users, return an empty array.
+  ${DEBUG_AI ? `- Return a reason for your evaluation in the reason field.` : ""}
 
   # Context
-  <context>
   ${context}
-  </context>
   `
 
   return systemPrompt
@@ -193,20 +159,28 @@ const getContext = async (input: Input): Promise<string> => {
   let previousMessages = await MessageModel.getNonFullMessagesFromNewToOld({
     chatId: input.chatId,
     newestMsgId: Math.min(...messages.map((m) => m.id)),
-    limit: 10,
+    limit: 8,
   })
 
-  // get previous messages
+  let date = new Date()
+
+  let rules = await Promise.all(input.participantSettings.map(async (p) => await formatZenModeRules(p.userId, input)))
+  let dmParticipants =
+    chatInfo?.type === "private"
+      ? `DM between ${await Promise.all(
+          chatInfo?.participantUserIds.map(async (userId) => fullDisplayName(await getCachedUserName(userId))) ?? [],
+        )}`
+      : ""
 
   let context = `
   <participants>
   ${participantNames
     .map(
       (name) =>
-        `<participant userId="${name.id}">
-      Name: ${name.firstName ?? ""} ${name.lastName ?? ""} 
-      Username: @${name.username}
-      Notifications: ${formatNotificationSettings(name.id, input)}
+        `<participant userId="${name.id}" localTime="${
+          name.timeZone ? date.toLocaleTimeString("en-US", { timeZone: name.timeZone }) : ""
+        }">
+      ${name.firstName ?? ""} ${name.lastName ?? ""} (@${name.username})
       </participant>`,
     )
     .join("\n")}
@@ -214,107 +188,93 @@ const getContext = async (input: Input): Promise<string> => {
 
   <chat_info>
   ${chatInfo?.title ? `Chat: ${chatInfo?.title}` : ""}
-  Chat type: ${chatInfo?.type === "thread" ? "group chat" : `DM between ${chatInfo?.participantUserIds.join(", ")}`}
+  Type: ${chatInfo?.type === "thread" ? "group chat" : dmParticipants}
   ${spaceInfo ? `Workspace: ${spaceInfo?.name}` : ""}
-  ${spaceInfo ? `Workspace description: ${spaceInfo?.name?.includes("Wanver") ? WANVER_TRANSLATION_CONTEXT : ""}` : ""}
+  ${spaceInfo ? `Description: ${spaceInfo?.name?.includes("Wanver") ? WANVER_TRANSLATION_CONTEXT : ""}` : ""}
   </chat_info>
 
-  <previous_messages>
+  <user_rules>
+  ${rules.join("\n")}
+  </user_rules>
+
+  <messages>
   ${previousMessages.map(formatMessage).join("\n")}
-  </previous_messages>
+  </messages>
   `
 
   return context
 }
 
-const formatNotificationSettings = (userId: number, input: Input): string => {
+const formatZenModeRules = async (userId: number, input: Input): Promise<string> => {
   const settings = input.participantSettings.find((p) => p.userId === userId)?.settings?.notifications
+  const userName = await getCachedUserName(userId)
+  const displayName = userName ? fullDisplayName(userName) : ""
 
-  if (!settings) return "No settings"
+  if (!settings) return ""
 
   const isZenMode = settings.mode === UserSettingsNotificationsMode.ImportantOnly
-  const isMentionMode = settings.mode === UserSettingsNotificationsMode.Mentions
-  const requiresMention = settings.zenModeRequiresMention
+
+  if (!isZenMode) return ""
 
   let rules = settings.zenModeUsesDefaultRules
     ? `
-  <rules>
-${requiresMention ? "Only if mentioned or replied to in a message, AND rules below apply:" : ""}
-- Something urgent has came up (eg. a bug or an incident). 
-- I must wake up for something, I must handle something.
-- Someone is waiting for me to unblock them and is asking me to come back/wake up.
-- A service, app, website, work tool, etc. is down/not working and needs fixing to unblock them.
-- I'm repeatedly mentioned/pinged and need to take action/review something.
-  </rules>`
-    : `<rules>
-${
-  requiresMention ? "Only if mentioned, a direct message to me, or replied to in a message, AND rules below apply:" : ""
-}
+<rules userId="${userId}">
+- An urgent matter has come up (eg. a bug or an incident). 
+- Someone is waiting for me to unblock them and I need to come back now/wake up.
+- A service, app, website, work tool, etc. is not working well or requires fixing.
+</rules>`
+    : `
+<rules userId="${userId}">
 ${settings.zenModeCustomRules}
+- An urgent matter has come up.
 </rules>
   `
 
-  return `
-  Notify ${userId} for: ${isMentionMode ? "Mentions" : isZenMode ? "Messages that match the criteria" : "None"}
-  ${isZenMode ? `User ${userId} wants to be notified when: "${rules}"` : ""}
-  `
+  return `Include userId "${userId}" ${
+    displayName ? `for ${displayName}` : ""
+  } in the result if the message matches the criteria user has set: "${rules}"`
+}
+
+const fullDisplayName = (userName: UserName | undefined) => {
+  if (!userName) return ""
+
+  let displayName = ""
+  if (userName.firstName || userName.lastName) {
+    displayName += `${userName.firstName ?? ""} ${userName.lastName ?? ""}`
+  }
+  if (userName.username) {
+    displayName += ` (@${userName.username})`
+  }
+
+  if (displayName.trim() === "") {
+    return `${userName.email}`
+  }
+
+  return displayName
 }
 
 export const formatMessage = (m: ProcessedMessage): string => {
   return `<message 
 id="${m.messageId}"
 sentAt="${m.date.toISOString()}"
-senderId="${m.fromId}" 
-${m.entities ? `entities="${formatEntities(m.entities)}"` : ""}
-${m.replyToMsgId ? `replyToId="${m.replyToMsgId}"` : ""}>
+senderUserId="${m.fromId}" 
+${m.replyToMsgId ? `replyToMsgId="${m.replyToMsgId}"` : ""}>
 ${m.photoId ? "[photo attachment]" : ""} ${m.videoId ? "[video attachment]" : ""} ${
     m.documentId ? "[document attachment]" : ""
-  } ${m.text ? m.text : "[empty caption]"}</message>`
+  } ${m.text ? m.text : "[empty caption]"}
+  ${m.entities ? formatEntities(m.entities) : ""}
+  </message>`
 }
 
 export const formatEntities = (entities: MessageEntities): string => {
-  return entities.entities
+  let content = entities.entities
     .map(
       (e) =>
-        `type="${e.type}" offset="${e.offset}" length="${e.length}" ${
+        `<entity type="${MessageEntity_Type[e.type]}" offset="${e.offset}" length="${e.length}" ${
           "userId" in e.entity ? `userId="${e.entity.userId}"` : ""
-        }`,
+        } />`,
     )
-    .join(",")
-}
+    .join("\n")
 
-// # Examples
-// <example_context>
-// particiapants: Amy (user_id: 1), Hassan (user_id: 2), Ellie (user_id: 3)
-// </example_context>
-//  <example id="0">
-// hey ellie!
-// </example>
-// <assistant_response id="0">
-// [{"msgId": 0, "mentioned": [3], "mustSee": []}]
-// </assistant_response>
-// <example id="1">
-// amy can you see the new message, we need it now.
-// </example>
-// <assistant_response id="1">
-// [{"msgId": 1, "mentioned": [1], "mustSee": [1]}]
-// </assistant_response>
-// <example id="4">
-// Ellie: website is down. @hasan
-// </example>
-// <assistant_response id="4">
-// [{"msgId": 4, "mentioned": [2], "mustSee": [2]}]
-// </assistant_response>
-// <example id="6">
-// Amy: Are you there? One sec, sending you a code, can you read it? (replying to Ellie)
-// </example>
-// <assistant_response id="6">
-// [{"msgId": 6, "mentioned": [3], "mustSee": [3]}]
-// </assistant_response>
-// <example id="7">
-// Hassan: Amy are you awake? wake up please
-// </example>
-// <assistant_response id="7">
-// [{"msgId": 7, "mentioned": [1], "mustSee": [1]}]
-// </assistant_response>
-// </examples>
+  return `<entities>${content}</entities>`
+}
