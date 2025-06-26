@@ -64,6 +64,12 @@ Sendable {
   }
 }
 
+// MARK: - Preview
+
+public extension Space {
+  static let preview = Space(id: 1, name: "Preview Space", date: Date(), creator: true)
+}
+
 public extension Space {
   init(from apiSpace: ApiSpace) {
     id = apiSpace.id
