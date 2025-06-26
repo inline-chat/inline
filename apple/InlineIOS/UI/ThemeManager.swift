@@ -18,7 +18,8 @@ protocol ThemeConfig {
   var reactionIncomingPrimary: UIColor? { get }
   var reactionIncomingSecoundry: UIColor? { get }
 
-  
+  var documentIconBackground: UIColor? { get }
+
   var id: String { get }
   var name: String { get }
 }
@@ -30,7 +31,7 @@ class ThemeManager: ObservableObject {
     Default(),
     Lavender(),
     PeonyPink(),
-    Orchid()
+    Orchid(),
   ]
 
   private let defaults = UserDefaults.standard
@@ -73,6 +74,6 @@ class ThemeManager: ObservableObject {
   // MARK: - Helper Methods
 
   static func findTheme(withID id: String) -> ThemeConfig? {
-    return themes.first { $0.id == id }
+    themes.first { $0.id == id }
   }
 }

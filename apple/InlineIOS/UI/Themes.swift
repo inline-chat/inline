@@ -33,6 +33,14 @@ struct Default: ThemeConfig {
       UIColor(hex: "#e2e5e5")!
     }
   })
+
+  var documentIconBackground: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#3c3b43")!
+    } else {
+      UIColor(hex: "#e2e5e5")!
+    }
+  })
 }
 
 struct Lavender: ThemeConfig {
@@ -86,6 +94,14 @@ struct Lavender: ThemeConfig {
       UIColor(hex: "#dddfe6")!
     }
   })
+
+  var documentIconBackground: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#41435d")!
+    } else {
+      UIColor(hex: "#dddfe6")!
+    }
+  })
 }
 
 struct PeonyPink: ThemeConfig {
@@ -114,6 +130,14 @@ struct PeonyPink: ThemeConfig {
 
   var reactionIncomingPrimary: UIColor? { accent }
   var reactionIncomingSecoundry: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#3c3b43")!
+    } else {
+      UIColor(hex: "#e2e5e5")!
+    }
+  })
+
+  var documentIconBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
       UIColor(hex: "#3c3b43")!
     } else {
@@ -155,6 +179,14 @@ struct Orchid: ThemeConfig {
 
   var reactionIncomingPrimary: UIColor? { accent }
   var reactionIncomingSecoundry: UIColor? = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#3c3b43")!
+    } else {
+      UIColor(hex: "#e2e5e5")!
+    }
+  })
+
+  var documentIconBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
       UIColor(hex: "#3c3b43")!
     } else {

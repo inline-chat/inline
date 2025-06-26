@@ -53,7 +53,8 @@ class DocumentView: UIView {
   }
 
   var fileIconWrapperColor: UIColor {
-    outgoing ? .white.withAlphaComponent(0.2) : .white.withAlphaComponent(0.08)
+    outgoing ? .white.withAlphaComponent(0.2) : ThemeManager.shared.selected.documentIconBackground ?? .systemGray5
+      .withAlphaComponent(0.2)
   }
 
   var progressBarColor: UIColor {
