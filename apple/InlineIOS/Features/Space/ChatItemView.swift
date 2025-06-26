@@ -210,6 +210,7 @@ struct ChatItemView: View {
       HStack {
         Image(systemName: "photo.fill")
           .font(.callout)
+          .foregroundColor(.secondary)
 
         Text(
           (message?.message.hasText == true ? message?.displayText ?? "" : "Photo")
