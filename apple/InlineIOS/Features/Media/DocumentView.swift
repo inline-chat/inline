@@ -325,11 +325,11 @@ class DocumentView: UIView {
           } else if mimeType.hasPrefix("video/") {
             iconName = "video.fill"
           } else if mimeType.hasPrefix("audio/") {
-            iconName = "music.note.fill"
+            iconName = "music.note"
           } else if mimeType == "application/pdf" {
             iconName = "text.document.fill"
           } else if mimeType == "application/zip" || mimeType == "application/x-rar-compressed" {
-            iconName = "shippingbox.fill"
+            iconName = "archivebox.fill"
           }
 
           iconView.image = UIImage(systemName: iconName)
@@ -341,22 +341,107 @@ class DocumentView: UIView {
           var iconName = "doc.circle.fill"
 
           switch fileExtension {
+            // Documents
             case "pdf":
-              iconName = "document.fill"
-            case "jpg", "jpeg", "png", "gif", "heic":
-              iconName = "photo.fill"
-            case "mp4", "mov", "avi":
-              iconName = "video.fill"
-            case "mp3", "wav", "aac":
-              iconName = "music.note.fill"
-            case "zip", "rar", "7z":
-              iconName = "shippingbox.fill"
+              iconName = "doc.richtext.fill"
             case "doc", "docx":
               iconName = "text.document.fill"
+            case "rtf", "txt":
+              iconName = "text.alignleft"
+            case "pages":
+              iconName = "text.document.fill"
+            // Spreadsheets
             case "xls", "xlsx":
-              iconName = "chart.pie.fill"
+              iconName = "tablecells.fill"
+            case "csv":
+              iconName = "tablecells"
+            case "numbers":
+              iconName = "tablecells.fill"
+            // Presentations
             case "ppt", "pptx":
-              iconName = "videoprojector.fill"
+              iconName = "rectangle.on.rectangle.fill"
+            case "key", "keynote":
+              iconName = "rectangle.on.rectangle.fill"
+            // Images
+            case "jpg", "jpeg", "png", "gif", "heic", "heif":
+              iconName = "photo.fill"
+            case "svg":
+              iconName = "photo.artframe"
+            case "bmp", "tiff", "tif":
+              iconName = "photo.fill"
+            case "webp":
+              iconName = "photo.fill"
+            case "ico":
+              iconName = "app.fill"
+            case "psd":
+              iconName = "photo.stack.fill"
+            case "ai", "eps":
+              iconName = "paintbrush.pointed.fill"
+            // Videos
+            case "mp4", "mov", "avi", "mkv", "webm":
+              iconName = "video.fill"
+            case "m4v", "3gp", "flv", "wmv":
+              iconName = "video.fill"
+            case "mpg", "mpeg", "m2v":
+              iconName = "video.fill"
+            // Audio
+            case "mp3", "wav", "aac", "m4a":
+              iconName = "music.note"
+            case "flac", "ogg", "wma":
+              iconName = "music.note"
+            case "aiff", "au":
+              iconName = "music.note"
+            // Archives
+            case "zip", "rar", "7z", "tar":
+              iconName = "archivebox.fill"
+            case "gz", "bz2", "xz":
+              iconName = "archivebox.fill"
+            case "dmg", "iso":
+              iconName = "opticaldiscdrive.fill"
+            // Code & Development
+            case "swift":
+              iconName = "swift"
+            case "js", "ts", "jsx", "tsx":
+              iconName = "curlybraces"
+            case "html", "htm":
+              iconName = "globe"
+            case "css", "scss", "sass":
+              iconName = "paintbrush.fill"
+            case "json", "xml", "yaml", "yml":
+              iconName = "doc.text.fill"
+            case "py", "java", "cpp", "c", "h":
+              iconName = "terminal.fill"
+            case "php", "rb", "go", "rs":
+              iconName = "terminal.fill"
+            case "sql":
+              iconName = "cylinder.fill"
+            case "sh", "bash", "zsh":
+              iconName = "terminal"
+            // Fonts
+            case "ttf", "otf", "woff", "woff2":
+              iconName = "textformat"
+            // 3D & CAD
+            case "obj", "fbx", "dae", "3ds":
+              iconName = "cube.fill"
+            case "dwg", "dxf":
+              iconName = "ruler.fill"
+            // Ebooks
+            case "epub", "mobi", "azw":
+              iconName = "book.fill"
+            // Executable
+            case "app", "exe", "msi":
+              iconName = "app.badge.fill"
+            case "deb", "rpm":
+              iconName = "shippingbox.fill"
+            // Configuration
+            case "plist", "conf", "cfg", "ini":
+              iconName = "gearshape.fill"
+            // Logs
+            case "log":
+              iconName = "doc.text"
+            // Certificates & Keys
+            case "cer", "crt", "pem", "key":
+              iconName = "lock.fill"
             default:
               iconName = "document.fill"
           }
