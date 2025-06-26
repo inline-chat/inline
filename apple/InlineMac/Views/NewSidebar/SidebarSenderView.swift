@@ -8,12 +8,14 @@ class SidebarSenderView: NSStackView {
 
   // MARK: - UI props
 
-  static let avatarSize: CGFloat = 13
+  static let avatarSize: CGFloat = 12
   static let height: CGFloat = 15
 
   var user: User {
     userInfo.user
   }
+
+  var inlineWithMessage: Bool = false
 
   init(userInfo: UserInfo) {
     self.userInfo = userInfo
@@ -23,8 +25,8 @@ class SidebarSenderView: NSStackView {
 
   private func setup() {
     orientation = .horizontal
-    spacing = 2
-    edgeInsets = NSEdgeInsets(top: 0, left: 1, bottom: 0, right: 0)
+    spacing = 1
+    edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
     alignment = .centerY
     translatesAutoresizingMaskIntoConstraints = false
     clipsToBounds = false
@@ -38,7 +40,7 @@ class SidebarSenderView: NSStackView {
 
     addArrangedSubview(avatarView)
     addArrangedSubview(nameLabel)
-    configure(with: userInfo)
+    configure(with: userInfo, inlineWithMessage: inlineWithMessage)
   }
 
   @available(*, unavailable)
@@ -66,17 +68,21 @@ class SidebarSenderView: NSStackView {
     view.isBordered = false
     view.clipsToBounds = false
     view.backgroundColor = .clear
-    view.font = .systemFont(ofSize: 12)
+    view.font = .systemFont(ofSize: 13, weight: .regular)
+    view.alphaValue = 0.8
     view.textColor = .secondaryLabelColor
     view.lineBreakMode = .byTruncatingTail
     view.maximumNumberOfLines = 1
+    view.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+    view.setContentHuggingPriority(.defaultLow, for: .horizontal)
     return view
   }()
 
   /// The sender view
 
-  func configure(with userInfo: UserInfo) {
+  func configure(with userInfo: UserInfo, inlineWithMessage: Bool) {
     self.userInfo = userInfo
+    self.inlineWithMessage = inlineWithMessage
 
     // Update avatar
     avatarView.removeFromSuperview()
@@ -93,5 +99,9 @@ class SidebarSenderView: NSStackView {
       user.username ??
       user.phoneNumber ??
       user.email ?? ""
+
+    if inlineWithMessage {
+      nameLabel.stringValue += ":"
+    }
   }
 }

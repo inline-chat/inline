@@ -14,8 +14,9 @@ class SidebarItemRow: NSTableCellView {
   // MARK: - UI props
 
   static let avatarSize: CGFloat = 48
-  static let height: CGFloat = 62
-  static let verticalPadding: CGFloat = (SidebarItemRow.height - SidebarItemRow.avatarSize) / 2
+  static let height: CGFloat = 64
+  static let verticalPadding: CGFloat = ((SidebarItemRow.height - SidebarItemRow.avatarSize) / 2)
+  let avatarSpacing: CGFloat = 6
 
   private var hoverColor: NSColor {
     if #available(macOS 14.0, *) {
@@ -68,103 +69,6 @@ class SidebarItemRow: NSTableCellView {
   }
 
   private var cancellables = Set<AnyCancellable>()
-
-  private func setupEventListeners() {
-    events?.sink { [weak self] event in
-      self?.handleEvent(event)
-    }
-    .store(in: &cancellables)
-
-    dependencies.nav.$currentRoute
-      .sink { [weak self] currentRoute in
-        guard let self else { return }
-        isSelected = currentRoute == route
-      }
-      .store(in: &cancellables)
-
-    // Subscribe to translation state changes
-    TranslationState.shared.subject.sink { [weak self] peer, _ in
-      guard let self, let currentPeer = peerId else { return }
-
-      // Only reconfigure if the translation change is for this item's peer
-      if peer == currentPeer, let item {
-        configure(with: item)
-      }
-    }.store(in: &cancellables)
-  }
-
-  private func handleEvent(_ event: SidebarEvents) {
-    switch event {
-      case .didLiveScroll:
-        isParentScrolling = true
-      case .didEndLiveScroll:
-        isParentScrolling = false
-    }
-  }
-
-  private func setupTrackingArea() {
-    updateTrackingArea()
-  }
-
-  private func updateTrackingArea() {
-    // Remove any existing tracking areas
-    trackingAreas.forEach { removeTrackingArea($0) }
-
-    if isParentScrolling {
-      return
-    }
-
-    // Add new tracking area with current bounds
-    let trackingArea = NSTrackingArea(
-      rect: bounds,
-      options: [.mouseEnteredAndExited, .activeAlways],
-      owner: self,
-      userInfo: nil
-    )
-    addTrackingArea(trackingArea)
-  }
-
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    updateTrackingArea()
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    super.mouseEntered(with: event)
-    Log.shared.debug("SidebarItemRow mouse entered")
-    isHovered = true
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    super.mouseExited(with: event)
-    Log.shared.debug("SidebarItemRow mouse exited")
-    isHovered = false
-  }
-
-  private func setupGestureRecognizers() {
-    let tapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleTap))
-    addGestureRecognizer(tapGesture)
-  }
-
-  private func updateAppearance() {
-    let color = isSelected ? selectedColor : isHovered ? hoverColor : .clear
-
-    if preparingForReuse {
-      containerView.layer?.backgroundColor = color.cgColor
-    } else {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = isHovered || isSelected ? 0.08 : 0.15
-        context.allowsImplicitAnimation = true
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        containerView.layer?.backgroundColor = color.cgColor
-      }
-    }
-  }
-
-  @objc private func handleTap() {
-    guard let route else { return }
-    dependencies.nav.open(route)
-  }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) {
@@ -264,14 +168,14 @@ class SidebarItemRow: NSTableCellView {
     let view = NSStackView()
     view.orientation = .vertical
     view.alignment = .leading
-    view.spacing = 1
+    view.spacing = 0
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
-  /// The title label
-  lazy var nameLabel: NSTextField = {
-    let view = NSTextField()
+  /// The message container view wraps sender and message labels
+  lazy var messageContainerView: NSView = {
+    let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -286,45 +190,75 @@ class SidebarItemRow: NSTableCellView {
     view.textContainer?.lineFragmentPadding = 0
     view.textContainerInset = .zero
     view.textContainer?.widthTracksTextView = true
-    // view.textContainer?.containerSize = CGSize(
-    //   width: CGFloat.greatestFiniteMagnitude,
-    //   height: CGFloat.greatestFiniteMagnitude
-    // )
-    // view.maxSize = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
     view.isVerticallyResizable = true
     view.isHorizontallyResizable = false
+    view.font = .systemFont(ofSize: 13, weight: .regular)
+    view.textColor = .secondaryLabelColor
+    view.alphaValue = 0.8
+    return view
+  }()
+
+  /// The space name label
+  /// Only used for threads that are in a space
+  lazy var spaceNameLabel: NSTextView = {
+    let view = NSTextView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isEditable = false
+    view.isSelectable = false
+    view.drawsBackground = false
+    view.textContainer?.lineFragmentPadding = 0
+    view.textContainerInset = .zero
+    view.textContainer?.widthTracksTextView = true
+    view.isVerticallyResizable = true
+    view.isHorizontallyResizable = false
+    view.font = .systemFont(ofSize: 11, weight: .medium)
+    view.textColor = .labelColor
+    view.alphaValue = 0.4
+    view.textContainer?.lineBreakMode = .byTruncatingTail
+    view.textContainer?.maximumNumberOfLines = 1
+    view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    view.heightAnchor.constraint(equalToConstant: 14).isActive = true
+    return view
+  }()
+
+  /// The chat title label
+  lazy var nameLabel: NSTextView = {
+    let view = NSTextView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isEditable = false
+    view.isSelectable = false
+    view.drawsBackground = false
+    view.textContainer?.lineFragmentPadding = 0
+    view.textContainerInset = .zero
+    view.textContainer?.widthTracksTextView = true
+    view.isVerticallyResizable = true
+    view.isHorizontallyResizable = false
+    view.font = .systemFont(ofSize: 13, weight: .regular)
+    view.textContainer?.lineBreakMode = .byTruncatingTail
+    view.textContainer?.maximumNumberOfLines = 1
+    view.heightAnchor.constraint(equalToConstant: 18).isActive = true
     return view
   }()
 
   /// The sender view
   var senderView: SidebarSenderView?
 
+  /// Constraint for message label leading anchor
+  private var messageLabelLeadingConstraint: NSLayoutConstraint?
+
   private func createSenderView() -> SidebarSenderView {
     let view = SidebarSenderView(
       userInfo: item?.lastMessage?.senderInfo ?? .deleted
     )
     view.translatesAutoresizingMaskIntoConstraints = false
+    view.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+    view.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
     return view
   }
 
+  /// Common layout setup happens here
   private func setup() {
-    // Configure text fields
-    nameLabel.isEditable = false
-    nameLabel.isBordered = false
-    nameLabel.clipsToBounds = false
-    nameLabel.backgroundColor = .clear
-    nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
-    nameLabel.lineBreakMode = .byTruncatingTail
-    nameLabel.maximumNumberOfLines = 1
-    nameLabel.cell?.usesSingleLineMode = true
-    nameLabel.cell?.wraps = false
-    nameLabel.cell?.isScrollable = false
-
-    messageLabel.font = .systemFont(ofSize: 13)
-    messageLabel.textColor = .secondaryLabelColor
-    messageLabel.alphaValue = 0.8
-    // Note: line limits will be set in configure()
-
     // Setup layout
     addSubview(containerView)
     containerView.addSubview(stackView)
@@ -332,7 +266,8 @@ class SidebarItemRow: NSTableCellView {
     stackView.addArrangedSubview(avatarView)
     stackView.addArrangedSubview(contentStackView)
     contentStackView.addArrangedSubview(nameLabel)
-    contentStackView.addArrangedSubview(messageLabel)
+    contentStackView.addArrangedSubview(messageContainerView)
+    messageContainerView.addSubview(messageLabel)
 
     // Set minimum height instead of fixed height
     heightAnchor.constraint(greaterThanOrEqualToConstant: Self.height).isActive = true
@@ -348,7 +283,7 @@ class SidebarItemRow: NSTableCellView {
       stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 0),
       stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: 0),
       stackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: Self.verticalPadding),
-      stackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.verticalPadding),
+      stackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: 0), // Don't apply padding
     ])
 
     NSLayoutConstraint.activate([
@@ -357,7 +292,7 @@ class SidebarItemRow: NSTableCellView {
     ])
 
     // Set fixed spacing between stack view items
-    stackView.setCustomSpacing(6, after: avatarView)
+    stackView.setCustomSpacing(avatarSpacing, after: avatarView)
 
     // Configure content hugging and compression resistance
     contentStackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -366,8 +301,22 @@ class SidebarItemRow: NSTableCellView {
     nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
     nameLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
+    messageContainerView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    messageContainerView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
     messageLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-    messageLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+    messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    // Add constraints for messageLabel within messageContainerView
+    NSLayoutConstraint.activate([
+      messageLabel.trailingAnchor.constraint(equalTo: messageContainerView.trailingAnchor),
+      messageLabel.topAnchor.constraint(equalTo: messageContainerView.topAnchor),
+      messageLabel.bottomAnchor.constraint(equalTo: messageContainerView.bottomAnchor),
+    ])
+
+    // Initialize message label leading constraint
+    messageLabelLeadingConstraint = messageLabel.leadingAnchor.constraint(equalTo: messageContainerView.leadingAnchor)
+    messageLabelLeadingConstraint?.isActive = true
   }
 
   func configure(with item: HomeChatItem) {
@@ -397,45 +346,75 @@ class SidebarItemRow: NSTableCellView {
         )
         avatarView.translatesAutoresizingMaskIntoConstraints = false
         stackView.insertArrangedSubview(avatarView, at: 1)
-        stackView.setCustomSpacing(6, after: avatarView)
+        stackView.setCustomSpacing(avatarSpacing, after: avatarView)
       }
+    }
+
+    // Configure space name
+    if isThread {
+      if spaceNameLabel.superview == nil {
+        contentStackView.insertArrangedSubview(spaceNameLabel, at: 0)
+      }
+      spaceNameLabel.string = item.space?.displayName ?? "Unknown space"
+    } else {
+      spaceNameLabel.removeFromSuperview()
     }
 
     // Configure name
     if let user = item.user {
-      nameLabel.stringValue = user.user.firstName ??
+      nameLabel.string = user.user.firstName ??
         user.user.lastName ??
         user.user.username ??
         user.user.phoneNumber ??
         user.user.email ?? ""
     } else if let chat = item.chat {
-      let spaceName = item.space?.displayName
-      if let spaceName {
-        nameLabel.stringValue = "\(spaceName) / \(chat.title ?? "Unknown")"
-      } else {
-        nameLabel.stringValue = chat.title ?? "Unknown"
-      }
+      nameLabel.string = chat.title ?? "Unknown"
     } else {
-      nameLabel.stringValue = "Unknown"
+      nameLabel.string = "Unknown"
     }
 
     // Configure last message
     let maxLines = isThread ? 1 : 2
     messageLabel.textContainer?.maximumNumberOfLines = maxLines
     messageLabel.textContainer?.lineBreakMode = .byTruncatingTail
-    // messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
     if let lastMessage = item.lastMessage {
       messageLabel.string = lastMessage.displayText ?? lastMessage.message.stringRepresentationWithEmoji ?? ""
-      Log.shared.debug("SidebarItemRow message set to: \(messageLabel.string)")
     } else {
       messageLabel.string = ""
-      Log.shared.debug("SidebarItemRow no message")
     }
 
-    // Force the text view to recalculate its layout
-    // messageLabel.invalidateIntrinsicContentSize()
-    // messageLabel.needsLayout = true
+    // Configure sender view
+    if isThread, let senderInfo = item.lastMessage?.senderInfo {
+      if senderView == nil {
+        senderView = createSenderView()
+        messageContainerView.addSubview(senderView!)
+
+        // Add constraints for sender view
+        NSLayoutConstraint.activate([
+          senderView!.leadingAnchor.constraint(equalTo: messageContainerView.leadingAnchor),
+          senderView!.topAnchor.constraint(equalTo: messageContainerView.topAnchor),
+          senderView!.bottomAnchor.constraint(equalTo: messageContainerView.bottomAnchor),
+        ])
+
+        // Update message label constraints to account for sender view
+        messageLabelLeadingConstraint?.isActive = false
+        messageLabelLeadingConstraint = messageLabel.leadingAnchor.constraint(
+          equalTo: senderView!.trailingAnchor,
+          constant: 0
+        )
+        messageLabelLeadingConstraint?.isActive = true
+      }
+      senderView?.configure(with: senderInfo, inlineWithMessage: isThread)
+    } else {
+      senderView?.removeFromSuperview()
+      senderView = nil
+
+      // Reset message label constraints when sender view is removed
+      messageLabelLeadingConstraint?.isActive = false
+      messageLabelLeadingConstraint = messageLabel.leadingAnchor.constraint(equalTo: messageContainerView.leadingAnchor)
+      messageLabelLeadingConstraint?.isActive = true
+    }
 
     // Gutter badges ---
     // Unread badge
@@ -463,19 +442,6 @@ class SidebarItemRow: NSTableCellView {
         pinnedBadge?.removeFromSuperview()
         pinnedBadge = nil
       }
-    }
-
-    // Update sender view
-    if isThread, let senderInfo = item.lastMessage?.senderInfo {
-      if senderView == nil {
-        senderView = createSenderView()
-        contentStackView.insertArrangedSubview(senderView!, at: 1)
-      } else {
-        senderView?.configure(with: senderInfo)
-      }
-    } else {
-      senderView?.removeFromSuperview()
-      senderView = nil
     }
 
     // Update selection state
@@ -619,6 +585,10 @@ class SidebarItemRow: NSTableCellView {
 
   // MARK: - Computed
 
+  private var showsSpaceName: Bool {
+    isThread
+  }
+
   private var isThread: Bool {
     guard let item else { return false }
     return item.dialog.peerThreadId != nil
@@ -670,4 +640,158 @@ class SidebarItemRow: NSTableCellView {
   private var currentRoute: NavEntry.Route {
     dependencies.nav.currentRoute
   }
+}
+
+// MARK: - Hover and interactions
+
+extension SidebarItemRow {
+  private func setupEventListeners() {
+    events?.sink { [weak self] event in
+      self?.handleEvent(event)
+    }
+    .store(in: &cancellables)
+
+    dependencies.nav.$currentRoute
+      .sink { [weak self] currentRoute in
+        guard let self else { return }
+        isSelected = currentRoute == route
+      }
+      .store(in: &cancellables)
+
+    // Subscribe to translation state changes
+    TranslationState.shared.subject.sink { [weak self] peer, _ in
+      guard let self, let currentPeer = peerId else { return }
+
+      // Only reconfigure if the translation change is for this item's peer
+      if peer == currentPeer, let item {
+        configure(with: item)
+      }
+    }.store(in: &cancellables)
+  }
+
+  private func handleEvent(_ event: SidebarEvents) {
+    switch event {
+      case .didLiveScroll:
+        isParentScrolling = true
+      case .didEndLiveScroll:
+        isParentScrolling = false
+    }
+  }
+
+  private func setupTrackingArea() {
+    updateTrackingArea()
+  }
+
+  private func updateTrackingArea() {
+    // Remove any existing tracking areas
+    trackingAreas.forEach { removeTrackingArea($0) }
+
+    if isParentScrolling {
+      return
+    }
+
+    // Add new tracking area with current bounds
+    let trackingArea = NSTrackingArea(
+      rect: bounds,
+      options: [.mouseEnteredAndExited, .activeAlways],
+      owner: self,
+      userInfo: nil
+    )
+    addTrackingArea(trackingArea)
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    updateTrackingArea()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    Log.shared.debug("SidebarItemRow mouse entered")
+    isHovered = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    Log.shared.debug("SidebarItemRow mouse exited")
+    isHovered = false
+  }
+
+  private func setupGestureRecognizers() {
+    let tapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleTap))
+    addGestureRecognizer(tapGesture)
+  }
+
+  private func updateAppearance() {
+    let color = isSelected ? selectedColor : isHovered ? hoverColor : .clear
+
+    if preparingForReuse {
+      containerView.layer?.backgroundColor = color.cgColor
+    } else {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = isHovered || isSelected ? 0.08 : 0.15
+        context.allowsImplicitAnimation = true
+        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        containerView.layer?.backgroundColor = color.cgColor
+      }
+    }
+  }
+
+  @objc private func handleTap() {
+    guard let route else { return }
+    dependencies.nav.open(route)
+  }
+}
+
+// MARK: - Preview
+
+#Preview("SidebarItemRow") {
+  let dependencies = AppDependencies()
+  let events = PassthroughSubject<NewSidebar.SidebarEvents, Never>()
+
+  let row = SidebarItemRow(dependencies: dependencies, events: events)
+  let chat = Chat(
+    id: Int64.random(in: 1 ... 50_000),
+    date: Date(),
+    type: .thread,
+    title: "Thread Chat",
+    spaceId: nil,
+    peerUserId: nil,
+    lastMsgId: 1,
+    emoji: nil
+  )
+
+  let sampleMessageInfo = EmbeddedMessage(
+    message: Message(
+      messageId: 1,
+      fromId: 1,
+      date: Date(),
+      text: "This is a preview message.",
+      peerUserId: 0,
+      peerThreadId: chat.id,
+      chatId: chat.id
+    ),
+    senderInfo: UserInfo.preview,
+    translations: []
+  )
+
+  let sampleDialog = Dialog.previewThread
+
+  let sampleItem = HomeChatItem(
+    dialog: sampleDialog,
+    user: nil,
+    chat: Chat.preview,
+    lastMessage: sampleMessageInfo,
+    space: Space.preview
+  )
+
+  row.configure(with: sampleItem)
+
+  NSLayoutConstraint.activate([
+    row.widthAnchor.constraint(equalToConstant: 300),
+    row.heightAnchor.constraint(equalToConstant: SidebarItemRow.height),
+  ])
+
+  row.frame = NSRect(x: 0, y: 0, width: 300, height: SidebarItemRow.height)
+  return row
 }
