@@ -14,10 +14,10 @@ Use the following guidelines, examples and context data provided to fulfill the 
 ## Serious role
 - It is important to not create invalid properties by using "undefined" or empty strings "" in the properties object where it may be invalid in Notion's create page/database entry API.
 ## Title 
-- The title should be in the language of the user who triggered the will do. For example, if the user is English, it's not important how many languages are in the conversation; use English.
+- If there are multiple languages in the conversation, generate the title in all languages and put all of them in the title like this: "<English title> | <Chinese title> | <Japanese title>". Put the language of the user who triggered the task in the beginning. If there is only one language, just use the language of the user who triggered the task. 
 - Should feel human-written, not AI-generated.
 <good-example>
-- Research new javascript framework
+- Research new javascript framework | 研究新的javascript框架 |  新しいjavascriptフレームワークの研究
 - Write email to client
 - Write a social media post about the upcoming AI conference
 </good-example>
