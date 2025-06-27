@@ -7,7 +7,7 @@ struct ComposeSendButtonSwiftUI: View {
 
   private let size: CGFloat = Theme.composeButtonSize
   private let backgroundColor: Color = .accent
-  private let hoveredBackgroundColor: Color = .accentColor.opacity(0.8)
+  private let hoveredBackgroundColor: Color = .accent.opacity(0.8)
 
   var body: some View {
     Group {
