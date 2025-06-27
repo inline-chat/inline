@@ -92,7 +92,7 @@ class NewSidebar: NSViewController {
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.contentView.wantsLayer = true
     scrollView.postsBoundsChangedNotifications = true
-    
+
     scrollView.hasVerticalScroller = true
     scrollView.scrollerStyle = .overlay
     scrollView.verticalScroller?.controlSize = .mini
@@ -213,6 +213,19 @@ class NewSidebar: NSViewController {
     updateDataSource(with: items, animated: false)
   }
 
+  /// Check which messages need to be translated
+  private func processForTranslation(items: [HomeChatItem]) {
+    let currentRoute = dependencies.nav.currentRoute
+    Task.detached {
+      for item in items {
+        // if active route, don't translate, it's already translating
+        guard currentRoute != .chat(peer: item.peerId) else { continue }
+        guard let lastMessage = item.lastMessage else { continue }
+        TranslationViewModel.translateMessages(for: item.peerId, messages: [FullMessage(from: lastMessage)])
+      }
+    }
+  }
+
   private func updateDataSource(with items: [HomeChatItem], animated: Bool = true) {
     var snapshot = NSDiffableDataSourceSnapshot<Section, HomeChatItem.ID>()
     snapshot.appendSections([.main])
@@ -224,6 +237,8 @@ class NewSidebar: NSViewController {
       }
       return false
     }
+
+    processForTranslation(items: itemsToReload)
 
     // Add all items to the new snapshot
     snapshot.appendItems(items.map(\.id), toSection: .main)

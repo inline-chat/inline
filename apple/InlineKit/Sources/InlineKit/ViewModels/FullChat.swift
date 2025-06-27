@@ -128,6 +128,15 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
 //      }
 //    }
   }
+
+  public init(from embeddedMessage: EmbeddedMessage) {
+    message = embeddedMessage.message
+    senderInfo = embeddedMessage.senderInfo
+    translations = embeddedMessage.translations
+    reactions = []
+    repliedToMessage = nil
+    attachments = []
+  }
 }
 
 public extension FullMessage {
