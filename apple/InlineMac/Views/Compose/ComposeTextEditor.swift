@@ -65,7 +65,7 @@ class ComposeTextEditor: NSView {
   }()
 
   private lazy var placeholder: NonInteractiveTextField = {
-    let label = NonInteractiveTextField(labelWithString: "Message")
+    let label = NonInteractiveTextField(label: "Message")
     label.translatesAutoresizingMaskIntoConstraints = false
     label.font = Theme.messageTextFont
     label.lineBreakMode = .byTruncatingTail
