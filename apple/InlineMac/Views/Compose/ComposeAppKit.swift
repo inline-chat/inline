@@ -831,24 +831,27 @@ class ComposeAppKit: NSView {
       handler: { [weak self] event in
         guard let self else { return }
 
+        // Only allow valid printable characters, not control/navigation keys
+        guard let characters = event.characters,
+              characters != " ", // Ignore space as it prevents our image preview from working
+              !characters.isEmpty,
+              characters.allSatisfy({ char in
+                // Check if character is printable (not a control character)
+                if let scalar = char.unicodeScalars.first {
+                  return scalar.properties.isAlphabetic || scalar.properties.isMath
+                }
+                return false
+              })
+        else { return }
+
+        // Put cursor in the text field
         focus()
 
-        // Only insert valid printable characters, not control/navigation keys
-        if let characters = event.characters,
-           !characters.isEmpty,
-           characters.allSatisfy({ char in
-             // Check if character is printable (not a control character)
-             if let scalar = char.unicodeScalars.first {
-               return scalar.properties.isAlphabetic || scalar.properties.isMath
-             }
-             return false
-           })
-        {
-          textEditor.textView.insertText(
-            characters,
-            replacementRange: NSRange(location: NSNotFound, length: 0)
-          )
-        }
+        // Insert text
+        textEditor.textView.insertText(
+          characters,
+          replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
       }
     )
 
