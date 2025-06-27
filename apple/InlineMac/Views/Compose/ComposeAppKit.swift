@@ -565,9 +565,11 @@ class ComposeAppKit: NSView {
             entities: message.message.entities
           )
 
+          // TODO: Extract these to a function
           // set manually without updating height
           textEditor.replaceAttributedString(attributedString)
           textEditor.showPlaceholder(text.isEmpty)
+          sendButton.updateCanSend(canSend)
           // calculate text height to prepare for height change
           updateContentHeight(for: textEditor.textView)
         }
@@ -818,6 +820,7 @@ class ComposeAppKit: NSView {
     }
     // reevaluate placeholder
     textEditor.showPlaceholder(text.isEmpty)
+    sendButton.updateCanSend(canSend)
   }
 
   private var keyMonitorUnsubscribe: (() -> Void)?
