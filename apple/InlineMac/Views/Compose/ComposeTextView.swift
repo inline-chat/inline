@@ -32,8 +32,11 @@ class ComposeNSTextView: NSTextView {
             return
           }
         }
-      } else if !event.modifierFlags.contains(.shift) {
+      } else if !event.modifierFlags.contains(.shift), !event.modifierFlags.contains(.control),
+                !event.modifierFlags.contains(.option)
+      {
         if let delegate = delegate as? ComposeTextViewDelegate {
+          // TODO: Improve this logic to only call return if actually return handler handles it
           if delegate.textViewDidPressReturn(self) {
             return
           }
