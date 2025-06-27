@@ -35,8 +35,12 @@ class ComposeAppKit: NSView {
     textEditor.isAttributedTextEmpty
   }
 
+  private var isEmptyTrimmed: Bool {
+    textEditor.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
   private var canSend: Bool {
-    !isEmpty || attachmentItems.count > 0
+    !isEmptyTrimmed || attachmentItems.count > 0
   }
 
   // [uniqueId: FileMediaItem]
@@ -714,7 +718,6 @@ class ComposeAppKit: NSView {
     DispatchQueue.main.async(qos: .userInteractive) {
       self.ignoreNextHeightChange = true
       let attributedString = self.textEditor.attributedString
-      let rawText = self.textEditor.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
       let replyToMsgId = self.state.replyingToMsgId
       let attachmentItems = self.attachmentItems
       // keep a copy of editingMessageId before we clear it
@@ -722,7 +725,7 @@ class ComposeAppKit: NSView {
 
       // Extract mention entities from attributed text
       // TODO: replace with `fromAttributedString`
-      let (_, entities) = ProcessEntities.fromAttributedString(attributedString)
+      let (rawText, entities) = ProcessEntities.fromAttributedString(attributedString)
 
       // make it nil if empty
       let text = if rawText.isEmpty, !attachmentItems.isEmpty {
@@ -971,7 +974,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textView(_ textView: NSTextView, didReceiveVideo url: URL) {
-    // TODO:
+    // TODO: Handle video
     handleFileDrop([url])
   }
 

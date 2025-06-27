@@ -423,7 +423,7 @@ extension ComposeTextEditor {
 
   /// Check if the attributed text in this editor is empty
   var isAttributedTextEmpty: Bool {
-    attributedString.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    attributedString.string.isEmpty
   }
 
   /// Get plain text from this editor's attributed string
