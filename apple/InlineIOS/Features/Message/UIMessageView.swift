@@ -680,15 +680,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -755,18 +755,34 @@ class UIMessageView: UIView {
   func detectAndStyleMentions(in text: String, attributedString: NSMutableAttributedString) {
     if let entities = fullMessage.message.entities {
       for entity in entities.entities {
-        if entity.type == .mention, case let .mention(mention) = entity.entity {
-          let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
+        let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
 
-          // Validate range is within bounds
-          if range.location >= 0, range.location + range.length <= text.utf16.count {
-            let mentionColor = MessageMentionRenderer.mentionColor(for: outgoing)
-            print("DEBUG: Applying mention color \(mentionColor) for outgoing: \(outgoing)")
-            attributedString.addAttributes([
-              .foregroundColor: mentionColor,
-              .init("mention_user_id"): mention.userID,
-            ], range: range)
-          }
+        // Validate range is within bounds
+        guard range.location >= 0, range.location + range.length <= text.utf16.count else {
+          continue
+        }
+
+        switch entity.type {
+          case .mention:
+            if case let .mention(mention) = entity.entity {
+              let mentionColor = MessageMentionRenderer.mentionColor(for: outgoing)
+              print("DEBUG: Applying mention color \(mentionColor) for outgoing: \(outgoing)")
+              attributedString.addAttributes([
+                .foregroundColor: mentionColor,
+                .init("mention_user_id"): mention.userID,
+              ], range: range)
+            }
+
+          case .bold:
+            // Apply bold formatting
+            let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
+            if let existingFont = existingAttributes[.font] as? UIFont {
+              let boldFont = UIFont.boldSystemFont(ofSize: existingFont.pointSize)
+              attributedString.addAttribute(.font, value: boldFont, range: range)
+            }
+
+          default:
+            break
         }
       }
     }

@@ -45,19 +45,19 @@ public class ProcessEntities {
   }
 
   ///
-  /// Converts text and an array of entities to
+  /// Converts text and an array of entities to attributed string
   ///
   public static func toAttributedString(
     text: String,
     entities: MessageEntities?,
-    configuration: Configuration,
+    configuration: Configuration
   ) -> NSMutableAttributedString {
     let attributedString = NSMutableAttributedString(
       string: text,
       attributes: [
         .font: configuration.font,
         .foregroundColor: configuration.textColor,
-      ],
+      ]
     )
 
     guard let entities else {
@@ -65,30 +65,44 @@ public class ProcessEntities {
     }
 
     for entity in entities.entities {
-      if entity.type == .mention, case let .mention(mention) = entity.entity {
-        let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
+      let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
 
-        // Validate range is within bounds
-        if range.location >= 0, range.location + range.length <= text.utf16.count {
-          if configuration.convertMentionsToLink {
-            var attributes: [NSAttributedString.Key: Any] = [
-              .mentionUserId: mention.userID,
-              .foregroundColor: configuration.linkColor,
-              .link: "inline://user/\(mention.userID)", // Custom URL scheme for mentions
-            ]
+      // Validate range is within bounds
+      guard range.location >= 0, range.location + range.length <= text.utf16.count else {
+        continue
+      }
 
-            #if os(macOS)
-            attributes[.cursor] = NSCursor.pointingHand
-            #endif
+      switch entity.type {
+        case .mention:
+          if case let .mention(mention) = entity.entity {
+            if configuration.convertMentionsToLink {
+              var attributes: [NSAttributedString.Key: Any] = [
+                .mentionUserId: mention.userID,
+                .foregroundColor: configuration.linkColor,
+                .link: "inline://user/\(mention.userID)", // Custom URL scheme for mentions
+              ]
 
-            attributedString.addAttributes(attributes, range: range)
-          } else {
-            attributedString.addAttributes([
-              .mentionUserId: mention.userID,
-              .foregroundColor: configuration.linkColor,
-            ], range: range)
+              #if os(macOS)
+              attributes[.cursor] = NSCursor.pointingHand
+              #endif
+
+              attributedString.addAttributes(attributes, range: range)
+            } else {
+              attributedString.addAttributes([
+                .mentionUserId: mention.userID,
+                .foregroundColor: configuration.linkColor,
+              ], range: range)
+            }
           }
-        }
+
+        case .bold:
+          // Apply bold formatting
+          let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
+          let boldFont = createBoldFont(from: existingAttributes[.font] as? PlatformFont ?? configuration.font)
+          attributedString.addAttribute(.font, value: boldFont, range: range)
+
+        default:
+          break
       }
     }
 
@@ -104,7 +118,7 @@ public class ProcessEntities {
     var entities: [MessageEntity] = []
     let text = attributedString.string
 
-    // Extract mention nodes from text
+    // Extract mention entities
     attributedString.enumerateAttribute(
       .mentionUserId,
       in: NSRange(location: 0, length: text.count),
@@ -122,10 +136,45 @@ public class ProcessEntities {
       }
     }
 
+    // Extract bold entities
+    attributedString
+      .enumerateAttribute(.font, in: NSRange(location: 0, length: text.count), options: []) { value, range, _ in
+        #if os(macOS)
+        if let font = value as? NSFont, font.fontDescriptor.symbolicTraits.contains(.bold) {
+          var entity = MessageEntity()
+          entity.type = .bold
+          entity.offset = Int64(range.location)
+          entity.length = Int64(range.length)
+          entities.append(entity)
+        }
+        #elseif os(iOS)
+        if let font = value as? UIFont, font.fontDescriptor.symbolicTraits.contains(.traitBold) {
+          var entity = MessageEntity()
+          entity.type = .bold
+          entity.offset = Int64(range.location)
+          entity.length = Int64(range.length)
+          entities.append(entity)
+        }
+        #endif
+      }
+
+    // Sort entities by offset
+    entities.sort { $0.offset < $1.offset }
+
     var messageEntities = MessageEntities()
     messageEntities.entities = entities
 
     return (text: text, entities: messageEntities)
+  }
+
+  // MARK: - Helper Methods
+
+  private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
+    #if os(macOS)
+    return NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+    #elseif os(iOS)
+    return UIFont.boldSystemFont(ofSize: font.pointSize)
+    #endif
   }
 }
 
