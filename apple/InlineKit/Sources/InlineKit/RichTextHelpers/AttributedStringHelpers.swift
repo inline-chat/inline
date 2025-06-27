@@ -6,7 +6,7 @@ import UIKit
 
 import InlineProtocol
 
-/// Helper class for mention-specific attributed string operations
+/// Helper class for rich text attributed string operations (mentions, bold, etc.)
 public class AttributedStringHelpers {
   // MARK: - Mention Attributes
 
@@ -77,6 +77,53 @@ public class AttributedStringHelpers {
     }
 
     return entities
+  }
+
+  // MARK: - Bold Text Processing
+
+  /// Process **bold** text patterns in attributed string
+  public static func processBoldText(in attributedString: NSAttributedString) -> NSAttributedString {
+    let boldDetector = BoldTextDetector()
+    return boldDetector.processBoldText(in: attributedString)
+  }
+
+  /// Extract bold entities from attributed text
+  public static func extractBoldEntities(from attributedString: NSAttributedString) -> [MessageEntity] {
+    let boldDetector = BoldTextDetector()
+    return boldDetector.extractBoldEntities(from: attributedString)
+  }
+
+  /// Apply bold entities to attributed text
+  public static func applyBoldEntities(
+    _ entities: [MessageEntity],
+    to attributedText: NSAttributedString
+  ) -> NSAttributedString {
+    let boldDetector = BoldTextDetector()
+    return boldDetector.applyBoldEntities(entities, to: attributedText)
+  }
+
+  // MARK: - Combined Entity Processing
+
+  /// Extract all entities (mentions, bold, etc.) from attributed text
+  public static func extractAllEntities(from attributedString: NSAttributedString) -> [MessageEntity] {
+    var allEntities: [MessageEntity] = []
+
+    // Extract mentions
+    allEntities.append(contentsOf: extractMentionEntities(from: attributedString))
+
+    // Extract bold text
+    allEntities.append(contentsOf: extractBoldEntities(from: attributedString))
+
+    // Sort by offset to maintain correct order
+    allEntities.sort { $0.offset < $1.offset }
+
+    return allEntities
+  }
+
+  /// Process all rich text patterns (bold, etc.) in attributed string
+  public static func processRichText(in attributedString: NSAttributedString) -> NSAttributedString {
+    // Process bold text patterns first
+    processBoldText(in: attributedString)
   }
 }
 

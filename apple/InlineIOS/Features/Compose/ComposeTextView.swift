@@ -494,6 +494,65 @@ class ComposeTextView: UITextView {
 
     return hasValidSticker
   }
+
+  /// Override typing attributes setter to prevent unwanted bold inheritance
+  override var typingAttributes: [NSAttributedString.Key: Any] {
+    get {
+      super.typingAttributes
+    }
+    set {
+      Log.shared.debug("🎯 TYPING ATTRS SET: \(newValue)")
+
+      // Check if we're trying to set bold attributes when we shouldn't
+      if let font = newValue[.font] as? UIFont,
+         font.fontDescriptor.symbolicTraits.contains(.traitBold)
+      {
+        Log.shared.debug("🎯 BOLD FONT DETECTED in typing attributes")
+
+        // Only allow bold if we're actually in the MIDDLE of a bold region, not at the end
+        let selectedRange = selectedRange
+        var shouldAllowBold = false
+
+        if selectedRange.length == 0, selectedRange.location > 0 {
+          let checkPosition = selectedRange.location - 1
+          if checkPosition < attributedText.length {
+            let attributes = attributedText.attributes(at: checkPosition, effectiveRange: nil)
+            let isPreviousCharBold = (attributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits
+              .contains(.traitBold) == true
+            Log.shared.debug("🎯 Previous char is bold: \(isPreviousCharBold)")
+
+            // CRITICAL FIX: Only allow bold if we're WITHIN a bold region
+            // Check if the NEXT character is also bold (meaning we're in the middle)
+            // If cursor is at the end of bold text, we should NOT inherit bold
+            if isPreviousCharBold, selectedRange.location < attributedText.length {
+              let nextAttributes = attributedText.attributes(at: selectedRange.location, effectiveRange: nil)
+              let isNextCharBold = (nextAttributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits
+                .contains(.traitBold) == true
+              shouldAllowBold = isNextCharBold
+              Log.shared.debug("🎯 Next char is bold: \(isNextCharBold), shouldAllowBold: \(shouldAllowBold)")
+            } else {
+              shouldAllowBold = false
+              Log.shared.debug("🎯 Previous char not bold or at end, shouldAllowBold: false")
+            }
+          }
+        }
+
+        if !shouldAllowBold {
+          Log.shared.debug("🛡️ BLOCKING bold typing attributes! Setting default instead.")
+          let defaultAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 17),
+            .foregroundColor: UIColor.label,
+          ]
+          super.typingAttributes = defaultAttributes
+          return
+        } else {
+          Log.shared.debug("🛡️ ALLOWING bold typing attributes (in middle of bold region)")
+        }
+      }
+
+      super.typingAttributes = newValue
+    }
+  }
 }
 
 extension ComposeTextView: UITextViewDelegate {
@@ -697,6 +756,21 @@ extension UITextView {
     return attributes[.mentionUserId] != nil
   }
 
+  /// Check if cursor is positioned after bold text
+  var isCursorAfterBoldText: Bool {
+    let selectedRange = selectedRange
+    guard selectedRange.length == 0, selectedRange.location > 0 else { return false }
+
+    let checkPosition = selectedRange.location - 1
+    guard checkPosition < attributedText.length else { return false }
+
+    let attributes = attributedText.attributes(at: checkPosition, effectiveRange: nil)
+    if let font = attributes[.font] as? UIFont {
+      return font.fontDescriptor.symbolicTraits.contains(.traitBold)
+    }
+    return false
+  }
+
   /// Check if current typing attributes have mention styling
   var hasTypingAttributesMentionStyling: Bool {
     let currentTypingAttributes = typingAttributes
@@ -704,17 +778,42 @@ extension UITextView {
       (currentTypingAttributes[.foregroundColor] as? UIColor) == UIColor.systemBlue
   }
 
-  /// Reset typing attributes to default to prevent mention style leakage
+  /// Check if current typing attributes have bold styling
+  var hasTypingAttributesBoldStyling: Bool {
+    let currentTypingAttributes = typingAttributes
+    if let font = currentTypingAttributes[.font] as? UIFont {
+      return font.fontDescriptor.symbolicTraits.contains(.traitBold)
+    }
+    return false
+  }
+
+  /// Reset typing attributes to default to prevent style leakage
   func resetTypingAttributesToDefault() {
-    typingAttributes = defaultTypingAttributes
+    let defaultAttributes: [NSAttributedString.Key: Any] = [
+      .font: font ?? UIFont.systemFont(ofSize: 17),
+      .foregroundColor: UIColor.label,
+    ]
+
+    // Set typing attributes
+    typingAttributes = defaultAttributes
+
+    // If there's selected text, ensure it also gets the default attributes
+    let selectedRange = selectedRange
+    if selectedRange.length == 0, selectedRange.location > 0 {
+      // For cursor position, we just set typing attributes
+      typingAttributes = defaultAttributes
+    }
   }
 
   /// Update typing attributes based on cursor position to prevent style leakage
   func updateTypingAttributesIfNeeded() {
     let selectedRange = selectedRange
 
-    // If cursor is after a mention or typing attributes have mention styling, reset to default
-    if selectedRange.length == 0, isCursorAfterMention || hasTypingAttributesMentionStyling {
+    // If cursor is after a mention/bold text or typing attributes have special styling, reset to default
+    if selectedRange.length == 0,
+       isCursorAfterMention || isCursorAfterBoldText || hasTypingAttributesMentionStyling ||
+       hasTypingAttributesBoldStyling
+    {
       resetTypingAttributesToDefault()
     }
   }

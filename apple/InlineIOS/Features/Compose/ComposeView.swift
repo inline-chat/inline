@@ -170,6 +170,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     clearDraft()
     textView.text = ""
+
+    // Reset typing attributes to prevent bold state from persisting
+    textView.resetTypingAttributesToDefault()
+
     resetHeight()
     textView.showPlaceholder(true)
     buttonDisappear()
@@ -272,13 +276,24 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     // Can't send if no text and no attachments
     guard hasText || hasAttachments else { return }
 
-    // Extract mention entities from attributed text
+    // Extract all entities (mentions, bold, etc.) from attributed text
     let attributedText = textView.attributedText ?? NSAttributedString()
+    var allEntities: [MessageEntity] = []
+
+    // Extract mentions
     let mentionEntities = mentionManager?.extractMentionEntities(from: attributedText) ?? []
-    let entities = if mentionEntities.isEmpty {
+    allEntities.append(contentsOf: mentionEntities)
+
+    // Extract bold entities
+    allEntities.append(contentsOf: AttributedStringHelpers.extractBoldEntities(from: attributedText))
+
+    // Sort by offset
+    allEntities.sort { $0.offset < $1.offset }
+
+    let entities = if allEntities.isEmpty {
       nil as MessageEntities?
     } else {
-      MessageEntities.with { $0.entities = mentionEntities }
+      MessageEntities.with { $0.entities = allEntities }
     }
 
     // Make text nil if empty and we have attachments
@@ -342,6 +357,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     clearAttachments()
     stopDraftSaveTimer()
     textView.text = ""
+
+    // Reset typing attributes to prevent bold state from persisting
+    textView.resetTypingAttributesToDefault()
+
     resetHeight()
     textView.showPlaceholder(true)
     buttonDisappear()
