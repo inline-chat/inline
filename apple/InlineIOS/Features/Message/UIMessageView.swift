@@ -6,6 +6,7 @@ import Logger
 import Nuke
 import NukeUI
 import SwiftUI
+import TextProcessing
 import UIKit
 
 class UIMessageView: UIView {
@@ -29,7 +30,6 @@ class UIMessageView: UIView {
   var linkTapHandler: ((URL) -> Void)?
   var interaction: UIContextMenuInteraction?
 
-  static let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
   var links: [(range: NSRange, url: URL)] = []
 
   static let attributedCache: NSCache<NSString, NSAttributedString> = {
@@ -680,15 +680,15 @@ class UIMessageView: UIView {
       message.hasPhoto,
       message.hasText
     ) {
-    case (true, false):
-      // File only
-      withFileConstraints
-    case (true, true):
-      // File with text
-      withFileAndTextConstraints
-    default:
-      // Text only
-      withoutFileConstraints
+      case (true, false):
+        // File only
+        withFileConstraints
+      case (true, true):
+        // File with text
+        withFileAndTextConstraints
+      default:
+        // Text only
+        withoutFileConstraints
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
@@ -733,23 +733,14 @@ class UIMessageView: UIView {
   }
 
   func detectAndStyleLinks(in text: String, attributedString: NSMutableAttributedString) {
-    guard let detector = Self.linkDetector else { return }
+    // Use centralized LinkDetector for consistent link detection
+    let linkMatches = LinkDetector.shared.applyLinkStyling(
+      to: attributedString,
+      linkColor: MessageMentionRenderer.linkColor(for: outgoing)
+    )
 
-    let nsString = text as NSString
-    let range = NSRange(location: 0, length: nsString.length)
-    let matches = detector.matches(in: text, options: [], range: range)
-
-    links = matches.compactMap { match in
-      guard let url = match.url else { return nil }
-
-      let linkAttributes: [NSAttributedString.Key: Any] = [
-        .foregroundColor: MessageMentionRenderer.linkColor(for: outgoing),
-        .underlineStyle: NSUnderlineStyle.single.rawValue,
-      ]
-      attributedString.addAttributes(linkAttributes, range: match.range)
-
-      return (range: match.range, url: url)
-    }
+    // Store links for tap handling
+    links = linkMatches.map { (range: $0.range, url: $0.url) }
   }
 
   func detectAndStyleMentions(in text: String, attributedString: NSMutableAttributedString) {
