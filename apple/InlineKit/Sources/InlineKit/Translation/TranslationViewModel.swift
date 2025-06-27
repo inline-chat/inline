@@ -3,7 +3,7 @@ import Foundation
 import InlineProtocol
 import Logger
 
-actor TranslationViewModel {
+public actor TranslationViewModel {
   private let db = AppDatabase.shared
   private let realtime = Realtime.shared
   private let log = Log.scoped("TranslationViewModel")
@@ -196,6 +196,97 @@ actor TranslationViewModel {
         log.error("Failed to process translations", error: error)
         // Clean up translating state in case of error
         let messageIds = messagesCopy.map(\.id)
+        await TranslatingStatePublisher.shared.removeBatch(
+          messageIds: messageIds,
+          peerId: peerId
+        )
+      }
+    }
+  }
+
+  // MARK: - Static Translation Method
+
+  /// Simple static method to translate messages for a given peer
+  /// - Parameters:
+  ///   - peerId: The peer ID to translate messages for
+  ///   - messages: Array of messages to check for translation
+  public nonisolated static func translateMessages(for peerId: Peer, messages: [FullMessage]) {
+    let log = Log.scoped("TranslationViewModel")
+
+    log.debug("Processing \(messages.count) messages for translation, peer: \(peerId)")
+
+    // Check if translation is enabled for this peer
+    guard TranslationState.shared.isTranslationEnabled(for: peerId) else {
+      log.debug("Translation disabled for peer \(peerId)")
+      return
+    }
+
+    // Get user's preferred language
+    let targetLanguage = UserLocale.getCurrentLanguage()
+    log.debug("Target language: \(targetLanguage)")
+
+    // Do everything on a background thread to avoid impacting UI
+    Task(priority: .userInitiated) {
+      do {
+        // Filter out sending/failed messages
+        let validMessages = messages.filter { message in
+          message.message.status != .sending && message.message.status != .failed
+        }
+
+        guard !validMessages.isEmpty else {
+          log.debug("No valid messages to process for translation")
+          return
+        }
+
+        // Filter messages needing translation
+        let messagesNeedingTranslation = try await TranslationManager.shared.filterMessagesNeedingTranslation(
+          messages: validMessages,
+          targetLanguage: targetLanguage
+        )
+
+        guard !messagesNeedingTranslation.isEmpty else {
+          log.debug("No messages need translation")
+          return
+        }
+
+        log.debug("Found \(messagesNeedingTranslation.count) messages needing translation")
+
+        // Mark messages as being translated
+        let messageIds = messagesNeedingTranslation.map(\.messageId)
+        await TranslatingStatePublisher.shared.addBatch(
+          messageIds: messageIds,
+          peerId: peerId
+        )
+
+        // Request translations from API
+        try await TranslationManager.shared.requestTranslations(
+          messages: messagesNeedingTranslation,
+          chatId: messagesNeedingTranslation[0].chatId,
+          peerId: peerId
+        )
+
+        log.debug("Successfully requested translations for \(messageIds.count) messages")
+
+        // Remove messages from translating state
+        await TranslatingStatePublisher.shared.removeBatch(
+          messageIds: messageIds,
+          peerId: peerId
+        )
+
+        // Trigger message updates
+        for message in messagesNeedingTranslation {
+          await MessagesPublisher.shared.messageUpdated(
+            message: message,
+            peer: peerId,
+            animated: true
+          )
+        }
+
+        log.debug("Completed translation cycle for \(messageIds.count) messages")
+      } catch {
+        log.error("Failed to process translations", error: error)
+        // Clean up translating state in case of error
+        let messageIds = messages.map(\.id)
         await TranslatingStatePublisher.shared.removeBatch(
           messageIds: messageIds,
           peerId: peerId
