@@ -16,7 +16,7 @@ class SidebarItemRow: NSTableCellView {
   static let avatarSize: CGFloat = 48
   static let height: CGFloat = 64
   static let verticalPadding: CGFloat = ((SidebarItemRow.height - SidebarItemRow.avatarSize) / 2)
-  let avatarSpacing: CGFloat = 6
+  let avatarSpacing: CGFloat = 6 
 
   private var hoverColor: NSColor {
     if #available(macOS 14.0, *) {
