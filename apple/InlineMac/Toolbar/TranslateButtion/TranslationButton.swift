@@ -19,7 +19,7 @@ public struct TranslationButton: View {
     }) {
       Image(systemName: "translate")
         .font(.system(size: 16))
-        .foregroundColor(isTranslationEnabled ? .blue : .primary)
+        .foregroundColor(isTranslationEnabled ? .accent : .secondary)
     }
     .buttonStyle(.automatic)
     .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
