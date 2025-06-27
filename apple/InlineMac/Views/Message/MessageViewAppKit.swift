@@ -311,6 +311,20 @@ class MessageViewAppKit: NSView {
   private var reactionsViewModel: ReactionsViewModel?
   private var reactionsView: NSView?
 
+  // MARK: - Link Detection
+
+  /// Stores detected links for tap handling
+  private var detectedLinks: [(range: NSRange, url: URL)] = []
+
+  /// Handles link clicks by opening the URL in the default browser
+  private func handleLinkClick(at characterIndex: Int) {
+    for link in detectedLinks where NSLocationInRange(characterIndex, link.range) {
+      log.debug("Link clicked: \(link.url)")
+      NSWorkspace.shared.open(link.url)
+      return
+    }
+  }
+
   // MARK: - Initialization
 
   init(fullMessage: FullMessage, props: MessageViewProps, isScrolling: Bool = false) {
@@ -609,12 +623,9 @@ class MessageViewAppKit: NSView {
     guard let user = fullMessage.senderInfo?.user else { return }
 
     Task { @MainActor in
-      do {
-        let _ = try await DataManager.shared.createPrivateChat(userId: user.id)
-        Nav.main.open(.chat(peer: .user(id: user.id)))
-      } catch {
-        Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
-      }
+      // TODO: Fix this so if user clicks on a message from a user they don't have a chat with, it creates a chat
+      // let _ = try await DataManager.shared.createPrivateChat(userId: user.id)
+      Nav.main.open(.chat(peer: .user(id: user.id)))
     }
   }
 
@@ -1070,45 +1081,15 @@ class MessageViewAppKit: NSView {
       )
     )
 
-    // Detect and add links
-    var handledRanges: [NSRange] = []
-    if let detector = Self.detector {
-      let matches = detector.matches(
-        in: text,
-        options: [],
-        range: NSRange(location: 0, length: text.utf16.count)
-      )
+    // Detect and add links using centralized LinkDetector
+    let linkMatches = LinkDetector.shared.applyLinkStyling(
+      to: attributedString,
+      linkColor: linkColor,
+      cursor: NSCursor.pointingHand
+    )
 
-      for match in matches {
-        if let url = match.url {
-          attributedString.addAttributes([
-            .cursor: NSCursor.pointingHand,
-            .link: url,
-            .foregroundColor: linkColor,
-            .underlineStyle: NSUnderlineStyle.single.rawValue,
-          ], range: match.range)
-          handledRanges.append(match.range)
-        }
-      }
-    }
-
-    // Fallback regex for new TLDs like .shop
-    let nsString = text as NSString
-    let searchRange = NSRange(location: 0, length: nsString.length)
-    let shopMatches = Self.shopLinkRegex.matches(in: text, options: [], range: searchRange)
-    for match in shopMatches {
-      let alreadyHandled = handledRanges.contains { NSIntersectionRange($0, match.range).length > 0 }
-      if alreadyHandled { continue }
-      let urlString = nsString.substring(with: match.range)
-      if let url = URL(string: urlString) {
-        attributedString.addAttributes([
-          .cursor: NSCursor.pointingHand,
-          .link: url,
-          .foregroundColor: linkColor,
-          .underlineStyle: NSUnderlineStyle.single.rawValue,
-        ], range: match.range)
-      }
-    }
+    // Store links for tap handling
+    detectedLinks = linkMatches.map { (range: $0.range, url: $0.url) }
 
     textView.textStorage?.setAttributedString(attributedString)
 
@@ -1121,12 +1102,6 @@ class MessageViewAppKit: NSView {
       textView.layoutManager?.ensureLayout(for: textView.textContainer!)
     }
   }
-
-  static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-  static let shopLinkRegex = try! NSRegularExpression(
-    pattern: #"https?://[\w.-]+\.shop\b[^\s]*"#,
-    options: [.caseInsensitive]
-  )
 
   func reflectBoundsChange(fraction uncappedFraction: CGFloat) {}
 
@@ -1669,10 +1644,18 @@ extension MessageViewAppKit {
   }
 }
 
+// MARK: - NSTextViewDelegate
+
 extension MessageViewAppKit: NSTextViewDelegate {
   func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
     createMenu(context: .textView, nativeMenu: menu)
   }
+
+  // func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+  //   // Handle our custom detected links
+  //   handleLinkClick(at: charIndex)
+  //   return true
+  // }
 }
 
 extension MessageViewAppKit: NSMenuDelegate {
