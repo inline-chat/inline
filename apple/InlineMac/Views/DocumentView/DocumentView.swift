@@ -68,7 +68,7 @@ class DocumentView: NSView {
     label.font = .systemFont(ofSize: 12, weight: .regular)
     label.maximumNumberOfLines = 1
     label.lineBreakMode = .byTruncatingTail
-    label.textColor = white ? .white : .labelColor
+    label.textColor = ThemeManager.shared.selectedTheme.primaryTextColor
     // Configure truncation
     label.cell?.lineBreakMode = .byTruncatingMiddle // Truncate in the middle for filenames
     label.cell?.truncatesLastVisibleLine = true

@@ -43,26 +43,26 @@ struct Default: ThemeConfig {
   })
 }
 
-struct Lavender: ThemeConfig {
+struct CatppuccinMocha: ThemeConfig {
   var primaryTextColor: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#EAEFFF")!
+      UIColor(hex: "#FFFFFF")!
     } else {
-      UIColor(hex: "#000000")!
+      UIColor(hex: "#4C4F69")!
     }
   })
 
   var secondaryTextColor: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#696A85")!
+      UIColor(hex: "#CDD6F4")!
     } else {
-      UIColor(hex: "#BDC2D1")!
+      UIColor(hex: "#4C4F69")!
     }
   })
 
-  var id: String = "lavender"
+  var id: String = "CatppuccinMocha"
 
-  var name: String = "Lavender"
+  var name: String = "Catppuccin Mocha"
 
   var backgroundColor: UIColor = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
@@ -72,16 +72,28 @@ struct Lavender: ThemeConfig {
     }
   })
 
-  var bubbleBackground: UIColor = .init(hex: "#7A8AEF")!
+  var bubbleBackground: UIColor = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#919EF4")!
+    } else {
+      UIColor(hex: "#7287FD")!
+    }
+  })
   var incomingBubbleBackground: UIColor = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
       UIColor(hex: "#313244")!
     } else {
-      UIColor(hex: "#EFF1F8")!
+      UIColor(hex: "#EFF1F5")!
     }
   })
 
-  var accent: UIColor = .init(hex: "#8293FF")!
+  var accent: UIColor = .init(dynamicProvider: { trait in
+    if trait.userInterfaceStyle == .dark {
+      UIColor(hex: "#919EF4")!
+    } else {
+      UIColor(hex: "#7287FD")!
+    }
+  })
 
   var reactionOutgoingPrimary: UIColor? = .white
   var reactionOutgoingSecoundry: UIColor? = .white.withAlphaComponent(0.08)
