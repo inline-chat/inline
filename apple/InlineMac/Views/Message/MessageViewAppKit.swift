@@ -1049,6 +1049,7 @@ class MessageViewAppKit: NSView {
     )
 
     // Detect and add links
+    var handledRanges: [NSRange] = []
     if let detector = Self.detector {
       let matches = detector.matches(
         in: text,
@@ -1064,7 +1065,26 @@ class MessageViewAppKit: NSView {
             .foregroundColor: linkColor,
             .underlineStyle: NSUnderlineStyle.single.rawValue,
           ], range: match.range)
+          handledRanges.append(match.range)
         }
+      }
+    }
+
+    // Fallback regex for new TLDs like .shop
+    let nsString = text as NSString
+    let searchRange = NSRange(location: 0, length: nsString.length)
+    let shopMatches = Self.shopLinkRegex.matches(in: text, options: [], range: searchRange)
+    for match in shopMatches {
+      let alreadyHandled = handledRanges.contains { NSIntersectionRange($0, match.range).length > 0 }
+      if alreadyHandled { continue }
+      let urlString = nsString.substring(with: match.range)
+      if let url = URL(string: urlString) {
+        attributedString.addAttributes([
+          .cursor: NSCursor.pointingHand,
+          .link: url,
+          .foregroundColor: linkColor,
+          .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ], range: match.range)
       }
     }
 
@@ -1081,6 +1101,10 @@ class MessageViewAppKit: NSView {
   }
 
   static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+  static let shopLinkRegex = try! NSRegularExpression(
+    pattern: #"https?://[\w.-]+\.shop\b[^\s]*"#,
+    options: [.caseInsensitive]
+  )
 
   func reflectBoundsChange(fraction uncappedFraction: CGFloat) {}
 
