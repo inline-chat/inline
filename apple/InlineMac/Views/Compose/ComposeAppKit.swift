@@ -568,6 +568,8 @@ class ComposeAppKit: NSView {
           // set manually without updating height
           textEditor.replaceAttributedString(attributedString)
           textEditor.showPlaceholder(text.isEmpty)
+          // calculate text height to prepare for height change
+          updateContentHeight(for: textEditor.textView)
         }
       }
     } else {
