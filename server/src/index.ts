@@ -21,11 +21,13 @@ import { Log, LogLevel } from "@in/server/utils/log"
 import { realtime } from "@in/server/realtime"
 import { integrationsRouter } from "./controllers/integrations/integrationsRouter"
 import type { Server } from "bun"
+import { EventEmitter } from "events"
 
 const port = process.env["PORT"] || 8000
 const log = new Log("server", LogLevel.INFO)
 
-// Ensure to call this before importing any other modules!
+// To fix a bug where 11 max listeners trigger a warning in production console
+EventEmitter.defaultMaxListeners = 20
 
 if (process.env.NODE_ENV !== "development") {
   Log.shared.info(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
