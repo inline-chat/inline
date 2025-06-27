@@ -135,6 +135,7 @@ class MessageViewAppKit: NSView {
   // Add gesture recognizer property
   private var longPressGesture: NSPressGestureRecognizer?
   private var doubleClickGesture: NSClickGestureRecognizer?
+  private var avatarClickGesture: NSClickGestureRecognizer?
 
   // MARK: Views
 
@@ -543,6 +544,13 @@ class MessageViewAppKit: NSView {
     if let gesture = doubleClickGesture {
       addGestureRecognizer(gesture)
     }
+
+    if showsAvatar {
+      avatarClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleAvatarClick(_:)))
+      if let gesture = avatarClickGesture {
+        avatarView.addGestureRecognizer(gesture)
+      }
+    }
   }
 
   @objc private func handleLongPress(_ gesture: NSPressGestureRecognizer) {
@@ -593,6 +601,20 @@ class MessageViewAppKit: NSView {
         userId: currentUserId,
         peerId: fullMessage.message.peerId
       )))
+    }
+  }
+
+  @objc private func handleAvatarClick(_ gesture: NSClickGestureRecognizer) {
+    guard !isDM else { return }
+    guard let user = fullMessage.senderInfo?.user else { return }
+
+    Task { @MainActor in
+      do {
+        let _ = try await DataManager.shared.createPrivateChat(userId: user.id)
+        Nav.main.open(.chat(peer: .user(id: user.id)))
+      } catch {
+        Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
+      }
     }
   }
 
