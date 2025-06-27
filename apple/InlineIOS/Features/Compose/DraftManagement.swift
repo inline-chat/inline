@@ -1,7 +1,7 @@
 import InlineKit
+import InlineProtocol
 import Logger
 import UIKit
-import InlineProtocol
 
 extension ComposeView {
   func startDraftSaveTimer() {
@@ -29,19 +29,29 @@ extension ComposeView {
       return
     }
 
-    // Extract mention entities from attributed text for draft
+    // Extract all entities from attributed text for draft
     let attributedText = textView.attributedText ?? NSAttributedString()
+    var allEntities: [MessageEntity] = []
+
+    // Extract mentions
     let mentionEntities = mentionManager?.extractMentionEntities(from: attributedText) ?? []
+    allEntities.append(contentsOf: mentionEntities)
+
+    // Extract bold entities
+    allEntities.append(contentsOf: AttributedStringHelpers.extractBoldEntities(from: attributedText))
+
+    // Sort by offset
+    allEntities.sort { $0.offset < $1.offset }
 
     // Determine final entities to save
-    let entities: MessageEntities? = if !mentionEntities.isEmpty {
-      // We have current mention entities, use them
-      MessageEntities.with { $0.entities = mentionEntities }
+    let entities: MessageEntities? = if !allEntities.isEmpty {
+      // We have current entities, use them
+      MessageEntities.with { $0.entities = allEntities }
     } else if let originalEntities = originalDraftEntities {
-      // No current mentions but we had original entities, preserve them if they're still valid
+      // No current entities but we had original entities, preserve them if they're still valid
       validateAndPreserveEntities(originalEntities, for: text)
     } else {
-      // No mentions at all
+      // No entities at all
       nil
     }
 
@@ -86,22 +96,38 @@ extension ComposeView {
       originalDraftEntities = entities
 
       if let entities {
+        let attributedText = NSMutableAttributedString(attributedString: textView.attributedText)
+
         for entity in entities.entities {
-          if entity.type == .mention, case let .mention(mention) = entity.entity {
-            let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
+          let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
 
-            if range.location >= 0, range.location + range.length <= draft.utf16.count {
-              let attributedText = NSMutableAttributedString(attributedString: textView.attributedText)
+          guard range.location >= 0, range.location + range.length <= draft.utf16.count else {
+            continue
+          }
 
-              attributedText.addAttributes([
-                .foregroundColor: ThemeManager.shared.selected.accent,
-                NSAttributedString.Key("mention_user_id"): mention.userID,
-              ], range: range)
+          switch entity.type {
+            case .mention:
+              if case let .mention(mention) = entity.entity {
+                attributedText.addAttributes([
+                  .foregroundColor: ThemeManager.shared.selected.accent,
+                  NSAttributedString.Key("mention_user_id"): mention.userID,
+                ], range: range)
+              }
 
-              textView.attributedText = attributedText
-            }
+            case .bold:
+              // Apply bold formatting
+              let existingAttributes = attributedText.attributes(at: range.location, effectiveRange: nil)
+              if let existingFont = existingAttributes[.font] as? UIFont {
+                let boldFont = UIFont.boldSystemFont(ofSize: existingFont.pointSize)
+                attributedText.addAttribute(.font, value: boldFont, range: range)
+              }
+
+            default:
+              break
           }
         }
+
+        textView.attributedText = attributedText
       }
 
       textView.showPlaceholder(false)
