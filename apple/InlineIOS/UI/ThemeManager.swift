@@ -29,7 +29,7 @@ class ThemeManager: ObservableObject {
 
   static let themes: [ThemeConfig] = [
     Default(),
-    Lavender(),
+    CatppuccinMocha(),
     PeonyPink(),
     Orchid(),
   ]
