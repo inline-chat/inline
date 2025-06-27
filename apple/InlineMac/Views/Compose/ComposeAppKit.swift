@@ -188,9 +188,6 @@ class ComposeAppKit: NSView {
     translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
 
-    Log.shared
-      .debug("🔍 ComposeAppKit setupView: chat=\(String(describing: chat)), chatId=\(String(describing: chatId))")
-
     // More distinct background
     // layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5).cgColor
 
@@ -984,20 +981,13 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   func textDidChange(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView else { return }
 
-    let text = textView.string
-
     // Prevent mention style leakage to new text
     textView.updateTypingAttributesIfNeeded()
 
-    // TODO: This is slow
-    if text.isRTL {
-      textView.baseWritingDirection = .rightToLeft
-    } else {
-      textView.baseWritingDirection = .leftToRight
-    }
-
     if !ignoreNextHeightChange {
       updateHeightIfNeeded(for: textView)
+    } else {
+      log.trace("ignore next height change")
     }
 
     // Detect mentions
@@ -1053,8 +1043,11 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
     if abs(textViewContentHeight - contentHeight) < 8.0 {
       // minimal change to height ignore
+      log.trace("minimal change to height ignore")
       return
     }
+
+    log.trace("update height to \(contentHeight)")
 
     textViewContentHeight = contentHeight
 
@@ -1138,6 +1131,7 @@ extension ComposeAppKit: ComposeMenuButtonDelegate {
 extension ComposeAppKit: MentionCompletionMenuDelegate {
   func mentionMenu(_ menu: MentionCompletionMenu, didSelectUser user: UserInfo, withText text: String, userId: Int64) {
     guard let mentionRange = currentMentionRange else { return }
+    log.trace("mentionMenu didSelectUser: \(text), \(userId)")
 
     let currentAttributedText = textEditor.attributedString
     let result = mentionDetector.replaceMention(
