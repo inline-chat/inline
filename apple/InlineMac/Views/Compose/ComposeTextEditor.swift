@@ -64,12 +64,15 @@ class ComposeTextEditor: NSView {
     return paragraph
   }()
 
-  private lazy var placeholder: NSTextField = {
-    let label = NSTextField(labelWithString: "Message")
+  private lazy var placeholder: NonInteractiveTextField = {
+    let label = NonInteractiveTextField(labelWithString: "Message")
     label.translatesAutoresizingMaskIntoConstraints = false
     label.font = Theme.messageTextFont
     label.lineBreakMode = .byTruncatingTail
     label.textColor = .placeholderTextColor
+    label.isEditable = false
+    label.isSelectable = false
+    label.isEnabled = false
     return label
   }()
 
@@ -213,17 +216,16 @@ class ComposeTextEditor: NSView {
     let offsetY = 0.0
 
     CATransaction.begin()
-    
+
     CATransaction.setCompletionBlock {
       if !show {
         self.placeholder.removeFromSuperview()
       }
     }
-    
+
     let animationGroup = CAAnimationGroup()
     animationGroup.duration = show ? 0.2 : 0.1
     animationGroup.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-    
 
     let fade = CABasicAnimation(keyPath: "opacity")
     if show {
@@ -260,7 +262,6 @@ class ComposeTextEditor: NSView {
 
     placeholder.layer?.add(animationGroup, forKey: nil)
     CATransaction.commit()
-    
   }
 
   func getTypingLineHeight() -> CGFloat {
