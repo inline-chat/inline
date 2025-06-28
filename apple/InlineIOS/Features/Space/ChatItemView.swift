@@ -122,6 +122,31 @@ struct ChatItemView: View {
           }
         }
       }
+      .overlay(alignment: .bottomTrailing) {
+        if isPinned {
+          if #available(iOS 26.0, *) {
+            Circle()
+              .fill(.yellow.opacity(0.9))
+              .frame(width: 22, height: 22)
+              .glassEffect()
+              .overlay {
+                Image(systemName: "pin.fill")
+                  .font(.caption)
+                  .foregroundColor(.white)
+              }
+
+          } else {
+            Circle()
+              .fill(.yellow)
+              .frame(width: 22, height: 22)
+              .overlay {
+                Image(systemName: "pin.fill")
+                  .font(.caption)
+                  .foregroundColor(.white)
+              }
+          }
+        }
+      }
   }
 
   @ViewBuilder
