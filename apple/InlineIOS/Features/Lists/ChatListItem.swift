@@ -39,16 +39,16 @@ struct ChatListItem: View {
       } label: {
         Image(systemName: isArchived ? "tray.and.arrow.up.fill" : "tray.and.arrow.down.fill")
       }
-      .tint(Color(.systemGray2))
+      .tint(.indigo)
 
       Button {
         onPin()
       } label: {
         Image(systemName: item.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
       }
-      .tint(.indigo)
+      .tint(.yellow)
     }
-    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+    .swipeActions(edge: .leading, allowsFullSwipe: false) {
       Button(role: .destructive) {
         onRead()
       } label: {

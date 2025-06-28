@@ -96,14 +96,41 @@ struct DirectChatItem: View {
   @ViewBuilder
   var userProfile: some View {
     if let userInfo {
-      if userInfo.user.id == Auth.shared.getCurrentUserId() {
-        InitialsCircle(
-          name: UserAvatar.getNameForInitials(user: userInfo.user),
-          size: 60,
-          symbol: "bookmark.fill"
-        )
-      } else {
-        UserAvatar(userInfo: userInfo, size: 60)
+      Group {
+        if userInfo.user.id == Auth.shared.getCurrentUserId() {
+          InitialsCircle(
+            name: UserAvatar.getNameForInitials(user: userInfo.user),
+            size: 60,
+            symbol: "bookmark.fill"
+          )
+        } else {
+          UserAvatar(userInfo: userInfo, size: 60)
+        }
+      }
+      .overlay(alignment: .bottomTrailing) {
+        if isPinned {
+          if #available(iOS 26.0, *) {
+            Circle()
+              .fill(.yellow.opacity(0.9))
+              .frame(width: 22, height: 22)
+              .glassEffect()
+              .overlay {
+                Image(systemName: "pin.fill")
+                  .font(.caption)
+                  .foregroundColor(.white)
+              }
+
+          } else {
+            Circle()
+              .fill(.yellow)
+              .frame(width: 22, height: 22)
+              .overlay {
+                Image(systemName: "pin.fill")
+                  .font(.caption)
+                  .foregroundColor(.white)
+              }
+          }
+        }
       }
     }
   }
