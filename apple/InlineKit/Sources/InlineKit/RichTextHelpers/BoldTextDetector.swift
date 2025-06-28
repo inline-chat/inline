@@ -14,6 +14,8 @@ public struct BoldRange {
   public let content: String
 }
 
+/// Handles **bold** pattern detection and conversion to formatted text
+/// Note: For entity extraction and application, use ProcessEntities from TextProcessing module
 public class BoldTextDetector {
   private let log = Log.scoped("BoldTextDetector")
 
@@ -100,62 +102,5 @@ public class BoldTextDetector {
     #endif
 
     return attributes
-  }
-
-  /// Extract bold entities from attributed text for sending
-  public func extractBoldEntities(from attributedText: NSAttributedString) -> [MessageEntity] {
-    var entities: [MessageEntity] = []
-    let text = attributedText.string
-
-    // Enumerate through the attributed string looking for bold fonts
-    attributedText
-      .enumerateAttribute(.font, in: NSRange(location: 0, length: text.count), options: []) { value, range, _ in
-        #if os(macOS)
-        if let font = value as? NSFont, font.fontDescriptor.symbolicTraits.contains(.bold) {
-          var entity = MessageEntity()
-          entity.type = .bold
-          entity.offset = Int64(range.location)
-          entity.length = Int64(range.length)
-          entities.append(entity)
-        }
-        #elseif os(iOS)
-        if let font = value as? UIFont, font.fontDescriptor.symbolicTraits.contains(.traitBold) {
-          var entity = MessageEntity()
-          entity.type = .bold
-          entity.offset = Int64(range.location)
-          entity.length = Int64(range.length)
-          entities.append(entity)
-        }
-        #endif
-      }
-
-    log.debug("Extracted \(entities.count) bold entities")
-    return entities
-  }
-
-  /// Apply bold entities to attributed text (for displaying received messages)
-  public func applyBoldEntities(
-    _ entities: [MessageEntity],
-    to attributedText: NSAttributedString
-  ) -> NSAttributedString {
-    let mutableAttributedText = attributedText.mutableCopy() as! NSMutableAttributedString
-
-    for entity in entities where entity.type == .bold {
-      let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
-
-      // Validate range is within bounds
-      guard range.location >= 0, range.location + range.length <= attributedText.length else {
-        log.warning("Bold entity range \(range) is out of bounds for text length \(attributedText.length)")
-        continue
-      }
-
-      // Get existing attributes and make font bold
-      let existingAttributes = mutableAttributedText.attributes(at: range.location, effectiveRange: nil)
-      let boldAttributes = createBoldAttributes(from: existingAttributes)
-
-      mutableAttributedText.addAttributes(boldAttributes, range: range)
-    }
-
-    return mutableAttributedText.copy() as! NSAttributedString
   }
 }

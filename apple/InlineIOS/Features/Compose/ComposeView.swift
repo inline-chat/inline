@@ -4,15 +4,19 @@ import CoreServices
 import ImageIO
 import InlineKit
 import InlineProtocol
+import InlineUI
 import Logger
 import MobileCoreServices
 import PhotosUI
 import SwiftUI
+import TextProcessing
 import UIKit
 import UniformTypeIdentifiers
 
 class ComposeView: UIView, NSTextLayoutManagerDelegate {
   // MARK: - Configuration Constants
+
+  private let log = Log.scoped("ComposeView")
 
   let maxHeight: CGFloat = 350
   let buttonSize: CGSize = .init(width: 32, height: 32)
@@ -143,7 +147,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   public func sendSticker(_ image: UIImage) {
     guard let peerId else {
-      Log.shared.debug("❌ COMPOSE - No peerId available")
+      log.debug("No peerId available")
       return
     }
 
@@ -168,17 +172,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     ChatState.shared.clearEditingMessageId(peer: peerId)
     ChatState.shared.clearReplyingMessageId(peer: peerId)
 
-    clearDraft()
-    textView.text = ""
-
-    // Reset typing attributes to prevent bold state from persisting
-    textView.resetTypingAttributesToDefault()
-
-    resetHeight()
-    textView.showPlaceholder(true)
-    buttonDisappear()
-
-    sendButton.configuration?.showsActivityIndicator = false
+    resetComposeState()
   }
 
   func setupViews() {
@@ -276,24 +270,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     // Can't send if no text and no attachments
     guard hasText || hasAttachments else { return }
 
-    // Extract all entities (mentions, bold, etc.) from attributed text
+    // Extract all entities using TextProcessing module
     let attributedText = textView.attributedText ?? NSAttributedString()
-    var allEntities: [MessageEntity] = []
+    let (_, extractedEntities) = ProcessEntities.fromAttributedString(attributedText)
 
-    // Extract mentions
-    let mentionEntities = mentionManager?.extractMentionEntities(from: attributedText) ?? []
-    allEntities.append(contentsOf: mentionEntities)
-
-    // Extract bold entities
-    allEntities.append(contentsOf: AttributedStringHelpers.extractBoldEntities(from: attributedText))
-
-    // Sort by offset
-    allEntities.sort { $0.offset < $1.offset }
-
-    let entities = if allEntities.isEmpty {
+    let entities = if extractedEntities.entities.isEmpty {
       nil as MessageEntities?
     } else {
-      MessageEntities.with { $0.entities = allEntities }
+      extractedEntities
     }
 
     // Make text nil if empty and we have attachments
@@ -328,12 +312,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         )))
       } else {
         for (index, (_, attachment)) in attachmentItems.enumerated() {
-          Log.shared.debug("Sending attachment: \(attachment)")
+          log.debug("Sending attachment: \(attachment)")
           let isFirst = index == 0
 
           // Verify attachment has valid local path before sending
           guard attachment.getLocalPath() != nil else {
-            Log.shared.error("Attachment has no local path, skipping: \(attachment)")
+            log.error("Attachment has no local path, skipping: \(attachment)")
             continue
           }
 
@@ -353,17 +337,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     // Clear everything
-    clearDraft()
-    clearAttachments()
-    stopDraftSaveTimer()
-    textView.text = ""
-
-    // Reset typing attributes to prevent bold state from persisting
-    textView.resetTypingAttributesToDefault()
-
-    resetHeight()
-    textView.showPlaceholder(true)
-    buttonDisappear()
+    resetComposeState()
   }
 
   func updateSendButtonForEditing(_ isEditing: Bool) {
@@ -458,6 +432,32 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     NotificationCenter.default.removeObserver(self)
   }
 
+  // MARK: - Reset Methods
+
+  /// Resets text view typing attributes and related state
+  func resetTextViewState() {
+    textView.resetTypingAttributesToDefault()
+
+    DispatchQueue.main.async { [weak self] in
+      self?.textView.updateTypingAttributesIfNeeded()
+    }
+  }
+
+  private func resetComposeState() {
+    clearDraft()
+    clearAttachments()
+    stopDraftSaveTimer()
+    textView.text = ""
+
+    resetTextViewState()
+
+    resetHeight()
+    textView.showPlaceholder(true)
+    buttonDisappear()
+
+    sendButton.configuration?.showsActivityIndicator = false
+  }
+
   // MARK: - Attachment Management
 
   func removeAttachment(_ id: String) {
@@ -467,7 +467,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     attachmentItems.removeValue(forKey: id)
     updateSendButtonVisibility()
 
-    Log.shared.debug("Removed attachment with id: \(id)")
+    log.debug("Removed attachment with id: \(id)")
   }
 
   func removeImage(_ id: String) {
@@ -481,7 +481,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func clearAttachments() {
     attachmentItems.removeAll()
     updateSendButtonVisibility()
-    Log.shared.debug("Cleared all attachments")
+    log.debug("Cleared all attachments")
   }
 
   func updateSendButtonVisibility() {
