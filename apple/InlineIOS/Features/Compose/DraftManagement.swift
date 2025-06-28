@@ -1,20 +1,23 @@
 import InlineKit
 import InlineProtocol
 import Logger
+import TextProcessing
 import UIKit
 
 extension ComposeView {
+  private static let draftLog = Log.scoped("ComposeView.DraftManagement")
+
   func startDraftSaveTimer() {
     stopDraftSaveTimer() // Stop any existing timer
     draftSaveTimer = Timer.scheduledTimer(withTimeInterval: draftSaveInterval, repeats: true) { [weak self] _ in
       self?.saveDraftIfNeeded()
     }
-    Log.shared.debug("🌴 Draft auto-save timer started")
+    Self.draftLog.debug("Draft auto-save timer started")
   }
 
   func stopDraftSaveTimer() {
     if draftSaveTimer != nil {
-      Log.shared.debug("🌴 Draft auto-save timer stopped")
+      Self.draftLog.debug("Draft auto-save timer stopped")
     }
     draftSaveTimer?.invalidate()
     draftSaveTimer = nil
@@ -29,24 +32,14 @@ extension ComposeView {
       return
     }
 
-    // Extract all entities from attributed text for draft
+    // Extract all entities using TextProcessing module
     let attributedText = textView.attributedText ?? NSAttributedString()
-    var allEntities: [MessageEntity] = []
-
-    // Extract mentions
-    let mentionEntities = mentionManager?.extractMentionEntities(from: attributedText) ?? []
-    allEntities.append(contentsOf: mentionEntities)
-
-    // Extract bold entities
-    allEntities.append(contentsOf: AttributedStringHelpers.extractBoldEntities(from: attributedText))
-
-    // Sort by offset
-    allEntities.sort { $0.offset < $1.offset }
+    let (_, extractedEntities) = ProcessEntities.fromAttributedString(attributedText)
 
     // Determine final entities to save
-    let entities: MessageEntities? = if !allEntities.isEmpty {
+    let entities: MessageEntities? = if !extractedEntities.entities.isEmpty {
       // We have current entities, use them
-      MessageEntities.with { $0.entities = allEntities }
+      extractedEntities
     } else if let originalEntities = originalDraftEntities {
       // No current entities but we had original entities, preserve them if they're still valid
       validateAndPreserveEntities(originalEntities, for: text)
@@ -55,7 +48,7 @@ extension ComposeView {
       nil
     }
 
-    Log.shared.debug("🌴 Auto-saving draft: \(text.prefix(50))...")
+    Self.draftLog.debug("Auto-saving draft: \(text.prefix(50))...")
     Drafts.shared.update(peerId: peerId, text: text, entities: entities)
   }
 
@@ -96,36 +89,17 @@ extension ComposeView {
       originalDraftEntities = entities
 
       if let entities {
-        let attributedText = NSMutableAttributedString(attributedString: textView.attributedText)
-
-        for entity in entities.entities {
-          let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
-
-          guard range.location >= 0, range.location + range.length <= draft.utf16.count else {
-            continue
-          }
-
-          switch entity.type {
-            case .mention:
-              if case let .mention(mention) = entity.entity {
-                attributedText.addAttributes([
-                  .foregroundColor: ThemeManager.shared.selected.accent,
-                  NSAttributedString.Key("mention_user_id"): mention.userID,
-                ], range: range)
-              }
-
-            case .bold:
-              // Apply bold formatting
-              let existingAttributes = attributedText.attributes(at: range.location, effectiveRange: nil)
-              if let existingFont = existingAttributes[.font] as? UIFont {
-                let boldFont = UIFont.boldSystemFont(ofSize: existingFont.pointSize)
-                attributedText.addAttribute(.font, value: boldFont, range: range)
-              }
-
-            default:
-              break
-          }
-        }
+        // Use ProcessEntities to apply entities to text
+        let attributedText = ProcessEntities.toAttributedString(
+          text: draft,
+          entities: entities,
+          configuration: .init(
+            font: textView.font ?? UIFont.systemFont(ofSize: 17),
+            textColor: UIColor.label,
+            linkColor: ThemeManager.shared.selected.accent,
+            convertMentionsToLink: false
+          )
+        )
 
         textView.attributedText = attributedText
       }

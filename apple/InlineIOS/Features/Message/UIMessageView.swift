@@ -538,7 +538,7 @@ class UIMessageView: UIView {
 
     // First check if tap is on a mention
     if let attributedText = messageLabel.attributedText {
-      attributedText.enumerateAttribute(.init("mention_user_id"), in: NSRange(
+      attributedText.enumerateAttribute(.mentionUserId, in: NSRange(
         location: 0,
         length: attributedText.length
       )) { value, range, _ in
@@ -757,20 +757,18 @@ class UIMessageView: UIView {
           case .mention:
             if case let .mention(mention) = entity.entity {
               let mentionColor = MessageMentionRenderer.mentionColor(for: outgoing)
-              print("DEBUG: Applying mention color \(mentionColor) for outgoing: \(outgoing)")
               attributedString.addAttributes([
                 .foregroundColor: mentionColor,
-                .init("mention_user_id"): mention.userID,
+                .mentionUserId: mention.userID,
               ], range: range)
             }
 
           case .bold:
-            // Apply bold formatting
+            // Apply bold formatting using existing attributes
             let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
-            if let existingFont = existingAttributes[.font] as? UIFont {
-              let boldFont = UIFont.boldSystemFont(ofSize: existingFont.pointSize)
-              attributedString.addAttribute(.font, value: boldFont, range: range)
-            }
+            let currentFont = existingAttributes[.font] as? UIFont ?? UIFont.systemFont(ofSize: 17)
+            let boldFont = UIFont.boldSystemFont(ofSize: currentFont.pointSize)
+            attributedString.addAttribute(.font, value: boldFont, range: range)
 
           default:
             break
