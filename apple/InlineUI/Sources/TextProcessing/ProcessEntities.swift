@@ -169,6 +169,16 @@ public class ProcessEntities {
 
   // MARK: - Helper Methods
 
+  /// Sorts message entities by their offset position
+  public static func sortEntities(_ entities: [MessageEntity]) -> [MessageEntity] {
+    entities.sorted { $0.offset < $1.offset }
+  }
+
+  /// Sorts message entities in place by their offset position
+  public static func sortEntities(_ entities: inout [MessageEntity]) {
+    entities.sort { $0.offset < $1.offset }
+  }
+
   private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
     return NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)

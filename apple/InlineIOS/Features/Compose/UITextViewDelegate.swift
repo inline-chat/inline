@@ -1,10 +1,12 @@
 import InlineKit
 import Logger
+import TextProcessing
 import UIKit
 
 // MARK: - UITextViewDelegate
 
 extension ComposeView: UITextViewDelegate {
+  private static let log = Log.scoped("ComposeView.UITextViewDelegate")
   func textViewDidChange(_ textView: UITextView) {
     // Prevent mention style leakage to new text
     textView.updateTypingAttributesIfNeeded()
@@ -70,8 +72,7 @@ extension ComposeView: UITextViewDelegate {
     let originalText = attributedText.string
     let originalCursorPosition = textView.selectedRange.location
 
-    Log.shared.debug("🎨 BEFORE: text='\(originalText)', cursor=\(originalCursorPosition)")
-
+    // Process **bold** patterns - for now keep existing logic until we have bold pattern processing in ProcessEntities
     let processedAttributedText = AttributedStringHelpers.processBoldText(in: attributedText)
 
     // Only update if processing changed the text
@@ -85,33 +86,12 @@ extension ComposeView: UITextViewDelegate {
         originalCursor: selectedRange.location
       )
 
-      Log.shared.debug("🎨 PROCESSING: text='\(processedAttributedText.string)', new cursor=\(newCursorPosition)")
-
       // Update the text view
       textView.attributedText = processedAttributedText
       textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
 
-      // CRITICAL: Reset typing attributes immediately to prevent bold state from persisting
-      textView.resetTypingAttributesToDefault()
-
-      Log.shared.debug("🎨 AFTER RESET: typing attrs = \(textView.typingAttributes)")
-
-      // Additional safety check: ensure typing attributes stay reset
-      DispatchQueue.main.async { [weak self] in
-        // Double-check and reset if still bold
-        if textView.hasTypingAttributesBoldStyling {
-          Log.shared.debug("🎨 ASYNC: Still bold! Resetting again...")
-          textView.resetTypingAttributesToDefault()
-        }
-
-        // Also check cursor position relative to any bold text
-        textView.updateTypingAttributesIfNeeded()
-
-        Log.shared.debug("🎨 FINAL: typing attrs = \(textView.typingAttributes)")
-      }
-
-      Log.shared
-        .debug("🎨 Processed bold text patterns - cursor moved from \(originalCursorPosition) to \(newCursorPosition)")
+      // Reset text view state after bold pattern processing
+      resetTextViewState()
     }
   }
 
@@ -138,10 +118,9 @@ extension ComposeView: UITextViewDelegate {
 
     let newPosition = max(0, originalCursor - removedCharacters)
 
-    Log.shared
-      .debug(
-        "🎯 Cursor calculation: original=\(originalCursor), matches=\(matches.count), removed=\(removedCharacters), new=\(newPosition)"
-      )
+    Self.log.trace(
+      "Cursor calculation: original=\(originalCursor), matches=\(matches.count), removed=\(removedCharacters), new=\(newPosition)"
+    )
 
     return newPosition
   }
