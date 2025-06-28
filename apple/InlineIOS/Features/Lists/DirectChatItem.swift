@@ -88,7 +88,7 @@ struct DirectChatItem: View {
       }
       Spacer()
     }
-    .frame(height: 70)
+    .frame(height: 50)
     .frame(maxWidth: .infinity, alignment: .top)
     .padding(.leading, -8)
   }
@@ -99,11 +99,11 @@ struct DirectChatItem: View {
       if userInfo.user.id == Auth.shared.getCurrentUserId() {
         InitialsCircle(
           name: UserAvatar.getNameForInitials(user: userInfo.user),
-          size: 58,
+          size: 60,
           symbol: "bookmark.fill"
         )
       } else {
-        UserAvatar(userInfo: userInfo, size: 58)
+        UserAvatar(userInfo: userInfo, size: 60)
       }
     }
   }
@@ -111,18 +111,11 @@ struct DirectChatItem: View {
   @ViewBuilder
   var unreadAndProfileView: some View {
     HStack(alignment: .center, spacing: 5) {
-      if isPinned && !hasUnreadMessages {
-        Image(systemName: "pin.fill")
-          .resizable()
-          .foregroundColor(.secondary)
-          .frame(width: 8, height: 10)
-        
-      } else {
-        Circle()
-          .fill(hasUnreadMessages ? ColorManager.shared.swiftUIColor : .clear)
-          .frame(width: 8, height: 8)
-          .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
-      }
+      Circle()
+        .fill(hasUnreadMessages ? ColorManager.shared.swiftUIColor : .clear)
+        .frame(width: 8, height: 8)
+        .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
+
       userProfile
     }
   }
@@ -173,69 +166,67 @@ struct DirectChatItem: View {
         }
 
         Text(currentComposeAction()?.toHumanReadableForIOS() ?? "")
-          .font(.customCaption())
+          .font(.callout)
           .foregroundStyle(.secondary)
       }
-      .padding(.top, 1)
+
     } else if lastMsg?.message.isSticker == true {
-      HStack(spacing: 4) {
+      HStack(spacing: 2) {
         Image(systemName: "cup.and.saucer.fill")
-          .font(.customCaption())
+          .font(.caption)
           .foregroundColor(.secondary)
         Text("Sticker")
-          .font(.customCaption())
+          .font(.callout)
           .foregroundColor(.secondary)
           .lineLimit(1)
           .truncationMode(.tail)
       }
-      .padding(.top, 1)
+
     } else if lastMsg?.message.documentId != nil {
-      HStack {
+      HStack(spacing: 2) {
         Image(systemName: "document.fill")
-          .font(.customCaption())
+          .font(.caption)
           .foregroundColor(.secondary)
 
         Text(
           (lastMsg?.message.hasText == true ? lastMsg?.displayText ?? "" : "Document")
             .replacingOccurrences(of: "\n", with: " ")
         )
-        .font(.customCaption())
+        .font(.callout)
         .foregroundColor(.secondary)
         .lineLimit(1)
         .truncationMode(.tail)
       }
-      .padding(.top, 1)
+
     } else if lastMsg?.message.photoId != nil || lastMsg?.message.fileId != nil {
       HStack {
         Image(systemName: "photo.fill")
-          .font(.customCaption())
+          .font(.caption)
           .foregroundColor(.secondary)
 
         Text(
           (lastMsg?.message.hasText == true ? lastMsg?.displayText ?? "" : "Photo")
             .replacingOccurrences(of: "\n", with: " ")
         )
-        .font(.customCaption())
+        .font(.callout)
         .foregroundColor(.secondary)
         .lineLimit(1)
         .truncationMode(.tail)
       }
-      .padding(.top, 1)
+
     } else if lastMsg?.message.hasUnsupportedTypes == true {
       Text("Unsupported message")
         .italic()
-        .font(.customCaption())
+        .font(.callout)
         .foregroundColor(.secondary)
         .lineLimit(1)
         .truncationMode(.tail)
-        .padding(.top, 1)
     } else {
       Text((lastMsg?.displayText ?? "").replacingOccurrences(of: "\n", with: " "))
-        .font(.customCaption())
+        .font(.callout)
         .foregroundColor(.secondary)
         .lineLimit(2)
         .truncationMode(.tail)
-        .padding(.top, 1)
     }
   }
 

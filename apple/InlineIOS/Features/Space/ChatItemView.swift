@@ -84,15 +84,15 @@ struct ChatItemView: View {
   }
 
   var body: some View {
-    VStack {
-      HStack(alignment: .top, spacing: 14) {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .top, spacing: 10) {
         unreadAndProfileView
         titleAndLastMessageView
         Spacer()
       }
-      Spacer()
     }
-    .frame(height: 70)
+
+    .frame(height: 50)
     .frame(maxWidth: .infinity, alignment: .top)
     .padding(.leading, -8)
   }
@@ -107,7 +107,7 @@ struct ChatItemView: View {
           endPoint: .bottom
         )
       )
-      .frame(width: 58, height: 58)
+      .frame(width: 60, height: 60)
       .overlay {
         Group {
           if let emoji = chat?.emoji {
@@ -127,36 +127,20 @@ struct ChatItemView: View {
   @ViewBuilder
   var unreadAndProfileView: some View {
     HStack(alignment: .center, spacing: 5) {
-      if isPinned, !hasUnreadMessages {
-        Image(systemName: "pin.fill")
-          .resizable()
-          .foregroundColor(.secondary)
-          .frame(width: 8, height: 10)
+      Circle()
+        .fill(hasUnreadMessages ? ColorManager.shared.swiftUIColor : .clear)
+        .frame(width: 8, height: 8)
+        .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
 
-      } else {
-        Circle()
-          .fill(hasUnreadMessages ? ColorManager.shared.swiftUIColor : .clear)
-          .frame(width: 8, height: 8)
-          .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
-      }
       chatProfile
     }
   }
 
   @ViewBuilder
   var title: some View {
-    HStack(alignment: .center) {
-      Text(chat?.title ?? "")
-        .font(.body)
-        .foregroundColor(.primary)
-      Spacer()
-
-      if let space {
-        Text(space.name)
-          .font(.caption)
-          .foregroundStyle(.tertiary)
-      }
-    }
+    Text(chat?.title ?? "")
+      .font(.body)
+      .foregroundColor(.primary)
   }
 
   @ViewBuilder
@@ -168,19 +152,20 @@ struct ChatItemView: View {
         UserAvatar(user: user, size: 15)
       }
 
-      Text(from?.user.firstName ?? "")
-        .font(.callout)
-        .foregroundColor(.secondary)
+      if let name = from?.user.firstName {
+        Text("\(name): ")
+          .font(.callout)
+          .foregroundColor(.secondary)
+      }
     }
-    .padding(.top, 2)
   }
 
   @ViewBuilder
   var lastMessageView: some View {
     if message?.message.isSticker == true {
-      HStack(spacing: 4) {
+      HStack(spacing: 2) {
         Image(systemName: "cup.and.saucer.fill")
-          .font(.callout)
+          .font(.caption)
           .foregroundColor(.secondary)
 
         Text("Sticker")
@@ -189,11 +174,11 @@ struct ChatItemView: View {
           .lineLimit(2)
           .truncationMode(.tail)
       }
-      .padding(.top, 1)
+
     } else if message?.message.documentId != nil {
-      HStack {
+      HStack(spacing: 2) {
         Image(systemName: "document.fill")
-          .font(.callout)
+          .font(.caption)
           .foregroundColor(.secondary)
 
         Text(
@@ -205,11 +190,11 @@ struct ChatItemView: View {
         .lineLimit(2)
         .truncationMode(.tail)
       }
-      .padding(.top, 1)
+
     } else if message?.message.photoId != nil || message?.message.fileId != nil {
-      HStack {
+      HStack(spacing: 2) {
         Image(systemName: "photo.fill")
-          .font(.callout)
+          .font(.caption)
           .foregroundColor(.secondary)
 
         Text(
@@ -221,7 +206,7 @@ struct ChatItemView: View {
         .lineLimit(2)
         .truncationMode(.tail)
       }
-      .padding(.top, 1)
+
     } else if message?.message.hasUnsupportedTypes == true {
       Text("Unsupported message")
         .italic()
@@ -238,9 +223,17 @@ struct ChatItemView: View {
   @ViewBuilder
   var titleAndLastMessageView: some View {
     VStack(alignment: .leading, spacing: 0) {
+      if let space {
+        Text(space.nameWithoutEmoji ?? space.name ?? "Space")
+          .font(.callout)
+          .foregroundStyle(.tertiary)
+          .fontWeight(.medium)
+      }
       title
-      lastMessageSenderView
-      lastMessageView
+      HStack(alignment: .center, spacing: 2) {
+        lastMessageSenderView
+        lastMessageView
+      }
     }
   }
 }
