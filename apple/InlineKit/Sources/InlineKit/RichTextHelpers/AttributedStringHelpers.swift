@@ -87,38 +87,12 @@ public class AttributedStringHelpers {
     return boldDetector.processBoldText(in: attributedString)
   }
 
-  /// Extract bold entities from attributed text
-  public static func extractBoldEntities(from attributedString: NSAttributedString) -> [MessageEntity] {
-    let boldDetector = BoldTextDetector()
-    return boldDetector.extractBoldEntities(from: attributedString)
-  }
-
-  /// Apply bold entities to attributed text
-  public static func applyBoldEntities(
-    _ entities: [MessageEntity],
-    to attributedText: NSAttributedString
-  ) -> NSAttributedString {
-    let boldDetector = BoldTextDetector()
-    return boldDetector.applyBoldEntities(entities, to: attributedText)
-  }
-
   // MARK: - Combined Entity Processing
 
-  /// Extract all entities (mentions, bold, etc.) from attributed text
-  public static func extractAllEntities(from attributedString: NSAttributedString) -> [MessageEntity] {
-    var allEntities: [MessageEntity] = []
-
-    // Extract mentions
-    allEntities.append(contentsOf: extractMentionEntities(from: attributedString))
-
-    // Extract bold text
-    allEntities.append(contentsOf: extractBoldEntities(from: attributedString))
-
-    // Sort by offset to maintain correct order
-    allEntities.sort { $0.offset < $1.offset }
-
-    return allEntities
-  }
+  // Note: For extracting/applying all entities (mentions, bold, etc.), use:
+  // - ProcessEntities.fromAttributedString() to extract entities
+  // - ProcessEntities.toAttributedString() to apply entities to text
+  // These methods are in the TextProcessing module and provide centralized entity handling.
 
   /// Process all rich text patterns (bold, etc.) in attributed string
   public static func processRichText(in attributedString: NSAttributedString) -> NSAttributedString {
