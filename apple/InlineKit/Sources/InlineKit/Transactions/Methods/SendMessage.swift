@@ -307,17 +307,18 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func rollback() async {
-    // Remove from database
-    let _ = try? await AppDatabase.shared.dbWriter.write { db in
-      try Message
-        .filter(Column("randomId") == randomId)
-        .filter(Column("messageId") == temporaryMessageId)
-        .deleteAll(db)
-    }
+    do {
+      // Remove from database and update chat state
+      let _ = try await AppDatabase.shared.dbWriter.write { db in
+        try Message.deleteMessages(db, messageIds: [temporaryMessageId], chatId: chatId)
+      }
 
-    // Remove from cache
-    await MessagesPublisher.shared
-      .messagesDeleted(messageIds: [temporaryMessageId], peer: peerId)
+      // Remove from cache
+      await MessagesPublisher.shared
+        .messagesDeleted(messageIds: [temporaryMessageId], peer: peerId)
+    } catch {
+      Log.shared.error("Failed to rollback send message", error: error)
+    }
   }
 
   enum SendMessageError: Error {
