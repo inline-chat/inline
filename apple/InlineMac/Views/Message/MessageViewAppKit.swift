@@ -1566,19 +1566,6 @@ class MessageViewAppKit: NSView {
     if let transactionId = message.transactionId, !transactionId.isEmpty {
       Transactions.shared.cancel(transactionId: transactionId)
     }
-    let chatId = message.chatId
-    let messageId = message.messageId
-    Task(priority: .userInitiated) {
-      let _ = try? await AppDatabase.shared.dbWriter.write { db in
-        try Message
-          .filter(Column("chatId") == chatId)
-          .filter(Column("messageId") == messageId)
-          .deleteAll(db)
-      }
-
-      MessagesPublisher.shared
-        .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
-    }
   }
 }
 

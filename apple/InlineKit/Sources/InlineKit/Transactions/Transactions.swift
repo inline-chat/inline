@@ -69,7 +69,7 @@ public class Transactions: @unchecked Sendable {
       return
     }
 
-    Task {
+    Task(priority: .userInitiated) {
       // Then queue for execution
       await actor.queue(transaction: transactionCopy)
     }
@@ -77,10 +77,11 @@ public class Transactions: @unchecked Sendable {
 
   /// Immediately triggers rollback and removes transaction from cache
   public func cancel(transactionId: String) {
-    Task {
-      // Remove from cache
-      cache.remove(transactionId: transactionId)
-      // Cancel in actor and trigger rollback
+    // Remove from cache
+    cache.remove(transactionId: transactionId)
+    // Cancel in actor and trigger rollback
+    Task.detached(priority: .userInitiated) { [weak self] in
+      guard let self else { return }
       await actor.cancel(transactionId: transactionId)
     }
   }
