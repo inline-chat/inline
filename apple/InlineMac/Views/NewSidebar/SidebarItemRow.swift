@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import InlineKit
 import Logger
+import RealtimeAPI
 
 class SidebarItemRow: NSTableCellView {
   typealias SidebarEvents = NewSidebar.SidebarEvents
@@ -554,6 +555,8 @@ class SidebarItemRow: NSTableCellView {
               $0.peerID = peerId.toInputPeer()
             }))
 
+          navigateOut()
+
           // Delete in local db
           if let dialog {
             try await dialog.deleteFromLocalDatabase()
@@ -561,7 +564,27 @@ class SidebarItemRow: NSTableCellView {
             try await chat?.deleteFromLocalDatabase()
           }
 
-          navigateOut()
+        } catch let error as RealtimeAPIError {
+          switch error {
+            case .rpcError(errorCode: .chatIDInvalid, _, _):
+              Log.shared.debug("Chat ID invalid, deleting in local db anyway")
+              navigateOut()
+              // Delete in local db anyway
+              if let dialog {
+                try await dialog.deleteFromLocalDatabase()
+              } else {
+                try await chat?.deleteFromLocalDatabase()
+              }
+
+            default:
+              Log.shared.error("Failed to delete chat", error: error)
+              let alert = NSAlert()
+              alert.alertStyle = .warning
+              alert.messageText = "Failed to delete chat"
+              alert.informativeText = "Error \(error.localizedDescription)"
+              alert.addButton(withTitle: "OK")
+              alert.runModal()
+          }
         } catch {
           // Show alert
           Log.shared.error("Failed to delete chat", error: error)
