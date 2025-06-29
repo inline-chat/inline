@@ -647,3 +647,52 @@ public extension Message {
     videoId != nil
   }
 }
+
+public extension Message {
+  /// Deletes the given messages from the database and makes sure the parent chat's
+  /// `lastMsgId` stays consistent after the deletion.
+  ///
+  /// - Parameters:
+  ///   - db: The GRDB `Database` instance to perform the deletion on.
+  ///   - messageIds: An array of **absolute** message IDs to delete.
+  ///   - chatId: The identifier of the chat the messages belong to.
+  /// - Throws: Rethrows any database error that occurs.
+  static func deleteMessages(
+    _ db: Database,
+    messageIds: [Int64],
+    chatId: Int64
+  ) throws {
+    // Fetch the chat once so we can update its `lastMsgId` if needed.
+    let chat = try Chat.fetchOne(db, id: chatId)
+
+    // Keep track of the current `lastMsgId` so we can update it when we delete it.
+    var prevChatLastMsgId = chat?.lastMsgId
+
+    for messageId in messageIds {
+      // If the message we are about to delete is the last message of the chat,
+      // we need to promote the previous message (if any) to be the new last one.
+      if prevChatLastMsgId == messageId {
+        let previousMessage = try Message
+          .filter(Column("chatId") == chat?.id)
+          .order(Column("date").desc)
+          .limit(1, offset: 1)
+          .fetchOne(db)
+
+        var updatedChat = chat
+        updatedChat?.lastMsgId = previousMessage?.messageId
+        try updatedChat?.save(db)
+
+        // Preserve the information that we have already handled the current
+        // `lastMsgId` so subsequent deletions in the same batch don't repeat
+        // the update work unnecessarily.
+        prevChatLastMsgId = messageId
+      }
+
+      // Remove the message itself.
+      try Message
+        .filter(Column("messageId") == messageId)
+        .filter(Column("chatId") == chatId)
+        .deleteAll(db)
+    }
+  }
+}

@@ -31,34 +31,7 @@ public struct TransactionDeleteMessage: Transaction {
     Log.shared.debug("Optimistic delete message \(messageIds) \(peerId) \(chatId)")
     do {
       try AppDatabase.shared.dbWriter.write { db in
-        let chat = try Chat.fetchOne(db, id: chatId)
-
-        var prevChatLastMsgId = chat?.lastMsgId
-
-        // Delete messages
-        for messageId in messageIds {
-          // Update last message first
-          if prevChatLastMsgId == messageId {
-            let previousMessage = try Message
-              .filter(Column("chatId") == chat?.id)
-              .order(Column("date").desc)
-              .limit(1, offset: 1)
-              .fetchOne(db)
-
-            var updatedChat = chat
-            updatedChat?.lastMsgId = previousMessage?.messageId
-            try updatedChat?.save(db)
-
-            // update so if next message is deleted, we can use it to update again
-            prevChatLastMsgId = messageId
-          }
-
-          // TODO: Optimize this to use keys
-          try Message
-            .filter(Column("messageId") == messageId)
-            .filter(Column("chatId") == chatId)
-            .deleteAll(db)
-        }
+        try Message.deleteMessages(db, messageIds: messageIds, chatId: chatId)
       }
 
       DispatchQueue.main.async(qos: .userInitiated) {
