@@ -16,7 +16,7 @@ class SidebarItemRow: NSTableCellView {
   static let avatarSize: CGFloat = 48
   static let height: CGFloat = 64
   static let verticalPadding: CGFloat = ((SidebarItemRow.height - SidebarItemRow.avatarSize) / 2)
-  let avatarSpacing: CGFloat = 6 
+  let avatarSpacing: CGFloat = 6
 
   private var hoverColor: NSColor {
     if #available(macOS 14.0, *) {
@@ -281,7 +281,7 @@ class SidebarItemRow: NSTableCellView {
 
     NSLayoutConstraint.activate([
       stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 0),
-      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: 0),
+      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -6),
       stackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: Self.verticalPadding),
       stackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: 0), // Don't apply padding
     ])
