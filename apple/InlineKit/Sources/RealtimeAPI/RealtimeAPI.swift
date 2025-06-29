@@ -71,7 +71,7 @@ public actor RealtimeAPI: Sendable {
 
     log.debug("starting realtime API")
 
-    guard let _ = await Auth.shared.getToken() else {
+    guard let _ = Auth.shared.getToken() else {
       log.error("No token available")
       throw RealtimeAPIError.notAuthorized
     }
@@ -94,7 +94,7 @@ public actor RealtimeAPI: Sendable {
     started = false
 
     // Clear message queue and pending RPC calls
-    msgQueue.removeAll()
+    await msgQueue.removeAll()
 
     // Cancel all pending RPC calls with a specific error
     for (_, continuation) in rpcCalls {
@@ -153,12 +153,15 @@ public actor RealtimeAPI: Sendable {
   }
 
   private func processMessages() async {
-    while state == .flowing, let message = msgQueue.next() {
+    while state == .flowing, let message = await msgQueue.next() {
       do {
         try await transport.send(message)
       } catch {
         handleFailedMessageSend()
-        msgQueue.requeue(message)
+        await msgQueue.requeue(message)
+        // Pause delivery so we wait for the transport to recover before
+        // retrying, otherwise the run-loop can stall indefinitely.
+        await pauseDelivery()
         break
       }
     }
@@ -234,9 +237,9 @@ extension RealtimeAPI {
     log.debug("invoking method: \(method)")
 
     return try await withCheckedThrowingContinuation { continuation in
-      msgQueue.push(message: message)
       rpcCalls[message.id] = continuation
       Task {
+        await msgQueue.push(message: message)
         await messageChannel.send(())
       }
     }
