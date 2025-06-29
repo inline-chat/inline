@@ -57,7 +57,7 @@ actor TransactionsActor {
     completionHandler = handler
   }
 
-  func cancel(transactionId: String) {
+  func cancel(transactionId: String) async {
     canceledTransactionIds.append(transactionId)
     guard let transaction = queue.first(where: { $0.id == transactionId }) else { return }
 
@@ -65,9 +65,12 @@ actor TransactionsActor {
     queue.removeAll { $0.id == transactionId }
 
     // Rollback
-    Task {
+    Task.detached(priority: .userInitiated) { [weak self] in
+      guard let self else { return }
       await transaction.rollback()
-      completionHandler?(transaction)
+      Task {
+        await completionHandler?(transaction)
+      }
     }
   }
 
@@ -140,9 +143,7 @@ actor TransactionsActor {
       if let transaction = dequeue() {
         // TODO: make it batches of 20 or sth
         // This task paralellizes the transactions
-        Task { [self] in
-          await run(transaction: transaction)
-        }
+        await run(transaction: transaction)
         continue
       }
 
