@@ -67,6 +67,11 @@ actor WebSocketTransport: NSObject, Sendable {
   private var log = Log.scoped("Realtime_TransportWS", enableTracing: false)
   private var pathMonitor: NWPathMonitor?
   private let reconnectionInProgress = ManagedAtomic<Bool>(false)
+  private let pingInFlight = ManagedAtomic<Bool>(false)
+
+  // Ping timeouts (in seconds)
+  private let pingTimeoutNormal: TimeInterval = 6.0 // Wi-Fi / LTE
+  private let pingTimeoutConstrained: TimeInterval = 10.0 // 3G / constrained paths
 
   override init() {
     log.debug("Initializing WebSocketTransport")
@@ -173,8 +178,8 @@ actor WebSocketTransport: NSObject, Sendable {
 
   private func endBackgroundTask() {
     guard backgroundTask != .invalid else { return }
-    Task {
-      await UIApplication.shared.endBackgroundTask(backgroundTask)
+    Task { @MainActor in
+      UIApplication.shared.endBackgroundTask(backgroundTask)
     }
     backgroundTask = .invalid
   }
@@ -370,13 +375,14 @@ actor WebSocketTransport: NSObject, Sendable {
         await connect()
 
       case .connected:
-        // TODO: Fix this BS
-        // Verify the connection is actually alive with a ping
+        // Verify the connection is actually alive with a ping. If the ping
+        // fails we treat this as a genuine disconnect so that the normal
+        // reconnection logic (with back-off etc.) can run.
         do {
           try await sendPing()
         } catch {
-          log.trace("Ping failed, reconnecting...")
-          await connect()
+          log.trace("Ping failed, treating as disconnect…")
+          await handleDisconnection(error: error)
         }
 
       case .connecting:
@@ -384,9 +390,14 @@ actor WebSocketTransport: NSObject, Sendable {
     }
   }
 
-  private let pingInterval: TimeInterval = 10.0
-  private let pingTimeout: TimeInterval = 8.0
-  private let maxConsecutivePingFailures = 3
+  // MARK: - Ping configuration
+
+  // Ping every 5 s. With a 10 s timeout and one allowed miss, worst-case
+  // detection time is ~25 s which is a good balance between responsiveness
+  // and battery/network usage for a chat app.
+  private let pingInterval: TimeInterval = 5.0
+  // Allow one lost ping; reconnect after the second consecutive failure.
+  private let maxConsecutivePingFailures = 2
 
   private func setupPingPong() {
     guard webSocketTask != nil else { return }
@@ -402,10 +413,16 @@ actor WebSocketTransport: NSObject, Sendable {
         do {
           try await Task.sleep(for: .seconds(pingInterval))
           try await sendPing()
+          // Successfully got pong – reset counter.
           consecutiveFailures = 0
+
+        } catch PingError.inProgress {
+          // Another ping is still outstanding; don't treat as a failure.
+          continue
+
         } catch {
           consecutiveFailures += 1
-          log.error("Ping failed (\(consecutiveFailures)/3)", error: error)
+          log.error("Ping failed (\(consecutiveFailures)/2)", error: error)
 
           if consecutiveFailures >= maxConsecutivePingFailures {
             await handleDisconnection(error: error)
@@ -416,23 +433,37 @@ actor WebSocketTransport: NSObject, Sendable {
     }
   }
 
+  private enum PingError: Error {
+    case inProgress
+  }
+
   private func sendPing(fastTimeout: Bool = false) async throws {
     guard running else { return }
     guard let webSocketTask else { return }
 
-    try await withThrowingTaskGroup(of: Void.self) { group in
+    // Ensure we don't have more than one ping outstanding.
+    if !pingInFlight.compareExchange(expected: false, desired: true, ordering: .acquiring).exchanged {
+      // A ping is already in flight; let the existing timeout handle it.
+      throw PingError.inProgress
+    }
 
+    defer { pingInFlight.store(false, ordering: .releasing) }
+
+    // Select an appropriate timeout for this ping.
+    let timeout = currentPingTimeout(fast: fastTimeout)
+
+    try await withThrowingTaskGroup(of: Void.self) { group in
       let hasCompleted = ManagedAtomic<Bool>(false)
 
-      // Add timeout task
+      // Timeout task
       group.addTask {
-        try await Task.sleep(for: .seconds(fastTimeout ? 2.0 : self.pingTimeout)) // 5 seconds timeout for ping
+        try await Task.sleep(for: .seconds(timeout))
         if hasCompleted.compareExchange(expected: false, desired: true, ordering: .relaxed).exchanged {
           throw TransportError.connectionTimeout
         }
       }
 
-      // Add ping task
+      // Actual ping task
       group.addTask {
         try await withCheckedThrowingContinuation { continuation in
           webSocketTask.sendPing { error in
@@ -448,7 +479,6 @@ actor WebSocketTransport: NSObject, Sendable {
       }
 
       do {
-        // Wait for first completion (success or failure)
         try await group.next()
         group.cancelAll()
       } catch {
@@ -501,6 +531,7 @@ actor WebSocketTransport: NSObject, Sendable {
           case .string:
             // unsupported
             break
+
           case let .data(data):
             log.debug("got data message \(data.count) bytes")
 
@@ -546,11 +577,9 @@ actor WebSocketTransport: NSObject, Sendable {
     reason: Data? = nil,
     error: Error? = nil
   ) async {
-    if webSocketTask?.state == .running {
-      log.debug("WebSocket disconnect was stale")
-      return
-    }
-    
+    // Proceed with cleanup regardless of the task's current state. URLSession
+    // sometimes still reports `.running` when the connection is actually
+    // defunct, so we avoid early-returning here.
     connectionState = .disconnected
     notifyStateChange()
 
@@ -638,6 +667,15 @@ actor WebSocketTransport: NSObject, Sendable {
         await handleDisconnection(error: error)
       }
     }
+  }
+
+  // MARK: - Helpers
+
+  /// Calculates the timeout to use for a ping based on network path quality
+  /// and whether this is a fast-probe (foreground transition) ping.
+  private func currentPingTimeout(fast: Bool) -> TimeInterval {
+    if fast { return 3.0 }
+    return networkQualityIsLow ? pingTimeoutConstrained : pingTimeoutNormal
   }
 }
 
