@@ -105,6 +105,8 @@ struct ReactionItem: View {
     }
   }
 
+  @State private var tooltip: String? = nil
+
   static let padding: CGFloat = 8
   static let spacing: CGFloat = 4
   static let height: CGFloat = 28
@@ -112,6 +114,18 @@ struct ReactionItem: View {
   static let textFontSize: CGFloat = 12
 
   var body: some View {
+    item
+      .help(tooltip ?? "")
+      .onHover { _ in
+        tooltip = group.reactions.compactMap { reaction in
+          reaction.reaction.userId == currentUserId ? "You" : ObjectCache.shared
+            .getUser(id: reaction.reaction.userId)?.user.displayName
+        }.joined(separator: ", ")
+      }
+  }
+
+  @ViewBuilder
+  private var item: some View {
     HStack(spacing: Self.spacing) {
       Text(emoji)
         .font(.system(size: Self.emojiFontSize))
