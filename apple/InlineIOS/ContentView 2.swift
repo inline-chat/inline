@@ -3,7 +3,6 @@ import InlineUI
 import Logger
 import SwiftUI
 
-
 struct ContentView2: View {
   @Environment(\.auth) private var auth
   @Environment(\.scenePhase) private var scene
@@ -17,7 +16,7 @@ struct ContentView2: View {
   @StateObject var mainViewRouter = MainViewRouter()
   @StateObject private var fileUploadViewModel = FileUploadViewModel()
   @StateObject private var tabsManager = TabsManager()
-  @State private var router = Router(initialTab: .chats)
+  @Environment(Router.self) private var router
 
   init() {
     _data = EnvironmentStateObject { env in
@@ -47,11 +46,13 @@ struct ContentView2: View {
 
   @ViewBuilder
   var content: some View {
+    @Bindable var bindableRouter = router
+
     switch mainViewRouter.route {
       case .main:
-        TabView(selection: $router.selectedTab) {
+        TabView(selection: $bindableRouter.selectedTab) {
           ForEach(AppTab.allCases) { tab in
-            NavigationStack(path: $router[tab]) {
+            NavigationStack(path: $bindableRouter[tab]) {
               tabContentView(for: tab)
                 .navigationDestination(for: Destination.self) { destination in
                   destinationView(for: destination)
@@ -63,7 +64,7 @@ struct ContentView2: View {
             .tag(tab)
           }
         }
-        .sheet(item: $router.presentedSheet) { sheet in
+        .sheet(item: $bindableRouter.presentedSheet) { sheet in
           sheetView(for: sheet)
         }
       case .onboarding:
