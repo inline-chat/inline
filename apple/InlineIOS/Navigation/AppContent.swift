@@ -46,6 +46,7 @@ enum Sheet: SheetType, Codable {
   }
 }
 
+@MainActor
 extension Router {
   func navigateFromNotification(peer: Peer) {
     // Check if user is already in the chat from the notification
@@ -57,10 +58,13 @@ extension Router {
       return
     }
 
+    // Switch to chats tab first (matching Navigation.swift behavior)
+    selectedTab = .chats
+
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-      self.popToRoot()
+      self.popToRoot(for: .chats)
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-        self.push(.chat(peer: peer))
+        self.push(.chat(peer: peer), for: .chats)
       }
     }
   }
