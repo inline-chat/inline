@@ -11,6 +11,7 @@ struct SpaceIntegrationsView: View {
   @EnvironmentStateObject private var viewModel: FullSpaceViewModel
   let spaceId: Int64
   @EnvironmentObject var nav: Navigation
+  @Environment(Router.self) var router
 
   init(spaceId: Int64) {
     self.spaceId = spaceId
@@ -37,7 +38,7 @@ struct SpaceIntegrationsView: View {
         completion: checkIntegrationConnection,
         hasOptions: true,
         navigateToOptions: {
-          nav.push(.integrationOptions(spaceId: spaceId, provider: "notion"))
+          router.push(.integrationOptions(spaceId: spaceId, provider: "notion"))
         },
         permissionCheck: {
           #if DEBUG
