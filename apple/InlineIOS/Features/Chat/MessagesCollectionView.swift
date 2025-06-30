@@ -62,13 +62,9 @@ final class MessagesCollectionView: UICollectionView {
     autoresizingMask = [.flexibleHeight]
     alwaysBounceVertical = true
 
-
     if #available(iOS 26.0, *) {
       topEdgeEffect.isHidden = true
-    } else {
-      
-    }
-
+    } else {}
 
     register(
       MessageCollectionViewCell.self,
@@ -466,7 +462,6 @@ private extension MessagesCollectionView {
     private var updateWorkItem: DispatchWorkItem?
     private var isApplyingSnapshot = false
     private var needsAnotherUpdate = false
-    private var hasIntegrationAccess: Bool = false
 
     func collectionView(
       _ collectionView: UICollectionView,
@@ -527,8 +522,15 @@ private extension MessagesCollectionView {
         }
         .store(in: &cancellables)
 
-      // Check integration access on initialization
-      checkIntegrationAccess()
+      // Setup NotionTaskManager delegate
+      setupNotionTaskManager()
+    }
+
+    private func setupNotionTaskManager() {
+      NotionTaskManager.shared.delegate = self
+      Task {
+        await NotionTaskManager.shared.checkIntegrationAccess(peerId: peerId, spaceId: spaceId)
+      }
     }
 
     func setupDataSource(_ collectionView: UICollectionView) {
@@ -1238,219 +1240,17 @@ private extension MessagesCollectionView {
       return messages[startIndex ... endIndex].map(\.message.messageId)
     }
 
-    private func checkIntegrationAccess() {
-      Task { [weak self] in
-        guard let self else { return }
-        do {
-          let integrations = try await ApiClient.shared.getIntegrations(
-            userId: Auth.shared.getCurrentUserId() ?? 0,
-            spaceId: peerId.isThread ? spaceId : nil
-          )
-
-          DispatchQueue.main.async {
-            self.hasIntegrationAccess = integrations.hasIntegrationAccess
-          }
-        } catch {
-          Log.shared.error("Error checking integration access: \(error)")
-          DispatchQueue.main.async {
-            self.hasIntegrationAccess = false
-          }
-        }
-      }
-    }
-
     private func createWillDoMenu(for message: Message) -> UIAction? {
       // Only show "Will Do" if user has integration access
-      guard hasIntegrationAccess else { return nil }
+      guard NotionTaskManager.shared.hasAccess else { return nil }
 
       return UIAction(
         title: "Will Do",
         image: UIImage(systemName: "circle.badge.plus")
-      ) { [weak self] _ in
-        Task { [weak self] in
-          await self?.handleWillDoAction(for: message)
+      ) { _ in
+        Task {
+          await NotionTaskManager.shared.handleWillDoAction(for: message, spaceId: self.spaceId)
         }
-      }
-    }
-
-    private func handleWillDoAction(for message: Message) async {
-      // For thread chats, use the current spaceId
-      if message.peerId.isThread {
-        await handleWillDoForSpace(message: message, spaceId: spaceId)
-        return
-      }
-
-      // For DM chats, handle without storing preferences
-      await handleWillDoForDM(message: message)
-    }
-
-    private func handleWillDoForSpace(message: Message, spaceId: Int64) async {
-      do {
-        // Check if user has access to integration
-        let integrations = try await ApiClient.shared.getIntegrations(
-          userId: Auth.shared.getCurrentUserId() ?? 0,
-          spaceId: spaceId
-        )
-
-        guard integrations.hasNotionConnected else {
-          ToastManager.shared.showToast(
-            "No Notion integration access for this space",
-            type: .error,
-            systemImage: "exclamationmark.triangle"
-          )
-          return
-        }
-
-        await createNotionTask(spaceId: spaceId, message: message)
-      } catch {
-        Log.shared.error("Error creating notion task: \(error)")
-        ToastManager.shared.showToast(
-          "Failed to create Notion task",
-          type: .error,
-          systemImage: "exclamationmark.triangle"
-        )
-      }
-    }
-
-    private func handleWillDoForDM(message: Message) async {
-      do {
-        // Get all accessible integrations for DMs
-        let integrations = try await ApiClient.shared.getIntegrations(
-          userId: Auth.shared.getCurrentUserId() ?? 0,
-          spaceId: nil
-        )
-
-        guard integrations.hasNotionConnected else {
-          ToastManager.shared.showToast(
-            "No Notion integration found. Please connect your Notion account in one of your spaces.",
-            type: .error,
-            systemImage: "exclamationmark.triangle"
-          )
-          return
-        }
-
-        guard let notionSpaces = integrations.notionSpaces, !notionSpaces.isEmpty else {
-          ToastManager.shared.showToast(
-            "No accessible Notion integrations found",
-            type: .error,
-            systemImage: "exclamationmark.triangle"
-          )
-          return
-        }
-
-        // Always show space selection for DMs without remembering preferences
-        await showSpaceSelectionSheet(spaces: notionSpaces, message: message)
-      } catch {
-        Log.shared.error("Error handling will do for DM: \(error)")
-        ToastManager.shared.showToast(
-          "Failed to create Notion task",
-          type: .error,
-          systemImage: "exclamationmark.triangle"
-        )
-      }
-    }
-
-    @MainActor
-    private func showSpaceSelectionSheet(
-      spaces: [NotionSpace],
-      message: Message
-    ) async {
-      // Find the view controller by traversing the responder chain from the collection view
-      func findViewController(from view: UIView?) -> UIViewController? {
-        guard let view else { return nil }
-
-        var responder: UIResponder? = view
-        while let nextResponder = responder?.next {
-          if let viewController = nextResponder as? UIViewController {
-            return viewController
-          }
-          responder = nextResponder
-        }
-        return nil
-      }
-
-      guard let viewController = findViewController(from: currentCollectionView) else { return }
-
-      let alert = UIAlertController(
-        title: "Select Space",
-        message: "Choose which space to create the Notion task in the selected database:",
-        preferredStyle: .actionSheet
-      )
-
-      for space in spaces {
-        let action = UIAlertAction(title: space.spaceName, style: .default) { [weak self] _ in
-          Task { [weak self] in
-            await self?.createNotionTask(
-              spaceId: space.spaceId,
-              message: message
-            )
-          }
-        }
-        alert.addAction(action)
-      }
-
-      alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-
-      // For iPad
-      if let popover = alert.popoverPresentationController {
-        popover.sourceView = viewController.view
-        popover.sourceRect = CGRect(
-          x: viewController.view.bounds.midX,
-          y: viewController.view.bounds.midY,
-          width: 0,
-          height: 0
-        )
-        popover.permittedArrowDirections = []
-      }
-
-      viewController.present(alert, animated: true)
-    }
-
-    private func createNotionTask(
-      spaceId: Int64,
-      message: Message
-    ) async {
-      let progressTracker = NotionTaskProgressTracker()
-
-      // Start progress tracking
-      let progressTask = Task {
-        await progressTracker.startProgress()
-      }
-
-      do {
-        let result = try await ApiClient.shared.createNotionTask(
-          spaceId: spaceId,
-          messageId: message.messageId,
-          chatId: message.chatId,
-          peerId: message.peerId
-        )
-
-        // Stop progress tracking
-        progressTracker.completeProgress()
-        progressTask.cancel()
-
-        ToastManager.shared.showToast(
-          "Done",
-          type: .success,
-          systemImage: "checkmark.circle",
-          action: {
-            if let url = URL(string: result.url) {
-              UIApplication.shared.open(url)
-            }
-          },
-          actionTitle: "Open"
-        )
-      } catch {
-        // Stop progress tracking on error
-        progressTracker.failProgress()
-        progressTask.cancel()
-
-        Log.shared.error("Error creating notion task: \(error)")
-        ToastManager.shared.showToast(
-          "Failed to create Notion task",
-          type: .error,
-          systemImage: "exclamationmark.triangle"
-        )
       }
     }
   }
@@ -1488,79 +1288,103 @@ extension Notification.Name {
   static let scrollToBottomChanged = Notification.Name("scrollToBottomChanged")
 }
 
-// MARK: - NotionTaskProgressTracker
+// MARK: - NotionTaskManagerDelegate Extension
 
-@MainActor
-class NotionTaskProgressTracker {
-  private let progressSteps: [(text: String, icon: String, estimatedDuration: TimeInterval)] = [
-    ("Processing", "cylinder.split.1x2", 3.0),
-    ("Assigning users", "person.2.circle", 2.0),
-    ("Generating issue", "brain.head.profile", 2.0),
-    ("Creating Notion page", "notion-logo", 2.0),
-  ]
+extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegate {
+  func showErrorToast(_ message: String, systemImage: String) {
+    DispatchQueue.main.async {
+      ToastManager.shared.showToast(
+        message,
+        type: .error,
+        systemImage: systemImage
+      )
+    }
+  }
 
-  private var currentStepIndex = 0
-  private var isCompleted = false
-  private var isFailed = false
+  func showSuccessToast(_ message: String, systemImage: String, url: String) {
+    DispatchQueue.main.async {
+      ToastManager.shared.showToast(
+        message,
+        type: .success,
+        systemImage: systemImage,
+        action: {
+          if let url = URL(string: url) {
+            UIApplication.shared.open(url)
+          }
+        },
+        actionTitle: "Open"
+      )
+    }
+  }
 
-  func startProgress() async {
-    currentStepIndex = 0
-    isCompleted = false
-    isFailed = false
+  func showSpaceSelectionSheet(spaces: [InlineKit.NotionSpace], completion: @escaping @Sendable (Int64) -> Void) {
+    // Ensure UI operations happen on the main thread
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
 
-    for (index, step) in progressSteps.enumerated() {
-      if isCompleted || isFailed {
-        return
+      // Find the view controller by traversing the responder chain from the collection view
+      func findViewController(from view: UIView?) -> UIViewController? {
+        guard let view else { return nil }
+
+        var responder: UIResponder? = view
+        while let nextResponder = responder?.next {
+          if let viewController = nextResponder as? UIViewController {
+            return viewController
+          }
+          responder = nextResponder
+        }
+        return nil
       }
 
-      currentStepIndex = index
+      guard let viewController = findViewController(from: currentCollectionView) else { return }
 
+      let alert = UIAlertController(
+        title: "Select Space",
+        message: "Choose which space to create the Notion task in the selected database:",
+        preferredStyle: .actionSheet
+      )
+
+      for space in spaces {
+        let action = UIAlertAction(title: space.spaceName, style: .default) { _ in
+          completion(space.spaceId)
+        }
+        alert.addAction(action)
+      }
+
+      alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+      // For iPad
+      if let popover = alert.popoverPresentationController {
+        popover.sourceView = viewController.view
+        popover.sourceRect = CGRect(
+          x: viewController.view.bounds.midX,
+          y: viewController.view.bounds.midY,
+          width: 0,
+          height: 0
+        )
+        popover.permittedArrowDirections = []
+      }
+
+      viewController.present(alert, animated: true)
+    }
+  }
+
+  func showProgressStep(_ step: Int, message: String, systemImage: String) {
+    DispatchQueue.main.async {
       ToastManager.shared.showProgressStep(
-        index + 1,
-        message: step.text,
-        systemImage: step.icon
+        step,
+        message: message,
+        systemImage: systemImage
       )
-
-      try? await Task.sleep(nanoseconds: UInt64(step.estimatedDuration * 1_000_000_000))
     }
   }
 
-  func completeProgress() {
-    isCompleted = true
-  }
-
-  func failProgress() {
-    isFailed = true
-  }
-
-  func updateProgress(to stepText: String) {
-    guard !isCompleted, !isFailed else { return }
-
-    if let stepIndex = progressSteps.firstIndex(where: { $0.text == stepText }) {
-      currentStepIndex = stepIndex
-      let step = progressSteps[stepIndex]
-
+  func updateProgressToast(message: String, systemImage: String) {
+    DispatchQueue.main.async {
       ToastManager.shared.updateProgressToast(
-        message: step.text,
-        systemImage: step.icon
+        message: message,
+        systemImage: systemImage
       )
     }
-  }
-
-  func advanceToStep(_ stepNumber: Int, customMessage: String? = nil) {
-    guard stepNumber >= 1, stepNumber <= progressSteps.count else { return }
-    guard !isCompleted, !isFailed else { return }
-
-    let stepIndex = stepNumber - 1
-    currentStepIndex = stepIndex
-    let step = progressSteps[stepIndex]
-
-    let message = customMessage ?? step.text
-
-    ToastManager.shared.showProgressStep(
-      stepNumber,
-      message: message,
-      systemImage: step.icon
-    )
   }
 }
