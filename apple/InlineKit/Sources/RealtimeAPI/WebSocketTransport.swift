@@ -179,7 +179,7 @@ actor WebSocketTransport: NSObject, Sendable {
   private func endBackgroundTask() {
     guard backgroundTask != .invalid else { return }
     Task { @MainActor in
-      UIApplication.shared.endBackgroundTask(backgroundTask)
+      await UIApplication.shared.endBackgroundTask(backgroundTask)
     }
     backgroundTask = .invalid
   }
