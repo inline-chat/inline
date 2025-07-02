@@ -15,11 +15,10 @@ import Throttler
 
 class MessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
-  private let log = Log.scoped("MessageView", enableTracing: false)
+  private let log = Log.scoped("MessageView", enableTracing: true)
   static let avatarSize: CGFloat = Theme.messageAvatarSize
   private(set) var fullMessage: FullMessage
   private var props: MessageViewProps
-  private var shineEffectView: ShineEffectView?
   private var translationStateCancellable: AnyCancellable?
   private var from: User {
     fullMessage.from ?? User.deletedInstance
@@ -47,6 +46,10 @@ class MessageViewAppKit: NSView {
 
   private var hasReactions: Bool {
     props.layout.hasReactions
+  }
+
+  private var hasAttachments: Bool {
+    props.layout.hasAttachments
   }
 
   private var outgoing: Bool {
@@ -147,6 +150,8 @@ class MessageViewAppKit: NSView {
     return view
   }()
 
+  private var shineEffectView: ShineEffectView?
+
   private lazy var avatarView: UserAvatarView = {
     let view = UserAvatarView(userInfo: fullMessage.senderInfo ?? .deleted)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -175,7 +180,7 @@ class MessageViewAppKit: NSView {
     return view
   }()
 
-  private lazy var newPhotoView: NewPhotoView = {
+  private lazy var photoView: NewPhotoView = {
     let view = NewPhotoView(fullMessage, scrollState: scrollState)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -193,6 +198,18 @@ class MessageViewAppKit: NSView {
     return view
   }()
 
+  /// Attachments
+  ///
+  /// Will do tasks, Loom embeds, etc.
+  private var attachmentsView: MessageAttachmentsView?
+
+  private func createAttachmentsView() -> MessageAttachmentsView? {
+    let view = MessageAttachmentsView(attachments: fullMessage.attachments, message: message)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }
+
+  /// Reply
   private lazy var replyView: EmbeddedMessageView = {
     let view = EmbeddedMessageView(style: outgoing ? .white : .colored)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -390,7 +407,7 @@ class MessageViewAppKit: NSView {
     }
 
     if hasPhoto {
-      contentView.addSubview(newPhotoView)
+      contentView.addSubview(photoView)
     }
 
     if hasDocument, let documentView {
@@ -403,6 +420,11 @@ class MessageViewAppKit: NSView {
 
     if hasReactions {
       setupReactions()
+    }
+
+    if hasAttachments {
+      attachmentsView = createAttachmentsView()
+      contentView.addSubview(attachmentsView!)
     }
 
     addSubview(timeAndStateView)
@@ -848,21 +870,41 @@ class MessageViewAppKit: NSView {
       )
     }
 
+    // // Attachments
+    // if let attachments = layout.attachments, let attachmentsView {
+    //   attachmentsViewTopConstraint = attachmentsView.topAnchor.constraint(
+    //     equalTo: contentView.topAnchor,
+    //     constant: layout.attachmentsContentViewTop
+    //   )
+
+    //   constraints.append(contentsOf: [
+    //     attachmentsViewTopConstraint!,
+    //     attachmentsView.leadingAnchor.constraint(
+    //       equalTo: contentView.leadingAnchor,
+    //       constant: 0
+    //     ),
+    //     attachmentsView.trailingAnchor.constraint(
+    //       equalTo: contentView.trailingAnchor,
+    //       constant: 0
+    //     ),
+    //   ])
+    // }
+
     // Photo
 
     if let photo = layout.photo {
-      photoViewTopConstraint = newPhotoView.topAnchor.constraint(
+      photoViewTopConstraint = photoView.topAnchor.constraint(
         equalTo: contentView.topAnchor,
         constant: layout.photoContentViewTop
       )
-      photoViewHeightConstraint = newPhotoView.heightAnchor.constraint(equalToConstant: photo.size.height)
-      photoViewWidthConstraint = newPhotoView.widthAnchor
+      photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photo.size.height)
+      photoViewWidthConstraint = photoView.widthAnchor
         .constraint(equalToConstant: photo.size.width)
       constraints.append(contentsOf: [
         photoViewTopConstraint!,
         photoViewHeightConstraint!,
         photoViewWidthConstraint!,
-        newPhotoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
+        photoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
       ])
     }
   }
@@ -881,6 +923,8 @@ class MessageViewAppKit: NSView {
 
   private var documentViewTopConstraint: NSLayoutConstraint?
 
+  private var attachmentsViewTopConstraint: NSLayoutConstraint?
+
   private var reactionViewWidthConstraint: NSLayoutConstraint!
   private var reactionViewHeightConstraint: NSLayoutConstraint!
   private var reactionViewTopConstraint: NSLayoutConstraint!
@@ -894,10 +938,42 @@ class MessageViewAppKit: NSView {
   private var isInitialUpdateConstraint = true
 
   override func updateConstraints() {
+    var skipUpdates = false
     if isInitialUpdateConstraint {
       setupConstraints()
       isInitialUpdateConstraint = false
       super.updateConstraints()
+      skipUpdates = true
+    }
+
+    // Setup/update attachments view constraints
+    if let attachments = props.layout.attachments {
+      log.trace("Updating attachments view constraints for message \(attachments.size)")
+      if let attachmentsViewTopConstraint {
+        if attachmentsViewTopConstraint.constant != props.layout.attachmentsContentViewTop {
+          attachmentsViewTopConstraint.constant = props.layout.attachmentsContentViewTop
+        }
+      } else if let attachmentsView {
+        attachmentsViewTopConstraint = attachmentsView.topAnchor.constraint(
+          equalTo: contentView.topAnchor,
+          constant: props.layout.attachmentsContentViewTop
+        )
+        NSLayoutConstraint.activate([
+          attachmentsViewTopConstraint!,
+          attachmentsView.leadingAnchor.constraint(
+            equalTo: contentView.leadingAnchor,
+            constant: attachments.spacing.left
+          ),
+          attachmentsView.trailingAnchor.constraint(
+            equalTo: contentView.trailingAnchor,
+            constant: -attachments.spacing.right
+          ),
+        ])
+      }
+    }
+
+    // From this point on, only updates happen (no setup)
+    if skipUpdates {
       return
     }
 
@@ -1335,16 +1411,15 @@ class MessageViewAppKit: NSView {
     updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)
 
     // Reactions
-    // if hasReactions {
+    // TODO: Reactions are not updating as expected
     updateReactions(prev: prev, next: fullMessage, props: props)
-    // }
 
     // Text
     setupMessageText()
 
     // Photo
     if hasPhoto {
-      newPhotoView.update(with: fullMessage)
+      photoView.update(with: fullMessage)
     }
 
     // Document
@@ -1352,6 +1427,19 @@ class MessageViewAppKit: NSView {
       if let documentInfo = fullMessage.documentInfo {
         documentView.update(with: documentInfo)
       }
+    }
+
+    if hasAttachments {
+      if let attachmentsView {
+        attachmentsView.configure(attachments: fullMessage.attachments)
+      } else {
+        attachmentsView = createAttachmentsView()
+        contentView.addSubview(attachmentsView!)
+      }
+    } else {
+      attachmentsView?.removeFromSuperview()
+      attachmentsView = nil
+      attachmentsViewTopConstraint = nil
     }
 
     // Update time and state
@@ -1393,9 +1481,9 @@ class MessageViewAppKit: NSView {
     didSet {
       if hasPhoto {
         if scrollState == .idle {
-          newPhotoView.setIsScrolling(false)
+          photoView.setIsScrolling(false)
         } else {
-          newPhotoView.setIsScrolling(true)
+          photoView.setIsScrolling(true)
         }
       }
     }
@@ -1706,8 +1794,8 @@ extension MessageViewAppKit: NSMenuDelegate {
 
     // Add photo actions
     if hasPhoto {
-      let copyItem = NSMenuItem(title: "Copy Image", action: #selector(newPhotoView.copyImage), keyEquivalent: "i")
-      copyItem.target = newPhotoView
+      let copyItem = NSMenuItem(title: "Copy Image", action: #selector(photoView.copyImage), keyEquivalent: "i")
+      copyItem.target = photoView
       copyItem.isEnabled = true
       if !rendersCopyText {
         copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: "Copy")
@@ -1717,8 +1805,8 @@ extension MessageViewAppKit: NSMenuDelegate {
 
     if hasPhoto {
       menu.addItem(NSMenuItem.separator())
-      let saveItem = NSMenuItem(title: "Save Image", action: #selector(newPhotoView.saveImage), keyEquivalent: "m")
-      saveItem.target = newPhotoView
+      let saveItem = NSMenuItem(title: "Save Image", action: #selector(photoView.saveImage), keyEquivalent: "m")
+      saveItem.target = photoView
       saveItem.isEnabled = true
       saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Image")
       menu.addItem(saveItem)
@@ -1794,40 +1882,6 @@ extension MessageViewAppKit: NSMenuDelegate {
 
     menu.delegate = self
     return menu
-  }
-}
-
-struct MessageViewInputProps: Equatable, Codable, Hashable {
-  var firstInGroup: Bool
-  var isLastMessage: Bool
-  var isFirstMessage: Bool
-  var isDM: Bool
-  var isRtl: Bool
-  var translated: Bool
-
-  /// Used in cache key
-  func toString() -> String {
-    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")"
-  }
-}
-
-struct MessageViewProps: Equatable, Codable, Hashable {
-  var firstInGroup: Bool
-  var isLastMessage: Bool
-  var isFirstMessage: Bool
-  var isRtl: Bool
-  var isDM: Bool = false
-  var index: Int?
-  var translated: Bool
-  var layout: MessageSizeCalculator.LayoutPlans
-
-  func equalExceptSize(_ rhs: MessageViewProps) -> Bool {
-    firstInGroup == rhs.firstInGroup &&
-      isLastMessage == rhs.isLastMessage &&
-      isFirstMessage == rhs.isFirstMessage &&
-      isRtl == rhs.isRtl &&
-      isDM == rhs.isDM &&
-      translated == rhs.translated
   }
 }
 
