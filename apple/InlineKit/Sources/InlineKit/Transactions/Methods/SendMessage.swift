@@ -190,11 +190,11 @@ public struct TransactionSendMessage: Transaction {
           }
 
           // Start document upload status
-          let clearUploadState = await ComposeActions.shared.startDocumentUpload(for: peerId)
+          // let clearUploadState = await ComposeActions.shared.startDocumentUpload(for: peerId)
           defer {
             // Clear the upload status and notify completion
             Task { @MainActor in
-              clearUploadState()
+              // clearUploadState()
               NotificationCenter.default.post(
                 name: NSNotification.Name("DocumentUploadCompleted"),
                 object: nil,
