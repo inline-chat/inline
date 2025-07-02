@@ -82,6 +82,7 @@ struct ChatView: View {
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
     .toolbar(.hidden, for: .tabBar)
+    .toolbarRole(.editor)
     .toolbar {
       ToolbarItem(placement: .principal) {
         Button(action: {
@@ -94,7 +95,7 @@ struct ChatView: View {
         .buttonStyle(.plain)
       }
 
-      ToolbarItem(placement: .topBarTrailing) {
+      ToolbarItem(placement: .topBarLeading) {
         Button {
           isTranslationEnabled.toggle()
           TranslationState.shared.toggleTranslation(for: fullChatViewModel.peer)
@@ -142,7 +143,16 @@ struct ChatView: View {
               router.push(.chatInfo(chatItem: chatItem))
             }
           }) {
-            UserAvatar(userInfo: user, size: 28)
+            if isThreadChat {
+              Text(
+                String(describing: fullChatViewModel.chat?.emoji ?? "💬")
+                  .replacingOccurrences(of: "Optional(\"", with: "")
+                  .replacingOccurrences(of: "\")", with: "")
+              )
+              .font(.body)
+            } else {
+              UserAvatar(userInfo: user, size: 28)
+            }
           }
           .buttonStyle(.plain)
         }
@@ -202,20 +212,9 @@ struct ChatView: View {
   @ViewBuilder
   var header: some View {
     VStack(spacing: 0) {
-      if isThreadChat {
-        HStack {
-          Text(
-            String(describing: fullChatViewModel.chat?.emoji ?? "💬").replacingOccurrences(of: "Optional(\"", with: "")
-              .replacingOccurrences(of: "\")", with: "")
-          )
-          .font(.body)
-          Text(title)
-            .font(.body)
-        }
-      } else {
-        Text(title)
-          .font(.body)
-      }
+      Text(title)
+        .font(.body)
+
       subtitleView
     }
     .onAppear {
