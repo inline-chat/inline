@@ -127,6 +127,10 @@ class MessageSizeCalculator {
     /// document is always above text, and it's mutually exclusive with other media types
     var document: LayoutPlan?
 
+    /// attachments are below text
+    var attachmentItems: [LayoutPlan]
+    var attachments: LayoutPlan?
+
     /// reply is always above text
     var reply: LayoutPlan?
 
@@ -162,6 +166,7 @@ class MessageSizeCalculator {
     var hasReply: Bool { reply != nil }
     var hasDocument: Bool { document != nil }
     var hasReactions: Bool { reactions != nil }
+    var hasAttachments: Bool { attachments != nil }
 
     // used as edge inset for content view stack
     var topMostContentTopSpacing: CGFloat {
@@ -244,6 +249,26 @@ class MessageSizeCalculator {
       return top
     }
 
+    var attachmentsContentViewTop: CGFloat {
+      var top: CGFloat = attachments?.spacing.top ?? 0
+      if let reply {
+        top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      if let photo {
+        top += photo.spacing.top + photo.size.height + photo.spacing.bottom
+      }
+      if let document {
+        top += document.spacing.top + document.size.height + document.spacing.bottom
+      }
+      if let text {
+        top += text.spacing.top + text.size.height + text.spacing.bottom
+      }
+      if let reactions {
+        top += reactions.spacing.top + reactions.size.height + reactions.spacing.bottom
+      }
+      return top
+    }
+
     var nameAndBubbleLeading: CGFloat {
       Theme.messageAvatarSize + Theme.messageHorizontalStackSpacing + Theme.messageSidePadding
     }
@@ -273,6 +298,7 @@ class MessageSizeCalculator {
     let hasDocument = message.documentInfo != nil
     let hasReply = message.message.repliedToMessageId != nil
     let hasReactions = message.reactions.count > 0
+    let hasAttachments = message.attachments.count > 0
     let isOutgoing = message.message.out == true
     var isSingleLine = false
     var textSize: CGSize?
@@ -326,6 +352,14 @@ class MessageSizeCalculator {
       // Documents have minimum width but can expand up to parent available width
       // Start with the minimum document width, but don't exceed parent available width
       documentWidth = min(parentAvailableWidth, Theme.documentViewWidth)
+    }
+
+    // Calculate attachments width first if we have attachments
+    var attachmentsWidth: CGFloat?
+    if hasAttachments {
+      // Attachments have minimum width but can expand up to parent available width
+      // Start with the minimum attachment width, but don't exceed parent available width
+      attachmentsWidth = min(parentAvailableWidth, Theme.attachmentViewWidth)
     }
 
     // What's the available width for the text
@@ -422,6 +456,10 @@ class MessageSizeCalculator {
       isSingleLine = false
     }
 
+    if isSingleLine, hasAttachments {
+      isSingleLine = false
+    }
+
     // MARK: - Layout Plans
 
     // we prepare our plans and after done with calculations we will use them to calculate the final size
@@ -444,6 +482,8 @@ class MessageSizeCalculator {
     var reactionsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
     var timePlan: LayoutPlan?
+    var attachmentsPlan: LayoutPlan?
+    var attachmentItemsPlans: [LayoutPlan] = []
 
     // MARK: - Name
 
@@ -556,6 +596,37 @@ class MessageSizeCalculator {
       }
     }
 
+    // MARK: - Attachments
+
+    if hasAttachments, let attachmentsWidth {
+      attachmentsPlan = LayoutPlan(size: .zero, spacing: .zero)
+      attachmentsPlan!.size = NSSize(width: attachmentsWidth, height: 0)
+      attachmentsPlan!.spacing = NSEdgeInsets(
+        top: Theme.messageTextAndPhotoSpacing,
+        left: Theme.messageBubbleContentHorizontalInset,
+        bottom: 4, // between time and attackment
+        right: Theme.messageBubbleContentHorizontalInset
+      )
+
+      attachmentItemsPlans = message.attachments.map { attachment in
+        var attachmentPlan = LayoutPlan(size: .zero, spacing: .zero)
+
+        // Handle different types of attachments
+        // External Task (Notion, Linear task, etc)
+        if let _ = attachment.externalTask {
+          attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.externalTaskViewHeight)
+          attachmentPlan.spacing = .bottom(Theme.messageAttachmentsSpacing)
+        }
+        // TODO: Loom
+
+        // Add to total height
+        attachmentsPlan!.size.height += attachmentPlan.size.height
+        attachmentsPlan!.size.height += attachmentPlan.spacing.bottom
+
+        return attachmentPlan
+      }
+    }
+
     // MARK: - Reactions
 
     if hasReactions {
@@ -616,8 +687,6 @@ class MessageSizeCalculator {
         reactionsPlan!.size.width = max(reactionsPlan!.size.width, currentLineWidth)
         reactionsPlan!.size.height = CGFloat(reactionsCurrentLine + 1) * (reactionSize.height + reactionsSpacing)
       }
-
-      print("reactionsPlan width:\(reactionsPlan!.size.width) height:\(reactionsPlan!.size.height)")
     }
 
     // MARK: - Time Size
@@ -675,6 +744,11 @@ class MessageSizeCalculator {
       bubbleHeight += documentPlan.size.height
       bubbleHeight += documentPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, documentPlan.size.width + documentPlan.spacing.horizontalTotal)
+    }
+    if let attachmentsPlan {
+      bubbleHeight += attachmentsPlan.size.height
+      bubbleHeight += attachmentsPlan.spacing.bottom
+      bubbleWidth = max(bubbleWidth, attachmentsPlan.size.width + attachmentsPlan.spacing.horizontalTotal)
     }
     if let reactionsPlan {
       bubbleHeight += reactionsPlan.size.height
@@ -736,6 +810,8 @@ class MessageSizeCalculator {
       text: textPlan,
       photo: photoPlan,
       document: documentPlan,
+      attachmentItems: attachmentItemsPlans,
+      attachments: attachmentsPlan,
       reply: replyPlan,
       reactions: reactionsPlan,
       reactionItems: reactionItemsPlan,
@@ -755,12 +831,6 @@ class MessageSizeCalculator {
       textHeightCache.setObject(NSValue(size: textSize), forKey: cacheKey_)
     }
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
-
-//    #if DEBUG
-//    let end = CFAbsoluteTimeGetCurrent()
-//    let timeElapsed = (end - start) * 1_000 // Convert to milliseconds
-//    log.trace("calculating size for msg\(message.id) took \(String(format: "%.2f", timeElapsed))ms")
-//    #endif
 
     return (size, textSize ?? NSSize.zero, photoSize, plan)
   }
