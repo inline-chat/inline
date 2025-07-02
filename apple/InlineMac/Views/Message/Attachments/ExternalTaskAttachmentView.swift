@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import InlineKit
+import Logger
 
 class ExternalTaskAttachmentView: NSView, AttachmentView {
   let fullAttachment: FullAttachment
@@ -131,6 +132,15 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
       contentStackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Self.padding),
       contentStackView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -Self.padding),
     ])
+
+    // Click
+    let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
+    addGestureRecognizer(clickGesture)
+
+    // Right click for context menu
+    let rightClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleRightClick))
+    rightClickGesture.buttonMask = 2 // Right mouse button
+    addGestureRecognizer(rightClickGesture)
   }
 
   private func configure() {
@@ -176,6 +186,10 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
     message.outgoing ? .white.withAlphaComponent(0.8) : .secondaryLabelColor
   }
 
+  private var task: ExternalTask? {
+    fullAttachment.externalTask
+  }
+
   // MARK: - Appearance Updates
 
   override func viewDidMoveToWindow() {
@@ -193,7 +207,95 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
     titleLabel.textColor = textColor
     taskCreatorLabel.textColor = secondaryTextColor
   }
+
+  // MARK: - Actions
+
+  @objc private func handleClick() {
+    guard let task, let urlString = task.url, let url = URL(string: urlString) else { return }
+    NSWorkspace.shared.open(url)
+  }
+
+  @objc private func handleRightClick() {
+    guard let task, let urlString = task.url, let url = URL(string: urlString) else { return }
+
+    let menu = NSMenu()
+
+    let openAction = NSMenuItem(title: "Open URL", action: #selector(openURL), keyEquivalent: "")
+    openAction.target = self
+    menu.addItem(openAction)
+
+    let copyAction = NSMenuItem(title: "Copy URL", action: #selector(copyURL), keyEquivalent: "")
+    copyAction.target = self
+    menu.addItem(copyAction)
+
+    menu.addItem(NSMenuItem.separator())
+
+    let deleteAction = NSMenuItem(title: "Delete", action: #selector(showDeleteConfirmation), keyEquivalent: "")
+    deleteAction.target = self
+    menu.addItem(deleteAction)
+
+    NSMenu.popUpContextMenu(menu, with: NSApp.currentEvent!, for: self)
+  }
+
+  @objc private func openURL() {
+    guard let task, let urlString = task.url, let url = URL(string: urlString) else { return }
+    NSWorkspace.shared.open(url)
+  }
+
+  @objc private func copyURL() {
+    guard let task, let urlString = task.url else { return }
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(urlString, forType: .string)
+  }
+
+  @objc private func showDeleteConfirmation() {
+    let alert = NSAlert()
+    alert.messageText = "Delete Task"
+    alert.informativeText = "This will delete the task from both Inline and Notion. This action cannot be undone."
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: "Delete")
+    alert.addButton(withTitle: "Cancel")
+
+    let response = alert.runModal()
+    if response == .alertFirstButtonReturn {
+      deleteAttachment()
+    }
+  }
+
+  private func deleteAttachment() {
+    guard let externalTask = task else {
+      Log.shared.error("Missing external task for deletion")
+      return
+    }
+
+    Task {
+      do {
+        try await DataManager.shared.deleteAttachment(
+          externalTask: externalTask,
+          messageId: message.messageId,
+          chatId: message.chatId
+        )
+      } catch {
+        Log.shared.error("Failed to delete attachment", error: error)
+
+        DispatchQueue.main.async { [weak self] in
+          self?.showErrorAlert(error: error)
+        }
+      }
+    }
+  }
+
+  private func showErrorAlert(error: Error) {
+    let alert = NSAlert()
+    alert.messageText = "Delete Failed"
+    alert.informativeText = "Failed to delete the task: \(error.localizedDescription)"
+    alert.alertStyle = .critical
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
+  }
 }
+
+// MARK: - TaskSquareView
 
 class TaskSquareView: NSView {
   private var isOutgoing: Bool
