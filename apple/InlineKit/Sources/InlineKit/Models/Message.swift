@@ -320,6 +320,10 @@ public extension Message {
       "Message"
     }
   }
+
+  var outgoing: Bool {
+    out ?? false
+  }
 }
 
 public extension InlineProtocol.Message {
