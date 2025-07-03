@@ -51,6 +51,9 @@ export const users = pgTable(
     // bot
     bot: boolean("bot").default(false),
     botCreatorId: integer("bot_creator_id").references((): AnyPgColumn => users.id),
+
+    // updates
+    pts: integer("pts").default(0),
   },
   (table) => ({
     users_username_unique: uniqueIndex("users_username_unique").on(lower(table.username)),
