@@ -92,10 +92,7 @@ public struct CreateChatIOSView: View {
       .background(.clear)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .topBarLeading) {
-          Text("Create Chat")
-            .fontWeight(.bold)
-        }
+    
         ToolbarItem(placement: .topBarTrailing) {
           Button(formState.isLoading ? "Creating..." : "Create") {
             submit()
@@ -105,6 +102,7 @@ public struct CreateChatIOSView: View {
           .opacity((chatTitle.isEmpty || (!isPublic && selectedPeople.isEmpty)) ? 0.5 : 1)
         }
       }
+      .navigationTitle("Create Chat")
       .onAppear {
         isTitleFocused = true
       }
