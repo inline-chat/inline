@@ -139,6 +139,18 @@ class NewSidebar: NSViewController {
       name: NSScrollView.didEndLiveScrollNotification,
       object: scrollView
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleNextChat),
+      name: .nextChat,
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handlePrevChat),
+      name: .prevChat,
+      object: nil
+    )
   }
 
   enum SidebarEvents {
@@ -258,6 +270,44 @@ class NewSidebar: NSViewController {
 
     // Update previous items
     previousItems = items
+  }
+
+  // MARK: - Chat Navigation
+
+  @objc private func handleNextChat() {
+    navigateChat(offset: 1)
+  }
+
+  @objc private func handlePrevChat() {
+    navigateChat(offset: -1)
+  }
+
+  private func navigateChat(offset: Int) {
+    guard !items.isEmpty else { return }
+
+    let nav = dependencies.nav
+
+    // Determine current peer in route
+    let currentPeer: Peer? = switch nav.currentRoute {
+      case let .chat(peer):
+        peer
+      default:
+        nil
+    }
+
+    // Find current index
+    let currentIndex: Int = {
+      if let currentPeer, let idx = items.firstIndex(where: { $0.peerId == currentPeer }) {
+        return idx
+      }
+      return -1
+    }()
+
+    let targetIndex = currentIndex + offset
+    guard targetIndex >= 0, targetIndex < items.count else { return }
+
+    let targetPeer = items[targetIndex].peerId
+    nav.open(.chat(peer: targetPeer))
   }
 }
 
