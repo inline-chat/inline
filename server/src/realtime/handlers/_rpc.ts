@@ -26,6 +26,7 @@ import { sendComposeActionHandler } from "./messages.sendComposeAction"
 import { createBotHandler } from "./createBot"
 import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMember"
 import { markAsUnread } from "./messages.markAsUnread"
+import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
 
 const log = new Log("rpc")
 
@@ -211,6 +212,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await markAsUnread(call.input.markAsUnread, handlerContext)
       return { oneofKind: "markAsUnread", markAsUnread: result }
+    }
+    
+    case Method.GET_UPDATES_STATE: {
+      if (call.input.oneofKind !== "getUpdatesState") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await getUpdatesState(call.input.getUpdatesState, handlerContext)
+      return { oneofKind: "getUpdatesState", getUpdatesState: result }
     }
 
     default:
