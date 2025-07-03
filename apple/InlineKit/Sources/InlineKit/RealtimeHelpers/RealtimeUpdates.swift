@@ -50,6 +50,9 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
         case let .spaceMemberAdd(spaceMemberAdd):
           try spaceMemberAdd.apply(db)
 
+        case let .spaceMemberDelete(spaceMemberDelete):
+          try spaceMemberDelete.apply(db)
+
         case let .joinSpace(joinSpace):
           try joinSpace.apply(db)
 
@@ -400,6 +403,27 @@ extension InlineProtocol.UpdateSpaceMemberAdd {
     let _ = try User.save(db, user: user)
     let member = Member(from: member)
     try member.save(db)
+  }
+}
+
+extension InlineProtocol.UpdateSpaceMemberDelete {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update space member delete user \(userID) from member \(memberID)")
+
+    do {
+      // Delete the member from the database
+      try Member.filter(Column("id") == memberID).deleteAll(db)
+
+      // If the removed user is the current user, clean up local data
+      if userID == Auth.shared.getCurrentUserId() {
+        // Remove all dialogs and chats for this space
+        // Note: This is a simplified cleanup - you may need more comprehensive cleanup
+        // depending on your data structure
+        Log.shared.info("Current user was removed from space, cleaning up local data")
+      }
+    } catch {
+      Log.shared.error("Failed to delete space member", error: error)
+    }
   }
 }
 

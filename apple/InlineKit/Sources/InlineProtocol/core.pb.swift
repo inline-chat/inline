@@ -45,6 +45,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getUserSettings // = 19
   case sendComposeAction // = 20
   case createBot // = 21
+  case removeSpaceMember // = 22
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -75,6 +76,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 19: self = .getUserSettings
     case 20: self = .sendComposeAction
     case 21: self = .createBot
+    case 22: self = .removeSpaceMember
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -103,6 +105,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getUserSettings: return 19
     case .sendComposeAction: return 20
     case .createBot: return 21
+    case .removeSpaceMember: return 22
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -131,6 +134,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getUserSettings,
     .sendComposeAction,
     .createBot,
+    .removeSpaceMember,
   ]
 
 }
@@ -2164,6 +2168,14 @@ public struct RpcCall: Sendable {
     set {input = .createBot(newValue)}
   }
 
+  public var removeSpaceMember: RemoveSpaceMemberInput {
+    get {
+      if case .removeSpaceMember(let v)? = input {return v}
+      return RemoveSpaceMemberInput()
+    }
+    set {input = .removeSpaceMember(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2188,6 +2200,7 @@ public struct RpcCall: Sendable {
     case getUserSettings(GetUserSettingsInput)
     case sendComposeAction(SendComposeActionInput)
     case createBot(CreateBotInput)
+    case removeSpaceMember(RemoveSpaceMemberInput)
 
   }
 
@@ -2377,6 +2390,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .createBot(newValue)}
   }
 
+  public var removeSpaceMember: RemoveSpaceMemberResult {
+    get {
+      if case .removeSpaceMember(let v)? = _storage._result {return v}
+      return RemoveSpaceMemberResult()
+    }
+    set {_uniqueStorage()._result = .removeSpaceMember(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2401,6 +2422,7 @@ public struct RpcResult: @unchecked Sendable {
     case getUserSettings(GetUserSettingsResult)
     case sendComposeAction(SendComposeActionResult)
     case createBot(CreateBotResult)
+    case removeSpaceMember(RemoveSpaceMemberResult)
 
   }
 
@@ -3647,6 +3669,10 @@ public struct UpdateSpaceMemberDelete: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  public var memberID: Int64 = 0
+
+  public var userID: Int64 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -4293,6 +4319,34 @@ public struct InviteToSpaceResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
+public struct RemoveSpaceMemberInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// ID of the space
+  public var spaceID: Int64 = 0
+
+  /// ID of the user to remove
+  public var userID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct RemoveSpaceMemberResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public struct GetChatParticipantsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -4428,6 +4482,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     19: .same(proto: "GET_USER_SETTINGS"),
     20: .same(proto: "SEND_COMPOSE_ACTION"),
     21: .same(proto: "CREATE_BOT"),
+    22: .same(proto: "REMOVE_SPACE_MEMBER"),
   ]
 }
 
@@ -7145,6 +7200,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     20: .same(proto: "getUserSettings"),
     21: .same(proto: "sendComposeAction"),
     22: .same(proto: "createBot"),
+    23: .same(proto: "removeSpaceMember"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -7427,6 +7483,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .createBot(v)
         }
       }()
+      case 23: try {
+        var v: RemoveSpaceMemberInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .removeSpaceMember(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .removeSpaceMember(v)
+        }
+      }()
       default: break
       }
     }
@@ -7525,6 +7594,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .createBot(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
     }()
+    case .removeSpaceMember?: try {
+      guard case .removeSpaceMember(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -7563,6 +7636,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     20: .same(proto: "getUserSettings"),
     21: .same(proto: "sendComposeAction"),
     22: .same(proto: "createBot"),
+    23: .same(proto: "removeSpaceMember"),
   ]
 
   fileprivate class _StorageClass {
@@ -7876,6 +7950,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .createBot(v)
           }
         }()
+        case 23: try {
+          var v: RemoveSpaceMemberResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .removeSpaceMember(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .removeSpaceMember(v)
+          }
+        }()
         default: break
         }
       }
@@ -7975,6 +8062,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .createBot?: try {
         guard case .createBot(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+      }()
+      case .removeSpaceMember?: try {
+        guard case .removeSpaceMember(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
       }()
       case nil: break
       }
@@ -10018,18 +10109,37 @@ extension UpdateSpaceMemberAdd: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateSpaceMemberDelete"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "member_id"),
+    2: .standard(proto: "user_id"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.memberID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.memberID != 0 {
+      try visitor.visitSingularInt64Field(value: self.memberID, fieldNumber: 1)
+    }
+    if self.userID != 0 {
+      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateSpaceMemberDelete, rhs: UpdateSpaceMemberDelete) -> Bool {
+    if lhs.memberID != rhs.memberID {return false}
+    if lhs.userID != rhs.userID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -11076,6 +11186,76 @@ extension InviteToSpaceResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension RemoveSpaceMemberInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RemoveSpaceMemberInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "space_id"),
+    2: .standard(proto: "user_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    if self.userID != 0 {
+      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RemoveSpaceMemberInput, rhs: RemoveSpaceMemberInput) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.userID != rhs.userID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension RemoveSpaceMemberResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RemoveSpaceMemberResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RemoveSpaceMemberResult, rhs: RemoveSpaceMemberResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
