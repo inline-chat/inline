@@ -274,6 +274,13 @@
       "when": 1749575153880,
       "tag": "0038_entities",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1751555484646,
+      "tag": "0039_translation_entities",
+      "breakpoints": true
     }
   ]
 }
