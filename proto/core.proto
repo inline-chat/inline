@@ -728,6 +728,9 @@ message MessageTranslation {
 
   // Date of translation
   int64 date = 4;
+
+  // Entities in the translation
+  optional MessageEntities entities = 5;
 }
 
 message GetMeInput {}

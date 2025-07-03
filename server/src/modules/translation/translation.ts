@@ -1,9 +1,10 @@
-import type { MessageTranslation } from "@in/protocol/core"
+import { MessageEntities, MessageEntity_Type, type MessageTranslation } from "@in/protocol/core"
 import type { ProcessedMessage, ProcessedMessageTranslation } from "@in/server/db/models/messages"
 import type { InputTranslation } from "@in/server/db/models/translations"
 import type { DbChat } from "@in/server/db/schema"
 import { isProd, WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
 import { openaiClient } from "@in/server/libs/openAI"
+import { formatEntities } from "@in/server/modules/notifications/eval"
 import { Log } from "@in/server/utils/log"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import invariant from "tiny-invariant"
@@ -40,11 +41,17 @@ async function translateMessages(input: {
   // Call OpenAI
   const response = await openaiClient.chat.completions.create({
     model: "gpt-4.1-mini",
-    // model: "gpt-4.1-nano",
+
     messages: [
       {
         role: "system",
-        content: `You are a professional‍ translator for Inline Chat app's messages, a work chat app like Slack. Translate the following message texts to ${languageName} language. If parts of text are already in "${languageName}", keep them as is. Don't be formal, this is a chat between coworkers. Try to preserve the original meaning, intent and tone of the messages. Don't add extra information. Don't summarize. Do not add or remove or change any emojis, special characters, code, numbers, barcodes, URLs, emails, etc. Preserve those as is properly. Then, output the translations, no explanations or additional text. This is a work context, people collaborating, coordinating, discussing, sharing information, etc usually. Find messages by their id between <message id="<id>" date="<ISO date>" [...more attributes]> and </message> tags. Use the context to help you translate the messages. Return the translations in an array of objects by attaching the message id to the translation.`,
+        content: `You are a professional‍ translator for Inline Chat app's messages, a work chat app like Slack. 
+        # Instructions 
+        Translate the following message texts to ${languageName} language. If parts of text are already in "${languageName}", keep them as is. Don't be formal, this is a chat between coworkers. Try to preserve the original meaning, intent and tone of the messages. Don't add extra information. Don't summarize. Do not add or remove or change any emojis, special characters, code, numbers, barcodes, URLs, @mentions, emails, etc. Preserve those as is properly. Then, output the translations, no explanations or additional text. This is a work context, people collaborating, coordinating, discussing, sharing information, etc usually. Find messages by their id between <message id="<id>" date="<ISO date>" [...more attributes]> and </message> tags. Use the context to help you translate the messages. Return the translations in an array of objects by attaching the message id to the translation.
+
+        # Entities
+        Entities are a list of objects that describe the entities in the message such as mentions, links, bold, italic, etc. The offset and length should be adjusted to the translated text. For example, if the original text is "Hello @John", with "@John" having an offset of 6 and a length of 4, and the translated text is "Hola @Dan", the offset should be 5 and the length should be 4. The entities should be returned in exactly the same JSON format as the original text only with the offset and length adjusted to the translated text. If no entities are present, return null.
+        `,
       },
       {
         role: "user",
@@ -65,7 +72,10 @@ async function translateMessages(input: {
             (m) =>
               `<message id="${m.messageId}" date="${m.date.toISOString()}" fromId="${m.fromId}" replyToId="${
                 m.replyToMsgId
-              }">${m.text}</message>\n`,
+              }">
+              <text>${m.text}</text>
+              ${m.entities ? `<entities>${formatEntitiesJson(m.entities)}</entities>` : ""}
+              </message>\n`,
           )
           .join("\n")}
         </messages>
@@ -102,13 +112,25 @@ async function translateMessages(input: {
 
     const result = BatchTranslationResultSchema.parse(JSON.parse(response.choices[0]?.message.content ?? "{}"))
     const date = new Date()
-    return result.translations.map((t) => ({
-      translation: t.translation,
-      messageId: t.messageId,
-      chatId: input.chat.id,
-      language: input.language,
-      date,
-    }))
+    return result.translations.map((t) => {
+      let entities: MessageEntities | null = null
+      try {
+        if (t.entities) {
+          entities = MessageEntities.fromJsonString(t.entities)
+        }
+      } catch (error) {
+        log.error(`Translation entities decoding failed`, error)
+      }
+
+      return {
+        translation: t.translation,
+        messageId: t.messageId,
+        chatId: input.chat.id,
+        language: input.language,
+        entities,
+        date,
+      }
+    })
   } catch (error) {
     log.error(`Translation decoding failed: ${error}`)
     throw new Error(`Translation decoding failed: ${error}`)
@@ -120,6 +142,7 @@ const BatchTranslationResultSchema = z.object({
     z.object({
       messageId: z.number(),
       translation: z.string(),
+      entities: z.string().nullable(),
     }),
   ),
 })
@@ -131,4 +154,8 @@ function getLanguageNameFromCode(code: string): string {
 async function gatherContext(input: { messages: ProcessedMessage[]; chat: DbChat }): Promise<string> {
   // TODO
   return ""
+}
+
+const formatEntitiesJson = (entities: MessageEntities): string => {
+  return MessageEntities.toJsonString(entities)
 }

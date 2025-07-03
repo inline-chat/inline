@@ -1,0 +1,1 @@
+ALTER TABLE "message_translations" ADD COLUMN "entities" "bytea";

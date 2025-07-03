@@ -21,6 +21,9 @@ export const translations = pgTable(
     translationIv: bytea("translation_iv"),
     translationTag: bytea("translation_tag"),
 
+    /** encrypted entities */
+    entities: bytea("entities"),
+
     // Language code (e.g. "en", "es", "fr")
     language: text("language").notNull(),
   },
