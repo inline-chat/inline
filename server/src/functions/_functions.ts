@@ -16,6 +16,7 @@ import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
 import { deleteMember } from "@in/server/functions/space.deleteMember"
 import { markAsUnread } from "./messages.markAsUnread"
+import { getUpdatesState } from "./updates.getUpdatesState"
 
 export const Functions = {
   messages: {
@@ -44,5 +45,8 @@ export const Functions = {
   },
   bot: {
     createBot: createBot,
+  },
+  updates: {
+    getUpdatesState: getUpdatesState,
   },
 }

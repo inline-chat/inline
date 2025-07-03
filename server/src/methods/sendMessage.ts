@@ -366,7 +366,6 @@ const sendPushNotificationToUser = async ({
     const userSessions = await SessionsModel.getValidSessionsByUserId(userId)
 
     if (!userSessions.length) {
-      Log.shared.debug("No active sessions found for user", { userId })
       return
     }
 

@@ -13,7 +13,11 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
 
   public func apply(update: InlineProtocol.Update, db: Database) {
     log.trace("apply realtime update")
-    log.debug("Received update type: \(update.update)")
+    // log.debug("Received update type: \(update.update)")
+
+    Task {
+      await UpdatesStateManager.shared.saveLastUpdateDate(update.date)
+    }
 
     do {
       switch update.update {
@@ -67,6 +71,9 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
 
         case let .updateUserSettings(userSettings):
           userSettings.apply()
+
+        case let .chatHasNewUpdates(chatHasNewUpdates):
+          try chatHasNewUpdates.apply(db)
 
         default:
           break
@@ -534,5 +541,13 @@ extension InlineProtocol.UpdateUserSettings {
     Task { @MainActor in
       INUserSettings.current.updateFromServer(settings)
     }
+  }
+}
+
+extension InlineProtocol.UpdateChatHasNewUpdates {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update chat has new updates \(chatID) \(pts)")
+
+    // Call realtime API to get updates for this chat
   }
 }
