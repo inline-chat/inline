@@ -29,8 +29,10 @@ import { and, asc, desc, eq, gt, inArray, lt, or } from "drizzle-orm"
 import { decrypt, decryptBinary, encryptBinary } from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
+import { updates } from "@in/server/db/schema/updates"
+import { UpdatesModel } from "@in/server/db/models/updates"
 
-const log = new Log("MessageModel", LogLevel.TRACE)
+const log = new Log("MessageModel", LogLevel.INFO)
 
 export const MessageModel = {
   deleteMessage: deleteMessage,
@@ -38,6 +40,7 @@ export const MessageModel = {
   insertMessage: insertMessage,
   getMessages: getMessages,
   getMessage: getMessage, // 1 msg
+  getMessagesByIds: getMessagesByIds,
   getMessagesAroundTarget: getMessagesAroundTarget,
   getNonFullMessagesRange: getNonFullMessagesRange,
   processMessage: processMessage,
@@ -221,11 +224,16 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
   }
 }
 
-async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<DbMessage> {
+type InsertMessageOutput = {
+  message: DbMessage
+  pts: number
+}
+
+async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<InsertMessageOutput> {
   let chatId = message.chatId
 
   // Insert new message with nested select for messageId sequence
-  const newMessage = await db.transaction(async (tx) => {
+  const { message: newMessage, pts } = await db.transaction(async (tx) => {
     // First lock the specific chat row
     const [chat] = await tx
       .select()
@@ -239,6 +247,7 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
     }
 
     const nextId = (chat.lastMsgId ?? 0) + 1
+    const nextPts = (chat.pts ?? 0) + 1
 
     // Insert the new message
     const [newDbMessage] = await tx
@@ -250,17 +259,54 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
       })
       .returning()
 
-    // Update the lastMsgId
-    await tx.update(chats).set({ lastMsgId: nextId }).where(eq(chats.id, chatId))
+    // Build update
+    const update = UpdatesModel.build({
+      update: {
+        oneofKind: "newMessage",
+        newMessage: {
+          chatId: BigInt(chatId),
+          msgId: BigInt(nextId),
+          pts: nextPts,
+        },
+      },
+    })
 
-    return newDbMessage
+    // Update chat's PTS and lastMsgId
+    await Promise.all([
+      tx
+        .update(chats)
+        .set({
+          lastMsgId: nextId,
+          pts: nextPts,
+          // Set to now
+          lastUpdateDate: new Date(),
+        })
+        .where(eq(chats.id, chatId)),
+
+      tx.insert(updates).values({
+        box: "c",
+        chatId: chatId,
+        pts: nextPts,
+        update: update.encrypted,
+        updateIv: update.iv,
+        updateTag: update.authTag,
+      }),
+    ])
+
+    return {
+      message: newDbMessage,
+      pts: nextPts,
+    }
   })
 
   if (!newMessage) {
     throw ModelError.Failed
   }
 
-  return newMessage
+  return {
+    message: newMessage,
+    pts,
+  }
 }
 
 /** Deletes a message from a chat */
@@ -281,11 +327,29 @@ async function deleteMessage(messageId: number, chatId: number) {
   log.trace("refreshed last message id after deletion")
 }
 
-/** Deletes multiple messages from a chat */
-async function deleteMessages(messageIds: bigint[], chatId: number) {
+/**
+ * Deletes multiple messages from a chat
+ **/
+async function deleteMessages(
+  messageIds: bigint[],
+  chatId: number,
+): Promise<{
+  pts: number
+}> {
   log.trace("deleteMessages", { messageIds, chatId })
 
-  await ChatModel.refreshLastMessageIdTransaction(chatId, async (tx) => {
+  // Use a transaction with FOR UPDATE to lock the row while we're working with it
+  let { pts } = await db.transaction(async (tx) => {
+    let [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update")
+
+    if (!chat) throw ModelError.ChatInvalid
+
+    const pts = (chat.pts ?? 0) + 1
+
+    // Clear first to allow for deleting
+    await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chatId))
+
+    // Delete message
     let deleted = await tx
       .delete(messages)
       .where(
@@ -303,10 +367,31 @@ async function deleteMessages(messageIds: bigint[], chatId: number) {
       log.trace("messages not found", { messageIds, chatId })
       throw ModelError.MessageInvalid
     }
+
+    let [message] = await tx
+      .select({ messageId: messages.messageId })
+      .from(messages)
+      .where(eq(messages.chatId, chatId))
+      .orderBy(desc(messages.messageId))
+      .limit(1)
+
+    const newLastMsgId = message?.messageId ?? null
+
+    await tx
+      .update(chats)
+      .set({
+        // Update last message
+        lastMsgId: newLastMsgId,
+        // Update PTS and update date
+        pts,
+        lastUpdateDate: new Date(),
+      })
+      .where(eq(chats.id, chatId))
+
+    return { pts }
   })
 
-  //await ChatModel.refreshLastMessageId(chatId)
-  //log.trace("refreshed last message id after deletion")
+  return { pts }
 }
 
 type EditMessageInput = {
@@ -316,34 +401,95 @@ type EditMessageInput = {
   entities?: MessageEntities
 }
 
-async function editMessage(input: EditMessageInput) {
+async function editMessage(input: EditMessageInput): Promise<{
+  message: DbMessage
+  pts: number
+  /**
+   * The date of the update recorded on Chat's lastUpdateDate
+   */
+  date: Date
+}> {
   let { messageId, chatId, text, entities } = input
+
   const encryptedMessage = text ? encryptMessage(text) : undefined
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities && binaryEntities?.length > 0 ? encryptBinary(binaryEntities) : undefined
 
-  let updated = await db
-    .update(messages)
-    .set({
-      editDate: new Date(),
-      // text
-      textEncrypted: encryptedMessage?.encrypted,
-      textIv: encryptedMessage?.iv,
-      textTag: encryptedMessage?.authTag,
-      // entities
-      entitiesEncrypted: encryptedEntities?.encrypted,
-      entitiesIv: encryptedEntities?.iv,
-      entitiesTag: encryptedEntities?.authTag,
-    })
-    .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
-    .returning()
+  let { message, pts, date } = await db.transaction(async (tx) => {
+    // First lock the specific chat row
+    const [chat] = await tx
+      .select()
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .for("update") // This locks the row
+      .limit(1)
 
-  if (updated.length === 0) {
+    if (!chat) {
+      throw ModelError.ChatInvalid
+    }
+
+    const nextPts = (chat.pts ?? 0) + 1
+    const lastUpdateDate = new Date()
+
+    // Build update
+    const update = UpdatesModel.build({
+      update: {
+        oneofKind: "editMessage",
+        editMessage: {
+          chatId: BigInt(chatId),
+          msgId: BigInt(messageId),
+          pts: nextPts,
+        },
+      },
+    })
+
+    let [msgs] = await Promise.all([
+      // Edit message
+      await db
+        .update(messages)
+        .set({
+          editDate: new Date(),
+          // text
+          textEncrypted: encryptedMessage?.encrypted,
+          textIv: encryptedMessage?.iv,
+          textTag: encryptedMessage?.authTag,
+          // entities
+          entitiesEncrypted: encryptedEntities?.encrypted,
+          entitiesIv: encryptedEntities?.iv,
+          entitiesTag: encryptedEntities?.authTag,
+        })
+        .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
+        .returning(),
+
+      // Insert update
+      tx.insert(updates).values({
+        box: "c",
+        chatId: chatId,
+        pts: nextPts,
+        update: update.encrypted,
+        updateIv: update.iv,
+        updateTag: update.authTag,
+      }),
+
+      // Update chat
+      tx
+        .update(chats)
+        .set({
+          pts: nextPts,
+          lastUpdateDate: lastUpdateDate,
+        })
+        .where(eq(chats.id, chatId)),
+    ])
+
+    return { message: msgs[0], pts: nextPts, date: lastUpdateDate }
+  })
+
+  if (!message) {
     log.trace("message not found", { messageId, chatId })
     throw ModelError.MessageInvalid
   }
 
-  return updated[0]
+  return { message, pts, date }
 }
 
 async function getMessage(messageId: number, chatId: number): Promise<DbFullMessage> {
@@ -637,4 +783,72 @@ async function getSenderIdForMessage({
   })
 
   return message?.fromId ?? undefined
+}
+
+async function getMessagesByIds(chatId: number, messageIds: bigint[]): Promise<DbFullMessage[]> {
+  if (messageIds.length === 0) {
+    return []
+  }
+
+  let result = await db._query.messages.findMany({
+    where: and(
+      eq(messages.chatId, chatId),
+      inArray(
+        messages.messageId,
+        messageIds.map((id) => Number(id)),
+      ),
+    ),
+    with: {
+      from: true,
+      reactions: true,
+      photo: {
+        with: {
+          photoSizes: {
+            with: {
+              file: true,
+            },
+          },
+        },
+      },
+      video: {
+        with: {
+          file: true,
+          photo: {
+            with: {
+              photoSizes: {
+                with: {
+                  file: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      document: {
+        with: {
+          file: true,
+        },
+      },
+      messageAttachments: {
+        with: {
+          externalTask: true,
+          linkEmbed: {
+            with: {
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+
+  return result.map(processMessage)
 }

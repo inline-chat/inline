@@ -24,6 +24,7 @@ import { getUserSettingsHandler } from "./user.getUserSettings"
 import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
 import { createBotHandler } from "./createBot"
+import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
 
 const log = new Log("rpc")
 
@@ -193,6 +194,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await createBotHandler(call.input.createBot, handlerContext)
       return { oneofKind: "createBot", createBot: result }
+    }
+
+    case Method.GET_UPDATES_STATE: {
+      if (call.input.oneofKind !== "getUpdatesState") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await getUpdatesState(call.input.getUpdatesState, handlerContext)
+      return { oneofKind: "getUpdatesState", getUpdatesState: result }
     }
 
     default:
