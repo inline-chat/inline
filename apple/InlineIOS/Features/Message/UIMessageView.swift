@@ -706,26 +706,29 @@ class UIMessageView: UIView {
 
     guard let text = fullMessage.displayText else { return }
 
+    let entities = fullMessage.translationEntities ?? fullMessage.message.entities
+
+    /// Use cache if available
     if let cachedString = Self.attributedCache.object(forKey: NSString(string: cacheKey)) {
       messageLabel.attributedText = cachedString
-      if let attributedString = cachedString.mutableCopy() as? NSMutableAttributedString {
-        detectAndStyleLinks(in: text, attributedString: attributedString)
-        detectAndStyleMentions(in: text, attributedString: attributedString)
-      }
       return
     }
 
-    let attributedString = NSMutableAttributedString(
-      string: text,
-      attributes: [
-        .font: UIFont
-          .systemFont(ofSize: isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17),
-        .foregroundColor: textColor,
-      ]
+    let font = UIFont
+      .systemFont(ofSize: isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17)
+
+    /// Apply entities to text and create an NSAttributedString
+    let attributedString = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: .init(
+        font: font,
+        textColor: textColor,
+        linkColor: MessageRichTextRenderer.linkColor(for: outgoing),
+      )
     )
 
     detectAndStyleLinks(in: text, attributedString: attributedString)
-    detectAndStyleMentions(in: text, attributedString: attributedString)
 
     Self.attributedCache.setObject(attributedString, forKey: cacheKey as NSString)
 
@@ -743,39 +746,39 @@ class UIMessageView: UIView {
     links = linkMatches.map { (range: $0.range, url: $0.url) }
   }
 
-  func detectAndStyleMentions(in text: String, attributedString: NSMutableAttributedString) {
-    if let entities = fullMessage.message.entities {
-      for entity in entities.entities {
-        let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
+  // func detectAndStyleMentions(in text: String, attributedString: NSMutableAttributedString) {
+  //   if let entities = fullMessage.message.entities {
+  //     for entity in entities.entities {
+  //       let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
 
-        // Validate range is within bounds
-        guard range.location >= 0, range.location + range.length <= text.utf16.count else {
-          continue
-        }
+  //       // Validate range is within bounds
+  //       guard range.location >= 0, range.location + range.length <= text.utf16.count else {
+  //         continue
+  //       }
 
-        switch entity.type {
-          case .mention:
-            if case let .mention(mention) = entity.entity {
-              let mentionColor = MessageRichTextRenderer.mentionColor(for: outgoing)
-              attributedString.addAttributes([
-                .foregroundColor: mentionColor,
-                .mentionUserId: mention.userID,
-              ], range: range)
-            }
+  //       switch entity.type {
+  //         case .mention:
+  //           if case let .mention(mention) = entity.entity {
+  //             let mentionColor = MessageRichTextRenderer.mentionColor(for: outgoing)
+  //             attributedString.addAttributes([
+  //               .foregroundColor: mentionColor,
+  //               .mentionUserId: mention.userID,
+  //             ], range: range)
+  //           }
 
-          case .bold:
-            // Apply bold formatting using existing attributes
-            let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
-            let currentFont = existingAttributes[.font] as? UIFont ?? UIFont.systemFont(ofSize: 17)
-            let boldFont = UIFont.boldSystemFont(ofSize: currentFont.pointSize)
-            attributedString.addAttribute(.font, value: boldFont, range: range)
+  //         case .bold:
+  //           // Apply bold formatting using existing attributes
+  //           let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
+  //           let currentFont = existingAttributes[.font] as? UIFont ?? UIFont.systemFont(ofSize: 17)
+  //           let boldFont = UIFont.boldSystemFont(ofSize: currentFont.pointSize)
+  //           attributedString.addAttribute(.font, value: boldFont, range: range)
 
-          default:
-            break
-        }
-      }
-    }
-  }
+  //         default:
+  //           break
+  //       }
+  //     }
+  //   }
+  // }
 
   func extractListItems(from message: String) -> [String] {
     let pattern = #"^\s*-\s+(.*)$"#
