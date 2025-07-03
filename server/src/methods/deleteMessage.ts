@@ -1,26 +1,12 @@
 import { db } from "@in/server/db"
-import { eq, inArray, and, or, desc } from "drizzle-orm"
-import { chats, members, spaces, dialogs, messages, type DbMessage, type DbFile } from "@in/server/db/schema"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { eq, and, desc } from "drizzle-orm"
+import { chats, messages } from "@in/server/db/schema"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
-import {
-  encodeChatInfo,
-  encodeMemberInfo,
-  encodeSpaceInfo,
-  encodeDialogInfo,
-  TChatInfo,
-  TMemberInfo,
-  TSpaceInfo,
-  TDialogInfo,
-  TPeerInfo,
-  type TUpdateInfo,
-} from "@in/server/api-types"
+import { TPeerInfo } from "@in/server/api-types"
 import { TInputId } from "@in/server/types/methods"
-import { Authorize } from "../utils/authorize"
-import { DialogsModel } from "@in/server/db/models/dialogs"
 import { getUpdateGroup } from "../modules/updates"
-import { connectionManager } from "../ws/connections"
 import type { Update } from "@in/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"

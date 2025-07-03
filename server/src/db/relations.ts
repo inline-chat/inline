@@ -23,6 +23,7 @@ export const relations = defineRelations(
     members: schema.members,
     translations: schema.translations,
     userSettings: schema.userSettings,
+    updates: schema.updates,
   },
   (r) => ({
     users: {
