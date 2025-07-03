@@ -10,6 +10,7 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var messageId: Int64
   public var chatId: Int64
   public var translation: String
+  public var entities: MessageEntities?
   public var language: String
   public var date: Date
 
@@ -18,6 +19,7 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
     static let messageId = Column(CodingKeys.messageId)
     static let chatId = Column(CodingKeys.chatId)
     static let translation = Column(CodingKeys.translation)
+    static let entities = Column(CodingKeys.entities)
     static let language = Column(CodingKeys.language)
     static let date = Column(CodingKeys.date)
   }
@@ -40,6 +42,7 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
     messageId: Int64,
     chatId: Int64,
     translation: String,
+    entities: MessageEntities?,
     language: String,
     date: Date
   ) {
@@ -47,6 +50,7 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
     self.messageId = messageId
     self.chatId = chatId
     self.translation = translation
+    self.entities = entities
     self.language = language
     self.date = date
   }
@@ -56,6 +60,7 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
       messageId: from.messageID,
       chatId: chatId,
       translation: from.translation,
+      entities: from.entities,
       language: from.language,
       date: Date(timeIntervalSince1970: TimeInterval(from.date))
     )
