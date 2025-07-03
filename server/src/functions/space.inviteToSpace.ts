@@ -133,12 +133,14 @@ async function inviteViaEmail(
     throw RealtimeRpcError.EmailInvalid
   }
 
+  let normalizedEmail = email.toLowerCase().trim()
+
   // Check if already a user
-  let user = await UsersModel.getUserByEmail(email)
+  let user = await UsersModel.getUserByEmail(normalizedEmail)
 
   if (!user) {
     // If no user, create one
-    user = await UsersModel.createUserWhenInvited({ email })
+    user = await UsersModel.createUserWhenInvited({ email: normalizedEmail })
   }
 
   return { user }
