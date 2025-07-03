@@ -1898,6 +1898,12 @@ export interface MessageTranslation {
      * @generated from protobuf field: int64 date = 4;
      */
     date: bigint;
+    /**
+     * Entities in the translation
+     *
+     * @generated from protobuf field: optional MessageEntities entities = 5;
+     */
+    entities?: MessageEntities;
 }
 /**
  * @generated from protobuf message GetMeInput
@@ -7276,7 +7282,8 @@ class MessageTranslation$Type extends MessageType<MessageTranslation> {
             { no: 1, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "language", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "translation", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "entities", kind: "message", T: () => MessageEntities }
         ]);
     }
     create(value?: PartialMessage<MessageTranslation>): MessageTranslation {
@@ -7306,6 +7313,9 @@ class MessageTranslation$Type extends MessageType<MessageTranslation> {
                 case /* int64 date */ 4:
                     message.date = reader.int64().toBigInt();
                     break;
+                case /* optional MessageEntities entities */ 5:
+                    message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7330,6 +7340,9 @@ class MessageTranslation$Type extends MessageType<MessageTranslation> {
         /* int64 date = 4; */
         if (message.date !== 0n)
             writer.tag(4, WireType.Varint).int64(message.date);
+        /* optional MessageEntities entities = 5; */
+        if (message.entities)
+            MessageEntities.internalBinaryWrite(message.entities, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -28,6 +28,7 @@ import { Log, LogLevel } from "@in/server/utils/log"
 import { and, asc, desc, eq, gt, inArray, lt, or } from "drizzle-orm"
 import { decrypt, decryptBinary, encryptBinary } from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
+import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 
 const log = new Log("MessageModel", LogLevel.TRACE)
 
@@ -68,8 +69,14 @@ export type ProcessedMessage = Omit<
   entities: MessageEntities | null
 }
 
-export type ProcessedMessageTranslation = Omit<DbTranslation, "translation" | "translationIv" | "translationTag"> & {
+export type ProcessedMessageTranslation = Omit<
+  DbTranslation,
+  "translation" | "translationIv" | "translationTag" | "entities"
+> & {
   translation: string | null
+
+  /** entities in the translation */
+  entities: MessageEntities | null
 }
 
 export type ProcessedMessageAndTranslation = ProcessedMessage & {
@@ -401,6 +408,11 @@ async function getMessage(messageId: number, chatId: number): Promise<DbFullMess
   return processMessage(result)
 }
 
+/**
+ * Decrypts a message translation
+ * @param translation - The translation to decrypt
+ * @returns The decrypted translation
+ */
 export function processMessageTranslation(translation: DbTranslation): ProcessedMessageTranslation {
   return {
     ...translation,
@@ -412,6 +424,8 @@ export function processMessageTranslation(translation: DbTranslation): Processed
             authTag: translation.translationTag,
           })
         : null,
+
+    entities: translation.entities ? MessageEntities.fromBinary(Encryption2.decryptBinary(translation.entities)) : null,
   }
 }
 
