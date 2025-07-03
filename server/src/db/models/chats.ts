@@ -20,6 +20,7 @@ export const ChatModel = {
   getChatIdFromInputPeer: getChatIdFromInputPeer,
   getChatFromInputPeer: getChatFromInputPeer,
   createUserChatAndDialog: createUserChatAndDialog,
+  getUserChats,
 }
 
 /**
@@ -276,3 +277,89 @@ async function refreshLastMessageIdTransaction(chatId: number, transaction: (tx:
 //   typeof import("../schema/index"),
 //   ExtractTablesWithRelations<typeof import("../schema/index")>
 // >
+
+type GetUserChatsInput = {
+  userId: number
+  where?: {
+    lastUpdateAtGreaterThanEqual: Date
+  }
+}
+
+type GetUserChatsOutput = {
+  chats: DbChat[]
+}
+
+export async function getUserChats(input: GetUserChatsInput): Promise<GetUserChatsOutput> {
+  let { userId, where } = input
+
+  // Fetch a list of public threads the user is a part of and don't have a dialog
+  const chats = await db.query.chats.findMany({
+    where: {
+      ...(where && "lastUpdateAtGreaterThanEqual" in where
+        ? {
+            last_update_date: {
+              gte: where.lastUpdateAtGreaterThanEqual,
+            },
+          }
+        : {}),
+
+      OR: [
+        // DMs
+        {
+          type: "private",
+          // that are between this user and another user
+          OR: [
+            {
+              minUserId: userId,
+            },
+            {
+              maxUserId: userId,
+            },
+          ],
+        },
+
+        // Public threads
+        {
+          type: "thread",
+          publicThread: true,
+          // that we are a participant in
+          space: {
+            deleted: {
+              isNull: true,
+            },
+            members: {
+              user: {
+                id: userId,
+              },
+            },
+          },
+        },
+
+        // Private threads
+        {
+          type: "thread",
+          publicThread: false,
+          // that we are a participant in
+          participants: {
+            user: {
+              id: userId,
+            },
+          },
+          // extra safety check until we clean up our database so if it's removed from space we remove from participants
+          space: {
+            deleted: {
+              isNull: true,
+            },
+            members: {
+              user: {
+                id: userId,
+              },
+            },
+          },
+        },
+      ],
+    },
+  })
+
+  return { chats }
+}
