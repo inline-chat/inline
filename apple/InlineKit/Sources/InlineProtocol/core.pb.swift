@@ -2794,9 +2794,21 @@ public struct MessageTranslation: Sendable {
   /// Date of translation
   public var date: Int64 = 0
 
+  /// Entities in the translation
+  public var entities: MessageEntities {
+    get {return _entities ?? MessageEntities()}
+    set {_entities = newValue}
+  }
+  /// Returns true if `entities` has been explicitly set.
+  public var hasEntities: Bool {return self._entities != nil}
+  /// Clears the value of `entities`. Subsequent reads from it will return its default value.
+  public mutating func clearEntities() {self._entities = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _entities: MessageEntities? = nil
 }
 
 public struct GetMeInput: Sendable {
@@ -8528,6 +8540,7 @@ extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     2: .same(proto: "language"),
     3: .same(proto: "translation"),
     4: .same(proto: "date"),
+    5: .same(proto: "entities"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8540,12 +8553,17 @@ extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       case 2: try { try decoder.decodeSingularStringField(value: &self.language) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.translation) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._entities) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.messageID != 0 {
       try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 1)
     }
@@ -8558,6 +8576,9 @@ extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     if self.date != 0 {
       try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 4)
     }
+    try { if let v = self._entities {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -8566,6 +8587,7 @@ extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     if lhs.language != rhs.language {return false}
     if lhs.translation != rhs.translation {return false}
     if lhs.date != rhs.date {return false}
+    if lhs._entities != rhs._entities {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
