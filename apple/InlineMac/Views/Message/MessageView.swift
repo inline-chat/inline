@@ -1125,9 +1125,11 @@ class MessageViewAppKit: NSView {
     guard hasText else { return }
 
     // Get display text which handles translations
+    // TODO: Instead of using multiple computed properties, we should have do a single check here
     let translationText = fullMessage.translationText
-    let showingTranslatedText = fullMessage.translationText != nil
+    let translationEntities = fullMessage.translationEntities
     let text = translationText ?? fullMessage.message.text ?? ""
+    let entities = translationEntities ?? fullMessage.message.entities
 
     // From Cache
 
@@ -1143,13 +1145,12 @@ class MessageViewAppKit: NSView {
         textView.textContainer?.size = props.layout.text?.size ?? .zero
         textView.layoutManager?.ensureLayout(for: textView.textContainer!)
       }
-      return
     }
 
     /// Apply entities to text and create an NSAttributedString
     let attributedString = ProcessEntities.toAttributedString(
       text: text,
-      entities: fullMessage.message.entities,
+      entities: entities,
       configuration: .init(
         font: MessageTextConfiguration.font,
         textColor: textColor,
