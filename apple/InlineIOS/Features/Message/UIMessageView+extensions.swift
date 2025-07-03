@@ -53,7 +53,7 @@ extension UIMessageView {
     let textView = UITextView()
     textView.backgroundColor = .clear
     textView.textAlignment = .natural
-    textView.font = .systemFont(ofSize: 18)
+    textView.font = .systemFont(ofSize: 17)
     textView.textColor = textColor
     textView.isEditable = false
     textView.isSelectable = false
