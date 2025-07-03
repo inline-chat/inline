@@ -14,6 +14,7 @@ import { addChatParticipant } from "./messages.addChatParticipant"
 import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
+import { getUpdatesState } from "./updates.getUpdatesState"
 
 export const Functions = {
   messages: {
@@ -39,5 +40,8 @@ export const Functions = {
   },
   bot: {
     createBot: createBot,
+  },
+  updates: {
+    getUpdatesState: getUpdatesState,
   },
 }

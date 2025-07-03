@@ -25,7 +25,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const currentUserId = context.currentUserId
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
 
-  const message = await MessageModel.editMessage(Number(input.messageId), chatId, input.text)
+  const { message, pts } = await MessageModel.editMessage(Number(input.messageId), chatId, input.text)
 
   if (!message) {
     Log.shared.error("Message not found")
@@ -39,7 +39,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     document: fullMessage.document ?? undefined,
   }
 
-  let { selfUpdates, updateGroup } = await pushUpdates({ inputPeer: input.peer, messageInfo, currentUserId })
+  let { selfUpdates } = await pushUpdates({ inputPeer: input.peer, messageInfo, currentUserId, pts })
 
   return { updates: selfUpdates }
 }
@@ -56,10 +56,12 @@ const pushUpdates = async ({
   inputPeer,
   messageInfo,
   currentUserId,
+  pts,
 }: {
   inputPeer: InputPeer
   messageInfo: MessageInfo
   currentUserId: number
+  pts: number
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
 
@@ -75,6 +77,7 @@ const pushUpdates = async ({
         update: {
           oneofKind: "editMessage",
           editMessage: {
+            pts,
             message: Encoders.message({
               ...messageInfo,
               encodingForPeer: { inputPeer: encodingForInputPeer },
@@ -106,6 +109,7 @@ const pushUpdates = async ({
         update: {
           oneofKind: "editMessage",
           editMessage: {
+            pts,
             message: Encoders.message({
               ...messageInfo,
               encodingForPeer: { inputPeer },

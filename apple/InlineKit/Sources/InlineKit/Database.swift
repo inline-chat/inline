@@ -460,6 +460,16 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("pts tracking") { db in
+      try db.alter(table: "dialog") { t in
+        t.add(column: "pts", .integer)
+      }
+
+      try db.alter(table: "space") { t in
+        t.add(column: "pts", .integer)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

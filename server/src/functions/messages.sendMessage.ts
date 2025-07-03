@@ -89,7 +89,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const encryptedEntities = binaryEntities ? encryptBinary(binaryEntities) : undefined
 
   // insert new msg with new ID
-  const newMessage = await MessageModel.insertMessage({
+  const { message: newMessage, pts } = await MessageModel.insertMessage({
     chatId: chatId,
     fromId: fromId,
     textEncrypted: encryptedMessage?.encrypted ?? null,
@@ -123,7 +123,13 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   }
 
   // send new updates
-  let { selfUpdates, updateGroup } = await pushUpdates({ inputPeer, messageInfo, currentUserId })
+  // TODO: need to create the update, use the sequence number
+  // we probably need to create the update and message in one transaction
+  // to avoid multiple times locking the chat row for last message and pts.
+  // we can also sepearate the sequence caching. this will speed up and
+  // remove the need to lock the chat row. then we should deliver the update
+  // with sequence number so we can ensure gap-free delivery.
+  let { selfUpdates, updateGroup } = await pushUpdates({ inputPeer, messageInfo, currentUserId, pts })
 
   // send notification
   sendNotifications({
@@ -190,10 +196,12 @@ const pushUpdates = async ({
   inputPeer,
   messageInfo,
   currentUserId,
+  pts,
 }: {
   inputPeer: InputPeer
   messageInfo: MessageInfo
   currentUserId: number
+  pts: number
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
 
@@ -226,6 +234,7 @@ const pushUpdates = async ({
               currentUserId,
               targetUserId: userId,
             }),
+            pts,
           },
         },
       }
@@ -261,6 +270,7 @@ const pushUpdates = async ({
               currentUserId,
               targetUserId: userId,
             }),
+            pts,
           },
         },
       }

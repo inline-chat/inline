@@ -1,9 +1,9 @@
-import { pgTable, varchar, boolean, pgEnum, unique, check } from "drizzle-orm/pg-core"
+import { pgTable, varchar, boolean, pgEnum, unique, check, timestamp } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { sql } from "drizzle-orm"
 import { relations } from "drizzle-orm/_relations"
-import { creationDate } from "@in/server/db/schema/common"
+import { creationDate, date } from "@in/server/db/schema/common"
 import { integer } from "drizzle-orm/pg-core"
 import { messages } from "@in/server/db/schema/messages"
 import { foreignKey } from "drizzle-orm/pg-core"
@@ -37,8 +37,12 @@ export const chats = pgTable(
     /** optional, required for private chats, greatest user id */
     maxUserId: integer("max_user_id").references(() => users.id),
 
-    // /** required for updates sequence */
-    // pts: integer(),
+    /** required for updates sequence */
+    pts: integer("pts").default(0),
+    lastUpdateDate: timestamp("last_update_date", {
+      mode: "date",
+      precision: 3,
+    }),
 
     date: creationDate,
     emoji: varchar({ length: 20 }),

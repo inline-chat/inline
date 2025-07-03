@@ -71,7 +71,7 @@ public actor RealtimeAPI: Sendable {
 
     log.debug("starting realtime API")
 
-    guard let _ = await Auth.shared.getToken() else {
+    guard let _ = Auth.shared.getToken() else {
       log.error("No token available")
       throw RealtimeAPIError.notAuthorized
     }
@@ -124,7 +124,7 @@ public actor RealtimeAPI: Sendable {
     messageChannel = AsyncChannel<Void>()
 
     // Wait a moment to ensure all tasks have settled
-    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+    try? await Task.sleep(for: .milliseconds(100)) // 100ms
 
     log.debug("stopped realtime API")
   }
