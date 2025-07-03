@@ -15,6 +15,7 @@ import { createChat } from "@in/server/realtime/handlers/messages.createChat"
 import { getSpaceMembers } from "@in/server/realtime/handlers/space.getSpaceMembers"
 import { deleteChatHandler } from "@in/server/realtime/handlers/messages.deleteChat"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
+import { removeSpaceMember } from "@in/server/realtime/handlers/space.removeSpaceMember"
 import { getChatParticipants } from "@in/server/realtime/handlers/messages.getChatParticipants"
 import { addChatParticipant } from "@in/server/realtime/handlers/messages.addChatParticipant"
 import { removeChatParticipant } from "@in/server/realtime/handlers/messages.removeChatParticipant"
@@ -193,6 +194,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await createBotHandler(call.input.createBot, handlerContext)
       return { oneofKind: "createBot", createBot: result }
+    }
+
+    case Method.REMOVE_SPACE_MEMBER: {
+      if (call.input.oneofKind !== "removeSpaceMember") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await removeSpaceMember(call.input.removeSpaceMember, handlerContext)
+      return { oneofKind: "removeSpaceMember", removeSpaceMember: result }
     }
 
     default:
