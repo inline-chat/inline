@@ -55,6 +55,16 @@ class MessageAttachmentsView: NSStackView {
     let removedAttachments = self.attachments.subtracting(newAttachments)
     let addedAttachments = newAttachments.subtracting(self.attachments)
 
+    // Update attachments
+    self.attachments = newAttachments
+
+    // TODO: Update existing attachments
+    // for attachment in self.attachments {
+    //   if let attachmentView = attachmentViews[attachment.id] {
+    //     attachmentView.configure(attachment: attachment)
+    //   }
+    // }
+
     // Remove removed attachments
     for attachment in removedAttachments {
       log.trace("Removing attachment: \(attachment)")
