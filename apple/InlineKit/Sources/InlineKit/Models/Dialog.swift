@@ -29,19 +29,21 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var draftMessage: DraftMessage?
   public var archived: Bool?
   public var chatId: Int64?
+  public var pts: Int64?
 
   public enum Columns {
-    static let id = Column(CodingKeys.id)
-    static let peerUserId = Column(CodingKeys.peerUserId)
-    static let peerThreadId = Column(CodingKeys.peerThreadId)
-    static let spaceId = Column(CodingKeys.spaceId)
-    static let unreadCount = Column(CodingKeys.unreadCount)
-    static let readInboxMaxId = Column(CodingKeys.readInboxMaxId)
-    static let readOutboxMaxId = Column(CodingKeys.readOutboxMaxId)
-    static let pinned = Column(CodingKeys.pinned)
-    static let draftMessage = Column(CodingKeys.draftMessage)
-    static let archived = Column(CodingKeys.archived)
-    static let chatId = Column(CodingKeys.chatId)
+    public static let id = Column(CodingKeys.id)
+    public static let peerUserId = Column(CodingKeys.peerUserId)
+    public static let peerThreadId = Column(CodingKeys.peerThreadId)
+    public static let spaceId = Column(CodingKeys.spaceId)
+    public static let unreadCount = Column(CodingKeys.unreadCount)
+    public static let readInboxMaxId = Column(CodingKeys.readInboxMaxId)
+    public static let readOutboxMaxId = Column(CodingKeys.readOutboxMaxId)
+    public static let pinned = Column(CodingKeys.pinned)
+    public static let draftMessage = Column(CodingKeys.draftMessage)
+    public static let archived = Column(CodingKeys.archived)
+    public static let chatId = Column(CodingKeys.chatId)
+    public static let pts = Column(CodingKeys.pts)
   }
 
   public static let space = belongsTo(Space.self)

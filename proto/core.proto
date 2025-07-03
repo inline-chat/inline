@@ -556,6 +556,7 @@ enum Method {
   CREATE_BOT = 21;
   DELETE_MEMBER = 22;
   MARK_AS_UNREAD = 23;
+  GET_UPDATES_STATE = 24;
 }
 
 message RpcCall {
@@ -584,6 +585,7 @@ message RpcCall {
     CreateBotInput createBot = 22;
     DeleteMemberInput deleteMember = 23;
     MarkAsUnreadInput markAsUnread = 24;
+    GetUpdatesStateInput getUpdatesState = 25;
   }
 }
 
@@ -614,6 +616,7 @@ message RpcResult {
     CreateBotResult createBot = 22;
     DeleteMemberResult deleteMember = 23;
     MarkAsUnreadResult markAsUnread = 24;
+    GetUpdatesStateResult getUpdatesState = 25;
   }
 }
 
@@ -627,8 +630,22 @@ message DeleteMemberInput {
 }
 
 // Remove member from space result
-message DeleteMemberResult {
-  repeated Update updates = 1;
+message DeleteMemberResult { repeated Update updates = 1; }
+
+message GetUpdatesStateInput {
+  // Local PTS of the self user update box
+  int32 user_pts = 1;
+
+  // Local date of state
+  int64 date = 2;
+}
+
+message GetUpdatesStateResult {
+  // Current PTS of the self user update box
+  int32 user_pts = 1;
+
+  // Current date of the state
+  int64 date = 2;
 }
 
 // Mark dialog as unread
@@ -888,30 +905,48 @@ message GetSpaceMembersResult {
 /// ------------------------------
 // Updates Subsystem
 message Update {
-  reserved 1, 2, 3;
+  reserved 1, 2;
+
+  int64 date = 3;
 
   oneof update {
-    UpdateNewMessage new_message = 4;
-    UpdateEditMessage edit_message = 5;
+    UpdateNewMessage new_message = 4;   // this
+    UpdateEditMessage edit_message = 5; // this
     UpdateMessageId update_message_id = 6;
-    UpdateDeleteMessages delete_messages = 7;
+    UpdateDeleteMessages delete_messages = 7; // this
     UpdateComposeAction update_compose_action = 8;
     UpdateUserStatus update_user_status = 9;
-    UpdateMessageAttachment message_attachment = 10;
+    UpdateMessageAttachment message_attachment = 10; // this
     UpdateReaction update_reaction = 11;
     UpdateDeleteReaction delete_reaction = 12;
-    UpdateChatParticipantAdd participant_add = 13;
-    UpdateChatParticipantDelete participant_delete = 14;
-    UpdateNewChat new_chat = 15;
-    UpdateDeleteChat delete_chat = 16;
+    UpdateChatParticipantAdd participant_add = 13;       // this
+    UpdateChatParticipantDelete participant_delete = 14; // this
+    UpdateNewChat new_chat = 15;                         // this
+    UpdateDeleteChat delete_chat = 16;                   // this
     UpdateSpaceMemberAdd space_member_add = 17;
-    UpdateSpaceMemberDelete space_member_delete = 18;
-    UpdateJoinSpace join_space = 19;
+    UpdateSpaceMemberDelete space_member_delete = 18; // this
+    UpdateJoinSpace join_space = 19;                  // this
     UpdateReadMaxId update_read_max_id = 20;
     UpdateUserSettings update_user_settings = 21;
     UpdateNewMessageNotification new_message_notification = 22;
     UpdateMarkAsUnread mark_as_unread = 23;
+    UpdateChatSkipPts chat_skip_pts = 24;
+    UpdateChatHasNewUpdates chat_has_new_updates = 25;
   }
+}
+
+// Update when a chat has new updates and client should fetch them
+message UpdateChatHasNewUpdates {
+  // Chat ID
+  int64 chat_id = 1;
+
+  // Current PTS of the chat
+  int32 pts = 2;
+}
+
+message UpdateChatSkipPts {
+  int64 chat_id = 1;
+  int32 pts = 2;
 }
 
 message UpdateNewMessageNotification {
@@ -991,15 +1026,22 @@ message UpdateDeleteChat {
 }
 
 // Update when a new message is created
-message UpdateNewMessage { Message message = 1; }
+message UpdateNewMessage {
+  Message message = 1;
+  int32 pts = 2;
+}
 
 // Update when a message is edited
-message UpdateEditMessage { Message message = 1; }
+message UpdateEditMessage {
+  Message message = 1;
+  int32 pts = 2;
+}
 
 // Update when messages are deleted
 message UpdateDeleteMessages {
   repeated int64 message_ids = 1;
   Peer peer_id = 2;
+  int32 pts = 3;
 }
 
 // Update when a message ID is updated after sending
