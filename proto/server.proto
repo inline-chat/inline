@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package server;
+
+message ServerUpdate {
+  reserved 1, 2, 3;
+
+  oneof update {
+    ServerUpdateNewMessage new_message = 4;
+    ServerUpdateEditMessage edit_message = 5;
+    ServerUpdateDeleteMessages delete_messages = 6;
+  }
+}
+
+message ServerUpdateNewMessage {
+  int64 chat_id = 1;
+  int64 msg_id = 2;
+  int32 pts = 3;
+}
+
+message ServerUpdateEditMessage {
+  int64 chat_id = 1;
+  int64 msg_id = 2;
+  int32 pts = 3;
+}
+
+message ServerUpdateDeleteMessages {
+  int64 chat_id = 1;
+  repeated int64 msg_ids = 2;
+  int32 pts = 3;
+}

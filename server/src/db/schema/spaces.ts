@@ -11,6 +11,8 @@ export const spaces = pgTable("spaces", {
   creatorId: integer().references(() => users.id),
   date: creationDate,
   deleted: date,
+  // updates
+  pts: integer("pts").default(0),
 })
 
 export const spaceRelations = relations(spaces, ({ many }) => ({

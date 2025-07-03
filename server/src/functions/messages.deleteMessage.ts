@@ -18,12 +18,13 @@ type Output = {
 
 export const deleteMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
-  await MessageModel.deleteMessages(input.messageIds, chatId)
+  let { pts } = await MessageModel.deleteMessages(input.messageIds, chatId)
 
   const { selfUpdates } = await pushUpdates({
     inputPeer: input.peer,
     messageIds: input.messageIds,
     currentUserId: context.currentUserId,
+    pts,
   })
 
   return { updates: selfUpdates }
@@ -38,10 +39,12 @@ const pushUpdates = async ({
   inputPeer,
   messageIds,
   currentUserId,
+  pts,
 }: {
   inputPeer: InputPeer
   messageIds: bigint[]
   currentUserId: number
+  pts: number
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
 
@@ -56,6 +59,7 @@ const pushUpdates = async ({
         update: {
           oneofKind: "deleteMessages",
           deleteMessages: {
+            pts,
             messageIds: messageIds.map((id) => BigInt(id)),
             peerId: Encoders.peerFromInputPeer({ inputPeer: encodingForInputPeer, currentUserId }),
           },
@@ -84,6 +88,7 @@ const pushUpdates = async ({
         update: {
           oneofKind: "deleteMessages",
           deleteMessages: {
+            pts,
             messageIds: messageIds.map((id) => BigInt(id)),
             peerId: Encoders.peerFromInputPeer({ inputPeer, currentUserId }),
           },
