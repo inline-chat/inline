@@ -43,20 +43,11 @@ extension ChatView {
       }
     }
 
-    var isComposeAction: Bool {
-      switch self {
-        case .typing, .composeAction:
-          true
-        default:
-          false
-      }
-    }
-
     @ViewBuilder
     var animatedIndicator: some View {
       switch self {
         case .typing:
-        AnimatedDots(dotSize: 3, dotColor: .secondary)
+          AnimatedDots(dotSize: 3, dotColor: .secondary)
         case let .composeAction(action):
           switch action {
             case .uploadingPhoto:
@@ -164,7 +155,7 @@ struct ChatSubtitlePreview: View {
 
         Text(subtitle.text.lowercased())
           .font(.caption)
-          .foregroundStyle(subtitle.isComposeAction ? .secondary : .secondary)
+          .foregroundStyle(.secondary)
       }
       .padding(.top, -2)
       .fixedSize()
