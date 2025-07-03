@@ -339,6 +339,7 @@ final class AppMenu: NSObject {
     )
     quickSearchItem.keyEquivalentModifierMask = [.command]
     quickSearchItem.target = self
+    quickSearchItem.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
     viewMenu.addItem(quickSearchItem)
 
     let toggleSidebarItem = NSMenuItem(
@@ -358,6 +359,8 @@ final class AppMenu: NSObject {
       keyEquivalent: "f"
     )
 
+    viewMenu.addItem(NSMenuItem.separator())
+
     // Navigation between chats in sidebar
     let prevChatItem = NSMenuItem(
       title: "Previous Chat",
@@ -366,6 +369,7 @@ final class AppMenu: NSObject {
     )
     prevChatItem.keyEquivalentModifierMask = [.option]
     prevChatItem.target = self
+    prevChatItem.image = NSImage(systemSymbolName: "chevron.up", accessibilityDescription: nil)
     viewMenu.addItem(prevChatItem)
 
     let nextChatItem = NSMenuItem(
@@ -375,6 +379,7 @@ final class AppMenu: NSObject {
     )
     nextChatItem.keyEquivalentModifierMask = [.option]
     nextChatItem.target = self
+    nextChatItem.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)
     viewMenu.addItem(nextChatItem)
   }
 
