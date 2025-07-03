@@ -149,6 +149,14 @@ public extension FullMessage {
     }
   }
 
+  var translationEntities: MessageEntities? {
+    if TranslationState.shared.isTranslationEnabled(for: peerId) {
+      currentTranslation?.entities
+    } else {
+      message.entities
+    }
+  }
+
   var isTranslated: Bool {
     translationText != nil
   }
