@@ -2,7 +2,7 @@ import UIKit
 
 /// Utility class for mention colors in iOS message bubbles
 /// This matches the macOS implementation exactly
-class MessageMentionRenderer {
+class MessageRichTextRenderer {
   /// Gets the appropriate mention color based on message direction
   /// - Parameter outgoing: Whether the message is outgoing
   /// - Returns: The color to use for mentions (white for outgoing, blue for incoming)
@@ -19,9 +19,11 @@ class MessageMentionRenderer {
   /// - Returns: The color to use for links
   static func linkColor(for outgoing: Bool) -> UIColor {
     if outgoing {
-      UIColor.white.withAlphaComponent(0.9)
+      UIColor.red
+      // UIColor.white
     } else {
-      ThemeManager.shared.selected.accent
+      UIColor.purple
+      // ThemeManager.shared.selected.accent
     }
   }
 }
