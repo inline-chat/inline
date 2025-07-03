@@ -264,7 +264,7 @@ class MessageSizeCalculator {
         top += text.spacing.top + text.size.height + text.spacing.bottom
       }
       if let reactions {
-        top += reactions.spacing.top + reactions.size.height + reactions.spacing.bottom
+        top += reactions.spacing.top + reactions.size.height // + reactions.spacing.bottom
       }
       return top
     }
@@ -635,7 +635,7 @@ class MessageSizeCalculator {
         spacing: NSEdgeInsets(
           top: 8.0,
           left: 8.0,
-          bottom: 8.0,
+          bottom: 0.0,
           right: 8.0
         )
       )
@@ -747,6 +747,7 @@ class MessageSizeCalculator {
     }
     if let attachmentsPlan {
       bubbleHeight += attachmentsPlan.size.height
+      bubbleHeight += attachmentsPlan.spacing.top // between text/reactions and attachments
       bubbleHeight += attachmentsPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, attachmentsPlan.size.width + attachmentsPlan.spacing.horizontalTotal)
     }
