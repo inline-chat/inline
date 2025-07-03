@@ -4,6 +4,8 @@ import InlineKit
 extension Notification.Name {
   static let toggleSidebar = Notification.Name("toggleSidebar")
   static let focusSearch = Notification.Name("focusSearch")
+  static let prevChat = Notification.Name("prevChat")
+  static let nextChat = Notification.Name("nextChat")
 }
 
 final class AppMenu: NSObject {
@@ -355,6 +357,25 @@ final class AppMenu: NSObject {
       action: #selector(NSWindow.toggleFullScreen(_:)),
       keyEquivalent: "f"
     )
+
+    // Navigation between chats in sidebar
+    let prevChatItem = NSMenuItem(
+      title: "Previous Chat",
+      action: #selector(prevChat(_:)),
+      keyEquivalent: String(UnicodeScalar(NSEvent.SpecialKey.upArrow.rawValue)!)
+    )
+    prevChatItem.keyEquivalentModifierMask = [.option]
+    prevChatItem.target = self
+    viewMenu.addItem(prevChatItem)
+
+    let nextChatItem = NSMenuItem(
+      title: "Next Chat",
+      action: #selector(nextChat(_:)),
+      keyEquivalent: String(UnicodeScalar(NSEvent.SpecialKey.downArrow.rawValue)!)
+    )
+    nextChatItem.keyEquivalentModifierMask = [.option]
+    nextChatItem.target = self
+    viewMenu.addItem(nextChatItem)
   }
 
   private func setupWindowMenu() {
@@ -455,5 +476,27 @@ final class AppMenu: NSObject {
 
   @objc private func focusSearch(_ sender: NSMenuItem) {
     NotificationCenter.default.post(name: .focusSearch, object: nil)
+  }
+
+  // MARK: - Chat Navigation Actions
+
+  @objc private func prevChat(_ sender: Any?) {
+    NotificationCenter.default.post(name: .prevChat, object: nil)
+  }
+
+  @objc private func nextChat(_ sender: Any?) {
+    NotificationCenter.default.post(name: .nextChat, object: nil)
+  }
+}
+
+extension AppMenu: NSMenuItemValidation {
+  func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    guard let nav = dependencies?.nav else { return false }
+
+    if menuItem.action == #selector(prevChat(_:)) || menuItem.action == #selector(nextChat(_:)) {
+      return nav.selectedTab == .inbox || nav.selectedTab == .archive
+    }
+
+    return true
   }
 }
