@@ -736,7 +736,7 @@ class UIMessageView: UIView {
     // Use centralized LinkDetector for consistent link detection
     let linkMatches = LinkDetector.shared.applyLinkStyling(
       to: attributedString,
-      linkColor: MessageMentionRenderer.linkColor(for: outgoing)
+      linkColor: MessageRichTextRenderer.linkColor(for: outgoing)
     )
 
     // Store links for tap handling
@@ -756,7 +756,7 @@ class UIMessageView: UIView {
         switch entity.type {
           case .mention:
             if case let .mention(mention) = entity.entity {
-              let mentionColor = MessageMentionRenderer.mentionColor(for: outgoing)
+              let mentionColor = MessageRichTextRenderer.mentionColor(for: outgoing)
               attributedString.addAttributes([
                 .foregroundColor: mentionColor,
                 .mentionUserId: mention.userID,
