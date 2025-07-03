@@ -49,15 +49,20 @@ extension UIMessageView {
     return stack
   }
 
-  func createMessageLabel() -> UILabel {
-    let label = UILabel()
-    label.backgroundColor = .clear
-    label.textAlignment = .natural
-    label.font = .systemFont(ofSize: 18)
-    label.textColor = textColor
-    label.numberOfLines = 0
-
-    return label
+  func createMessageLabel() -> UITextView {
+    let textView = UITextView()
+    textView.backgroundColor = .clear
+    textView.textAlignment = .natural
+    textView.font = .systemFont(ofSize: 18)
+    textView.textColor = textColor
+    textView.isEditable = false
+    textView.isSelectable = false
+    textView.isScrollEnabled = false
+    textView.dataDetectorTypes = []
+    textView.textContainer.lineFragmentPadding = 0
+    textView.textContainerInset = .zero
+    textView.linkTextAttributes = [:]
+    return textView
   }
 
   func createUnsupportedLabel() -> UILabel {
