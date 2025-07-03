@@ -144,7 +144,7 @@ struct HomeSidebar: View {
     SidebarTabView<Tab>(
       tabs: [
         .init(value: .archive, label: "Archive", systemImage: "archivebox.fill"),
-        .init(value: .inbox, label: "Your Chats", systemImage: "bubble.left.and.bubble.right.fill", fontSize: 16),
+        .init(value: .inbox, label: "Chats", systemImage: "bubble.left.and.bubble.right.fill", fontSize: 16),
         .init(value: .spaces, label: "Space", systemImage: "building.2.fill", fontSize: 16),
         //  .init(value: .spaces, label: "Browse", systemImage: "list.bullet", fontSize: 18),
       ],
@@ -203,7 +203,7 @@ struct HomeSidebar: View {
       .onChange(of: searchQuery) { searchQuery in
         search.updateQuery(searchQuery)
         // Task(priority: .userInitiated) { @MainActor in
-         localSearch.search(query: searchQuery)
+        localSearch.search(query: searchQuery)
         // Reset selection when search query changes
         selectedResultIndex = 0
         // }
@@ -278,7 +278,7 @@ struct HomeSidebar: View {
       if tab == .archive {
         Text("Archive")
       } else {
-        Text("Your Chats")
+        Text("Chats")
       }
 
       Spacer()
