@@ -516,11 +516,11 @@ class UIMessageView: UIView {
     // Get tap location in the label's coordinate space
     let tapLocation = gesture.location(in: messageLabel)
 
-    // Create text container to match the label's configuration
+    // Create text container to match the text view's configuration
     let textContainer = NSTextContainer(size: messageLabel.bounds.size)
-    textContainer.lineFragmentPadding = 0
-    textContainer.lineBreakMode = messageLabel.lineBreakMode
-    textContainer.maximumNumberOfLines = messageLabel.numberOfLines
+    textContainer.lineFragmentPadding = messageLabel.textContainer.lineFragmentPadding
+    textContainer.lineBreakMode = messageLabel.textContainer.lineBreakMode
+    textContainer.maximumNumberOfLines = messageLabel.textContainer.maximumNumberOfLines
 
     // Create layout manager and text storage
     let layoutManager = NSLayoutManager()

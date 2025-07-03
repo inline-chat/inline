@@ -19,11 +19,9 @@ class MessageRichTextRenderer {
   /// - Returns: The color to use for links
   static func linkColor(for outgoing: Bool) -> UIColor {
     if outgoing {
-      UIColor.red
-      // UIColor.white
+      UIColor.white
     } else {
-      UIColor.purple
-      // ThemeManager.shared.selected.accent
+      ThemeManager.shared.selected.accent
     }
   }
 }
