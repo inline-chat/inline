@@ -249,9 +249,9 @@ struct ChatItemView: View {
   var titleAndLastMessageView: some View {
     VStack(alignment: .leading, spacing: 0) {
       if let space {
-        Text(space.nameWithoutEmoji ?? space.name ?? "Space")
+        Text(space.nameWithoutEmoji)
           .font(.callout)
-          .foregroundStyle(.tertiary)
+          .foregroundStyle(.secondary)
           .fontWeight(.medium)
       }
       title
