@@ -106,11 +106,13 @@ public final class LinkDetector: Sendable {
   ) -> [LinkMatch] {
     let text = attributedString.string
     let matches = detectLinks(in: text)
+    let underlineColor = linkColor
 
     for match in matches {
       var attributes: [NSAttributedString.Key: Any] = [
         .foregroundColor: linkColor,
         .underlineStyle: NSUnderlineStyle.single.rawValue,
+        .underlineColor: underlineColor,
         .link: match.url,
       ]
 
