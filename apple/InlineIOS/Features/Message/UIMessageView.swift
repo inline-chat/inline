@@ -428,7 +428,9 @@ class UIMessageView: UIView {
 
       containerStack.addArrangedSubview(innerContainer)
     } else {
-      multiLineContainer.addArrangedSubview(messageLabel)
+      if message.hasText {
+        multiLineContainer.addArrangedSubview(messageLabel)
+      }
 
       // Insert URLPreviewView(s) for attachments with urlPreview
       for attachment in fullMessage.attachments {
