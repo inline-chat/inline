@@ -239,8 +239,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
         // Include caption for each photo if it has one
         let isFirst = index == 0
-        let captionText = photoItem.caption.trimmingCharacters(in: .whitespacesAndNewlines)
-        let messageText = !captionText.isEmpty ? captionText : nil
+        let captionText = photoItem.caption?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let messageText = captionText?.isEmpty == false ? captionText : nil
 
         Transactions.shared.mutate(
           transaction: .sendMessage(
