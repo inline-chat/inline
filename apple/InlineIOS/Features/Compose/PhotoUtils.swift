@@ -256,7 +256,10 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
           )
         )
 
-        Log.shared.debug("Sent image \(index + 1)/\(photoItems.count) with caption: '\(captionText)'")
+        Log.shared
+          .debug(
+            "Sent image \(index + 1)/\(photoItems.count) with caption: '\(String(describing: captionText))'"
+          )
       } catch {
         Log.shared.error("Failed to save and send photo \(index + 1)", error: error)
       }
