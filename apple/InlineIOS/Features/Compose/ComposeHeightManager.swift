@@ -11,6 +11,9 @@ extension ComposeView {
   }
 
   func updateHeight() {
+    // If textView doesn't have proper bounds yet, defer height calculation
+    guard textView.bounds.width > 0 else { return }
+
     let size = textView.sizeThatFits(CGSize(
       width: textView.bounds.width,
       height: .greatestFiniteMagnitude
