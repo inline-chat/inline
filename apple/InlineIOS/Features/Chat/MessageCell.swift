@@ -67,11 +67,14 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
 
   func configure(with message: FullMessage, fromOtherSender: Bool, spaceId: Int64) {
+    let newOutgoing = message.message.out == true
+    
     if self.message != nil {
       if prevText == message.displayText, self.message == message,
-         self.fromOtherSender == fromOtherSender, self.spaceId == spaceId
+         self.fromOtherSender == fromOtherSender, self.spaceId == spaceId,
+         self.outgoing == newOutgoing
       {
-        // skip only if everything is exact match
+        // skip only if everything is exact match including outgoing state
         return
       }
     }
@@ -82,7 +85,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     self.fromOtherSender = fromOtherSender
     self.spaceId = spaceId
     isThread = message.peerId.isThread
-    outgoing = message.message.out == true
+    outgoing = newOutgoing
 
     resetCell()
 
@@ -96,7 +99,16 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   override func prepareForReuse() {
     super.prepareForReuse()
-    // resetCell()
+    
+    // Reset swipe state
+    resetSwipeState()
+    
+    // Clear cached values to force reconfiguration
+    prevText = nil
+    message = nil
+    
+    // Reset delegate
+    delegate = nil
   }
 
   // MARK: - Constraints
@@ -397,6 +409,8 @@ extension MessageCollectionViewCell {
     messageView?.stopShineAnimation()
 
     messageView?.removeFromSuperview()
+    messageView = nil
+    
     if isThread {
       nameLabel.removeFromSuperview()
       avatarView?.removeFromSuperview()
