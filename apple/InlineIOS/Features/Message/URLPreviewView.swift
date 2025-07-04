@@ -132,15 +132,25 @@ class URLPreviewView: UIView {
        let height = bestSize.height,
        width > 0, height > 0
     {
+      let aspectRatio = CGFloat(width) / CGFloat(height)
       isPortrait = height > width
+      
       if isPortrait {
-        // Portrait: limit by height
+        // Portrait: limit by height, ensure width doesn't exceed maxWidth
         imageHeight = min(CGFloat(height), maxHeight)
-        imageWidth = min(CGFloat(width) * (imageHeight / CGFloat(height)), maxWidth)
+        imageWidth = min(imageHeight * aspectRatio, maxWidth)
+        // Recalculate height if width was constrained
+        if imageWidth == maxWidth {
+          imageHeight = imageWidth / aspectRatio
+        }
       } else {
-        // Landscape: limit by width
+        // Landscape: limit by width, ensure height doesn't exceed maxHeight
         imageWidth = min(CGFloat(width), maxWidth)
-        imageHeight = min(CGFloat(height) * (imageWidth / CGFloat(width)), maxHeight)
+        imageHeight = min(imageWidth / aspectRatio, maxHeight)
+        // Recalculate width if height was constrained
+        if imageHeight == maxHeight {
+          imageWidth = imageHeight * aspectRatio
+        }
       }
     }
     NSLayoutConstraint.activate([
@@ -153,28 +163,29 @@ class URLPreviewView: UIView {
       // Site name label
       siteNameLabel.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
       siteNameLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-      siteNameLabel.widthAnchor.constraint(equalToConstant: maxWidth),
+      siteNameLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
 
       // Title label
       titleLabel.topAnchor.constraint(equalTo: siteNameLabel.bottomAnchor, constant: interLabelSpacing),
       titleLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-      titleLabel.widthAnchor.constraint(equalToConstant: maxWidth),
+      titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
 
       // Description label
       descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: interLabelSpacing),
       descriptionLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-      descriptionLabel.widthAnchor.constraint(equalToConstant: maxWidth),
+      descriptionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
 
       // Image view
       imageView.topAnchor.constraint(equalTo: descriptionLabel.bottomAnchor, constant: verticalPadding),
-      imageView.centerXAnchor.constraint(equalTo: centerXAnchor, constant: rectangleWidth / 2),
+      imageView.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
+      imageView.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth),
       imageView.widthAnchor.constraint(equalToConstant: imageWidth),
       imageView.heightAnchor.constraint(equalToConstant: imageHeight),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
     ])
 
     for label in [siteNameLabel, titleLabel, descriptionLabel] {
-      label.preferredMaxLayoutWidth = maxWidth
+      label.preferredMaxLayoutWidth = 0
     }
 
     backgroundColor = bgColor
