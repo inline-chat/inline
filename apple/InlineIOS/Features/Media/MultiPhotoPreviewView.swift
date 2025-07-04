@@ -3,9 +3,9 @@ import SwiftUI
 public struct PhotoItem: Identifiable {
   public let id = UUID()
   public let image: UIImage
-  public var caption: String = ""
+  public var caption: String?
 
-  public init(image: UIImage, caption: String = "") {
+  public init(image: UIImage, caption: String? = nil) {
     self.image = image
     self.caption = caption
   }
@@ -17,13 +17,13 @@ class MultiPhotoPreviewViewModel: ObservableObject {
   @Published var isPresented: Bool = false
 
   func setPhotos(_ images: [UIImage]) {
-    photoItems = images.map { PhotoItem(image: $0, caption: "") }
+    photoItems = images.map { PhotoItem(image: $0, caption: nil) }
     currentIndex = 0
   }
 
   func updateCaption(at index: Int, caption: String) {
     guard index < photoItems.count else { return }
-    photoItems[index].caption = caption
+    photoItems[index].caption = caption.isEmpty ? nil : caption
   }
 
   var currentPhoto: PhotoItem? {
@@ -107,7 +107,7 @@ struct MultiPhotoPreviewView: View {
 
             // Load caption for new photo
             if newValue < viewModel.photoItems.count {
-              currentCaption = viewModel.photoItems[newValue].caption
+              currentCaption = viewModel.photoItems[newValue].caption ?? ""
             }
           }
 
@@ -163,7 +163,7 @@ struct MultiPhotoPreviewView: View {
     .onAppear {
       // Initialize caption for first photo
       if let firstPhoto = viewModel.photoItems.first {
-        currentCaption = firstPhoto.caption
+        currentCaption = firstPhoto.caption ?? ""
       }
     }
   }
