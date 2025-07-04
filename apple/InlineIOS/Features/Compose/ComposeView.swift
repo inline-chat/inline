@@ -421,7 +421,26 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
          let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
       {
-        textView.text = message.message.text
+        // Set attributed text with entities to preserve mentions and formatting
+        if let text = message.message.text {
+          let configuration = ProcessEntities.Configuration(
+            font: .systemFont(ofSize: 17),
+            textColor: .label,
+            linkColor: .systemBlue,
+            convertMentionsToLink: false // Keep as attributes for editing
+          )
+
+          let attributedText = ProcessEntities.toAttributedString(
+            text: text,
+            entities: message.message.entities,
+            configuration: configuration
+          )
+
+          textView.attributedText = attributedText
+        } else {
+          textView.text = ""
+        }
+
         textView.showPlaceholder(false)
         buttonAppear()
         DispatchQueue.main.async { [weak self] in
