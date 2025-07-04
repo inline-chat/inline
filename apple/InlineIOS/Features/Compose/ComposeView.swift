@@ -20,6 +20,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   let maxHeight: CGFloat = 350
   let buttonSize: CGSize = .init(width: 32, height: 32)
+  let linkColor: UIColor = ThemeManager.shared.selected.accent
 
   static let minHeight: CGFloat = 38.0
   static let textViewVerticalPadding: CGFloat = 0.0
@@ -426,7 +427,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           let configuration = ProcessEntities.Configuration(
             font: .systemFont(ofSize: 17),
             textColor: .label,
-            linkColor: .systemBlue,
+            linkColor: linkColor,
             convertMentionsToLink: false // Keep as attributes for editing
           )
 
