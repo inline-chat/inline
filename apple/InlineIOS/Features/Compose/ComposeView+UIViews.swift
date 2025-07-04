@@ -76,7 +76,7 @@ extension ComposeView {
 
     let libraryAction = UIAction(
       title: "Photos",
-      image: UIImage(systemName: "photo"),
+      image: UIImage(systemName: "photo.on.rectangle.angled"),
       handler: { [weak self] _ in
         self?.presentPicker()
       }

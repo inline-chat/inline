@@ -56,6 +56,16 @@
         }
       }
     },
+    "%lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld"
+          }
+        }
+      }
+    },
     "+1 555 555 5555" : {
       "comment" : "Phone number placeholder",
       "extractionState" : "stale",

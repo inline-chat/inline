@@ -62,6 +62,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var originalDraftEntities: MessageEntities?
 
   let previewViewModel = PhotoPreviewViewModel()
+  let multiPhotoPreviewViewModel = MultiPhotoPreviewViewModel()
   let draftSaveInterval: TimeInterval = 2.0 // Save every 2 seconds
 
   // MARK: - UI Components
