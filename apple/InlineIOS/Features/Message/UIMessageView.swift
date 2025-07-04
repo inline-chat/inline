@@ -30,7 +30,6 @@ class UIMessageView: UIView {
   var linkTapHandler: ((URL) -> Void)?
   var interaction: UIContextMenuInteraction?
 
-  var links: [(range: NSRange, url: URL)] = []
 
   static let attributedCache: NSCache<NSString, NSAttributedString> = {
     let cache = NSCache<NSString, NSAttributedString>()
@@ -499,8 +498,9 @@ class UIMessageView: UIView {
 
   func addGestureRecognizer() {
     messageLabel.isUserInteractionEnabled = true
-
-    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+    
+    // Add tap gesture for mentions and links
+    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTextViewTap))
     messageLabel.addGestureRecognizer(tapGesture)
   }
 
@@ -518,32 +518,22 @@ class UIMessageView: UIView {
     bubbleView.addGestureRecognizer(doubleTapGesture)
   }
 
-  @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-    // Get tap location in the label's coordinate space
+
+  @objc func handleTextViewTap(_ gesture: UITapGestureRecognizer) {
     let tapLocation = gesture.location(in: messageLabel)
-
-    // Create text container to match the text view's configuration
-    let textContainer = NSTextContainer(size: messageLabel.bounds.size)
-    textContainer.lineFragmentPadding = messageLabel.textContainer.lineFragmentPadding
-    textContainer.lineBreakMode = messageLabel.textContainer.lineBreakMode
-    textContainer.maximumNumberOfLines = messageLabel.textContainer.maximumNumberOfLines
-
-    // Create layout manager and text storage
-    let layoutManager = NSLayoutManager()
-    let textStorage = NSTextStorage(attributedString: messageLabel.attributedText ?? NSAttributedString())
-
-    layoutManager.addTextContainer(textContainer)
-    textStorage.addLayoutManager(layoutManager)
-
+    let textContainer = messageLabel.textContainer
+    let layoutManager = messageLabel.layoutManager
+    
     // Get character index at tap location
     let characterIndex = layoutManager.characterIndex(
       for: tapLocation,
       in: textContainer,
       fractionOfDistanceBetweenInsertionPoints: nil
     )
-
-    // First check if tap is on a mention
+    
+    // Check if tap is on a mention first
     if let attributedText = messageLabel.attributedText {
+      var foundMention = false
       attributedText.enumerateAttribute(.mentionUserId, in: NSRange(
         location: 0,
         length: attributedText.length
@@ -557,16 +547,25 @@ class UIMessageView: UIView {
             object: nil,
             userInfo: ["userId": userId]
           )
+          foundMention = true
           return
         }
       }
-    }
-
-    // Then check if tap is on a regular link
-    for link in links where NSLocationInRange(characterIndex, link.range) {
-      print("Link tapped: \(link.url)")
-      linkTapHandler?(link.url)
-      return
+      
+      // If not a mention, check for links
+      if !foundMention {
+        attributedText.enumerateAttribute(.link, in: NSRange(
+          location: 0,
+          length: attributedText.length
+        )) { value, range, _ in
+          if NSLocationInRange(characterIndex, range),
+             let url = value as? URL
+          {
+            linkTapHandler?(url)
+            return
+          }
+        }
+      }
     }
   }
 
@@ -743,13 +742,10 @@ class UIMessageView: UIView {
 
   func detectAndStyleLinks(in text: String, attributedString: NSMutableAttributedString) {
     // Use centralized LinkDetector for consistent link detection
-    let linkMatches = LinkDetector.shared.applyLinkStyling(
+    LinkDetector.shared.applyLinkStyling(
       to: attributedString,
       linkColor: MessageRichTextRenderer.linkColor(for: outgoing)
     )
-
-    // Store links for tap handling
-    links = linkMatches.map { (range: $0.range, url: $0.url) }
   }
 
   // func detectAndStyleMentions(in text: String, attributedString: NSMutableAttributedString) {
@@ -945,3 +941,4 @@ class UIMessageView: UIView {
     return nil
   }
 }
+
