@@ -383,7 +383,7 @@ class UIMessageView: UIView {
       innerContainer.layoutMargins = UIEdgeInsets(
         top: 0,
         left: StackPadding.leading,
-        bottom: 12,
+        bottom: 0,
         right: StackPadding.trailing
       )
 
