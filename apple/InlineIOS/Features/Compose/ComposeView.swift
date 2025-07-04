@@ -113,6 +113,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
   }
 
+  override func layoutSubviews() {
+    super.layoutSubviews()
+
+    // Update height after layout if text view now has proper bounds and there's text
+    if textView.bounds.width > 0, !(textView.text?.isEmpty ?? true) {
+      updateHeight()
+    }
+  }
+
   override func removeFromSuperview() {
     saveDraft()
     stopDraftSaveTimer()
