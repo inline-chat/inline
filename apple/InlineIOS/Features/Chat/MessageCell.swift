@@ -30,10 +30,10 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   // MARK: - Sizes
 
-  private let avatarSize: CGFloat = 32
-  private let avatarLeading: CGFloat = 2
-  private let nameLabelLeading: CGFloat = 6
-  private let nameLabelTop: CGFloat = 14
+  private let avatarSize: CGFloat = 28
+  private let avatarLeading: CGFloat = 0
+  private let nameLabelLeading: CGFloat = 9
+  private let nameLabelTop: CGFloat = 9
   private let nameLabelHeight: CGFloat = 16
 
   // MARK: - Views
@@ -312,7 +312,7 @@ extension MessageCollectionViewCell {
     contentView.addSubview(avatarOrSpacer)
 
     NSLayoutConstraint.activate([
-      avatarOrSpacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 34),
+      avatarOrSpacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
       avatarOrSpacer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: avatarLeading),
       avatarOrSpacer.widthAnchor.constraint(equalToConstant: avatarSize),
       avatarOrSpacer.heightAnchor.constraint(equalToConstant: avatarSize),
@@ -331,9 +331,9 @@ extension MessageCollectionViewCell {
   /// Space between bubble's top to contentView's top (includes name height)
   private var topBubblePadding: CGFloat {
     if isThread, fromOtherSender, !outgoing {
-      nameLabelHeight + nameLabelTop + 2
+      nameLabelHeight + nameLabelTop
     } else {
-      fromOtherSender ? 12 : 2
+      fromOtherSender ? 6 : 1
     }
   }
 
@@ -354,10 +354,10 @@ extension MessageCollectionViewCell {
 
     if isThread, fromOtherSender, !outgoing {
       if let avatarOrSpacer = avatarSpacerView {
-        leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: 6)
+        leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: 3)
       } else {
         leadingConstraint = newMessageView.leadingAnchor
-          .constraint(equalTo: contentView.leadingAnchor, constant: 44)
+          .constraint(equalTo: contentView.leadingAnchor, constant: 32)
       }
       trailingConstraint = newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10)
     } else {
@@ -365,19 +365,19 @@ extension MessageCollectionViewCell {
       var leadingConstant: CGFloat = 0
       // Add spacer for incoming messages that are not fromOtherSender
       if isThread, !outgoing, !fromOtherSender {
-        let avatarSize: CGFloat = 32
-        let avatarLeading: CGFloat = 2
+        let avatarSize: CGFloat = 28
+        let avatarLeading: CGFloat = 0
         let spacer = UIView()
         spacer.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(spacer)
         NSLayoutConstraint.activate([
-          spacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 34),
+          spacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
           spacer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: avatarLeading),
           spacer.widthAnchor.constraint(equalToConstant: avatarSize),
           spacer.heightAnchor.constraint(equalToConstant: avatarSize),
         ])
         leadingAnchor = spacer.trailingAnchor
-        leadingConstant = 6
+        leadingConstant = 3
       }
       leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingConstant)
       trailingConstraint = newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
