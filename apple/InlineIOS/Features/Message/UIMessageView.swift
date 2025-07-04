@@ -264,6 +264,10 @@ class UIMessageView: UIView {
     // Remove shine effect
     stopShineAnimation()
 
+    // Reset appearance-related properties
+    bubbleView.backgroundColor = bubbleColor
+    messageLabel.textColor = textColor
+    
     // Re-setup translation state observation
     setupTranslationObserver()
   }
@@ -703,7 +707,7 @@ class UIMessageView: UIView {
   }
 
   func setupAppearance() {
-    let cacheKey = "\(message.stableId)-\(fullMessage.displayText ?? "")"
+    let cacheKey = "\(message.stableId)-\(fullMessage.displayText ?? "")-\(outgoing)"
     bubbleView.backgroundColor = bubbleColor
 
     guard let text = fullMessage.displayText else { return }
