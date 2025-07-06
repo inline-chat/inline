@@ -91,6 +91,9 @@ export const batchEvaluate = async (input: Input): Promise<NotificationEvalResul
     if (model === "gpt-4.1-mini") {
       inputPrice = (inputTokens * 0.0004) / 1000
       outputPrice = (outputTokens * 0.0016) / 1000
+    } else if (model === "gpt-4.1") {
+      inputPrice = (inputTokens * 0.002) / 1000
+      outputPrice = (outputTokens * 0.08) / 1000
     } else if (model === "gpt-4.1-nano") {
       inputPrice = (inputTokens * 0.0001) / 1000
       outputPrice = (outputTokens * 0.0004) / 1000
