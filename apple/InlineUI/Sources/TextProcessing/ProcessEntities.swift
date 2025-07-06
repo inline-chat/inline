@@ -128,7 +128,7 @@ public class ProcessEntities {
         var entity = MessageEntity()
         entity.type = .mention
         entity.offset = Int64(range.location)
-        entity.length = Int64(range.length - 1) // Subtract 1 for trailing space
+        entity.length = Int64(range.length)
         entity.mention = MessageEntity.MessageEntityMention.with {
           $0.userID = userId
         }
