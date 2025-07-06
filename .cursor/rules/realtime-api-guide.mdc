@@ -24,3 +24,9 @@ To enable debug logging in tests, set process.env["DEBUG"] = "1".
 
 ## Updates
 when encoding updates, make sure you encode update object for each user separately because it affects how Peer and data is encoded.
+
+## Generate protocol buffers
+In root of the repo, call:
+```
+bun generate:proto
+```
