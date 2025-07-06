@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { messages, translations } from "@in/server/db/schema"
-import { eq, and, gt, desc, inArray } from "drizzle-orm"
+import { eq, and, gt, desc, inArray, lt } from "drizzle-orm"
 import { decryptBinary, encrypt } from "@in/server/modules/encryption/encryption"
 import { Log } from "@in/server/utils/log"
 import { MessageEntities, type InputPeer, type MessageTranslation } from "@in/protocol/core"
@@ -29,6 +29,7 @@ type TranslateMessagesFnInput = {
 }
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
+const CONTEXT_MESSAGE_LIMIT = 5
 
 export async function translateMessages(
   input: TranslateMessagesFnInput,
@@ -99,9 +100,26 @@ export async function translateMessages(
       newMessagesCount: messagesToTranslate.length,
     })
 
+    // Get context messages if we have fewer than 5 messages to translate
+    let contextMessages: ProcessedMessage[] = []
+    if (messagesToTranslate.length < CONTEXT_MESSAGE_LIMIT) {
+      const oldestMessageId = Math.min(...messagesToTranslate.map((m) => m.messageId))
+      contextMessages = await getContextMessages({
+        chatId: chat.id,
+        beforeMessageId: oldestMessageId,
+        limit: CONTEXT_MESSAGE_LIMIT - messagesToTranslate.length,
+      })
+
+      log.debug("Retrieved context messages", {
+        contextCount: contextMessages.length,
+        oldestMessageId,
+      })
+    }
+
     // Translate messages
     const messageTranslations = await TranslationModule.translateMessages({
       messages: messagesToTranslate,
+      contextMessages,
       language: input.language,
       chat,
       actorId: context.currentUserId,
@@ -156,6 +174,56 @@ export async function translateMessages(
 // ----------------
 // HELPERS
 // ----------------
+
+/**
+ * Get context messages for translation to provide conversation context
+ */
+async function getContextMessages(input: {
+  chatId: number
+  beforeMessageId: number
+  limit: number
+}): Promise<ProcessedMessage[]> {
+  try {
+    const result = await db._query.messages.findMany({
+      where: and(eq(messages.chatId, input.chatId), lt(messages.messageId, input.beforeMessageId)),
+      orderBy: desc(messages.messageId),
+      limit: input.limit,
+    })
+
+    // Reverse to get chronological order (oldest first)
+    result.reverse()
+
+    return result.map((msg) => ({
+      ...msg,
+      // Decrypt text
+      text:
+        msg.textEncrypted && msg.textIv && msg.textTag
+          ? decryptMessage({
+              encrypted: msg.textEncrypted,
+              iv: msg.textIv,
+              authTag: msg.textTag,
+            })
+          : msg.text,
+
+      entities:
+        msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
+          ? MessageEntities.fromBinary(
+              decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
+            )
+          : null,
+    }))
+  } catch (error) {
+    log.error("Failed to get context messages", {
+      error,
+      chatId: input.chatId,
+      beforeMessageId: input.beforeMessageId,
+      limit: input.limit,
+    })
+    // Return empty array if we can't get context messages - translation can still proceed
+    return []
+  }
+}
+
 async function getMessagesAndTranslations(input: {
   chatId: number
   messageIds: number[]
