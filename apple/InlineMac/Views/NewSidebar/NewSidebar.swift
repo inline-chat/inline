@@ -255,7 +255,7 @@ class NewSidebar: NSViewController {
     // Add all items to the new snapshot
     snapshot.appendItems(items.map(\.id), toSection: .main)
 
-    // Apply the snapshot with animation
+    // // Apply the snapshot with animation
     dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
       // After applying the snapshot, reload the cells that need updating
       if !itemsToReload.isEmpty {
@@ -328,9 +328,7 @@ extension NewSidebar: NSTableViewDelegate {
       case .trailing:
         return [createArchiveAction(item: item)]
       case .leading:
-        // need to fix dimissal
-        // return [createPinAction(item: item)]
-        return []
+        return [createPinAction(item: item)]
       default:
         return []
     }
@@ -346,8 +344,14 @@ extension NewSidebar: NSTableViewDelegate {
     ) { [weak self] _, row in
       guard let self else { return }
       let item = items[row]
-      Task(priority: .userInitiated) {
-        // Dismiss the swipe action on the main thread
+
+      // Dismiss the swipe action on the main thread
+      tableView.rowActionsVisible = false
+
+      Task.detached {
+        // Wait for the swipe action to be dismissed otherwise it will glitch
+        try await Task.sleep(for: .milliseconds(340))
+
         try await DataManager.shared.updateDialog(peerId: item.peerId, pinned: !isPinned)
       }
     }
