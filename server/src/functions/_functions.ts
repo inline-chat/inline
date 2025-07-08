@@ -8,6 +8,7 @@ import { createChat } from "./messages.createChat"
 import { getSpaceMembers } from "./space.getSpaceMembers"
 import { deleteChat } from "./messages.deleteChat"
 import { inviteToSpace } from "./space.inviteToSpace"
+import { removeSpaceMember } from "./space.removeSpaceMember"
 import { getChatParticipants } from "./messages.getChatParticipants"
 import { removeChatParticipant } from "./messages.removeChatParticipant"
 import { addChatParticipant } from "./messages.addChatParticipant"
@@ -32,6 +33,7 @@ export const Functions = {
   spaces: {
     getSpaceMembers: getSpaceMembers,
     inviteToSpace: inviteToSpace,
+    removeSpaceMember: removeSpaceMember,
   },
   user: {
     getUserSettings: getUserSettings,
