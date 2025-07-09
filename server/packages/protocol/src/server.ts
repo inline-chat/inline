@@ -15,34 +15,58 @@ import { MessageType } from "@protobuf-ts/runtime";
  */
 export interface ServerUpdate {
     /**
+     * @generated from protobuf field: int64 date = 1;
+     */
+    date: bigint;
+    /**
      * @generated from protobuf oneof: update
      */
     update: {
         oneofKind: "newMessage";
         /**
-         * @generated from protobuf field: server.ServerUpdateNewMessage new_message = 4;
+         * @generated from protobuf field: server.ServerChatUpdateNewMessage new_message = 4;
          */
-        newMessage: ServerUpdateNewMessage;
+        newMessage: ServerChatUpdateNewMessage;
     } | {
         oneofKind: "editMessage";
         /**
-         * @generated from protobuf field: server.ServerUpdateEditMessage edit_message = 5;
+         * @generated from protobuf field: server.ServerChatUpdateEditMessage edit_message = 5;
          */
-        editMessage: ServerUpdateEditMessage;
+        editMessage: ServerChatUpdateEditMessage;
     } | {
         oneofKind: "deleteMessages";
         /**
-         * @generated from protobuf field: server.ServerUpdateDeleteMessages delete_messages = 6;
+         * @generated from protobuf field: server.ServerChatUpdateDeleteMessages delete_messages = 6;
          */
-        deleteMessages: ServerUpdateDeleteMessages;
+        deleteMessages: ServerChatUpdateDeleteMessages;
+    } | {
+        oneofKind: "deleteChat";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateDeleteChat delete_chat = 7;
+         */
+        deleteChat: ServerChatUpdateDeleteChat;
+    } | {
+        oneofKind: "spaceRemoveMember";
+        // Space updates
+
+        /**
+         * @generated from protobuf field: server.ServerSpaceUpdateRemoveMember space_remove_member = 8;
+         */
+        spaceRemoveMember: ServerSpaceUpdateRemoveMember;
     } | {
         oneofKind: undefined;
     };
 }
+// ------------------------------------------------------------
+// Chat updates
+// ------------------------------------------------------------
+
 /**
- * @generated from protobuf message server.ServerUpdateNewMessage
+ * Update for a chat when a message is created
+ *
+ * @generated from protobuf message server.ServerChatUpdateNewMessage
  */
-export interface ServerUpdateNewMessage {
+export interface ServerChatUpdateNewMessage {
     /**
      * @generated from protobuf field: int64 chat_id = 1;
      */
@@ -57,9 +81,11 @@ export interface ServerUpdateNewMessage {
     pts: number;
 }
 /**
- * @generated from protobuf message server.ServerUpdateEditMessage
+ * Update for a chat when a message is edited
+ *
+ * @generated from protobuf message server.ServerChatUpdateEditMessage
  */
-export interface ServerUpdateEditMessage {
+export interface ServerChatUpdateEditMessage {
     /**
      * @generated from protobuf field: int64 chat_id = 1;
      */
@@ -74,9 +100,11 @@ export interface ServerUpdateEditMessage {
     pts: number;
 }
 /**
- * @generated from protobuf message server.ServerUpdateDeleteMessages
+ * Update for a chat when messages are deleted
+ *
+ * @generated from protobuf message server.ServerChatUpdateDeleteMessages
  */
-export interface ServerUpdateDeleteMessages {
+export interface ServerChatUpdateDeleteMessages {
     /**
      * @generated from protobuf field: int64 chat_id = 1;
      */
@@ -90,17 +118,59 @@ export interface ServerUpdateDeleteMessages {
      */
     pts: number;
 }
+/**
+ * Update for a chat when it is deleted
+ *
+ * @generated from protobuf message server.ServerChatUpdateDeleteChat
+ */
+export interface ServerChatUpdateDeleteChat {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int32 pts = 2;
+     */
+    pts: number;
+}
+// ------------------------------------------------------------
+// Space updates
+// ------------------------------------------------------------
+
+/**
+ * Update for a space when a member is removed
+ *
+ * @generated from protobuf message server.ServerSpaceUpdateRemoveMember
+ */
+export interface ServerSpaceUpdateRemoveMember {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: int64 member_id = 2;
+     */
+    memberId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 3;
+     */
+    userId: bigint;
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUpdate$Type extends MessageType<ServerUpdate> {
     constructor() {
         super("server.ServerUpdate", [
-            { no: 4, name: "new_message", kind: "message", oneof: "update", T: () => ServerUpdateNewMessage },
-            { no: 5, name: "edit_message", kind: "message", oneof: "update", T: () => ServerUpdateEditMessage },
-            { no: 6, name: "delete_messages", kind: "message", oneof: "update", T: () => ServerUpdateDeleteMessages }
+            { no: 1, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "new_message", kind: "message", oneof: "update", T: () => ServerChatUpdateNewMessage },
+            { no: 5, name: "edit_message", kind: "message", oneof: "update", T: () => ServerChatUpdateEditMessage },
+            { no: 6, name: "delete_messages", kind: "message", oneof: "update", T: () => ServerChatUpdateDeleteMessages },
+            { no: 7, name: "delete_chat", kind: "message", oneof: "update", T: () => ServerChatUpdateDeleteChat },
+            { no: 8, name: "space_remove_member", kind: "message", oneof: "update", T: () => ServerSpaceUpdateRemoveMember }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.date = 0n;
         message.update = { oneofKind: undefined };
         if (value !== undefined)
             reflectionMergePartial<ServerUpdate>(this, message, value);
@@ -111,22 +181,37 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* server.ServerUpdateNewMessage new_message */ 4:
+                case /* int64 date */ 1:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                case /* server.ServerChatUpdateNewMessage new_message */ 4:
                     message.update = {
                         oneofKind: "newMessage",
-                        newMessage: ServerUpdateNewMessage.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).newMessage)
+                        newMessage: ServerChatUpdateNewMessage.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).newMessage)
                     };
                     break;
-                case /* server.ServerUpdateEditMessage edit_message */ 5:
+                case /* server.ServerChatUpdateEditMessage edit_message */ 5:
                     message.update = {
                         oneofKind: "editMessage",
-                        editMessage: ServerUpdateEditMessage.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).editMessage)
+                        editMessage: ServerChatUpdateEditMessage.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).editMessage)
                     };
                     break;
-                case /* server.ServerUpdateDeleteMessages delete_messages */ 6:
+                case /* server.ServerChatUpdateDeleteMessages delete_messages */ 6:
                     message.update = {
                         oneofKind: "deleteMessages",
-                        deleteMessages: ServerUpdateDeleteMessages.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).deleteMessages)
+                        deleteMessages: ServerChatUpdateDeleteMessages.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).deleteMessages)
+                    };
+                    break;
+                case /* server.ServerChatUpdateDeleteChat delete_chat */ 7:
+                    message.update = {
+                        oneofKind: "deleteChat",
+                        deleteChat: ServerChatUpdateDeleteChat.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).deleteChat)
+                    };
+                    break;
+                case /* server.ServerSpaceUpdateRemoveMember space_remove_member */ 8:
+                    message.update = {
+                        oneofKind: "spaceRemoveMember",
+                        spaceRemoveMember: ServerSpaceUpdateRemoveMember.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceRemoveMember)
                     };
                     break;
                 default:
@@ -141,15 +226,24 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         return message;
     }
     internalBinaryWrite(message: ServerUpdate, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* server.ServerUpdateNewMessage new_message = 4; */
+        /* int64 date = 1; */
+        if (message.date !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.date);
+        /* server.ServerChatUpdateNewMessage new_message = 4; */
         if (message.update.oneofKind === "newMessage")
-            ServerUpdateNewMessage.internalBinaryWrite(message.update.newMessage, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
-        /* server.ServerUpdateEditMessage edit_message = 5; */
+            ServerChatUpdateNewMessage.internalBinaryWrite(message.update.newMessage, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateEditMessage edit_message = 5; */
         if (message.update.oneofKind === "editMessage")
-            ServerUpdateEditMessage.internalBinaryWrite(message.update.editMessage, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
-        /* server.ServerUpdateDeleteMessages delete_messages = 6; */
+            ServerChatUpdateEditMessage.internalBinaryWrite(message.update.editMessage, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateDeleteMessages delete_messages = 6; */
         if (message.update.oneofKind === "deleteMessages")
-            ServerUpdateDeleteMessages.internalBinaryWrite(message.update.deleteMessages, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+            ServerChatUpdateDeleteMessages.internalBinaryWrite(message.update.deleteMessages, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateDeleteChat delete_chat = 7; */
+        if (message.update.oneofKind === "deleteChat")
+            ServerChatUpdateDeleteChat.internalBinaryWrite(message.update.deleteChat, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerSpaceUpdateRemoveMember space_remove_member = 8; */
+        if (message.update.oneofKind === "spaceRemoveMember")
+            ServerSpaceUpdateRemoveMember.internalBinaryWrite(message.update.spaceRemoveMember, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -161,24 +255,24 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
  */
 export const ServerUpdate = new ServerUpdate$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class ServerUpdateNewMessage$Type extends MessageType<ServerUpdateNewMessage> {
+class ServerChatUpdateNewMessage$Type extends MessageType<ServerChatUpdateNewMessage> {
     constructor() {
-        super("server.ServerUpdateNewMessage", [
+        super("server.ServerChatUpdateNewMessage", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "msg_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
-    create(value?: PartialMessage<ServerUpdateNewMessage>): ServerUpdateNewMessage {
+    create(value?: PartialMessage<ServerChatUpdateNewMessage>): ServerChatUpdateNewMessage {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
         message.msgId = 0n;
         message.pts = 0;
         if (value !== undefined)
-            reflectionMergePartial<ServerUpdateNewMessage>(this, message, value);
+            reflectionMergePartial<ServerChatUpdateNewMessage>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUpdateNewMessage): ServerUpdateNewMessage {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateNewMessage): ServerChatUpdateNewMessage {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -203,7 +297,7 @@ class ServerUpdateNewMessage$Type extends MessageType<ServerUpdateNewMessage> {
         }
         return message;
     }
-    internalBinaryWrite(message: ServerUpdateNewMessage, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: ServerChatUpdateNewMessage, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* int64 chat_id = 1; */
         if (message.chatId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.chatId);
@@ -220,28 +314,28 @@ class ServerUpdateNewMessage$Type extends MessageType<ServerUpdateNewMessage> {
     }
 }
 /**
- * @generated MessageType for protobuf message server.ServerUpdateNewMessage
+ * @generated MessageType for protobuf message server.ServerChatUpdateNewMessage
  */
-export const ServerUpdateNewMessage = new ServerUpdateNewMessage$Type();
+export const ServerChatUpdateNewMessage = new ServerChatUpdateNewMessage$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class ServerUpdateEditMessage$Type extends MessageType<ServerUpdateEditMessage> {
+class ServerChatUpdateEditMessage$Type extends MessageType<ServerChatUpdateEditMessage> {
     constructor() {
-        super("server.ServerUpdateEditMessage", [
+        super("server.ServerChatUpdateEditMessage", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "msg_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
-    create(value?: PartialMessage<ServerUpdateEditMessage>): ServerUpdateEditMessage {
+    create(value?: PartialMessage<ServerChatUpdateEditMessage>): ServerChatUpdateEditMessage {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
         message.msgId = 0n;
         message.pts = 0;
         if (value !== undefined)
-            reflectionMergePartial<ServerUpdateEditMessage>(this, message, value);
+            reflectionMergePartial<ServerChatUpdateEditMessage>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUpdateEditMessage): ServerUpdateEditMessage {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateEditMessage): ServerChatUpdateEditMessage {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -266,7 +360,7 @@ class ServerUpdateEditMessage$Type extends MessageType<ServerUpdateEditMessage> 
         }
         return message;
     }
-    internalBinaryWrite(message: ServerUpdateEditMessage, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: ServerChatUpdateEditMessage, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* int64 chat_id = 1; */
         if (message.chatId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.chatId);
@@ -283,28 +377,28 @@ class ServerUpdateEditMessage$Type extends MessageType<ServerUpdateEditMessage> 
     }
 }
 /**
- * @generated MessageType for protobuf message server.ServerUpdateEditMessage
+ * @generated MessageType for protobuf message server.ServerChatUpdateEditMessage
  */
-export const ServerUpdateEditMessage = new ServerUpdateEditMessage$Type();
+export const ServerChatUpdateEditMessage = new ServerChatUpdateEditMessage$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class ServerUpdateDeleteMessages$Type extends MessageType<ServerUpdateDeleteMessages> {
+class ServerChatUpdateDeleteMessages$Type extends MessageType<ServerChatUpdateDeleteMessages> {
     constructor() {
-        super("server.ServerUpdateDeleteMessages", [
+        super("server.ServerChatUpdateDeleteMessages", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "msg_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
-    create(value?: PartialMessage<ServerUpdateDeleteMessages>): ServerUpdateDeleteMessages {
+    create(value?: PartialMessage<ServerChatUpdateDeleteMessages>): ServerChatUpdateDeleteMessages {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
         message.msgIds = [];
         message.pts = 0;
         if (value !== undefined)
-            reflectionMergePartial<ServerUpdateDeleteMessages>(this, message, value);
+            reflectionMergePartial<ServerChatUpdateDeleteMessages>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUpdateDeleteMessages): ServerUpdateDeleteMessages {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateDeleteMessages): ServerChatUpdateDeleteMessages {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -333,7 +427,7 @@ class ServerUpdateDeleteMessages$Type extends MessageType<ServerUpdateDeleteMess
         }
         return message;
     }
-    internalBinaryWrite(message: ServerUpdateDeleteMessages, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: ServerChatUpdateDeleteMessages, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* int64 chat_id = 1; */
         if (message.chatId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.chatId);
@@ -354,6 +448,124 @@ class ServerUpdateDeleteMessages$Type extends MessageType<ServerUpdateDeleteMess
     }
 }
 /**
- * @generated MessageType for protobuf message server.ServerUpdateDeleteMessages
+ * @generated MessageType for protobuf message server.ServerChatUpdateDeleteMessages
  */
-export const ServerUpdateDeleteMessages = new ServerUpdateDeleteMessages$Type();
+export const ServerChatUpdateDeleteMessages = new ServerChatUpdateDeleteMessages$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateDeleteChat$Type extends MessageType<ServerChatUpdateDeleteChat> {
+    constructor() {
+        super("server.ServerChatUpdateDeleteChat", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateDeleteChat>): ServerChatUpdateDeleteChat {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.pts = 0;
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateDeleteChat>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateDeleteChat): ServerChatUpdateDeleteChat {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int32 pts */ 2:
+                    message.pts = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateDeleteChat, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int32 pts = 2; */
+        if (message.pts !== 0)
+            writer.tag(2, WireType.Varint).int32(message.pts);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateDeleteChat
+ */
+export const ServerChatUpdateDeleteChat = new ServerChatUpdateDeleteChat$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRemoveMember> {
+    constructor() {
+        super("server.ServerSpaceUpdateRemoveMember", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "member_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerSpaceUpdateRemoveMember>): ServerSpaceUpdateRemoveMember {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.memberId = 0n;
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerSpaceUpdateRemoveMember>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerSpaceUpdateRemoveMember): ServerSpaceUpdateRemoveMember {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int64 member_id */ 2:
+                    message.memberId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 3:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerSpaceUpdateRemoveMember, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* int64 member_id = 2; */
+        if (message.memberId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.memberId);
+        /* int64 user_id = 3; */
+        if (message.userId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerSpaceUpdateRemoveMember
+ */
+export const ServerSpaceUpdateRemoveMember = new ServerSpaceUpdateRemoveMember$Type();
