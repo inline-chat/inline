@@ -905,9 +905,7 @@ message GetSpaceMembersResult {
 /// ------------------------------
 // Updates Subsystem
 message Update {
-  reserved 1, 2;
-
-  int64 date = 3;
+  reserved 1, 2, 3;
 
   oneof update {
     UpdateNewMessage new_message = 4;   // this
@@ -932,6 +930,7 @@ message Update {
     UpdateMarkAsUnread mark_as_unread = 23;
     UpdateChatSkipPts chat_skip_pts = 24;
     UpdateChatHasNewUpdates chat_has_new_updates = 25;
+    // UpdateSpaceHasNewUpdates space_has_new_updates = 25;
   }
 }
 
@@ -942,11 +941,19 @@ message UpdateChatHasNewUpdates {
 
   // Current PTS of the chat
   int32 pts = 2;
+
+  // Date of the last update
+  int64 date = 3;
 }
 
 message UpdateChatSkipPts {
   int64 chat_id = 1;
+
+  // PTS
   int32 pts = 2;
+
+  // Date of update
+  int64 date = 3;
 }
 
 message UpdateNewMessageNotification {
@@ -961,6 +968,8 @@ message UpdateNewMessageNotification {
 
   // Reason for the notification
   Reason reason = 2;
+
+  // TODO: add PTS
 }
 
 message UpdateUserSettings { UserSettings settings = 1; }
@@ -973,8 +982,17 @@ message UpdateSpaceMemberAdd {
 
 // Update when a space member is removed
 message UpdateSpaceMemberDelete {
+  // Space ID
   int64 space_id = 1;
+
+  // User ID
   int64 user_id = 2;
+
+  // PTS of the update
+  int32 pts = 3;
+
+  // Date of the update
+  int64 date = 4;
 }
 
 // Update when we joined a space
@@ -1028,20 +1046,38 @@ message UpdateDeleteChat {
 // Update when a new message is created
 message UpdateNewMessage {
   Message message = 1;
+
+  // PTS of the update
   int32 pts = 2;
+
+  // Date of the update
+  int64 date = 3;
 }
 
 // Update when a message is edited
 message UpdateEditMessage {
   Message message = 1;
+
+  // PTS of the update
   int32 pts = 2;
+
+  // Date of the update
+  int64 date = 3;
 }
 
 // Update when messages are deleted
 message UpdateDeleteMessages {
+  // Message IDs
   repeated int64 message_ids = 1;
+
+  // Peer ID
   Peer peer_id = 2;
+
+  // PTS of the update
   int32 pts = 3;
+
+  // Date of the update
+  int64 date = 4;
 }
 
 // Update when a message ID is updated after sending

@@ -16,10 +16,6 @@ export const getUpdatesState = async (
 ): Promise<GetUpdatesStateFnResult> => {
   let userLocalDate = decodeDate(input.date)
 
-  // return latest state
-  let newDate = new Date()
-  let newTimetamp = encodeDateStrict(newDate)
-
   // check latest changes of chats from this user's dialogs for changes compared to date
   // get a list of dialogs for this user
   let { chats } = await ChatModel.getUserChats({
@@ -29,8 +25,23 @@ export const getUpdatesState = async (
     },
   })
 
+  // Find latest update date for chats
+  let latestChatUpdateTs = chats.reduce((max, chat) => {
+    return Math.max(max, chat.lastUpdateDate?.getTime() ?? 0)
+  }, 0)
+  let latestChatUpdateDate = new Date(latestChatUpdateTs)
+  let latestChatUpdateDateEncoded = encodeDateStrict(latestChatUpdateDate)
+
+  // Find latest update date for spaces
+  // let latestSpaceUpdateDate = spaces.reduce((max, space) => {
+  //   return Math.max(max, space.lastUpdateDate?.getTime() ?? 0)
+  // }, 0)
+
   // Publish updates
   for (let chat of chats) {
+    if (!chat.lastUpdateDate) {
+      continue
+    }
     RealtimeUpdates.pushToUser(context.currentUserId, [
       {
         update: {
@@ -39,6 +50,7 @@ export const getUpdatesState = async (
             chatId: BigInt(chat.id),
             // PTS should not be null here
             pts: chat.pts ?? 0,
+            date: encodeDateStrict(chat.lastUpdateDate),
           },
         },
       },
@@ -46,7 +58,7 @@ export const getUpdatesState = async (
   }
 
   return {
-    date: newTimetamp,
+    date: latestChatUpdateDateEncoded,
 
     // TODO: fetch latest PTS for the user
     userPts: 0,

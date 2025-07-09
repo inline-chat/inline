@@ -2,7 +2,7 @@ import { creationDate, date } from "@in/server/db/schema/common"
 import { members } from "@in/server/db/schema/members"
 import { users } from "@in/server/db/schema/users"
 import { relations } from "drizzle-orm/_relations"
-import { pgTable, varchar, serial, integer } from "drizzle-orm/pg-core"
+import { pgTable, varchar, serial, integer, timestamp } from "drizzle-orm/pg-core"
 
 export const spaces = pgTable("spaces", {
   id: serial().primaryKey(),
@@ -11,8 +11,15 @@ export const spaces = pgTable("spaces", {
   creatorId: integer().references(() => users.id),
   date: creationDate,
   deleted: date,
-  // updates
+
+  /** PTS of the space */
   pts: integer("pts").default(0),
+
+  /** Date of the last update */
+  lastUpdateDate: timestamp("last_update_date", {
+    mode: "date",
+    precision: 3,
+  }),
 })
 
 export const spaceRelations = relations(spaces, ({ many }) => ({
