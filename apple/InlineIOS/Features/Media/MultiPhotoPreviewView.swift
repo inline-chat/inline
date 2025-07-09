@@ -40,132 +40,209 @@ struct MultiPhotoPreviewView: View {
   @FocusState private var isCaptionFocused: Bool
   @State private var currentCaption: String = ""
 
+  // MARK: - Layout Constants
+
+  private let closeButtonSize: CGFloat = 32
+  private let textFieldHorizontalPadding: CGFloat = 16
+  private let textFieldVerticalPadding: CGFloat = 10
+  private let counterHorizontalPadding: CGFloat = 12
+  private let counterVerticalPadding: CGFloat = 6
+  private let bottomContentSpacing: CGFloat = 12
+  private let bottomContentPadding: CGFloat = 8
+  private let animationDuration: TimeInterval = 0.2
+
+  // Computed properties for consistent sizing
+  private var textFieldHeight: CGFloat {
+    (textFieldVerticalPadding * 2) + 20 // 20 is approximate font height
+  }
+
+  private var sendButtonSize: CGFloat {
+    textFieldHeight
+  }
+
   var body: some View {
-    GeometryReader { geometry in
-      ZStack {
-        Color.black
-          .edgesIgnoringSafeArea(.all)
+    NavigationView {
+      GeometryReader { geometry in
+        ZStack {
+          Color(.systemBackground)
+            .edgesIgnoringSafeArea(.all)
 
-        VStack(spacing: 0) {
-          // Header with close button and photo counter
-          HStack {
-            Button(action: {
-              withAnimation(.easeOut(duration: 0.2)) {
-                isPresented = false
+          VStack(spacing: 0) {
+            TabView(selection: $viewModel.currentIndex) {
+              ForEach(Array(viewModel.photoItems.enumerated()), id: \.element.id) { index, photoItem in
+                Image(uiImage: photoItem.image)
+                  .resizable()
+                  .aspectRatio(contentMode: .fit)
+                  .frame(maxWidth: geometry.size.width)
+                  .tag(index)
               }
-            }) {
-              Image(systemName: "xmark")
-                .font(.callout)
-                .foregroundColor(.secondary)
-                .frame(width: 32, height: 32)
-                .background(
-                  Circle()
-                    .fill(.thickMaterial)
-                    .strokeBorder(Color(.systemGray4), lineWidth: 1)
-                )
+            }
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            .onChange(of: viewModel.currentIndex) { oldValue, newValue in
+              handlePhotoChange(from: oldValue, to: newValue)
             }
 
             Spacer()
-
-            // Photo counter
-            Text("\(viewModel.currentIndex + 1) of \(viewModel.photoItems.count)")
-              .font(.caption)
-              .foregroundColor(.secondary)
-              .padding(.horizontal, 12)
-              .padding(.vertical, 6)
-              .background(
-                Capsule()
-                  .fill(.thickMaterial)
-                  .strokeBorder(Color(.systemGray4), lineWidth: 1)
-              )
-
-            Spacer()
-
-            // Invisible placeholder for layout balance
-            Color.clear
-              .frame(width: 32, height: 32)
           }
-          .padding(.horizontal, 16)
-          .padding(.top, 16)
-
-          // Photo carousel
-          TabView(selection: $viewModel.currentIndex) {
-            ForEach(Array(viewModel.photoItems.enumerated()), id: \.element.id) { index, photoItem in
-              Image(uiImage: photoItem.image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: geometry.size.width)
-                .tag(index)
+          .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+              closeButton
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+              photoCounter
             }
           }
-          .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-          .onChange(of: viewModel.currentIndex) { oldValue, newValue in
-            // Save current caption when switching photos
-            if oldValue != newValue, oldValue < viewModel.photoItems.count {
-              viewModel.updateCaption(at: oldValue, caption: currentCaption)
-            }
-
-            // Load caption for new photo
-            if newValue < viewModel.photoItems.count {
-              currentCaption = viewModel.photoItems[newValue].caption ?? ""
-            }
+          .safeAreaInset(edge: .bottom) {
+            bottomContent
           }
-
-          Spacer()
-        }
-
-        // Bottom caption and send button overlay
-        VStack {
-          Spacer()
-
-          HStack(spacing: 12) {
-            TextField("Add a caption...", text: $currentCaption)
-              .padding(.horizontal, 16)
-              .padding(.vertical, 10)
-              .background(
-                Capsule()
-                  .fill(.thickMaterial)
-                  .strokeBorder(Color(.systemGray4), lineWidth: 1)
-              )
-              .focused($isCaptionFocused)
-              .onChange(of: currentCaption) { _, newValue in
-                // Update caption in real time
-                viewModel.updateCaption(at: viewModel.currentIndex, caption: newValue)
-              }
-
-            Button(action: {
-              // Save current caption before sending
-              viewModel.updateCaption(at: viewModel.currentIndex, caption: currentCaption)
-              onSend(viewModel.photoItems)
-              isPresented = false
-            }) {
-              Image(systemName: "arrow.up")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 40, height: 40)
-                .background(Color.blue)
-                .clipShape(Circle())
-            }
-            .buttonStyle(ScaleButtonStyle())
-          }
-          .padding(.horizontal)
-          .padding(.bottom, 8)
-          .background(
-            LinearGradient(
-              colors: [.clear, .black.opacity(0.3)],
-              startPoint: .top,
-              endPoint: .bottom
-            )
-          )
         }
       }
     }
     .onAppear {
-      // Initialize caption for first photo
-      if let firstPhoto = viewModel.photoItems.first {
-        currentCaption = firstPhoto.caption ?? ""
+      initializeCaption()
+    }
+  }
+
+  // MARK: - View Components
+
+  private var closeButton: some View {
+    Group {
+      if #available(iOS 26.0, *) {
+        Button(action: {
+          withAnimation(.easeOut(duration: animationDuration)) {
+            isPresented = false
+          }
+        }) {
+          Image(systemName: "xmark")
+            .font(.body)
+            .foregroundColor(.primary)
+            .frame(width: closeButtonSize, height: closeButtonSize)
+            .contentShape(Circle())
+        }
+        .clipShape(Circle())
+        .buttonStyle(.glass)
+
+      } else {
+        Button(action: {
+          withAnimation(.easeOut(duration: animationDuration)) {
+            isPresented = false
+          }
+        }) {
+          Circle()
+            .fill(.primary.opacity(0.08))
+            .frame(width: closeButtonSize, height: closeButtonSize)
+            .overlay {
+              Image(systemName: "xmark")
+                .font(.callout)
+                .foregroundColor(.primary)
+            }
+        }
+        .clipShape(Circle())
       }
     }
+  }
+
+  private var photoCounter: some View {
+    HStack {
+      Text("\(viewModel.currentIndex + 1)")
+        .font(.body)
+        .foregroundColor(.primary)
+      Text("of \(viewModel.photoItems.count)")
+        .font(.body)
+        .foregroundColor(.secondary)
+    }
+    .padding(.horizontal, counterHorizontalPadding)
+    .frame(height: 32)
+    .background {
+      if #available(iOS 26.0, *) {
+        Capsule()
+          .glassEffect(.regular, in: Capsule(), isEnabled: true)
+      } else {
+        Capsule()
+          .fill(.primary.opacity(0.06))
+      }
+    }
+  }
+
+  private var captionTextField: some View {
+    TextField("Add a caption...", text: $currentCaption)
+      .padding(.horizontal, textFieldHorizontalPadding)
+      .padding(.vertical, textFieldVerticalPadding)
+      .focused($isCaptionFocused)
+      .onChange(of: currentCaption) { _, newValue in
+        viewModel.updateCaption(at: viewModel.currentIndex, caption: newValue)
+      }
+      .background {
+        if #available(iOS 26.0, *) {
+          Capsule()
+            .glassEffect(.regular, in: Capsule(), isEnabled: true)
+        } else {
+          Capsule()
+            .stroke(.primary.opacity(0.1), lineWidth: 1)
+        }
+      }
+  }
+
+  private var sendButton: some View {
+    Group {
+      if #available(iOS 26.0, *) {
+        Button(action: {
+          sendPhotos()
+        }) {
+          Image(systemName: "arrow.up")
+            .foregroundColor(.white)
+        }
+        .frame(width: sendButtonSize, height: sendButtonSize)
+        .clipShape(Circle())
+        .buttonStyle(.glassProminent)
+      } else {
+        Button(action: {
+          sendPhotos()
+        }) {
+          Image(systemName: "arrow.up")
+            .foregroundColor(.white)
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .frame(width: sendButtonSize, height: sendButtonSize)
+        .background(Color(ThemeManager.shared.selected.accent))
+        .clipShape(Circle())
+      }
+    }
+  }
+
+  private var bottomContent: some View {
+    HStack(spacing: bottomContentSpacing) {
+      captionTextField
+      sendButton
+    }
+    .padding(.horizontal)
+    .padding(.bottom, bottomContentPadding)
+  }
+
+  // MARK: - Helper Methods
+
+  private func handlePhotoChange(from oldValue: Int, to newValue: Int) {
+    // Save current caption when switching photos
+    if oldValue != newValue, oldValue < viewModel.photoItems.count {
+      viewModel.updateCaption(at: oldValue, caption: currentCaption)
+    }
+
+    // Load caption for new photo
+    if newValue < viewModel.photoItems.count {
+      currentCaption = viewModel.photoItems[newValue].caption ?? ""
+    }
+  }
+
+  private func initializeCaption() {
+    if let firstPhoto = viewModel.photoItems.first {
+      currentCaption = firstPhoto.caption ?? ""
+    }
+  }
+
+  private func sendPhotos() {
+    viewModel.updateCaption(at: viewModel.currentIndex, caption: currentCaption)
+    onSend(viewModel.photoItems)
+    isPresented = false
   }
 }
 
