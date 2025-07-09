@@ -3450,8 +3450,6 @@ public struct Update: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var date: Int64 = 0
-
   public var update: Update.OneOf_Update? = nil
 
   /// this
@@ -3684,6 +3682,9 @@ public struct UpdateChatHasNewUpdates: Sendable {
   /// Current PTS of the chat
   public var pts: Int32 = 0
 
+  /// Date of the last update
+  public var date: Int64 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3696,7 +3697,11 @@ public struct UpdateChatSkipPts: Sendable {
 
   public var chatID: Int64 = 0
 
+  /// PTS
   public var pts: Int32 = 0
+
+  /// Date of update
+  public var date: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3824,9 +3829,17 @@ public struct UpdateSpaceMemberDelete: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// Space ID
   public var spaceID: Int64 = 0
 
+  /// User ID
   public var userID: Int64 = 0
+
+  /// PTS of the update
+  public var pts: Int32 = 0
+
+  /// Date of the update
+  public var date: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3965,7 +3978,11 @@ public struct UpdateNewMessage: Sendable {
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
   public mutating func clearMessage() {self._message = nil}
 
+  /// PTS of the update
   public var pts: Int32 = 0
+
+  /// Date of the update
+  public var date: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3989,7 +4006,11 @@ public struct UpdateEditMessage: Sendable {
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
   public mutating func clearMessage() {self._message = nil}
 
+  /// PTS of the update
   public var pts: Int32 = 0
+
+  /// Date of the update
+  public var date: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4004,8 +4025,10 @@ public struct UpdateDeleteMessages: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// Message IDs
   public var messageIds: [Int64] = []
 
+  /// Peer ID
   public var peerID: Peer {
     get {return _peerID ?? Peer()}
     set {_peerID = newValue}
@@ -4015,7 +4038,11 @@ public struct UpdateDeleteMessages: Sendable {
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
+  /// PTS of the update
   public var pts: Int32 = 0
+
+  /// Date of the update
+  public var date: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -9880,7 +9907,6 @@ extension GetSpaceMembersResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Update"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    3: .same(proto: "date"),
     4: .standard(proto: "new_message"),
     5: .standard(proto: "edit_message"),
     6: .standard(proto: "update_message_id"),
@@ -9910,7 +9936,6 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       case 4: try {
         var v: UpdateNewMessage?
         var hadOneofValue = false
@@ -10194,9 +10219,6 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
-    }
     switch self.update {
     case .newMessage?: try {
       guard case .newMessage(let v)? = self.update else { preconditionFailure() }
@@ -10288,7 +10310,6 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
   }
 
   public static func ==(lhs: Update, rhs: Update) -> Bool {
-    if lhs.date != rhs.date {return false}
     if lhs.update != rhs.update {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -10300,6 +10321,7 @@ extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Message
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "chat_id"),
     2: .same(proto: "pts"),
+    3: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10310,6 +10332,7 @@ extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Message
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -10322,12 +10345,16 @@ extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Message
     if self.pts != 0 {
       try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 2)
     }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateChatHasNewUpdates, rhs: UpdateChatHasNewUpdates) -> Bool {
     if lhs.chatID != rhs.chatID {return false}
     if lhs.pts != rhs.pts {return false}
+    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10338,6 +10365,7 @@ extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "chat_id"),
     2: .same(proto: "pts"),
+    3: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10348,6 +10376,7 @@ extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -10360,12 +10389,16 @@ extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     if self.pts != 0 {
       try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 2)
     }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateChatSkipPts, rhs: UpdateChatSkipPts) -> Bool {
     if lhs.chatID != rhs.chatID {return false}
     if lhs.pts != rhs.pts {return false}
+    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10546,6 +10579,8 @@ extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._Message
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "space_id"),
     2: .standard(proto: "user_id"),
+    3: .same(proto: "pts"),
+    4: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10556,6 +10591,8 @@ extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._Message
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -10568,12 +10605,20 @@ extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._Message
     if self.userID != 0 {
       try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
     }
+    if self.pts != 0 {
+      try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 3)
+    }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateSpaceMemberDelete, rhs: UpdateSpaceMemberDelete) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
     if lhs.userID != rhs.userID {return false}
+    if lhs.pts != rhs.pts {return false}
+    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10794,6 +10839,7 @@ extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "message"),
     2: .same(proto: "pts"),
+    3: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10804,6 +10850,7 @@ extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._message) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -10820,12 +10867,16 @@ extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if self.pts != 0 {
       try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 2)
     }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateNewMessage, rhs: UpdateNewMessage) -> Bool {
     if lhs._message != rhs._message {return false}
     if lhs.pts != rhs.pts {return false}
+    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10836,6 +10887,7 @@ extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "message"),
     2: .same(proto: "pts"),
+    3: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10846,6 +10898,7 @@ extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._message) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -10862,12 +10915,16 @@ extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     if self.pts != 0 {
       try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 2)
     }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateEditMessage, rhs: UpdateEditMessage) -> Bool {
     if lhs._message != rhs._message {return false}
     if lhs.pts != rhs.pts {return false}
+    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10879,6 +10936,7 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     1: .standard(proto: "message_ids"),
     2: .standard(proto: "peer_id"),
     3: .same(proto: "pts"),
+    4: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10890,6 +10948,7 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       case 1: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 3: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -10909,6 +10968,9 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if self.pts != 0 {
       try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 3)
     }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -10916,6 +10978,7 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if lhs.messageIds != rhs.messageIds {return false}
     if lhs._peerID != rhs._peerID {return false}
     if lhs.pts != rhs.pts {return false}
+    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

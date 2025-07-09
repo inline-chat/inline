@@ -3,29 +3,61 @@ syntax = "proto3";
 package server;
 
 message ServerUpdate {
-  reserved 1, 2, 3;
+  int64 date = 1;
+  reserved 2, 3;
 
   oneof update {
-    ServerUpdateNewMessage new_message = 4;
-    ServerUpdateEditMessage edit_message = 5;
-    ServerUpdateDeleteMessages delete_messages = 6;
+    // Chat updates
+
+    ServerChatUpdateNewMessage new_message = 4;
+    ServerChatUpdateEditMessage edit_message = 5;
+    ServerChatUpdateDeleteMessages delete_messages = 6;
+    ServerChatUpdateDeleteChat delete_chat = 7;
+
+    // Space updates
+
+    ServerSpaceUpdateRemoveMember space_remove_member = 8;
   }
 }
 
-message ServerUpdateNewMessage {
+// ------------------------------------------------------------
+// Chat updates
+// ------------------------------------------------------------
+
+// Update for a chat when a message is created
+message ServerChatUpdateNewMessage {
   int64 chat_id = 1;
   int64 msg_id = 2;
   int32 pts = 3;
 }
 
-message ServerUpdateEditMessage {
+// Update for a chat when a message is edited
+message ServerChatUpdateEditMessage {
   int64 chat_id = 1;
   int64 msg_id = 2;
   int32 pts = 3;
 }
 
-message ServerUpdateDeleteMessages {
+// Update for a chat when messages are deleted
+message ServerChatUpdateDeleteMessages {
   int64 chat_id = 1;
   repeated int64 msg_ids = 2;
   int32 pts = 3;
+}
+
+// Update for a chat when it is deleted
+message ServerChatUpdateDeleteChat {
+  int64 chat_id = 1;
+  int32 pts = 2;
+}
+
+// ------------------------------------------------------------
+// Space updates
+// ------------------------------------------------------------
+
+// Update for a space when a member is removed
+message ServerSpaceUpdateRemoveMember {
+  int64 space_id = 1;
+  int64 member_id = 2;
+  int64 user_id = 3;
 }
