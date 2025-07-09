@@ -27,7 +27,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const currentUserId = context.currentUserId
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
 
-  const { message, pts } = await MessageModel.editMessage({
+  const { message, pts, date } = await MessageModel.editMessage({
     messageId: Number(input.messageId),
     chatId,
     text: input.text,
