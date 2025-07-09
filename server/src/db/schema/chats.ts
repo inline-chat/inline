@@ -37,15 +37,18 @@ export const chats = pgTable(
     /** optional, required for private chats, greatest user id */
     maxUserId: integer("max_user_id").references(() => users.id),
 
-    /** required for updates sequence */
+    date: creationDate,
+
+    emoji: varchar({ length: 20 }),
+
+    /** PTS of the chat */
     pts: integer("pts").default(0),
+
+    /** Date of the last update */
     lastUpdateDate: timestamp("last_update_date", {
       mode: "date",
       precision: 3,
     }),
-
-    date: creationDate,
-    emoji: varchar({ length: 20 }),
   },
   (table) => ({
     /** Ensure correctness */
