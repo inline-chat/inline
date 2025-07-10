@@ -553,6 +553,7 @@ enum Method {
   GET_USER_SETTINGS = 19;
   SEND_COMPOSE_ACTION = 20;
   CREATE_BOT = 21;
+  GET_UPDATES_STATE = 22;
 }
 
 message RpcCall {
@@ -579,6 +580,7 @@ message RpcCall {
     GetUserSettingsInput getUserSettings = 20;
     SendComposeActionInput sendComposeAction = 21;
     CreateBotInput createBot = 22;
+    GetUpdatesStateInput getUpdatesState = 23;
   }
 }
 
@@ -607,7 +609,24 @@ message RpcResult {
     GetUserSettingsResult getUserSettings = 20;
     SendComposeActionResult sendComposeAction = 21;
     CreateBotResult createBot = 22;
+    GetUpdatesStateResult getUpdatesState = 23;
   }
+}
+
+message GetUpdatesStateInput {
+  // Local PTS of the self user update box
+  int32 user_pts = 1;
+
+  // Local date of state
+  int64 date = 2;
+}
+
+message GetUpdatesStateResult {
+  // Current PTS of the self user update box
+  int32 user_pts = 1;
+
+  // Current date of the state
+  int64 date = 2;
 }
 
 message CreateBotInput {
@@ -859,26 +878,53 @@ message Update {
   reserved 1, 2, 3;
 
   oneof update {
-    UpdateNewMessage new_message = 4;
-    UpdateEditMessage edit_message = 5;
+    UpdateNewMessage new_message = 4;   // this
+    UpdateEditMessage edit_message = 5; // this
     UpdateMessageId update_message_id = 6;
-    UpdateDeleteMessages delete_messages = 7;
+    UpdateDeleteMessages delete_messages = 7; // this
     UpdateComposeAction update_compose_action = 8;
     UpdateUserStatus update_user_status = 9;
-    UpdateMessageAttachment message_attachment = 10;
+    UpdateMessageAttachment message_attachment = 10; // this
     UpdateReaction update_reaction = 11;
     UpdateDeleteReaction delete_reaction = 12;
-    UpdateChatParticipantAdd participant_add = 13;
-    UpdateChatParticipantDelete participant_delete = 14;
-    UpdateNewChat new_chat = 15;
-    UpdateDeleteChat delete_chat = 16;
+    UpdateChatParticipantAdd participant_add = 13;       // this
+    UpdateChatParticipantDelete participant_delete = 14; // this
+    UpdateNewChat new_chat = 15;                         // this
+    UpdateDeleteChat delete_chat = 16;                   // this
     UpdateSpaceMemberAdd space_member_add = 17;
-    UpdateSpaceMemberDelete space_member_delete = 18;
-    UpdateJoinSpace join_space = 19;
+    UpdateSpaceMemberDelete space_member_delete = 18; // this
+    UpdateJoinSpace join_space = 19;                  // this
     UpdateReadMaxId update_read_max_id = 20;
     UpdateUserSettings update_user_settings = 21;
     UpdateNewMessageNotification new_message_notification = 22;
+    UpdateChatSkipPts chat_skip_pts = 23;
+    UpdateChatHasNewUpdates chat_has_new_updates = 24;
+
+    // START HERE
+    // UpdateSpaceHasNewUpdates space_has_new_updates = 25;
   }
+}
+
+// Update when a chat has new updates and client should fetch them
+message UpdateChatHasNewUpdates {
+  // Chat ID
+  int64 chat_id = 1;
+
+  // Current PTS of the chat
+  int32 pts = 2;
+
+  // Date of the last update
+  int64 date = 3;
+}
+
+message UpdateChatSkipPts {
+  int64 chat_id = 1;
+
+  // PTS
+  int32 pts = 2;
+
+  // Date of update
+  int64 date = 3;
 }
 
 message UpdateNewMessageNotification {
@@ -893,6 +939,8 @@ message UpdateNewMessageNotification {
 
   // Reason for the notification
   Reason reason = 2;
+
+  // TODO: add PTS
 }
 
 message UpdateUserSettings { UserSettings settings = 1; }
@@ -905,7 +953,17 @@ message UpdateSpaceMemberAdd {
 
 // Update when a space member is removed
 message UpdateSpaceMemberDelete {
-  // todo
+  // Space ID
+  int64 space_id = 1;
+
+  // User ID
+  int64 user_id = 2;
+
+  // PTS of the update
+  int32 pts = 3;
+
+  // Date of the update
+  int64 date = 4;
 }
 
 // Update when we joined a space
@@ -948,15 +1006,40 @@ message UpdateDeleteChat {
 }
 
 // Update when a new message is created
-message UpdateNewMessage { Message message = 1; }
+message UpdateNewMessage {
+  Message message = 1;
+
+  // PTS of the update
+  int32 pts = 2;
+
+  // Date of the update
+  int64 date = 3;
+}
 
 // Update when a message is edited
-message UpdateEditMessage { Message message = 1; }
+message UpdateEditMessage {
+  Message message = 1;
+
+  // PTS of the update
+  int32 pts = 2;
+
+  // Date of the update
+  int64 date = 3;
+}
 
 // Update when messages are deleted
 message UpdateDeleteMessages {
+  // Message IDs
   repeated int64 message_ids = 1;
+
+  // Peer ID
   Peer peer_id = 2;
+
+  // PTS of the update
+  int32 pts = 3;
+
+  // Date of the update
+  int64 date = 4;
 }
 
 // Update when a message ID is updated after sending
