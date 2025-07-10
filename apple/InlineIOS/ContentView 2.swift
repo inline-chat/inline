@@ -9,6 +9,7 @@ struct ContentView2: View {
 
   @EnvironmentStateObject private var data: DataManager
   @EnvironmentStateObject private var home: HomeViewModel
+  @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
 
   @StateObject private var onboardingNav = OnboardingNavigation()
   @StateObject var api = ApiClient()
@@ -16,6 +17,7 @@ struct ContentView2: View {
   @StateObject var mainViewRouter = MainViewRouter()
   @StateObject private var fileUploadViewModel = FileUploadViewModel()
   @StateObject private var tabsManager = TabsManager()
+
   @Environment(Router.self) private var router
 
   init() {
@@ -25,6 +27,10 @@ struct ContentView2: View {
 
     _home = EnvironmentStateObject { env in
       HomeViewModel(db: env.appDatabase)
+    }
+
+    _compactSpaceList = EnvironmentStateObject { env in
+      CompactSpaceList(db: env.appDatabase)
     }
   }
 
@@ -41,6 +47,7 @@ struct ContentView2: View {
     .environmentObject(home)
     .environmentObject(fileUploadViewModel)
     .environmentObject(tabsManager)
+    .environmentObject(compactSpaceList)
     .toastView()
   }
 
@@ -119,6 +126,8 @@ struct ContentView2: View {
         CreateChatIOSView(spaceId: spaceId)
       case .alphaSheet:
         AlphaSheet()
+      case .createSpaceChat:
+        CreateSpaceChat()
     }
   }
 }
