@@ -26,9 +26,10 @@ struct ChatListView: View {
             onRead: { onRead(item) },
             isArchived: isArchived
           )
+          .themedListRow()
         }
       }
-      .listStyle(.plain)
+      .themedListStyle()
       .animation(.default, value: items)
       .onChange(of: items) { _, newItems in
         processForTranslation(items: newItems)

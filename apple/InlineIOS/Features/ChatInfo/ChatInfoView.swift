@@ -16,7 +16,7 @@ struct SearchUserRow: View {
         UserAvatar(userInfo: userInfo, size: 32)
         Text((userInfo.user.firstName ?? "") + " " + (userInfo.user.lastName ?? ""))
           .fontWeight(.medium)
-          .foregroundColor(.primary)
+          .themedPrimaryText()
       }
     }
   }
@@ -33,13 +33,13 @@ struct EmptySearchView: View {
       VStack(spacing: 4) {
         Text("🔍")
           .font(.largeTitle)
-          .foregroundColor(.primary)
+          .themedPrimaryText()
           .padding(.bottom, 14)
         Text("Search for people")
           .font(.headline)
-          .foregroundColor(.primary)
+          .themedPrimaryText()
         Text("Type a username to find someone to add. eg. dena, mo")
-          .foregroundColor(.secondary)
+          .themedSecondaryText()
           .multilineTextAlignment(.center)
       }
       .padding(.horizontal, 45)
@@ -179,10 +179,13 @@ struct ChatInfoView: View {
                     Button(role: .destructive, action: {
                       Task {
                         do {
-                          try await Realtime.shared.invokeWithHandler(.removeChatParticipant, input: .removeChatParticipant(.with { input in
-                            input.chatID = chatItem.chat?.id ?? 0
-                            input.userID = userInfo.user.id
-                          }))
+                          try await Realtime.shared.invokeWithHandler(
+                            .removeChatParticipant,
+                            input: .removeChatParticipant(.with { input in
+                              input.chatID = chatItem.chat?.id ?? 0
+                              input.userID = userInfo.user.id
+                            })
+                          )
                         } catch {
                           Log.shared.error("Failed to remove participant", error: error)
                         }

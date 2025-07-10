@@ -64,7 +64,7 @@ struct MultiPhotoPreviewView: View {
     NavigationView {
       GeometryReader { geometry in
         ZStack {
-          Color(.systemBackground)
+          ThemeManager.shared.backgroundColorSwiftUI
             .edgesIgnoringSafeArea(.all)
 
           VStack(spacing: 0) {
@@ -113,22 +113,22 @@ struct MultiPhotoPreviewView: View {
     }) {
       if #available(iOS 26.0, *) {
         Circle()
-          .fill(Color(.systemBackground))
+          .fill(ThemeManager.shared.cardBackgroundColor)
           .frame(width: closeButtonSize, height: closeButtonSize)
           .overlay {
             Image(systemName: "xmark")
               .font(.callout)
-              .foregroundColor(.primary)
+              .foregroundColor(ThemeManager.shared.textPrimaryColor)
           }
           .glassEffect(.regular, in: Circle(), isEnabled: true)
       } else {
         Circle()
-          .fill(.primary.opacity(0.08))
+          .fill(ThemeManager.shared.surfaceBackgroundColor)
           .frame(width: closeButtonSize, height: closeButtonSize)
           .overlay {
             Image(systemName: "xmark")
               .font(.callout)
-              .foregroundColor(.primary)
+              .foregroundColor(ThemeManager.shared.textPrimaryColor)
           }
       }
     }
@@ -139,10 +139,10 @@ struct MultiPhotoPreviewView: View {
     HStack(spacing: 2) {
       Text("\(viewModel.currentIndex + 1)")
         .font(.body)
-        .foregroundColor(.primary)
+        .foregroundColor(ThemeManager.shared.textPrimaryColor)
       Text("of \(viewModel.photoItems.count)")
         .font(.body)
-        .foregroundColor(.secondary)
+        .foregroundColor(ThemeManager.shared.textSecondaryColor)
     }
     .padding(.horizontal, counterHorizontalPadding)
     .frame(height: 32)
@@ -150,11 +150,11 @@ struct MultiPhotoPreviewView: View {
     .background {
       if #available(iOS 26.0, *) {
         Capsule()
-          .fill(Color(.systemBackground))
+          .fill(ThemeManager.shared.cardBackgroundColor)
           .glassEffect(.regular, in: Capsule(), isEnabled: true)
       } else {
         Capsule()
-          .fill(.primary.opacity(0.06))
+          .fill(ThemeManager.shared.surfaceBackgroundColor)
       }
     }
   }
@@ -169,7 +169,7 @@ struct MultiPhotoPreviewView: View {
       }
       .background {
         Capsule()
-          .stroke(.primary.opacity(0.1), lineWidth: 1)
+          .stroke(ThemeManager.shared.borderColor, lineWidth: 1)
       }
   }
 
@@ -182,7 +182,7 @@ struct MultiPhotoPreviewView: View {
     }
     .buttonStyle(ScaleButtonStyle())
     .frame(width: sendButtonSize, height: sendButtonSize)
-    .background(Color(ThemeManager.shared.selected.accent))
+    .background(ThemeManager.shared.accentColor)
     .clipShape(Circle())
   }
 

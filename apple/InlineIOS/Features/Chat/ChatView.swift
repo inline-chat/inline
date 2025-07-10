@@ -62,8 +62,8 @@ struct ChatView: View {
           .background(
             LinearGradient(
               gradient: Gradient(colors: [
-                Color(ThemeManager.shared.selected.backgroundColor).opacity(1),
-                Color(ThemeManager.shared.selected.backgroundColor).opacity(0.0),
+                ThemeManager.shared.backgroundColorSwiftUI.opacity(1),
+                ThemeManager.shared.backgroundColorSwiftUI.opacity(0.0),
               ]),
               startPoint: .top,
               endPoint: .bottom
@@ -103,7 +103,7 @@ struct ChatView: View {
         } label: {
           Image(systemName: "translate")
         }
-        .tint(isTranslationEnabled ? Color(ThemeManager.shared.selected.accent) : .gray)
+        .tint(isTranslationEnabled ? ThemeManager.shared.accentColor : .gray)
         .popover(isPresented: $showTranslationPopover) {
           VStack {
             Text(
