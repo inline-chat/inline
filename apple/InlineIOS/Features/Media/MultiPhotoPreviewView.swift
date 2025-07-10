@@ -111,20 +111,32 @@ struct MultiPhotoPreviewView: View {
         isPresented = false
       }
     }) {
-      Circle()
-        .fill(.primary.opacity(0.08))
-        .frame(width: closeButtonSize, height: closeButtonSize)
-        .overlay {
-          Image(systemName: "xmark")
-            .font(.callout)
-            .foregroundColor(.primary)
-        }
+      if #available(iOS 26.0, *) {
+        Circle()
+          .fill(Color(.systemBackground))
+          .frame(width: closeButtonSize, height: closeButtonSize)
+          .overlay {
+            Image(systemName: "xmark")
+              .font(.callout)
+              .foregroundColor(.primary)
+          }
+          .glassEffect(.regular, in: Circle(), isEnabled: true)
+      } else {
+        Circle()
+          .fill(.primary.opacity(0.08))
+          .frame(width: closeButtonSize, height: closeButtonSize)
+          .overlay {
+            Image(systemName: "xmark")
+              .font(.callout)
+              .foregroundColor(.primary)
+          }
+      }
     }
     .buttonStyle(PlainButtonStyle())
   }
 
   private var photoCounter: some View {
-    HStack {
+    HStack(spacing: 2) {
       Text("\(viewModel.currentIndex + 1)")
         .font(.body)
         .foregroundColor(.primary)
@@ -134,9 +146,11 @@ struct MultiPhotoPreviewView: View {
     }
     .padding(.horizontal, counterHorizontalPadding)
     .frame(height: 32)
+    .fixedSize(horizontal: true, vertical: false)
     .background {
       if #available(iOS 26.0, *) {
         Capsule()
+          .fill(Color(.systemBackground))
           .glassEffect(.regular, in: Capsule(), isEnabled: true)
       } else {
         Capsule()
@@ -154,41 +168,22 @@ struct MultiPhotoPreviewView: View {
         viewModel.updateCaption(at: viewModel.currentIndex, caption: newValue)
       }
       .background {
-        if #available(iOS 26.0, *) {
-          Capsule()
-            .glassEffect(.regular, in: Capsule(), isEnabled: true)
-        } else {
-          Capsule()
-            .stroke(.primary.opacity(0.1), lineWidth: 1)
-        }
+        Capsule()
+          .stroke(.primary.opacity(0.1), lineWidth: 1)
       }
   }
 
   private var sendButton: some View {
-    Group {
-      if #available(iOS 26.0, *) {
-        Button(action: {
-          sendPhotos()
-        }) {
-          Image(systemName: "arrow.up")
-            .foregroundColor(.white)
-        }
-        .frame(width: sendButtonSize, height: sendButtonSize)
-        .clipShape(Circle())
-        .buttonStyle(.glassProminent)
-      } else {
-        Button(action: {
-          sendPhotos()
-        }) {
-          Image(systemName: "arrow.up")
-            .foregroundColor(.white)
-        }
-        .buttonStyle(ScaleButtonStyle())
-        .frame(width: sendButtonSize, height: sendButtonSize)
-        .background(Color(ThemeManager.shared.selected.accent))
-        .clipShape(Circle())
-      }
+    Button(action: {
+      sendPhotos()
+    }) {
+      Image(systemName: "arrow.up")
+        .foregroundColor(.white)
     }
+    .buttonStyle(ScaleButtonStyle())
+    .frame(width: sendButtonSize, height: sendButtonSize)
+    .background(Color(ThemeManager.shared.selected.accent))
+    .clipShape(Circle())
   }
 
   private var bottomContent: some View {
