@@ -76,7 +76,13 @@ struct HomeToolbarContent: ToolbarContent {
       Button {
         router.presentSheet(.createSpace)
       } label: {
-        Label("Create Space", systemImage: "building.fill")
+        Label("Create Space", systemImage: "building")
+      }
+
+      Button {
+        router.presentSheet(.createSpaceChat)
+      } label: {
+        Label("New Group Chat", systemImage: "plus.message")
       }
 
       Button {

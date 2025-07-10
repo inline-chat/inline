@@ -7,7 +7,7 @@ struct SpacesView: View {
   @Environment(Router.self) private var router
   @Environment(\.realtime) var realtime
 
-  @EnvironmentObject private var homeViewModel: HomeViewModel
+  @EnvironmentObject var homeViewModel: HomeViewModel
 
   @State var shouldShow = false
   @State var apiState: RealtimeAPIState = .connecting

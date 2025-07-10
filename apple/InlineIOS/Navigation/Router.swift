@@ -1,6 +1,8 @@
 import Foundation
 import InlineKit
+#if canImport(Playgrounds)
 import Playgrounds
+#endif
 import SwiftUI
 
 /// A generic navigation model that provides tab-based navigation with persistent state.
