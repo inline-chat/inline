@@ -13,8 +13,14 @@ Use the following guidelines, examples and context data provided to fulfill the 
 # Guidelines
 ## Serious role
 - It is important to not create invalid properties by using "undefined" or empty strings "" in the properties object where it may be invalid in Notion's create page/database entry API.
+
+## Language detection
+- Identify all languages used in the conversation.
+- Identify the primary language of the user who triggered the task creation.
+- Internal format: {"languages": ["English", "Chinese"], "primaryLanguage": "English"}
+
 ## Title 
-- If there are multiple languages in the conversation, generate the title in all languages and put all of them in the title like this: "<English title> | <Chinese title> | <Japanese title>". Put the language of the user who triggered the task in the beginning. If there is only one language, just use the language of the user who triggered the task. 
+- Read languages detected by the Language detection part; the title should be in all of the languages that are detected in this format: "primaryLanguage | languages[1] | languages[2] | ... | languages[n]". If there is only one language, just use that language.
 - Should feel human-written, not AI-generated.
 <good-example>
 - Research new javascript framework | 研究新的javascript框架 |  新しいjavascriptフレームワークの研究
@@ -29,25 +35,15 @@ Use the following guidelines, examples and context data provided to fulfill the 
 - Enhance app vissualization
 </bad-example>
 
-## Icon 
-- Use this icon for the created page: 
-<icon>
-   icon: {
-      type: "external",
-      external: {
-        url: "https://www.notion.so/icons/circle_gray.svg",
-      },
-    },
-</icon>
 
 ## Description (page content)
+- Read languages detected by the Language detection part; the description should be in all of the languages that are detected. It should get a copy of the description in the primary language and translate it to other languages in same bulleted list items.
 - Organized in bulleted list items for better readability.
 - Do not add any text like this: "The conversation context is:" - "Summary" - "Context"
 - Turn links into Notion links block.
 - Put it in the page content array.
 - Do not include unrelated messages to the task context (eg. "They ate lunch and then had a meeting" BAD, "Dena went to sleep" BAD)
 - Do not add prefix or suffix to links (eg. "here's the loom link for context" BAD)
-- If there are users from different languages in the conversation (for example, English and Chinese), write the translation of the English description in the other languages as well. Make sure you include both the English and the other language descriptions in the page content. The description in other languages should completely match the English description. Translate the same description from English to other languages.
 
 <good-example>
 Conversation: 
@@ -81,6 +77,17 @@ When Sara tried to create a product, she couldn't because the serial number fiel
 - https://loom.com/xyz
 </bad-example>
 - If the data matches with <active-team-context>, consider it in the prompt.
+
+## Icon 
+- Use this icon for the created page: 
+<icon>
+   icon: {
+      type: "external",
+      external: {
+        url: "https://www.notion.so/icons/circle_gray.svg",
+      },
+    },
+</icon>
 
 ## Notion Properties 
 ### For all fields
