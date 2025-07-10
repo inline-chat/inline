@@ -1,8 +1,8 @@
 import InlineKit
 import InlineUI
+import Logger
 import MCEmojiPicker
 import SwiftUI
-import Logger
 
 struct CreateThread: View {
   @State private var animate: Bool = false
@@ -64,12 +64,13 @@ struct CreateThread: View {
           }
         }
       }
-      .background(.clear)
+      .themedListStyle()
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
           Text("Create Chat")
             .fontWeight(.bold)
+            .themedPrimaryText()
         }
         ToolbarItem(placement: .topBarTrailing) {
           Button(formState.isLoading ? "Creating..." : "Create") {
@@ -84,6 +85,7 @@ struct CreateThread: View {
         isFocused = true
       }
     }
+    .themedSheet()
   }
 
   func submit() {

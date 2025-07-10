@@ -28,12 +28,14 @@ struct ArchivedChatsView: View {
           spaceArchivedView
       }
     }
+    .background(ThemeManager.shared.backgroundColorSwiftUI)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .principal) {
         Text(shouldShow ? getStatusText(apiState) : "Archived Chats")
           .font(.title3)
           .fontWeight(.semibold)
+          .themedPrimaryText()
           .contentTransition(.numericText())
           .animation(.spring(duration: 0.5), value: getStatusText(apiState))
           .animation(.spring(duration: 0.5), value: shouldShow)
@@ -152,9 +154,10 @@ struct ArchivedChatsView: View {
                 bottom: 2,
                 trailing: 0
               ))
+              .themedListRow()
           }
         }
-        .listStyle(.plain)
+        .themedListStyle()
         .animation(.default, value: fullSpaceViewModel.chats)
         .animation(.default, value: fullSpaceViewModel.memberChats)
       }

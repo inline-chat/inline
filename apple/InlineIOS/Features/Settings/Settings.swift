@@ -22,6 +22,7 @@ struct SettingsView: View {
   var body: some View {
     List {
       UserProfileSection(currentUser: currentUser)
+        .themedListRow()
       Section {
         Button {
           fileUploadViewModel.showImagePicker = true
@@ -34,12 +35,13 @@ struct SettingsView: View {
               .background(Color.orange)
               .clipShape(RoundedRectangle(cornerRadius: 6))
             Text("Change Profile Photo")
-              .foregroundColor(.primary)
+              .themedPrimaryText()
               .padding(.leading, 4)
             Spacer()
           }
           .padding(.vertical, 2)
         }
+        .themedListRow()
       }
 
       NavigationLink(destination: IntegrationsView()) {
@@ -50,12 +52,13 @@ struct SettingsView: View {
             .background(Color.purple)
             .clipShape(RoundedRectangle(cornerRadius: 6))
           Text("Integrations")
-            .foregroundColor(.primary)
+            .themedPrimaryText()
             .padding(.leading, 4)
           Spacer()
         }
         .padding(.vertical, 2)
       }
+      .themedListRow()
       NavigationLink(destination: ThemeSelectionView()) {
         HStack {
           Image(systemName: "paintbrush.fill")
@@ -64,12 +67,13 @@ struct SettingsView: View {
             .background(Color.blue)
             .clipShape(RoundedRectangle(cornerRadius: 6))
           Text("Appearance")
-            .foregroundColor(.primary)
+            .themedPrimaryText()
             .padding(.leading, 4)
           Spacer()
         }
         .padding(.vertical, 2)
       }
+      .themedListRow()
 
       Section {
         Button {
@@ -82,7 +86,7 @@ struct SettingsView: View {
               .background(Color.red)
               .clipShape(RoundedRectangle(cornerRadius: 6))
             Text("Clear Cache")
-              .foregroundColor(.primary)
+              .themedPrimaryText()
               .padding(.leading, 4)
             Spacer()
             if isClearing {
@@ -93,6 +97,7 @@ struct SettingsView: View {
           .padding(.vertical, 2)
         }
         .disabled(isClearing)
+        .themedListRow()
 
         Button {
           TranslationAlertDismiss.shared.resetAllDismissStates()
@@ -104,17 +109,18 @@ struct SettingsView: View {
               .background(Color.orange)
               .clipShape(RoundedRectangle(cornerRadius: 6))
             Text("Reset Translation Alerts")
-              .foregroundColor(.primary)
+              .themedPrimaryText()
               .padding(.leading, 4)
             Spacer()
           }
           .padding(.vertical, 2)
         }
+        .themedListRow()
       }
 
       LogoutSection()
     }
-
+    .listStyle(.insetGrouped)
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
     .toolbar(.hidden, for: .tabBar)
@@ -122,13 +128,14 @@ struct SettingsView: View {
       ToolbarItem(id: "settings", placement: .principal) {
         HStack {
           Image(systemName: "gearshape.fill")
-            .foregroundColor(.secondary)
+            .themedSecondaryText()
             .font(.callout)
             .padding(.trailing, 4)
           VStack(alignment: .leading) {
             Text("Settings")
               .font(.body)
               .fontWeight(.semibold)
+              .themedPrimaryText()
           }
         }
       }
