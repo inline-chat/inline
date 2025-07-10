@@ -38,7 +38,9 @@ final class MessagesCollectionView: UICollectionView {
     for interaction: UIContextMenuInteraction,
     configuration: UIContextMenuConfiguration
   ) -> [Any]? {
-    guard let indexPath = configuration.identifier as? IndexPath else { return nil }
+    guard let indexPath = configuration.identifier as? IndexPath else {
+      return nil
+    }
     return accessoryProvider?(indexPath)
   }
 
