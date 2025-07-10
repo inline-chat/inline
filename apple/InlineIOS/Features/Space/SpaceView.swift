@@ -173,9 +173,10 @@ private struct MemberListView: View {
             .unreadCount ?? 0 > 0
         )
         .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 0))
+        .themedListRow()
       }
     }
-    .listStyle(.plain)
+    .themedListStyle()
   }
 }
 
@@ -188,9 +189,10 @@ private struct ChatListContent: View {
       ForEach(items, id: \.id) { item in
         ChatItemRow(item: item)
           .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
+          .themedListRow()
       }
     }
-    .listStyle(.plain)
+    .themedListStyle()
   }
 }
 

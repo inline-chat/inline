@@ -48,12 +48,14 @@ struct SpaceSettingsView: View {
             Text(viewModel.space?.nameWithoutEmoji ?? "Space")
               .font(.body)
               .fontWeight(.medium)
+              .themedPrimaryText()
 
             Text("\(viewModel.members.count) \(viewModel.members.count == 1 ? "member" : "members")")
               .font(.callout)
-              .foregroundColor(.secondary)
+              .themedSecondaryText()
           }
         }
+        .themedListRow()
       }
 
       Section {
@@ -65,12 +67,13 @@ struct SpaceSettingsView: View {
               .background(Color.purple)
               .clipShape(RoundedRectangle(cornerRadius: 6))
             Text("Integrations")
-              .foregroundColor(.primary)
+              .themedPrimaryText()
               .padding(.leading, 4)
             Spacer()
           }
           .padding(.vertical, 2)
         }
+        .themedListRow()
       }
 
       Section {
@@ -85,22 +88,25 @@ struct SpaceSettingsView: View {
               .foregroundColor(.red)
           }
         }
+        .themedListRow()
       }
-
-      .toolbarRole(.editor)
-      .toolbar(.hidden, for: .tabBar)
-      .toolbar {
-        ToolbarItem(id: "settings", placement: .principal) {
-          HStack {
-            Image(systemName: "gearshape.fill")
-              .foregroundColor(.secondary)
-              .font(.callout)
-              .padding(.trailing, 4)
-            VStack(alignment: .leading) {
-              Text("\(viewModel.space?.nameWithoutEmoji ?? "Space") Settings")
-                .font(.body)
-                .fontWeight(.semibold)
-            }
+    }
+    .listStyle(.insetGrouped)
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbarRole(.editor)
+    .toolbar(.hidden, for: .tabBar)
+    .toolbar {
+      ToolbarItem(id: "settings", placement: .principal) {
+        HStack {
+          Image(systemName: "gearshape.fill")
+            .themedSecondaryText()
+            .font(.callout)
+            .padding(.trailing, 4)
+          VStack(alignment: .leading) {
+            Text("\(viewModel.space?.nameWithoutEmoji ?? "Space") Settings")
+              .font(.body)
+              .fontWeight(.semibold)
+              .themedPrimaryText()
           }
         }
       }

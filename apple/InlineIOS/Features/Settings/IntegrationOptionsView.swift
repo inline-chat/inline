@@ -44,8 +44,10 @@ struct IntegrationOptionsView: View {
             }
           }
         }
+        .themedListRow()
       }
     }
+    .listStyle(.insetGrouped)
     .onAppear {
       loadCachedData()
 
@@ -67,10 +69,12 @@ struct IntegrationOptionsView: View {
               Text("Notion")
                 .font(.body)
                 .fontWeight(.semibold)
+                .themedPrimaryText()
             }
           } else {
             // TODO: support Linear
             Text("Integration Options")
+              .themedPrimaryText()
           }
         }
       }

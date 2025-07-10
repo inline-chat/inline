@@ -9,10 +9,12 @@ struct UserProfileSection: View {
     Section(header: Text("Account")) {
       if let user = currentUser {
         ProfileRow(userInfo: user)
+          .themedListRow()
       } else {
         Button("Set up profile") {
           // TODO: Add profile setup
         }
+        .themedListRow()
       }
     }
   }
@@ -46,14 +48,15 @@ struct ProfileRow: View {
         Text(fullName)
           .font(.body)
           .fontWeight(.medium)
+          .themedPrimaryText()
         if !isChatInfo {
           Text(user.email ?? "")
             .font(.callout)
-            .foregroundColor(.secondary)
+            .themedSecondaryText()
         } else {
           Text("@\(user.username ?? "")")
             .font(.callout)
-            .foregroundColor(.secondary)
+            .themedSecondaryText()
         }
       }
     }

@@ -49,9 +49,11 @@ struct SpaceIntegrationsView: View {
           #endif
         }
       )
+      .themedListRow()
 
       // TODO: add footerText
     }
+    .listStyle(.insetGrouped)
     .onAppear {
       checkIntegrationConnection()
       updatePermissions()
@@ -63,13 +65,14 @@ struct SpaceIntegrationsView: View {
       ToolbarItem(id: "integrations", placement: .principal) {
         HStack {
           Image(systemName: "app.connected.to.app.below.fill")
-            .foregroundColor(.secondary)
+            .themedSecondaryText()
             .font(.callout)
             .padding(.trailing, 4)
           VStack(alignment: .leading) {
             Text("Integrations")
               .font(.body)
               .fontWeight(.semibold)
+              .themedPrimaryText()
           }
         }
       }
