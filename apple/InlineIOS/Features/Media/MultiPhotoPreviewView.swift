@@ -106,40 +106,21 @@ struct MultiPhotoPreviewView: View {
   // MARK: - View Components
 
   private var closeButton: some View {
-    Group {
-      if #available(iOS 26.0, *) {
-        Button(action: {
-          withAnimation(.easeOut(duration: animationDuration)) {
-            isPresented = false
-          }
-        }) {
-          Image(systemName: "xmark")
-            .font(.body)
-            .foregroundColor(.primary)
-            .frame(width: closeButtonSize, height: closeButtonSize)
-            .contentShape(Circle())
-        }
-        .clipShape(Circle())
-        .buttonStyle(.glass)
-
-      } else {
-        Button(action: {
-          withAnimation(.easeOut(duration: animationDuration)) {
-            isPresented = false
-          }
-        }) {
-          Circle()
-            .fill(.primary.opacity(0.08))
-            .frame(width: closeButtonSize, height: closeButtonSize)
-            .overlay {
-              Image(systemName: "xmark")
-                .font(.callout)
-                .foregroundColor(.primary)
-            }
-        }
-        .clipShape(Circle())
+    Button(action: {
+      withAnimation(.easeOut(duration: animationDuration)) {
+        isPresented = false
       }
+    }) {
+      Circle()
+        .fill(.primary.opacity(0.08))
+        .frame(width: closeButtonSize, height: closeButtonSize)
+        .overlay {
+          Image(systemName: "xmark")
+            .font(.callout)
+            .foregroundColor(.primary)
+        }
     }
+    .buttonStyle(PlainButtonStyle())
   }
 
   private var photoCounter: some View {
