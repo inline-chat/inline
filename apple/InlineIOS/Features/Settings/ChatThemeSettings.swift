@@ -17,16 +17,18 @@ struct ThemeSelectionView: View {
       themeGrid
         .listRowInsets(EdgeInsets())
     }
+    .listStyle(.insetGrouped)
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
     .toolbar {
       ToolbarItem(placement: .principal) {
         HStack {
           Image(systemName: "paintpalette.fill")
-            .foregroundColor(.secondary)
+            .themedSecondaryText()
             .font(.callout)
           Text("Themes")
             .font(.headline)
+            .themedPrimaryText()
         }
       }
     }

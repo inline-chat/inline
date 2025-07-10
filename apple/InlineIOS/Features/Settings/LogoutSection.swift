@@ -14,6 +14,7 @@ struct LogoutSection: View {
       Button("Logout", role: .destructive) {
         Task { await performLogout() }
       }
+      .themedListRow()
     }
   }
 

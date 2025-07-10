@@ -45,12 +45,14 @@ struct AddMember: View {
             Text("Add Member")
               .fontWeight(.medium)
               .font(.body)
+              .themedPrimaryText()
             Spacer()
           }
           .frame(maxWidth: .infinity)
         }
       }
     }
+    .themedSheet()
   }
 
   @ViewBuilder
@@ -61,7 +63,7 @@ struct AddMember: View {
           Text("🔎")
             .font(.largeTitle)
           Text("Please enter a username to search for")
-            .foregroundColor(.secondary)
+            .themedSecondaryText()
             .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -70,7 +72,7 @@ struct AddMember: View {
         searchLoadingView
       } else if searchResults.isEmpty, !text.isEmpty {
         Text("No users found")
-          .foregroundColor(.secondary)
+          .themedSecondaryText()
       } else {
         searchResultsList
       }
@@ -82,7 +84,7 @@ struct AddMember: View {
     HStack {
       ProgressView()
       Text("Searching...")
-        .foregroundColor(.secondary)
+        .themedSecondaryText()
     }
   }
 
@@ -90,8 +92,9 @@ struct AddMember: View {
     List(searchResults) { userInfo in
       searchResultRow(for: userInfo)
         .listRowInsets(EdgeInsets(top: 9, leading: 2, bottom: 2, trailing: 0))
+        .themedListRow()
     }
-    .listStyle(.plain)
+    .themedListStyle()
   }
 
   private func searchResultRow(for userInfo: UserInfo) -> some View {
@@ -102,7 +105,7 @@ struct AddMember: View {
         UserAvatar(userInfo: userInfo, size: 28)
         Text((userInfo.user.firstName ?? "") + " " + (userInfo.user.lastName ?? ""))
           .fontWeight(.medium)
-          .foregroundColor(.primary)
+          .themedPrimaryText()
         Spacer()
       }
       .frame(maxWidth: .infinity)

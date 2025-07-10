@@ -89,10 +89,9 @@ public struct CreateChatIOSView: View {
           }
         }
       }
-      .background(.clear)
+      .themedListStyle()
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-    
         ToolbarItem(placement: .topBarTrailing) {
           Button(formState.isLoading ? "Creating..." : "Create") {
             submit()
@@ -107,11 +106,13 @@ public struct CreateChatIOSView: View {
         isTitleFocused = true
       }
     }
+    .themedSheet()
   }
 
   private func memberRow(_ member: SpaceChatItem) -> some View {
     HStack {
       Text(member.user?.fullName ?? "Unknown User")
+        .themedPrimaryText()
       Spacer()
       if let userId = member.user?.id, selectedPeople.contains(userId) {
         Image(systemName: "checkmark")
