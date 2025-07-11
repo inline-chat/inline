@@ -205,7 +205,8 @@ struct DirectChatItem: View {
         Text("Sticker")
           .font(.callout)
           .foregroundColor(.secondary)
-          .lineLimit(1)
+          .lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
           .truncationMode(.tail)
       }
 
@@ -221,7 +222,8 @@ struct DirectChatItem: View {
         )
         .font(.callout)
         .foregroundColor(.secondary)
-        .lineLimit(1)
+        .lineLimit(2)
+        .fixedSize(horizontal: false, vertical: true)
         .truncationMode(.tail)
       }
 
@@ -237,7 +239,8 @@ struct DirectChatItem: View {
         )
         .font(.callout)
         .foregroundColor(.secondary)
-        .lineLimit(1)
+        .lineLimit(2)
+        .fixedSize(horizontal: false, vertical: true)
         .truncationMode(.tail)
       }
 
@@ -246,13 +249,15 @@ struct DirectChatItem: View {
         .italic()
         .font(.callout)
         .foregroundColor(.secondary)
-        .lineLimit(1)
+        .lineLimit(2)
+        .fixedSize(horizontal: false, vertical: true)
         .truncationMode(.tail)
     } else {
       Text((lastMsg?.displayText ?? "").replacingOccurrences(of: "\n", with: " "))
         .font(.callout)
         .foregroundColor(.secondary)
         .lineLimit(2)
+        .fixedSize(horizontal: false, vertical: true)
         .truncationMode(.tail)
     }
   }
