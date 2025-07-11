@@ -41,6 +41,7 @@
     "apn": "^2.2.0",
     "arctic": "^3.3.0",
     "drizzle-orm": "^1.0.0-beta.1-c0277c0",
+    "effect": "^3.16.12",
     "elysia": "=1.1.26",
     "elysia-helmet": "^2.0.0",
     "elysia-rate-limit": "^4.1.0",
