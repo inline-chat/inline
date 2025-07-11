@@ -42,7 +42,6 @@ struct Default: ThemeConfig {
     }
   })
 
-  // Default implementations for new properties
   var listRowBackground: UIColor? { nil }
   var listSeparatorColor: UIColor? { nil }
   var navigationBarBackground: UIColor? { nil }
@@ -136,25 +135,25 @@ struct CatppuccinMocha: ThemeConfig {
   // Enhanced Catppuccin Mocha theming - synchronized backgrounds
   var listRowBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#11111B")! // Match main background
+      UIColor(hex: "#11111B")!
     } else {
-      UIColor(hex: "#FFFFFF")! // Match main background
+      UIColor(hex: "#FFFFFF")!
     }
   })
 
   var listSeparatorColor: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#6C7086")! // Catppuccin Mocha Overlay0
+      UIColor(hex: "#6C7086")!
     } else {
-      UIColor(hex: "#9CA0B0")! // Catppuccin Latte Overlay0
+      UIColor(hex: "#9CA0B0")!
     }
   })
 
   var navigationBarBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#11111B")! // Match main background
+      UIColor(hex: "#11111B")!
     } else {
-      UIColor(hex: "#FFFFFF")! // Match main background
+      UIColor(hex: "#FFFFFF")!
     }
   })
 
@@ -168,17 +167,17 @@ struct CatppuccinMocha: ThemeConfig {
 
   var surfaceBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#313244")! // Catppuccin Mocha Surface0
+      UIColor(hex: "#313244")!
     } else {
-      UIColor(hex: "#CCD0DA")! // Catppuccin Latte Surface0
+      UIColor(hex: "#CCD0DA")!
     }
   })
 
   var surfaceSecondary: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#45475A")! // Catppuccin Mocha Surface1
+      UIColor(hex: "#45475A")!
     } else {
-      UIColor(hex: "#BCC0CC")! // Catppuccin Latte Surface1
+      UIColor(hex: "#BCC0CC")!
     }
   })
 
@@ -188,57 +187,55 @@ struct CatppuccinMocha: ThemeConfig {
 
   var borderColor: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#585B70")! // Catppuccin Mocha Surface2
+      UIColor(hex: "#585B70")!
     } else {
-      UIColor(hex: "#ACB0BE")! // Catppuccin Latte Surface2
+      UIColor(hex: "#ACB0BE")!
     }
   })
 
   var overlayBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#7F849C")! // Catppuccin Mocha Overlay1
+      UIColor(hex: "#7F849C")!
     } else {
-      UIColor(hex: "#8C8FA1")! // Catppuccin Latte Overlay1
+      UIColor(hex: "#8C8FA1")!
     }
   })
 
   var cardBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#181825")! // Catppuccin Mocha Mantle
-    } else {
-      UIColor(hex: "#E6E9EF")! // Catppuccin Latte Mantle
+      UIColor(hex: "#181825")!
     }
   })
 
   var searchBarBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#313244")! // Catppuccin Mocha Surface0
+      UIColor(hex: "#313244")!
     } else {
-      UIColor(hex: "#CCD0DA")! // Catppuccin Latte Surface0
+      UIColor(hex: "#CCD0DA")!
     }
   })
 
   var buttonBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#CBA6F7")! // Catppuccin Mocha Mauve
+      UIColor(hex: "#CBA6F7")!
     } else {
-      UIColor(hex: "#8839EF")! // Catppuccin Latte Mauve
+      UIColor(hex: "#8839EF")!
     }
   })
 
   var buttonSecondaryBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#45475A")! // Catppuccin Mocha Surface1
+      UIColor(hex: "#45475A")!
     } else {
-      UIColor(hex: "#BCC0CC")! // Catppuccin Latte Surface1
+      UIColor(hex: "#BCC0CC")!
     }
   })
 
   var sheetTintColor: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
-      UIColor(hex: "#919EF4")! // Match accent color
+      UIColor(hex: "#919EF4")!
     } else {
-      UIColor(hex: "#7287FD")! // Match accent color
+      UIColor(hex: "#7287FD")!
     }
   })
 }
@@ -284,7 +281,6 @@ struct PeonyPink: ThemeConfig {
     }
   })
 
-  // Default implementations for new properties
   var listRowBackground: UIColor? { nil }
   var listSeparatorColor: UIColor? { nil }
   var navigationBarBackground: UIColor? { nil }
@@ -351,7 +347,6 @@ struct Orchid: ThemeConfig {
     }
   })
 
-  // Default implementations for new properties
   var listRowBackground: UIColor? { nil }
   var listSeparatorColor: UIColor? { nil }
   var navigationBarBackground: UIColor? { nil }
