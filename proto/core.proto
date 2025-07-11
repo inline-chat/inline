@@ -553,6 +553,7 @@ enum Method {
   GET_USER_SETTINGS = 19;
   SEND_COMPOSE_ACTION = 20;
   CREATE_BOT = 21;
+  DELETE_MEMBER = 22;
 }
 
 message RpcCall {
@@ -579,6 +580,7 @@ message RpcCall {
     GetUserSettingsInput getUserSettings = 20;
     SendComposeActionInput sendComposeAction = 21;
     CreateBotInput createBot = 22;
+    DeleteMemberInput deleteMember = 23;
   }
 }
 
@@ -607,7 +609,22 @@ message RpcResult {
     GetUserSettingsResult getUserSettings = 20;
     SendComposeActionResult sendComposeAction = 21;
     CreateBotResult createBot = 22;
+    DeleteMemberResult deleteMember = 23;
   }
+}
+
+// Remove member from space
+message DeleteMemberInput {
+  // Space ID
+  int64 space_id = 1;
+
+  // Member ID
+  int64 user_id = 2;
+}
+
+// Remove member from space result
+message DeleteMemberResult {
+  repeated Update updates = 1;
 }
 
 message CreateBotInput {
@@ -905,7 +922,8 @@ message UpdateSpaceMemberAdd {
 
 // Update when a space member is removed
 message UpdateSpaceMemberDelete {
-  // todo
+  int64 space_id = 1;
+  int64 user_id = 2;
 }
 
 // Update when we joined a space

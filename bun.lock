@@ -33,6 +33,7 @@
         "apn": "^2.2.0",
         "arctic": "^3.3.0",
         "drizzle-orm": "^1.0.0-beta.1-c0277c0",
+        "effect": "^3.16.12",
         "elysia": "=1.1.26",
         "elysia-helmet": "^2.0.0",
         "elysia-rate-limit": "^4.1.0",
@@ -934,7 +935,7 @@
 
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 
-    "effect": ["effect@3.13.1", "", { "dependencies": { "@standard-schema/spec": "^1.0.0", "fast-check": "^3.23.1" } }, "sha512-YbA45m51eZapqy/ptZvIIZi+XBj13fPCzbiDRLgxZTEUhKuf4xLzuuSsKc61Y3SIscMM2o+VPht2ty+bVEQHQQ=="],
+    "effect": ["effect@3.16.12", "", { "dependencies": { "@standard-schema/spec": "^1.0.0", "fast-check": "^3.23.1" } }, "sha512-N39iBk0K71F9nb442TLbTkjl24FLUzuvx2i1I2RsEAQsdAdUTuUoW0vlfUXgkMTUOnYqKnWcFfqw4hK4Pw27hg=="],
 
     "electron-to-chromium": ["electron-to-chromium@1.5.101", "", {}, "sha512-L0ISiQrP/56Acgu4/i/kfPwWSgrzYZUnQrC0+QPFuhqlLP1Ir7qzPPDVS9BcKIyWTRU8+o6CC8dKw38tSWhYIA=="],
 
