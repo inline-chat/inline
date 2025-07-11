@@ -6,6 +6,7 @@ import { members, type DbMember, type DbMemberRole } from "@in/server/db/schema"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { SpaceModel } from "./spaces"
+import { deleteMemberEffect } from "@in/server/db/models/members/deleteMember"
 
 const log = new Log("MembersModel")
 
@@ -17,6 +18,7 @@ export const MembersModel = {
   isUserMemberOfSpace,
   getAllMembersOfSpace,
   removeMemberFromSpace,
+  deleteMemberEffect,
 }
 
 /**

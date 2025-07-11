@@ -1486,6 +1486,12 @@ export interface RpcCall {
          */
         createBot: CreateBotInput;
     } | {
+        oneofKind: "deleteMember";
+        /**
+         * @generated from protobuf field: DeleteMemberInput deleteMember = 23;
+         */
+        deleteMember: DeleteMemberInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1627,8 +1633,44 @@ export interface RpcResult {
          */
         createBot: CreateBotResult;
     } | {
+        oneofKind: "deleteMember";
+        /**
+         * @generated from protobuf field: DeleteMemberResult deleteMember = 23;
+         */
+        deleteMember: DeleteMemberResult;
+    } | {
         oneofKind: undefined;
     };
+}
+/**
+ * Remove member from space
+ *
+ * @generated from protobuf message DeleteMemberInput
+ */
+export interface DeleteMemberInput {
+    /**
+     * Space ID
+     *
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * Member ID
+     *
+     * @generated from protobuf field: int64 user_id = 2;
+     */
+    userId: bigint;
+}
+/**
+ * Remove member from space result
+ *
+ * @generated from protobuf message DeleteMemberResult
+ */
+export interface DeleteMemberResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
 }
 /**
  * @generated from protobuf message CreateBotInput
@@ -2419,11 +2461,17 @@ export interface UpdateSpaceMemberAdd {
 /**
  * Update when a space member is removed
  *
- * todo
- *
  * @generated from protobuf message UpdateSpaceMemberDelete
  */
 export interface UpdateSpaceMemberDelete {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 2;
+     */
+    userId: bigint;
 }
 /**
  * Update when we joined a space
@@ -3000,7 +3048,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: CREATE_BOT = 21;
      */
-    CREATE_BOT = 21
+    CREATE_BOT = 21,
+    /**
+     * @generated from protobuf enum value: DELETE_MEMBER = 22;
+     */
+    DELETE_MEMBER = 22
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -6085,7 +6137,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 19, name: "updateUserSettings", kind: "message", oneof: "input", T: () => UpdateUserSettingsInput },
             { no: 20, name: "getUserSettings", kind: "message", oneof: "input", T: () => GetUserSettingsInput },
             { no: 21, name: "sendComposeAction", kind: "message", oneof: "input", T: () => SendComposeActionInput },
-            { no: 22, name: "createBot", kind: "message", oneof: "input", T: () => CreateBotInput }
+            { no: 22, name: "createBot", kind: "message", oneof: "input", T: () => CreateBotInput },
+            { no: 23, name: "deleteMember", kind: "message", oneof: "input", T: () => DeleteMemberInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -6230,6 +6283,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         createBot: CreateBotInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createBot)
                     };
                     break;
+                case /* DeleteMemberInput deleteMember */ 23:
+                    message.input = {
+                        oneofKind: "deleteMember",
+                        deleteMember: DeleteMemberInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteMember)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6308,6 +6367,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* CreateBotInput createBot = 22; */
         if (message.input.oneofKind === "createBot")
             CreateBotInput.internalBinaryWrite(message.input.createBot, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteMemberInput deleteMember = 23; */
+        if (message.input.oneofKind === "deleteMember")
+            DeleteMemberInput.internalBinaryWrite(message.input.deleteMember, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6343,7 +6405,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 19, name: "updateUserSettings", kind: "message", oneof: "result", T: () => UpdateUserSettingsResult },
             { no: 20, name: "getUserSettings", kind: "message", oneof: "result", T: () => GetUserSettingsResult },
             { no: 21, name: "sendComposeAction", kind: "message", oneof: "result", T: () => SendComposeActionResult },
-            { no: 22, name: "createBot", kind: "message", oneof: "result", T: () => CreateBotResult }
+            { no: 22, name: "createBot", kind: "message", oneof: "result", T: () => CreateBotResult },
+            { no: 23, name: "deleteMember", kind: "message", oneof: "result", T: () => DeleteMemberResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -6488,6 +6551,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         createBot: CreateBotResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createBot)
                     };
                     break;
+                case /* DeleteMemberResult deleteMember */ 23:
+                    message.result = {
+                        oneofKind: "deleteMember",
+                        deleteMember: DeleteMemberResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteMember)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6566,6 +6635,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* CreateBotResult createBot = 22; */
         if (message.result.oneofKind === "createBot")
             CreateBotResult.internalBinaryWrite(message.result.createBot, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteMemberResult deleteMember = 23; */
+        if (message.result.oneofKind === "deleteMember")
+            DeleteMemberResult.internalBinaryWrite(message.result.deleteMember, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6576,6 +6648,108 @@ class RpcResult$Type extends MessageType<RpcResult> {
  * @generated MessageType for protobuf message RpcResult
  */
 export const RpcResult = new RpcResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteMemberInput$Type extends MessageType<DeleteMemberInput> {
+    constructor() {
+        super("DeleteMemberInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteMemberInput>): DeleteMemberInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<DeleteMemberInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteMemberInput): DeleteMemberInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 2:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteMemberInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* int64 user_id = 2; */
+        if (message.userId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteMemberInput
+ */
+export const DeleteMemberInput = new DeleteMemberInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteMemberResult$Type extends MessageType<DeleteMemberResult> {
+    constructor() {
+        super("DeleteMemberResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteMemberResult>): DeleteMemberResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<DeleteMemberResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteMemberResult): DeleteMemberResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteMemberResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteMemberResult
+ */
+export const DeleteMemberResult = new DeleteMemberResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CreateBotInput$Type extends MessageType<CreateBotInput> {
     constructor() {
@@ -8881,18 +9055,48 @@ export const UpdateSpaceMemberAdd = new UpdateSpaceMemberAdd$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateSpaceMemberDelete$Type extends MessageType<UpdateSpaceMemberDelete> {
     constructor() {
-        super("UpdateSpaceMemberDelete", []);
+        super("UpdateSpaceMemberDelete", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
     }
     create(value?: PartialMessage<UpdateSpaceMemberDelete>): UpdateSpaceMemberDelete {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.userId = 0n;
         if (value !== undefined)
             reflectionMergePartial<UpdateSpaceMemberDelete>(this, message, value);
         return message;
     }
     internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateSpaceMemberDelete): UpdateSpaceMemberDelete {
-        return target ?? this.create();
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 2:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
     }
     internalBinaryWrite(message: UpdateSpaceMemberDelete, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* int64 user_id = 2; */
+        if (message.userId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.userId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -24,6 +24,7 @@ import { getUserSettingsHandler } from "./user.getUserSettings"
 import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
 import { createBotHandler } from "./createBot"
+import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMember"
 
 const log = new Log("rpc")
 
@@ -193,6 +194,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await createBotHandler(call.input.createBot, handlerContext)
       return { oneofKind: "createBot", createBot: result }
+    }
+
+    case Method.DELETE_MEMBER: {
+      if (call.input.oneofKind !== "deleteMember") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await deleteMemberHandler(call.input.deleteMember, handlerContext)
+      return { oneofKind: "deleteMember", deleteMember: result }
     }
 
     default:

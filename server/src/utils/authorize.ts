@@ -34,6 +34,23 @@ const spaceMember = async (spaceId: number, currentUserId: number): Promise<{ me
   return { member }
 }
 
+const spaceAdmin = async (spaceId: number, currentUserId: number): Promise<{ member: DbMember }> => {
+  const member = await db.query.members.findFirst({
+    where: {
+      spaceId,
+      userId: currentUserId,
+      OR: [{ role: "admin" }, { role: "owner" }],
+    },
+  })
+
+  if (member === undefined) {
+    // TODO: throw Authorize error
+    throw new InlineError(InlineError.ApiError.USER_NOT_PARTICIPANT)
+  }
+
+  return { member }
+}
+
 /** Check if user is chat participant */
 const chatParticipant = async (chatId: number, currentUserId: number) => {
   const participant = await db._query.chatParticipants.findFirst({
@@ -79,4 +96,5 @@ export const Authorize = {
   spaceMember,
   chatParticipant,
   hasIntegrationAccess,
+  spaceAdmin,
 }

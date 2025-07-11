@@ -14,6 +14,7 @@ import { addChatParticipant } from "./messages.addChatParticipant"
 import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
+import { deleteMember } from "@in/server/functions/space.deleteMember"
 
 export const Functions = {
   messages: {
@@ -32,6 +33,7 @@ export const Functions = {
   spaces: {
     getSpaceMembers: getSpaceMembers,
     inviteToSpace: inviteToSpace,
+    deleteMember: deleteMember,
   },
   user: {
     getUserSettings: getUserSettings,
