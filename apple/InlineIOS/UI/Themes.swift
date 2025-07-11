@@ -204,6 +204,8 @@ struct CatppuccinMocha: ThemeConfig {
   var cardBackground: UIColor? = .init(dynamicProvider: { trait in
     if trait.userInterfaceStyle == .dark {
       UIColor(hex: "#181825")!
+    } else {
+      UIColor(hex: "#E6E9EF")!
     }
   })
 
