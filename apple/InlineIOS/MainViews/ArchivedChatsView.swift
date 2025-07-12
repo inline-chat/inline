@@ -30,6 +30,7 @@ struct ArchivedChatsView: View {
     }
     .background(ThemeManager.shared.backgroundColorSwiftUI)
     .navigationBarTitleDisplayMode(.inline)
+    .navigationTitle("")
     .toolbar {
       ToolbarItem(placement: .principal) {
         Text(shouldShow ? getStatusText(apiState) : "Archived Chats")

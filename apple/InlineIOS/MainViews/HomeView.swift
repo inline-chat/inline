@@ -129,6 +129,7 @@ struct HomeView: View {
       .onAppear {
         initalFetch()
       }
+      .navigationTitle("")
   }
 
   @ViewBuilder
