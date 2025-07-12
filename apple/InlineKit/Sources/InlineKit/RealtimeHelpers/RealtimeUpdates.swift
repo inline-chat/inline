@@ -50,6 +50,9 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
         case let .spaceMemberAdd(spaceMemberAdd):
           try spaceMemberAdd.apply(db)
 
+        case let .spaceMemberDelete(spaceMemberDelete):
+          try spaceMemberDelete.apply(db)
+
         case let .joinSpace(joinSpace):
           try joinSpace.apply(db)
 
@@ -400,6 +403,69 @@ extension InlineProtocol.UpdateSpaceMemberAdd {
     let _ = try User.save(db, user: user)
     let member = Member(from: member)
     try member.save(db)
+  }
+}
+
+extension InlineProtocol.UpdateSpaceMemberDelete {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update space member delete user \(userID) from space \(spaceID)")
+
+    do {
+      // Delete the member from the database
+      try Member
+        .filter(Column("userId") == userID)
+        .filter(Column("spaceId") == spaceID)
+        .deleteAll(db)
+
+      // If the removed user is the current user, clean up local data
+      if userID == Auth.shared.getCurrentUserId() {
+        // Remove all dialogs and chats for this space
+        // Note: This is a simplified cleanup - you may need more comprehensive cleanup
+        Log.shared.info("Current user was removed from space, cleaning up local data")
+
+        do {
+          // 1. Collect all chats that belong to the removed space
+          let chatsInSpace = try Chat.filter(Column("spaceId") == spaceID).fetchAll(db)
+          let chatIds = chatsInSpace.map(\.id)
+
+          if !chatIds.isEmpty {
+            // 2. Delete all messages, reactions, translations, participants, etc. that belong to those chats
+            try Message.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+            try Reaction.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+            try ChatParticipant.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+
+            // 3. Delete dialogs that reference these chats
+            try Dialog.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+          }
+
+          // 4. Delete any dialogs that are directly associated with the space (safety)
+          try Dialog.filter(Column("spaceId") == spaceID).deleteAll(db)
+
+          // 5. Remove the chats themselves
+          try Chat.filter(Column("spaceId") == spaceID).deleteAll(db)
+
+          // 6. Remove all remaining members for this space (if any)
+          try Member.filter(Column("spaceId") == spaceID).deleteAll(db)
+
+          // 7. Finally delete the space record
+          try Space.filter(Column("id") == spaceID).deleteAll(db)
+
+        } catch {
+          Log.shared.error("Failed to clean up space data", error: error)
+        }
+
+        // Notify UI so that any views related to this space can be dismissed
+        Task.detached {
+          NotificationCenter.default.post(
+            name: Notification.Name("spaceDeletedNotification"),
+            object: nil,
+            userInfo: ["spaceId": spaceID]
+          )
+        }
+      }
+    } catch {
+      Log.shared.error("Failed to delete space member", error: error)
+    }
   }
 }
 
