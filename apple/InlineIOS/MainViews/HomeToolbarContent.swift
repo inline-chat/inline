@@ -15,19 +15,31 @@ struct HomeToolbarContent: ToolbarContent {
       notificationsButton
     }
 
-    ToolbarItem(placement: .principal) {
-      Text(shouldShow ? getStatusText(apiState) : "Chats")
-        .font(.title3)
-        .fontWeight(.semibold)
-        .themedPrimaryText()
-        .contentTransition(.numericText())
-        .animation(.spring(duration: 0.5), value: getStatusText(apiState))
-        .animation(.spring(duration: 0.5), value: shouldShow)
+    if #available(iOS 26.0, *) {
+      ToolbarItem(placement: .principal) {
+        title
+      }
+      .sharedBackgroundVisibility(.hidden)
+    } else {
+      ToolbarItem(placement: .principal) {
+        title
+      }
     }
 
     ToolbarItem(placement: .topBarTrailing) {
       dotsButton
     }
+  }
+
+  @ViewBuilder
+  private var title: some View {
+    Text(shouldShow ? getStatusText(apiState) : "Chats")
+      .font(.title3)
+      .fontWeight(.semibold)
+      .themedPrimaryText()
+      .contentTransition(.numericText())
+      .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+      .animation(.spring(duration: 0.5), value: shouldShow)
   }
 
   @ViewBuilder
