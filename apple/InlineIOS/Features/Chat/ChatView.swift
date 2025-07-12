@@ -26,6 +26,13 @@ struct ChatView: View {
   @ObservedObject var composeActions: ComposeActions = .shared
 
   static let formatter = RelativeDateTimeFormatter()
+  var toolbarAvatarSize: CGFloat {
+    if #available(iOS 26.0, *) {
+      44
+    } else {
+      32
+    }
+  }
 
   var isPrivateChat: Bool {
     fullChatViewModel.peer.isPrivate
@@ -145,18 +152,19 @@ struct ChatView: View {
               startPoint: .top,
               endPoint: .bottom
             )
-          ).frame(width: 32, height: 32)
+          )
+          .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
           .overlay {
             Text(
               String(describing: fullChatViewModel.chat?.emoji ?? "💬")
                 .replacingOccurrences(of: "Optional(\"", with: "")
                 .replacingOccurrences(of: "\")", with: "")
             )
-            .font(.body)
+            .font(.title2)
           }
       } else {
         if let user = fullChatViewModel.peerUserInfo {
-          UserAvatar(userInfo: user, size: 32)
+          UserAvatar(userInfo: user, size: toolbarAvatarSize)
         } else {
           Circle()
             .fill(
@@ -165,7 +173,7 @@ struct ChatView: View {
                 startPoint: .top,
                 endPoint: .bottom
               )
-            ).frame(width: 32, height: 32)
+            ).frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
         }
       }
 
@@ -235,7 +243,7 @@ struct ChatView: View {
     } label: {
       Image(systemName: "translate")
     }
-    .tint(isTranslationEnabled ? ThemeManager.shared.accentColor : .gray)
+    .tint(isTranslationEnabled ? ThemeManager.shared.accentColor : .primary.opacity(0.7))
     .popover(isPresented: $showTranslationPopover) {
       translationPopover
         .padding()
