@@ -62,79 +62,19 @@ struct ChatView: View {
       )
       .edgesIgnoringSafeArea(.all)
 
-      VStack {
-        VariableBlurView()
-          /// +25 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
-          .frame(height: navBarHeight + 38)
-          .contentShape(Rectangle())
-          .background(
-            LinearGradient(
-              gradient: Gradient(colors: [
-                ThemeManager.shared.backgroundColorSwiftUI.opacity(1),
-                ThemeManager.shared.backgroundColorSwiftUI.opacity(0.0),
-              ]),
-              startPoint: .top,
-              endPoint: .bottom
-            )
-          )
-        Spacer()
-      }
-      .ignoresSafeArea(.all)
-    }
-    .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
-      if let height = notification.userInfo?["navBarHeight"] as? CGFloat {
-        navBarHeight = height
-      }
+      ChatViewHeader(navBarHeight: $navBarHeight)
     }
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
     .toolbar(.hidden, for: .tabBar)
-    // .toolbarRole(.editor)
+    .toolbarRole(.editor)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        Button {
-          isTranslationEnabled.toggle()
-          TranslationState.shared.toggleTranslation(for: fullChatViewModel.peer)
-          showTranslationPopover = false
-        } label: {
-          Image(systemName: "translate")
-        }
-        .tint(isTranslationEnabled ? ThemeManager.shared.accentColor : .gray)
-        .popover(isPresented: $showTranslationPopover) {
-          VStack {
-            Text(
-              "Translate to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
-            )
-            HStack(spacing: 12) {
-              Button("Translate") {
-                isTranslationEnabled = true
-                TranslationState.shared.setTranslationEnabled(true, for: fullChatViewModel.peer)
-                showTranslationPopover = false
-              }
-
-              if needsTranslation {
-                Button("Dismiss") {
-                  TranslationAlertDismiss.shared.dismissForPeer(fullChatViewModel.peer)
-                  showTranslationPopover = false
-                }
-                .foregroundStyle(.tertiary)
-              }
-
-            }.padding(.top, 4)
-          }
-          .padding()
-          .presentationCompactAdaptation(.popover)
-        }
-        .onChange(of: showTranslationPopover) { _, isPresented in
-          if !isPresented {
-            needsTranslation = false
-          }
-        }
+        translateButton
       }
 
-      // if let user = fullChatViewModel.peerUserInfo {
       if #available(iOS 26.0, *) {
-        ToolbarItem(placement: .topBarLeading) {
+        ToolbarItem(placement: .principal) {
           toolbarLeadingView
         }
         .sharedBackgroundVisibility(.hidden)
@@ -143,23 +83,19 @@ struct ChatView: View {
           toolbarLeadingView
         }
       }
-      // }
-    }
-    .overlay(alignment: .top) {
-      if preview {
-        header
-          .frame(height: 45)
-          .background(.ultraThickMaterial)
-      }
     }
     .onAppear {
-      apiState = realtime.apiState
-      isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: peerId)
+      getApiState()
+      getTranslationState()
       fetch()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
+      if let height = notification.userInfo?["navBarHeight"] as? CGFloat {
+        navBarHeight = height
+      }
     }
     .onReceive(realtime.apiStatePublisher) { apiState = $0 }
     .onReceive(TranslationDetector.shared.needsTranslation) { result in
-
       needsTranslation = result.needsTranslation
       if result.needsTranslation {
         if TranslationState.shared.isTranslationEnabled(for: peerId) {
@@ -265,7 +201,91 @@ struct ChatView: View {
     })
   }
 
+  @ViewBuilder
+  var translationPopover: some View {
+    VStack {
+      Text(
+        "Translate to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
+      )
+      HStack(spacing: 12) {
+        Button("Translate") {
+          isTranslationEnabled = true
+          TranslationState.shared.setTranslationEnabled(true, for: fullChatViewModel.peer)
+          showTranslationPopover = false
+        }
+
+        if needsTranslation {
+          Button("Dismiss") {
+            TranslationAlertDismiss.shared.dismissForPeer(fullChatViewModel.peer)
+            showTranslationPopover = false
+          }
+          .foregroundStyle(.tertiary)
+        }
+
+      }.padding(.top, 4)
+    }
+  }
+
+  @ViewBuilder
+  var translateButton: some View {
+    Button {
+      isTranslationEnabled.toggle()
+      TranslationState.shared.toggleTranslation(for: fullChatViewModel.peer)
+      showTranslationPopover = false
+    } label: {
+      Image(systemName: "translate")
+    }
+    .tint(isTranslationEnabled ? ThemeManager.shared.accentColor : .gray)
+    .popover(isPresented: $showTranslationPopover) {
+      translationPopover
+        .padding()
+        .presentationCompactAdaptation(.popover)
+    }
+    .onChange(of: showTranslationPopover) { _, isPresented in
+      if !isPresented {
+        needsTranslation = false
+      }
+    }
+  }
+
+  func getApiState() {
+    apiState = realtime.apiState
+  }
+
+  func getTranslationState() {
+    isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: peerId)
+  }
+
   func fetch() {
     fullChatViewModel.refetchChatView()
+  }
+}
+
+struct ChatViewHeader: View {
+  @Binding private var navBarHeight: CGFloat
+
+  init(navBarHeight: Binding<CGFloat>) {
+    _navBarHeight = navBarHeight
+  }
+
+  var body: some View {
+    VStack {
+      VariableBlurView()
+        /// +25 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
+        .frame(height: navBarHeight + 38)
+        .contentShape(Rectangle())
+        .background(
+          LinearGradient(
+            gradient: Gradient(colors: [
+              ThemeManager.shared.backgroundColorSwiftUI.opacity(1),
+              ThemeManager.shared.backgroundColorSwiftUI.opacity(0.0),
+            ]),
+            startPoint: .top,
+            endPoint: .bottom
+          )
+        )
+      Spacer()
+    }
+    .ignoresSafeArea(.all)
   }
 }
