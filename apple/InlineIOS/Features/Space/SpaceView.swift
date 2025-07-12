@@ -68,6 +68,7 @@ struct SpaceView: View {
       contentView
     }
     .navigationBarTitleDisplayMode(.inline)
+    .navigationTitle("")
     .toolbar { toolbarContent }
     .sheet(isPresented: $showAddMemberSheet) {
       AddMember(showSheet: $showAddMemberSheet, spaceId: spaceId)
