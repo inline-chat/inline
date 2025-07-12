@@ -35,6 +35,14 @@ struct ChatView: View {
     fullChatViewModel.peer.isThread
   }
 
+  var chatProfileColors: [Color] {
+    let _ = colorScheme
+    return [
+      Color(.systemGray3).adjustLuminosity(by: 0.2),
+      Color(.systemGray5).adjustLuminosity(by: 0),
+    ]
+  }
+
   init(peer: Peer, preview: Bool = false) {
     peerId = peer
     self.preview = preview
@@ -73,7 +81,6 @@ struct ChatView: View {
       }
       .ignoresSafeArea(.all)
     }
-
     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
       if let height = notification.userInfo?["navBarHeight"] as? CGFloat {
         navBarHeight = height
@@ -84,18 +91,7 @@ struct ChatView: View {
     .toolbar(.hidden, for: .tabBar)
     // .toolbarRole(.editor)
     .toolbar {
-      ToolbarItem(placement: .principal) {
-        Button(action: {
-          if let chatItem = fullChatViewModel.chatItem {
-            router.push(.chatInfo(chatItem: chatItem))
-          }
-        }) {
-          header
-        }
-        .buttonStyle(.plain)
-      }
-
-      ToolbarItem(placement: .topBarLeading) {
+      ToolbarItem(placement: .topBarTrailing) {
         Button {
           isTranslationEnabled.toggle()
           TranslationState.shared.toggleTranslation(for: fullChatViewModel.peer)
@@ -136,27 +132,18 @@ struct ChatView: View {
         }
       }
 
-      if let user = fullChatViewModel.peerUserInfo {
-        ToolbarItem(placement: .topBarTrailing) {
-          Button(action: {
-            if let chatItem = fullChatViewModel.chatItem {
-              router.push(.chatInfo(chatItem: chatItem))
-            }
-          }) {
-            if isThreadChat {
-              Text(
-                String(describing: fullChatViewModel.chat?.emoji ?? "💬")
-                  .replacingOccurrences(of: "Optional(\"", with: "")
-                  .replacingOccurrences(of: "\")", with: "")
-              )
-              .font(.body)
-            } else {
-              UserAvatar(userInfo: user, size: 28)
-            }
-          }
-          .buttonStyle(.plain)
+      // if let user = fullChatViewModel.peerUserInfo {
+      if #available(iOS 26.0, *) {
+        ToolbarItem(placement: .topBarLeading) {
+          toolbarLeadingView
+        }
+        .sharedBackgroundVisibility(.hidden)
+      } else {
+        ToolbarItem(placement: .topBarLeading) {
+          toolbarLeadingView
         }
       }
+      // }
     }
     .overlay(alignment: .top) {
       if preview {
@@ -166,9 +153,11 @@ struct ChatView: View {
       }
     }
     .onAppear {
-      isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: fullChatViewModel.peer)
+      apiState = realtime.apiState
+      isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: peerId)
       fetch()
     }
+    .onReceive(realtime.apiStatePublisher) { apiState = $0 }
     .onReceive(TranslationDetector.shared.needsTranslation) { result in
 
       needsTranslation = result.needsTranslation
@@ -210,13 +199,64 @@ struct ChatView: View {
   }
 
   @ViewBuilder
+  var toolbarLeadingView: some View {
+    HStack(spacing: 8) {
+      if isThreadChat {
+        Circle()
+          .fill(
+            LinearGradient(
+              colors: chatProfileColors,
+              startPoint: .top,
+              endPoint: .bottom
+            )
+          ).frame(width: 32, height: 32)
+          .overlay {
+            Text(
+              String(describing: fullChatViewModel.chat?.emoji ?? "💬")
+                .replacingOccurrences(of: "Optional(\"", with: "")
+                .replacingOccurrences(of: "\")", with: "")
+            )
+            .font(.body)
+          }
+      } else {
+        if let user = fullChatViewModel.peerUserInfo {
+          UserAvatar(userInfo: user, size: 32)
+        } else {
+          Circle()
+            .fill(
+              LinearGradient(
+                colors: chatProfileColors,
+                startPoint: .top,
+                endPoint: .bottom
+              )
+            ).frame(width: 32, height: 32)
+        }
+      }
+
+      VStack(alignment: .leading, spacing: 0) {
+        Text(title)
+          .font(.body)
+        subtitleView
+      }
+    }
+    .scaledToFill()
+    .fixedSize()
+    .onTapGesture {
+      if let chatItem = fullChatViewModel.chatItem {
+        router.push(.chatInfo(chatItem: chatItem))
+      }
+    }
+  }
+
+  @ViewBuilder
   var header: some View {
-    VStack(spacing: 0) {
+    VStack(alignment: .leading, spacing: 0) {
       Text(title)
         .font(.body)
 
       subtitleView
     }
+    .fixedSize(horizontal: false, vertical: true)
     .onAppear {
       apiState = realtime.apiState
     }
