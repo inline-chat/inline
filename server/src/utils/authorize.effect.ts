@@ -5,11 +5,9 @@ import { InlineError } from "@in/server/types/errors"
 import { Data, Effect } from "effect"
 
 export class UserNotMemberError extends Data.TaggedError("authorize/UserNotMember")<{}> {}
+export class UserNotAdminError extends Data.TaggedError("authorize/UserNotAdmin")<{}> {}
 
-const spaceAdmin = (
-  spaceId: number,
-  currentUserId: number,
-): Effect.Effect<{ member: DbMember }, UserNotMemberError, never> => {
+const spaceAdmin = (spaceId: number, currentUserId: number) => {
   return Effect.gen(function* () {
     const member = yield* Effect.tryPromise(() =>
       db.query.members.findFirst({
@@ -22,7 +20,7 @@ const spaceAdmin = (
     ).pipe(Effect.catchAll(() => Effect.fail(new UserNotMemberError())))
 
     if (!member) {
-      return yield* Effect.fail(new UserNotMemberError())
+      return yield* Effect.fail(new UserNotAdminError())
     }
 
     return yield* Effect.succeed({ member })
