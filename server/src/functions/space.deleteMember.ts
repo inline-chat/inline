@@ -30,9 +30,10 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
     }
 
     // Get space
-    const space = yield* Effect.tryPromise(() => SpaceModel.getSpaceById(spaceId)).pipe(
-      Effect.catchAll(() => Effect.fail(new SpaceNotExistsError())),
-    )
+    const space = yield* Effect.tryPromise({
+      try: () => SpaceModel.getSpaceById(spaceId),
+      catch: () => Effect.fail(new SpaceNotExistsError()),
+    })
 
     if (!space) {
       return yield* Effect.fail(new SpaceNotExistsError())
