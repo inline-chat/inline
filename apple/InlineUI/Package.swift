@@ -21,12 +21,16 @@ let package = Package(
   
   dependencies: [
     .package(name: "InlineKit", path: "../InlineKit"),
+    .package(url: "https://github.com/kean/Nuke", from: "12.8.0"),
   ],
   
   targets: [
     .target(
       name: "InlineUI",
-      dependencies: baseDependencies,
+      dependencies: baseDependencies + [
+        .product(name: "Nuke", package: "Nuke"),
+        .product(name: "NukeUI", package: "Nuke"),
+      ],
     ),
 
     .target(
@@ -36,7 +40,7 @@ let package = Package(
 
     .testTarget(
       name: "InlineUITests",
-      dependencies: ["InlineUI"]
+      dependencies: ["InlineUI", "TextProcessing"]
     ),
   ]
 )
