@@ -76,7 +76,7 @@ extension MacNotifications {
     let body: String
 
     if chat?.type == .thread {
-      title = "\(space != nil ? "\(space!.name)  • " : "")\(chatName)"
+      title = "\(chatName) \(space != nil ? "(\(space!.name))" : "")"
       subtitle = senderName
       body = protocolMsg.stringRepresentationWithEmoji
     } else {
