@@ -44,6 +44,8 @@ final class GlobalHotkeys {
     // Default Vim-style navigation bindings
     hotkeys.append(Hotkey(key: "k", modifierFlags: [.control], action: .previousChat))
     hotkeys.append(Hotkey(key: "j", modifierFlags: [.control], action: .nextChat))
+    hotkeys.append(Hotkey(key: "p", modifierFlags: [.control], action: .previousChat))
+    hotkeys.append(Hotkey(key: "n", modifierFlags: [.control], action: .nextChat))
 
     setupMonitor()
   }
