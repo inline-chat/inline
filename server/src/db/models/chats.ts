@@ -297,7 +297,7 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
     where: {
       ...(where && "lastUpdateAtGreaterThanEqual" in where
         ? {
-            last_update_date: {
+            lastUpdateDate: {
               gte: where.lastUpdateAtGreaterThanEqual,
             },
           }
@@ -328,9 +328,7 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
               isNull: true,
             },
             members: {
-              user: {
-                id: userId,
-              },
+              userId,
             },
           },
         },
@@ -341,9 +339,7 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
           publicThread: false,
           // that we are a participant in
           participants: {
-            user: {
-              id: userId,
-            },
+            userId,
           },
           // extra safety check until we clean up our database so if it's removed from space we remove from participants
           space: {
@@ -351,9 +347,7 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
               isNull: true,
             },
             members: {
-              user: {
-                id: userId,
-              },
+              userId,
             },
           },
         },
