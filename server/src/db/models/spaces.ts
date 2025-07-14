@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { members, spaces, type DbSpace, type DbMemberRole } from "@in/server/db/schema"
-import { eq, or } from "drizzle-orm"
+import { eq, lt, or } from "drizzle-orm"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { MembersModel } from "./members"
@@ -13,6 +13,7 @@ export const SpaceModel = {
   removeUserFromSpace,
   validateSpaceAccess,
   isValidSpaceId,
+  getSpacesAfterUpdateDate,
 }
 
 /**
@@ -138,4 +139,38 @@ export const getSpaceIdsForUser = async (userId: number): Promise<number[]> => {
     .where(eq(members.userId, userId))
 
   return results.map(({ id }) => id)
+}
+
+type GetSpacesAfterUpdateDateInput = {
+  userId: number
+  lastUpdateDateGreaterThanEqual: Date
+}
+
+/**
+ * Get spaces that the user is a member of and have been updated after the last update date
+ * @param input - The input object
+ * @returns The spaces
+ */
+async function getSpacesAfterUpdateDate(input: GetSpacesAfterUpdateDateInput): Promise<DbSpace[]> {
+  // Get spaces
+  const result = await db.query.spaces.findMany({
+    where: {
+      // that are not deleted
+      deleted: {
+        isNull: true,
+      },
+
+      // that the user is a member of
+      members: {
+        userId: input.userId,
+      },
+
+      // that have been updated after the last update date
+      lastUpdateDate: {
+        gte: input.lastUpdateDateGreaterThanEqual,
+      },
+    },
+  })
+
+  return result
 }
