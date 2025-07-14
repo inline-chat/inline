@@ -30,7 +30,7 @@ public struct TransactionSendMessage: Transaction {
 
   // Config
   public var id = UUID().uuidString
-  public var config = TransactionConfig.default
+  public var config = TransactionConfig(maxRetries: 30, retryDelay: 4, executionTimeout: 600)
   public var date = Date()
 
   // State

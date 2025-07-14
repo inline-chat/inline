@@ -213,7 +213,7 @@ public struct TransactionConfig: Codable, Sendable {
   let executionTimeout: TimeInterval
 
   public static var `default`: TransactionConfig {
-    TransactionConfig(maxRetries: 30, retryDelay: 5, executionTimeout: 10)
+    TransactionConfig(maxRetries: 30, retryDelay: 4, executionTimeout: 60)
   }
 
   public static var noRetry: TransactionConfig {

@@ -58,15 +58,16 @@ actor TransactionsActor {
   }
 
   func cancel(transactionId: String) async {
-    canceledTransactionIds.append(transactionId)
+    if !canceledTransactionIds.contains(transactionId) {
+      canceledTransactionIds.append(transactionId)
+    }
     guard let transaction = queue.first(where: { $0.id == transactionId }) else { return }
 
     // Remove from queue if not yet started
     queue.removeAll { $0.id == transactionId }
 
     // Rollback
-    Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self else { return }
+    Task.detached(priority: .userInitiated) { [self] in
       await transaction.rollback()
       Task {
         await completionHandler?(transaction)
@@ -85,13 +86,14 @@ actor TransactionsActor {
   }
 
   public func run(transaction: some Transaction) async {
-    Task.detached { [weak self] in
-      guard let self else { return }
+    Task.detached { [self] in // capture strongly; actor instance lives for app lifetime
       do {
         let result = try await executeWithRetry(transaction)
 
         await transaction.didSucceed(result: result)
         await completionHandler?(transaction)
+        // Cleanup any cancel markers
+        await self.removeCancelMarker(transaction.id)
       } catch TransactionError.canceled {
         await transaction.rollback()
         await completionHandler?(transaction)
@@ -105,21 +107,56 @@ actor TransactionsActor {
 
   private func executeWithRetry<T: Transaction>(_ transaction: T) async throws -> T.R {
     var attempts = 0
+    // Always allow at least one attempt even if maxRetries == 0
+    let maxAttempts = max(transaction.config.maxRetries, 0) + 1
 
-    while attempts < transaction.config.maxRetries {
+    while attempts < maxAttempts {
+      // Early-exit if user canceled
       if canceledTransactionIds.contains(transaction.id) {
         throw TransactionError.canceled
       }
+
       do {
-        return try await transaction.execute()
-      } catch {
-        if transaction.shouldRetryOnFail(error: error) {
-          attempts += 1
-          if attempts < transaction.config.maxRetries {
-            try await Task.sleep(nanoseconds: UInt64(transaction.config.retryDelay * 1_000_000_000))
-          } else {
-            throw error
+        // Wrap execute() in a timeout if a positive timeout is configured
+        let result: T.R
+        if transaction.config.executionTimeout > 0 {
+          result = try await withThrowingTaskGroup(of: T.R.self) { group in
+            // Task that performs the actual execution
+            group.addTask {
+              try await transaction.execute()
+            }
+
+            // Task that enforces the timeout
+            group.addTask {
+              try await Task.sleep(nanoseconds: UInt64(transaction.config.executionTimeout * 1_000_000_000))
+              throw TransactionError.timeout
+            }
+
+            // Return the first finished child (throws if it threw)
+            let value = try await group.next()!
+            group.cancelAll()
+            return value
           }
+        } else {
+          // No timeout requested
+          result = try await transaction.execute()
+        }
+
+        return result
+      } catch {
+        // If error is cancel/timeout just propagate – no retry.
+        if case TransactionError.canceled = error {
+          throw error
+        }
+        if case TransactionError.timeout = error {
+          throw error
+        }
+
+        // Decide if we should retry
+        if transaction.shouldRetryOnFail(error: error), attempts + 1 < maxAttempts {
+          attempts += 1
+          try await Task.sleep(nanoseconds: UInt64(transaction.config.retryDelay * 1_000_000_000))
+          continue
         } else {
           throw error
         }
@@ -157,7 +194,17 @@ actor TransactionsActor {
 
   private func waitForWork() async {
     await withCheckedContinuation { continuation in
+      // If work arrived between the dequeue check and setting the continuation, resume immediately.
+      if !queue.isEmpty {
+        continuation.resume()
+        return
+      }
+
       waitingContinuation = continuation
     }
+  }
+
+  private func removeCancelMarker(_ id: String) {
+    canceledTransactionIds.removeAll { $0 == id }
   }
 }
