@@ -14,6 +14,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   // Common Dependencies
   @MainActor private var dependencies = AppDependencies()
+  
+  // Vim-style chat navigation key monitor
+  @MainActor private var globalHotkeys: GlobalHotkeys?
 
   // --
   let notifications = NotificationsManager()
@@ -38,6 +41,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     initializeServices()
     setupMainWindow()
     setupMainMenu()
+    // Register Vim-style shortcuts (Ctrl-K / Ctrl-J) for chat navigation
+    Task { @MainActor in
+      self.globalHotkeys = GlobalHotkeys(dependencies: self.dependencies)
+    }
 
     // Register for URL events
     NSAppleEventManager.shared().setEventHandler(
