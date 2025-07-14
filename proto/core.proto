@@ -633,16 +633,14 @@ message DeleteMemberInput {
 message DeleteMemberResult { repeated Update updates = 1; }
 
 message GetUpdatesStateInput {
-  // Local PTS of the self user update box
-  int32 user_pts = 1;
+  reserved 1;
 
   // Local date of state
   int64 date = 2;
 }
 
 message GetUpdatesStateResult {
-  // Current PTS of the self user update box
-  int32 user_pts = 1;
+  reserved 1;
 
   // Current date of the state
   int64 date = 2;
@@ -655,9 +653,7 @@ message MarkAsUnreadInput {
 }
 
 // Mark dialog as unread result
-message MarkAsUnreadResult {
-  repeated Update updates = 1;
-}
+message MarkAsUnreadResult { repeated Update updates = 1; }
 
 message CreateBotInput {
   // Name of the bot
@@ -930,8 +926,16 @@ message Update {
     UpdateMarkAsUnread mark_as_unread = 23;
     UpdateChatSkipPts chat_skip_pts = 24;
     UpdateChatHasNewUpdates chat_has_new_updates = 25;
-    // UpdateSpaceHasNewUpdates space_has_new_updates = 25;
+    UpdateSpaceHasNewUpdates space_has_new_updates = 26;
   }
+}
+
+message UpdateSpaceHasNewUpdates {
+  // Space ID
+  int64 space_id = 1;
+
+  // Current PTS of the space
+  int32 pts = 2;
 }
 
 // Update when a chat has new updates and client should fetch them
@@ -941,9 +945,6 @@ message UpdateChatHasNewUpdates {
 
   // Current PTS of the chat
   int32 pts = 2;
-
-  // Date of the last update
-  int64 date = 3;
 }
 
 message UpdateChatSkipPts {
