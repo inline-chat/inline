@@ -15,7 +15,6 @@ message ServerUpdate {
     ServerChatUpdateDeleteChat delete_chat = 7;
 
     // Space updates
-
     ServerSpaceUpdateRemoveMember space_remove_member = 8;
   }
 }
@@ -58,6 +57,5 @@ message ServerChatUpdateDeleteChat {
 // Update for a space when a member is removed
 message ServerSpaceUpdateRemoveMember {
   int64 space_id = 1;
-  int64 member_id = 2;
   int64 user_id = 3;
 }
