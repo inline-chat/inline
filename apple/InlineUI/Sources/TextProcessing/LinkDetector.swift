@@ -38,7 +38,8 @@ public final class LinkDetector: Sendable {
   /// This pattern matches URLs that start with http/https and have a whitelisted TLD
   private static let whitelistedTLDRegex: NSRegularExpression = {
     let tlds = whitelistedTLDs.joined(separator: "|")
-    let pattern = "https?://[\\w.-]+\\.(\(tlds))\\b"
+    // Capture the full path & query after the TLD (everything until the next whitespace)
+    let pattern = "https?://[\\w.-]+\\.(\(tlds))[^\\s]*"
     return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
   }()
 
@@ -46,7 +47,8 @@ public final class LinkDetector: Sendable {
   /// This pattern matches domains like "shopline.shop" or "inline.chat" or "x.ai"
   private static let bareDomainRegex: NSRegularExpression = {
     let tlds = whitelistedTLDs.joined(separator: "|")
-    let pattern = "\\b[\\w-]+\\.(\(tlds))\\b"
+    // Support multiple sub-domain components (e.g. bot.wanver.shop)
+    let pattern = "\\b[\\w-]+(?:\\.[\\w-]+)*\\.(\(tlds))\\b"
     return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
   }()
 
@@ -194,6 +196,16 @@ public final class LinkDetector: Sendable {
       guard !overlaps else {
         log.debug("🔍 Skipping overlapping range: \(match.range)")
         return nil
+      }
+
+      // Skip domains that are part of an email address (preceded by "@")
+      if match.range.location > 0 {
+        let precedingRange = NSRange(location: match.range.location - 1, length: 1)
+        let precedingChar = (text as NSString).substring(with: precedingRange)
+        if precedingChar == "@" {
+          log.debug("🔍 Skipping domain preceded by @ (likely an email address): \(match.range)")
+          return nil
+        }
       }
 
       let domainString = (text as NSString).substring(with: match.range)
