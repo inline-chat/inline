@@ -5,7 +5,7 @@ import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { type DbChat } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { getCachedUserName } from "@in/server/modules/cache/userNames"
+import { getCachedUserName, UserNamesCache } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
@@ -473,15 +473,24 @@ async function sendNotificationToUser({
     return
   }
 
-  let title = userName.firstName ? `${userName.firstName}` : userName.username ?? "Message"
+  let title = "Message"
   let body = "New message" // default
 
+  let includeSenderNameInMessage = false
+  const senderName = UserNamesCache.getDisplayName(userName)
   // Only provide chat title for threads not DMs
   const chatTitle = chat?.type === "thread" ? chat.title ?? undefined : undefined
 
   if (chatTitle) {
     // If thread
-    title = chatTitle + " • " + title
+    title = chatTitle
+  } else if (senderName) {
+    // If DM
+    includeSenderNameInMessage = true
+    title = senderName
+  } else {
+    // If no sender name, use default
+    title = "Message"
   }
 
   if (messageText) {
@@ -495,6 +504,10 @@ async function sendNotificationToUser({
     body = "🎥 Video"
   } else if (messageInfo.message.mediaType === "document") {
     body = "📄 File"
+  }
+
+  if (includeSenderNameInMessage) {
+    body = `${senderName}: ${body}`
   }
 
   Notifications.sendToUser({
