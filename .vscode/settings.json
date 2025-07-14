@@ -9,5 +9,6 @@
   },
 
   // Show folder names in file tabs
-  "workbench.editor.labelFormat": "short"
+  "workbench.editor.labelFormat": "short",
+  "editor.formatOnSave": true
 }
