@@ -80,9 +80,15 @@ public final class LinkDetector: Sendable {
   /// Regex pattern for detecting bare domains with whitelisted TLDs (without protocol)
   /// This pattern matches domains like "shopline.shop" or "inline.chat" or "x.ai"
   private static let bareDomainRegex: NSRegularExpression = {
-    let tlds = whitelistedTLDs.joined(separator: "|")
+    // Sort TLDs by length in descending order so that longer ones like "team" match before shorter ones like "ai" or "co"
+    let tlds = whitelistedTLDs.sorted { $0.count > $1.count }.joined(separator: "|")
     // Support multiple sub-domain components (e.g. bot.wanver.shop)
-    let pattern = "\\b[\\w-]+(?:\\.[\\w-]+)*\\.(\(tlds))\\b"
+    // Capture optional path and query segments that immediately follow the domain
+    // Example matches: "inline.chat/path", "google.com/path?query=1", "bot.wanver.shop" (no path)
+    // Require a word boundary (\b) immediately after the TLD so we don't match partial overlaps like
+    // "test.srt" where "sr" would incorrectly satisfy the "sr" TLD. The boundary still allows
+    // valid URL continuations such as whitespace or path/query characters (e.g. "/", "?", "#").
+    let pattern = "\\b[\\w-]+(?:\\.[\\w-]+)*\\.(\(tlds))\\b(?:/[^\\s<>()\\[\\]{}\"']*)?"
     return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
   }()
 
@@ -230,18 +236,51 @@ public final class LinkDetector: Sendable {
         }
       }
 
-      let domainString = (text as NSString).substring(with: match.range)
-      log.debug("🔍 Found bare domain: '\(domainString)' at range \(match.range)")
+      // NEW: Skip domains that are immediately preceded by a protocol delimiter (e.g. "://")
+      if match.range.location >= 3 {
+        let protocolCheckRange = NSRange(location: match.range.location - 3, length: 3)
+        let precedingThree = (text as NSString).substring(with: protocolCheckRange)
+        if precedingThree == "://" {
+          log.debug("🔍 Skipping domain preceded by :// (likely part of another URL scheme): \(match.range)")
+          return nil
+        }
+      }
+
+      // NEW: Ensure the character right before the match is either whitespace/newline or opening punctuation.
+      if match.range.location > 0 {
+        let precedingRange = NSRange(location: match.range.location - 1, length: 1)
+        let precedingScalar = (text as NSString).substring(with: precedingRange).unicodeScalars.first!
+        let allowedPreceding = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "([{\"'"))
+        if !allowedPreceding.contains(precedingScalar) {
+          log.debug("🔍 Skipping domain due to invalid preceding character: \(precedingScalar)")
+          return nil
+        }
+      }
+
+      var urlSubstring = (text as NSString).substring(with: match.range)
+
+      // Trim common trailing punctuation that should not be part of the URL (e.g. ",", ")", ".")
+      let trailingPunctuation = CharacterSet(charactersIn: ",.!?:;)]}'\"")
+      while let lastScalar = urlSubstring.unicodeScalars.last,
+            trailingPunctuation.contains(lastScalar) {
+        urlSubstring.removeLast()
+      }
+
+      // Adjust range length if we trimmed characters
+      let trimmedCount = match.range.length - urlSubstring.utf16.count
+      let adjustedRange = NSRange(location: match.range.location, length: match.range.length - trimmedCount)
+
+      log.debug("🔍 Found bare domain with optional path: '\(urlSubstring)' at range \(adjustedRange)")
 
       // Add https:// protocol to make it a valid URL
-      let urlString = "https://\(domainString)"
+      let urlString = "https://\(urlSubstring)"
       guard let url = URL(string: urlString) else {
         log.debug("🔍 Failed to create URL from: '\(urlString)'")
         return nil
       }
 
       return LinkMatch(
-        range: match.range,
+        range: adjustedRange,
         url: url,
         isWhitelistedTLD: true
       )
