@@ -484,9 +484,11 @@ async function sendNotificationToUser({
   if (chatTitle) {
     // If thread
     title = chatTitle
+    if (senderName) {
+      includeSenderNameInMessage = true
+    }
   } else if (senderName) {
     // If DM
-    includeSenderNameInMessage = true
     title = senderName
   } else {
     // If no sender name, use default
