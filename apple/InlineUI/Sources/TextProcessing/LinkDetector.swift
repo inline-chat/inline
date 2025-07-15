@@ -21,27 +21,61 @@ public final class LinkDetector: Sendable {
   /// Shared instance for performance
   public static let shared = LinkDetector()
 
-  /// Standard URL detector for common protocols
-  private static let standardDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+  // We removed the built-in `NSDataDetector` to rely fully on our own regular-expression-based detectors for
+  // both performance and flexibility.
+
+  /// Generic regex for detecting any http or https URL (supports very long paths and query strings)
+  /// RFC 3986 unreserved + reserved characters are allowed after the scheme delimiter until a whitespace
+  private static let fullURLRegex: NSRegularExpression = {
+    // This pattern matches "http" or "https", followed by "://", then any combination of
+    // unreserved (A–Z a–z 0–9 -._~) and reserved characters (:/?#[]@!$&'()*+,;=%) until it hits
+    // a whitespace character. This intentionally excludes angle brackets and other punctuation
+    // that typically terminates URLs in plain text.
+    let pattern = "https?://[^\\s<>()\\[\\]{}\"']+"
+    return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+  }()
 
   /// Whitelisted TLDs that should be detected as links
   /// These are modern TLDs that might not be recognized by NSDataDetector
   private static let whitelistedTLDs: Set<String> = [
-    "shop", "chat", "info", "app", "dev", "io", "ai", "co", "me", "tv", "fm", "ly", "to", "be", "cc", "gg", "ml", "tk",
-    "ga", "cf", "gq", "so", "cm", "cd", "cg", "td", "ne", "bf", "ci", "sn", "gn", "gw", "mr", "ml", "bi", "rw", "km",
-    "dj", "sc", "mu", "sz", "ls", "bw", "na", "zm", "mw", "zw", "ao", "mz", "mg", "yt", "re", "pf", "nc", "vu", "fj",
-    "pg", "sb", "ki", "tv", "nr", "pw", "fm", "mh", "ws", "to", "ck", "nu", "tk", "nz", "au", "fj", "pg", "sb", "ki",
-    "tv", "nr", "pw", "fm", "mh", "ws", "to", "ck", "nu", "tk",
+    // Common legacy gTLDs
+    "com", "net", "org", "edu", "gov", "mil", "int",
+
+    // Popular generic + brand-new gTLDs
+    "app", "blog", "biz", "cloud", "club", "dev", "digital", "live", "news", "online", "page", "site", "shop", "store", "tech", "top", "xyz", "chat",
+
+    // Frequently used two-letter ccTLDs (selection)
+    "ac", "ad", "ae", "af", "ag", "ai", "al", "am", "ao", "ar", "as", "at", "au", "aw", "az",
+    "ba", "bb", "bd", "be", "bf", "bg", "bh", "bi", "bj", "bm", "bn", "bo", "br", "bs", "bt", "bw", "by", "bz",
+    "ca", "cat", "cc", "cd", "cf", "cg", "ch", "ci", "ck", "cl", "cm", "cn", "co", "cr", "cu", "cv", "cw", "cx", "cy", "cz",
+    "de", "dj", "dk", "dm", "do", "dz",
+    "ec", "ee", "eg", "er", "es", "et", "eu",
+    "fi", "fj", "fk", "fm", "fo", "fr",
+    "ga", "gb", "gd", "ge", "gf", "gg", "gh", "gi", "gl", "gm", "gn", "gp", "gq", "gr", "gs", "gt", "gu", "gw", "gy",
+    "hk", "hm", "hn", "hr", "ht", "hu",
+    "id", "ie", "il", "im", "in", "io", "iq", "ir", "is", "it",
+    "je", "jm", "jo", "jp",
+    "ke", "kg", "kh", "ki", "km", "kn", "kp", "kr", "kw", "ky", "kz",
+    "la", "lb", "lc", "li", "lk", "lr", "ls", "lt", "lu", "lv", "ly",
+    "ma", "mc", "md", "me", "mg", "mh", "mk", "ml", "mm", "mn", "mo", "mp", "mq", "mr", "ms", "mt", "mu", "mv", "mw", "mx", "my", "mz",
+    "na", "nc", "ne", "nf", "ng", "ni", "nl", "no", "np", "nr", "nu", "nz",
+    "om",
+    "pa", "pe", "pf", "pg", "ph", "pk", "pl", "pm", "pn", "pr", "ps", "pt", "pw", "py",
+    "qa",
+    "re", "ro", "rs", "ru", "rw",
+    "sa", "sb", "sc", "sd", "se", "sg", "sh", "si", "sk", "sl", "sm", "sn", "so", "sr", "ss", "st", "su", "sv", "sx", "sy", "sz",
+    "tc", "td", "tf", "tg", "th", "tj", "tk", "tl", "tm", "tn", "to", "tr", "tt", "tv", "tw", "tz",
+    "ua", "ug", "uk", "us", "uy", "uz",
+    "va", "vc", "ve", "vg", "vi", "vn", "vu",
+    "wf", "ws",
+    "ye", "yt",
+    "za", "zm", "zw",
+    // Short thematic gTLDs that can overlap with English words (risk of false positives is acceptable)
+    "ai", "io", "me", "fm", "ly", "to",
   ]
 
-  /// Regex pattern for detecting URLs with whitelisted TLDs
-  /// This pattern matches URLs that start with http/https and have a whitelisted TLD
-  private static let whitelistedTLDRegex: NSRegularExpression = {
-    let tlds = whitelistedTLDs.joined(separator: "|")
-    // Capture the full path & query after the TLD (everything until the next whitespace)
-    let pattern = "https?://[\\w.-]+\\.(\(tlds))[^\\s]*"
-    return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
-  }()
+  // Note: With the introduction of `fullURLRegex`, we no longer need a dedicated whitelisted TLD
+  // regex for URLs that already include a protocol. We still keep bare-domain detection below.
 
   /// Regex pattern for detecting bare domains with whitelisted TLDs (without protocol)
   /// This pattern matches domains like "shopline.shop" or "inline.chat" or "x.ai"
@@ -69,21 +103,15 @@ public final class LinkDetector: Sendable {
     var matches: [LinkMatch] = []
     var handledRanges: Set<NSRange> = []
 
-    // First, detect standard URLs using NSDataDetector
-    if let standardMatches = detectStandardLinks(in: text) {
-      log.debug("🔍 Standard detector found \(standardMatches.count) matches")
-      for match in standardMatches {
-        matches.append(match)
-        handledRanges.insert(match.range)
-      }
+    // First, detect full http/https URLs using custom regex (handles very long or exotic URLs)
+    let fullURLMatches = detectFullURLLinks(in: text, excluding: handledRanges)
+    log.debug("🔍 Full URL detector found \(fullURLMatches.count) matches")
+    matches.append(contentsOf: fullURLMatches)
+    for match in fullURLMatches {
+      handledRanges.insert(match.range)
     }
 
-    // Then detect whitelisted TLD URLs that might have been missed
-    let whitelistedMatches = detectWhitelistedTLDLinks(in: text, excluding: handledRanges)
-    log.debug("🔍 Whitelisted TLD detector found \(whitelistedMatches.count) matches")
-    matches.append(contentsOf: whitelistedMatches)
-
-    // Finally detect bare domains with whitelisted TLDs
+    // Finally, detect bare domains with whitelisted TLDs (e.g. "inline.chat")
     let bareDomainMatches = detectBareDomainLinks(in: text, excluding: handledRanges)
     log.debug("🔍 Bare domain detector found \(bareDomainMatches.count) matches")
     matches.append(contentsOf: bareDomainMatches)
@@ -132,56 +160,50 @@ public final class LinkDetector: Sendable {
 
   // MARK: - Private Methods
 
-  /// Detects standard URLs using NSDataDetector
-  private func detectStandardLinks(in text: String) -> [LinkMatch]? {
-    guard let detector = Self.standardDetector else { return nil }
-
-    let range = NSRange(location: 0, length: text.utf16.count)
-    let matches = detector.matches(in: text, options: [], range: range)
+  // Detects http/https URLs using custom regex (covers very long query strings and exotic cases)
+  private func detectFullURLLinks(in text: String, excluding handledRanges: Set<NSRange>) -> [LinkMatch] {
+    let nsText = text as NSString
+    let searchRange = NSRange(location: 0, length: nsText.length)
+    let matches = Self.fullURLRegex.matches(in: text, options: [], range: searchRange)
 
     return matches.compactMap { match in
-      guard let url = match.url else { return nil }
+      // Skip overlaps with already handled ranges
+      let overlaps = handledRanges.contains { NSIntersectionRange($0, match.range).length > 0 }
+      guard !overlaps else { return nil }
 
-      // Validate that this is actually a URL we want to detect
-      guard isValidURL(url) else { return nil }
+      var urlString = nsText.substring(with: match.range)
 
-      return LinkMatch(
-        range: match.range,
-        url: url,
-        isWhitelistedTLD: false
-      )
+      // Trim common trailing punctuation that should not be part of the URL (e.g. ",", ")", ".")
+      let trailingPunctuation = CharacterSet(charactersIn: ",.!?:;)]}'\"")
+      while let lastUnicodeScalar = urlString.unicodeScalars.last,
+            trailingPunctuation.contains(lastUnicodeScalar) {
+        urlString.removeLast()
+      }
+
+      // Adjust range length if we trimmed characters
+      let trimmedCount = match.range.length - urlString.utf16.count
+      let adjustedRange = NSRange(location: match.range.location, length: match.range.length - trimmedCount)
+
+      guard let url = URL(string: urlString), isValidURL(url) else {
+        return nil
+      }
+
+      // Determine if this URL ends with a whitelisted TLD
+      var isWhitelisted = false
+      if let host = url.host?.lowercased(),
+         let tld = host.components(separatedBy: ".").last {
+        isWhitelisted = Self.whitelistedTLDs.contains(tld)
+      }
+
+      return LinkMatch(range: adjustedRange, url: url, isWhitelistedTLD: isWhitelisted)
     }
   }
+
+  // Removed `detectStandardLinks` because we no longer rely on `NSDataDetector`.
 
   /// Detects URLs with whitelisted TLDs that might have been missed by NSDataDetector
-  private func detectWhitelistedTLDLinks(in text: String, excluding handledRanges: Set<NSRange>) -> [LinkMatch] {
-    let range = NSRange(location: 0, length: text.utf16.count)
-    let matches = Self.whitelistedTLDRegex.matches(in: text, options: [], range: range)
-
-    log.debug("🔍 Whitelisted TLD regex found \(matches.count) matches in text: '\(text)'")
-
-    return matches.compactMap { match in
-      // Skip if this range overlaps with already handled ranges
-      let overlaps = handledRanges.contains { NSIntersectionRange($0, match.range).length > 0 }
-      guard !overlaps else {
-        log.debug("🔍 Skipping overlapping range: \(match.range)")
-        return nil
-      }
-
-      let urlString = (text as NSString).substring(with: match.range)
-      log.debug("🔍 Found whitelisted TLD URL: '\(urlString)' at range \(match.range)")
-      guard let url = URL(string: urlString) else {
-        log.debug("🔍 Failed to create URL from: '\(urlString)'")
-        return nil
-      }
-
-      return LinkMatch(
-        range: match.range,
-        url: url,
-        isWhitelistedTLD: true
-      )
-    }
-  }
+  // NOTE: Obsolete – kept for potential future specialised handling. Currently unused.
+  private func detectWhitelistedTLDLinks(in text: String, excluding handledRanges: Set<NSRange>) -> [LinkMatch] { [] }
 
   /// Detects bare domains with whitelisted TLDs (without protocol)
   private func detectBareDomainLinks(in text: String, excluding handledRanges: Set<NSRange>) -> [LinkMatch] {
