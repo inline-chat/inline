@@ -31,10 +31,10 @@ type Input = {
   }[]
 }
 
-const log = new Log("notifications.eval", LogLevel.DEBUG)
+const log = new Log("notifications.eval")
 
-//const DEBUG_AI = !isProd
-const DEBUG_AI = true
+const DEBUG_AI = !isProd
+//const DEBUG_AI = true
 
 let outputSchema = z.object({
   notifyUserIds: z.array(z.number()).nullable(),
@@ -232,9 +232,6 @@ const formatZenModeRules = async (userId: number, input: Input): Promise<string>
     : `
 <filter userId="${userId}">
 ${settings.zenModeCustomRules}
-or any of the following:
-- An urgent matter has come up or
-- Someone is depending on me to unblock them in an important matter and I need to come back now/wake up.
 </filter>
   `
 
