@@ -33,7 +33,8 @@ type Input = {
 
 const log = new Log("notifications.eval", LogLevel.DEBUG)
 
-const DEBUG_AI = !isProd
+//const DEBUG_AI = !isProd
+const DEBUG_AI = true
 
 let outputSchema = z.object({
   notifyUserIds: z.array(z.number()).nullable(),
