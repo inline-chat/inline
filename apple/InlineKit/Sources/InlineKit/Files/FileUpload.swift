@@ -395,7 +395,8 @@ public actor FileUploader {
     } else {
       // not found
       Log.shared.warning("[FileUploader] Upload not found for \(uploadId)")
-      return UploadResult(photoId: nil, videoId: nil, documentId: nil)
+      throw FileUploadError.failedToUpload
+      // return UploadResult(photoId: nil, videoId: nil, documentId: nil)
     }
   }
 }
