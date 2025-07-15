@@ -8,7 +8,7 @@ import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
 import { getCachedUserName, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
-import { Log } from "@in/server/utils/log"
+import { Log, LogLevel } from "@in/server/utils/log"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import type { ChatModel } from "openai/resources/chat/chat.mjs"
 import z from "zod"
@@ -31,7 +31,7 @@ type Input = {
   }[]
 }
 
-const log = new Log("notifications.eval")
+const log = new Log("notifications.eval", LogLevel.DEBUG)
 
 const DEBUG_AI = !isProd
 
@@ -140,7 +140,8 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   - For each user, if the message matches the criteria they have set, include their user ID in the notifyUserIds array. 
   - For example, user A (ID: 1) says: "notify me when John DMs me, or there is a bug/incident in production". In this case you should check if message is from John, or message is in another chat and matches the criteria (is about an website incident) and if it matches include user ID "1" in the result array. 
   - It's important to be accurate in your evaluation otherwise users may lose important messages which they wanted and lose trust in the system. 
-  - If a user asks to be notified when a specific user mentions them or when a specific user sends them a direct message (or DM, PM, etc.), you should include the user ID of the user who asked to be notified in the notifyUserIds array. If user wants all DMs, you should include the user ID of the user in the notifyUserIds array for all direct messages.
+  - If a user asks to be notified when a specific user mentions them or when a specific user sends them a direct message (or DM, PM, etc.) or wants all DMs, you should trigger the notification for the user who asked to be notified. If User A asks to be notified for DM from User B, you should trigger the notification for User A if User B or sends a DM to User A. if User A asks to be notified for DM from all users, you should trigger the notification for User A if any user sends a DM to User A.
+  - to trigger the notification, you should include the user ID of the user who asked to be notified in the notifyUserIds array.
   - If message contains only a few @ mentions, there is a high chance these users need to take action and should be notified. consider the previous messages for the context of evaluation.
   - If it doesn't concern any of the users, return an empty array.
   ${DEBUG_AI ? `- Return a reason for your evaluation in the reason field.` : ""}
