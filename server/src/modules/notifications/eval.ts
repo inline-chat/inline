@@ -130,20 +130,19 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   const context = await getContext(input)
   const systemPrompt = `
   # Identity
-  You are an assistant for Inline – a chat app similar to Slack. You are given a message and you must evaluate who needs to get a notification on their phones based on a criteria/filter that each user has set. 
+  You are an assistant for Inline – a chat app similar to Slack. You are given a message and you must evaluate who needs to get a notification on their phones based on a set of filters that each user has set. 
 
   # Instructions
 
   - You are given a message that mentions a user or a few users. 
   - Analyse the message, previous messages, participants, and the context of where chat is happening
-  - Some of participants have enabled a notification filter with custom rules to limit what they want to get notification for. They use it when sleeping at night or when they're in focus to avoid waking up for messages they don't want to be notified for. For example is user A receives a message: "hey @userA, watch this cool video" and User A has set a rule to notify them only if there is an incident, then this message should not be notified to user A.
-  - Even if the message is a direct mention, but doesn't follow user's criteria of importance, you should not trigger the notification for that user. People mention/DM/reply frequently but not all of them should wake up the user. Unless they ask for a broad filter (eg. all DMs from a specific user)
-  - For each user, if the message matches the criteria they have set, include their user ID in the notifyUserIds array. 
+  - Some of participants have enabled a set of notification filters with custom rules to limit what they want to get notification for. They use it when sleeping at night or when they're in focus to avoid waking up for messages they don't want to be notified for. For example is user A receives a message: "hey @userA, watch this cool video" and User A has set a rule to notify them only if there is an incident, then this message should not be notified to user A.
+  - Even if the message is a direct mention, but doesn't follow user's filters, you should not trigger the notification for that user. People mention/DM/reply frequently but not all of them should wake up the user. Unless they ask for a broad filter (eg. all DMs from a specific user, all messages, all mentions, etc. in that case respect the user's ask)
+  - For each user, if the message matches any of the filters they have set, include their user ID in the notifyUserIds array. 
   - For example, user A (ID: 1) says: "notify me when John DMs me, or there is a bug/incident in production". In this case you should check if message is from John, or message is in another chat and matches the criteria (is about an website incident) and if it matches include user ID "1" in the result array. 
-  - It's important to be accurate in your evaluation otherwise users may lose important messages which they wanted and lose trust in the system. 
-  - If user lists multiple filters, you should evaluate the messages against all of them and if ANY of their filters match, you should trigger the notification for the user who asked to be notified. Even if some of the filters don't match, you should still trigger the notification if any of the filters match.
-  - If a user asks to be notified when a specific user mentions them or when a specific user sends them a direct message (or DM, PM, etc.) or wants all DMs, you should trigger the notification for the user who asked to be notified. If User A asks to be notified for DM from User B, you should trigger the notification for User A if User B or sends a DM to User A. if User A asks to be notified for DM from all users, you should trigger the notification for User A if any user sends a DM to User A.
-  - to trigger the notification, you should include the user ID of the user who asked to be notified in the notifyUserIds array.
+  - IMPORTANT: Be accurate and careful in your evaluation otherwise users may lose important messages which they wanted to get a notification for. Consider all the filters.
+  - If user lists multiple filters, if ANY of their filters match, you should trigger the notification for the user who asked to be notified. Even if some of the filters don't match.
+  - to trigger the notification for a user, you include the user ID in the notifyUserIds array.
   - If message contains only a few @ mentions, there is a high chance these users need to take action and should be notified. consider the previous messages for the context of evaluation.
   - If it doesn't concern any of the users, return an empty array.
   ${DEBUG_AI ? `- Return a reason for your evaluation in the reason field.` : ""}
@@ -225,22 +224,23 @@ const formatZenModeRules = async (userId: number, input: Input): Promise<string>
 
   let rules = settings.zenModeUsesDefaultRules
     ? `
-<rules userId="${userId}">
-- An urgent matter has come up (eg. a bug or an incident). 
-- Someone is waiting for me to unblock them and I need to come back now/wake up.
+<filter userId="${userId}">
+- An urgent matter has come up (eg. a bug or an incident) or
+- Someone is waiting for me to unblock them and I need to come back now/wake up or
 - A service, app, website, work tool, etc. is not working well or requires fixing.
-</rules>`
+</filter>`
     : `
-<rules userId="${userId}">
+<filter userId="${userId}">
 ${settings.zenModeCustomRules}
-- An urgent matter has come up.
+or any of the following:
+- An urgent matter has come up or
 - Someone is depending on me to unblock them in an important matter and I need to come back now/wake up.
-</rules>
+</filter>
   `
 
   return `Include userId "${userId}" ${
     displayName ? `for ${displayName}` : ""
-  } in the result if the message matches any of the criteria they have set: "${rules}"`
+  } in the result if the message passes any of the filters they have set: "${rules}"`
 }
 
 const fullDisplayName = (userName: UserName | undefined) => {
