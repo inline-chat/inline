@@ -140,7 +140,8 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   - For each user, if the message matches the criteria they have set, include their user ID in the notifyUserIds array. 
   - For example, user A (ID: 1) says: "notify me when John DMs me, or there is a bug/incident in production". In this case you should check if message is from John, or message is in another chat and matches the criteria (is about an website incident) and if it matches include user ID "1" in the result array. 
   - It's important to be accurate in your evaluation otherwise users may lose important messages which they wanted and lose trust in the system. 
-  - If message is only a few @ mentions, there is a high chance these users need to take action and should be notified. consider the previous messages for the context of evaluation.
+  - If a user asks to be notified when a specific user mentions them or when a specific user sends them a direct message (or DM, PM, etc.), you should include the user ID of the user who asked to be notified in the notifyUserIds array. If user wants all DMs, you should include the user ID of the user in the notifyUserIds array for all direct messages.
+  - If message contains only a few @ mentions, there is a high chance these users need to take action and should be notified. consider the previous messages for the context of evaluation.
   - If it doesn't concern any of the users, return an empty array.
   ${DEBUG_AI ? `- Return a reason for your evaluation in the reason field.` : ""}
 
@@ -170,7 +171,7 @@ const getContext = async (input: Input): Promise<string> => {
   let rules = await Promise.all(input.participantSettings.map(async (p) => await formatZenModeRules(p.userId, input)))
   let dmParticipants =
     chatInfo?.type === "private"
-      ? `DM between ${await Promise.all(
+      ? `direct message chat (DM) between ${await Promise.all(
           chatInfo?.participantUserIds.map(async (userId) => fullDisplayName(await getCachedUserName(userId))) ?? [],
         )}`
       : ""
@@ -191,7 +192,7 @@ const getContext = async (input: Input): Promise<string> => {
 
   <chat_info>
   ${chatInfo?.title ? `Chat: ${chatInfo?.title}` : ""}
-  Type: ${chatInfo?.type === "thread" ? "group chat" : dmParticipants}
+  Chat Type: ${chatInfo?.type === "thread" ? "group chat" : dmParticipants}
   ${spaceInfo ? `Workspace: ${spaceInfo?.name}` : ""}
   ${spaceInfo ? `Description: ${spaceInfo?.name?.includes("Wanver") ? WANVER_TRANSLATION_CONTEXT : ""}` : ""}
   </chat_info>
