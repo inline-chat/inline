@@ -7,6 +7,7 @@ import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
 import type { TranslationCallInput } from "./types"
+import { relativeTimeFromNow } from "@in/server/modules/notifications/eval"
 
 const log = new Log("modules/translation/textTranslation")
 
@@ -93,9 +94,9 @@ export async function translateTexts(
     ${input.messages
       .map(
         (m) =>
-          `<message id="${m.messageId}" date="${m.date.toISOString()}" fromId="${m.fromId}" replyToId="${
-            m.replyToMsgId
-          }">
+          `<message id="${m.messageId}" date="${relativeTimeFromNow(m.date)}" fromId="${m.fromId}" ${
+            m.replyToMsgId ? `replyToId="${m.replyToMsgId}"` : ""
+          }>
           <text length="${m.text?.length ?? 0}">${m.text}</text>
           </message>\n`,
       )
