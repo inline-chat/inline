@@ -6,7 +6,7 @@ import { isProd, WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
 import { openaiClient } from "@in/server/libs/openAI"
 import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
-import { getCachedUserName, type UserName } from "@in/server/modules/cache/userNames"
+import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
@@ -46,7 +46,13 @@ type Output = z.infer<typeof outputSchema>
 export type NotificationEvalResult = Output
 
 /** Check if a message should be sent to which users */
-export const batchEvaluate = async (input: Input): Promise<NotificationEvalResult> => {
+export const batchEvaluate = async (_input: Input): Promise<NotificationEvalResult> => {
+  let input: Input = {
+    ..._input,
+    // Don't evaluate filters for the user who sent the message
+    participantSettings: _input.participantSettings.filter((p) => p.userId != _input.message.message.fromId),
+  }
+
   const systemPrompt = await getSystemPrompt(input)
   const userPrompt = await getUserPrompt(input)
 
@@ -94,7 +100,7 @@ export const batchEvaluate = async (input: Input): Promise<NotificationEvalResul
       outputPrice = (outputTokens * 0.0016) / 1000
     } else if (model === "gpt-4.1") {
       inputPrice = (inputTokens * 0.002) / 1000
-      outputPrice = (outputTokens * 0.08) / 1000
+      outputPrice = (outputTokens * 0.008) / 1000
     } else if (model === "gpt-4.1-nano") {
       inputPrice = (inputTokens * 0.0001) / 1000
       outputPrice = (outputTokens * 0.0004) / 1000
@@ -119,8 +125,20 @@ export const batchEvaluate = async (input: Input): Promise<NotificationEvalResul
 }
 
 const getUserPrompt = async (input: Input): Promise<string> => {
+  const usersWithFilters = await Promise.all(
+    input.participantSettings.map(async (p) => await formatZenModeRules(p.userId, input)),
+  )
+
   const userPrompt = `
+  <new_message>
   ${formatMessage({ ...input.message.message, text: input.message.text, entities: input.message.entities })}
+  </new_message>
+
+  According to above message, determine which of the following users should receive a notification:
+  
+  <users_with_filters>
+  ${usersWithFilters.join("\n")}
+  </users_with_filters>
   `
 
   return userPrompt
@@ -130,22 +148,24 @@ const getSystemPrompt = async (input: Input): Promise<string> => {
   const context = await getContext(input)
   const systemPrompt = `
   # Identity
-  You are an assistant for Inline – a chat app similar to Slack. You are given a message and you must evaluate who needs to get a notification on their phones based on a set of filters that each user has set. 
+  You are an assistant for Inline chat app similar to Slack. For a given message, you evaluate who needs to get a notification.
 
   # Instructions
-
-  - You are given a message that mentions a user or a few users. 
-  - Analyse the message, previous messages, participants, and the context of where chat is happening
-  - Some of participants have enabled a set of notification filters with custom rules to limit what they want to get notification for. They use it when sleeping at night or when they're in focus to avoid waking up for messages they don't want to be notified for. For example is user A receives a message: "hey @userA, watch this cool video" and User A has set a rule to notify them only if there is an incident, then this message should not be notified to user A.
-  - Even if the message is a direct mention, but doesn't follow user's filters, you should not trigger the notification for that user. People mention/DM/reply frequently but not all of them should wake up the user. Unless they ask for a broad filter (eg. all DMs from a specific user, all messages, all mentions, etc. in that case respect the user's ask)
-  - For each user, if the message matches any of the filters they have set, include their user ID in the notifyUserIds array. 
-  - For example, user A (ID: 1) says: "notify me when John DMs me, or there is a bug/incident in production". In this case you should check if message is from John, or message is in another chat and matches the criteria (is about an website incident) and if it matches include user ID "1" in the result array. 
-  - IMPORTANT: Be accurate and careful in your evaluation otherwise users may lose important messages which they wanted to get a notification for. Consider all the filters.
-  - If user lists multiple filters, if ANY of their filters match, you should trigger the notification for the user who asked to be notified. Even if some of the filters don't match.
-  - to trigger the notification for a user, you include the user ID in the notifyUserIds array.
-  - If message contains only a few @ mentions, there is a high chance these users need to take action and should be notified. consider the previous messages for the context of evaluation.
-  - If it doesn't concern any of the users, return an empty array.
+  - You are given a message and the conversation context
+  - Some of participants only want to be notified for messages that pass through a filter they have set. 
+  - Determine which users should receive a notification for the given message based on the filters they have set.
+  - Return an array of user IDs that should receive a notification. If message doesn't match any of the filters 
+  
+  # Note
+  - @mentions don't necessarily mean the user needs to receive a notification. Users typically use these filters to evaluate if their mentions or direct messages matter to them at the time.
+  - Message doesn't need to pass every filter to be notified. If any of the filters match, the user should be notified. 
   ${DEBUG_AI ? `- Return a reason for your evaluation in the reason field.` : ""}
+
+  # Examples 
+  - User with ID 1 receives a message from User 2: "hey @user1, watch this cool video" and User 1 has set a filter to receive notifications only if there their servers are down, result is notifyUserIds: []. 
+  - User with ID 1 has their filter: "- when John DMs me - there is a bug/incident in production". For a message from User John with ID 2 in a group message chat: "hey @user1, app doesn't work" should result in notifyUserIds: [1].
+  - User with ID 1 has their filter: "- all DMs from John". For a message from User John with ID 2 in a direct message chat: "hey" should result in notifyUserIds: [1].
+  - User with ID 1 has their filter: "- all messages after 10am my time - only if there is an incident at night". For a message from User John with ID 2 in a group message chat: "hey" should result in notifyUserIds: [1].
 
   # Context
   ${context}
@@ -178,20 +198,9 @@ const getContext = async (input: Input): Promise<string> => {
         )}`
       : ""
 
-  let context = `
-  <participants>
-  ${participantNames
-    .map(
-      (name) =>
-        `<user userId="${name.id}" localTime="${
-          name.timeZone ? date.toLocaleTimeString("en-US", { timeZone: name.timeZone }) : ""
-        }">
-      ${name.firstName ?? ""} ${name.lastName ?? ""} (@${name.username})
-      </user>`,
-    )
-    .join("\n")}
-  </participants>
+  let conversation = await Promise.all(previousMessages.map(async (m) => await formatMessageSimple(m)))
 
+  let context = `
   <chat_info>
   ${chatInfo?.title ? `Chat: ${chatInfo?.title}` : ""}
   Chat Type: ${chatInfo?.type === "thread" ? "group chat" : dmParticipants}
@@ -199,13 +208,22 @@ const getContext = async (input: Input): Promise<string> => {
   ${spaceInfo ? `Description: ${spaceInfo?.name?.includes("Wanver") ? WANVER_TRANSLATION_CONTEXT : ""}` : ""}
   </chat_info>
 
-  <user_rules>
-  ${rules.join("\n")}
-  </user_rules>
+  <participants>
+  ${participantNames
+    .map(
+      (name) =>
+        `<user id="${name.id}" localTime="${
+          name.timeZone ? date.toLocaleTimeString("en-US", { timeZone: name.timeZone, timeStyle: "short" }) : "unknown"
+        }">
+      ${name.firstName ?? ""} ${name.lastName ?? ""} (@${name.username})
+      </user>`,
+    )
+    .join("\n")}
+  </participants>
 
-  <messages>
-  ${previousMessages.map(formatMessage).join("\n")}
-  </messages>
+  <conversation>
+  ${conversation.join("\n")}
+  </conversation>
   `
 
   return context
@@ -224,20 +242,20 @@ const formatZenModeRules = async (userId: number, input: Input): Promise<string>
 
   let rules = settings.zenModeUsesDefaultRules
     ? `
-<filter userId="${userId}">
+<filters userId="${userId}">
 - An urgent matter has come up (eg. a bug or an incident) or
 - Someone is waiting for me to unblock them and I need to come back now/wake up or
 - A service, app, website, work tool, etc. is not working well or requires fixing.
-</filter>`
+</filters>`
     : `
-<filter userId="${userId}">
+<filters userId="${userId}">
 ${settings.zenModeCustomRules}
-</filter>
+</filters>
   `
 
   return `Include userId "${userId}" ${
     displayName ? `for ${displayName}` : ""
-  } in the result if the message passes any of the filters they have set: "${rules}"`
+  } ANY of the following filters: "${rules}"`
 }
 
 const fullDisplayName = (userName: UserName | undefined) => {
@@ -271,6 +289,15 @@ ${m.photoId ? "[photo attachment]" : ""} ${m.videoId ? "[video attachment]" : ""
   </message>`
 }
 
+/** Useful for concise conversation history display */
+export const formatMessageSimple = async (m: ProcessedMessage): Promise<string> => {
+  let sender = await getCachedUserName(m.fromId)
+  let senderDisplayName = sender ? UserNamesCache.getDisplayName(sender) : `User ${m.fromId}`
+  let willTruncate = m.text && m.text.length > 200
+  let textContent = m.text ? (willTruncate ? m.text.slice(0, 200) + "..." : m.text) : "[empty caption]"
+  return `[messageId: ${m.messageId}] ${senderDisplayName} (${relativeTimeFromNow(m.date)}): ${textContent}`
+}
+
 export const formatEntities = (entities: MessageEntities): string => {
   let content = entities.entities
     .map(
@@ -282,4 +309,35 @@ export const formatEntities = (entities: MessageEntities): string => {
     .join("\n")
 
   return `<entities>${content}</entities>`
+}
+
+/**
+ * Returns a relative time label such as:
+ *   “just now”, “3 m ago”, “2 h ago”, “5 d ago”, “1 y ago”
+ */
+export const relativeTimeFromNow = (date: Date): string => {
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000)
+
+  const MIN = 60
+  const HOUR = 60 * MIN
+  const DAY = 24 * HOUR
+  const WEEK = 7 * DAY
+  const YEAR = 365 * DAY
+
+  switch (true) {
+    case secs < 10:
+      return "just now"
+    case secs < MIN:
+      return `${secs}s ago`
+    case secs < HOUR:
+      return `${Math.floor(secs / MIN)}m ago`
+    case secs < DAY:
+      return `${Math.floor(secs / HOUR)}h ago`
+    case secs < WEEK:
+      return `${Math.floor(secs / DAY)}d ago`
+    case secs < YEAR:
+      return `${Math.floor(secs / WEEK)}w ago`
+    default:
+      return `${Math.floor(secs / YEAR)}y ago`
+  }
 }
