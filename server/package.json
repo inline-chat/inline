@@ -10,6 +10,7 @@
     "test": "bun test",
     "typecheck": "tsc --build",
     "db:migrate": "bun scripts/migrate.ts",
+    "eval:setup": "bun scripts/setup-willdo-eval-env.ts",
     "db:dangerously-reset-db": "bun scripts/reset-db.ts",
     "db:generate": "drizzle-kit generate --schema src/db/schema/index.ts --out drizzle --dialect postgresql --name",
     "db:push": "drizzle-kit push --schema src/db/schema/index.ts --dialect postgresql",
