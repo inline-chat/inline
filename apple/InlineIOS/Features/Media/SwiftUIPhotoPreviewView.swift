@@ -20,14 +20,29 @@ struct SwiftUIPhotoPreviewView: View {
   private let minScale: CGFloat = 0.5
   private let maxScale: CGFloat = 3.0
 
+  // MARK: - Layout Constants
+
+  private let closeButtonSize: CGFloat = 44
+  private let actionButtonSize: CGFloat = 44
+  private let textFieldHorizontalPadding: CGFloat = 16
+  private let textFieldVerticalPadding: CGFloat = 12
+  private let bottomContentSpacing: CGFloat = 12
+  private let bottomContentPadding: CGFloat = 20
+  private let animationDuration: TimeInterval = 0.3
+
+  // Computed properties for consistent sizing
+  private var sendButtonSize: CGFloat {
+    44
+  }
+
   var body: some View {
     GeometryReader { geometry in
       ZStack {
         // Background
-        Color.black
+        ThemeManager.shared.backgroundColorSwiftUI
           .ignoresSafeArea()
           .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.3)) {
+            withAnimation(.easeInOut(duration: animationDuration)) {
               showingActions.toggle()
             }
           }
@@ -119,62 +134,27 @@ struct SwiftUIPhotoPreviewView: View {
           VStack {
             HStack {
               // Close button
-              Button(action: {
-                withAnimation(.easeOut(duration: 0.2)) {
-                  isPresented = false
-                }
-              }) {
-                Image(systemName: "xmark")
-                  .font(.system(size: 18, weight: .medium))
-                  .foregroundColor(.white)
-                  .frame(width: 44, height: 44)
-                  .background(
-                    Circle()
-                      .fill(.black.opacity(0.5))
-                      .backdrop(BlurView(style: .systemUltraThinMaterialDark))
-                  )
-              }
-              .buttonStyle(ScaleButtonStyle2())
+              closeButton
 
               Spacer()
 
               // Action buttons
               HStack(spacing: 16) {
                 // Save button
-                Button(action: {
-                  saveImage()
-                }) {
-                  Image(systemName: "square.and.arrow.down")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: 44, height: 44)
-                    .background(
-                      Circle()
-                        .fill(.black.opacity(0.5))
-                        .backdrop(BlurView(style: .systemUltraThinMaterialDark))
-                    )
-                }
-                .buttonStyle(ScaleButtonStyle2())
+                actionButton(
+                  systemImage: "square.and.arrow.down",
+                  action: saveImage
+                )
 
                 // Share button
-                Button(action: {
-                  shareImage()
-                }) {
-                  Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: 44, height: 44)
-                    .background(
-                      Circle()
-                        .fill(.black.opacity(0.5))
-                        .backdrop(BlurView(style: .systemUltraThinMaterialDark))
-                    )
-                }
-                .buttonStyle(ScaleButtonStyle2())
+                actionButton(
+                  systemImage: "square.and.arrow.up",
+                  action: shareImage
+                )
               }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
+            .padding(.horizontal, bottomContentPadding)
+            .padding(.top, bottomContentPadding)
 
             Spacer()
           }
@@ -186,46 +166,7 @@ struct SwiftUIPhotoPreviewView: View {
           VStack {
             Spacer()
 
-            VStack(spacing: 16) {
-              // Caption input
-              HStack(spacing: 12) {
-                TextField("Add a caption...", text: $caption, axis: .vertical)
-                  .focused($isCaptionFocused)
-                  .font(.system(size: 16))
-                  .foregroundColor(.white)
-                  .padding(.horizontal, 16)
-                  .padding(.vertical, 12)
-                  .background(
-                    RoundedRectangle(cornerRadius: 20)
-                      .fill(.black.opacity(0.6))
-                      .backdrop(BlurView(style: .systemUltraThinMaterialDark))
-                      .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                          .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                      )
-                  )
-                  .lineLimit(1 ... 4)
-
-                // Send button
-                Button(action: {
-                  sendImage()
-                }) {
-                  Image(systemName: "arrow.up")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(width: 44, height: 44)
-                    .background(
-                      Circle()
-                        .fill(Color.blue)
-                        .shadow(color: .blue.opacity(0.3), radius: 8, x: 0, y: 4)
-                    )
-                }
-                .buttonStyle(ScaleButtonStyle2())
-                .disabled(caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && image == nil)
-              }
-              .padding(.horizontal, 20)
-              .padding(.bottom, keyboardHeight > 0 ? 8 : 20)
-            }
+            bottomContent
           }
           .transition(.move(edge: .bottom).combined(with: .opacity))
         }
@@ -238,6 +179,105 @@ struct SwiftUIPhotoPreviewView: View {
     .onDisappear {
       removeKeyboardObservers()
     }
+  }
+
+  // MARK: - View Components
+
+  private var closeButton: some View {
+    Button(action: {
+      withAnimation(.easeOut(duration: 0.2)) {
+        isPresented = false
+      }
+    }) {
+      if #available(iOS 26.0, *) {
+        Circle()
+          .fill(ThemeManager.shared.cardBackgroundColor)
+          .frame(width: closeButtonSize, height: closeButtonSize)
+          .overlay {
+            Image(systemName: "xmark")
+              .font(.callout)
+              .foregroundColor(ThemeManager.shared.textPrimaryColor)
+          }
+          .glassEffect(.regular, in: Circle(), isEnabled: true)
+      } else {
+        Circle()
+          .fill(ThemeManager.shared.surfaceBackgroundColor)
+          .frame(width: closeButtonSize, height: closeButtonSize)
+          .overlay {
+            Image(systemName: "xmark")
+              .font(.callout)
+              .foregroundColor(ThemeManager.shared.textPrimaryColor)
+          }
+      }
+    }
+    .buttonStyle(ScaleButtonStyle2())
+  }
+
+  private func actionButton(systemImage: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      if #available(iOS 26.0, *) {
+        Circle()
+          .fill(ThemeManager.shared.cardBackgroundColor)
+          .frame(width: actionButtonSize, height: actionButtonSize)
+          .overlay {
+            Image(systemName: systemImage)
+              .font(.system(size: 18, weight: .medium))
+              .foregroundColor(ThemeManager.shared.textPrimaryColor)
+          }
+          .glassEffect(.regular, in: Circle(), isEnabled: true)
+      } else {
+        Circle()
+          .fill(ThemeManager.shared.surfaceBackgroundColor)
+          .frame(width: actionButtonSize, height: actionButtonSize)
+          .overlay {
+            Image(systemName: systemImage)
+              .font(.system(size: 18, weight: .medium))
+              .foregroundColor(ThemeManager.shared.textPrimaryColor)
+          }
+      }
+    }
+    .buttonStyle(ScaleButtonStyle2())
+  }
+
+  private var captionTextField: some View {
+    TextField("Add a caption...", text: $caption, axis: .vertical)
+      .focused($isCaptionFocused)
+      .font(.system(size: 16))
+      .foregroundColor(ThemeManager.shared.textPrimaryColor)
+      .padding(.horizontal, textFieldHorizontalPadding)
+      .padding(.vertical, textFieldVerticalPadding)
+      .background {
+        RoundedRectangle(cornerRadius: 20)
+          .stroke(ThemeManager.shared.borderColor, lineWidth: 1)
+      }
+      .lineLimit(1 ... 4)
+  }
+
+  private var sendButton: some View {
+    Button(action: {
+      sendImage()
+    }) {
+      Image(systemName: "arrow.up")
+        .font(.system(size: 20, weight: .semibold))
+        .foregroundColor(.white)
+        .frame(width: sendButtonSize, height: sendButtonSize)
+        .background(
+          Circle()
+            .fill(ThemeManager.shared.accentColor)
+            .shadow(color: ThemeManager.shared.accentColor.opacity(0.3), radius: 8, x: 0, y: 4)
+        )
+    }
+    .buttonStyle(ScaleButtonStyle2())
+    .disabled(caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && image == nil)
+  }
+
+  private var bottomContent: some View {
+    HStack(spacing: bottomContentSpacing) {
+      captionTextField
+      sendButton
+    }
+    .padding(.horizontal, bottomContentPadding)
+    .padding(.bottom, keyboardHeight > 0 ? 8 : bottomContentPadding)
   }
 
   // MARK: - Actions
@@ -290,7 +330,7 @@ struct SwiftUIPhotoPreviewView: View {
       queue: .main
     ) { notification in
       if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-        withAnimation(.easeInOut(duration: 0.3)) {
+        withAnimation(.easeInOut(duration: animationDuration)) {
           keyboardHeight = keyboardFrame.height
         }
       }
@@ -301,7 +341,7 @@ struct SwiftUIPhotoPreviewView: View {
       object: nil,
       queue: .main
     ) { _ in
-      withAnimation(.easeInOut(duration: 0.3)) {
+      withAnimation(.easeInOut(duration: animationDuration)) {
         keyboardHeight = 0
       }
     }
@@ -310,26 +350,6 @@ struct SwiftUIPhotoPreviewView: View {
   private func removeKeyboardObservers() {
     NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
     NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
-  }
-}
-
-// MARK: - Supporting Views
-
-struct BlurView: UIViewRepresentable {
-  let style: UIBlurEffect.Style
-
-  func makeUIView(context: Context) -> UIVisualEffectView {
-    UIVisualEffectView(effect: UIBlurEffect(style: style))
-  }
-
-  func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
-    uiView.effect = UIBlurEffect(style: style)
-  }
-}
-
-extension View {
-  func backdrop(_ content: some View) -> some View {
-    background(content)
   }
 }
 
