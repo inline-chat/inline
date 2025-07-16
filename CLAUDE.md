@@ -151,6 +151,13 @@ var message = Message.with {
 #### Mutations and Transactions
 For data mutations like `sendMessage`, create transactions under `InlineKit/Sources/InlineKit/Transactions/Methods/` and call via the transactions singleton for automatic retry and optimistic updates.
 
+#### Translation System
+- **Language Support**: English (en), Spanish (es), French (fr), Japanese (ja), Chinese Simplified (zh-Hans), Chinese Traditional (zh-Hant), Tagalog (tl), Persian (fa)
+- **Language Preference**: `UserLocale.setPreferredTranslationLanguage()` to set custom language, stored in UserDefaults
+- **Translation State**: `TranslationState.shared` manages per-peer translation enable/disable state
+- **Language Picker**: `LanguagePickerView` provides UI for selecting translation target language
+- **Integration**: Translation button in `apple/InlineMac/Toolbar/TranslateButtion/TranslationButton.swift`
+
 ## Web Client (web/)
 
 React Router application for web access to the chat platform.
@@ -167,6 +174,35 @@ bun run dev              # Development server
 bun run build            # Production build
 bun run typecheck        # Type checking
 bun run start            # Start production server
+```
+
+## Apple Platform Build Commands
+
+### Available Schemes
+From `apple/Inline.xcodeproj`:
+- **"Inline (macOS)"** - Main macOS application
+- **"Inline (iOS)"** - Main iOS application  
+- **"2nd Inline (macOS)"** - Alternative macOS build configuration
+- **InlineKit** - Shared Swift package
+- **InlineUI** - Shared SwiftUI components
+- **InlineProtocol** - Protocol buffer Swift code
+- **Logger** - Logging framework
+- **RealtimeAPI** - WebSocket client
+- **TextProcessing** - Text processing utilities
+
+### Build Commands
+```bash
+# Build macOS app
+xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (macOS)" -configuration Debug build
+
+# Build iOS app  
+xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (iOS)" -configuration Debug build
+
+# Build specific package (e.g. InlineKit)
+xcodebuild -project apple/Inline.xcodeproj -scheme "InlineKit" -configuration Debug build
+
+# List all available schemes
+xcodebuild -project apple/Inline.xcodeproj -list
 ```
 
 ## Development Guidelines
