@@ -66,17 +66,23 @@ public class UserLocale {
   
   /// Get the user's preferred translation language if set
   public static func getPreferredTranslationLanguage() -> String? {
+    // Fast-path: if we've already loaded the value, just return it and avoid the lock
+    if cacheLoaded {
+      return cachedPreferredLanguage
+    }
+
+    // Slow-path (executed only once per session, unless the value is reset):
     return cacheLock.withLock {
-      // Return cached value if available
+      // If another thread loaded the value while we were waiting for the lock
       if cacheLoaded {
         return cachedPreferredLanguage
       }
-      
+
       // Load from UserDefaults on first access
       let stored = UserDefaults.standard.string(forKey: preferredTranslationLanguageKey)
       cachedPreferredLanguage = stored
       cacheLoaded = true
-      
+
       log.debug("Retrieved preferred translation language: \(stored ?? "nil")")
       return stored
     }
