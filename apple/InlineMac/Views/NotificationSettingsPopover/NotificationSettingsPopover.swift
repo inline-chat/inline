@@ -80,8 +80,8 @@ struct NotificationSettingsButton: View {
       VStack(alignment: .leading, spacing: 1) {
         NotificationSettingsItem(
           systemImage: "bell.fill",
-          title: "All",
-          description: "Receive all notifications",
+          title: "All messages",
+          description: "Receive notifications for every message",
           selected: notificationSettings.mode == .all,
           value: NotificationMode.all,
           onChange: {
@@ -92,8 +92,8 @@ struct NotificationSettingsButton: View {
 
         NotificationSettingsItem(
           systemImage: "at",
-          title: "Mentions",
-          description: "Mentions of your name or username",
+          title: "Messages to you",
+          description: "Mentions, direct messages, and replies to you",
           selected: notificationSettings.mode == .mentions,
           value: NotificationMode.mentions,
           onChange: {
@@ -104,8 +104,8 @@ struct NotificationSettingsButton: View {
 
         NotificationSettingsItem(
           systemImage: "apple.meditate",
-          title: "Zen Mode",
-          description: "Only what's important to you",
+          title: "Zen",
+          description: "Only important messages",
           selected: notificationSettings.mode == .importantOnly,
           value: NotificationMode.importantOnly,
           onChange: {
@@ -122,7 +122,7 @@ struct NotificationSettingsButton: View {
         NotificationSettingsItem(
           systemImage: "bell.slash.fill",
           title: "None",
-          description: "No notifications",
+          description: "Zero notifications",
           selected: notificationSettings.mode == .none,
           value: NotificationMode.none,
           onChange: {

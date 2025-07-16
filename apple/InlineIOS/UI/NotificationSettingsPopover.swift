@@ -79,8 +79,8 @@ struct NotificationSettingsButton: View {
 
         NotificationSettingsItem(
           systemImage: "at",
-          title: "Mentions",
-          description: "Mentions of your name or username",
+          title: "Messages to you",
+          description: "Mentions, direct messages, and replies to you",
           selected: notificationSettings.mode == .mentions,
           value: NotificationMode.mentions,
           onChange: {
@@ -91,8 +91,8 @@ struct NotificationSettingsButton: View {
 
         NotificationSettingsItem(
           systemImage: "apple.meditate",
-          title: "Zen Mode",
-          description: "Only messages that need your attention",
+          title: "Zen",
+          description: "Only important messages",
           selected: notificationSettings.mode == .importantOnly,
           value: NotificationMode.importantOnly,
           onChange: {
