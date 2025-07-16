@@ -6,20 +6,10 @@ actor LanguageDetector {
     .traditionalChinese,
     .simplifiedChinese,
     .english,
-    .persian,
-//    .spanish,
-//    .french,
-//    .german,
-//    .finnish,
-//    .japanese,
-//    .korean,
-//    .turkish,
-//    .russian,
-//    .ukrainian,
-//    .vietnamese,
-//    .hindi,
-//    .polish,
-//    .portuguese
+    .spanish,
+    .french,
+    .japanese,
+    .persian
   ]
 
   // Define major script groups

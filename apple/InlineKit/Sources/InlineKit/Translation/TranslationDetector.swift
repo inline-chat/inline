@@ -14,7 +14,10 @@ public final class TranslationDetector {
     .traditionalChinese,
     .simplifiedChinese,
     .english,
-    .persian,
+    .spanish,
+    .french,
+    .japanese,
+    .persian
   ]
 
   public struct DetectionResult {
