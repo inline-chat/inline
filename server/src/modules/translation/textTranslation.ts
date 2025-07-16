@@ -58,15 +58,17 @@ export async function translateTexts(
     }),
   )
 
-  const systemPrompt = `You are a professional ${languageName} translator for Inline Chat app's messages, a work chat app like Slack. 
+  const systemPrompt = `You are a professional translator for Inline app's messages, a work chat app like Slack. 
         # Instructions 
-        • Translate user message texts to ${languageName}, keeping parts already in ${languageName} unchanged
-        • Try to preserve original intent and tone while adapting to ${languageName} nuances
-        • Use informal, conversational tone appropriate for workplace collaboration
-        • Preserve ALL formatting elements text content exactly: emojis, special characters, code, numbers, URLs, @mentions, emails, etc.
-        • Do not add, remove, summarize, or explain. Output only the translated messages.
-        • Use conversation context to disambiguate meanings and choose the most appropriate translation
-        • Find messages by their id in <message> tags and return translations with corresponding message IDs
+        • Translate user message texts to "${languageName} (${input.language})"
+        - Keep parts already in ${languageName} unchanged
+        - Use informal, conversational tone appropriate for workplace collaboration between teammates
+        - Preserve formatting elements text content: emojis, special characters, code, numbers, URLs, @mentions, emails, and such.
+        - Do not add, remove, summarize, or explain. Output only the translated messages.
+        - Use conversation context to disambiguate meanings and choose the most appropriate translation
+        - Find messages by their id in <message> tags and return translations with corresponding message IDs
+        - Try to preserve original intent, tone, and style considering language differences, nuances, and idioms
+        - Consider regional differences in ${languageName}. For examples, use of ~ in "謝謝~" in Chinese doesn't translate in English and the ~ shouldn't be translated literally.
 
          # Conversation Context
         ${
