@@ -6,7 +6,7 @@ class EmbedMessageView: UIView {
     static let cornerRadius: CGFloat = 8
     static let rectangleWidth: CGFloat = 4
     static let contentSpacing: CGFloat = 6
-    static let verticalPadding: CGFloat = 2
+    static let verticalPadding: CGFloat = 4
     static let horizontalPadding: CGFloat = 6
     static let imageIconSize: CGFloat = 16
   }
@@ -14,6 +14,8 @@ class EmbedMessageView: UIView {
   static let height = 42.0
   private var outgoing: Bool = false
   private var isOnlyEmoji: Bool = false
+
+  let theme = ThemeManager.shared.selected
 
   private lazy var headerLabel: UILabel = {
     let label = UILabel()
@@ -177,10 +179,10 @@ private extension EmbedMessageView {
   }
 
   func updateColors() {
-    let textColor: UIColor = outgoing && !isOnlyEmoji ?.white : .secondaryLabel
-    let rectangleColor = outgoing && !isOnlyEmoji ? UIColor.white : .systemGray
-    let bgAlpha: CGFloat = outgoing && !isOnlyEmoji ? 0.13 : 0.1
-    backgroundColor = outgoing && !isOnlyEmoji ? .white.withAlphaComponent(bgAlpha) : .systemGray
+    let textColor: UIColor = outgoing && !isOnlyEmoji ?.white : theme.accent
+    let rectangleColor = outgoing && !isOnlyEmoji ? UIColor.white : theme.accent
+    let bgAlpha: CGFloat = outgoing && !isOnlyEmoji ? 0.13 : 0.08
+    backgroundColor = outgoing && !isOnlyEmoji ? .white.withAlphaComponent(bgAlpha) : theme.accent
       .withAlphaComponent(bgAlpha)
 
     headerLabel.textColor = textColor
