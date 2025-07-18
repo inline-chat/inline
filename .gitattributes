@@ -1,0 +1,5 @@
+# Exclude protocol buffer generated files from diff stats
+*.pb.ts linguist-generated=true
+*.pb.d.ts linguist-generated=true
+*.pb.swift linguist-generated=true
+server/packages/protocol/src/* linguist-generated=true
