@@ -66,28 +66,46 @@ final class NewPhotoView: UIView {
 
   // MARK: - Setup
 
+  private func shouldCropNarrowImage(width: Int, height: Int) -> Bool {
+    let aspectRatio = CGFloat(width) / CGFloat(height)
+    return aspectRatio < 0.75 && hasText // Narrow image with caption
+  }
+
   private func calculateImageDimensions(width: Int, height: Int) -> ImageDimensions {
     let aspectRatio = CGFloat(width) / CGFloat(height)
+    let preferredWidth: CGFloat = 280 // Width for narrow images with captions
 
     var calculatedWidth: CGFloat
     var calculatedHeight: CGFloat
 
-    if width > height {
-      calculatedWidth = min(maxWidth, CGFloat(width))
-      calculatedHeight = calculatedWidth / aspectRatio
-    } else {
-      calculatedHeight = min(maxHeight, CGFloat(height))
-      calculatedWidth = calculatedHeight * aspectRatio
-    }
-
-    if calculatedHeight > maxHeight {
+    // For very narrow images with captions, use fixed dimensions to enable cropping
+    if shouldCropNarrowImage(width: width, height: height) {
+      calculatedWidth = preferredWidth
       calculatedHeight = maxHeight
-      calculatedWidth = calculatedHeight * aspectRatio
-    }
+    } else {
+      if width > height {
+        calculatedWidth = min(maxWidth, CGFloat(width))
+        calculatedHeight = calculatedWidth / aspectRatio
+      } else {
+        calculatedHeight = min(maxHeight, CGFloat(height))
+        calculatedWidth = calculatedHeight * aspectRatio
+      }
 
-    if calculatedWidth > maxWidth {
-      calculatedWidth = maxWidth
-      calculatedHeight = calculatedWidth / aspectRatio
+      if calculatedHeight > maxHeight {
+        calculatedHeight = maxHeight
+        calculatedWidth = calculatedHeight * aspectRatio
+      }
+
+      if calculatedWidth > maxWidth {
+        calculatedWidth = maxWidth
+        calculatedHeight = calculatedWidth / aspectRatio
+      }
+
+      // Enforce minimum width for narrow images without captions
+      if calculatedWidth < minWidth {
+        calculatedWidth = minWidth
+        calculatedHeight = calculatedWidth / aspectRatio
+      }
     }
 
     return ImageDimensions(
@@ -120,21 +138,53 @@ final class NewPhotoView: UIView {
       return
     }
 
+    // Set content mode based on whether we should crop narrow images
+    if shouldCropNarrowImage(width: width, height: height) {
+      imageView.contentMode = .scaleAspectFill
+    } else {
+      imageView.contentMode = .scaleAspectFit
+    }
+
     let dimensions = calculateImageDimensions(width: width, height: height)
 
     if !isSticker {
       let widthConstraint = widthAnchor.constraint(equalToConstant: dimensions.width)
       let heightConstraint = heightAnchor.constraint(equalToConstant: dimensions.height)
 
-      let imageViewTopConstraint = imageView.topAnchor.constraint(equalTo: topAnchor)
-      let imageViewLeadingConstraint = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
-      let imageViewTrailingConstraint = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
-      let imageViewBottomConstraint = imageView.bottomAnchor.constraint(equalTo: bottomAnchor)
+      if shouldCropNarrowImage(width: width, height: height) {
+        // For narrow images with captions, center the image and let it be cropped
+        let imageViewCenterXConstraint = imageView.centerXAnchor.constraint(equalTo: centerXAnchor)
+        let imageViewCenterYConstraint = imageView.centerYAnchor.constraint(equalTo: centerYAnchor)
 
-      imageConstraints = [
-        widthConstraint, heightConstraint,
-        imageViewTopConstraint, imageViewLeadingConstraint, imageViewTrailingConstraint, imageViewBottomConstraint,
-      ]
+        // Calculate aspect ratio for this specific case
+        let aspectRatio = CGFloat(width) / CGFloat(height)
+
+        // Set aspect ratio constraint to maintain original proportions
+        let aspectRatioConstraint = imageView.widthAnchor.constraint(
+          equalTo: imageView.heightAnchor,
+          multiplier: aspectRatio
+        )
+
+        // Set width to container width, height will be calculated by aspect ratio
+        let imageViewWidthConstraint = imageView.widthAnchor.constraint(equalTo: widthAnchor)
+
+        imageConstraints = [
+          widthConstraint, heightConstraint,
+          imageViewCenterXConstraint, imageViewCenterYConstraint,
+          imageViewWidthConstraint, aspectRatioConstraint,
+        ]
+      } else {
+        // Normal case - fill the container
+        let imageViewTopConstraint = imageView.topAnchor.constraint(equalTo: topAnchor)
+        let imageViewLeadingConstraint = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
+        let imageViewTrailingConstraint = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
+        let imageViewBottomConstraint = imageView.bottomAnchor.constraint(equalTo: bottomAnchor)
+
+        imageConstraints = [
+          widthConstraint, heightConstraint,
+          imageViewTopConstraint, imageViewLeadingConstraint, imageViewTrailingConstraint, imageViewBottomConstraint,
+        ]
+      }
     }
 
     else {
