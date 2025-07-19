@@ -57,33 +57,7 @@ struct SpacesView: View {
   var toolbarContent: some ToolbarContent {
     Group {
       ToolbarItem(placement: .principal) {
-        Text(shouldShow ? getStatusText(apiState) : "Spaces")
-          .font(.title3)
-          .fontWeight(.semibold)
-          .themedPrimaryText()
-          .contentTransition(.numericText())
-          .animation(.spring(duration: 0.5), value: getStatusText(apiState))
-          .animation(.spring(duration: 0.5), value: shouldShow)
-          .onAppear {
-            apiState = realtime.apiState
-            if apiState != .connected {
-              shouldShow = true
-            }
-          }
-          .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
-            apiState = nextApiState
-            if nextApiState == .connected {
-              Task { @MainActor in
-                try await Task.sleep(for: .seconds(1))
-                if nextApiState == .connected {
-                  // second check
-                  shouldShow = false
-                }
-              }
-            } else {
-              shouldShow = true
-            }
-          })
+        header
       }
       ToolbarItem(placement: .topBarTrailing) {
         Button {
@@ -93,6 +67,48 @@ struct SpacesView: View {
         }
       }
     }
+  }
+
+  @ViewBuilder
+  private var header: some View {
+    HStack(spacing: 8) {
+      if apiState != .connected {
+        Spinner(size: 16)
+          .padding(.trailing, 4)
+      }
+
+      VStack(alignment: .leading, spacing: 0) {
+        Text(shouldShow ? getStatusText(apiState) : "Chats")
+          .font(.title3)
+          .fontWeight(.semibold)
+          .themedPrimaryText()
+          .contentTransition(.numericText())
+          .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+          .animation(.spring(duration: 0.5), value: shouldShow)
+      }
+    }
+
+    .onAppear {
+      apiState = realtime.apiState
+
+      if apiState != .connected {
+        shouldShow = true
+      }
+    }
+    .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
+      apiState = nextApiState
+      if nextApiState == .connected {
+        Task { @MainActor in
+          try await Task.sleep(for: .seconds(1))
+          if nextApiState == .connected {
+            // second check
+            shouldShow = false
+          }
+        }
+      } else {
+        shouldShow = true
+      }
+    })
   }
 }
 

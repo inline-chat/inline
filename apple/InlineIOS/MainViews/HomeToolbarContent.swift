@@ -17,12 +17,12 @@ struct HomeToolbarContent: ToolbarContent {
 
     if #available(iOS 26.0, *) {
       ToolbarItem(placement: .principal) {
-        title
+        header
       }
       .sharedBackgroundVisibility(.hidden)
     } else {
       ToolbarItem(placement: .principal) {
-        title
+        header
       }
     }
 
