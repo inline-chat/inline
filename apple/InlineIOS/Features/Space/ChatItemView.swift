@@ -188,7 +188,7 @@ struct ChatItemView: View {
   @ViewBuilder
   var lastMessageView: some View {
     if message?.message.isSticker == true {
-      HStack(spacing: 2) {
+      HStack(spacing: 4) {
         Image(systemName: "cup.and.saucer.fill")
           .font(.caption)
           .foregroundColor(.secondary)
@@ -201,7 +201,7 @@ struct ChatItemView: View {
       }
 
     } else if message?.message.documentId != nil {
-      HStack(spacing: 2) {
+      HStack(spacing: 4) {
         Image(systemName: "document.fill")
           .font(.caption)
           .foregroundColor(.secondary)
@@ -217,7 +217,7 @@ struct ChatItemView: View {
       }
 
     } else if message?.message.photoId != nil || message?.message.fileId != nil {
-      HStack(spacing: 2) {
+      HStack(spacing: 4) {
         Image(systemName: "photo.fill")
           .font(.caption)
           .foregroundColor(.secondary)
