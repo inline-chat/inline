@@ -30,3 +30,5 @@ export class Updates {
     }
   }
 }
+
+export let updatesModule = Updates.shared

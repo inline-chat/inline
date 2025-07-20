@@ -281,6 +281,13 @@
       "when": 1751555484646,
       "tag": "0039_translation_entities",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1753045246986,
+      "tag": "0040_soft_mongu",
+      "breakpoints": true
     }
   ]
 }
