@@ -179,13 +179,14 @@ private extension EmbedMessageView {
   }
 
   func updateColors() {
-    let textColor: UIColor = outgoing && !isOnlyEmoji ?.white : theme.accent
+    let textColor: UIColor = outgoing && !isOnlyEmoji ? .white : .label
+    let headerColor: UIColor = outgoing && !isOnlyEmoji ? .white : theme.accent
     let rectangleColor = outgoing && !isOnlyEmoji ? UIColor.white : theme.accent
     let bgAlpha: CGFloat = outgoing && !isOnlyEmoji ? 0.13 : 0.08
     backgroundColor = outgoing && !isOnlyEmoji ? .white.withAlphaComponent(bgAlpha) : theme.accent
       .withAlphaComponent(bgAlpha)
 
-    headerLabel.textColor = textColor
+    headerLabel.textColor = headerColor
     messageLabel.textColor = textColor
     rectangleView.backgroundColor = rectangleColor
     imageIconView.tintColor = textColor
