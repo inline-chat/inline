@@ -137,21 +137,6 @@ struct SwiftUIPhotoPreviewView: View {
               closeButton
 
               Spacer()
-
-              // Action buttons
-              HStack(spacing: 16) {
-                // Save button
-                actionButton(
-                  systemImage: "square.and.arrow.down",
-                  action: saveImage
-                )
-
-                // Share button
-                actionButton(
-                  systemImage: "square.and.arrow.up",
-                  action: shareImage
-                )
-              }
             }
             .padding(.horizontal, bottomContentPadding)
             .padding(.top, bottomContentPadding)
