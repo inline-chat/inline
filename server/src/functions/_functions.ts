@@ -15,6 +15,7 @@ import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
 import { deleteMember } from "@in/server/functions/space.deleteMember"
+import { markAsUnread } from "./messages.markAsUnread"
 
 export const Functions = {
   messages: {
@@ -29,6 +30,8 @@ export const Functions = {
     getChatParticipants: getChatParticipants,
     addChatParticipant: addChatParticipant,
     removeChatParticipant: removeChatParticipant,
+    // until we make tests pass
+    //markAsUnread: markAsUnread,
   },
   spaces: {
     getSpaceMembers: getSpaceMembers,

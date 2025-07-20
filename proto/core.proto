@@ -128,6 +128,7 @@ message Dialog {
   optional int64 read_max_id = 5;
   optional int32 unread_count = 6;
   optional int64 chat_id = 7;
+  optional bool unread_mark = 8;
 }
 
 // A thread
@@ -554,6 +555,7 @@ enum Method {
   SEND_COMPOSE_ACTION = 20;
   CREATE_BOT = 21;
   DELETE_MEMBER = 22;
+  MARK_AS_UNREAD = 23;
 }
 
 message RpcCall {
@@ -581,6 +583,7 @@ message RpcCall {
     SendComposeActionInput sendComposeAction = 21;
     CreateBotInput createBot = 22;
     DeleteMemberInput deleteMember = 23;
+    MarkAsUnreadInput markAsUnread = 24;
   }
 }
 
@@ -610,6 +613,7 @@ message RpcResult {
     SendComposeActionResult sendComposeAction = 21;
     CreateBotResult createBot = 22;
     DeleteMemberResult deleteMember = 23;
+    MarkAsUnreadResult markAsUnread = 24;
   }
 }
 
@@ -624,6 +628,17 @@ message DeleteMemberInput {
 
 // Remove member from space result
 message DeleteMemberResult {
+  repeated Update updates = 1;
+}
+
+// Mark dialog as unread
+message MarkAsUnreadInput {
+  // Peer ID to mark as unread
+  InputPeer peer_id = 1;
+}
+
+// Mark dialog as unread result
+message MarkAsUnreadResult {
   repeated Update updates = 1;
 }
 
@@ -895,6 +910,7 @@ message Update {
     UpdateReadMaxId update_read_max_id = 20;
     UpdateUserSettings update_user_settings = 21;
     UpdateNewMessageNotification new_message_notification = 22;
+    UpdateMarkAsUnread mark_as_unread = 23;
   }
 }
 
@@ -945,6 +961,15 @@ message UpdateReadMaxId {
 
   // Still unread count
   int32 unread_count = 4;
+}
+
+// Update when a dialog is marked as unread
+message UpdateMarkAsUnread {
+  // Peer ID of the dialog that was marked as unread
+  Peer peer_id = 1;
+
+  // Whether it's marked as unread (true) or not (false)
+  bool unread_mark = 2;
 }
 
 // Update when a new chat is created either in space or a private chat

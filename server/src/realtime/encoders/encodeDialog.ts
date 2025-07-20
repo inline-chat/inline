@@ -40,5 +40,6 @@ export function encodeDialog(dialog: DbDialog, { unreadCount }: { unreadCount: n
     pinned: dialog.pinned ?? false,
     unreadCount: unreadCount,
     readMaxId: dialog.readInboxMaxId ? BigInt(dialog.readInboxMaxId) : undefined,
+    unreadMark: dialog.unreadMark ?? undefined,
   }
 }

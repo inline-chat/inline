@@ -25,6 +25,7 @@ import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
 import { createBotHandler } from "./createBot"
 import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMember"
+import { markAsUnread } from "./messages.markAsUnread"
 
 const log = new Log("rpc")
 
@@ -202,6 +203,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await deleteMemberHandler(call.input.deleteMember, handlerContext)
       return { oneofKind: "deleteMember", deleteMember: result }
+    }
+
+    case Method.MARK_AS_UNREAD: {
+      if (call.input.oneofKind !== "markAsUnread") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await markAsUnread(call.input.markAsUnread, handlerContext)
+      return { oneofKind: "markAsUnread", markAsUnread: result }
     }
 
     default:
