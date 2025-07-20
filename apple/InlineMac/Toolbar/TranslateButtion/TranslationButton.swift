@@ -151,6 +151,7 @@ public struct TranslationPopoverView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
+        .tint(.accent)
 
         Spacer()
       }
