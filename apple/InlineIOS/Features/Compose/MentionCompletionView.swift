@@ -15,7 +15,7 @@ protocol MentionCompletionDelegate: AnyObject {
 
 public class MentionCompletionView: UIView {
   public static let maxHeight: CGFloat = 200
-  public static let itemHeight: CGFloat = 56
+  public static let itemHeight: CGFloat = 58
 
   weak var delegate: MentionCompletionDelegate?
 
