@@ -1,5 +1,19 @@
 import SwiftUI
 
+extension UIImage {
+  func rotated180() -> UIImage? {
+    guard let cgImage = self.cgImage else { return nil }
+    
+    let renderer = UIGraphicsImageRenderer(size: size)
+    return renderer.image { context in
+      context.cgContext.translateBy(x: size.width / 2, y: size.height / 2)
+      context.cgContext.rotate(by: .pi)
+      context.cgContext.translateBy(x: -size.width / 2, y: -size.height / 2)
+      draw(in: CGRect(origin: .zero, size: size))
+    }
+  }
+}
+
 /// A variable blur view.
 public class VariableBlurUIView: UIVisualEffectView {
   private var filterType: String
@@ -9,9 +23,15 @@ public class VariableBlurUIView: UIVisualEffectView {
   public init(
     gradientMask: UIImage,
     maxBlurRadius: CGFloat = 20,
-    filterType: String = "variableBlur"
+    filterType: String = "variableBlur",
+    rotateForBottomBar: Bool = false
   ) {
-    self.gradientMask = gradientMask
+    if rotateForBottomBar {
+      // Rotate the gradient mask 180 degrees for bottom bars
+      self.gradientMask = gradientMask.rotated180() ?? gradientMask
+    } else {
+      self.gradientMask = gradientMask
+    }
     self.maxBlurRadius = maxBlurRadius
     self.filterType = filterType
     super.init(effect: UIBlurEffect(style: .regular))
@@ -123,23 +143,27 @@ public struct VariableBlurView: UIViewRepresentable {
   public var gradientMask: UIImage
   public var maxBlurRadius: CGFloat
   public var filterType: String
+  public var rotateForBottomBar: Bool
 
   /// A variable blur view.
   public init(
     gradientMask: UIImage = VariableBlurViewConstants.defaultGradientMask,
     maxBlurRadius: CGFloat = 4,
-    filterType: String = "variableBlur"
+    filterType: String = "variableBlur",
+    rotateForBottomBar: Bool = false
   ) {
     self.gradientMask = gradientMask
     self.maxBlurRadius = maxBlurRadius
     self.filterType = filterType
+    self.rotateForBottomBar = rotateForBottomBar
   }
 
   public func makeUIView(context: Context) -> VariableBlurUIView {
     let view = VariableBlurUIView(
       gradientMask: gradientMask,
       maxBlurRadius: maxBlurRadius,
-      filterType: filterType
+      filterType: filterType,
+      rotateForBottomBar: rotateForBottomBar
     )
     return view
   }
