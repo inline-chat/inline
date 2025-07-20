@@ -47,6 +47,9 @@ export const dialogs = pgTable(
 
     /** archived */
     archived: boolean("archived").default(false),
+
+    /** manually marked as unread */
+    unreadMark: boolean("unread_mark").default(false),
   },
   (table) => ({
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(table.chatId, table.userId),
