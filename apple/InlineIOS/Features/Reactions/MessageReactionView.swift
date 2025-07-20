@@ -52,7 +52,7 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
     if emoji == "✓" || emoji == "✔️" {
       let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
       let checkmarkImage = UIImage(systemName: "checkmark", withConfiguration: config)?
-        .withTintColor(UIColor(hex: "#2AAC28")!, renderingMode: .alwaysOriginal)
+        .withTintColor(byCurrentUser && !outgoing ? .white : UIColor(hex: "#2AAC28")!, renderingMode: .alwaysOriginal)
       let imageAttachment = NSTextAttachment()
       imageAttachment.image = checkmarkImage
       let attributedString = NSAttributedString(attachment: imageAttachment)
