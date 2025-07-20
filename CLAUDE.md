@@ -252,6 +252,29 @@ xcodebuild -project apple/Inline.xcodeproj -list
    bun run db:migrate
    ```
 
+
+## Swift
+* Design UI in a way that is idiomatic for the macOS platform and follows Apple Human Interface Guidelines.
+* Use SF Symbols for iconography.
+* Use the most modern macOS APIs. Since there is no backward compatibility constraint, this app can target the latest macOS version with the newest APIs.
+* Use the most modern Swift language features and conventions. Target Swift 6 and use Swift concurrency (async/await, actors) and Swift macros where applicable.
+- Build UI with small, focused views
+- Extract reusable components naturally
+- Use view modifiers to encapsulate common styling
+- Prefer composition over inheritance
+- Use extensions to organize large files
+- Follow Swift naming conventions consistently
+- Unit test business logic and data transformations
+- Use SwiftUI Previews for visual testing
+- Test @Observable classes independently
+- Keep tests simple and focused
+- Don't sacrifice code clarity for testability
+- Use Swift Concurrency (async/await, actors)
+- Leverage Swift 6 data race safety when available
+- Utilize property wrappers effectively
+- Embrace value types where appropriate
+- Use protocols for abstraction, not just for testing
+
 ## Common Development Tasks
 
 ### Adding New Protocol Buffer Types
@@ -272,3 +295,4 @@ xcodebuild -project apple/Inline.xcodeproj -list
 - **Database**: Use `bun run db:studio` for visual inspection
 
 This guide provides the foundation for understanding and contributing to the Inline chat application codebase. For specific implementation details, refer to the existing code patterns and the `.cursor/rules/*.mdc` files for additional context.
+
