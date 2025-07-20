@@ -198,10 +198,12 @@ struct DirectChatItem: View {
       }
 
     } else if lastMsg?.message.isSticker == true {
-      HStack(spacing: 2) {
+      HStack(alignment: .top, spacing: 4) {
         Image(systemName: "cup.and.saucer.fill")
           .font(.caption)
           .foregroundColor(.secondary)
+          .padding(.top, 5)
+
         Text("Sticker")
           .font(.callout)
           .foregroundColor(.secondary)
@@ -210,10 +212,11 @@ struct DirectChatItem: View {
       }
 
     } else if lastMsg?.message.documentId != nil {
-      HStack(spacing: 2) {
+      HStack(alignment: .top, spacing: 4) {
         Image(systemName: "document.fill")
           .font(.caption)
           .foregroundColor(.secondary)
+          .padding(.top, 5)
 
         Text(
           (lastMsg?.message.hasText == true ? lastMsg?.displayText ?? "" : "Document")
@@ -226,11 +229,11 @@ struct DirectChatItem: View {
       }
 
     } else if lastMsg?.message.photoId != nil || lastMsg?.message.fileId != nil {
-      HStack {
+      HStack(alignment: .top, spacing: 4) {
         Image(systemName: "photo.fill")
           .font(.caption)
           .foregroundColor(.secondary)
-
+          .padding(.top, 5)
         Text(
           (lastMsg?.message.hasText == true ? lastMsg?.displayText ?? "" : "Photo")
             .replacingOccurrences(of: "\n", with: " ")
