@@ -389,6 +389,10 @@ export interface Dialog {
      * @generated from protobuf field: optional int64 chat_id = 7;
      */
     chatId?: bigint;
+    /**
+     * @generated from protobuf field: optional bool unread_mark = 8;
+     */
+    unreadMark?: boolean;
 }
 /**
  * A thread
@@ -1492,6 +1496,12 @@ export interface RpcCall {
          */
         deleteMember: DeleteMemberInput;
     } | {
+        oneofKind: "markAsUnread";
+        /**
+         * @generated from protobuf field: MarkAsUnreadInput markAsUnread = 24;
+         */
+        markAsUnread: MarkAsUnreadInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1639,6 +1649,12 @@ export interface RpcResult {
          */
         deleteMember: DeleteMemberResult;
     } | {
+        oneofKind: "markAsUnread";
+        /**
+         * @generated from protobuf field: MarkAsUnreadResult markAsUnread = 24;
+         */
+        markAsUnread: MarkAsUnreadResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1667,6 +1683,30 @@ export interface DeleteMemberInput {
  * @generated from protobuf message DeleteMemberResult
  */
 export interface DeleteMemberResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * Mark dialog as unread
+ *
+ * @generated from protobuf message MarkAsUnreadInput
+ */
+export interface MarkAsUnreadInput {
+    /**
+     * Peer ID to mark as unread
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+}
+/**
+ * Mark dialog as unread result
+ *
+ * @generated from protobuf message MarkAsUnreadResult
+ */
+export interface MarkAsUnreadResult {
     /**
      * @generated from protobuf field: repeated Update updates = 1;
      */
@@ -2397,6 +2437,12 @@ export interface Update {
          */
         newMessageNotification: UpdateNewMessageNotification;
     } | {
+        oneofKind: "markAsUnread";
+        /**
+         * @generated from protobuf field: UpdateMarkAsUnread mark_as_unread = 23;
+         */
+        markAsUnread: UpdateMarkAsUnread;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2515,6 +2561,25 @@ export interface UpdateReadMaxId {
      * @generated from protobuf field: int32 unread_count = 4;
      */
     unreadCount: number;
+}
+/**
+ * Update when a dialog is marked as unread
+ *
+ * @generated from protobuf message UpdateMarkAsUnread
+ */
+export interface UpdateMarkAsUnread {
+    /**
+     * Peer ID of the dialog that was marked as unread
+     *
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * Whether it's marked as unread (true) or not (false)
+     *
+     * @generated from protobuf field: bool unread_mark = 2;
+     */
+    unreadMark: boolean;
 }
 /**
  * Update when a new chat is created either in space or a private chat
@@ -3052,7 +3117,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: DELETE_MEMBER = 22;
      */
-    DELETE_MEMBER = 22
+    DELETE_MEMBER = 22,
+    /**
+     * @generated from protobuf enum value: MARK_AS_UNREAD = 23;
+     */
+    MARK_AS_UNREAD = 23
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -4112,7 +4181,8 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 4, name: "pinned", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 5, name: "read_max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "unread_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 7, name: "chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 7, name: "chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "unread_mark", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Dialog>): Dialog {
@@ -4147,6 +4217,9 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional int64 chat_id */ 7:
                     message.chatId = reader.int64().toBigInt();
                     break;
+                case /* optional bool unread_mark */ 8:
+                    message.unreadMark = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4180,6 +4253,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional int64 chat_id = 7; */
         if (message.chatId !== undefined)
             writer.tag(7, WireType.Varint).int64(message.chatId);
+        /* optional bool unread_mark = 8; */
+        if (message.unreadMark !== undefined)
+            writer.tag(8, WireType.Varint).bool(message.unreadMark);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6138,7 +6214,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 20, name: "getUserSettings", kind: "message", oneof: "input", T: () => GetUserSettingsInput },
             { no: 21, name: "sendComposeAction", kind: "message", oneof: "input", T: () => SendComposeActionInput },
             { no: 22, name: "createBot", kind: "message", oneof: "input", T: () => CreateBotInput },
-            { no: 23, name: "deleteMember", kind: "message", oneof: "input", T: () => DeleteMemberInput }
+            { no: 23, name: "deleteMember", kind: "message", oneof: "input", T: () => DeleteMemberInput },
+            { no: 24, name: "markAsUnread", kind: "message", oneof: "input", T: () => MarkAsUnreadInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -6289,6 +6366,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         deleteMember: DeleteMemberInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteMember)
                     };
                     break;
+                case /* MarkAsUnreadInput markAsUnread */ 24:
+                    message.input = {
+                        oneofKind: "markAsUnread",
+                        markAsUnread: MarkAsUnreadInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).markAsUnread)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6370,6 +6453,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DeleteMemberInput deleteMember = 23; */
         if (message.input.oneofKind === "deleteMember")
             DeleteMemberInput.internalBinaryWrite(message.input.deleteMember, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
+        /* MarkAsUnreadInput markAsUnread = 24; */
+        if (message.input.oneofKind === "markAsUnread")
+            MarkAsUnreadInput.internalBinaryWrite(message.input.markAsUnread, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6406,7 +6492,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 20, name: "getUserSettings", kind: "message", oneof: "result", T: () => GetUserSettingsResult },
             { no: 21, name: "sendComposeAction", kind: "message", oneof: "result", T: () => SendComposeActionResult },
             { no: 22, name: "createBot", kind: "message", oneof: "result", T: () => CreateBotResult },
-            { no: 23, name: "deleteMember", kind: "message", oneof: "result", T: () => DeleteMemberResult }
+            { no: 23, name: "deleteMember", kind: "message", oneof: "result", T: () => DeleteMemberResult },
+            { no: 24, name: "markAsUnread", kind: "message", oneof: "result", T: () => MarkAsUnreadResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -6557,6 +6644,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         deleteMember: DeleteMemberResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteMember)
                     };
                     break;
+                case /* MarkAsUnreadResult markAsUnread */ 24:
+                    message.result = {
+                        oneofKind: "markAsUnread",
+                        markAsUnread: MarkAsUnreadResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).markAsUnread)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6638,6 +6731,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DeleteMemberResult deleteMember = 23; */
         if (message.result.oneofKind === "deleteMember")
             DeleteMemberResult.internalBinaryWrite(message.result.deleteMember, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
+        /* MarkAsUnreadResult markAsUnread = 24; */
+        if (message.result.oneofKind === "markAsUnread")
+            MarkAsUnreadResult.internalBinaryWrite(message.result.markAsUnread, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6750,6 +6846,99 @@ class DeleteMemberResult$Type extends MessageType<DeleteMemberResult> {
  * @generated MessageType for protobuf message DeleteMemberResult
  */
 export const DeleteMemberResult = new DeleteMemberResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MarkAsUnreadInput$Type extends MessageType<MarkAsUnreadInput> {
+    constructor() {
+        super("MarkAsUnreadInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer }
+        ]);
+    }
+    create(value?: PartialMessage<MarkAsUnreadInput>): MarkAsUnreadInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MarkAsUnreadInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MarkAsUnreadInput): MarkAsUnreadInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MarkAsUnreadInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MarkAsUnreadInput
+ */
+export const MarkAsUnreadInput = new MarkAsUnreadInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MarkAsUnreadResult$Type extends MessageType<MarkAsUnreadResult> {
+    constructor() {
+        super("MarkAsUnreadResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<MarkAsUnreadResult>): MarkAsUnreadResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<MarkAsUnreadResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MarkAsUnreadResult): MarkAsUnreadResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MarkAsUnreadResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MarkAsUnreadResult
+ */
+export const MarkAsUnreadResult = new MarkAsUnreadResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CreateBotInput$Type extends MessageType<CreateBotInput> {
     constructor() {
@@ -8691,7 +8880,8 @@ class Update$Type extends MessageType<Update> {
             { no: 19, name: "join_space", kind: "message", oneof: "update", T: () => UpdateJoinSpace },
             { no: 20, name: "update_read_max_id", kind: "message", oneof: "update", T: () => UpdateReadMaxId },
             { no: 21, name: "update_user_settings", kind: "message", oneof: "update", T: () => UpdateUserSettings },
-            { no: 22, name: "new_message_notification", kind: "message", oneof: "update", T: () => UpdateNewMessageNotification }
+            { no: 22, name: "new_message_notification", kind: "message", oneof: "update", T: () => UpdateNewMessageNotification },
+            { no: 23, name: "mark_as_unread", kind: "message", oneof: "update", T: () => UpdateMarkAsUnread }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -8820,6 +9010,12 @@ class Update$Type extends MessageType<Update> {
                         newMessageNotification: UpdateNewMessageNotification.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).newMessageNotification)
                     };
                     break;
+                case /* UpdateMarkAsUnread mark_as_unread */ 23:
+                    message.update = {
+                        oneofKind: "markAsUnread",
+                        markAsUnread: UpdateMarkAsUnread.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).markAsUnread)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8889,6 +9085,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateNewMessageNotification new_message_notification = 22; */
         if (message.update.oneofKind === "newMessageNotification")
             UpdateNewMessageNotification.internalBinaryWrite(message.update.newMessageNotification, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateMarkAsUnread mark_as_unread = 23; */
+        if (message.update.oneofKind === "markAsUnread")
+            UpdateMarkAsUnread.internalBinaryWrite(message.update.markAsUnread, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9222,6 +9421,60 @@ class UpdateReadMaxId$Type extends MessageType<UpdateReadMaxId> {
  * @generated MessageType for protobuf message UpdateReadMaxId
  */
 export const UpdateReadMaxId = new UpdateReadMaxId$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateMarkAsUnread$Type extends MessageType<UpdateMarkAsUnread> {
+    constructor() {
+        super("UpdateMarkAsUnread", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "unread_mark", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateMarkAsUnread>): UpdateMarkAsUnread {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.unreadMark = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateMarkAsUnread>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateMarkAsUnread): UpdateMarkAsUnread {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* bool unread_mark */ 2:
+                    message.unreadMark = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateMarkAsUnread, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool unread_mark = 2; */
+        if (message.unreadMark !== false)
+            writer.tag(2, WireType.Varint).bool(message.unreadMark);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateMarkAsUnread
+ */
+export const UpdateMarkAsUnread = new UpdateMarkAsUnread$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateNewChat$Type extends MessageType<UpdateNewChat> {
     constructor() {

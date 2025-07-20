@@ -45,14 +45,22 @@ export const handler = async (
   }
 
   if (maxId === undefined) {
-    // chat is empty or last message is nil
-    //throw new InlineError(InlineError.ApiError.INTERNAL)
+    // chat is empty or last message is nil, but we still want to clear unreadMark
+    await db
+      .update(dialogs)
+      .set({ unreadMark: false })
+      .where(
+        and(
+          peerUserId ? eq(dialogs.peerUserId, peerUserId) : eq(dialogs.chatId, peerThreadId!),
+          eq(dialogs.userId, context.currentUserId),
+        ),
+      )
     return {}
   }
 
   const _ = await db
     .update(dialogs)
-    .set({ readInboxMaxId: maxId })
+    .set({ readInboxMaxId: maxId, unreadMark: false })
     .where(
       and(
         peerUserId ? eq(dialogs.peerUserId, peerUserId) : eq(dialogs.chatId, peerThreadId!),

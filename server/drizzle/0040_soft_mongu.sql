@@ -1,0 +1,1 @@
+ALTER TABLE "dialogs" ADD COLUMN "unread_mark" boolean DEFAULT false;
