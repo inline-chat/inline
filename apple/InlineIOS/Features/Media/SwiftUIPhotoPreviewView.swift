@@ -52,6 +52,13 @@ class SwiftUIPhotoPreviewViewModel: ObservableObject {
 
   func removePhoto(at index: Int) {
     guard index < photoItems.count else { return }
+
+    // Always save current caption before any photo removal
+    updateCaption(at: currentIndex, caption: caption)
+
+    let wasCurrentPhoto = currentIndex == index
+    let transitioningToSingle = photoItems.count == 2 // Will become 1 after removal
+
     photoItems.remove(at: index)
 
     if photoItems.isEmpty {
@@ -61,7 +68,16 @@ class SwiftUIPhotoPreviewViewModel: ObservableObject {
       if currentIndex >= photoItems.count {
         currentIndex = photoItems.count - 1
       }
-      updateCaptionForCurrentPhoto()
+
+      // When transitioning to single photo mode, preserve the current caption
+      if transitioningToSingle {
+        // Keep current caption text, don't reload from photo item
+        updateCaption(at: currentIndex, caption: caption)
+      } else if wasCurrentPhoto {
+        // If we removed current photo but still in multi-photo mode, load new photo's caption
+        updateCaptionForCurrentPhoto()
+      }
+      // If we removed a different photo, keep current caption as-is
     }
   }
 
@@ -131,6 +147,7 @@ struct SwiftUIPhotoPreviewView: View {
   @State private var lastScale: CGFloat = 1.0
   @State private var lastOffset: CGSize = .zero
   @State private var keyboardHeight: CGFloat = 0
+  @State private var wasMultiplePhotos: Bool = false
 
   @FocusState private var isCaptionFocused: Bool
 
@@ -204,12 +221,15 @@ struct SwiftUIPhotoPreviewView: View {
     }
     .overlay(alignment: .topLeading) {
       closeButton
-
         .padding(.leading, 16)
+        .padding(.top, 16)
     }
     .overlay(alignment: .topTrailing) {
-      photoCountCircle
-        .padding(.trailing, 16)
+      if viewModel.hasMultiplePhotos {
+        photoCounter
+          .padding(.trailing, 16)
+          .padding(.top, 16)
+      }
     }
     .overlay(alignment: .bottom) {
       VStack(spacing: 0) {
@@ -223,6 +243,15 @@ struct SwiftUIPhotoPreviewView: View {
     .onAppear {
       setupKeyboardObservers()
       viewModel.updateCaptionForCurrentPhoto()
+      wasMultiplePhotos = viewModel.hasMultiplePhotos
+    }
+    .onChange(of: viewModel.hasMultiplePhotos) { _, newValue in
+      // Detect transition from multiple to single photo mode
+      if wasMultiplePhotos, !newValue {
+        // Preserve current caption when transitioning to single photo mode
+        viewModel.updateCaption(at: viewModel.currentIndex, caption: viewModel.caption)
+      }
+      wasMultiplePhotos = newValue
     }
     .onDisappear {
       removeKeyboardObservers()
@@ -311,45 +340,56 @@ struct SwiftUIPhotoPreviewView: View {
   }
 
   private var photoPreviewStrip: some View {
-    ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: thumbnailSpacing) {
-        ForEach(Array(viewModel.photoItems.enumerated()), id: \.element.id) { index, photoItem in
-          ZStack {
-            Image(uiImage: photoItem.image)
-              .resizable()
-              .aspectRatio(contentMode: .fill)
-              .frame(width: thumbnailSize, height: thumbnailSize)
-              .clipped()
-              .cornerRadius(8)
-              .overlay {
-                ZStack {
-                  RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.black.opacity(0.2))
-                    .stroke(
-                      index == viewModel.currentIndex ? ThemeManager.shared.accentColor : Color.clear,
-                      lineWidth: 2
-                    )
-                  if viewModel.currentIndex == index {
-                    Image(systemName: "trash.fill")
-                      .foregroundColor(.white)
-                      .font(.body)
+    GeometryReader { geometry in
+      let stripWidth = geometry.size.width
+      let totalThumbnailsWidth = CGFloat(viewModel.photoItems.count) * thumbnailSize +
+        CGFloat(viewModel.photoItems.count - 1) * thumbnailSpacing
+      let shouldCenter = totalThumbnailsWidth < stripWidth - (bottomContentPadding * 2)
+
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: thumbnailSpacing) {
+          ForEach(Array(viewModel.photoItems.enumerated()), id: \.element.id) { index, photoItem in
+            ZStack {
+              Image(uiImage: photoItem.image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: thumbnailSize, height: thumbnailSize)
+                .clipped()
+                .cornerRadius(8)
+                .overlay {
+                  ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                      .fill(Color.black.opacity(0.2))
+                      .stroke(
+                        index == viewModel.currentIndex ? ThemeManager.shared.accentColor : Color.clear,
+                        lineWidth: 2
+                      )
+                    if viewModel.currentIndex == index {
+                      Image(systemName: "trash.fill")
+                        .foregroundColor(.white)
+                        .font(.body)
+                    }
                   }
                 }
-              }
-              .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                  if viewModel.currentIndex != index {
-                    viewModel.currentIndex = index
-                    viewModel.updateCaptionForCurrentPhoto()
-                  } else {
-                    viewModel.removePhoto(at: index)
+                .onTapGesture {
+                  withAnimation(.easeInOut(duration: 0.2)) {
+                    if viewModel.currentIndex != index {
+                      viewModel.currentIndex = index
+                      viewModel.updateCaptionForCurrentPhoto()
+                    } else {
+                      viewModel.removePhoto(at: index)
+                    }
                   }
                 }
-              }
+            }
           }
         }
+        .padding(.horizontal, bottomContentPadding)
+        .frame(
+          width: max(totalThumbnailsWidth + (bottomContentPadding * 2), stripWidth),
+          alignment: shouldCenter ? .center : .leading
+        )
       }
-      .padding(.horizontal, bottomContentPadding)
     }
     .frame(height: previewStripHeight)
   }
