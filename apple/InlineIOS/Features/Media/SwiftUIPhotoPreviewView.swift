@@ -165,7 +165,7 @@ struct SwiftUIPhotoPreviewView: View {
   private let animationDuration: TimeInterval = 0.3
   private let thumbnailSize: CGFloat = 50
   private let thumbnailSpacing: CGFloat = 4
-  private let previewStripHeight: CGFloat = 68
+  private let previewStripHeight: CGFloat = 58
 
   // Computed properties for consistent sizing
   private var sendButtonSize: CGFloat {
@@ -300,7 +300,7 @@ struct SwiftUIPhotoPreviewView: View {
         .foregroundColor(ThemeManager.shared.textSecondaryColor)
     }
     .padding(.horizontal, 12)
-    .frame(height: 32)
+    .frame(height: closeButtonSize)
     .fixedSize(horizontal: true, vertical: false)
     .background {
       if #available(iOS 26.0, *) {
