@@ -37,7 +37,7 @@ class LiquidGlassComposeView: UIView {
   var selectedImage: UIImage?
   var showingPhotoPreview: Bool = false
   var imageCaption: String = ""
-  let previewViewModel = PhotoPreviewViewModel()
+  let previewViewModel = SwiftUIPhotoPreviewViewModel()
   var attachmentItems: [UIImage: FileMediaItem] = [:]
 
   var onHeightChange: ((CGFloat) -> Void)?

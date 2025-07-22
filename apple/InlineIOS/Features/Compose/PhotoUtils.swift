@@ -9,7 +9,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   // MARK: - UIImagePickerControllerDelegate
 
   func presentPicker() {
-    guard let windowScene = window?.windowScene else { return }
+    guard let windowScene = window?.windowScene, !isPickerPresented else { return }
 
     var configuration = PHPickerConfiguration(photoLibrary: .shared())
     configuration.filter = .images
@@ -17,6 +17,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
     let picker = PHPickerViewController(configuration: configuration)
     picker.delegate = self
+    isPickerPresented = true
 
     let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow })
     let rootVC = keyWindow?.rootViewController
@@ -78,12 +79,15 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       ),
       onSend: { [weak self] image, caption in
         self?.sendImage(image, caption: caption)
+      },
+      onAddMorePhotos: { [weak self] in
+        self?.presentPicker()
       }
     )
 
     let previewVC = UIHostingController(rootView: previewView)
-    previewVC.modalPresentationStyle = .fullScreen
-    previewVC.modalTransitionStyle = .crossDissolve
+    previewVC.modalPresentationStyle = UIModalPresentationStyle.fullScreen
+    previewVC.modalTransitionStyle = UIModalTransitionStyle.crossDissolve
 
     if let windowScene = window?.windowScene,
        let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
@@ -105,7 +109,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     multiPhotoPreviewViewModel.setPhotos(images)
     multiPhotoPreviewViewModel.isPresented = true
 
-    let multiPreviewView = MultiPhotoPreviewView(
+    let multiPreviewView = SwiftUIPhotoPreviewView(
       viewModel: multiPhotoPreviewViewModel,
       isPresented: Binding(
         get: { [weak self] in self?.multiPhotoPreviewViewModel.isPresented ?? false },
@@ -118,6 +122,9 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       ),
       onSend: { [weak self] photoItems in
         self?.sendMultipleImages(photoItems)
+      },
+      onAddMorePhotos: { [weak self] in
+        self?.presentPicker()
       }
     )
 
@@ -155,7 +162,9 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     let picker = topmostVC.presentingViewController as? PHPickerViewController
 
     topmostVC.dismiss(animated: true) { [weak self] in
-      picker?.dismiss(animated: true)
+      picker?.dismiss(animated: true) {
+        self?.isPickerPresented = false
+      }
       self?.selectedImage = nil
       self?.previewViewModel.caption = ""
       self?.previewViewModel.isPresented = false
@@ -184,7 +193,9 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     let picker = topmostVC.presentingViewController as? PHPickerViewController
 
     topmostVC.dismiss(animated: true) { [weak self] in
-      picker?.dismiss(animated: true)
+      picker?.dismiss(animated: true) {
+        self?.isPickerPresented = false
+      }
       self?.multiPhotoPreviewViewModel.photoItems.removeAll()
       self?.multiPhotoPreviewViewModel.currentIndex = 0
       self?.multiPhotoPreviewViewModel.isPresented = false
@@ -295,12 +306,15 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       ),
       onSend: { [weak self] image, caption in
         self?.sendImage(image, caption: caption)
+      },
+      onAddMorePhotos: { [weak self] in
+        self?.presentPicker()
       }
     )
 
     let previewVC = UIHostingController(rootView: previewView)
-    previewVC.modalPresentationStyle = .fullScreen
-    previewVC.modalTransitionStyle = .crossDissolve
+    previewVC.modalPresentationStyle = UIModalPresentationStyle.fullScreen
+    previewVC.modalTransitionStyle = UIModalTransitionStyle.crossDissolve
 
     var responder: UIResponder? = self
     while let nextResponder = responder?.next {
@@ -334,9 +348,13 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 extension ComposeView: PHPickerViewControllerDelegate {
   func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
     guard !results.isEmpty else {
-      picker.dismiss(animated: true)
+      picker.dismiss(animated: true) { [weak self] in
+        self?.isPickerPresented = false
+      }
       return
     }
+    
+    isPickerPresented = false
 
     // If only one photo selected, use the original single preview
     if results.count == 1 {
@@ -347,14 +365,18 @@ extension ComposeView: PHPickerViewControllerDelegate {
         if let error {
           Log.shared.debug("Failed to load image:", file: error.localizedDescription)
           DispatchQueue.main.async {
-            picker.dismiss(animated: true)
+            picker.dismiss(animated: true) { [weak self] in
+              self?.isPickerPresented = false
+            }
           }
           return
         }
 
         guard let image = object as? UIImage else {
           DispatchQueue.main.async {
-            picker.dismiss(animated: true)
+            picker.dismiss(animated: true) { [weak self] in
+              self?.isPickerPresented = false
+            }
           }
           return
         }
@@ -380,6 +402,9 @@ extension ComposeView: PHPickerViewControllerDelegate {
             ),
             onSend: { [weak self] image, caption in
               self?.sendImage(image, caption: caption)
+            },
+            onAddMorePhotos: { [weak self] in
+              self?.presentPicker()
             }
           )
 
@@ -430,7 +455,9 @@ extension ComposeView: PHPickerViewControllerDelegate {
       let sortedImages = loadedImages.sorted { $0.index < $1.index }.map(\.image)
 
       guard !sortedImages.isEmpty else {
-        picker.dismiss(animated: true)
+        picker.dismiss(animated: true) { [weak self] in
+          self?.isPickerPresented = false
+        }
         return
       }
 
@@ -438,7 +465,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
       multiPhotoPreviewViewModel.setPhotos(sortedImages)
       multiPhotoPreviewViewModel.isPresented = true
 
-      let multiPreviewView = MultiPhotoPreviewView(
+      let multiPreviewView = SwiftUIPhotoPreviewView(
         viewModel: multiPhotoPreviewViewModel,
         isPresented: Binding(
           get: { [weak self] in self?.multiPhotoPreviewViewModel.isPresented ?? false },
@@ -451,12 +478,15 @@ extension ComposeView: PHPickerViewControllerDelegate {
         ),
         onSend: { [weak self] photoItems in
           self?.sendMultipleImages(photoItems)
+        },
+        onAddMorePhotos: { [weak self] in
+          self?.presentPicker()
         }
       )
 
       let previewVC = UIHostingController(rootView: multiPreviewView)
-      previewVC.modalPresentationStyle = .fullScreen
-      previewVC.modalTransitionStyle = .crossDissolve
+      previewVC.modalPresentationStyle = UIModalPresentationStyle.fullScreen
+      previewVC.modalTransitionStyle = UIModalTransitionStyle.crossDissolve
 
       picker.present(previewVC, animated: true)
     }
