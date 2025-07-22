@@ -1,18 +1,135 @@
 import SwiftUI
 
+public struct PhotoItem: Identifiable {
+  public let id = UUID()
+  public let image: UIImage
+  public var caption: String?
+
+  public init(image: UIImage, caption: String? = nil) {
+    self.image = image
+    self.caption = caption
+  }
+}
+
+class SwiftUIPhotoPreviewViewModel: ObservableObject {
+  @Published var photoItems: [PhotoItem] = []
+  @Published var currentIndex: Int = 0
+  @Published var isPresented: Bool = false
+  @Published var caption: String = ""
+
+  func setPhotos(_ images: [UIImage]) {
+    photoItems = images.map { PhotoItem(image: $0, caption: nil) }
+    currentIndex = 0
+    if let firstPhoto = photoItems.first {
+      caption = firstPhoto.caption ?? ""
+    }
+  }
+
+  func setSinglePhoto(_ image: UIImage, caption: String = "") {
+    photoItems = [PhotoItem(image: image, caption: caption.isEmpty ? nil : caption)]
+    currentIndex = 0
+    self.caption = caption
+  }
+
+  func addPhoto(_ image: UIImage) {
+    // Save current caption before adding new photo
+    if currentIndex < photoItems.count {
+      updateCaption(at: currentIndex, caption: caption)
+    }
+
+    photoItems.append(PhotoItem(image: image, caption: nil))
+  }
+
+  func addPhotos(_ images: [UIImage]) {
+    // Save current caption before adding new photos
+    if currentIndex < photoItems.count {
+      updateCaption(at: currentIndex, caption: caption)
+    }
+
+    let newPhotoItems = images.map { PhotoItem(image: $0, caption: nil) }
+    photoItems.append(contentsOf: newPhotoItems)
+  }
+
+  func removePhoto(at index: Int) {
+    guard index < photoItems.count else { return }
+    photoItems.remove(at: index)
+
+    if photoItems.isEmpty {
+      currentIndex = 0
+      caption = ""
+    } else {
+      if currentIndex >= photoItems.count {
+        currentIndex = photoItems.count - 1
+      }
+      updateCaptionForCurrentPhoto()
+    }
+  }
+
+  func updateCaption(at index: Int, caption: String) {
+    guard index < photoItems.count else { return }
+    photoItems[index].caption = caption.isEmpty ? nil : caption
+  }
+
+  func updateCaptionForCurrentPhoto() {
+    guard currentIndex < photoItems.count else { return }
+    caption = photoItems[currentIndex].caption ?? ""
+  }
+
+  var currentPhoto: PhotoItem? {
+    guard currentIndex < photoItems.count else { return nil }
+    return photoItems[currentIndex]
+  }
+
+  var hasMultiplePhotos: Bool {
+    photoItems.count > 1
+  }
+}
+
 struct SwiftUIPhotoPreviewView: View {
-  let image: UIImage
-  @Binding var caption: String
+  @ObservedObject var viewModel: SwiftUIPhotoPreviewViewModel
   @Binding var isPresented: Bool
-  let onSend: (UIImage, String) -> Void
+  let onSend: ([PhotoItem]) -> Void
+  let onAddMorePhotos: (() -> Void)?
   let onSave: ((UIImage) -> Void)? = nil
   let onShare: ((UIImage) -> Void)? = nil
+
+  // Legacy single photo constructor
+  init(
+    image: UIImage,
+    caption: Binding<String>,
+    isPresented: Binding<Bool>,
+    onSend: @escaping (UIImage, String) -> Void,
+    onAddMorePhotos: (() -> Void)? = nil
+  ) {
+    let vm = SwiftUIPhotoPreviewViewModel()
+    vm.setSinglePhoto(image, caption: caption.wrappedValue)
+    viewModel = vm
+    _isPresented = isPresented
+    self.onAddMorePhotos = onAddMorePhotos
+    self.onSend = { photoItems in
+      if let firstPhoto = photoItems.first {
+        onSend(firstPhoto.image, firstPhoto.caption ?? "")
+      }
+    }
+  }
+
+  // Multi photo constructor
+  init(
+    viewModel: SwiftUIPhotoPreviewViewModel,
+    isPresented: Binding<Bool>,
+    onSend: @escaping ([PhotoItem]) -> Void,
+    onAddMorePhotos: (() -> Void)? = nil
+  ) {
+    self.viewModel = viewModel
+    _isPresented = isPresented
+    self.onSend = onSend
+    self.onAddMorePhotos = onAddMorePhotos
+  }
 
   @State private var scale: CGFloat = 1.0
   @State private var offset: CGSize = .zero
   @State private var lastScale: CGFloat = 1.0
   @State private var lastOffset: CGSize = .zero
-  @State private var showingActions = true
   @State private var keyboardHeight: CGFloat = 0
 
   @FocusState private var isCaptionFocused: Bool
@@ -29,6 +146,9 @@ struct SwiftUIPhotoPreviewView: View {
   private let bottomContentSpacing: CGFloat = 12
   private let bottomContentPadding: CGFloat = 20
   private let animationDuration: TimeInterval = 0.3
+  private let thumbnailSize: CGFloat = 50
+  private let thumbnailSpacing: CGFloat = 4
+  private let previewStripHeight: CGFloat = 68
 
   // Computed properties for consistent sizing
   private var sendButtonSize: CGFloat {
@@ -41,125 +161,68 @@ struct SwiftUIPhotoPreviewView: View {
         // Background
         ThemeManager.shared.backgroundColorSwiftUI
           .ignoresSafeArea()
-          .onTapGesture {
-            withAnimation(.easeInOut(duration: animationDuration)) {
-              showingActions.toggle()
-            }
-          }
 
         // Main image with zoom and pan
-        Image(uiImage: image)
-          .resizable()
-          .aspectRatio(contentMode: .fit)
-          .frame(maxHeight: geometry.size.height * 0.6)
-          .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
-          .scaleEffect(scale)
-          .offset(offset)
-          .gesture(
-            SimultaneousGesture(
-              // Magnification gesture
-              MagnificationGesture()
-                .onChanged { value in
-                  let newScale = lastScale * value
-                  scale = min(max(newScale, minScale), maxScale)
-                }
-                .onEnded { _ in
-                  lastScale = scale
-
-                  // Snap back if too small
-                  if scale < 1.0 {
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                      scale = 1.0
-                      offset = .zero
-                    }
-                    lastScale = 1.0
-                    lastOffset = .zero
-                  }
-                },
-
-              // Drag gesture
-              DragGesture()
-                .onChanged { value in
-                  let newOffset = CGSize(
-                    width: lastOffset.width + value.translation.width,
-                    height: lastOffset.height + value.translation.height
+        if let currentPhoto = viewModel.currentPhoto {
+          if viewModel.hasMultiplePhotos {
+            TabView(selection: $viewModel.currentIndex) {
+              ForEach(Array(viewModel.photoItems.enumerated()), id: \.element.id) { index, photoItem in
+                Image(uiImage: photoItem.image)
+                  .resizable()
+                  .scaledToFit()
+                  .frame(
+                    maxWidth: geometry.size.width * 0.95,
+                    maxHeight: geometry.size.height * 0.8
                   )
-                  offset = newOffset
-                }
-                .onEnded { _ in
-                  lastOffset = offset
-
-                  // Snap back to center if scale is 1.0
-                  if scale <= 1.0 {
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                      offset = .zero
-                    }
-                    lastOffset = .zero
-                  } else {
-                    // Constrain offset to keep image visible
-                    let maxOffsetX = (geometry.size.width * (scale - 1)) / 2
-                    let maxOffsetY = (geometry.size.height * (scale - 1)) / 2
-
-                    let constrainedOffset = CGSize(
-                      width: min(max(offset.width, -maxOffsetX), maxOffsetX),
-                      height: min(max(offset.height, -maxOffsetY), maxOffsetY)
-                    )
-
-                    if constrainedOffset != offset {
-                      withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        offset = constrainedOffset
-                      }
-                      lastOffset = constrainedOffset
-                    }
-                  }
-                }
-            )
-          )
-          .onTapGesture(count: 2) {
-            // Double tap to zoom
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-              if scale > 1.0 {
-                scale = 1.0
-                offset = .zero
-              } else {
-                scale = 2.0
+                  .tag(index)
               }
             }
-            lastScale = scale
-            lastOffset = offset
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            .onChange(of: viewModel.currentIndex) { oldValue, newValue in
+              handlePhotoChange(from: oldValue, to: newValue)
+            }
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+          } else {
+            Image(uiImage: currentPhoto.image)
+              .resizable()
+              .scaledToFit()
+              .frame(
+                maxWidth: geometry.size.width * 0.95,
+                maxHeight: geometry.size.height * 0.8
+              )
+              .scaleEffect(scale)
+              .offset(offset)
+              .gesture(zoomAndPanGesture(geometry: geometry))
+              .onTapGesture(count: 2) {
+                doubleTapToZoom()
+              }
           }
+        }
 
         // Top controls
-        if showingActions {
-          VStack {
-            HStack {
-              // Close button
-              closeButton
+      }
+    }
+    .overlay(alignment: .topLeading) {
+      closeButton
 
-              Spacer()
-            }
-            .padding(.horizontal, bottomContentPadding)
-            .padding(.top, bottomContentPadding)
-
-            Spacer()
-          }
-          .transition(.move(edge: .top).combined(with: .opacity))
+        .padding(.leading, 16)
+    }
+    .overlay(alignment: .topTrailing) {
+      photoCountCircle
+        .padding(.trailing, 16)
+    }
+    .overlay(alignment: .bottom) {
+      VStack(spacing: 0) {
+        if !isCaptionFocused, viewModel.hasMultiplePhotos {
+          photoPreviewStrip
         }
-
-        // Bottom caption and send controls
-        if showingActions {
-          VStack {
-            Spacer()
-
-            bottomContent
-          }
-          .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
+        bottomContent
       }
     }
     .statusBarHidden()
     .onAppear {
       setupKeyboardObservers()
+      viewModel.updateCaptionForCurrentPhoto()
     }
     .onDisappear {
       removeKeyboardObservers()
@@ -198,6 +261,126 @@ struct SwiftUIPhotoPreviewView: View {
     .buttonStyle(ScaleButtonStyle2())
   }
 
+  private var photoCounter: some View {
+    HStack(spacing: 2) {
+      Text("\(viewModel.currentIndex + 1)")
+        .font(.body)
+        .foregroundColor(ThemeManager.shared.textPrimaryColor)
+      Text("of \(viewModel.photoItems.count)")
+        .font(.body)
+        .foregroundColor(ThemeManager.shared.textSecondaryColor)
+    }
+    .padding(.horizontal, 12)
+    .frame(height: 32)
+    .fixedSize(horizontal: true, vertical: false)
+    .background {
+      if #available(iOS 26.0, *) {
+        Capsule()
+          .fill(ThemeManager.shared.cardBackgroundColor)
+          .glassEffect(.regular, in: Capsule(), isEnabled: true)
+      } else {
+        Capsule()
+          .fill(ThemeManager.shared.surfaceBackgroundColor)
+      }
+    }
+  }
+
+  // Displays the total number of photos in a circular badge shown in the
+  // top-bar trailing position. It is hidden when there is only one photo.
+  private var photoCountCircle: some View {
+    Group {
+      if viewModel.photoItems.count > 1 {
+        Text("\(viewModel.currentIndex + 1)")
+          .font(.callout.bold())
+          .foregroundColor(ThemeManager.shared.textPrimaryColor)
+          .frame(width: closeButtonSize, height: closeButtonSize)
+          .background(
+            Group {
+              if #available(iOS 26.0, *) {
+                Circle()
+                  .fill(ThemeManager.shared.cardBackgroundColor)
+                  .glassEffect(.regular, in: Circle(), isEnabled: true)
+              } else {
+                Circle()
+                  .fill(ThemeManager.shared.surfaceBackgroundColor)
+              }
+            }
+          )
+      }
+    }
+  }
+
+  private var photoPreviewStrip: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: thumbnailSpacing) {
+        ForEach(Array(viewModel.photoItems.enumerated()), id: \.element.id) { index, photoItem in
+          ZStack {
+            Image(uiImage: photoItem.image)
+              .resizable()
+              .aspectRatio(contentMode: .fill)
+              .frame(width: thumbnailSize, height: thumbnailSize)
+              .clipped()
+              .cornerRadius(8)
+              .overlay {
+                ZStack {
+                  RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.black.opacity(0.2))
+                    .stroke(
+                      index == viewModel.currentIndex ? ThemeManager.shared.accentColor : Color.clear,
+                      lineWidth: 2
+                    )
+                  if viewModel.currentIndex == index {
+                    Image(systemName: "trash.fill")
+                      .foregroundColor(.white)
+                      .font(.body)
+                  }
+                }
+              }
+              .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                  if viewModel.currentIndex != index {
+                    viewModel.currentIndex = index
+                    viewModel.updateCaptionForCurrentPhoto()
+                  } else {
+                    viewModel.removePhoto(at: index)
+                  }
+                }
+              }
+          }
+        }
+      }
+      .padding(.horizontal, bottomContentPadding)
+    }
+    .frame(height: previewStripHeight)
+  }
+
+  private var captionTextField: some View {
+    TextField("Add a caption...", text: $viewModel.caption, axis: .vertical)
+      .focused($isCaptionFocused)
+      .font(.system(size: 16))
+      .foregroundColor(ThemeManager.shared.textPrimaryColor)
+      .padding(.horizontal, textFieldHorizontalPadding)
+      .padding(.vertical, textFieldVerticalPadding)
+      .background {
+        RoundedRectangle(cornerRadius: 20)
+          .fill(ThemeManager.shared.backgroundColorSwiftUI)
+          .stroke(ThemeManager.shared.borderColor, lineWidth: 1)
+      }
+      .lineLimit(isCaptionFocused ? (1 ... 4) : (1 ... 1))
+      .onChange(of: viewModel.caption) { _, newValue in
+        viewModel.updateCaption(at: viewModel.currentIndex, caption: newValue)
+      }
+      .onSubmit {
+        finishEditingCaption()
+      }
+      .submitLabel(.done)
+      .onTapGesture {
+        if !isCaptionFocused {
+          isCaptionFocused = true
+        }
+      }
+  }
+
   private func actionButton(systemImage: String, action: @escaping () -> Void) -> some View {
     Button(action: action) {
       if #available(iOS 26.0, *) {
@@ -224,40 +407,28 @@ struct SwiftUIPhotoPreviewView: View {
     .buttonStyle(ScaleButtonStyle2())
   }
 
-  private var captionTextField: some View {
-    TextField("Add a caption...", text: $caption, axis: .vertical)
-      .focused($isCaptionFocused)
-      .font(.system(size: 16))
-      .foregroundColor(ThemeManager.shared.textPrimaryColor)
-      .padding(.horizontal, textFieldHorizontalPadding)
-      .padding(.vertical, textFieldVerticalPadding)
-      .background {
-        RoundedRectangle(cornerRadius: 20)
-          .stroke(ThemeManager.shared.borderColor, lineWidth: 1)
-      }
-      .lineLimit(1 ... 4)
-  }
-
   private var sendButton: some View {
     Button(action: {
-      sendImage()
+      if isCaptionFocused {
+        finishEditingCaption()
+      } else {
+        sendPhotos()
+      }
     }) {
-      Image(systemName: "arrow.up")
+      Image(systemName: isCaptionFocused ? "checkmark" : "arrow.up")
         .font(.system(size: 20, weight: .semibold))
         .foregroundColor(.white)
         .frame(width: sendButtonSize, height: sendButtonSize)
         .background(
           Circle()
             .fill(ThemeManager.shared.accentColor)
-            .shadow(color: ThemeManager.shared.accentColor.opacity(0.3), radius: 8, x: 0, y: 4)
         )
     }
     .buttonStyle(ScaleButtonStyle2())
-    .disabled(caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && image == nil)
   }
 
   private var bottomContent: some View {
-    HStack(spacing: bottomContentSpacing) {
+    HStack(alignment: .bottom, spacing: bottomContentSpacing) {
       captionTextField
       sendButton
     }
@@ -267,24 +438,125 @@ struct SwiftUIPhotoPreviewView: View {
 
   // MARK: - Actions
 
-  private func sendImage() {
-    onSend(image, caption)
+  private func finishEditingCaption() {
+    isCaptionFocused = false
+    // Update the caption for the current photo
+    viewModel.updateCaption(at: viewModel.currentIndex, caption: viewModel.caption)
+  }
+
+  private func handlePhotoChange(from oldValue: Int, to newValue: Int) {
+    // Save current caption when switching photos
+    if oldValue != newValue, oldValue < viewModel.photoItems.count {
+      viewModel.updateCaption(at: oldValue, caption: viewModel.caption)
+    }
+
+    // Load caption for new photo
+    viewModel.updateCaptionForCurrentPhoto()
+
+    // Exit caption editing mode when switching photos
+    if isCaptionFocused {
+      isCaptionFocused = false
+    }
+  }
+
+  private func sendPhotos() {
+    // Update current photo's caption before sending
+    viewModel.updateCaption(at: viewModel.currentIndex, caption: viewModel.caption)
+    onSend(viewModel.photoItems)
+    isPresented = false
+  }
+
+  private func zoomAndPanGesture(geometry: GeometryProxy) -> some Gesture {
+    SimultaneousGesture(
+      // Magnification gesture
+      MagnificationGesture()
+        .onChanged { value in
+          let newScale = lastScale * value
+          scale = min(max(newScale, minScale), maxScale)
+        }
+        .onEnded { _ in
+          lastScale = scale
+
+          // Snap back if too small
+          if scale < 1.0 {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+              scale = 1.0
+              offset = .zero
+            }
+            lastScale = 1.0
+            lastOffset = .zero
+          }
+        },
+
+      // Drag gesture
+      DragGesture()
+        .onChanged { value in
+          let newOffset = CGSize(
+            width: lastOffset.width + value.translation.width,
+            height: lastOffset.height + value.translation.height
+          )
+          offset = newOffset
+        }
+        .onEnded { _ in
+          lastOffset = offset
+
+          // Snap back to center if scale is 1.0
+          if scale <= 1.0 {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+              offset = .zero
+            }
+            lastOffset = .zero
+          } else {
+            // Constrain offset to keep image visible
+            let maxOffsetX = (geometry.size.width * (scale - 1)) / 2
+            let maxOffsetY = (geometry.size.height * (scale - 1)) / 2
+
+            let constrainedOffset = CGSize(
+              width: min(max(offset.width, -maxOffsetX), maxOffsetX),
+              height: min(max(offset.height, -maxOffsetY), maxOffsetY)
+            )
+
+            if constrainedOffset != offset {
+              withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                offset = constrainedOffset
+              }
+              lastOffset = constrainedOffset
+            }
+          }
+        }
+    )
+  }
+
+  private func doubleTapToZoom() {
+    // Double tap to zoom
+    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+      if scale > 1.0 {
+        scale = 1.0
+        offset = .zero
+      } else {
+        scale = 2.0
+      }
+    }
+    lastScale = scale
+    lastOffset = offset
   }
 
   private func saveImage() {
-    UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+    guard let currentPhoto = viewModel.currentPhoto else { return }
+    UIImageWriteToSavedPhotosAlbum(currentPhoto.image, nil, nil, nil)
 
     // Show success feedback
     let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
     impactFeedback.impactOccurred()
 
     // Optional callback
-    onSave?(image)
+    onSave?(currentPhoto.image)
   }
 
   private func shareImage() {
+    guard let currentPhoto = viewModel.currentPhoto else { return }
     let activityViewController = UIActivityViewController(
-      activityItems: [image],
+      activityItems: [currentPhoto.image],
       applicationActivities: nil
     )
 
@@ -303,7 +575,7 @@ struct SwiftUIPhotoPreviewView: View {
     }
 
     // Optional callback
-    onShare?(image)
+    onShare?(currentPhoto.image)
   }
 
   // MARK: - Keyboard Handling
@@ -351,10 +623,17 @@ struct ScaleButtonStyle2: ButtonStyle {
 // MARK: - Preview
 
 #Preview {
-  SwiftUIPhotoPreviewView(
-    image: UIImage(systemName: "photo.fill")!,
-    caption: .constant("Sample caption"),
+  let vm = SwiftUIPhotoPreviewViewModel()
+  vm.setPhotos([
+    UIImage(systemName: "photo")!,
+    UIImage(systemName: "photo.fill")!,
+    UIImage(systemName: "photo.circle")!,
+  ])
+
+  return SwiftUIPhotoPreviewView(
+    viewModel: vm,
     isPresented: .constant(true),
-    onSend: { _, _ in }
+    onSend: { _ in },
+    onAddMorePhotos: {}
   )
 }
