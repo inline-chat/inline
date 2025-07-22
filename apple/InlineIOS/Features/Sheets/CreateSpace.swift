@@ -32,7 +32,7 @@ struct CreateSpace: View {
           }
         }
       }
-      .themedListStyle()
+      .themedInsetGroupedListStyle()
       .navigationBarTitleDisplayMode(.inline)
       .toolbar(content: {
         ToolbarItem(placement: .principal) {
