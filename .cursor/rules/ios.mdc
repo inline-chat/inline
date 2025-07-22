@@ -3,4 +3,6 @@ description:
 globs: apple/InlineIOS/**/*.swift
 alwaysApply: false
 ---
-iOS app uses Nuke and NukeUI to render remote images. 
+
+- iOS app uses Nuke and NukeUI to render remote images. 
+- Use SwiftUI for most of the parts except the chat, compose and message list. These must be high performance and use UIKit best practices. 
