@@ -189,6 +189,12 @@ extension View {
       .background(ThemeManager.shared.backgroundColorSwiftUI)
   }
 
+  func themedInsetGroupedListStyle() -> some View {
+    listStyle(.insetGrouped)
+      .scrollContentBackground(.hidden)
+      .background(ThemeManager.shared.backgroundColorSwiftUI)
+  }
+
   /// Applies theme colors to navigation bars
   func themedNavigationBar() -> some View {
     toolbarBackground(ThemeManager.shared.navigationBarBackgroundColor, for: .navigationBar)
