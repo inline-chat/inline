@@ -3,7 +3,7 @@ description:
 globs: server/*.ts,server/**/*.ts
 alwaysApply: false
 ---
-This is codebase for Inline, a chat app.
+This is codebase for Inline, a chat app similar to Slack.
 
 In server/ module, we have two APIs, one is a REST API using files in methods/ directory and based on Elyisia. The newer one we use more is the realtime API based on protocol buffers which uses web sockets using our RPC format. We compose API in the functions/ directory which are abstracted away from the API. Then we utilize those in our Realtime API handlers (stored in realtime/handlers/) that connect it to the RPC type system. Our database schema is under db/schema/ directory using Drizzle. To use database JSON types in Realtime API, we create an encoder function in encoders/ directory. We use RealtimeRpcError in handlers and functions. 
 
@@ -29,4 +29,16 @@ when encoding updates, make sure you encode update object for each user separate
 In root of the repo, call:
 ```
 bun generate:proto
+```
+
+## Database migrations
+
+First generate migrations:
+```
+bun db:generate <migration_name_slug>
+```
+
+Then apply migrations
+```
+bun db:migrate
 ```
