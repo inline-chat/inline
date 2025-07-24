@@ -245,10 +245,9 @@ final class MessagesCollectionView: UICollectionView {
     // Check if content size changed and anchor scroll position if needed
     let currentContentSize = contentSize
     if currentContentSize != lastContentSize && !lastContentSize.equalTo(.zero) {
-      // Content size changed, anchor scroll position
-      DispatchQueue.main.async { [weak self] in
-        self?.anchorScrollPosition()
-      }
+      // Content size changed, anchor scroll position immediately without async dispatch
+      // to prevent visual jumps during layout
+      anchorScrollPosition()
     }
     lastContentSize = currentContentSize
   }
@@ -769,9 +768,8 @@ private extension MessagesCollectionView {
 
       dataSource.apply(snapshot, animatingDifferences: animated ?? false) { [weak self] in
         // Restore scroll position after initial data is loaded
-        DispatchQueue.main.async {
-          (self?.currentCollectionView as? MessagesCollectionView)?.restoreScrollPosition()
-        }
+        // Already on main queue after snapshot completion
+        (self?.currentCollectionView as? MessagesCollectionView)?.restoreScrollPosition()
       }
     }
 
@@ -807,9 +805,8 @@ private extension MessagesCollectionView {
                 )
               } else {
                 // Anchor scroll position for new messages if user is not at bottom
-                DispatchQueue.main.async {
-                  (self?.currentCollectionView as? MessagesCollectionView)?.anchorScrollPosition()
-                }
+                // Already on main queue, no need for async dispatch
+                (self?.currentCollectionView as? MessagesCollectionView)?.anchorScrollPosition()
               }
             }
           }
@@ -825,9 +822,8 @@ private extension MessagesCollectionView {
           snapshot.reconfigureItems(ids)
           dataSource.apply(snapshot, animatingDifferences: animated ?? false) { [weak self] in
             // Anchor scroll position after updates (e.g., reactions, content changes)
-            DispatchQueue.main.async {
-              (self?.currentCollectionView as? MessagesCollectionView)?.anchorScrollPosition()
-            }
+            // Already on main queue after snapshot completion
+            (self?.currentCollectionView as? MessagesCollectionView)?.anchorScrollPosition()
           }
 
         case let .reload(animated):
