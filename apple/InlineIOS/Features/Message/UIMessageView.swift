@@ -43,16 +43,25 @@ class UIMessageView: UIView {
 
   var bubbleColor: UIColor {
     if isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata {
-      UIColor.clear
+      return UIColor.clear
     } else if outgoing {
-      ThemeManager.shared.selected.bubbleBackground
+      // Show red bubble for failed messages to match iOS system styling
+      if message.status == .failed {
+        return UIColor.systemRed
+      } else {
+        return ThemeManager.shared.selected.bubbleBackground
+      }
     } else {
-      ThemeManager.shared.selected.incomingBubbleBackground
+      return ThemeManager.shared.selected.incomingBubbleBackground
     }
   }
 
   var textColor: UIColor {
-    outgoing ? .white : ThemeManager.shared.selected.primaryTextColor ?? .label
+    if outgoing {
+      .white
+    } else {
+      ThemeManager.shared.selected.primaryTextColor ?? .label
+    }
   }
 
   var message: Message {
@@ -253,6 +262,10 @@ class UIMessageView: UIView {
     shineEffectView?.stopAnimation()
     shineEffectView?.removeFromSuperview()
     shineEffectView = nil
+  }
+  
+  public func refreshAppearance() {
+    setupAppearance()
   }
 
   func reset() {
