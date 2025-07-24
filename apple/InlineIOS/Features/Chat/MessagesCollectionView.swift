@@ -16,6 +16,36 @@ final class MessagesCollectionView: UICollectionView {
   private var coordinator: Coordinator
   var accessoryProvider: ((IndexPath) -> [Any])?
   static var contextMenuOpen: Bool = false
+  
+  // MARK: - Scroll Position Storage
+  private static var scrollPositions: [Int64: CGPoint] = [:]
+  private static let maxStoredPositions = 50 // Limit memory usage
+  
+  private func saveScrollPosition() {
+    Self.scrollPositions[chatId] = contentOffset
+    
+    // Clean up old positions if we have too many stored
+    if Self.scrollPositions.count > Self.maxStoredPositions {
+      let sortedKeys = Self.scrollPositions.keys.sorted()
+      let keysToRemove = sortedKeys.prefix(Self.scrollPositions.count - Self.maxStoredPositions)
+      for key in keysToRemove {
+        Self.scrollPositions.removeValue(forKey: key)
+      }
+    }
+  }
+  
+  private func restoreScrollPosition() {
+    guard let savedPosition = Self.scrollPositions[chatId] else { return }
+    
+    // Ensure we don't restore to an invalid position
+    let maxY = max(contentSize.height - bounds.height + contentInset.top + contentInset.bottom, -contentInset.top)
+    let minY = -contentInset.top
+    
+    let clampedY = max(minY, min(maxY, savedPosition.y))
+    let restoredPosition = CGPoint(x: savedPosition.x, y: clampedY)
+    
+    setContentOffset(restoredPosition, animated: false)
+  }
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
     self.peerId = peerId
@@ -93,10 +123,22 @@ final class MessagesCollectionView: UICollectionView {
   override func didMoveToWindow() {
     updateContentInsets()
   }
+  
+  override func willMove(toWindow newWindow: UIWindow?) {
+    super.willMove(toWindow: newWindow)
+    
+    // Save scroll position when view is being removed from window
+    if newWindow == nil {
+      saveScrollPosition()
+    }
+  }
 
   deinit {
     NotificationCenter.default.removeObserver(self)
     Log.shared.debug("CollectionView deinit")
+    
+    // Save scroll position before deallocation
+    saveScrollPosition()
 
     Task {
       await ImagePrefetcher.shared.clearCache()
@@ -596,7 +638,12 @@ private extension MessagesCollectionView {
       // Reconfigure all items to ensure cells are reloaded
       snapshot.reconfigureItems(itemIdentifiers)
 
-      dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+      dataSource.apply(snapshot, animatingDifferences: animated ?? false) { [weak self] in
+        // Restore scroll position after initial data is loaded
+        DispatchQueue.main.async {
+          (self?.currentCollectionView as? MessagesCollectionView)?.restoreScrollPosition()
+        }
+      }
     }
 
     func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
@@ -1168,6 +1215,9 @@ private extension MessagesCollectionView {
       /// -58.0)
 
       guard let messagesCollectionView = currentCollectionView as? MessagesCollectionView else { return }
+      
+      // Save scroll position during scrolling (throttled)
+      messagesCollectionView.saveScrollPosition()
 
       let threshold = messagesCollectionView.calculatedThreshold
       let isAtBottom = scrollView.contentOffset.y > -threshold
