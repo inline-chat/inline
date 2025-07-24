@@ -18,33 +18,97 @@ final class MessagesCollectionView: UICollectionView {
   static var contextMenuOpen: Bool = false
   
   // MARK: - Scroll Position Storage
-  private static var scrollPositions: [Int64: CGPoint] = [:]
+  private static var savedScrollPositions: [Int64: SavedScrollPosition] = [:]
   private static let maxStoredPositions = 50 // Limit memory usage
   
+  private struct SavedScrollPosition {
+    let messageId: Int64
+    let offsetFromMessageTop: CGFloat
+  }
+  
   private func saveScrollPosition() {
-    Self.scrollPositions[chatId] = contentOffset
+    // Don't save position if user is near the bottom (within threshold)
+    if shouldScrollToBottom {
+      Self.savedScrollPositions.removeValue(forKey: chatId)
+      return
+    }
+    
+    // Find the topmost visible message in the viewport
+    // Note: In reversed scroll view, "topmost" is actually the bottommost in the data array
+    guard let topmostVisibleMessage = getTopmostVisibleMessage() else { return }
+    
+    // Calculate offset from the top of that message
+    let messageIndexPath = IndexPath(item: topmostVisibleMessage.index, section: 0)
+    guard let layoutAttributes = layoutAttributesForItem(at: messageIndexPath) else { return }
+    
+    let offsetFromMessageTop = contentOffset.y - layoutAttributes.frame.minY
+    
+    let savedPosition = SavedScrollPosition(
+      messageId: topmostVisibleMessage.message.message.messageId,
+      offsetFromMessageTop: offsetFromMessageTop
+    )
+    
+    Self.savedScrollPositions[chatId] = savedPosition
     
     // Clean up old positions if we have too many stored
-    if Self.scrollPositions.count > Self.maxStoredPositions {
-      let sortedKeys = Self.scrollPositions.keys.sorted()
-      let keysToRemove = sortedKeys.prefix(Self.scrollPositions.count - Self.maxStoredPositions)
+    if Self.savedScrollPositions.count > Self.maxStoredPositions {
+      let sortedKeys = Self.savedScrollPositions.keys.sorted()
+      let keysToRemove = sortedKeys.prefix(Self.savedScrollPositions.count - Self.maxStoredPositions)
       for key in keysToRemove {
-        Self.scrollPositions.removeValue(forKey: key)
+        Self.savedScrollPositions.removeValue(forKey: key)
       }
     }
   }
   
   private func restoreScrollPosition() {
-    guard let savedPosition = Self.scrollPositions[chatId] else { return }
+    guard let savedPosition = Self.savedScrollPositions[chatId] else { return }
+    
+    // Find the saved message in the current data
+    guard let messageIndex = coordinator.messages.firstIndex(where: { $0.message.messageId == savedPosition.messageId }) else {
+      // Message not found, clear the saved position
+      Self.savedScrollPositions.removeValue(forKey: chatId)
+      return
+    }
+    
+    let messageIndexPath = IndexPath(item: messageIndex, section: 0)
+    guard let layoutAttributes = layoutAttributesForItem(at: messageIndexPath) else { return }
+    
+    // Calculate the target scroll position
+    let targetY = layoutAttributes.frame.minY + savedPosition.offsetFromMessageTop
     
     // Ensure we don't restore to an invalid position
     let maxY = max(contentSize.height - bounds.height + contentInset.top + contentInset.bottom, -contentInset.top)
     let minY = -contentInset.top
     
-    let clampedY = max(minY, min(maxY, savedPosition.y))
-    let restoredPosition = CGPoint(x: savedPosition.x, y: clampedY)
+    let clampedY = max(minY, min(maxY, targetY))
+    let restoredPosition = CGPoint(x: 0, y: clampedY)
     
     setContentOffset(restoredPosition, animated: false)
+  }
+  
+  private func getTopmostVisibleMessage() -> (message: FullMessage, index: Int)? {
+    let visibleRect = CGRect(
+      x: contentOffset.x,
+      y: contentOffset.y,
+      width: bounds.width,
+      height: bounds.height
+    )
+    
+    // Get visible index paths and find the topmost one
+    let visibleIndexPaths = indexPathsForVisibleItems.sorted { $0.item < $1.item }
+    
+    for indexPath in visibleIndexPaths {
+      guard indexPath.item < coordinator.messages.count,
+            let layoutAttributes = layoutAttributesForItem(at: indexPath) else { continue }
+      
+      // Check if this cell intersects with the visible rect
+      if layoutAttributes.frame.intersects(visibleRect) {
+        let message = coordinator.messages[indexPath.item]
+        return (message: message, index: indexPath.item)
+      }
+    }
+    
+    return nil
   }
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
