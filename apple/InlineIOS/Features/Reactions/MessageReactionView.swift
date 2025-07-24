@@ -15,6 +15,21 @@ struct ReactionUser {
 }
 
 class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
+  // MARK: - Constants
+
+  private enum Constants {
+    static let avatarSize: CGFloat = 26
+    static let avatarOverlapOffset: CGFloat = -8
+    static let emojiSize: CGFloat = 20
+    static let stackSpacing: CGFloat = 2
+    static let containerPadding = UIEdgeInsets(top: 3, left: 7, bottom: 3, right: 7)
+    static let menuAvatarSize: CGFloat = 24
+    static let preloadAvatarSize: CGFloat = 48
+    static let animationDuration: CGFloat = 0.15
+    static let intrinsicWidth: CGFloat = 48
+    static let intrinsicHeightPadding: CGFloat = 8
+  }
+
   // MARK: - Properties
 
   let emoji: String
@@ -29,9 +44,6 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
 
   private lazy var containerView: UIView = {
     let view = UIView()
-    UIView.performWithoutAnimation {
-      view.layer.cornerRadius = 14
-    }
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -39,7 +51,7 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   private lazy var stackView: UIStackView = {
     let stack = UIStackView()
     stack.axis = .horizontal
-    stack.spacing = 0
+    stack.spacing = Constants.stackSpacing
     stack.alignment = .center
     stack.translatesAutoresizingMaskIntoConstraints = false
     return stack
@@ -47,28 +59,15 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
 
   private lazy var emojiLabel: UILabel = {
     let label = UILabel()
-    label.font = UIFont.systemFont(ofSize: 17)
-
-    if emoji == "✓" || emoji == "✔️" {
-      let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
-      let checkmarkImage = UIImage(systemName: "checkmark", withConfiguration: config)?
-        .withTintColor(byCurrentUser && !outgoing ? .white : UIColor(hex: "#2AAC28")!, renderingMode: .alwaysOriginal)
-      let imageAttachment = NSTextAttachment()
-      imageAttachment.image = checkmarkImage
-      let attributedString = NSAttributedString(attachment: imageAttachment)
-      label.attributedText = attributedString
-    } else {
-      label.text = emoji
-    }
-
+    label.font = UIFont.systemFont(ofSize: Constants.emojiSize, weight: .medium)
+    configureEmojiLabel(label)
     return label
   }()
 
-  private lazy var countLabel: UILabel = {
-    let label = UILabel()
-    label.font = UIFont.systemFont(ofSize: 13)
-    label.text = "\(count)"
-    return label
+  private lazy var avatarsContainer: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
   }()
 
   // MARK: - Initialization
@@ -93,8 +92,22 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
 
   // MARK: - Setup
 
-  private func setupView() {
-    // Configure container appearance
+  private func configureEmojiLabel(_ label: UILabel) {
+    if emoji == "✓" || emoji == "✔️" {
+      let config = UIImage.SymbolConfiguration(pointSize: Constants.emojiSize, weight: .semibold)
+      let checkmarkColor = byCurrentUser && !outgoing ? UIColor.white : UIColor(hex: "#2AAC28")!
+      let checkmarkImage = UIImage(systemName: "checkmark", withConfiguration: config)?
+        .withTintColor(checkmarkColor, renderingMode: .alwaysOriginal)
+
+      let imageAttachment = NSTextAttachment()
+      imageAttachment.image = checkmarkImage
+      label.attributedText = NSAttributedString(attachment: imageAttachment)
+    } else {
+      label.text = emoji
+    }
+  }
+
+  private func configureContainerAppearance() {
     containerView.backgroundColor = byCurrentUser ?
       (
         outgoing ? ThemeManager.shared.selected.reactionOutgoingPrimary : ThemeManager.shared.selected
@@ -104,15 +117,10 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
         outgoing ? ThemeManager.shared.selected.reactionOutgoingSecoundry : ThemeManager.shared.selected
           .reactionIncomingSecoundry
       )
+  }
 
-    // Configure text colors
-    countLabel.textColor = byCurrentUser ?
-      (
-        outgoing ? .black : .white
-      ) :
-      (
-        outgoing ? .white : .label
-      )
+  private func setupView() {
+    configureContainerAppearance()
 
     // Center the emoji and count labels
     stackView.distribution = .equalSpacing
@@ -123,22 +131,34 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
     containerView.addSubview(stackView)
 
     stackView.addArrangedSubview(emojiLabel)
-    stackView.addArrangedSubview(countLabel)
+    stackView.addArrangedSubview(avatarsContainer)
 
-    // Setup constraints
     NSLayoutConstraint.activate([
       containerView.topAnchor.constraint(equalTo: topAnchor),
       containerView.leadingAnchor.constraint(equalTo: leadingAnchor),
       containerView.trailingAnchor.constraint(equalTo: trailingAnchor),
       containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-      stackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 4),
-      stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
-      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8),
-      stackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -4),
+      stackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: Constants.containerPadding.top),
+      stackView.leadingAnchor.constraint(
+        equalTo: containerView.leadingAnchor,
+        constant: Constants.containerPadding.left
+      ),
+      stackView.trailingAnchor.constraint(
+        equalTo: containerView.trailingAnchor,
+        constant: -Constants.containerPadding.right
+      ),
+      stackView.bottomAnchor.constraint(
+        equalTo: containerView.bottomAnchor,
+        constant: -Constants.containerPadding.bottom
+      ),
     ])
 
-    // Setup tap gesture
+    setupGestures()
+    setupAvatars()
+  }
+
+  private func setupGestures() {
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
     addGestureRecognizer(tapGesture)
     isUserInteractionEnabled = true
@@ -146,6 +166,54 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
     let containerTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
     containerView.addGestureRecognizer(containerTapGesture)
     containerView.isUserInteractionEnabled = true
+  }
+
+  private func setupAvatars() {
+    clearExistingAvatars()
+    configureAvatarsContainer()
+    createAvatarViews()
+  }
+
+  private func clearExistingAvatars() {
+    avatarsContainer.subviews.forEach { $0.removeFromSuperview() }
+    avatarsContainer.removeConstraints(avatarsContainer.constraints)
+  }
+
+  private func configureAvatarsContainer() {
+    let containerWidth = calculateAvatarsContainerWidth()
+    NSLayoutConstraint.activate([
+      avatarsContainer.widthAnchor.constraint(equalToConstant: containerWidth),
+      avatarsContainer.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
+    ])
+  }
+
+  private func calculateAvatarsContainerWidth() -> CGFloat {
+    guard reactionUsers.count > 0 else { return 0 }
+    return Constants
+      .avatarSize + CGFloat(reactionUsers.count - 1) * (Constants.avatarSize + Constants.avatarOverlapOffset)
+  }
+
+  private func createAvatarViews() {
+    for (index, reactionUser) in reactionUsers.enumerated() {
+      guard let userInfo = reactionUser.userInfo else { continue }
+
+      let avatarView = UserAvatarView()
+      avatarView.configure(with: userInfo, size: Constants.avatarSize)
+      avatarView.translatesAutoresizingMaskIntoConstraints = false
+
+      avatarsContainer.addSubview(avatarView)
+
+      // Reverse the order so first avatar appears on top (rightmost)
+      let reverseIndex = reactionUsers.count - 1 - index
+      let leadingOffset = CGFloat(reverseIndex) * (Constants.avatarSize + Constants.avatarOverlapOffset)
+
+      NSLayoutConstraint.activate([
+        avatarView.leadingAnchor.constraint(equalTo: avatarsContainer.leadingAnchor, constant: leadingOffset),
+        avatarView.centerYAnchor.constraint(equalTo: avatarsContainer.centerYAnchor),
+        avatarView.widthAnchor.constraint(equalToConstant: Constants.avatarSize),
+        avatarView.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
+      ])
+    }
   }
 
   private func setupInteractions() {
@@ -174,7 +242,7 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
               let remoteUrl = photo.getRemoteURL() else { continue }
 
         // Check if already cached
-        let request = ImageRequest(url: remoteUrl, processors: [.resize(width: 48)])
+        let request = ImageRequest(url: remoteUrl, processors: [.resize(width: Constants.preloadAvatarSize)])
         if ImagePipeline.shared.cache.cachedImage(for: request) == nil {
           // Preload the image
           try? await ImagePipeline.shared.image(for: request)
@@ -227,7 +295,10 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   ) -> UITargetedPreview? {
     let parameters = UIPreviewParameters()
     parameters.backgroundColor = .clear
-    parameters.visiblePath = UIBezierPath(roundedRect: containerView.bounds, cornerRadius: 14)
+    parameters.visiblePath = UIBezierPath(
+      roundedRect: containerView.bounds,
+      cornerRadius: containerView.bounds.height / 2
+    )
     return UITargetedPreview(view: containerView, parameters: parameters)
   }
 
@@ -259,9 +330,18 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
 
   // MARK: - Layout
 
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    UIView.performWithoutAnimation {
+      containerView.layer.cornerRadius = containerView.bounds.height / 2
+    }
+  }
+
   override var intrinsicContentSize: CGSize {
-    let height = stackView.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height + 8
-    return CGSize(width: 48, height: height)
+    let stackSize = stackView.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+    let width = stackSize.width + Constants.containerPadding.left + Constants.containerPadding.right
+    let height = stackSize.height + Constants.containerPadding.top + Constants.containerPadding.bottom
+    return CGSize(width: width, height: height)
   }
 
   override func sizeThatFits(_ size: CGSize) -> CGSize {
@@ -269,24 +349,21 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   }
 
   func updateCount(_ newCount: Int, animated: Bool) {
-    guard count != newCount else { return }
-
+    // Avatar display is updated through updateReactionUsers
     if animated {
-      UIView.animate(withDuration: 0.15, animations: {
-        self.countLabel.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
+      UIView.animate(withDuration: Constants.animationDuration, animations: {
+        self.avatarsContainer.transform = CGAffineTransform(scaleX: 1.1, y: 1.1)
       }) { _ in
-        self.countLabel.text = "\(newCount)"
-        UIView.animate(withDuration: 0.15) {
-          self.countLabel.transform = .identity
+        UIView.animate(withDuration: Constants.animationDuration) {
+          self.avatarsContainer.transform = .identity
         }
       }
-    } else {
-      countLabel.text = "\(newCount)"
     }
   }
 
   func updateReactionUsers(_ newReactionUsers: [ReactionUser]) {
     reactionUsers = newReactionUsers
+    setupAvatars()
   }
 
   private func createAvatarImage(for userInfo: UserInfo) -> UIImage {
@@ -294,27 +371,27 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
     if let photo = userInfo.profilePhoto?.first {
       if let localUrl = photo.getLocalURL() {
         if let image = UIImage(contentsOfFile: localUrl.path) {
-          return resizeImage(image, to: CGSize(width: 24, height: 24))
+          return resizeImage(image, to: CGSize(width: Constants.menuAvatarSize, height: Constants.menuAvatarSize))
         }
       }
 
       // Check Nuke's cache for remote images
       if let remoteUrl = photo.getRemoteURL() {
-        let request = ImageRequest(url: remoteUrl, processors: [.resize(width: 48)])
+        let request = ImageRequest(url: remoteUrl, processors: [.resize(width: Constants.preloadAvatarSize)])
         if let cachedImage = ImagePipeline.shared.cache.cachedImage(for: request)?.image {
-          return resizeImage(cachedImage, to: CGSize(width: 24, height: 24))
+          return resizeImage(cachedImage, to: CGSize(width: Constants.menuAvatarSize, height: Constants.menuAvatarSize))
         }
 
         // Also check without processors in case it was cached differently
         let simpleRequest = ImageRequest(url: remoteUrl)
         if let cachedImage = ImagePipeline.shared.cache.cachedImage(for: simpleRequest)?.image {
-          return resizeImage(cachedImage, to: CGSize(width: 24, height: 24))
+          return resizeImage(cachedImage, to: CGSize(width: Constants.menuAvatarSize, height: Constants.menuAvatarSize))
         }
       }
     }
 
     // Fallback: create initials avatar synchronously
-    return createInitialsAvatar(for: userInfo, size: 24)
+    return createInitialsAvatar(for: userInfo, size: Constants.menuAvatarSize)
   }
 
   private func createInitialsAvatar(for userInfo: UserInfo, size: CGFloat) -> UIImage {
@@ -327,8 +404,6 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
 
     let initials = nameForInitials.first.map(String.init)?.uppercased() ?? "User"
     let baseColor = AvatarColorUtility.uiColorFor(name: nameForInitials)
-
-    print("Creating initials avatar: name='\(nameForInitials)', initials='\(initials)', color=\(baseColor)")
 
     let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
     let image = renderer.image { context in
@@ -357,8 +432,7 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
         )
       }
 
-      // Draw initials (matching UserAvatarView font size)
-      let fontSize = size * 0.5 // Matching UserAvatarView's relative sizing
+      let fontSize = size * 0.5
       let font = UIFont.systemFont(ofSize: fontSize, weight: .medium)
       let attributes: [NSAttributedString.Key: Any] = [
         .font: font,
@@ -400,6 +474,8 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
     UIImage(systemName: "person.circle") ?? UIImage()
   }
 }
+
+// MARK: - UIColor Extension
 
 extension UIColor {
   /// Background color for reactions on outgoing messages by others
