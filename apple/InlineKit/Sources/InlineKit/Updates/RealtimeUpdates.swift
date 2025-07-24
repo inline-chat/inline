@@ -15,9 +15,7 @@ public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
     log.trace("apply realtime update")
     // log.debug("Received update type: \(update.update)")
 
-    Task {
-      await UpdatesStateManager.shared.saveLastUpdateDate(update.date)
-    }
+    // TODO: Save update state
 
     do {
       switch update.update {
@@ -546,7 +544,7 @@ extension InlineProtocol.UpdateUserSettings {
 
 extension InlineProtocol.UpdateChatHasNewUpdates {
   func apply(_ db: Database) throws {
-    Log.shared.debug("update chat has new updates \(chatID) \(pts)")
+    Log.shared.debug("update chat has new updates \(chatID) \(updateSeq)")
 
     // Call realtime API to get updates for this chat
   }

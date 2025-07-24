@@ -12,8 +12,8 @@ export const spaces = pgTable("spaces", {
   date: creationDate,
   deleted: date,
 
-  /** PTS of the space */
-  pts: integer("pts").default(0),
+  /** Sequence of the updates for the space */
+  updateSeq: integer("update_seq").default(0),
 
   /** Date of the last update */
   lastUpdateDate: timestamp("last_update_date", {
