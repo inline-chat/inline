@@ -86,6 +86,7 @@ final class AppMenu: NSObject {
       keyEquivalent: ""
     )
     logoutMenuItem.target = self
+    logoutMenuItem.image = NSImage(systemSymbolName: "rectangle.portrait.and.arrow.right", accessibilityDescription: nil)
     appMenu.addItem(logoutMenuItem)
 
     let clearCacheMenuItem = NSMenuItem(
@@ -94,6 +95,7 @@ final class AppMenu: NSObject {
       keyEquivalent: ""
     )
     clearCacheMenuItem.target = self
+    clearCacheMenuItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
     appMenu.addItem(clearCacheMenuItem)
 
     let clearMediaCacheMenuItem = NSMenuItem(
@@ -349,6 +351,7 @@ final class AppMenu: NSObject {
     )
     toggleSidebarItem.keyEquivalentModifierMask = [.command]
     toggleSidebarItem.target = self
+    toggleSidebarItem.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: nil)
     viewMenu.addItem(toggleSidebarItem)
 
     viewMenu.addItem(NSMenuItem.separator())
@@ -409,6 +412,7 @@ final class AppMenu: NSObject {
     )
     alwaysOnTopItem.keyEquivalentModifierMask = [.command, .option]
     alwaysOnTopItem.target = self
+    alwaysOnTopItem.image = NSImage(systemSymbolName: "pin", accessibilityDescription: nil)
     windowMenu.addItem(alwaysOnTopItem)
 
     windowMenu.addItem(NSMenuItem.separator())
