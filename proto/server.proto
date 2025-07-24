@@ -4,7 +4,8 @@ package server;
 
 message ServerUpdate {
   int64 date = 1;
-  reserved 2, 3;
+  int32 seq = 2;
+  reserved 3;
 
   oneof update {
     // Chat updates
@@ -27,28 +28,22 @@ message ServerUpdate {
 message ServerChatUpdateNewMessage {
   int64 chat_id = 1;
   int64 msg_id = 2;
-  int32 pts = 3;
 }
 
 // Update for a chat when a message is edited
 message ServerChatUpdateEditMessage {
   int64 chat_id = 1;
   int64 msg_id = 2;
-  int32 pts = 3;
 }
 
 // Update for a chat when messages are deleted
 message ServerChatUpdateDeleteMessages {
   int64 chat_id = 1;
   repeated int64 msg_ids = 2;
-  int32 pts = 3;
 }
 
 // Update for a chat when it is deleted
-message ServerChatUpdateDeleteChat {
-  int64 chat_id = 1;
-  int32 pts = 2;
-}
+message ServerChatUpdateDeleteChat { int64 chat_id = 1; }
 
 // ------------------------------------------------------------
 // Space updates
@@ -57,5 +52,5 @@ message ServerChatUpdateDeleteChat {
 // Update for a space when a member is removed
 message ServerSpaceUpdateRemoveMember {
   int64 space_id = 1;
-  int64 user_id = 3;
+  int64 user_id = 2;
 }

@@ -41,8 +41,8 @@ export const chats = pgTable(
 
     emoji: varchar({ length: 20 }),
 
-    /** PTS of the chat */
-    pts: integer("pts").default(0),
+    /** Sequence of the updates for the chat */
+    updateSeq: integer("update_seq").default(0),
 
     /** Date of the last update */
     lastUpdateDate: timestamp("last_update_date", {

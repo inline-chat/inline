@@ -6,7 +6,6 @@ import { decodeDate, encodeDate, encodeDateStrict } from "@in/server/realtime/en
 import { RealtimeUpdates } from "@in/server/realtime/message"
 
 type GetUpdatesStateFnResult = {
-  userPts: number
   date: bigint
 }
 
@@ -49,8 +48,7 @@ export const getUpdatesState = async (
           chatHasNewUpdates: {
             chatId: BigInt(chat.id),
             // PTS should not be null here
-            pts: chat.pts ?? 0,
-            date: encodeDateStrict(chat.lastUpdateDate),
+            updateSeq: chat.updateSeq ?? 0,
           },
         },
       },
@@ -59,8 +57,5 @@ export const getUpdatesState = async (
 
   return {
     date: latestChatUpdateDateEncoded,
-
-    // TODO: fetch latest PTS for the user
-    userPts: 0,
   }
 }

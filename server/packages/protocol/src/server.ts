@@ -19,6 +19,10 @@ export interface ServerUpdate {
      */
     date: bigint;
     /**
+     * @generated from protobuf field: int32 seq = 2;
+     */
+    seq: number;
+    /**
      * @generated from protobuf oneof: update
      */
     update: {
@@ -47,9 +51,9 @@ export interface ServerUpdate {
         deleteChat: ServerChatUpdateDeleteChat;
     } | {
         oneofKind: "spaceRemoveMember";
-        // Space updates
-
         /**
+         * Space updates
+         *
          * @generated from protobuf field: server.ServerSpaceUpdateRemoveMember space_remove_member = 8;
          */
         spaceRemoveMember: ServerSpaceUpdateRemoveMember;
@@ -75,10 +79,6 @@ export interface ServerChatUpdateNewMessage {
      * @generated from protobuf field: int64 msg_id = 2;
      */
     msgId: bigint;
-    /**
-     * @generated from protobuf field: int32 pts = 3;
-     */
-    pts: number;
 }
 /**
  * Update for a chat when a message is edited
@@ -94,10 +94,6 @@ export interface ServerChatUpdateEditMessage {
      * @generated from protobuf field: int64 msg_id = 2;
      */
     msgId: bigint;
-    /**
-     * @generated from protobuf field: int32 pts = 3;
-     */
-    pts: number;
 }
 /**
  * Update for a chat when messages are deleted
@@ -113,10 +109,6 @@ export interface ServerChatUpdateDeleteMessages {
      * @generated from protobuf field: repeated int64 msg_ids = 2;
      */
     msgIds: bigint[];
-    /**
-     * @generated from protobuf field: int32 pts = 3;
-     */
-    pts: number;
 }
 /**
  * Update for a chat when it is deleted
@@ -128,10 +120,6 @@ export interface ServerChatUpdateDeleteChat {
      * @generated from protobuf field: int64 chat_id = 1;
      */
     chatId: bigint;
-    /**
-     * @generated from protobuf field: int32 pts = 2;
-     */
-    pts: number;
 }
 // ------------------------------------------------------------
 // Space updates
@@ -148,11 +136,7 @@ export interface ServerSpaceUpdateRemoveMember {
      */
     spaceId: bigint;
     /**
-     * @generated from protobuf field: int64 member_id = 2;
-     */
-    memberId: bigint;
-    /**
-     * @generated from protobuf field: int64 user_id = 3;
+     * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
 }
@@ -161,6 +145,7 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
     constructor() {
         super("server.ServerUpdate", [
             { no: 1, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "seq", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 4, name: "new_message", kind: "message", oneof: "update", T: () => ServerChatUpdateNewMessage },
             { no: 5, name: "edit_message", kind: "message", oneof: "update", T: () => ServerChatUpdateEditMessage },
             { no: 6, name: "delete_messages", kind: "message", oneof: "update", T: () => ServerChatUpdateDeleteMessages },
@@ -171,6 +156,7 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.date = 0n;
+        message.seq = 0;
         message.update = { oneofKind: undefined };
         if (value !== undefined)
             reflectionMergePartial<ServerUpdate>(this, message, value);
@@ -183,6 +169,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             switch (fieldNo) {
                 case /* int64 date */ 1:
                     message.date = reader.int64().toBigInt();
+                    break;
+                case /* int32 seq */ 2:
+                    message.seq = reader.int32();
                     break;
                 case /* server.ServerChatUpdateNewMessage new_message */ 4:
                     message.update = {
@@ -229,6 +218,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* int64 date = 1; */
         if (message.date !== 0n)
             writer.tag(1, WireType.Varint).int64(message.date);
+        /* int32 seq = 2; */
+        if (message.seq !== 0)
+            writer.tag(2, WireType.Varint).int32(message.seq);
         /* server.ServerChatUpdateNewMessage new_message = 4; */
         if (message.update.oneofKind === "newMessage")
             ServerChatUpdateNewMessage.internalBinaryWrite(message.update.newMessage, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
@@ -259,15 +251,13 @@ class ServerChatUpdateNewMessage$Type extends MessageType<ServerChatUpdateNewMes
     constructor() {
         super("server.ServerChatUpdateNewMessage", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "msg_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 2, name: "msg_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<ServerChatUpdateNewMessage>): ServerChatUpdateNewMessage {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
         message.msgId = 0n;
-        message.pts = 0;
         if (value !== undefined)
             reflectionMergePartial<ServerChatUpdateNewMessage>(this, message, value);
         return message;
@@ -282,9 +272,6 @@ class ServerChatUpdateNewMessage$Type extends MessageType<ServerChatUpdateNewMes
                     break;
                 case /* int64 msg_id */ 2:
                     message.msgId = reader.int64().toBigInt();
-                    break;
-                case /* int32 pts */ 3:
-                    message.pts = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -304,9 +291,6 @@ class ServerChatUpdateNewMessage$Type extends MessageType<ServerChatUpdateNewMes
         /* int64 msg_id = 2; */
         if (message.msgId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.msgId);
-        /* int32 pts = 3; */
-        if (message.pts !== 0)
-            writer.tag(3, WireType.Varint).int32(message.pts);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -322,15 +306,13 @@ class ServerChatUpdateEditMessage$Type extends MessageType<ServerChatUpdateEditM
     constructor() {
         super("server.ServerChatUpdateEditMessage", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "msg_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 2, name: "msg_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<ServerChatUpdateEditMessage>): ServerChatUpdateEditMessage {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
         message.msgId = 0n;
-        message.pts = 0;
         if (value !== undefined)
             reflectionMergePartial<ServerChatUpdateEditMessage>(this, message, value);
         return message;
@@ -345,9 +327,6 @@ class ServerChatUpdateEditMessage$Type extends MessageType<ServerChatUpdateEditM
                     break;
                 case /* int64 msg_id */ 2:
                     message.msgId = reader.int64().toBigInt();
-                    break;
-                case /* int32 pts */ 3:
-                    message.pts = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -367,9 +346,6 @@ class ServerChatUpdateEditMessage$Type extends MessageType<ServerChatUpdateEditM
         /* int64 msg_id = 2; */
         if (message.msgId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.msgId);
-        /* int32 pts = 3; */
-        if (message.pts !== 0)
-            writer.tag(3, WireType.Varint).int32(message.pts);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -385,15 +361,13 @@ class ServerChatUpdateDeleteMessages$Type extends MessageType<ServerChatUpdateDe
     constructor() {
         super("server.ServerChatUpdateDeleteMessages", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "msg_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 2, name: "msg_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<ServerChatUpdateDeleteMessages>): ServerChatUpdateDeleteMessages {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
         message.msgIds = [];
-        message.pts = 0;
         if (value !== undefined)
             reflectionMergePartial<ServerChatUpdateDeleteMessages>(this, message, value);
         return message;
@@ -412,9 +386,6 @@ class ServerChatUpdateDeleteMessages$Type extends MessageType<ServerChatUpdateDe
                             message.msgIds.push(reader.int64().toBigInt());
                     else
                         message.msgIds.push(reader.int64().toBigInt());
-                    break;
-                case /* int32 pts */ 3:
-                    message.pts = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -438,9 +409,6 @@ class ServerChatUpdateDeleteMessages$Type extends MessageType<ServerChatUpdateDe
                 writer.int64(message.msgIds[i]);
             writer.join();
         }
-        /* int32 pts = 3; */
-        if (message.pts !== 0)
-            writer.tag(3, WireType.Varint).int32(message.pts);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -455,14 +423,12 @@ export const ServerChatUpdateDeleteMessages = new ServerChatUpdateDeleteMessages
 class ServerChatUpdateDeleteChat$Type extends MessageType<ServerChatUpdateDeleteChat> {
     constructor() {
         super("server.ServerChatUpdateDeleteChat", [
-            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<ServerChatUpdateDeleteChat>): ServerChatUpdateDeleteChat {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
-        message.pts = 0;
         if (value !== undefined)
             reflectionMergePartial<ServerChatUpdateDeleteChat>(this, message, value);
         return message;
@@ -474,9 +440,6 @@ class ServerChatUpdateDeleteChat$Type extends MessageType<ServerChatUpdateDelete
             switch (fieldNo) {
                 case /* int64 chat_id */ 1:
                     message.chatId = reader.int64().toBigInt();
-                    break;
-                case /* int32 pts */ 2:
-                    message.pts = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -493,9 +456,6 @@ class ServerChatUpdateDeleteChat$Type extends MessageType<ServerChatUpdateDelete
         /* int64 chat_id = 1; */
         if (message.chatId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.chatId);
-        /* int32 pts = 2; */
-        if (message.pts !== 0)
-            writer.tag(2, WireType.Varint).int32(message.pts);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -511,14 +471,12 @@ class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRe
     constructor() {
         super("server.ServerSpaceUpdateRemoveMember", [
             { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "member_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<ServerSpaceUpdateRemoveMember>): ServerSpaceUpdateRemoveMember {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.spaceId = 0n;
-        message.memberId = 0n;
         message.userId = 0n;
         if (value !== undefined)
             reflectionMergePartial<ServerSpaceUpdateRemoveMember>(this, message, value);
@@ -532,10 +490,7 @@ class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRe
                 case /* int64 space_id */ 1:
                     message.spaceId = reader.int64().toBigInt();
                     break;
-                case /* int64 member_id */ 2:
-                    message.memberId = reader.int64().toBigInt();
-                    break;
-                case /* int64 user_id */ 3:
+                case /* int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
                     break;
                 default:
@@ -553,12 +508,9 @@ class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRe
         /* int64 space_id = 1; */
         if (message.spaceId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.spaceId);
-        /* int64 member_id = 2; */
-        if (message.memberId !== 0n)
-            writer.tag(2, WireType.Varint).int64(message.memberId);
-        /* int64 user_id = 3; */
+        /* int64 user_id = 2; */
         if (message.userId !== 0n)
-            writer.tag(3, WireType.Varint).int64(message.userId);
+            writer.tag(2, WireType.Varint).int64(message.userId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

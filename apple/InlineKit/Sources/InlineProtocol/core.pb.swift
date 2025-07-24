@@ -2520,9 +2520,6 @@ public struct GetUpdatesStateInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// Local PTS of the self user update box
-  public var userPts: Int32 = 0
-
   /// Local date of state
   public var date: Int64 = 0
 
@@ -2535,9 +2532,6 @@ public struct GetUpdatesStateResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
-
-  /// Current PTS of the self user update box
-  public var userPts: Int32 = 0
 
   /// Current date of the state
   public var date: Int64 = 0
@@ -3512,197 +3506,226 @@ public struct GetSpaceMembersResult: Sendable {
 
 //// ------------------------------
 /// Updates Subsystem
-public struct Update: Sendable {
+public struct Update: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var update: Update.OneOf_Update? = nil
+  public var seq: Int32 {
+    get {return _storage._seq ?? 0}
+    set {_uniqueStorage()._seq = newValue}
+  }
+  /// Returns true if `seq` has been explicitly set.
+  public var hasSeq: Bool {return _storage._seq != nil}
+  /// Clears the value of `seq`. Subsequent reads from it will return its default value.
+  public mutating func clearSeq() {_uniqueStorage()._seq = nil}
+
+  public var date: Int64 {
+    get {return _storage._date ?? 0}
+    set {_uniqueStorage()._date = newValue}
+  }
+  /// Returns true if `date` has been explicitly set.
+  public var hasDate: Bool {return _storage._date != nil}
+  /// Clears the value of `date`. Subsequent reads from it will return its default value.
+  public mutating func clearDate() {_uniqueStorage()._date = nil}
+
+  public var update: OneOf_Update? {
+    get {return _storage._update}
+    set {_uniqueStorage()._update = newValue}
+  }
 
   /// this
   public var newMessage: UpdateNewMessage {
     get {
-      if case .newMessage(let v)? = update {return v}
+      if case .newMessage(let v)? = _storage._update {return v}
       return UpdateNewMessage()
     }
-    set {update = .newMessage(newValue)}
+    set {_uniqueStorage()._update = .newMessage(newValue)}
   }
 
   /// this
   public var editMessage: UpdateEditMessage {
     get {
-      if case .editMessage(let v)? = update {return v}
+      if case .editMessage(let v)? = _storage._update {return v}
       return UpdateEditMessage()
     }
-    set {update = .editMessage(newValue)}
+    set {_uniqueStorage()._update = .editMessage(newValue)}
   }
 
   public var updateMessageID: UpdateMessageId {
     get {
-      if case .updateMessageID(let v)? = update {return v}
+      if case .updateMessageID(let v)? = _storage._update {return v}
       return UpdateMessageId()
     }
-    set {update = .updateMessageID(newValue)}
+    set {_uniqueStorage()._update = .updateMessageID(newValue)}
   }
 
   /// this
   public var deleteMessages: UpdateDeleteMessages {
     get {
-      if case .deleteMessages(let v)? = update {return v}
+      if case .deleteMessages(let v)? = _storage._update {return v}
       return UpdateDeleteMessages()
     }
-    set {update = .deleteMessages(newValue)}
+    set {_uniqueStorage()._update = .deleteMessages(newValue)}
   }
 
   public var updateComposeAction: UpdateComposeAction {
     get {
-      if case .updateComposeAction(let v)? = update {return v}
+      if case .updateComposeAction(let v)? = _storage._update {return v}
       return UpdateComposeAction()
     }
-    set {update = .updateComposeAction(newValue)}
+    set {_uniqueStorage()._update = .updateComposeAction(newValue)}
   }
 
   public var updateUserStatus: UpdateUserStatus {
     get {
-      if case .updateUserStatus(let v)? = update {return v}
+      if case .updateUserStatus(let v)? = _storage._update {return v}
       return UpdateUserStatus()
     }
-    set {update = .updateUserStatus(newValue)}
+    set {_uniqueStorage()._update = .updateUserStatus(newValue)}
   }
 
   /// this
   public var messageAttachment: UpdateMessageAttachment {
     get {
-      if case .messageAttachment(let v)? = update {return v}
+      if case .messageAttachment(let v)? = _storage._update {return v}
       return UpdateMessageAttachment()
     }
-    set {update = .messageAttachment(newValue)}
+    set {_uniqueStorage()._update = .messageAttachment(newValue)}
   }
 
   public var updateReaction: UpdateReaction {
     get {
-      if case .updateReaction(let v)? = update {return v}
+      if case .updateReaction(let v)? = _storage._update {return v}
       return UpdateReaction()
     }
-    set {update = .updateReaction(newValue)}
+    set {_uniqueStorage()._update = .updateReaction(newValue)}
   }
 
   public var deleteReaction: UpdateDeleteReaction {
     get {
-      if case .deleteReaction(let v)? = update {return v}
+      if case .deleteReaction(let v)? = _storage._update {return v}
       return UpdateDeleteReaction()
     }
-    set {update = .deleteReaction(newValue)}
+    set {_uniqueStorage()._update = .deleteReaction(newValue)}
   }
 
   /// this
   public var participantAdd: UpdateChatParticipantAdd {
     get {
-      if case .participantAdd(let v)? = update {return v}
+      if case .participantAdd(let v)? = _storage._update {return v}
       return UpdateChatParticipantAdd()
     }
-    set {update = .participantAdd(newValue)}
+    set {_uniqueStorage()._update = .participantAdd(newValue)}
   }
 
   /// this
   public var participantDelete: UpdateChatParticipantDelete {
     get {
-      if case .participantDelete(let v)? = update {return v}
+      if case .participantDelete(let v)? = _storage._update {return v}
       return UpdateChatParticipantDelete()
     }
-    set {update = .participantDelete(newValue)}
+    set {_uniqueStorage()._update = .participantDelete(newValue)}
   }
 
   /// this
   public var newChat: UpdateNewChat {
     get {
-      if case .newChat(let v)? = update {return v}
+      if case .newChat(let v)? = _storage._update {return v}
       return UpdateNewChat()
     }
-    set {update = .newChat(newValue)}
+    set {_uniqueStorage()._update = .newChat(newValue)}
   }
 
   /// this
   public var deleteChat: UpdateDeleteChat {
     get {
-      if case .deleteChat(let v)? = update {return v}
+      if case .deleteChat(let v)? = _storage._update {return v}
       return UpdateDeleteChat()
     }
-    set {update = .deleteChat(newValue)}
+    set {_uniqueStorage()._update = .deleteChat(newValue)}
   }
 
   public var spaceMemberAdd: UpdateSpaceMemberAdd {
     get {
-      if case .spaceMemberAdd(let v)? = update {return v}
+      if case .spaceMemberAdd(let v)? = _storage._update {return v}
       return UpdateSpaceMemberAdd()
     }
-    set {update = .spaceMemberAdd(newValue)}
+    set {_uniqueStorage()._update = .spaceMemberAdd(newValue)}
   }
 
   /// this
   public var spaceMemberDelete: UpdateSpaceMemberDelete {
     get {
-      if case .spaceMemberDelete(let v)? = update {return v}
+      if case .spaceMemberDelete(let v)? = _storage._update {return v}
       return UpdateSpaceMemberDelete()
     }
-    set {update = .spaceMemberDelete(newValue)}
+    set {_uniqueStorage()._update = .spaceMemberDelete(newValue)}
   }
 
   /// this
   public var joinSpace: UpdateJoinSpace {
     get {
-      if case .joinSpace(let v)? = update {return v}
+      if case .joinSpace(let v)? = _storage._update {return v}
       return UpdateJoinSpace()
     }
-    set {update = .joinSpace(newValue)}
+    set {_uniqueStorage()._update = .joinSpace(newValue)}
   }
 
   public var updateReadMaxID: UpdateReadMaxId {
     get {
-      if case .updateReadMaxID(let v)? = update {return v}
+      if case .updateReadMaxID(let v)? = _storage._update {return v}
       return UpdateReadMaxId()
     }
-    set {update = .updateReadMaxID(newValue)}
+    set {_uniqueStorage()._update = .updateReadMaxID(newValue)}
   }
 
   public var updateUserSettings: UpdateUserSettings {
     get {
-      if case .updateUserSettings(let v)? = update {return v}
+      if case .updateUserSettings(let v)? = _storage._update {return v}
       return UpdateUserSettings()
     }
-    set {update = .updateUserSettings(newValue)}
+    set {_uniqueStorage()._update = .updateUserSettings(newValue)}
   }
 
   public var newMessageNotification: UpdateNewMessageNotification {
     get {
-      if case .newMessageNotification(let v)? = update {return v}
+      if case .newMessageNotification(let v)? = _storage._update {return v}
       return UpdateNewMessageNotification()
     }
-    set {update = .newMessageNotification(newValue)}
+    set {_uniqueStorage()._update = .newMessageNotification(newValue)}
   }
 
   public var markAsUnread: UpdateMarkAsUnread {
     get {
-      if case .markAsUnread(let v)? = update {return v}
+      if case .markAsUnread(let v)? = _storage._update {return v}
       return UpdateMarkAsUnread()
     }
-    set {update = .markAsUnread(newValue)}
+    set {_uniqueStorage()._update = .markAsUnread(newValue)}
   }
 
   public var chatSkipPts: UpdateChatSkipPts {
     get {
-      if case .chatSkipPts(let v)? = update {return v}
+      if case .chatSkipPts(let v)? = _storage._update {return v}
       return UpdateChatSkipPts()
     }
-    set {update = .chatSkipPts(newValue)}
+    set {_uniqueStorage()._update = .chatSkipPts(newValue)}
   }
 
   public var chatHasNewUpdates: UpdateChatHasNewUpdates {
     get {
-      if case .chatHasNewUpdates(let v)? = update {return v}
+      if case .chatHasNewUpdates(let v)? = _storage._update {return v}
       return UpdateChatHasNewUpdates()
     }
-    set {update = .chatHasNewUpdates(newValue)}
+    set {_uniqueStorage()._update = .chatHasNewUpdates(newValue)}
+  }
+
+  public var spaceHasNewUpdates: UpdateSpaceHasNewUpdates {
+    get {
+      if case .spaceHasNewUpdates(let v)? = _storage._update {return v}
+      return UpdateSpaceHasNewUpdates()
+    }
+    set {_uniqueStorage()._update = .spaceHasNewUpdates(newValue)}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -3740,8 +3763,27 @@ public struct Update: Sendable {
     case markAsUnread(UpdateMarkAsUnread)
     case chatSkipPts(UpdateChatSkipPts)
     case chatHasNewUpdates(UpdateChatHasNewUpdates)
+    case spaceHasNewUpdates(UpdateSpaceHasNewUpdates)
 
   }
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct UpdateSpaceHasNewUpdates: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Space ID
+  public var spaceID: Int64 = 0
+
+  /// Current sequence of the space
+  public var updateSeq: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 }
@@ -3756,10 +3798,7 @@ public struct UpdateChatHasNewUpdates: Sendable {
   public var chatID: Int64 = 0
 
   /// Current PTS of the chat
-  public var pts: Int32 = 0
-
-  /// Date of the last update
-  public var date: Int64 = 0
+  public var updateSeq: Int32 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3772,12 +3811,6 @@ public struct UpdateChatSkipPts: Sendable {
   // methods supported on all messages.
 
   public var chatID: Int64 = 0
-
-  /// PTS
-  public var pts: Int32 = 0
-
-  /// Date of update
-  public var date: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3910,12 +3943,6 @@ public struct UpdateSpaceMemberDelete: Sendable {
 
   /// User ID
   public var userID: Int64 = 0
-
-  /// PTS of the update
-  public var pts: Int32 = 0
-
-  /// Date of the update
-  public var date: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4080,12 +4107,6 @@ public struct UpdateNewMessage: Sendable {
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
   public mutating func clearMessage() {self._message = nil}
 
-  /// PTS of the update
-  public var pts: Int32 = 0
-
-  /// Date of the update
-  public var date: Int64 = 0
-
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -4107,12 +4128,6 @@ public struct UpdateEditMessage: Sendable {
   public var hasMessage: Bool {return self._message != nil}
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
   public mutating func clearMessage() {self._message = nil}
-
-  /// PTS of the update
-  public var pts: Int32 = 0
-
-  /// Date of the update
-  public var date: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4139,12 +4154,6 @@ public struct UpdateDeleteMessages: Sendable {
   public var hasPeerID: Bool {return self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
-
-  /// PTS of the update
-  public var pts: Int32 = 0
-
-  /// Date of the update
-  public var date: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -8504,7 +8513,6 @@ extension DeleteMemberResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesStateInput"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_pts"),
     2: .same(proto: "date"),
   ]
 
@@ -8514,7 +8522,6 @@ extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt32Field(value: &self.userPts) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
@@ -8522,9 +8529,6 @@ extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.userPts != 0 {
-      try visitor.visitSingularInt32Field(value: self.userPts, fieldNumber: 1)
-    }
     if self.date != 0 {
       try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 2)
     }
@@ -8532,7 +8536,6 @@ extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 
   public static func ==(lhs: GetUpdatesStateInput, rhs: GetUpdatesStateInput) -> Bool {
-    if lhs.userPts != rhs.userPts {return false}
     if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -8542,7 +8545,6 @@ extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesStateResult"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_pts"),
     2: .same(proto: "date"),
   ]
 
@@ -8552,7 +8554,6 @@ extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt32Field(value: &self.userPts) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
@@ -8560,9 +8561,6 @@ extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.userPts != 0 {
-      try visitor.visitSingularInt32Field(value: self.userPts, fieldNumber: 1)
-    }
     if self.date != 0 {
       try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 2)
     }
@@ -8570,7 +8568,6 @@ extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 
   public static func ==(lhs: GetUpdatesStateResult, rhs: GetUpdatesStateResult) -> Bool {
-    if lhs.userPts != rhs.userPts {return false}
     if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -10162,6 +10159,8 @@ extension GetSpaceMembersResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Update"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "seq"),
+    2: .same(proto: "date"),
     4: .standard(proto: "new_message"),
     5: .standard(proto: "edit_message"),
     6: .standard(proto: "update_message_id"),
@@ -10184,6 +10183,488 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     23: .standard(proto: "mark_as_unread"),
     24: .standard(proto: "chat_skip_pts"),
     25: .standard(proto: "chat_has_new_updates"),
+    26: .standard(proto: "space_has_new_updates"),
+  ]
+
+  fileprivate class _StorageClass {
+    var _seq: Int32? = nil
+    var _date: Int64? = nil
+    var _update: Update.OneOf_Update?
+
+    #if swift(>=5.10)
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+    #else
+      static let defaultInstance = _StorageClass()
+    #endif
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _seq = source._seq
+      _date = source._date
+      _update = source._update
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularInt32Field(value: &_storage._seq) }()
+        case 2: try { try decoder.decodeSingularInt64Field(value: &_storage._date) }()
+        case 4: try {
+          var v: UpdateNewMessage?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .newMessage(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .newMessage(v)
+          }
+        }()
+        case 5: try {
+          var v: UpdateEditMessage?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .editMessage(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .editMessage(v)
+          }
+        }()
+        case 6: try {
+          var v: UpdateMessageId?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .updateMessageID(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .updateMessageID(v)
+          }
+        }()
+        case 7: try {
+          var v: UpdateDeleteMessages?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .deleteMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .deleteMessages(v)
+          }
+        }()
+        case 8: try {
+          var v: UpdateComposeAction?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .updateComposeAction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .updateComposeAction(v)
+          }
+        }()
+        case 9: try {
+          var v: UpdateUserStatus?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .updateUserStatus(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .updateUserStatus(v)
+          }
+        }()
+        case 10: try {
+          var v: UpdateMessageAttachment?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .messageAttachment(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .messageAttachment(v)
+          }
+        }()
+        case 11: try {
+          var v: UpdateReaction?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .updateReaction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .updateReaction(v)
+          }
+        }()
+        case 12: try {
+          var v: UpdateDeleteReaction?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .deleteReaction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .deleteReaction(v)
+          }
+        }()
+        case 13: try {
+          var v: UpdateChatParticipantAdd?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .participantAdd(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .participantAdd(v)
+          }
+        }()
+        case 14: try {
+          var v: UpdateChatParticipantDelete?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .participantDelete(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .participantDelete(v)
+          }
+        }()
+        case 15: try {
+          var v: UpdateNewChat?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .newChat(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .newChat(v)
+          }
+        }()
+        case 16: try {
+          var v: UpdateDeleteChat?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .deleteChat(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .deleteChat(v)
+          }
+        }()
+        case 17: try {
+          var v: UpdateSpaceMemberAdd?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .spaceMemberAdd(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .spaceMemberAdd(v)
+          }
+        }()
+        case 18: try {
+          var v: UpdateSpaceMemberDelete?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .spaceMemberDelete(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .spaceMemberDelete(v)
+          }
+        }()
+        case 19: try {
+          var v: UpdateJoinSpace?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .joinSpace(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .joinSpace(v)
+          }
+        }()
+        case 20: try {
+          var v: UpdateReadMaxId?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .updateReadMaxID(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .updateReadMaxID(v)
+          }
+        }()
+        case 21: try {
+          var v: UpdateUserSettings?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .updateUserSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .updateUserSettings(v)
+          }
+        }()
+        case 22: try {
+          var v: UpdateNewMessageNotification?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .newMessageNotification(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .newMessageNotification(v)
+          }
+        }()
+        case 23: try {
+          var v: UpdateMarkAsUnread?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .markAsUnread(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .markAsUnread(v)
+          }
+        }()
+        case 24: try {
+          var v: UpdateChatSkipPts?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .chatSkipPts(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .chatSkipPts(v)
+          }
+        }()
+        case 25: try {
+          var v: UpdateChatHasNewUpdates?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .chatHasNewUpdates(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .chatHasNewUpdates(v)
+          }
+        }()
+        case 26: try {
+          var v: UpdateSpaceHasNewUpdates?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .spaceHasNewUpdates(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .spaceHasNewUpdates(v)
+          }
+        }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      try { if let v = _storage._seq {
+        try visitor.visitSingularInt32Field(value: v, fieldNumber: 1)
+      } }()
+      try { if let v = _storage._date {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+      } }()
+      switch _storage._update {
+      case .newMessage?: try {
+        guard case .newMessage(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      }()
+      case .editMessage?: try {
+        guard case .editMessage(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      }()
+      case .updateMessageID?: try {
+        guard case .updateMessageID(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      }()
+      case .deleteMessages?: try {
+        guard case .deleteMessages(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      }()
+      case .updateComposeAction?: try {
+        guard case .updateComposeAction(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+      }()
+      case .updateUserStatus?: try {
+        guard case .updateUserStatus(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      }()
+      case .messageAttachment?: try {
+        guard case .messageAttachment(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+      }()
+      case .updateReaction?: try {
+        guard case .updateReaction(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+      }()
+      case .deleteReaction?: try {
+        guard case .deleteReaction(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+      }()
+      case .participantAdd?: try {
+        guard case .participantAdd(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
+      }()
+      case .participantDelete?: try {
+        guard case .participantDelete(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
+      }()
+      case .newChat?: try {
+        guard case .newChat(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
+      }()
+      case .deleteChat?: try {
+        guard case .deleteChat(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
+      }()
+      case .spaceMemberAdd?: try {
+        guard case .spaceMemberAdd(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
+      }()
+      case .spaceMemberDelete?: try {
+        guard case .spaceMemberDelete(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
+      }()
+      case .joinSpace?: try {
+        guard case .joinSpace(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
+      }()
+      case .updateReadMaxID?: try {
+        guard case .updateReadMaxID(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
+      }()
+      case .updateUserSettings?: try {
+        guard case .updateUserSettings(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
+      }()
+      case .newMessageNotification?: try {
+        guard case .newMessageNotification(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+      }()
+      case .markAsUnread?: try {
+        guard case .markAsUnread(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
+      }()
+      case .chatSkipPts?: try {
+        guard case .chatSkipPts(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
+      }()
+      case .chatHasNewUpdates?: try {
+        guard case .chatHasNewUpdates(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
+      }()
+      case .spaceHasNewUpdates?: try {
+        guard case .spaceHasNewUpdates(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
+      }()
+      case nil: break
+      }
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Update, rhs: Update) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._seq != rhs_storage._seq {return false}
+        if _storage._date != rhs_storage._date {return false}
+        if _storage._update != rhs_storage._update {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateSpaceHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateSpaceHasNewUpdates"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "space_id"),
+    2: .standard(proto: "update_seq"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10192,398 +10673,26 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 4: try {
-        var v: UpdateNewMessage?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .newMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .newMessage(v)
-        }
-      }()
-      case 5: try {
-        var v: UpdateEditMessage?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .editMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .editMessage(v)
-        }
-      }()
-      case 6: try {
-        var v: UpdateMessageId?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateMessageID(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateMessageID(v)
-        }
-      }()
-      case 7: try {
-        var v: UpdateDeleteMessages?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .deleteMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .deleteMessages(v)
-        }
-      }()
-      case 8: try {
-        var v: UpdateComposeAction?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateComposeAction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateComposeAction(v)
-        }
-      }()
-      case 9: try {
-        var v: UpdateUserStatus?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateUserStatus(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateUserStatus(v)
-        }
-      }()
-      case 10: try {
-        var v: UpdateMessageAttachment?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .messageAttachment(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .messageAttachment(v)
-        }
-      }()
-      case 11: try {
-        var v: UpdateReaction?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateReaction(v)
-        }
-      }()
-      case 12: try {
-        var v: UpdateDeleteReaction?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .deleteReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .deleteReaction(v)
-        }
-      }()
-      case 13: try {
-        var v: UpdateChatParticipantAdd?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .participantAdd(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .participantAdd(v)
-        }
-      }()
-      case 14: try {
-        var v: UpdateChatParticipantDelete?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .participantDelete(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .participantDelete(v)
-        }
-      }()
-      case 15: try {
-        var v: UpdateNewChat?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .newChat(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .newChat(v)
-        }
-      }()
-      case 16: try {
-        var v: UpdateDeleteChat?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .deleteChat(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .deleteChat(v)
-        }
-      }()
-      case 17: try {
-        var v: UpdateSpaceMemberAdd?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .spaceMemberAdd(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .spaceMemberAdd(v)
-        }
-      }()
-      case 18: try {
-        var v: UpdateSpaceMemberDelete?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .spaceMemberDelete(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .spaceMemberDelete(v)
-        }
-      }()
-      case 19: try {
-        var v: UpdateJoinSpace?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .joinSpace(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .joinSpace(v)
-        }
-      }()
-      case 20: try {
-        var v: UpdateReadMaxId?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateReadMaxID(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateReadMaxID(v)
-        }
-      }()
-      case 21: try {
-        var v: UpdateUserSettings?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .updateUserSettings(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .updateUserSettings(v)
-        }
-      }()
-      case 22: try {
-        var v: UpdateNewMessageNotification?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .newMessageNotification(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .newMessageNotification(v)
-        }
-      }()
-      case 23: try {
-        var v: UpdateMarkAsUnread?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .markAsUnread(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .markAsUnread(v)
-        }
-      }()
-      case 24: try {
-        var v: UpdateChatSkipPts?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .chatSkipPts(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .chatSkipPts(v)
-        }
-      }()
-      case 25: try {
-        var v: UpdateChatHasNewUpdates?
-        var hadOneofValue = false
-        if let current = self.update {
-          hadOneofValue = true
-          if case .chatHasNewUpdates(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.update = .chatHasNewUpdates(v)
-        }
-      }()
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.updateSeq) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    switch self.update {
-    case .newMessage?: try {
-      guard case .newMessage(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
-    case .editMessage?: try {
-      guard case .editMessage(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    }()
-    case .updateMessageID?: try {
-      guard case .updateMessageID(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    }()
-    case .deleteMessages?: try {
-      guard case .deleteMessages(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    }()
-    case .updateComposeAction?: try {
-      guard case .updateComposeAction(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-    }()
-    case .updateUserStatus?: try {
-      guard case .updateUserStatus(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
-    }()
-    case .messageAttachment?: try {
-      guard case .messageAttachment(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
-    }()
-    case .updateReaction?: try {
-      guard case .updateReaction(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
-    }()
-    case .deleteReaction?: try {
-      guard case .deleteReaction(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
-    }()
-    case .participantAdd?: try {
-      guard case .participantAdd(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
-    }()
-    case .participantDelete?: try {
-      guard case .participantDelete(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
-    }()
-    case .newChat?: try {
-      guard case .newChat(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
-    }()
-    case .deleteChat?: try {
-      guard case .deleteChat(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
-    }()
-    case .spaceMemberAdd?: try {
-      guard case .spaceMemberAdd(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
-    }()
-    case .spaceMemberDelete?: try {
-      guard case .spaceMemberDelete(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
-    }()
-    case .joinSpace?: try {
-      guard case .joinSpace(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
-    }()
-    case .updateReadMaxID?: try {
-      guard case .updateReadMaxID(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
-    }()
-    case .updateUserSettings?: try {
-      guard case .updateUserSettings(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
-    }()
-    case .newMessageNotification?: try {
-      guard case .newMessageNotification(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
-    }()
-    case .markAsUnread?: try {
-      guard case .markAsUnread(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
-    }()
-    case .chatSkipPts?: try {
-      guard case .chatSkipPts(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
-    }()
-    case .chatHasNewUpdates?: try {
-      guard case .chatHasNewUpdates(let v)? = self.update else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
-    }()
-    case nil: break
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    if self.updateSeq != 0 {
+      try visitor.visitSingularInt32Field(value: self.updateSeq, fieldNumber: 2)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Update, rhs: Update) -> Bool {
-    if lhs.update != rhs.update {return false}
+  public static func ==(lhs: UpdateSpaceHasNewUpdates, rhs: UpdateSpaceHasNewUpdates) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.updateSeq != rhs.updateSeq {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10593,8 +10702,7 @@ extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Message
   public static let protoMessageName: String = "UpdateChatHasNewUpdates"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "chat_id"),
-    2: .same(proto: "pts"),
-    3: .same(proto: "date"),
+    2: .standard(proto: "update_seq"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10604,8 +10712,7 @@ extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Message
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
-      case 2: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.updateSeq) }()
       default: break
       }
     }
@@ -10615,19 +10722,15 @@ extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Message
     if self.chatID != 0 {
       try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
     }
-    if self.pts != 0 {
-      try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 2)
-    }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
+    if self.updateSeq != 0 {
+      try visitor.visitSingularInt32Field(value: self.updateSeq, fieldNumber: 2)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateChatHasNewUpdates, rhs: UpdateChatHasNewUpdates) -> Bool {
     if lhs.chatID != rhs.chatID {return false}
-    if lhs.pts != rhs.pts {return false}
-    if lhs.date != rhs.date {return false}
+    if lhs.updateSeq != rhs.updateSeq {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10637,8 +10740,6 @@ extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   public static let protoMessageName: String = "UpdateChatSkipPts"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "chat_id"),
-    2: .same(proto: "pts"),
-    3: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10648,8 +10749,6 @@ extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
-      case 2: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -10659,19 +10758,11 @@ extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     if self.chatID != 0 {
       try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
     }
-    if self.pts != 0 {
-      try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 2)
-    }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateChatSkipPts, rhs: UpdateChatSkipPts) -> Bool {
     if lhs.chatID != rhs.chatID {return false}
-    if lhs.pts != rhs.pts {return false}
-    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10852,8 +10943,6 @@ extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._Message
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "space_id"),
     2: .standard(proto: "user_id"),
-    3: .same(proto: "pts"),
-    4: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10864,8 +10953,6 @@ extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._Message
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
-      case 3: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
-      case 4: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -10878,20 +10965,12 @@ extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._Message
     if self.userID != 0 {
       try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
     }
-    if self.pts != 0 {
-      try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 3)
-    }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 4)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateSpaceMemberDelete, rhs: UpdateSpaceMemberDelete) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
     if lhs.userID != rhs.userID {return false}
-    if lhs.pts != rhs.pts {return false}
-    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -11153,8 +11232,6 @@ extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   public static let protoMessageName: String = "UpdateNewMessage"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "message"),
-    2: .same(proto: "pts"),
-    3: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -11164,8 +11241,6 @@ extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._message) }()
-      case 2: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -11179,19 +11254,11 @@ extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     try { if let v = self._message {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
-    if self.pts != 0 {
-      try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 2)
-    }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateNewMessage, rhs: UpdateNewMessage) -> Bool {
     if lhs._message != rhs._message {return false}
-    if lhs.pts != rhs.pts {return false}
-    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -11201,8 +11268,6 @@ extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   public static let protoMessageName: String = "UpdateEditMessage"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "message"),
-    2: .same(proto: "pts"),
-    3: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -11212,8 +11277,6 @@ extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._message) }()
-      case 2: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -11227,19 +11290,11 @@ extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     try { if let v = self._message {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
-    if self.pts != 0 {
-      try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 2)
-    }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateEditMessage, rhs: UpdateEditMessage) -> Bool {
     if lhs._message != rhs._message {return false}
-    if lhs.pts != rhs.pts {return false}
-    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -11250,8 +11305,6 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "message_ids"),
     2: .standard(proto: "peer_id"),
-    3: .same(proto: "pts"),
-    4: .same(proto: "date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -11262,8 +11315,6 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
-      case 3: try { try decoder.decodeSingularInt32Field(value: &self.pts) }()
-      case 4: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       default: break
       }
     }
@@ -11280,20 +11331,12 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
-    if self.pts != 0 {
-      try visitor.visitSingularInt32Field(value: self.pts, fieldNumber: 3)
-    }
-    if self.date != 0 {
-      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 4)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateDeleteMessages, rhs: UpdateDeleteMessages) -> Bool {
     if lhs.messageIds != rhs.messageIds {return false}
     if lhs._peerID != rhs._peerID {return false}
-    if lhs.pts != rhs.pts {return false}
-    if lhs.date != rhs.date {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
