@@ -24,7 +24,13 @@ final class MessagesCollectionView: UICollectionView {
   private struct SavedScrollPosition {
     let messageId: Int64
     let offsetFromMessageTop: CGFloat
+    let timestamp: TimeInterval // Track when position was saved
   }
+  
+  // Track scroll anchoring state
+  private var isAnchoring = false
+  private var lastContentSize: CGSize = .zero
+  internal var shouldAnchorOnContentSizeChange = true
   
   private func saveScrollPosition() {
     // Don't save position if user is near the bottom (within threshold)
@@ -32,6 +38,9 @@ final class MessagesCollectionView: UICollectionView {
       Self.savedScrollPositions.removeValue(forKey: chatId)
       return
     }
+    
+    // Don't save if we're currently anchoring to avoid recursion
+    if isAnchoring { return }
     
     // Find the topmost visible message in the viewport
     // Note: In reversed scroll view, "topmost" is actually the bottommost in the data array
@@ -45,7 +54,8 @@ final class MessagesCollectionView: UICollectionView {
     
     let savedPosition = SavedScrollPosition(
       messageId: topmostVisibleMessage.message.message.messageId,
-      offsetFromMessageTop: offsetFromMessageTop
+      offsetFromMessageTop: offsetFromMessageTop,
+      timestamp: Date().timeIntervalSince1970
     )
     
     Self.savedScrollPositions[chatId] = savedPosition
@@ -83,7 +93,46 @@ final class MessagesCollectionView: UICollectionView {
     let clampedY = max(minY, min(maxY, targetY))
     let restoredPosition = CGPoint(x: 0, y: clampedY)
     
+    isAnchoring = true
     setContentOffset(restoredPosition, animated: false)
+    isAnchoring = false
+  }
+  
+  private func anchorScrollPosition() {
+    // Only anchor if we have a saved position and should anchor on content changes
+    guard shouldAnchorOnContentSizeChange,
+          let savedPosition = Self.savedScrollPositions[chatId],
+          !shouldScrollToBottom else { return }
+    
+    // Find the saved message in the current data
+    guard let messageIndex = coordinator.messages.firstIndex(where: { $0.message.messageId == savedPosition.messageId }) else {
+      // Message not found, clear the saved position
+      Self.savedScrollPositions.removeValue(forKey: chatId)
+      return
+    }
+    
+    let messageIndexPath = IndexPath(item: messageIndex, section: 0)
+    guard let layoutAttributes = layoutAttributesForItem(at: messageIndexPath) else { return }
+    
+    // Calculate the target scroll position
+    let targetY = layoutAttributes.frame.minY + savedPosition.offsetFromMessageTop
+    
+    // Ensure we don't restore to an invalid position
+    let maxY = max(contentSize.height - bounds.height + contentInset.top + contentInset.bottom, -contentInset.top)
+    let minY = -contentInset.top
+    
+    let clampedY = max(minY, min(maxY, targetY))
+    let targetPosition = CGPoint(x: 0, y: clampedY)
+    
+    // Only adjust if there's a meaningful difference
+    let currentOffset = contentOffset
+    let offsetDifference = abs(currentOffset.y - targetPosition.y)
+    
+    if offsetDifference > 1.0 { // Only anchor if difference is significant
+      isAnchoring = true
+      setContentOffset(targetPosition, animated: false)
+      isAnchoring = false
+    }
   }
   
   private func getTopmostVisibleMessage() -> (message: FullMessage, index: Int)? {
@@ -186,6 +235,22 @@ final class MessagesCollectionView: UICollectionView {
 
   override func didMoveToWindow() {
     updateContentInsets()
+    // Initialize content size tracking
+    lastContentSize = contentSize
+  }
+  
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    
+    // Check if content size changed and anchor scroll position if needed
+    let currentContentSize = contentSize
+    if currentContentSize != lastContentSize && !lastContentSize.equalTo(.zero) {
+      // Content size changed, anchor scroll position
+      DispatchQueue.main.async { [weak self] in
+        self?.anchorScrollPosition()
+      }
+    }
+    lastContentSize = currentContentSize
   }
   
   override func willMove(toWindow newWindow: UIWindow?) {
@@ -740,6 +805,11 @@ private extension MessagesCollectionView {
                   at: .top,
                   animated: true
                 )
+              } else {
+                // Anchor scroll position for new messages if user is not at bottom
+                DispatchQueue.main.async {
+                  (self?.currentCollectionView as? MessagesCollectionView)?.anchorScrollPosition()
+                }
               }
             }
           }
@@ -753,7 +823,12 @@ private extension MessagesCollectionView {
           var snapshot = dataSource.snapshot()
           let ids = newMessages.map(\.id)
           snapshot.reconfigureItems(ids)
-          dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+          dataSource.apply(snapshot, animatingDifferences: animated ?? false) { [weak self] in
+            // Anchor scroll position after updates (e.g., reactions, content changes)
+            DispatchQueue.main.async {
+              (self?.currentCollectionView as? MessagesCollectionView)?.anchorScrollPosition()
+            }
+          }
 
         case let .reload(animated):
           setInitialData(animated: animated)
@@ -1263,14 +1338,35 @@ private extension MessagesCollectionView {
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
       isUserDragging = true
       isUserScrollInEffect = true
+      
+      // Disable scroll anchoring while user is scrolling
+      if let messagesCollectionView = currentCollectionView as? MessagesCollectionView {
+        messagesCollectionView.shouldAnchorOnContentSizeChange = false
+      }
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
       isUserDragging = false
+      
+      // Re-enable scroll anchoring after a short delay if not decelerating
+      if !decelerate {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+          if let messagesCollectionView = self?.currentCollectionView as? MessagesCollectionView {
+            messagesCollectionView.shouldAnchorOnContentSizeChange = true
+          }
+        }
+      }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
       isUserScrollInEffect = false
+      
+      // Re-enable scroll anchoring after scrolling ends
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        if let messagesCollectionView = self?.currentCollectionView as? MessagesCollectionView {
+          messagesCollectionView.shouldAnchorOnContentSizeChange = true
+        }
+      }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -1280,8 +1376,10 @@ private extension MessagesCollectionView {
 
       guard let messagesCollectionView = currentCollectionView as? MessagesCollectionView else { return }
       
-      // Save scroll position during scrolling (throttled)
-      messagesCollectionView.saveScrollPosition()
+      // Only save scroll position if user is scrolling, not during programmatic anchoring
+      if isUserScrollInEffect || isUserDragging {
+        messagesCollectionView.saveScrollPosition()
+      }
 
       let threshold = messagesCollectionView.calculatedThreshold
       let isAtBottom = scrollView.contentOffset.y > -threshold
