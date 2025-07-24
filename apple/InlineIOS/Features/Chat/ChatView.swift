@@ -181,10 +181,11 @@ struct ChatView: View {
         Text(title)
           .font(.body)
         subtitleView
+          .frame(minHeight: 16)
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .scaledToFill()
-    .fixedSize()
+    .frame(maxWidth: .infinity, alignment: .leading)
     .onTapGesture {
       if let chatItem = fullChatViewModel.chatItem {
         router.push(.chatInfo(chatItem: chatItem))

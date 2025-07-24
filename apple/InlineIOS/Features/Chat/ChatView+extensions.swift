@@ -104,18 +104,16 @@ extension ChatView {
   @ViewBuilder
   var subtitleView: some View {
     let subtitle = getCurrentSubtitle()
-    if !subtitle.text.isEmpty {
-      HStack(alignment: .center, spacing: 4) {
-        subtitle.animatedIndicator.padding(.top, 2)
+    HStack(alignment: .center, spacing: 4) {
+      subtitle.animatedIndicator.padding(.top, 2)
 
-        Text(subtitle.text.lowercased())
-          .font(.caption)
-//          .foregroundStyle(subtitle.isComposeAction ? Color(ThemeManager.shared.selected.accent) : .secondary)
-          .foregroundStyle(.secondary)
-      }
-      .padding(.top, -2)
-      .fixedSize()
+      Text(subtitle.text.isEmpty ? " " : subtitle.text.lowercased())
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .opacity(subtitle.text.isEmpty ? 0 : 1)
     }
+    .padding(.top, -2)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
