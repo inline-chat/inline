@@ -222,16 +222,19 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
 
     let openAction = NSMenuItem(title: "Open URL", action: #selector(openURL), keyEquivalent: "")
     openAction.target = self
+    openAction.image = NSImage(systemSymbolName: "arrow.up.right.square", accessibilityDescription: nil)
     menu.addItem(openAction)
 
     let copyAction = NSMenuItem(title: "Copy URL", action: #selector(copyURL), keyEquivalent: "")
     copyAction.target = self
+    copyAction.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: nil)
     menu.addItem(copyAction)
 
     menu.addItem(NSMenuItem.separator())
 
     let deleteAction = NSMenuItem(title: "Delete", action: #selector(showDeleteConfirmation), keyEquivalent: "")
     deleteAction.target = self
+    deleteAction.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
     menu.addItem(deleteAction)
 
     NSMenu.popUpContextMenu(menu, with: NSApp.currentEvent!, for: self)

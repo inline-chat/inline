@@ -473,6 +473,7 @@ class SidebarItemRow: NSTableCellView {
       keyEquivalent: "p"
     )
     pinItem.target = self
+    pinItem.image = NSImage(systemSymbolName: isPinned ? "pin.slash" : "pin", accessibilityDescription: nil)
     menu.addItem(pinItem)
 
     // Archive item
@@ -482,6 +483,7 @@ class SidebarItemRow: NSTableCellView {
       keyEquivalent: "a"
     )
     archiveItem.target = self
+    archiveItem.image = NSImage(systemSymbolName: isArchived ? "archivebox" : "archivebox", accessibilityDescription: nil)
     menu.addItem(archiveItem)
 
     if isThread {
@@ -495,6 +497,7 @@ class SidebarItemRow: NSTableCellView {
         keyEquivalent: ""
       )
       deleteItem.target = self
+      deleteItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
       deleteItem.attributedTitle = NSAttributedString(
         string: "Delete",
         attributes: [.foregroundColor: NSColor.systemRed]
