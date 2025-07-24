@@ -10,6 +10,7 @@ import { getUpdateGroupFromInputPeer, type UpdateGroup } from "../modules/update
 import { RealtimeUpdates } from "../realtime/message"
 import { connectionManager } from "../ws/connections"
 import { encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 
 type Input = {
   messageId: bigint
@@ -27,7 +28,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const currentUserId = context.currentUserId
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
 
-  const { message, pts, date } = await MessageModel.editMessage({
+  const { message, update } = await MessageModel.editMessage({
     messageId: Number(input.messageId),
     chatId,
     text: input.text,
@@ -46,7 +47,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     document: fullMessage.document ?? undefined,
   }
 
-  let { selfUpdates } = await pushUpdates({ inputPeer: input.peer, messageInfo, currentUserId, pts })
+  let { selfUpdates } = await pushUpdates({ inputPeer: input.peer, messageInfo, currentUserId, update })
 
   return { updates: selfUpdates }
 }
@@ -63,14 +64,12 @@ const pushUpdates = async ({
   inputPeer,
   messageInfo,
   currentUserId,
-  pts,
-  date,
+  update,
 }: {
   inputPeer: InputPeer
   messageInfo: MessageInfo
   currentUserId: number
-  pts: number
-  date: Date
+  update: UpdateSeqAndDate
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
 
@@ -83,11 +82,12 @@ const pushUpdates = async ({
         userId === currentUserId ? inputPeer : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
 
       let newMessageUpdate: Update = {
-        date: encodeDateStrict(date),
+        date: encodeDateStrict(update.date),
+        seq: update.seq,
+
         update: {
           oneofKind: "editMessage",
           editMessage: {
-            pts,
             message: Encoders.message({
               ...messageInfo,
               encodingForPeer: { inputPeer: encodingForInputPeer },
@@ -116,11 +116,12 @@ const pushUpdates = async ({
     updateGroup.userIds.forEach((userId) => {
       // New updates
       let editMessageUpdate: Update = {
-        date: encodeDateStrict(date),
+        date: encodeDateStrict(update.date),
+        seq: update.seq,
+
         update: {
           oneofKind: "editMessage",
           editMessage: {
-            pts,
             message: Encoders.message({
               ...messageInfo,
               encodingForPeer: { inputPeer },

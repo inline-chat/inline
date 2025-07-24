@@ -1705,12 +1705,6 @@ export interface DeleteMemberResult {
  */
 export interface GetUpdatesStateInput {
     /**
-     * Local PTS of the self user update box
-     *
-     * @generated from protobuf field: int32 user_pts = 1;
-     */
-    userPts: number;
-    /**
      * Local date of state
      *
      * @generated from protobuf field: int64 date = 2;
@@ -1721,12 +1715,6 @@ export interface GetUpdatesStateInput {
  * @generated from protobuf message GetUpdatesStateResult
  */
 export interface GetUpdatesStateResult {
-    /**
-     * Current PTS of the self user update box
-     *
-     * @generated from protobuf field: int32 user_pts = 1;
-     */
-    userPts: number;
     /**
      * Current date of the state
      *
@@ -2366,6 +2354,14 @@ export interface GetSpaceMembersResult {
  */
 export interface Update {
     /**
+     * @generated from protobuf field: optional int32 seq = 1;
+     */
+    seq?: number;
+    /**
+     * @generated from protobuf field: optional int64 date = 2;
+     */
+    date?: bigint;
+    /**
      * @generated from protobuf oneof: update
      */
     update: {
@@ -2501,8 +2497,31 @@ export interface Update {
          */
         chatHasNewUpdates: UpdateChatHasNewUpdates;
     } | {
+        oneofKind: "spaceHasNewUpdates";
+        /**
+         * @generated from protobuf field: UpdateSpaceHasNewUpdates space_has_new_updates = 26;
+         */
+        spaceHasNewUpdates: UpdateSpaceHasNewUpdates;
+    } | {
         oneofKind: undefined;
     };
+}
+/**
+ * @generated from protobuf message UpdateSpaceHasNewUpdates
+ */
+export interface UpdateSpaceHasNewUpdates {
+    /**
+     * Space ID
+     *
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * Current sequence of the space
+     *
+     * @generated from protobuf field: int32 update_seq = 2;
+     */
+    updateSeq: number;
 }
 /**
  * Update when a chat has new updates and client should fetch them
@@ -2519,15 +2538,9 @@ export interface UpdateChatHasNewUpdates {
     /**
      * Current PTS of the chat
      *
-     * @generated from protobuf field: int32 pts = 2;
+     * @generated from protobuf field: int32 update_seq = 2;
      */
-    pts: number;
-    /**
-     * Date of the last update
-     *
-     * @generated from protobuf field: int64 date = 3;
-     */
-    date: bigint;
+    updateSeq: number;
 }
 /**
  * @generated from protobuf message UpdateChatSkipPts
@@ -2537,18 +2550,6 @@ export interface UpdateChatSkipPts {
      * @generated from protobuf field: int64 chat_id = 1;
      */
     chatId: bigint;
-    /**
-     * PTS
-     *
-     * @generated from protobuf field: int32 pts = 2;
-     */
-    pts: number;
-    /**
-     * Date of update
-     *
-     * @generated from protobuf field: int64 date = 3;
-     */
-    date: bigint;
 }
 /**
  * @generated from protobuf message UpdateNewMessageNotification
@@ -2626,18 +2627,6 @@ export interface UpdateSpaceMemberDelete {
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
-    /**
-     * PTS of the update
-     *
-     * @generated from protobuf field: int32 pts = 3;
-     */
-    pts: number;
-    /**
-     * Date of the update
-     *
-     * @generated from protobuf field: int64 date = 4;
-     */
-    date: bigint;
 }
 /**
  * Update when we joined a space
@@ -2746,18 +2735,6 @@ export interface UpdateNewMessage {
      * @generated from protobuf field: Message message = 1;
      */
     message?: Message;
-    /**
-     * PTS of the update
-     *
-     * @generated from protobuf field: int32 pts = 2;
-     */
-    pts: number;
-    /**
-     * Date of the update
-     *
-     * @generated from protobuf field: int64 date = 3;
-     */
-    date: bigint;
 }
 /**
  * Update when a message is edited
@@ -2769,18 +2746,6 @@ export interface UpdateEditMessage {
      * @generated from protobuf field: Message message = 1;
      */
     message?: Message;
-    /**
-     * PTS of the update
-     *
-     * @generated from protobuf field: int32 pts = 2;
-     */
-    pts: number;
-    /**
-     * Date of the update
-     *
-     * @generated from protobuf field: int64 date = 3;
-     */
-    date: bigint;
 }
 /**
  * Update when messages are deleted
@@ -2800,18 +2765,6 @@ export interface UpdateDeleteMessages {
      * @generated from protobuf field: Peer peer_id = 2;
      */
     peerId?: Peer;
-    /**
-     * PTS of the update
-     *
-     * @generated from protobuf field: int32 pts = 3;
-     */
-    pts: number;
-    /**
-     * Date of the update
-     *
-     * @generated from protobuf field: int64 date = 4;
-     */
-    date: bigint;
 }
 /**
  * Update when a message ID is updated after sending
@@ -7034,13 +6987,11 @@ export const DeleteMemberResult = new DeleteMemberResult$Type();
 class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
     constructor() {
         super("GetUpdatesStateInput", [
-            { no: 1, name: "user_pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateInput>): GetUpdatesStateInput {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.userPts = 0;
         message.date = 0n;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesStateInput>(this, message, value);
@@ -7051,9 +7002,6 @@ class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* int32 user_pts */ 1:
-                    message.userPts = reader.int32();
-                    break;
                 case /* int64 date */ 2:
                     message.date = reader.int64().toBigInt();
                     break;
@@ -7069,9 +7017,6 @@ class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
         return message;
     }
     internalBinaryWrite(message: GetUpdatesStateInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* int32 user_pts = 1; */
-        if (message.userPts !== 0)
-            writer.tag(1, WireType.Varint).int32(message.userPts);
         /* int64 date = 2; */
         if (message.date !== 0n)
             writer.tag(2, WireType.Varint).int64(message.date);
@@ -7089,13 +7034,11 @@ export const GetUpdatesStateInput = new GetUpdatesStateInput$Type();
 class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
     constructor() {
         super("GetUpdatesStateResult", [
-            { no: 1, name: "user_pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateResult>): GetUpdatesStateResult {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.userPts = 0;
         message.date = 0n;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesStateResult>(this, message, value);
@@ -7106,9 +7049,6 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* int32 user_pts */ 1:
-                    message.userPts = reader.int32();
-                    break;
                 case /* int64 date */ 2:
                     message.date = reader.int64().toBigInt();
                     break;
@@ -7124,9 +7064,6 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
         return message;
     }
     internalBinaryWrite(message: GetUpdatesStateResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* int32 user_pts = 1; */
-        if (message.userPts !== 0)
-            writer.tag(1, WireType.Varint).int32(message.userPts);
         /* int64 date = 2; */
         if (message.date !== 0n)
             writer.tag(2, WireType.Varint).int64(message.date);
@@ -9156,6 +9093,8 @@ export const GetSpaceMembersResult = new GetSpaceMembersResult$Type();
 class Update$Type extends MessageType<Update> {
     constructor() {
         super("Update", [
+            { no: 1, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "new_message", kind: "message", oneof: "update", T: () => UpdateNewMessage },
             { no: 5, name: "edit_message", kind: "message", oneof: "update", T: () => UpdateEditMessage },
             { no: 6, name: "update_message_id", kind: "message", oneof: "update", T: () => UpdateMessageId },
@@ -9177,7 +9116,8 @@ class Update$Type extends MessageType<Update> {
             { no: 22, name: "new_message_notification", kind: "message", oneof: "update", T: () => UpdateNewMessageNotification },
             { no: 23, name: "mark_as_unread", kind: "message", oneof: "update", T: () => UpdateMarkAsUnread },
             { no: 24, name: "chat_skip_pts", kind: "message", oneof: "update", T: () => UpdateChatSkipPts },
-            { no: 25, name: "chat_has_new_updates", kind: "message", oneof: "update", T: () => UpdateChatHasNewUpdates }
+            { no: 25, name: "chat_has_new_updates", kind: "message", oneof: "update", T: () => UpdateChatHasNewUpdates },
+            { no: 26, name: "space_has_new_updates", kind: "message", oneof: "update", T: () => UpdateSpaceHasNewUpdates }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -9192,6 +9132,12 @@ class Update$Type extends MessageType<Update> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
+                case /* optional int32 seq */ 1:
+                    message.seq = reader.int32();
+                    break;
+                case /* optional int64 date */ 2:
+                    message.date = reader.int64().toBigInt();
+                    break;
                 case /* UpdateNewMessage new_message */ 4:
                     message.update = {
                         oneofKind: "newMessage",
@@ -9324,6 +9270,12 @@ class Update$Type extends MessageType<Update> {
                         chatHasNewUpdates: UpdateChatHasNewUpdates.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatHasNewUpdates)
                     };
                     break;
+                case /* UpdateSpaceHasNewUpdates space_has_new_updates */ 26:
+                    message.update = {
+                        oneofKind: "spaceHasNewUpdates",
+                        spaceHasNewUpdates: UpdateSpaceHasNewUpdates.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceHasNewUpdates)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9336,6 +9288,12 @@ class Update$Type extends MessageType<Update> {
         return message;
     }
     internalBinaryWrite(message: Update, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional int32 seq = 1; */
+        if (message.seq !== undefined)
+            writer.tag(1, WireType.Varint).int32(message.seq);
+        /* optional int64 date = 2; */
+        if (message.date !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.date);
         /* UpdateNewMessage new_message = 4; */
         if (message.update.oneofKind === "newMessage")
             UpdateNewMessage.internalBinaryWrite(message.update.newMessage, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
@@ -9402,6 +9360,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateChatHasNewUpdates chat_has_new_updates = 25; */
         if (message.update.oneofKind === "chatHasNewUpdates")
             UpdateChatHasNewUpdates.internalBinaryWrite(message.update.chatHasNewUpdates, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateSpaceHasNewUpdates space_has_new_updates = 26; */
+        if (message.update.oneofKind === "spaceHasNewUpdates")
+            UpdateSpaceHasNewUpdates.internalBinaryWrite(message.update.spaceHasNewUpdates, writer.tag(26, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9413,19 +9374,72 @@ class Update$Type extends MessageType<Update> {
  */
 export const Update = new Update$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class UpdateSpaceHasNewUpdates$Type extends MessageType<UpdateSpaceHasNewUpdates> {
+    constructor() {
+        super("UpdateSpaceHasNewUpdates", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "update_seq", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateSpaceHasNewUpdates>): UpdateSpaceHasNewUpdates {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.updateSeq = 0;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateSpaceHasNewUpdates>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateSpaceHasNewUpdates): UpdateSpaceHasNewUpdates {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int32 update_seq */ 2:
+                    message.updateSeq = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateSpaceHasNewUpdates, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* int32 update_seq = 2; */
+        if (message.updateSeq !== 0)
+            writer.tag(2, WireType.Varint).int32(message.updateSeq);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateSpaceHasNewUpdates
+ */
+export const UpdateSpaceHasNewUpdates = new UpdateSpaceHasNewUpdates$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class UpdateChatHasNewUpdates$Type extends MessageType<UpdateChatHasNewUpdates> {
     constructor() {
         super("UpdateChatHasNewUpdates", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "update_seq", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateChatHasNewUpdates>): UpdateChatHasNewUpdates {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
-        message.pts = 0;
-        message.date = 0n;
+        message.updateSeq = 0;
         if (value !== undefined)
             reflectionMergePartial<UpdateChatHasNewUpdates>(this, message, value);
         return message;
@@ -9438,11 +9452,8 @@ class UpdateChatHasNewUpdates$Type extends MessageType<UpdateChatHasNewUpdates> 
                 case /* int64 chat_id */ 1:
                     message.chatId = reader.int64().toBigInt();
                     break;
-                case /* int32 pts */ 2:
-                    message.pts = reader.int32();
-                    break;
-                case /* int64 date */ 3:
-                    message.date = reader.int64().toBigInt();
+                case /* int32 update_seq */ 2:
+                    message.updateSeq = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -9459,12 +9470,9 @@ class UpdateChatHasNewUpdates$Type extends MessageType<UpdateChatHasNewUpdates> 
         /* int64 chat_id = 1; */
         if (message.chatId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.chatId);
-        /* int32 pts = 2; */
-        if (message.pts !== 0)
-            writer.tag(2, WireType.Varint).int32(message.pts);
-        /* int64 date = 3; */
-        if (message.date !== 0n)
-            writer.tag(3, WireType.Varint).int64(message.date);
+        /* int32 update_seq = 2; */
+        if (message.updateSeq !== 0)
+            writer.tag(2, WireType.Varint).int32(message.updateSeq);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9479,16 +9487,12 @@ export const UpdateChatHasNewUpdates = new UpdateChatHasNewUpdates$Type();
 class UpdateChatSkipPts$Type extends MessageType<UpdateChatSkipPts> {
     constructor() {
         super("UpdateChatSkipPts", [
-            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateChatSkipPts>): UpdateChatSkipPts {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
-        message.pts = 0;
-        message.date = 0n;
         if (value !== undefined)
             reflectionMergePartial<UpdateChatSkipPts>(this, message, value);
         return message;
@@ -9500,12 +9504,6 @@ class UpdateChatSkipPts$Type extends MessageType<UpdateChatSkipPts> {
             switch (fieldNo) {
                 case /* int64 chat_id */ 1:
                     message.chatId = reader.int64().toBigInt();
-                    break;
-                case /* int32 pts */ 2:
-                    message.pts = reader.int32();
-                    break;
-                case /* int64 date */ 3:
-                    message.date = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -9522,12 +9520,6 @@ class UpdateChatSkipPts$Type extends MessageType<UpdateChatSkipPts> {
         /* int64 chat_id = 1; */
         if (message.chatId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.chatId);
-        /* int32 pts = 2; */
-        if (message.pts !== 0)
-            writer.tag(2, WireType.Varint).int32(message.pts);
-        /* int64 date = 3; */
-        if (message.date !== 0n)
-            writer.tag(3, WireType.Varint).int64(message.date);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9696,17 +9688,13 @@ class UpdateSpaceMemberDelete$Type extends MessageType<UpdateSpaceMemberDelete> 
     constructor() {
         super("UpdateSpaceMemberDelete", [
             { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateSpaceMemberDelete>): UpdateSpaceMemberDelete {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.spaceId = 0n;
         message.userId = 0n;
-        message.pts = 0;
-        message.date = 0n;
         if (value !== undefined)
             reflectionMergePartial<UpdateSpaceMemberDelete>(this, message, value);
         return message;
@@ -9721,12 +9709,6 @@ class UpdateSpaceMemberDelete$Type extends MessageType<UpdateSpaceMemberDelete> 
                     break;
                 case /* int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
-                    break;
-                case /* int32 pts */ 3:
-                    message.pts = reader.int32();
-                    break;
-                case /* int64 date */ 4:
-                    message.date = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -9746,12 +9728,6 @@ class UpdateSpaceMemberDelete$Type extends MessageType<UpdateSpaceMemberDelete> 
         /* int64 user_id = 2; */
         if (message.userId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.userId);
-        /* int32 pts = 3; */
-        if (message.pts !== 0)
-            writer.tag(3, WireType.Varint).int32(message.pts);
-        /* int64 date = 4; */
-        if (message.date !== 0n)
-            writer.tag(4, WireType.Varint).int64(message.date);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10034,15 +10010,11 @@ export const UpdateDeleteChat = new UpdateDeleteChat$Type();
 class UpdateNewMessage$Type extends MessageType<UpdateNewMessage> {
     constructor() {
         super("UpdateNewMessage", [
-            { no: 1, name: "message", kind: "message", T: () => Message },
-            { no: 2, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "message", kind: "message", T: () => Message }
         ]);
     }
     create(value?: PartialMessage<UpdateNewMessage>): UpdateNewMessage {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.pts = 0;
-        message.date = 0n;
         if (value !== undefined)
             reflectionMergePartial<UpdateNewMessage>(this, message, value);
         return message;
@@ -10054,12 +10026,6 @@ class UpdateNewMessage$Type extends MessageType<UpdateNewMessage> {
             switch (fieldNo) {
                 case /* Message message */ 1:
                     message.message = Message.internalBinaryRead(reader, reader.uint32(), options, message.message);
-                    break;
-                case /* int32 pts */ 2:
-                    message.pts = reader.int32();
-                    break;
-                case /* int64 date */ 3:
-                    message.date = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -10076,12 +10042,6 @@ class UpdateNewMessage$Type extends MessageType<UpdateNewMessage> {
         /* Message message = 1; */
         if (message.message)
             Message.internalBinaryWrite(message.message, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
-        /* int32 pts = 2; */
-        if (message.pts !== 0)
-            writer.tag(2, WireType.Varint).int32(message.pts);
-        /* int64 date = 3; */
-        if (message.date !== 0n)
-            writer.tag(3, WireType.Varint).int64(message.date);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10096,15 +10056,11 @@ export const UpdateNewMessage = new UpdateNewMessage$Type();
 class UpdateEditMessage$Type extends MessageType<UpdateEditMessage> {
     constructor() {
         super("UpdateEditMessage", [
-            { no: 1, name: "message", kind: "message", T: () => Message },
-            { no: 2, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "message", kind: "message", T: () => Message }
         ]);
     }
     create(value?: PartialMessage<UpdateEditMessage>): UpdateEditMessage {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.pts = 0;
-        message.date = 0n;
         if (value !== undefined)
             reflectionMergePartial<UpdateEditMessage>(this, message, value);
         return message;
@@ -10116,12 +10072,6 @@ class UpdateEditMessage$Type extends MessageType<UpdateEditMessage> {
             switch (fieldNo) {
                 case /* Message message */ 1:
                     message.message = Message.internalBinaryRead(reader, reader.uint32(), options, message.message);
-                    break;
-                case /* int32 pts */ 2:
-                    message.pts = reader.int32();
-                    break;
-                case /* int64 date */ 3:
-                    message.date = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -10138,12 +10088,6 @@ class UpdateEditMessage$Type extends MessageType<UpdateEditMessage> {
         /* Message message = 1; */
         if (message.message)
             Message.internalBinaryWrite(message.message, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
-        /* int32 pts = 2; */
-        if (message.pts !== 0)
-            writer.tag(2, WireType.Varint).int32(message.pts);
-        /* int64 date = 3; */
-        if (message.date !== 0n)
-            writer.tag(3, WireType.Varint).int64(message.date);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10159,16 +10103,12 @@ class UpdateDeleteMessages$Type extends MessageType<UpdateDeleteMessages> {
     constructor() {
         super("UpdateDeleteMessages", [
             { no: 1, name: "message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "peer_id", kind: "message", T: () => Peer },
-            { no: 3, name: "pts", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "peer_id", kind: "message", T: () => Peer }
         ]);
     }
     create(value?: PartialMessage<UpdateDeleteMessages>): UpdateDeleteMessages {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.messageIds = [];
-        message.pts = 0;
-        message.date = 0n;
         if (value !== undefined)
             reflectionMergePartial<UpdateDeleteMessages>(this, message, value);
         return message;
@@ -10187,12 +10127,6 @@ class UpdateDeleteMessages$Type extends MessageType<UpdateDeleteMessages> {
                     break;
                 case /* Peer peer_id */ 2:
                     message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
-                    break;
-                case /* int32 pts */ 3:
-                    message.pts = reader.int32();
-                    break;
-                case /* int64 date */ 4:
-                    message.date = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -10216,12 +10150,6 @@ class UpdateDeleteMessages$Type extends MessageType<UpdateDeleteMessages> {
         /* Peer peer_id = 2; */
         if (message.peerId)
             Peer.internalBinaryWrite(message.peerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
-        /* int32 pts = 3; */
-        if (message.pts !== 0)
-            writer.tag(3, WireType.Varint).int32(message.pts);
-        /* int64 date = 4; */
-        if (message.date !== 0n)
-            writer.tag(4, WireType.Varint).int64(message.date);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

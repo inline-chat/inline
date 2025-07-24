@@ -20,6 +20,8 @@ import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 type Input = {
   peerId: InputPeer
@@ -90,7 +92,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptBinary(binaryEntities) : undefined
 
   // insert new msg with new ID
-  const { message: newMessage, pts } = await MessageModel.insertMessage({
+  const { message: newMessage, update } = await MessageModel.insertMessage({
     chatId: chatId,
     fromId: fromId,
     textEncrypted: encryptedMessage?.encrypted ?? null,
@@ -130,7 +132,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // we can also sepearate the sequence caching. this will speed up and
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
-  let { selfUpdates, updateGroup } = await pushUpdates({ inputPeer, messageInfo, currentUserId, pts })
+  let { selfUpdates, updateGroup } = await pushUpdates({ inputPeer, messageInfo, currentUserId, update })
 
   // send notification
   sendNotifications({
@@ -197,12 +199,12 @@ const pushUpdates = async ({
   inputPeer,
   messageInfo,
   currentUserId,
-  pts,
+  update,
 }: {
   inputPeer: InputPeer
   messageInfo: MessageInfo
   currentUserId: number
-  pts: number
+  update: UpdateSeqAndDate
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
 
@@ -235,9 +237,10 @@ const pushUpdates = async ({
               currentUserId,
               targetUserId: userId,
             }),
-            pts,
           },
         },
+        seq: update.seq,
+        date: encodeDateStrict(update.date),
       }
 
       if (userId === currentUserId) {
@@ -271,9 +274,10 @@ const pushUpdates = async ({
               currentUserId,
               targetUserId: userId,
             }),
-            pts,
           },
         },
+        seq: update.seq,
+        date: encodeDateStrict(update.date),
       }
 
       if (userId === currentUserId) {

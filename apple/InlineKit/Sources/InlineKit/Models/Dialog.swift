@@ -29,7 +29,6 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var draftMessage: DraftMessage?
   public var archived: Bool?
   public var chatId: Int64?
-  public var pts: Int64?
 
   public enum Columns {
     public static let id = Column(CodingKeys.id)
@@ -43,7 +42,6 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let draftMessage = Column(CodingKeys.draftMessage)
     public static let archived = Column(CodingKeys.archived)
     public static let chatId = Column(CodingKeys.chatId)
-    public static let pts = Column(CodingKeys.pts)
   }
 
   public static let space = belongsTo(Space.self)

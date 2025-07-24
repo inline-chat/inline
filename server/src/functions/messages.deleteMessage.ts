@@ -6,6 +6,8 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { UpdateGroup } from "../modules/updates"
 import { getUpdateGroupFromInputPeer } from "../modules/updates"
 import { RealtimeUpdates } from "../realtime/message"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 type Input = {
   messageIds: bigint[]
@@ -18,13 +20,13 @@ type Output = {
 
 export const deleteMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
-  let { pts } = await MessageModel.deleteMessages(input.messageIds, chatId)
+  let { update } = await MessageModel.deleteMessages(input.messageIds, chatId)
 
   const { selfUpdates } = await pushUpdates({
     inputPeer: input.peer,
     messageIds: input.messageIds,
     currentUserId: context.currentUserId,
-    pts,
+    update,
   })
 
   return { updates: selfUpdates }
@@ -39,12 +41,12 @@ const pushUpdates = async ({
   inputPeer,
   messageIds,
   currentUserId,
-  pts,
+  update,
 }: {
   inputPeer: InputPeer
   messageIds: bigint[]
   currentUserId: number
-  pts: number
+  update: UpdateSeqAndDate
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
 
@@ -59,11 +61,12 @@ const pushUpdates = async ({
         update: {
           oneofKind: "deleteMessages",
           deleteMessages: {
-            pts,
             messageIds: messageIds.map((id) => BigInt(id)),
             peerId: Encoders.peerFromInputPeer({ inputPeer: encodingForInputPeer, currentUserId }),
           },
         },
+        seq: update.seq,
+        date: encodeDateStrict(update.date),
       }
 
       if (userId === currentUserId) {
@@ -88,11 +91,12 @@ const pushUpdates = async ({
         update: {
           oneofKind: "deleteMessages",
           deleteMessages: {
-            pts,
             messageIds: messageIds.map((id) => BigInt(id)),
             peerId: Encoders.peerFromInputPeer({ inputPeer, currentUserId }),
           },
         },
+        seq: update.seq,
+        date: encodeDateStrict(update.date),
       }
 
       if (userId === currentUserId) {
