@@ -7,6 +7,7 @@ protocol ThemeConfig {
 
   var bubbleBackground: UIColor { get }
   var incomingBubbleBackground: UIColor { get }
+  var failedBubbleBackground: UIColor { get }
 
   // only for incoming messages for now
   var primaryTextColor: UIColor? { get }
