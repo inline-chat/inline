@@ -35,10 +35,10 @@ bun generate:proto
 
 First generate migrations:
 ```
-bun db:generate <migration_name_slug>
+cd server && bun db:generate <migration_name_slug>
 ```
 
 Then apply migrations
 ```
-bun db:migrate
+cd server && bun db:migrate
 ```
