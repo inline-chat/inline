@@ -58,6 +58,7 @@ struct Default: ThemeConfig {
   var buttonBackground: UIColor? { nil }
   var buttonSecondaryBackground: UIColor? { nil }
   var sheetTintColor: UIColor? { nil }
+  var logoutRed: UIColor = .init(hex: "#f38ba8")!
 }
 
 struct CatppuccinMocha: ThemeConfig {
@@ -240,6 +241,8 @@ struct CatppuccinMocha: ThemeConfig {
       UIColor(hex: "#7287FD")!
     }
   })
+
+  var logoutRed: UIColor = .init(hex: "#f38ba8")!
 }
 
 struct PeonyPink: ThemeConfig {
@@ -299,6 +302,7 @@ struct PeonyPink: ThemeConfig {
   var buttonBackground: UIColor? { nil }
   var buttonSecondaryBackground: UIColor? { nil }
   var sheetTintColor: UIColor? { nil }
+  var logoutRed: UIColor = .init(hex: "#f38ba8")!
 }
 
 struct Orchid: ThemeConfig {
@@ -365,4 +369,5 @@ struct Orchid: ThemeConfig {
   var buttonBackground: UIColor? { nil }
   var buttonSecondaryBackground: UIColor? { nil }
   var sheetTintColor: UIColor? { nil }
+  var logoutRed: UIColor = .init(hex: "#f38ba8")!
 }
