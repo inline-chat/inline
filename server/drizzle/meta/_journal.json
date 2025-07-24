@@ -288,6 +288,13 @@
       "when": 1753045246986,
       "tag": "0040_soft_mongu",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1753370790498,
+      "tag": "0041_updates_table",
+      "breakpoints": true
     }
   ]
 }
