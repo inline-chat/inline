@@ -28,7 +28,7 @@ describe("editMessage", () => {
       text: "test",
     })
 
-    let edited = (await MessageModel.editMessage({
+    let { message: edited } = (await MessageModel.editMessage({
       messageId: 1,
       chatId: chatId,
       text: "edited",
@@ -55,7 +55,7 @@ describe("editMessage", () => {
       entities: testUtils.mentionEntities(0, 3),
     })
 
-    let edited = (await MessageModel.editMessage({
+    let { message: edited } = (await MessageModel.editMessage({
       messageId: 2,
       chatId: chatId,
       text: "edited @mo",
