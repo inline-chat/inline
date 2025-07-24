@@ -21,6 +21,8 @@ struct Default: ThemeConfig {
   })
 
   var accent: UIColor = .init(hex: "#52A5FF")!
+  
+  var failedBubbleBackground: UIColor = .systemRed
 
   var reactionOutgoingPrimary: UIColor? = .white
   var reactionOutgoingSecoundry: UIColor? = .white.withAlphaComponent(0.08)
@@ -111,6 +113,8 @@ struct CatppuccinMocha: ThemeConfig {
       UIColor(hex: "#7287FD")!
     }
   })
+  
+  var failedBubbleBackground: UIColor = UIColor(hex: "#f38ba8")!
 
   var reactionOutgoingPrimary: UIColor? = .white
   var reactionOutgoingSecoundry: UIColor? = .white.withAlphaComponent(0.08)
@@ -263,6 +267,9 @@ struct PeonyPink: ThemeConfig {
   })
 
   var accent: UIColor = .init(hex: "#FF82B8")!
+  
+  var failedBubbleBackground: UIColor = .systemRed
+  
   var reactionOutgoingPrimary: UIColor? = .white
   var reactionOutgoingSecoundry: UIColor? = .white.withAlphaComponent(0.08)
 
@@ -328,6 +335,8 @@ struct Orchid: ThemeConfig {
   })
 
   var accent: UIColor = .init(hex: "#a28cf2")!
+  
+  var failedBubbleBackground: UIColor = .systemRed
 
   var reactionOutgoingPrimary: UIColor? = .white
   var reactionOutgoingSecoundry: UIColor? = .white.withAlphaComponent(0.08)
