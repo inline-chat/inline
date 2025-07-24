@@ -36,13 +36,6 @@ final class UserAvatarView: UIView {
   private var size: CGFloat = 32
   private var nameForInitials: String = ""
 
-  public static func getNameForInitials(user: User) -> String {
-    let firstName = user.firstName ?? user.email?.components(separatedBy: "@").first ?? "User"
-    let lastName = user.lastName
-    let name = "\(firstName)\(lastName != nil ? " \(lastName ?? "")" : "")"
-    return name
-  }
-
   // MARK: - Initialization
 
   override init(frame: CGRect) {
@@ -86,121 +79,111 @@ final class UserAvatarView: UIView {
   // MARK: - Configuration
 
   func configure(with userInfo: UserInfo, size: CGFloat = 32) {
-    UIView.performWithoutAnimation {
-      self.size = size
+    self.size = size
+    let user = userInfo.user
+    
+    configureSize()
+    configureInitials(for: user)
+    configureColors()
+    loadImage(for: user, userInfo: userInfo)
+  }
+  
+  // MARK: - Private Configuration Methods
+  
+  private func configureSize() {
+    guard constraints.isEmpty else { return }
+    
+    NSLayoutConstraint.activate([
+      widthAnchor.constraint(equalToConstant: size),
+      heightAnchor.constraint(equalToConstant: size),
+    ])
+  }
+  
+  private func configureInitials(for user: User) {
+    nameForInitials = AvatarColorUtility.formatNameForHashing(
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email
+    )
+    
+    initialsLabel.text = nameForInitials.first?.uppercased() ?? ""
+  }
+  
+  private func configureColors() {
+    let baseColor = AvatarColorUtility.uiColorFor(name: nameForInitials)
+    let isDarkMode = traitCollection.userInterfaceStyle == .dark
+    let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
 
-      // Only set size constraints if they haven't been set externally
-      if constraints.isEmpty {
-        NSLayoutConstraint.activate([
-          widthAnchor.constraint(equalToConstant: size),
-          heightAnchor.constraint(equalToConstant: size),
-        ])
-      }
+    gradientLayer.colors = [
+      adjustedColor.adjustLuminosity(by: 0.2).cgColor,
+      adjustedColor.cgColor,
+    ]
+  }
+  
+  private func loadImage(for user: User, userInfo: UserInfo) {
+    let localUrl = user.getLocalURL()
+    let remoteUrl = user.getRemoteURL()
 
-      // Get name for initials
-      let user = userInfo.user
-      nameForInitials = AvatarColorUtility.formatNameForHashing(
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email
-      )
-
-      // Update initials
-      initialsLabel.text = nameForInitials.first.map(String.init)?.uppercased() ?? ""
-
-      // Update gradient colors
-      let baseColor = AvatarColorUtility.uiColorFor(name: nameForInitials)
-      let isDarkMode = traitCollection.userInterfaceStyle == .dark
-      let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
-
-      gradientLayer.colors = [
-        adjustedColor.adjustLuminosity(by: 0.2).cgColor,
-        adjustedColor.cgColor,
-      ]
-
-      // Load image if available
-      if var photo = userInfo.profilePhoto?.first {
-        loadProfileImage(photo: photo)
-      } else {
-        showInitials()
-      }
+    if localUrl != nil || remoteUrl != nil {
+      loadProfileImage(localUrl: localUrl, remoteUrl: remoteUrl, userInfo: userInfo)
+    } else {
+      showInitials()
     }
   }
 
-  private func loadProfileImage(photo: InlineKit.File) {
-    // Hide initials immediately if we have a photo to load
-    UIView.performWithoutAnimation {
-      initialsLabel.isHidden = true
+  // MARK: - Image Loading
+  
+  private func loadProfileImage(localUrl: URL?, remoteUrl: URL?, userInfo: UserInfo) {
+    guard let imageUrl = localUrl ?? remoteUrl else {
+      showInitials()
+      return
     }
 
-    if let localUrl = photo.getLocalURL() {
-      imageView.request = ImageRequest(
-        url: localUrl,
-        processors: [.resize(width: 96)],
-        priority: .high
-      )
-
-      // Set up success/failure handlers
-      imageView.onSuccess = { [weak self] _ in
-        DispatchQueue.main.async {
-          UIView.performWithoutAnimation {
-            self?.initialsLabel.isHidden = true
-          }
-        }
+    hideInitials()
+    configureImageRequest(for: imageUrl)
+    setupImageHandlers()
+    cacheImageIfNeeded(localUrl: localUrl, remoteUrl: remoteUrl, userId: userInfo.user.id)
+  }
+  
+  private func configureImageRequest(for url: URL) {
+    imageView.request = ImageRequest(
+      url: url,
+      processors: [.resize(width: 96)],
+      priority: .high
+    )
+  }
+  
+  private func setupImageHandlers() {
+    imageView.onSuccess = { [weak self] _ in
+      DispatchQueue.main.async {
+        self?.hideInitials()
       }
+    }
 
-      imageView.onFailure = { [weak self] _ in
-        DispatchQueue.main.async {
-          self?.showInitials()
-        }
+    imageView.onFailure = { [weak self] _ in
+      DispatchQueue.main.async {
+        self?.showInitials()
       }
-
-    } else if let remoteUrl = photo.getRemoteURL() {
-      imageView.request = ImageRequest(
-        url: remoteUrl,
-        processors: [.resize(width: 96)],
-        priority: .high
-      )
-
-      // Set up success/failure handlers
-      imageView.onSuccess = { [weak self] _ in
-        DispatchQueue.main.async {
-          UIView.performWithoutAnimation {
-            self?.initialsLabel.isHidden = true
-          }
-        }
+    }
+  }
+  
+  private func cacheImageIfNeeded(localUrl: URL?, remoteUrl: URL?, userId: Int64) {
+    guard localUrl == nil, let remoteUrl = remoteUrl else { return }
+    
+    Task.detached(priority: .userInitiated) { [weak self] in
+      guard self != nil else { return }
+      do {
+        let image = try await ImagePipeline.shared.image(for: remoteUrl)
+        try await User.cacheImage(userId: userId, image: image)
+      } catch {
+        Log.shared.error("Failed to cache profile image", error: error)
       }
-
-      imageView.onFailure = { [weak self] _ in
-        DispatchQueue.main.async {
-          self?.showInitials()
-        }
-      }
-
-      // Save image locally when loaded
-      Task.detached(priority: .userInitiated) { [weak self] in
-        guard self != nil else { return }
-        do {
-          let image = try await ImagePipeline.shared.image(for: remoteUrl)
-          let directory = FileHelpers.getDocumentsDirectory()
-          let fileName = photo.fileName ?? ""
-          if let (pathString, _) = try? image.save(
-            to: directory,
-            withName: fileName,
-            format: photo.imageFormat
-          ) {
-            var updatedPhoto = photo
-            updatedPhoto.localPath = pathString
-            try? await AppDatabase.shared.dbWriter.write { db in
-              try updatedPhoto.save(db)
-            }
-          }
-        } catch {
-          Log.shared.error("Failed to load and cache profile image", error: error)
-        }
-      }
-    } else {
-      showInitials()
+    }
+  }
+  
+  private func hideInitials() {
+    UIView.performWithoutAnimation {
+      initialsLabel.isHidden = true
     }
   }
 
@@ -209,29 +192,6 @@ final class UserAvatarView: UIView {
       initialsLabel.isHidden = false
       imageView.request = nil
     }
-  }
-
-  // MARK: - Private Helpers
-
-  private func colorForName(_ name: String) -> UIColor {
-    let colors: [UIColor] = [
-      UIColor(.pink).adjustLuminosity(by: -0.1),
-      .orange,
-      .purple,
-      .yellow.adjustLuminosity(by: -0.1),
-      UIColor(.teal),
-      .blue,
-      UIColor(.teal),
-      .green,
-      UIColor(.primary),
-      .red,
-      UIColor(.indigo),
-      UIColor(.mint),
-      UIColor(.cyan),
-    ]
-
-    let hash = name.utf8.reduce(0) { $0 + Int($1) }
-    return colors[abs(hash) % colors.count]
   }
 }
 
