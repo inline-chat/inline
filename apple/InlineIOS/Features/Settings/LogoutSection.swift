@@ -8,13 +8,37 @@ struct LogoutSection: View {
   @EnvironmentObject private var navigation: Navigation
   @EnvironmentObject private var onboardingNavigation: OnboardingNavigation
   @Environment(Router.self) private var router
+  
+  @State private var showLogoutAlert = false
 
   var body: some View {
     Section(header: Text("Actions")) {
+      Button {
+        showLogoutAlert = true
+      } label: {
+        HStack {
+          Image(systemName: "rectangle.portrait.and.arrow.right.fill")
+            .font(.callout)
+            .foregroundColor(.white)
+            .frame(width: 25, height: 25)
+            .background(ThemeManager.shared.logoutRedColor)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+          Text("Logout")
+            .foregroundColor(ThemeManager.shared.logoutRedColor)
+            .padding(.leading, 4)
+          Spacer()
+        }
+        .padding(.vertical, 2)
+      }
+      .themedListRow()
+    }
+    .alert("Logout", isPresented: $showLogoutAlert) {
+      Button("Cancel", role: .cancel) {}
       Button("Logout", role: .destructive) {
         Task { await performLogout() }
       }
-      .themedListRow()
+    } message: {
+      Text("Are you sure you want to logout? This will clear your local data and return you to the welcome screen.")
     }
   }
 

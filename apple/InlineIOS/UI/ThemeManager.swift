@@ -37,6 +37,7 @@ protocol ThemeConfig {
   var buttonBackground: UIColor? { get }
   var buttonSecondaryBackground: UIColor? { get }
   var sheetTintColor: UIColor? { get }
+  var logoutRed: UIColor { get }
 
   var id: String { get }
   var name: String { get }
@@ -170,6 +171,10 @@ extension ThemeManager {
 
   var sheetTintColor: Color {
     Color(selected.sheetTintColor ?? selected.accent)
+  }
+
+  var logoutRedColor: Color {
+    Color(selected.logoutRed)
   }
 }
 
