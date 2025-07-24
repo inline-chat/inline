@@ -45,9 +45,9 @@ class UIMessageView: UIView {
     if isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata {
       return UIColor.clear
     } else if outgoing {
-      // Show red bubble for failed messages to match iOS system styling
+      // Show red bubble for failed messages using theme-aware color
       if message.status == .failed {
-        return UIColor.systemRed
+        return ThemeManager.shared.selected.failedBubbleBackground
       } else {
         return ThemeManager.shared.selected.bubbleBackground
       }
