@@ -73,8 +73,14 @@ class ImageAttachmentView: NSView, QLPreviewItem {
 
   private func setupContextMenu() {
     let menu = NSMenu()
-    menu.addItem(withTitle: "Remove", action: #selector(removeButtonClicked), keyEquivalent: "")
-    menu.addItem(withTitle: "Copy", action: #selector(copyImage), keyEquivalent: "")
+    
+    let removeItem = NSMenuItem(title: "Remove", action: #selector(removeButtonClicked), keyEquivalent: "")
+    removeItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+    menu.addItem(removeItem)
+    
+    let copyItem = NSMenuItem(title: "Copy", action: #selector(copyImage), keyEquivalent: "")
+    copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: nil)
+    menu.addItem(copyItem)
 
     self.menu = menu
   }
