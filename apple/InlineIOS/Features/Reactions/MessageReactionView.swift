@@ -95,7 +95,7 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   private func configureEmojiLabel(_ label: UILabel) {
     if emoji == "✓" || emoji == "✔️" {
       let config = UIImage.SymbolConfiguration(pointSize: Constants.emojiSize, weight: .semibold)
-      let checkmarkColor = byCurrentUser && !outgoing ? UIColor.white : UIColor(hex: "#2AAC28")!
+      let checkmarkColor = (byCurrentUser && !outgoing) || (!byCurrentUser && outgoing) ? UIColor.white : UIColor(hex: "#2AAC28")!
       let checkmarkImage = UIImage(systemName: "checkmark", withConfiguration: config)?
         .withTintColor(checkmarkColor, renderingMode: .alwaysOriginal)
 
