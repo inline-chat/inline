@@ -42,7 +42,8 @@ public actor RealtimeAPI: Sendable {
   var stateChannel = AsyncChannel<Void>()
   var messageChannel = AsyncChannel<Void>()
   var started: Bool = false
-  public var updatesEngine: RealtimeUpdatesProtocol
+
+  var sync: Sync
 
   // publishers
   public let eventsChannel = AsyncChannel<RealtimeAPIEvent>()
@@ -50,10 +51,13 @@ public actor RealtimeAPI: Sendable {
   /// Message IDs to continution handlers
   private var rpcCalls: [UInt64: CheckedContinuation<RpcResult.OneOf_Result?, any Error>] = [:]
 
-  public init(updatesEngine: RealtimeUpdatesProtocol) {
+  public init() {
     log.debug("initilized realtime core")
     transport = WebSocketTransport()
-    self.updatesEngine = updatesEngine
+    sync = Sync()
+    Task { [weak self] in
+      await self?.sync.configure(realtime: self)
+    }
   }
 
   enum RunState {
@@ -146,6 +150,7 @@ public actor RealtimeAPI: Sendable {
           case .flowing:
             await self.processMessages()
           case .paused:
+            // ?????? WHATTTTT
             break // Wait for state change
         }
       }
@@ -161,7 +166,7 @@ public actor RealtimeAPI: Sendable {
         await msgQueue.requeue(message)
         // Pause delivery so we wait for the transport to recover before
         // retrying, otherwise the run-loop can stall indefinitely.
-        await pauseDelivery()
+        await pauseDelivery() /// ???????
         break
       }
     }
@@ -343,7 +348,7 @@ extension RealtimeAPI {
 
   private func handleUpdate(_ updatesPayload: UpdatesPayload) {
     Task {
-      await updatesEngine.applyBatch(updates: updatesPayload.updates)
+      await sync.handle(updates: updatesPayload)
     }
   }
 }
@@ -389,5 +394,22 @@ extension RealtimeAPI {
   private func getBuildNumber() -> Int32 {
     (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
       .flatMap { Int32($0) } ?? 0
+  }
+}
+
+// MARK: - Sync Delegate
+
+extension RealtimeAPI: SyncDelegate {
+  public nonisolated func syncDidStart() {
+    Task {
+      // TODO: switch to updating state
+      await log.debug("sync started")
+    }
+  }
+
+  public nonisolated func syncDidFinish() {
+    Task {
+      await log.debug("sync finished")
+    }
   }
 }

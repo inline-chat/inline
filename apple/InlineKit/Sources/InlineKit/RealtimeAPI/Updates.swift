@@ -3,9 +3,8 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
-import RealtimeAPI
 
-public actor UpdatesEngine: Sendable, RealtimeUpdatesProtocol {
+public actor UpdatesEngine: Sendable {
   public static let shared = UpdatesEngine()
 
   private let database: AppDatabase = .shared

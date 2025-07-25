@@ -1,6 +1,5 @@
-import { CreateChatInput, CreateChatResult, GetUpdatesStateInput, GetUpdatesStateResult } from "@in/protocol/core"
+import { GetUpdatesStateInput, GetUpdatesStateResult } from "@in/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
-import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Functions } from "@in/server/functions"
 import { Method } from "@in/protocol/core"
 
