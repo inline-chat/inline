@@ -1,5 +1,4 @@
 import Foundation
-import RealtimeAPI
 
 public extension Date {
   func formatted() -> String {

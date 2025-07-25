@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import InlineKit
 import InlineUI
-import RealtimeAPI
+
 import SwiftUI
 
 class TranslateToolbar: NSToolbarItem {

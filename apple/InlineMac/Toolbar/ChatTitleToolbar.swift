@@ -1,7 +1,6 @@
 import AppKit
 import Combine
 import InlineKit
-import RealtimeAPI
 
 class ChatTitleToolbar: NSToolbarItem {
   private var peer: Peer
@@ -51,8 +50,8 @@ class ChatTitleToolbar: NSToolbarItem {
     super.init(itemIdentifier: .chatTitle)
 
     visibilityPriority = .high
-    self.isBordered = false
-    
+    isBordered = false
+
     setupView()
     setupConstraints()
     setupInteraction()

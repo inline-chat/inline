@@ -1,6 +1,6 @@
 import Auth
 import InlineKit
-import RealtimeAPI
+
 import SwiftUI
 
 extension ChatView {

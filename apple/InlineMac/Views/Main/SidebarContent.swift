@@ -3,7 +3,7 @@ import GRDB
 import InlineKit
 import InlineUI
 import Logger
-import RealtimeAPI
+
 import SwiftUI
 
 struct SidebarContent: View {
