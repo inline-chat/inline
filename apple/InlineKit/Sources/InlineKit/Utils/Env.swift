@@ -1,7 +1,7 @@
 import Logger
-import RealtimeAPI
-import SwiftUI
+
 import Auth
+import SwiftUI
 
 public extension EnvironmentValues {
   @Entry var appDatabase = AppDatabase.empty()

@@ -3,7 +3,6 @@ import GRDB
 import InlineKit
 import InlineProtocol
 import Logger
-import RealtimeAPI
 
 public struct TransactionCreateChat: Transaction {
   // Properties

@@ -2,7 +2,6 @@ import Combine
 import InlineKit
 import InlineUI
 import Logger
-import RealtimeAPI
 import SwiftUI
 
 struct ChatView: View {

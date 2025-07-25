@@ -2,7 +2,6 @@ import AppKit
 import Combine
 import InlineKit
 import Logger
-import RealtimeAPI
 
 class SidebarItemRow: NSTableCellView {
   typealias SidebarEvents = NewSidebar.SidebarEvents

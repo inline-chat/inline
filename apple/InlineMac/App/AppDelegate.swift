@@ -3,7 +3,7 @@ import Auth
 import InlineConfig
 import InlineKit
 import Logger
-import RealtimeAPI
+
 import Sentry
 import SwiftUI
 import UserNotifications
@@ -14,7 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   // Common Dependencies
   @MainActor private var dependencies = AppDependencies()
-  
+
   // Vim-style chat navigation key monitor
   @MainActor private var globalHotkeys: GlobalHotkeys?
 
