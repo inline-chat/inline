@@ -4,7 +4,6 @@ import GRDB
 import InlineProtocol
 import Logger
 import MultipartFormDataKit
-import RealtimeAPI
 
 #if os(iOS)
 import UIKit

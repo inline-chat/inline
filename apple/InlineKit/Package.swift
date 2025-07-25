@@ -8,7 +8,7 @@ let package = Package(
   defaultLocalization: "en",
   platforms: [
     .iOS(.v17),
-    .macOS(.v13),
+    .macOS(.v14),
   ],
   products: [
     // Products define the executables and libraries a package produces, making them visible to other packages.
@@ -27,10 +27,6 @@ let package = Package(
     .library(
       name: "InlineProtocol",
       targets: ["InlineProtocol"]
-    ),
-    .library(
-      name: "RealtimeAPI",
-      targets: ["RealtimeAPI"]
     ),
     .library(
       name: "FileAttachments",
@@ -74,10 +70,11 @@ let package = Package(
         .product(name: "MultipartFormDataKit", package: "MultipartFormDataKit"),
         .product(name: "Get", package: "Get"),
         .product(name: "Nuke", package: "Nuke"),
+        .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
         "InlineConfig",
-        "Logger",
         "InlineProtocol",
-        "RealtimeAPI",
+        "Logger",
+        "Auth",
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
@@ -102,17 +99,6 @@ let package = Package(
       name: "InlineProtocol",
       dependencies: [
         .product(name: "SwiftProtobuf", package: "swift-protobuf"),
-      ]
-    ),
-
-    .target(
-      name: "RealtimeAPI",
-      dependencies: [
-        .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
-        "Logger",
-        "InlineProtocol",
-        "InlineConfig",
-        "Auth",
       ]
     ),
 

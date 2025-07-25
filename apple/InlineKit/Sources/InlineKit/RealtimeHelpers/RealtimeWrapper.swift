@@ -11,7 +11,7 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
-import RealtimeAPI
+
 import SwiftUI
 
 public final actor Realtime: Sendable {
@@ -19,7 +19,6 @@ public final actor Realtime: Sendable {
 
   private let db = AppDatabase.shared
   private let log = Log.scoped("RealtimeWrapper", enableTracing: false)
-  public var updates: UpdatesEngine
   private var api: RealtimeAPI
   private var eventsTask: Task<Void, Never>?
   private var started = false
@@ -33,8 +32,7 @@ public final actor Realtime: Sendable {
   }
 
   private init() {
-    updates = UpdatesEngine()
-    api = RealtimeAPI(updatesEngine: updates)
+    api = RealtimeAPI()
 
     Task {
       if Auth.shared.isLoggedIn {
@@ -55,6 +53,11 @@ public final actor Realtime: Sendable {
         }
       }
     }
+  }
+
+  /// Apply updates as a result of an operation
+  public func applyUpdates(_ updates: [InlineProtocol.Update]) {
+    // TODO: connect to sync client
   }
 
   private func ensureStarted() {
@@ -225,9 +228,7 @@ public extension Realtime {
   private func handleResult_deleteMessages(_ result: DeleteMessagesResult) throws {
     log.trace("deleteMessages result: \(result)")
 
-    Task {
-      await api.updatesEngine.applyBatch(updates: result.updates)
-    }
+    applyUpdates(result.updates)
   }
 
   private func handleResult_getChatHistory(_ input: RpcCall.OneOf_Input, _ result: GetChatHistoryResult) throws {
@@ -537,8 +538,6 @@ public extension Realtime {
   ) async throws {
     log.trace("updateNotificationSettings result: \(result)")
 
-    Task {
-      await updates.applyBatch(updates: result.updates)
-    }
+    applyUpdates(result.updates)
   }
 }

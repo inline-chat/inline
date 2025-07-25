@@ -4,7 +4,6 @@ import GRDB
 import InlineProtocol
 import Logger
 import MultipartFormDataKit
-import RealtimeAPI
 
 public struct TransactionEditMessage: Transaction {
   // Properties
@@ -101,7 +100,7 @@ public struct TransactionEditMessage: Transaction {
   }
 
   public func didSucceed(result: [InlineProtocol.Update]) async {
-    await Realtime.shared.updates.applyBatch(updates: result)
+    await Realtime.shared.applyUpdates(result)
   }
 
   public func didFail(error: Error?) async {}
