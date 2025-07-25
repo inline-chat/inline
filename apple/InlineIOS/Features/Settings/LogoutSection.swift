@@ -8,7 +8,7 @@ struct LogoutSection: View {
   @EnvironmentObject private var navigation: Navigation
   @EnvironmentObject private var onboardingNavigation: OnboardingNavigation
   @Environment(Router.self) private var router
-  
+
   @State private var showLogoutAlert = false
 
   var body: some View {
