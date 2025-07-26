@@ -21,7 +21,7 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
     static let avatarSize: CGFloat = 26
     static let avatarOverlapOffset: CGFloat = -8
     static let emojiSize: CGFloat = 20
-    static let stackSpacing: CGFloat = 2
+    static let stackSpacing: CGFloat = 4
     static let containerPadding = UIEdgeInsets(top: 3, left: 7, bottom: 3, right: 7)
     static let menuAvatarSize: CGFloat = 24
     static let preloadAvatarSize: CGFloat = 48
@@ -95,7 +95,8 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   private func configureEmojiLabel(_ label: UILabel) {
     if emoji == "✓" || emoji == "✔️" {
       let config = UIImage.SymbolConfiguration(pointSize: Constants.emojiSize, weight: .semibold)
-      let checkmarkColor = (byCurrentUser && !outgoing) || (!byCurrentUser && outgoing) ? UIColor.white : UIColor(hex: "#2AAC28")!
+      let checkmarkColor = (byCurrentUser && !outgoing) || (!byCurrentUser && outgoing) ? UIColor
+        .white : UIColor(hex: "#2AAC28")!
       let checkmarkImage = UIImage(systemName: "checkmark", withConfiguration: config)?
         .withTintColor(checkmarkColor, renderingMode: .alwaysOriginal)
 
