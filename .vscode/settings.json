@@ -10,5 +10,10 @@
 
   // Show folder names in file tabs
   "workbench.editor.labelFormat": "short",
-  "editor.formatOnSave": true
+  "editor.formatOnSave": true,
+
+  // Spell check
+  "cSpell.enabledFileTypes": {
+    "swift": true
+  }
 }
