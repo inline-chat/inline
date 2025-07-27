@@ -396,20 +396,3 @@ extension RealtimeAPI {
       .flatMap { Int32($0) } ?? 0
   }
 }
-
-// MARK: - Sync Delegate
-
-extension RealtimeAPI: SyncDelegate {
-  public nonisolated func syncDidStart() {
-    Task {
-      // TODO: switch to updating state
-      await log.debug("sync started")
-    }
-  }
-
-  public nonisolated func syncDidFinish() {
-    Task {
-      await log.debug("sync finished")
-    }
-  }
-}
