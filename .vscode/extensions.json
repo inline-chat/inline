@@ -1,3 +1,9 @@
 {
-  "recommendations": ["sweetpad.sweetpad", "swiftlang.swift-vscode"]
+  "recommendations": [
+    "sweetpad.sweetpad",
+    "swiftlang.swift-vscode",
+    "vadimcn.vscode-lldb",
+    "gfreezy.xcode-pal",
+    "streetsidesoftware.code-spell-checker"
+  ]
 }
