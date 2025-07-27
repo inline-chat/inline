@@ -15,11 +15,3 @@ public actor Sync: Sendable {
     // Handle the updates payload
   }
 }
-
-public protocol SyncDelegate: AnyObject {
-  /// Called when the sync process starts to revoer
-  func syncDidStart()
-
-  /// Called when the sync process finishes and we're processing updates in realtime
-  func syncDidFinish()
-}
