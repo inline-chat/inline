@@ -19,8 +19,9 @@
 		B7020C642DCE1593007099D9 /* NukeVideo in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C632DCE1593007099D9 /* NukeVideo */; };
 		B77EE8082DC91CFD00C42B9E /* iPhoneNumberField in Frameworks */ = {isa = PBXBuildFile; productRef = B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */; };
 		B7C0676B2DB7F44900EAADA4 /* iMessageUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; };
-		B7C0676C2DB7F44900EAADA4 /* iMessageUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B7C0676C2DB7F44900EAADA4 /* iMessageUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B7F71EB92DDB3BA70091C872 /* RenderMeThis in Frameworks */ = {isa = PBXBuildFile; productRef = B7F71EB82DDB3BA70091C872 /* RenderMeThis */; };
+		B7FF093B2E366D29001E564B /* iMessageUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; };
 		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
 		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
 		C35E950E2CAC497700D569AF /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C35E950D2CAC497700D569AF /* GRDB */; };
@@ -59,6 +60,13 @@
 			remoteInfo = share;
 		};
 		B7C0676D2DB7F44900EAADA4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CD2660FC2CA01CAE00EB186F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B7C0674D2DB7F2BA00EAADA4;
+			remoteInfo = iMessageUI;
+		};
+		B7FF093C2E366D29001E564B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = CD2660FC2CA01CAE00EB186F /* Project object */;
 			proxyType = 1;
@@ -119,15 +127,6 @@
 			);
 			target = B7020C412DCE1534007099D9 /* share */;
 		};
-		B7C067702DB7F5BC00EAADA4 /* Exceptions for "iMessageUI" folder in "iMessageUI" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			publicHeaders = (
-				_UIContextMenuAccessoryViewBuilder.h,
-				iMessageUI.h,
-				"UICollectionView+Private.h",
-			);
-			target = B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */;
-		};
 		C33CC3A22CA5C771002882B3 /* Exceptions for "InlineIOS" folder in "InlineIOS" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -155,9 +154,6 @@
 		};
 		B7C0674F2DB7F2BA00EAADA4 /* iMessageUI */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				B7C067702DB7F5BC00EAADA4 /* Exceptions for "iMessageUI" folder in "iMessageUI" target */,
-			);
 			path = iMessageUI;
 			sourceTree = "<group>";
 		};
@@ -210,6 +206,7 @@
 			files = (
 				CD4E8E2C2E088F6B00CE6BC0 /* TextProcessing in Frameworks */,
 				C3AEE6AC2D4FCDD0005D1179 /* NukeUI in Frameworks */,
+				B7FF093B2E366D29001E564B /* iMessageUI.framework in Frameworks */,
 				B77EE8082DC91CFD00C42B9E /* iPhoneNumberField in Frameworks */,
 				B7F71EB92DDB3BA70091C872 /* RenderMeThis in Frameworks */,
 				C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */,
@@ -367,6 +364,7 @@
 			dependencies = (
 				B7C0676E2DB7F44900EAADA4 /* PBXTargetDependency */,
 				B7020C4B2DCE1534007099D9 /* PBXTargetDependency */,
+				B7FF093D2E366D29001E564B /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
@@ -561,6 +559,11 @@
 			isa = PBXTargetDependency;
 			target = B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */;
 			targetProxy = B7C0676D2DB7F44900EAADA4 /* PBXContainerItemProxy */;
+		};
+		B7FF093D2E366D29001E564B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */;
+			targetProxy = B7FF093C2E366D29001E564B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
