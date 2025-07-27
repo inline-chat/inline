@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -32,6 +32,10 @@ let package = Package(
       name: "FileAttachments",
       targets: ["FileAttachments"]
     ),
+    .library(
+      name: "RealtimeV2",
+      targets: ["RealtimeV2"]
+    ),
   ],
   dependencies: [
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "3.2.0"),
@@ -47,6 +51,7 @@ let package = Package(
       .upToNextMajor(from: "1.2.0")
     ),
     .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
+    .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.0.0"),
   ],
   targets: [
     // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -75,6 +80,7 @@ let package = Package(
         "InlineProtocol",
         "Logger",
         "Auth",
+        "RealtimeV2",
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
@@ -107,6 +113,16 @@ let package = Package(
       dependencies: [
         "InlineKit",
         "Logger",
+      ]
+    ),
+
+    .target(
+      name: "RealtimeV2",
+      dependencies: [
+        "Logger",
+        "InlineProtocol",
+        "InlineConfig",
+        .product(name: "Dependencies", package: "swift-dependencies"),
       ]
     ),
 

@@ -86,11 +86,6 @@ actor WebSocketTransport: NSObject, Sendable {
     configuration.isDiscretionary = false // Immediate connection attempt
     configuration.networkServiceType = .responsiveData // For real-time priority
 
-    // Set TCP options for faster connection establishment
-    configuration.connectionProxyDictionary = [
-      kCFNetworkProxiesHTTPEnable: false,
-      kCFStreamPropertyShouldCloseNativeSocket: true,
-    ]
     configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
 
     session = nil

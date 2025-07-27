@@ -42,6 +42,7 @@
 		CD4E8E2A2E088F6100CE6BC0 /* TextProcessing in Frameworks */ = {isa = PBXBuildFile; productRef = CD4E8E292E088F6100CE6BC0 /* TextProcessing */; };
 		CD4E8E2C2E088F6B00CE6BC0 /* TextProcessing in Frameworks */ = {isa = PBXBuildFile; productRef = CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */; };
 		CD70BF1E2DE72D5100E9830A /* FileAttachments in Frameworks */ = {isa = PBXBuildFile; productRef = CD70BF1D2DE72D5100E9830A /* FileAttachments */; };
+		CD76223E2E3690FC00F1A181 /* RealtimeV2 in Frameworks */ = {isa = PBXBuildFile; productRef = CD76223D2E3690FC00F1A181 /* RealtimeV2 */; };
 		CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D42D3E8066001AFC1A /* Nuke */; };
 		CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D62D3E8066001AFC1A /* NukeUI */; };
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
@@ -237,6 +238,7 @@
 				CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */,
 				CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
+				CD76223E2E3690FC00F1A181 /* RealtimeV2 in Frameworks */,
 				CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */,
 				CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */,
 				CD4E8E2A2E088F6100CE6BC0 /* TextProcessing in Frameworks */,
@@ -421,6 +423,7 @@
 				CDC72E3C2D999C6D001E8A0C /* GRDB */,
 				CD70BF1D2DE72D5100E9830A /* FileAttachments */,
 				CD4E8E292E088F6100CE6BC0 /* TextProcessing */,
+				CD76223D2E3690FC00F1A181 /* RealtimeV2 */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -1447,6 +1450,10 @@
 		CD70BF1D2DE72D5100E9830A /* FileAttachments */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = FileAttachments;
+		};
+		CD76223D2E3690FC00F1A181 /* RealtimeV2 */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RealtimeV2;
 		};
 		CDB123D42D3E8066001AFC1A /* Nuke */ = {
 			isa = XCSwiftPackageProductDependency;
