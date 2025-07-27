@@ -476,6 +476,16 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("drop pts tracking in model tables") { db in
+      try db.alter(table: "dialog") { t in
+        t.drop(column: "pts")
+      }
+
+      try db.alter(table: "space") { t in
+        t.drop(column: "pts")
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
