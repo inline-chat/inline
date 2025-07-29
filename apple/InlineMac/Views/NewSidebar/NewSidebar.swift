@@ -415,7 +415,7 @@ extension NewSidebar: NSTableViewDelegate {
     
     readUnreadAction.backgroundColor = hasUnread ? .systemBlue : .systemGray
     readUnreadAction.image = NSImage(
-      systemSymbolName: hasUnread ? "envelope.open" : "envelope.badge",
+      systemSymbolName: hasUnread ? "checkmark.message.fill" : "message.badge.filled.fill",
       accessibilityDescription: nil
     )
     

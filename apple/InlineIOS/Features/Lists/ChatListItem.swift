@@ -63,7 +63,7 @@ struct ChatListItem: View {
         Button {
           onUnread()
         } label: {
-          Image(systemName: "envelope.badge.fill")
+          Image(systemName: "message.badge.filled.fill")
         }
         .tint(.orange)
       }
