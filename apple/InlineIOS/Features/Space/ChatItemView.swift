@@ -68,7 +68,7 @@ struct ChatItemView: View {
   }
 
   var hasUnreadMessages: Bool {
-    props.dialog.unreadCount ?? 0 > 0
+    (props.dialog.unreadCount ?? 0) > 0 || (props.dialog.unreadMark == true)
   }
 
   var isPinned: Bool {
