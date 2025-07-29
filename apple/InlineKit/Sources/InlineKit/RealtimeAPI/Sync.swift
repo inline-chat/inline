@@ -11,7 +11,10 @@ public actor Sync: Sendable {
     self.realtime = realtime
   }
 
-  public func handle(updates: UpdatesPayload) {
+  public func handle(updates: [InlineProtocol.Update]) {
     // Handle the updates payload
+    Task {
+      await engine.applyBatch(updates: updates)
+    }
   }
 }

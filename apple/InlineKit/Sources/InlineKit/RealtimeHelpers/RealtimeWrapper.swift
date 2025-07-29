@@ -58,6 +58,9 @@ public final actor Realtime: Sendable {
   /// Apply updates as a result of an operation
   public func applyUpdates(_ updates: [InlineProtocol.Update]) {
     // TODO: connect to sync client
+    Task {
+      await api.sync.handle(updates: updates)
+    }
   }
 
   private func ensureStarted() {
