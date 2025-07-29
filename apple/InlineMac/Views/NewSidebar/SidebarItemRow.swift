@@ -475,6 +475,19 @@ class SidebarItemRow: NSTableCellView {
     pinItem.image = NSImage(systemSymbolName: isPinned ? "pin.slash" : "pin", accessibilityDescription: nil)
     menu.addItem(pinItem)
 
+    // Read/Unread item
+    let readUnreadItem = NSMenuItem(
+      title: hasUnread ? "Mark as Read" : "Mark as Unread",
+      action: #selector(handleReadUnreadAction),
+      keyEquivalent: "r"
+    )
+    readUnreadItem.target = self
+    readUnreadItem.image = NSImage(
+      systemSymbolName: hasUnread ? "checkmark.message.fill" : "message.badge.filled.fill",
+      accessibilityDescription: nil
+    )
+    menu.addItem(readUnreadItem)
+
     // Archive item
     let archiveItem = NSMenuItem(
       title: isArchived ? "Unarchive" : "Archive",
@@ -518,6 +531,27 @@ class SidebarItemRow: NSTableCellView {
     guard let item else { return }
     Task(priority: .userInitiated) {
       try await DataManager.shared.updateDialog(peerId: item.peerId, archived: !isArchived)
+    }
+  }
+
+  @objc private func handleReadUnreadAction() {
+    guard let item else { return }
+    
+    Task(priority: .userInitiated) {
+      do {
+        if hasUnread {
+          // Mark as read using UnreadManager
+          UnreadManager.shared.readAll(item.peerId, chatId: item.chat?.id ?? 0)
+        } else {
+          // Mark as unread using realtime API
+          try await dependencies.realtime
+            .invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
+              $0.peerID = item.peerId.toInputPeer()
+            }))
+        }
+      } catch {
+        Log.shared.error("Failed to update read/unread status", error: error)
+      }
     }
   }
 
