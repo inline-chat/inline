@@ -170,8 +170,12 @@ private struct MemberListView: View {
       ForEach(members, id: \.userInfo.user.id) { member in
         MemberItemRow(
           member: member,
-          hasUnread: viewModel.filteredMemberChats.first(where: { $0.user?.id == member.userInfo.user.id })?.dialog
-            .unreadCount ?? 0 > 0
+          hasUnread: {
+            if let dialog = viewModel.filteredMemberChats.first(where: { $0.user?.id == member.userInfo.user.id })?.dialog {
+              return (dialog.unreadCount ?? 0) > 0 || (dialog.unreadMark == true)
+            }
+            return false
+          }()
         )
         .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 0))
         .themedListRow()
