@@ -275,7 +275,7 @@ struct SwiftUIPhotoPreviewView: View {
               .font(.callout)
               .foregroundColor(ThemeManager.shared.textPrimaryColor)
           }
-          .glassEffect(.regular, in: Circle(), isEnabled: true)
+          .glassEffect(.regular, in: Circle())
       } else {
         Circle()
           .fill(ThemeManager.shared.surfaceBackgroundColor)
@@ -306,7 +306,7 @@ struct SwiftUIPhotoPreviewView: View {
       if #available(iOS 26.0, *) {
         Capsule()
           .fill(ThemeManager.shared.cardBackgroundColor)
-          .glassEffect(.regular, in: Capsule(), isEnabled: true)
+          .glassEffect(.regular, in: Capsule())
       } else {
         Capsule()
           .fill(ThemeManager.shared.surfaceBackgroundColor)
@@ -328,7 +328,7 @@ struct SwiftUIPhotoPreviewView: View {
               if #available(iOS 26.0, *) {
                 Circle()
                   .fill(ThemeManager.shared.cardBackgroundColor)
-                  .glassEffect(.regular, in: Circle(), isEnabled: true)
+                  .glassEffect(.regular, in: Circle())
               } else {
                 Circle()
                   .fill(ThemeManager.shared.surfaceBackgroundColor)
@@ -432,7 +432,7 @@ struct SwiftUIPhotoPreviewView: View {
               .font(.system(size: 18, weight: .medium))
               .foregroundColor(ThemeManager.shared.textPrimaryColor)
           }
-          .glassEffect(.regular, in: Circle(), isEnabled: true)
+          .glassEffect(.regular, in: Circle())
       } else {
         Circle()
           .fill(ThemeManager.shared.surfaceBackgroundColor)

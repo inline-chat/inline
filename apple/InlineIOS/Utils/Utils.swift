@@ -1,4 +1,5 @@
 import Foundation
+import InlineKit
 
 public extension Date {
   func formatted() -> String {
