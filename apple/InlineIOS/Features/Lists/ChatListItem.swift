@@ -49,9 +49,9 @@ struct ChatListItem: View {
       }
       .tint(.yellow)
     }
-    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+    .swipeActions(edge: .leading, allowsFullSwipe: true) {
       let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
-      
+
       if hasUnread {
         Button {
           onRead()
@@ -65,7 +65,7 @@ struct ChatListItem: View {
         } label: {
           Image(systemName: "message.badge.filled.fill")
         }
-        .tint(.orange)
+        .tint(.teal)
       }
     }
     .listRowInsets(.init(top: 16, leading: 16, bottom: 16, trailing: 16))
