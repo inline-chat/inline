@@ -6,6 +6,7 @@ import SwiftUI
 struct ContentView2: View {
   @Environment(\.auth) private var auth
   @Environment(\.scenePhase) private var scene
+  @Environment(\.realtime) var realtime
 
   @EnvironmentStateObject private var data: DataManager
   @EnvironmentStateObject private var home: HomeViewModel
@@ -138,6 +139,7 @@ struct SimpleChatListView: View {
   @EnvironmentObject private var home: HomeViewModel
   @EnvironmentObject private var dataManager: DataManager
   @Environment(Router.self) private var router
+  @Environment(\.realtime) private var realtime
 
   var chatItems: [HomeChatItem] {
     home.chats.filter {
