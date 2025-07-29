@@ -326,9 +326,9 @@ extension NewSidebar: NSTableViewDelegate {
     let item = items[row]
     switch edge {
       case .trailing:
-        return [createArchiveAction(item: item), createReadUnreadAction(item: item)]
+        return [createArchiveAction(item: item)]
       case .leading:
-        return [createPinAction(item: item)]
+        return [createReadUnreadAction(item: item), createPinAction(item: item)]
       default:
         return []
     }
@@ -384,7 +384,7 @@ extension NewSidebar: NSTableViewDelegate {
     
     let readUnreadAction = NSTableViewRowAction(
       style: .regular,
-      title: hasUnread ? "Mark as Read" : "Mark as Unread"
+      title: hasUnread ? "Mark Read" : "Mark Unread"
     ) { [weak self] _, row in
       guard let self else { return }
       let item = items[row]
@@ -402,7 +402,8 @@ extension NewSidebar: NSTableViewDelegate {
             UnreadManager.shared.readAll(item.peerId, chatId: item.chat?.id ?? 0)
           } else {
             // Mark as unread using realtime API
-            try await dependencies.realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
+            try await self.dependencies.realtime
+              .invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
               $0.peerID = item.peerId.toInputPeer()
             }))
           }
