@@ -42,7 +42,10 @@ public final class UnreadManager: Sendable {
         let localDialogId = Dialog.getDialogId(peerId: peerId)
         try Dialog
           .filter(id: localDialogId)
-          .updateAll(db, [Column("unreadCount").set(to: 0)])
+          .updateAll(db, [
+            Column("unreadCount").set(to: 0),
+            Column("unreadMark").set(to: false)
+          ])
       }
     } catch {
       log.error("Failed to update local DB with unread count", error: error)

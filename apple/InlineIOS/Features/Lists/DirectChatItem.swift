@@ -61,7 +61,7 @@ struct DirectChatItem: View {
   }
 
   var hasUnreadMessages: Bool {
-    (dialog.unreadCount ?? 0) > 0
+    (dialog.unreadCount ?? 0) > 0 || (dialog.unreadMark == true)
   }
 
   var isPinned: Bool {
