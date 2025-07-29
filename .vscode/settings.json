@@ -15,5 +15,6 @@
   // Spell check
   "cSpell.enabledFileTypes": {
     "swift": true
-  }
+  },
+  "cSpell.words": ["GRDB"]
 }
