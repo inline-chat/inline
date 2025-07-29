@@ -43,6 +43,15 @@ extension ChatView {
       }
     }
 
+    var shouldKeepOriginalCase: Bool {
+      switch self {
+        case .typing:
+          true
+        default:
+          false
+      }
+    }
+
     @ViewBuilder
     var animatedIndicator: some View {
       switch self {
@@ -108,7 +117,8 @@ extension ChatView {
       HStack(alignment: .center, spacing: 4) {
         subtitle.animatedIndicator.padding(.top, 2)
 
-        Text(subtitle.text.lowercased())
+        // Text(subtitle.text.lowercased())
+        Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
           .font(.caption)
 //          .foregroundStyle(subtitle.isComposeAction ? Color(ThemeManager.shared.selected.accent) : .secondary)
           .foregroundStyle(.secondary)
