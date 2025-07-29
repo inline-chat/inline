@@ -346,9 +346,9 @@ extension RealtimeAPI {
     }
   }
 
-  private func handleUpdate(_ updatesPayload: UpdatesPayload) {
+  private func handleUpdate(_ updates: UpdatesPayload) {
     Task {
-      await sync.handle(updates: updatesPayload)
+      await sync.handle(updates: updates.updates)
     }
   }
 }
