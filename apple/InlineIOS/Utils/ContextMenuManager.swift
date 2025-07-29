@@ -18,6 +18,7 @@ final class ContextMenuManager {
 
   func show(for gesture: UIGestureRecognizer, message: FullMessage, spaceId: Int64) {
     guard let sourceView = gesture.view else { return }
+    var outgoing: Bool { message.message.outgoing == true }
 
     previousKeyWindow = sourceView.window
 
@@ -101,7 +102,8 @@ final class ContextMenuManager {
     // Calculate available space and positioning
     let screenBounds = UIScreen.main.bounds
     let sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
-    let menuSpacing: CGFloat = 20
+    let menuSpacing: CGFloat = 12
+    let menuEdgeSpace: CGFloat = 8
     let safeAreaBottom = rootVC.view.safeAreaInsets.bottom
 
     let availableSpaceBelow = screenBounds.height - sourceFrame.maxY - safeAreaBottom - menuSpacing
@@ -138,18 +140,36 @@ final class ContextMenuManager {
       )
     }
 
-    NSLayoutConstraint.activate([
-      messageView.leadingAnchor.constraint(
-        equalTo: scrollView.leadingAnchor,
-        constant: sourceView.convert(sourceView.bounds, to: scrollView).minX
-      ),
-      messageView.widthAnchor.constraint(equalToConstant: sourceView.bounds.width),
-      messageView.heightAnchor.constraint(equalToConstant: sourceView.bounds.height),
-      messageTopConstraint,
+    var constraints: [NSLayoutConstraint] = []
 
-      contextMenu.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
-      contextMenuTopConstraint,
-    ])
+    constraints.append(
+      contentsOf: [
+        messageView.leadingAnchor.constraint(
+          equalTo: scrollView.leadingAnchor,
+          constant: sourceView.convert(sourceView.bounds, to: scrollView).minX
+        ),
+        messageView.widthAnchor.constraint(equalToConstant: sourceView.bounds.width),
+        messageView.heightAnchor.constraint(equalToConstant: sourceView.bounds.height),
+        messageTopConstraint,
+        contextMenuTopConstraint,
+      ]
+    )
+
+    if outgoing {
+      constraints.append(
+        contentsOf: [
+          contextMenu.trailingAnchor.constraint(equalTo: messageView.trailingAnchor, constant: -menuEdgeSpace),
+        ]
+      )
+    } else {
+      constraints.append(
+        contentsOf: [
+          contextMenu.leadingAnchor.constraint(equalTo: messageView.leadingAnchor, constant: menuEdgeSpace),
+        ]
+      )
+    }
+
+    NSLayoutConstraint.activate(constraints)
 
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(backgroundTapped))
     tapGesture.cancelsTouchesInView = false
