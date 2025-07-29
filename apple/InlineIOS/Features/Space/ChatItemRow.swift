@@ -8,7 +8,7 @@ struct ChatItemRow: View {
   @EnvironmentObject private var data: DataManager
 
   var hasUnread: Bool {
-    item.dialog.unreadCount ?? 0 > 0
+    (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
   }
 
   private var chatProfileColors: [Color] {
