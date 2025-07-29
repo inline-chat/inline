@@ -177,7 +177,7 @@ final class ContextMenuManager {
   }
 
   func hide() {
-    overlayWindow.resignKey()
+    // If rootViewController still exists, animate fade-out before removal.
     if let rootVC = overlayWindow.rootViewController,
        let dimmingView = rootVC.view.subviews
        .first(where: { $0.backgroundColor?.cgColor.alpha ?? 0 > 0 && $0 is UIView })
