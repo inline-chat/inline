@@ -203,6 +203,9 @@ public extension Realtime {
         case let .updateUserSettings(result):
           try await handleResult_updateUserSettings(result)
 
+        case let .markAsUnread(result):
+          try await handleResult_markAsUnread(result)
+
         default:
           break
       }
@@ -538,6 +541,14 @@ public extension Realtime {
   ) async throws {
     log.trace("updateNotificationSettings result: \(result)")
 
+    applyUpdates(result.updates)
+  }
+
+  private func handleResult_markAsUnread(
+    _ result: InlineProtocol.MarkAsUnreadResult
+  ) async throws {
+    log.trace("markAsUnread result: \(result)")
+    
     applyUpdates(result.updates)
   }
 }
