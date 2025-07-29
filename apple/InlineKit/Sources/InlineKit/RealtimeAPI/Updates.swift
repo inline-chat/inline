@@ -72,6 +72,9 @@ public actor UpdatesEngine: Sendable {
         case let .chatHasNewUpdates(chatHasNewUpdates):
           try chatHasNewUpdates.apply(db)
 
+        case let .markAsUnread(markAsUnread):
+          try markAsUnread.apply(db)
+
         default:
           break
       }
@@ -546,5 +549,20 @@ extension InlineProtocol.UpdateChatHasNewUpdates {
     Log.shared.debug("update chat has new updates \(chatID) \(updateSeq)")
 
     // Call realtime API to get updates for this chat
+  }
+}
+
+extension InlineProtocol.UpdateMarkAsUnread {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update mark as unread for peer \(peerID.toPeer()) mark: \(unreadMark)")
+    
+    // Find the dialog for this peer and update the unread mark
+    if var dialog = try Dialog.get(peerId: peerID.toPeer()).fetchOne(db) {
+      dialog.unreadMark = unreadMark
+      try dialog.update(db)
+      Log.shared.debug("Updated dialog unread mark to \(unreadMark)")
+    } else {
+      Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update unread mark")
+    }
   }
 }

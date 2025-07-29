@@ -8,6 +8,7 @@ struct ChatListView: View {
   let onArchive: (HomeChatItem) -> Void
   let onPin: (HomeChatItem) -> Void
   let onRead: (HomeChatItem) -> Void
+  let onUnread: (HomeChatItem) -> Void
 
   @Environment(Router.self) private var router
   @State private var previousItems: [HomeChatItem] = []
@@ -24,6 +25,7 @@ struct ChatListView: View {
             onArchive: { onArchive(item) },
             onPin: { onPin(item) },
             onRead: { onRead(item) },
+            onUnread: { onUnread(item) },
             isArchived: isArchived
           )
           .themedListRow()
