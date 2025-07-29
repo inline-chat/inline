@@ -125,6 +125,17 @@ struct ArchivedChatsView: View {
         Task {
           UnreadManager.shared.readAll(item.dialog.peerId, chatId: item.chat?.id ?? 0)
         }
+      },
+      onUnread: { item in
+        Task {
+          do {
+            try await realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
+              $0.peerID = item.dialog.peerId.toInputPeer()
+            }))
+          } catch {
+            Log.shared.error("Failed to mark as unread", error: error)
+          }
+        }
       }
     )
   }
@@ -219,6 +230,17 @@ struct ArchivedChatsView: View {
               UnreadManager.shared.readAll(memberChat.dialog.peerId, chatId: memberChat.chat?.id ?? 0)
             }
           },
+          onUnread: {
+            Task {
+              do {
+                try await realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
+                  $0.peerID = memberChat.dialog.peerId.toInputPeer()
+                }))
+              } catch {
+                Log.shared.error("Failed to mark as unread", error: error)
+              }
+            }
+          },
           isArchived: true
         )
 
@@ -256,6 +278,17 @@ struct ArchivedChatsView: View {
           onRead: {
             Task {
               UnreadManager.shared.readAll(chat.dialog.peerId, chatId: chat.chat?.id ?? 0)
+            }
+          },
+          onUnread: {
+            Task {
+              do {
+                try await realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
+                  $0.peerID = chat.dialog.peerId.toInputPeer()
+                }))
+              } catch {
+                Log.shared.error("Failed to mark as unread", error: error)
+              }
             }
           },
           isArchived: true
