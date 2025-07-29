@@ -184,6 +184,17 @@ struct HomeView: View {
                 Task {
                   UnreadManager.shared.readAll(item.dialog.peerId, chatId: item.chat?.id ?? 0)
                 }
+              },
+              onUnread: { item in
+                Task {
+                  do {
+                    try await realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
+                      $0.peerID = item.dialog.peerId.toInputPeer()
+                    }))
+                  } catch {
+                    Log.shared.error("Failed to mark as unread", error: error)
+                  }
+                }
               }
             )
           }

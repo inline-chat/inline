@@ -326,7 +326,7 @@ extension NewSidebar: NSTableViewDelegate {
     let item = items[row]
     switch edge {
       case .trailing:
-        return [createArchiveAction(item: item)]
+        return [createArchiveAction(item: item), createReadUnreadAction(item: item)]
       case .leading:
         return [createPinAction(item: item)]
       default:
@@ -377,6 +377,48 @@ extension NewSidebar: NSTableViewDelegate {
     archiveAction.backgroundColor = .systemPurple
     archiveAction.image = NSImage(systemSymbolName: isArchived ? "pin.slash" : "pin", accessibilityDescription: nil)
     return archiveAction
+  }
+  
+  private func createReadUnreadAction(item: HomeChatItem) -> NSTableViewRowAction {
+    let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
+    
+    let readUnreadAction = NSTableViewRowAction(
+      style: .regular,
+      title: hasUnread ? "Mark as Read" : "Mark as Unread"
+    ) { [weak self] _, row in
+      guard let self else { return }
+      let item = items[row]
+      
+      // Dismiss the swipe action on the main thread
+      tableView.rowActionsVisible = false
+      
+      Task.detached {
+        // Wait for the swipe action to be dismissed otherwise it will glitch
+        try await Task.sleep(for: .milliseconds(340))
+        
+        do {
+          if hasUnread {
+            // Mark as read using UnreadManager
+            UnreadManager.shared.readAll(item.peerId, chatId: item.chat?.id ?? 0)
+          } else {
+            // Mark as unread using realtime API
+            try await dependencies.realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
+              $0.peerID = item.peerId.toInputPeer()
+            }))
+          }
+        } catch {
+          Log.shared.error("Failed to update read/unread status", error: error)
+        }
+      }
+    }
+    
+    readUnreadAction.backgroundColor = hasUnread ? .systemBlue : .systemGray
+    readUnreadAction.image = NSImage(
+      systemSymbolName: hasUnread ? "envelope.open" : "envelope.badge",
+      accessibilityDescription: nil
+    )
+    
+    return readUnreadAction
   }
 }
 
