@@ -621,7 +621,7 @@ class SidebarItemRow: NSTableCellView {
 
   private var hasUnread: Bool {
     guard let item else { return false }
-    return (item.dialog.unreadCount ?? 0) > 0
+    return (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
   }
 
   private var isPinned: Bool {

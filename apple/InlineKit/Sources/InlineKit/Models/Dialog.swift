@@ -29,6 +29,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var draftMessage: DraftMessage?
   public var archived: Bool?
   public var chatId: Int64?
+  public var unreadMark: Bool?
 
   public enum Columns {
     public static let id = Column(CodingKeys.id)
@@ -42,6 +43,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let draftMessage = Column(CodingKeys.draftMessage)
     public static let archived = Column(CodingKeys.archived)
     public static let chatId = Column(CodingKeys.chatId)
+    public static let unreadMark = Column(CodingKeys.unreadMark)
   }
 
   public static let space = belongsTo(Space.self)
@@ -114,6 +116,7 @@ public extension Dialog {
     pinned = nil
     draftMessage = nil
     archived = nil
+    unreadMark = nil
     unreadCount = nil
     chatId = nil
   }
@@ -134,6 +137,7 @@ public extension Dialog {
     pinned = nil
     draftMessage = nil
     archived = false
+    unreadMark = nil
     unreadCount = nil
     chatId = chat.id
   }
@@ -158,6 +162,7 @@ public extension Dialog {
     readOutboxMaxId = nil
     pinned = from.pinned
     archived = from.archived
+    unreadMark = from.unreadMark
     draftMessage = nil
     chatId = from.hasChatID ? from.chatID : nil
   }
@@ -206,7 +211,9 @@ public extension Dialog {
       readOutboxMaxId: nil,
       pinned: false,
       draftMessage: nil,
-      archived: false
+      archived: false,
+      chatId: nil,
+      unreadMark: nil
     )
   }
 
@@ -221,7 +228,9 @@ public extension Dialog {
       readOutboxMaxId: nil,
       pinned: false,
       draftMessage: nil,
-      archived: false
+      archived: false,
+      chatId: nil,
+      unreadMark: nil
     )
   }
 }

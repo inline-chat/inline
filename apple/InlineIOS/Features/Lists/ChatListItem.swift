@@ -7,6 +7,7 @@ struct ChatListItem: View {
   let onArchive: () -> Void
   let onPin: () -> Void
   let onRead: () -> Void
+  let onUnread: () -> Void
   let isArchived: Bool
 
   @EnvironmentObject private var nav: Navigation
@@ -49,12 +50,23 @@ struct ChatListItem: View {
       .tint(.yellow)
     }
     .swipeActions(edge: .leading, allowsFullSwipe: false) {
-      Button(role: .destructive) {
-        onRead()
-      } label: {
-        Image(systemName: "checkmark.message.fill")
+      let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
+      
+      if hasUnread {
+        Button {
+          onRead()
+        } label: {
+          Image(systemName: "checkmark.message.fill")
+        }
+        .tint(.blue)
+      } else {
+        Button {
+          onUnread()
+        } label: {
+          Image(systemName: "envelope.badge.fill")
+        }
+        .tint(.orange)
       }
-      .tint(.blue)
     }
     .listRowInsets(.init(top: 16, leading: 16, bottom: 16, trailing: 16))
 //    .contextMenu {
