@@ -1,3 +1,4 @@
+import AsyncAlgorithms
 import Foundation
 import InlineConfig
 import InlineProtocol
@@ -19,7 +20,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
 
   private let log = Log.scoped("RealtimeV2.WebSocketTransport")
 
-  nonisolated var events: AsyncStream<TransportEvent> { _eventStream }
+  nonisolated var events: AsyncChannel<TransportEvent> { _eventChannel }
 
   func start() async {
     guard state == .idle else { return }
@@ -73,9 +74,8 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
   }()
 
-  // AsyncStream plumbing
-  private let _eventStream: AsyncStream<TransportEvent>
-  private let continuation: AsyncStream<TransportEvent>.Continuation
+  // AsyncChannel plumbing
+  private let _eventChannel: AsyncChannel<TransportEvent>
 
   /// Cancels any leftover tasks or sockets from a previous connection attempt.
   /// This prevents multiple receive loops from running in parallel and ensures
@@ -90,17 +90,13 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     task = nil
   }
 
-  // MARK: Initialisation -----------------------------------------------------
+  // MARK: Initialization -----------------------------------------------------
 
   init(url: URL? = nil) {
-    log.trace("initialising")
+    log.trace("initializing")
 
-    // 1. Build the unified AsyncStream first
-    var cont: AsyncStream<TransportEvent>.Continuation!
-    _eventStream = AsyncStream<TransportEvent> { continuation in
-      cont = continuation
-    }
-    continuation = cont
+    // 1. Build the unified AsyncChannel first
+    _eventChannel = AsyncChannel<TransportEvent>()
 
     // 2. Endpoint (the session is configured lazily)
     self.url = url ?? Self.defaultURL
@@ -129,7 +125,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     cleanUpPreviousConnection()
 
     state = .connecting
-    continuation.yield(.connecting)
+    await _eventChannel.send(.connecting)
 
     let wsTask = session.webSocketTask(with: url)
     task = wsTask
@@ -146,7 +142,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   private func closeAndFinish() {
     task?.cancel()
     task = nil
-    continuation.finish()
+    _eventChannel.finish()
   }
 
   // MARK: Receive loop -------------------------------------------------------
@@ -155,7 +151,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     guard let task else { return }
 
     // Keep a reference so we can cancel on reconnect.
-    receiveLoopTask = Task.detached { [weak self, webSocketTask = task] in
+    receiveLoopTask = Task.detached { [weak self, webSocketTask = task, eventChannel = _eventChannel] in
       guard let self else { return }
       while true {
         do {
@@ -165,7 +161,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
             case let .data(data):
               // TODO: handle failed to decode and log
               if let msg = try? ServerProtocolMessage(serializedBytes: data) {
-                continuation.yield(.message(msg))
+                await eventChannel.send(.message(msg))
               }
             case .string:
               // Log warning
@@ -193,7 +189,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     // attempting to reconnect.
     cleanUpPreviousConnection()
 
-    continuation.yield(.connecting)
+    await _eventChannel.send(.connecting)
 
     // Small delay with jitter to avoid busy-loop in pathological scenarios.
     // TODO: Improve reconnection logic
@@ -233,7 +229,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     guard self.task === task else { return }
 
     state = .connected
-    continuation.yield(.connected)
+    await _eventChannel.send(.connected)
 
     receiveLoop()
   }
