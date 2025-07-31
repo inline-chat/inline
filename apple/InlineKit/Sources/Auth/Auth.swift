@@ -19,6 +19,8 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   @Published public private(set) var currentUserId: Int64?
   @Published public private(set) var token: String?
 
+  public var events: AsyncChannel<AuthEvent>
+
   private var task: Task<Void, Never>?
 
   private init() {
@@ -30,6 +32,8 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     token = authManager.initialToken
     task = nil
 
+    events = AsyncChannel<AuthEvent>()
+
     // Listen to changes
     task = Task { [weak self] in
       guard let self else { return }
@@ -37,6 +41,15 @@ public final class Auth: ObservableObject, @unchecked Sendable {
       for await isLoggedIn in await authManager.isLoggedIn {
         let newCUID = await authManager.getCurrentUserId()
         let newToken = await authManager.getToken()
+
+        if isLoggedIn {
+          await events.send(.login(
+            userId: newCUID!,
+            token: newToken!
+          ))
+        } else {
+          await events.send(.logout)
+        }
 
         Task { @MainActor in
           self.lock.withLock {
@@ -55,10 +68,17 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     isLoggedIn = authManager.initialIsLoggedIn
     currentUserId = authManager.initialUserId
     token = authManager.initialToken
+
+    events = AsyncChannel<AuthEvent>()
   }
 
   public func getToken() -> String? {
-    lock.withLock {
+    // if we already have a token, return it
+    if let token {
+      return token
+    }
+
+    return lock.withLock {
       token
     }
   }
@@ -259,4 +279,9 @@ actor AuthManager: Sendable {
     let loggedIn = cachedToken != nil && cachedUserId != nil
     await isLoggedIn.send(loggedIn)
   }
+}
+
+public enum AuthEvent: Sendable {
+  case login(userId: Int64, token: String)
+  case logout
 }
