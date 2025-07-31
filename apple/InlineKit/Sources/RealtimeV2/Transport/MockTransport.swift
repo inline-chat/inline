@@ -1,3 +1,4 @@
+import AsyncAlgorithms
 import Foundation
 import InlineProtocol
 
@@ -6,13 +7,13 @@ import InlineProtocol
 actor MockTransport: Transport {
   // MARK: Public -----------------------------------------------------------------
 
-  nonisolated var events: AsyncStream<TransportEvent> { stream }
+  nonisolated var events: AsyncChannel<TransportEvent> { channel }
 
   func start() async {
     guard !started else { return }
     started = true
-    continuation.yield(.connecting)
-    continuation.yield(.connected)
+    await channel.send(.connecting)
+    await channel.send(.connected)
   }
 
   func stop() async {
@@ -27,8 +28,8 @@ actor MockTransport: Transport {
   // MARK: Testing helpers --------------------------------------------------------
 
   /// Push an arbitrary event into the stream (used by unit tests).
-  func emit(_ event: TransportEvent) {
-    continuation.yield(event)
+  func emit(_ event: TransportEvent) async {
+    await channel.send(event)
   }
 
   /// All messages that have been sent by the system under test.
@@ -38,12 +39,9 @@ actor MockTransport: Transport {
 
   private var started = false
 
-  private let stream: AsyncStream<TransportEvent>
-  private let continuation: AsyncStream<TransportEvent>.Continuation
+  private let channel: AsyncChannel<TransportEvent>
 
   init() {
-    var cont: AsyncStream<TransportEvent>.Continuation!
-    stream = AsyncStream<TransportEvent> { c in cont = c }
-    continuation = cont
+    channel = AsyncChannel<TransportEvent>()
   }
 }
