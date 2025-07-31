@@ -16,5 +16,5 @@
   "cSpell.enabledFileTypes": {
     "swift": true
   },
-  "cSpell.words": ["GRDB"]
+  "cSpell.words": ["Deinitialization", "GRDB"]
 }
