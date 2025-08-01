@@ -114,6 +114,10 @@ actor ProtocolClient {
       case let .rpcError(error):
         handleRpcError(error)
 
+      case let .ack(ack):
+        // TODO:
+        log.debug("Received ack: \(ack)")
+
       case let .message(serverMessage):
         log.debug("Received server message: \(serverMessage)")
         // TODO: Handle server messages (updates, notifications, etc.)
