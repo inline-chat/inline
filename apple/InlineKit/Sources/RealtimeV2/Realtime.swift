@@ -14,6 +14,7 @@ public actor Realtime {
   private var auth: Auth
   private var client: ProtocolClient
 
+  // TODO:
   // transactions
   // sync
 
@@ -36,7 +37,6 @@ public actor Realtime {
 
     Task {
       // Initialize everything and start
-
       await self.start()
     }
   }
