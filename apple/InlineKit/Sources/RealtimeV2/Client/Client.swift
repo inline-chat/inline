@@ -121,7 +121,6 @@ actor ProtocolClient {
       case let .message(serverMessage):
         log.debug("Received server message: \(serverMessage)")
         // TODO: Handle server messages (updates, notifications, etc.)
-
       default:
         log.debug("Protocol client: Unhandled message type: \(String(describing: message.body))")
     }
