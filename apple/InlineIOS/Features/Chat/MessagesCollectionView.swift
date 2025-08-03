@@ -73,6 +73,12 @@ final class MessagesCollectionView: UICollectionView {
       forCellWithReuseIdentifier: MessageCollectionViewCell.reuseIdentifier
     )
 
+    register(
+      DateSeparatorView.self,
+      forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter,
+      withReuseIdentifier: DateSeparatorView.reuseIdentifier
+    )
+
     transform = CGAffineTransform(scaleX: 1, y: -1)
     showsVerticalScrollIndicator = true
     keyboardDismissMode = .interactive
@@ -105,11 +111,7 @@ final class MessagesCollectionView: UICollectionView {
 
   func scrollToBottom() {
     if !itemsEmpty, shouldScrollToBottom {
-      scrollToItem(
-        at: IndexPath(item: 0, section: 0),
-        at: .top,
-        animated: true
-      )
+      safeScrollToTop(animated: true)
     }
   }
 
@@ -121,11 +123,7 @@ final class MessagesCollectionView: UICollectionView {
     UIView.animate(withDuration: 0.2) {
       self.updateContentInsets()
       if !self.itemsEmpty, self.shouldScrollToBottom {
-        self.scrollToItem(
-          at: IndexPath(item: 0, section: 0),
-          at: .top,
-          animated: false
-        )
+        self.safeScrollToTop(animated: false)
       }
     }
   }
@@ -192,6 +190,49 @@ final class MessagesCollectionView: UICollectionView {
   var shouldScrollToBottom: Bool { contentOffset.y < calculatedThreshold }
   var itemsEmpty: Bool { coordinator.messages.isEmpty }
 
+  private func findIndexPath(for messageId: Int64) -> IndexPath? {
+    for (sectionIndex, section) in coordinator.viewModel.sections.enumerated() {
+      for (itemIndex, message) in section.messages.enumerated() {
+        if message.message.messageId == messageId {
+          let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+          // Validate the index path before returning
+          if isValidIndexPath(indexPath) {
+            return indexPath
+          }
+        }
+      }
+    }
+    return nil
+  }
+
+  private func isValidIndexPath(_ indexPath: IndexPath) -> Bool {
+    // Check both view model and collection view data source to avoid race conditions
+    guard indexPath.section >= 0,
+          indexPath.section < coordinator.viewModel.numberOfSections(),
+          indexPath.item >= 0,
+          indexPath.item < coordinator.viewModel.numberOfItems(in: indexPath.section),
+          indexPath.section < numberOfSections,
+          indexPath.item < numberOfItems(inSection: indexPath.section)
+    else {
+      return false
+    }
+    return true
+  }
+
+  private func safeScrollToTop(animated: Bool = true) {
+    // Check both view model and data source to avoid race conditions
+    guard coordinator.viewModel.numberOfSections() > 0,
+          coordinator.viewModel.numberOfItems(in: 0) > 0,
+          numberOfSections > 0,
+          numberOfItems(inSection: 0) > 0
+    else {
+      return
+    }
+
+    let indexPath = IndexPath(item: 0, section: 0)
+    scrollToItem(at: indexPath, at: .top, animated: animated)
+  }
+
   @objc func orientationDidChange(_ notification: Notification) {
     coordinator.clearSizeCache()
     guard !isKeyboardVisible else { return }
@@ -200,11 +241,7 @@ final class MessagesCollectionView: UICollectionView {
       UIView.animate(withDuration: 0.3) {
         self.updateContentInsets()
         if self.shouldScrollToBottom, !self.itemsEmpty {
-          self.scrollToItem(
-            at: IndexPath(item: 0, section: 0),
-            at: .top,
-            animated: true
-          )
+          self.safeScrollToTop(animated: true)
         }
       }
     }
@@ -289,11 +326,7 @@ final class MessagesCollectionView: UICollectionView {
     updateContentInsets()
     UIView.animate(withDuration: duration) {
       if self.shouldScrollToBottom, !self.itemsEmpty {
-        self.scrollToItem(
-          at: IndexPath(item: 0, section: 0),
-          at: .top,
-          animated: false
-        )
+        self.safeScrollToTop(animated: false)
       }
     }
   }
@@ -308,11 +341,7 @@ final class MessagesCollectionView: UICollectionView {
     updateContentInsets()
     UIView.animate(withDuration: duration) {
       if self.shouldScrollToBottom, !self.itemsEmpty {
-        self.scrollToItem(
-          at: IndexPath(item: 0, section: 0),
-          at: .top,
-          animated: true
-        )
+        self.safeScrollToTop(animated: true)
       }
     }
   }
@@ -322,11 +351,7 @@ final class MessagesCollectionView: UICollectionView {
       UIView.animate(withDuration: 0.2, delay: 0) {
         self.updateContentInsets()
         if self.shouldScrollToBottom, !self.itemsEmpty {
-          self.scrollToItem(
-            at: IndexPath(item: 0, section: 0),
-            at: .top,
-            animated: true
-          )
+          self.safeScrollToTop(animated: true)
         }
       }
     }
@@ -360,16 +385,19 @@ final class MessagesCollectionView: UICollectionView {
         animateScrollToBottom(duration: 0.14)
       }
     } else {
-      scrollToItem(
-        at: IndexPath(item: 0, section: 0),
-        at: .top,
-        animated: true
-      )
+      safeScrollToTop(animated: true)
     }
   }
 
   private func animateScrollToBottom(duration: TimeInterval) {
-    if let attributes = layoutAttributesForItem(at: IndexPath(item: 0, section: 0)) {
+    // Check both view model and data source to avoid race conditions
+    guard coordinator.viewModel.numberOfSections() > 0,
+          coordinator.viewModel.numberOfItems(in: 0) > 0,
+          numberOfSections > 0,
+          numberOfItems(inSection: 0) > 0 else { return }
+
+    let indexPath = IndexPath(item: 0, section: 0)
+    if let attributes = layoutAttributesForItem(at: indexPath) {
       let targetOffset = CGPoint(x: 0, y: attributes.frame.minY - contentInset.top)
       UIView.animate(
         withDuration: duration,
@@ -383,12 +411,7 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   private static func createLayout() -> UICollectionViewLayout {
-    let layout = AnimatedCollectionViewLayout()
-    layout.minimumInteritemSpacing = 0
-    layout.minimumLineSpacing = 0
-    layout.scrollDirection = .vertical
-    layout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
-    return layout
+    AnimatedCompositionalLayout.createSectionedLayout()
   }
 
   // TODO: Handle far reply scroll
@@ -398,9 +421,8 @@ final class MessagesCollectionView: UICollectionView {
           let repliedToMessageId = userInfo["repliedToMessageId"] as? Int64,
           let chatId = userInfo["chatId"] as? Int64,
           chatId == self.chatId else { return }
-    // Find the index of the message with this messageId
-    if let index = coordinator.messages.firstIndex(where: { $0.message.messageId == repliedToMessageId }) {
-      let indexPath = IndexPath(item: index, section: 0)
+    // Find the index path of the message with this messageId
+    if let indexPath = findIndexPath(for: repliedToMessageId), isValidIndexPath(indexPath) {
       scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
       // Highlight the cell after scrolling
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -411,7 +433,8 @@ final class MessagesCollectionView: UICollectionView {
             cell.clearHighlight()
           }
         }
-        if let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell {
+        // Revalidate index path before accessing cell
+        if isValidIndexPath(indexPath), let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell {
           cell.highlightBubble()
         }
       }
@@ -423,27 +446,28 @@ final class MessagesCollectionView: UICollectionView {
 
 extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
   func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+    // Get messages on main actor, then move heavy work to background
     let messagesToPrefetch: [FullMessage] = indexPaths.compactMap { indexPath in
-      guard indexPath.item < coordinator.messages.count else { return nil }
-      return coordinator.messages[indexPath.item]
+      coordinator.viewModel.message(at: indexPath)
     }.filter { $0.photoInfo != nil }
 
     if !messagesToPrefetch.isEmpty {
-      // Dispatch to background to avoid blocking the main thread
-      Task.detached(priority: .low) {
+      // Move only the image prefetching to background thread
+      Task.detached(priority: .utility) {
         await ImagePrefetcher.shared.prefetchImages(for: messagesToPrefetch)
       }
     }
   }
 
   func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+    // Get messages on main actor, then move heavy work to background
     let messagesToCancel: [FullMessage] = indexPaths.compactMap { indexPath in
-      guard indexPath.item < coordinator.messages.count else { return nil }
-      return coordinator.messages[indexPath.item]
+      coordinator.viewModel.message(at: indexPath)
     }.filter { $0.photoInfo != nil }
 
     if !messagesToCancel.isEmpty {
-      Task.detached(priority: .low) {
+      // Move only the cancel prefetching to background thread
+      Task.detached(priority: .utility) {
         await ImagePrefetcher.shared.cancelPrefetching(for: messagesToCancel)
       }
     }
@@ -455,7 +479,7 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
 private extension MessagesCollectionView {
   class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
     private var currentCollectionView: UICollectionView?
-    private let viewModel: MessagesProgressiveViewModel
+    let viewModel: MessagesSectionedViewModel
     private let peerId: Peer
     private let chatId: Int64
     private let spaceId: Int64
@@ -492,18 +516,16 @@ private extension MessagesCollectionView {
       collectionContextMenu?.dismissMenu()
     }
 
-    enum Section {
-      case main
+    private var dataSource: UICollectionViewDiffableDataSource<Date, FullMessage.ID>!
+    var messages: [FullMessage] {
+      viewModel.sections.flatMap(\.messages)
     }
-
-    private var dataSource: UICollectionViewDiffableDataSource<Section, FullMessage.ID>!
-    var messages: [FullMessage] { viewModel.messages }
 
     init(peerId: Peer, chatId: Int64, spaceId: Int64) {
       self.peerId = peerId
       self.chatId = chatId
       self.spaceId = spaceId
-      viewModel = MessagesProgressiveViewModel(peer: peerId, reversed: true)
+      viewModel = MessagesSectionedViewModel(peer: peerId, reversed: true)
 
       super.init()
 
@@ -554,7 +576,7 @@ private extension MessagesCollectionView {
         )
       }
 
-      dataSource = UICollectionViewDiffableDataSource<Section, FullMessage.ID>(
+      dataSource = UICollectionViewDiffableDataSource<Date, FullMessage.ID>(
         collectionView: collectionView
       ) { collectionView, indexPath, messageId in
         collectionView.dequeueConfiguredReusableCell(
@@ -564,88 +586,137 @@ private extension MessagesCollectionView {
         )
       }
 
+      // Configure supplementary view provider for date separators
+      dataSource.supplementaryViewProvider = { [weak self] collectionView, kind, indexPath in
+        guard let self else { return nil }
+
+        if kind == UICollectionView.elementKindSectionFooter {
+          guard let footerView = collectionView.dequeueReusableSupplementaryView(
+            ofKind: kind,
+            withReuseIdentifier: DateSeparatorView.reuseIdentifier,
+            for: indexPath
+          ) as? DateSeparatorView else {
+            return nil
+          }
+
+          // Safely get section with bounds checking
+          if let section = viewModel.section(at: indexPath.section) {
+            footerView.configure(with: section.dayString)
+          } else {
+            // Fallback for invalid section
+            footerView.configure(with: "")
+          }
+
+          return footerView
+        }
+
+        return nil
+      }
+
       // Set initial data after configuring the data source
       setInitialData()
     }
 
     private func isMessageFromDifferentSender(at indexPath: IndexPath) -> Bool {
-      // Ensure we're not accessing beyond array bounds
-      guard indexPath.item < messages.count else { return true }
+      guard let currentMessage = viewModel.message(at: indexPath) else { return true }
 
-      let currentMessage = messages[indexPath.item]
+      // Check previous message within the same section
+      let previousIndexPath = IndexPath(item: indexPath.item + 1, section: indexPath.section)
 
-      // Ensure previous message exists
-      guard indexPath.item + 1 < messages.count else { return true }
+      // Ensure the previous index path is valid before checking
+      if previousIndexPath.item < viewModel.numberOfItems(in: indexPath.section),
+         let previousMessage = viewModel.message(at: previousIndexPath)
+      {
+        return currentMessage.message.fromId != previousMessage.message.fromId
+      }
 
-      let previousMessage = messages[indexPath.item + 1]
+      // If no previous message in this section, check last message of previous section
+      if indexPath.section > 0 {
+        let previousSection = indexPath.section - 1
+        let previousSectionItemCount = viewModel.numberOfItems(in: previousSection)
+        if previousSectionItemCount > 0 {
+          let lastMessageInPreviousSection = IndexPath(item: 0, section: previousSection)
+          if let lastMessage = viewModel.message(at: lastMessageInPreviousSection) {
+            return currentMessage.message.fromId != lastMessage.message.fromId
+          }
+        }
+      }
 
-      return currentMessage.message.fromId != previousMessage.message.fromId
+      return true
     }
 
     private func setInitialData(animated: Bool? = false) {
-      var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
+      var snapshot = NSDiffableDataSourceSnapshot<Date, FullMessage.ID>()
 
-      // Only one section in this collection view, identified by Section.main
-      snapshot.appendSections([.main])
-
-      // Get identifiers of all message in our model and add to initial snapshot
-      let itemIdentifiers = messages.map(\.id)
-
-      snapshot.appendItems(itemIdentifiers, toSection: .main)
-
-      // Reconfigure all items to ensure cells are reloaded
-      snapshot.reconfigureItems(itemIdentifiers)
+      // Add sections and their messages using dates as stable identifiers
+      for section in viewModel.sections {
+        snapshot.appendSections([section.date])
+        let messageIds = section.messages.map(\.id)
+        snapshot.appendItems(messageIds, toSection: section.date)
+      }
 
       dataSource.apply(snapshot, animatingDifferences: animated ?? false)
     }
 
-    func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
+    func applyUpdate(_ update: MessagesSectionedViewModel.SectionedMessagesChangeSet) {
       switch update {
-        case let .added(newMessages, _):
-          // get current snapshot and append new items
-          var snapshot = dataSource.snapshot()
-          let newIds = newMessages.map(\.id)
+        case let .reload(animated):
+          setInitialData(animated: animated)
 
-          let shouldScroll = newMessages.contains {
-            $0.message.fromId == Auth.shared.getCurrentUserId()
+        case let .sectionsChanged(sections):
+          setInitialData(animated: true)
+
+        case let .messagesAdded(sectionIndex, messageIds):
+          var snapshot = dataSource.snapshot()
+
+          // Validate section index
+          guard sectionIndex >= 0, sectionIndex < viewModel.numberOfSections() else {
+            setInitialData(animated: true)
+            return
           }
 
-          if let first = snapshot.itemIdentifiers.first {
-            snapshot.insertItems(newIds, beforeItem: first)
+          // Check if this is the first section (most recent)
+          let shouldScroll = sectionIndex == 0
+
+          // Convert section index to date
+          guard let section = viewModel.section(at: sectionIndex) else {
+            setInitialData(animated: true)
+            return
+          }
+          let sectionDate = section.date
+
+          if let firstItemInSection = snapshot.itemIdentifiers(inSection: sectionDate).first {
+            snapshot.insertItems(messageIds, beforeItem: firstItemInSection)
           } else {
-            snapshot.appendItems(newIds, toSection: .main)
+            snapshot.appendItems(messageIds, toSection: sectionDate)
           }
 
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self else { return }
-
             updateUnreadIfNeeded()
           }
-          UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .curveEaseInOut]) {
-            self.dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
-              if shouldScroll {
-                self?.currentCollectionView?.scrollToItem(
-                  at: IndexPath(item: 0, section: 0),
-                  at: .top,
-                  animated: true
-                )
+
+          dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+            if shouldScroll {
+              if let collectionView = self?.currentCollectionView as? MessagesCollectionView {
+                collectionView.safeScrollToTop(animated: true)
               }
             }
           }
 
-        case let .deleted(ids, _):
+        case let .messagesDeleted(_, messageIds):
           var snapshot = dataSource.snapshot()
-          snapshot.deleteItems(ids)
+          snapshot.deleteItems(messageIds)
           dataSource.apply(snapshot, animatingDifferences: true)
 
-        case let .updated(newMessages, _, animated):
+        case let .messagesUpdated(_, messageIds, animated):
           var snapshot = dataSource.snapshot()
-          let ids = newMessages.map(\.id)
-          snapshot.reconfigureItems(ids)
+          snapshot.reconfigureItems(messageIds)
           dataSource.apply(snapshot, animatingDifferences: animated ?? false)
 
-        case let .reload(animated):
-          setInitialData(animated: animated)
+        case .multiSectionUpdate:
+          // Multiple sections affected - do a full data reload for simplicity
+          setInitialData(animated: true)
       }
     }
 
@@ -660,7 +731,7 @@ private extension MessagesCollectionView {
       guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
       collectionView.accessoryProvider = { [weak self] indexPath in
 
-        guard let message = self?.messages[indexPath.item] else { return [] }
+        guard let self, let message = viewModel.message(at: indexPath) else { return [] }
         let alignment: UIContextMenuAccessoryAlignment = if message.message.out == true {
           .trailing
         } else {
@@ -675,18 +746,16 @@ private extension MessagesCollectionView {
         accessoryView?.backgroundColor = .clear
 
         if let accessoryView {
-          let reactionPickerView = self?.createReactionPickerView(for: message.message, at: indexPath)
-          if let reactionPickerView {
-            accessoryView.addSubview(reactionPickerView)
+          let reactionPickerView = createReactionPickerView(for: message.message, at: indexPath)
+          accessoryView.addSubview(reactionPickerView)
 
-            reactionPickerView.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-              reactionPickerView.centerXAnchor.constraint(equalTo: accessoryView.centerXAnchor),
-              reactionPickerView.centerYAnchor.constraint(equalTo: accessoryView.centerYAnchor),
-              reactionPickerView.leadingAnchor.constraint(equalTo: accessoryView.leadingAnchor),
-              reactionPickerView.trailingAnchor.constraint(equalTo: accessoryView.trailingAnchor),
-            ])
-          }
+          reactionPickerView.translatesAutoresizingMaskIntoConstraints = false
+          NSLayoutConstraint.activate([
+            reactionPickerView.centerXAnchor.constraint(equalTo: accessoryView.centerXAnchor),
+            reactionPickerView.centerYAnchor.constraint(equalTo: accessoryView.centerYAnchor),
+            reactionPickerView.leadingAnchor.constraint(equalTo: accessoryView.leadingAnchor),
+            reactionPickerView.trailingAnchor.constraint(equalTo: accessoryView.trailingAnchor),
+          ])
         }
 
         guard let accessoryView else { return [] }
@@ -721,14 +790,16 @@ private extension MessagesCollectionView {
           let image = UIImage(systemName: "checkmark", withConfiguration: config)?
             .withTintColor(UIColor(hex: "#2AAC28")!, renderingMode: .alwaysOriginal)
           button.setImage(image, for: .normal)
-          button.tag = indexPath.item * 1_000 + index
+          // Use message ID for reliable lookup across sectioned data
+          let baseTag = Int(message.messageId % Int64(Int.max - 1_000))
+          button.tag = baseTag + index
           button.layer.cornerRadius = 19
           button.clipsToBounds = true
           button.addTarget(self, action: #selector(handleReactionButtonTap(_:)), for: .touchUpInside)
           button.addTarget(self, action: #selector(buttonTouchDown(_:)), for: .touchDown)
           button.addTarget(self, action: #selector(buttonTouchUp(_:)), for: [.touchUpOutside, .touchCancel])
         } else {
-          button = createReactionButton(reaction: reaction, messageIndex: indexPath.item, reactionIndex: index)
+          button = createReactionButton(reaction: reaction, messageId: message.messageId, reactionIndex: index)
         }
         stackView.addArrangedSubview(button)
       }
@@ -752,7 +823,7 @@ private extension MessagesCollectionView {
       return containerView
     }
 
-    private func createReactionButton(reaction: String, messageIndex: Int, reactionIndex: Int) -> UIButton {
+    private func createReactionButton(reaction: String, messageId: Int64, reactionIndex: Int) -> UIButton {
       let button = UIButton(type: .system)
       button.translatesAutoresizingMaskIntoConstraints = false
 
@@ -768,7 +839,10 @@ private extension MessagesCollectionView {
       configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 2, bottom: 2, trailing: 2)
       button.configuration = configuration
 
-      button.tag = messageIndex * 1_000 + reactionIndex
+      // Use message ID for reliable lookup across sectioned data
+      // Format: (messageId % safe_range) * 1000 + reactionIndex
+      let baseTag = Int(messageId % Int64(Int.max / 10_000)) // Ensure we don't overflow
+      button.tag = baseTag * 1_000 + reactionIndex
 
       button.layer.cornerRadius = 19
       button.clipsToBounds = true
@@ -799,9 +873,28 @@ private extension MessagesCollectionView {
     }
 
     @objc private func handleReactionButtonTap(_ sender: UIButton) {
-      let fullMessage = messages[sender.tag / 1_000]
-      _ = sender.tag / 1_000
-      _ = sender.tag % 1_000
+      // Extract message ID from tag (format: (messageId % safe_range) * 1000 + reactionIndex)
+      guard sender.tag >= 1_000 else { return }
+
+      let baseTag = sender.tag / 1_000 // Get the base message ID part
+
+      // Find the message by searching through all sections
+      var targetMessage: FullMessage?
+      for section in viewModel.sections {
+        for message in section.messages {
+          let messageBaseTag = Int(message.message.messageId % Int64(Int.max / 10_000))
+          if messageBaseTag == baseTag {
+            targetMessage = message
+            break
+          }
+        }
+        if targetMessage != nil { break }
+      }
+
+      guard let fullMessage = targetMessage else {
+        print("Could not find message for tag: \(sender.tag), baseTag: \(baseTag)")
+        return
+      }
       let message = fullMessage.message
 
       guard let emoji = sender.configuration?.title else { return }
@@ -834,11 +927,9 @@ private extension MessagesCollectionView {
       layout collectionViewLayout: UICollectionViewLayout,
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
-      guard indexPath.item < messages.count else {
+      guard let message = viewModel.message(at: indexPath) else {
         return .zero
       }
-
-      let message = messages[indexPath.item]
 
       if let cachedSize = sizeCache[message.id] {
         return cachedSize
@@ -904,8 +995,8 @@ private extension MessagesCollectionView {
       contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
       point: CGPoint
     ) -> UIContextMenuConfiguration? {
-      guard let indexPath = indexPaths.first else { return nil }
-      let fullMessage = messages[indexPath.item]
+      guard let indexPath = indexPaths.first,
+            let fullMessage = viewModel.message(at: indexPath) else { return nil }
       let message = fullMessage.message
       let cell = currentCollectionView?.cellForItem(at: indexPath) as! MessageCollectionViewCell
 
@@ -1206,18 +1297,12 @@ private extension MessagesCollectionView {
       let missingIds = availableIds.subtracting(currentIds)
 
       if !missingIds.isEmpty {
-        var snapshot = NSDiffableDataSourceSnapshot<Section, FullMessage.ID>()
-        snapshot.appendSections([.main])
-        let orderedIds = messages.map(\.id)
-        snapshot.appendItems(orderedIds, toSection: .main)
-        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-          guard let self else { return }
-          isApplyingSnapshot = false
-          if needsAnotherUpdate {
-            needsAnotherUpdate = false
-            DispatchQueue.main.async { [weak self] in
-              self?.scheduleUpdateItems()
-            }
+        setInitialData(animated: false)
+        isApplyingSnapshot = false
+        if needsAnotherUpdate {
+          needsAnotherUpdate = false
+          DispatchQueue.main.async { [weak self] in
+            self?.scheduleUpdateItems()
           }
         }
       } else {
@@ -1255,34 +1340,6 @@ private extension MessagesCollectionView {
         }
       }
     }
-  }
-}
-
-final class AnimatedCollectionViewLayout: UICollectionViewFlowLayout {
-  override func prepare() {
-    super.prepare()
-
-    guard let collectionView else { return }
-
-    // Calculate the available width
-    let availableWidth = collectionView.bounds.width - sectionInset.left - sectionInset.right
-
-    // Don't set a fixed itemSize here since we're using automatic sizing
-    estimatedItemSize = CGSize(width: availableWidth, height: 1)
-  }
-
-  override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
-    -> UICollectionViewLayoutAttributes?
-  {
-    guard
-      let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)?.copy()
-      as? UICollectionViewLayoutAttributes
-    else {
-      return nil
-    }
-
-    attributes.transform = CGAffineTransform(translationX: 0, y: -30)
-    return attributes
   }
 }
 
