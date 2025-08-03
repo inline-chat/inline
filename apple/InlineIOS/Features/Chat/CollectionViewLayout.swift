@@ -8,17 +8,17 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
     guard let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath) else {
       return nil
     }
-    
+
     let modifiedAttributes = attributes.copy() as! UICollectionViewLayoutAttributes
-    
+
     // For new items appearing, start them from below and transparent
-    // Since collection view is inverted, positive Y moves items down (which appears as up from bottom)
-    modifiedAttributes.transform = CGAffineTransform(translationX: 0, y: 50)
+    // Since collection view is inverted, negative Y makes items slide up from bottom (proper chat behavior)
+    modifiedAttributes.transform = CGAffineTransform(translationX: 0, y: -50)
     modifiedAttributes.alpha = 0.0
-    
+
     return modifiedAttributes
   }
-  
+
   override func finalLayoutAttributesForDisappearingItem(at itemIndexPath: IndexPath)
     -> UICollectionViewLayoutAttributes?
   {
@@ -29,7 +29,7 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
       return nil
     }
 
-    attributes.transform = CGAffineTransform(translationX: 0, y: 30)
+    attributes.transform = CGAffineTransform(translationX: 0, y: -26)
     attributes.alpha = 0.0
     return attributes
   }
