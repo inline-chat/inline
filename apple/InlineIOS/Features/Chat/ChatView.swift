@@ -279,7 +279,7 @@ struct ChatViewHeader: View {
     VStack {
       VariableBlurView()
         /// +25 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
-        .frame(height: navBarHeight + 38)
+        .frame(height: navBarHeight + 25) // was 38
         .contentShape(Rectangle())
         .background(
           LinearGradient(
@@ -291,8 +291,10 @@ struct ChatViewHeader: View {
             endPoint: .bottom
           )
         )
+
       Spacer()
     }
     .ignoresSafeArea(.all)
+    .allowsHitTesting(false)
   }
 }
