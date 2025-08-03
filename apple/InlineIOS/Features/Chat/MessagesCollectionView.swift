@@ -696,6 +696,11 @@ private extension MessagesCollectionView {
             updateUnreadIfNeeded()
           }
 
+          // Use CATransaction to customize the diffable data source animation timing
+          CATransaction.begin()
+          CATransaction.setAnimationDuration(0.33)
+          CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1.0))
+          
           dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
             if shouldScroll {
               if let collectionView = self?.currentCollectionView as? MessagesCollectionView {
@@ -703,6 +708,8 @@ private extension MessagesCollectionView {
               }
             }
           }
+          
+          CATransaction.commit()
 
         case let .messagesDeleted(_, messageIds):
           var snapshot = dataSource.snapshot()
