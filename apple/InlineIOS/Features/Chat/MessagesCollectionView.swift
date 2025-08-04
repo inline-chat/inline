@@ -489,6 +489,13 @@ private extension MessagesCollectionView {
     private var isApplyingSnapshot = false
     private var needsAnotherUpdate = false
 
+    // MARK: - Date Separator Visibility Handling
+
+    fileprivate var dateSeparatorHideWorkItem: DispatchWorkItem?
+    /// Delay before the pinned date badge is hidden after scrolling stops.
+    /// Adjust this value to tweak the UX (similar to WhatsApp/Telegram/Signal).
+    fileprivate let dateSeparatorHideDelay: TimeInterval = 0.5
+
     func collectionView(
       _ collectionView: UICollectionView,
       willDisplayContextMenu configuration: UIContextMenuConfiguration,
@@ -656,6 +663,11 @@ private extension MessagesCollectionView {
       }
 
       dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+
+      // Kick-off the auto-hide timer on first load as well (after layout pass)
+      DispatchQueue.main.async { [weak self] in
+        self?.scheduleHideDateSeparators()
+      }
     }
 
     func applyUpdate(_ update: MessagesSectionedViewModel.SectionedMessagesChangeSet) {
@@ -700,7 +712,7 @@ private extension MessagesCollectionView {
           CATransaction.begin()
           CATransaction.setAnimationDuration(0.33)
           CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1.0))
-          
+
           dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
             if shouldScroll {
               if let collectionView = self?.currentCollectionView as? MessagesCollectionView {
@@ -708,7 +720,7 @@ private extension MessagesCollectionView {
               }
             }
           }
-          
+
           CATransaction.commit()
 
         case let .messagesDeleted(_, messageIds):
@@ -1250,17 +1262,28 @@ private extension MessagesCollectionView {
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
       isUserDragging = true
       isUserScrollInEffect = true
+      // Show date badge immediately when user starts interacting
+      dateSeparatorHideWorkItem?.cancel()
+      setDateSeparators(hidden: false, animated: true)
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
       isUserDragging = false
+      if !decelerate {
+        scheduleHideDateSeparators()
+      }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
       isUserScrollInEffect = false
+      scheduleHideDateSeparators()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+      // Ensure date badge is visible while the user is actively scrolling.
+      dateSeparatorHideWorkItem?.cancel()
+      setDateSeparators(hidden: false, animated: false)
+
       /// Reminder: textViewVerticalMargin in ComposeView affects scrollView.contentOffset.y number
       /// (textViewVerticalMargin = 7.0  -> contentOffset.y = -64.0 | textViewVerticalMargin = 4.0 -> contentOffset.y =
       /// -58.0)
@@ -1285,8 +1308,8 @@ private extension MessagesCollectionView {
         let maxOffset = scrollView.contentSize.height - scrollView.bounds.size.height
         let threshold: CGFloat = 100 // Load when within 100 points of the top
         let isNearTop = scrollView.contentOffset.y >= (maxOffset - threshold)
-        
-        if isNearTop && maxOffset > 0 {
+
+        if isNearTop, maxOffset > 0 {
           viewModel.loadBatch(at: .older)
           scheduleUpdateItems()
         }
@@ -1326,6 +1349,46 @@ private extension MessagesCollectionView {
           }
         }
       }
+    }
+
+    // MARK: - Date Separator Visibility
+
+    private func setDateSeparators(hidden: Bool, animated: Bool) {
+      guard let collectionView = currentCollectionView else { return }
+
+      let footers = collectionView.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionFooter)
+      let targetAlpha: CGFloat = hidden ? 0 : 1
+
+      // The physical bottom edge of the visible rect in the collection-view's coordinate space
+      let visibleBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.contentInset
+        .bottom
+
+      for view in footers {
+        guard let separator = view as? DateSeparatorView else { continue }
+
+        // Detect if this footer is currently pinned to the bottom (sticky)
+        let isPinned = abs(separator.frame.maxY - visibleBottom) < 1.0
+        guard isPinned else { continue }
+
+        if animated {
+          UIView.animate(withDuration: 0.2) {
+            separator.alpha = targetAlpha
+          }
+        } else {
+          separator.alpha = targetAlpha
+        }
+      }
+    }
+
+    private func scheduleHideDateSeparators() {
+      // Cancel any existing scheduled hide operation
+      dateSeparatorHideWorkItem?.cancel()
+
+      let workItem = DispatchWorkItem { [weak self] in
+        self?.setDateSeparators(hidden: true, animated: true)
+      }
+      dateSeparatorHideWorkItem = workItem
+      DispatchQueue.main.asyncAfter(deadline: .now() + dateSeparatorHideDelay, execute: workItem)
     }
 
     private func getMessagesWindow(around targetMessageId: Int64) -> [Int64] {
