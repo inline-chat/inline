@@ -141,7 +141,7 @@ public class MessagesProgressiveViewModel {
           let deletedIndices = messages.enumerated()
             .filter { messageDelete.messageIds.contains($0.element.message.messageId) }
             .map(\.offset)
-          var deletedGlobalIds: [Int64] = deletedIndices.map { messages[$0].id }
+          let deletedGlobalIds: [Int64] = deletedIndices.map { messages[$0].id }
 
           // Store indices in reverse order to safely remove items
           let sortedIndices = deletedIndices.sorted(by: >)
@@ -318,13 +318,21 @@ public class MessagesProgressiveViewModel {
       )
       messagesBatch.removeAll { existingMessagesAtCursor.contains($0.id) }
 
-      if prepend {
-        messages.insert(contentsOf: messagesBatch, at: 0)
-      } else {
-        messages.append(contentsOf: messagesBatch)
-      }
+      // Only proceed if we have new messages to add
+      if !messagesBatch.isEmpty {
+        if prepend {
+          messages.insert(contentsOf: messagesBatch, at: 0)
+        } else {
+          messages.append(contentsOf: messagesBatch)
+        }
 
-      updateRange()
+        updateRange()
+
+        // Notify observers about the new messages
+        let indices = prepend ? Array(0 ..< messagesBatch.count) :
+          Array((messages.count - messagesBatch.count) ..< messages.count)
+        callback?(.added(messagesBatch, indexSet: indices))
+      }
     } catch {
       Log.shared.error("Failed to get messages \(error)")
     }

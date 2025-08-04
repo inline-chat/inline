@@ -1280,8 +1280,13 @@ private extension MessagesCollectionView {
       }
 
       if isUserScrollInEffect {
-        let isAtBottom = scrollView.contentOffset.y >= (scrollView.contentSize.height - scrollView.bounds.size.height)
-        if isAtBottom {
+        // For inverted collection view, we need to detect when user scrolls to the "top" (oldest messages)
+        // which is actually at the maximum content offset position
+        let maxOffset = scrollView.contentSize.height - scrollView.bounds.size.height
+        let threshold: CGFloat = 100 // Load when within 100 points of the top
+        let isNearTop = scrollView.contentOffset.y >= (maxOffset - threshold)
+        
+        if isNearTop && maxOffset > 0 {
           viewModel.loadBatch(at: .older)
           scheduleUpdateItems()
         }
