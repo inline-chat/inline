@@ -296,3 +296,5 @@ xcodebuild -project apple/Inline.xcodeproj -list
 
 This guide provides the foundation for understanding and contributing to the Inline chat application codebase. For specific implementation details, refer to the existing code patterns and the `.cursor/rules/*.mdc` files for additional context.
 
+## Development Memories
+- Don't run xcodebuild command, use IDE diagnostics, Swift typecheck, and when needed to build, run xcodebuild in silent mode to disable all the logging which fills the context window.
