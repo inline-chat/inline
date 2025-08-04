@@ -11,41 +11,43 @@ struct ReactionPickerView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      // Main reaction bar
-      HStack(spacing: 12) {
-        ForEach(emojis, id: \.self) { emoji in
-          Button(action: {
-            onEmojiSelected(emoji)
-          }) {
-            if emoji == "✓" || emoji == "✔️" || emoji == "✔" {
-              Image(systemName: "checkmark")
-                .font(.system(size: 24))
-                .fontWeight(.medium)
-                .foregroundColor(Color(uiColor: UIColor(hex: "#2AAC28")!))
-            } else {
-              Text(emoji)
-                .font(.system(size: 24))
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 12) {
+          ForEach(emojis, id: \.self) { emoji in
+            Button(action: {
+              onEmojiSelected(emoji)
+            }) {
+              if emoji == "✓" || emoji == "✔️" || emoji == "✔" {
+                Image(systemName: "checkmark")
+                  .font(.title)
+                  .fontWeight(.medium)
+                  .foregroundColor(Color(uiColor: UIColor(hex: "#2AAC28")!))
+              } else {
+                Text(emoji)
+                  .font(.title)
+              }
             }
+            .buttonStyle(PlainButtonStyle())
           }
-          .buttonStyle(PlainButtonStyle())
         }
-
-        Button(action: {
-          onShowEmojiPicker()
-        }) {
-          Image(systemName: "plus")
-            .font(.system(size: 16, weight: .bold))
-            .foregroundColor(.primary)
-        }
-        .buttonStyle(ReactionButtonStyle())
+        .padding(.horizontal, 14)
       }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
+      .frame(width: 350, height: 50)
       .background(
         Capsule()
-          .fill(Color(UIColor.secondarySystemBackground))
-          .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
+          .fill(.thickMaterial)
+          .frame(width: 350, height: 50)
       )
+//      .overlay(alignment: .leading) {
+//        HalfCapsule(side: .left)
+//          .fill(.thickMaterial)
+//          .frame(width: 25, height: 50)
+//      }
+//      .overlay(alignment: .trailing) {
+//        HalfCapsule(side: .right)
+//          .fill(.thickMaterial)
+//          .frame(width: 25, height: 50)
+//      }
     }
   }
 }
@@ -85,7 +87,7 @@ struct EmojiGridView: View {
               onEmojiSelected(emoji)
             }) {
               Text(emoji)
-                .font(.system(size: 24))
+                .font(.title)
             }
             .buttonStyle(PlainButtonStyle())
             .padding(4)

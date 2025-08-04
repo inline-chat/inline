@@ -1,4 +1,7 @@
+import Auth
 import InlineKit
+import Logger
+import SwiftUI
 import UIKit
 
 final class ContextMenuManager {
@@ -36,14 +39,17 @@ final class ContextMenuManager {
     blurView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     rootVC.view.addSubview(blurView)
 
-    let scrollView = UIScrollView(frame: rootVC.view.bounds)
-    scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    let scrollView = UIScrollView()
+    scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.backgroundColor = .clear
     scrollView.isOpaque = false
     scrollView.showsVerticalScrollIndicator = false
     scrollView.showsHorizontalScrollIndicator = false
     scrollView.alwaysBounceVertical = true
+    scrollView.alwaysBounceHorizontal = false
     scrollView.contentInsetAdjustmentBehavior = .never
+    scrollView.isScrollEnabled = true
+    scrollView.clipsToBounds = false
 
     let menuElements: [ContextMenuElement] = [
       .item(ContextMenuItem(
@@ -84,69 +90,184 @@ final class ContextMenuManager {
       )),
     ]
 
+    let defaultReactions = [
+      "🥹",
+      "❤️",
+      "🫡",
+      "👍",
+      "👎",
+      "💯",
+      "😂",
+      "🔥",
+      "🎉",
+      "✔️",
+      "👏",
+      "🙏",
+      "🤔",
+      "😮",
+      "😢",
+      "😡",
+      "🫠",
+      "🤯",
+      "☕️",
+    ]
+
+    let reactionPicker = ReactionPickerHostingController(
+      emojis: defaultReactions,
+      onEmojiSelected: { selectedEmoji in
+        let currentUserId = Auth.shared.getCurrentUserId() ?? 0
+        if message.reactions
+          .contains(where: { $0.reaction.emoji == selectedEmoji && $0.reaction.userId == currentUserId })
+        {
+          Transactions.shared.mutate(transaction: .deleteReaction(.init(
+            message: message.message,
+            emoji: selectedEmoji,
+            peerId: message.message.peerId,
+            chatId: message.message.chatId
+          )))
+        } else {
+          Transactions.shared.mutate(transaction: .addReaction(.init(
+            message: message.message,
+            emoji: selectedEmoji,
+            userId: currentUserId,
+            peerId: message.message.peerId
+          )))
+        }
+        self.hide()
+      },
+      onWillDoTapped: {},
+      contextMenuInteraction: nil
+    )
+
+    let reactionPickerView = reactionPicker.view!
+    reactionPickerView.translatesAutoresizingMaskIntoConstraints = false
+
+    rootVC.addChild(reactionPicker)
+    reactionPicker.didMove(toParent: rootVC)
+
+    // Add scroll view to root view controller first
+    rootVC.view.addSubview(scrollView)
+
+    // Set up scroll view constraints
+    NSLayoutConstraint.activate([
+      scrollView.topAnchor.constraint(equalTo: rootVC.view.topAnchor),
+      scrollView.leadingAnchor.constraint(equalTo: rootVC.view.leadingAnchor),
+      scrollView.trailingAnchor.constraint(equalTo: rootVC.view.trailingAnchor),
+      scrollView.bottomAnchor.constraint(equalTo: rootVC.view.bottomAnchor),
+    ])
+
+    rootVC.view.addSubview(reactionPickerView)
+    setupInitialAnimationState(for: reactionPickerView)
+
     let contextMenu = ContextMenuView(elements: menuElements)
     contextMenu.translatesAutoresizingMaskIntoConstraints = false
     currentMenu = contextMenu
 
-    // Prepare for animated presentation
     contextMenu.prepareForPresentation()
 
-    // Add context menu to get its size
-    scrollView.addSubview(contextMenu)
+    rootVC.view.addSubview(contextMenu)
 
-    // Get menu size by laying it out
+    // Ensure the menu never compresses — lock its intrinsic size
     contextMenu.setNeedsLayout()
     contextMenu.layoutIfNeeded()
     let menuSize = contextMenu.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+    let menuWidth = contextMenu.widthAnchor.constraint(equalToConstant: menuSize.width)
+    let menuHeight = contextMenu.heightAnchor.constraint(equalToConstant: menuSize.height)
+    menuWidth.priority = .required
+    menuHeight.priority = .required
+    NSLayoutConstraint.activate([menuWidth, menuHeight])
 
-    // Calculate available space and positioning
     let screenBounds = UIScreen.main.bounds
     let sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
-    let menuSpacing: CGFloat = 12
+    let menuSpacing: CGFloat = 8
     let menuEdgeSpace: CGFloat = 8
-    let safeAreaBottom = rootVC.view.safeAreaInsets.bottom
+    let minimumBottomSpacing: CGFloat = 14
 
-    let availableSpaceBelow = screenBounds.height - sourceFrame.maxY - safeAreaBottom - menuSpacing
-    let menuFitsBelow = availableSpaceBelow >= menuSize.height
+    // Safe-area insets (use source window while overlay is still off-screen)
+    let windowSafeInsets = sourceView.window?.safeAreaInsets ?? .zero
+    let safeAreaTop = windowSafeInsets.top
+    let safeAreaBottom = windowSafeInsets.bottom
+    
+    // Configure scroll view content insets for proper scrolling
+    scrollView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: safeAreaBottom, right: 0)
+    scrollView.scrollIndicatorInsets = scrollView.contentInset
+
+    reactionPickerView.setNeedsLayout()
+    reactionPickerView.layoutIfNeeded()
+    let reactionPickerHeight = reactionPickerView
+      .systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height
+
+    let reactionPickerTopOffset: CGFloat = safeAreaTop + 20
+    var messageTopPosition = sourceFrame.minY
+
+    // Can we show reaction picker above the message?
+    let hasSpaceAbove = (sourceFrame.minY - safeAreaTop) >= (reactionPickerHeight + 20)
+
+    if !hasSpaceAbove {
+      // Keep message below the top-anchored reaction picker
+      let minTop = reactionPickerTopOffset + reactionPickerHeight + 10
+      if messageTopPosition < minTop {
+        messageTopPosition = minTop
+      }
+    }
 
     let messageView = UIMessageView(fullMessage: message, spaceId: spaceId)
     messageView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.addSubview(messageView)
 
+    rootVC.view.bringSubviewToFront(contextMenu)
+
     var messageTopConstraint: NSLayoutConstraint
     var contextMenuTopConstraint: NSLayoutConstraint
 
-    if menuFitsBelow {
-      // Menu fits below - normal positioning
-      let originalFrame = sourceView.convert(sourceView.bounds, to: scrollView)
-      messageTopConstraint = messageView.topAnchor.constraint(
-        equalTo: scrollView.topAnchor,
-        constant: originalFrame.minY
-      )
-      contextMenuTopConstraint = contextMenu.topAnchor.constraint(
-        equalTo: messageView.bottomAnchor,
-        constant: menuSpacing
-      )
-    } else {
-      // Menu doesn't fit below - push message up
-      let requiredHeight = sourceFrame.height + menuSpacing + menuSize.height
-      let pushUpAmount = requiredHeight - availableSpaceBelow - sourceFrame.height
-      let adjustedY = max(rootVC.view.safeAreaInsets.top + 20, sourceFrame.minY - pushUpAmount)
-
-      messageTopConstraint = messageView.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: adjustedY)
-      contextMenuTopConstraint = contextMenu.topAnchor.constraint(
-        equalTo: messageView.bottomAnchor,
-        constant: menuSpacing
-      )
+    // Shift message up if we need space for context menu
+    let currentBottomSpace = screenBounds.height - (messageTopPosition + sourceFrame.height) - safeAreaBottom
+    let bottomGapNeeded = menuSpacing + menuSize.height + minimumBottomSpacing
+    if currentBottomSpace < bottomGapNeeded {
+      messageTopPosition -= (bottomGapNeeded - currentBottomSpace)
     }
 
+    messageTopConstraint = messageView.topAnchor.constraint(
+      equalTo: scrollView.topAnchor,
+      constant: messageTopPosition
+    )
+
+    let menuTopConstant = messageTopPosition + sourceFrame.height + menuSpacing
+
+    contextMenuTopConstraint = contextMenu.topAnchor.constraint(
+      equalTo: messageView.bottomAnchor,
+      constant: menuSpacing
+    )
+
     var constraints: [NSLayoutConstraint] = []
+
+    let pickerPositionConstraint: NSLayoutConstraint = hasSpaceAbove ?
+      reactionPickerView.bottomAnchor.constraint(equalTo: messageView.topAnchor, constant: -8) :
+      reactionPickerView.topAnchor.constraint(
+        equalTo: rootVC.view.safeAreaLayoutGuide.topAnchor,
+        constant: reactionPickerTopOffset - safeAreaTop
+      )
+    let pickerSideConstraint: NSLayoutConstraint = outgoing ?
+      reactionPickerView.trailingAnchor.constraint(equalTo: messageView.trailingAnchor) :
+      reactionPickerView.leadingAnchor.constraint(equalTo: messageView.leadingAnchor)
+    constraints.append(contentsOf: [
+      pickerPositionConstraint,
+      pickerSideConstraint,
+      reactionPickerView.leadingAnchor.constraint(
+        greaterThanOrEqualTo: rootVC.view.leadingAnchor,
+        constant: menuEdgeSpace
+      ),
+      reactionPickerView.trailingAnchor.constraint(
+        lessThanOrEqualTo: rootVC.view.trailingAnchor,
+        constant: -menuEdgeSpace
+      ),
+    ])
 
     constraints.append(
       contentsOf: [
         messageView.leadingAnchor.constraint(
           equalTo: scrollView.leadingAnchor,
-          constant: sourceView.convert(sourceView.bounds, to: scrollView).minX
+          constant: sourceFrame.minX
         ),
         messageView.widthAnchor.constraint(equalToConstant: sourceView.bounds.width),
         messageView.heightAnchor.constraint(equalToConstant: sourceView.bounds.height),
@@ -169,13 +290,43 @@ final class ContextMenuManager {
       )
     }
 
+    // Ensure context menu has enough space both from screen bottom and scroll content
+    constraints.append(contentsOf: [
+      contextMenu.bottomAnchor.constraint(
+        lessThanOrEqualTo: rootVC.view.safeAreaLayoutGuide.bottomAnchor,
+        constant: -minimumBottomSpacing
+      ).withPriority(.defaultHigh),
+      // Also ensure the menu stays within the scroll view's content bounds
+      contextMenu.bottomAnchor.constraint(
+        lessThanOrEqualTo: scrollView.bottomAnchor,
+        constant: -minimumBottomSpacing
+      ).withPriority(.required)
+    ])
+
     NSLayoutConstraint.activate(constraints)
+
+    // Calculate total content height to ensure message and menu are never cut off
+    let messageEndPosition = messageTopPosition + sourceFrame.height
+    let menuEndPosition = messageEndPosition + menuSpacing + menuSize.height + minimumBottomSpacing
+    let reactionPickerEnd = hasSpaceAbove ? 
+      reactionPickerTopOffset + reactionPickerHeight + 20 : 
+      reactionPickerTopOffset + reactionPickerHeight
+    
+    let totalContentHeight = max(
+      menuEndPosition,
+      reactionPickerEnd,
+      screenBounds.height + 100 // Extra padding for comfortable scrolling
+    )
+    scrollView.contentSize = CGSize(width: screenBounds.width, height: totalContentHeight)
+
+    if messageTopPosition < safeAreaTop {
+      let targetOffset = safeAreaTop - messageTopPosition
+      scrollView.setContentOffset(CGPoint(x: 0, y: targetOffset), animated: false)
+    }
 
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(backgroundTapped))
     tapGesture.cancelsTouchesInView = false
     rootVC.view.addGestureRecognizer(tapGesture)
-
-    rootVC.view.addSubview(scrollView)
 
     overlayWindow.rootViewController = rootVC
     overlayWindow.frame = UIScreen.main.bounds
@@ -190,19 +341,29 @@ final class ContextMenuManager {
 
     overlayWindow.isHidden = false
     overlayWindow.makeKeyAndVisible()
+
     UIView.animate(withDuration: 0.25) {
       dimmingView.alpha = 1
     }
+
     contextMenu.animateIn(after: 0)
+
+    UIView.animate(withDuration: 0.15, delay: 0.1, options: .curveEaseOut) {
+      reactionPickerView.alpha = 1
+      reactionPickerView.transform = .identity
+    }
+  }
+
+  private func setupInitialAnimationState(for reactionPickerView: UIView) {
+    reactionPickerView.alpha = 0
+    reactionPickerView.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
   }
 
   func hide() {
-    // If rootViewController still exists, animate fade-out before removal.
     if let rootVC = overlayWindow.rootViewController,
        let dimmingView = rootVC.view.subviews
-       .first(where: { $0.backgroundColor?.cgColor.alpha ?? 0 > 0 && $0 is UIView })
+       .first(where: { $0.backgroundColor?.cgColor.alpha ?? 0 > 0 })
     {
-      // Run both menu and dimming animations in parallel.
       currentMenu?.animateOut()
 
       UIView.animate(withDuration: 0.15, animations: {
