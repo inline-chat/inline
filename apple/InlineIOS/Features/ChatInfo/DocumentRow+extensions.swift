@@ -151,8 +151,8 @@ extension DocumentRow {
     return "document.fill"
   }
 
-  func iconName(for extension: String) -> String {
-    switch `extension` {
+  func iconName(for fileExtension: String) -> String {
+    switch fileExtension {
       // Documents
       case "pdf": "doc.richtext.fill"
       case "doc", "docx": "text.document.fill"

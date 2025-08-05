@@ -6,48 +6,6 @@ import InlineUI
 import Logger
 import SwiftUI
 
-struct SearchUserRow: View {
-  let userInfo: UserInfo
-  let onTap: () -> Void
-
-  var body: some View {
-    Button(action: onTap) {
-      HStack(spacing: 9) {
-        UserAvatar(userInfo: userInfo, size: 32)
-        Text((userInfo.user.firstName ?? "") + " " + (userInfo.user.lastName ?? ""))
-          .fontWeight(.medium)
-          .themedPrimaryText()
-      }
-    }
-  }
-}
-
-struct EmptySearchView: View {
-  let isSearching: Bool
-
-  var body: some View {
-    if isSearching {
-      ProgressView()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    } else {
-      VStack(spacing: 4) {
-        Text("🔍")
-          .font(.largeTitle)
-          .themedPrimaryText()
-          .padding(.bottom, 14)
-        Text("Search for people")
-          .font(.headline)
-          .themedPrimaryText()
-        Text("Type a username to find someone to add. eg. dena, mo")
-          .themedSecondaryText()
-          .multilineTextAlignment(.center)
-      }
-      .padding(.horizontal, 45)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-  }
-}
-
 struct ChatInfoView: View {
   let chatItem: SpaceChatItem
   @StateObject var participantsViewModel: ChatParticipantsViewModel
@@ -121,51 +79,58 @@ struct ChatInfoView: View {
   }
 
   var body: some View {
-    VStack(spacing: 0) {
-      // ScrollView(.vertical) {
-      VStack(spacing: 18) {
-        chatInfoHeader
+    ZStack(alignment: .top) {
+      ScrollView(.vertical) {
+        LazyVStack(spacing: 18) {
+          chatInfoHeader
 
-        // Tab Bar
-        HStack(spacing: 2) {
-          ForEach(ChatInfoTab.allCases, id: \.self) { tab in
-            Button {
-              withAnimation(.easeInOut(duration: 0.3)) {
-                selectedTab = tab
-              }
-            } label: {
-              Text(tab.rawValue)
-                .font(.callout)
-                .foregroundColor(selectedTab == tab ? .primary : .secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background {
-                  if selectedTab == tab {
-                    Capsule()
-                      .fill(.thinMaterial)
-                      .matchedGeometryEffect(id: "tab_background", in: tabSelection)
-                  }
+          // Tab Bar
+          HStack(spacing: 2) {
+            ForEach(ChatInfoTab.allCases, id: \.self) { tab in
+              Button {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                  selectedTab = tab
                 }
+              } label: {
+                Text(tab.rawValue)
+                  .font(.callout)
+                  .foregroundColor(selectedTab == tab ? .primary : .secondary)
+                  .padding(.horizontal, 16)
+                  .padding(.vertical, 8)
+                  .background {
+                    if selectedTab == tab {
+                      Capsule()
+                        .fill(.thinMaterial)
+                        .matchedGeometryEffect(id: "tab_background", in: tabSelection)
+                    }
+                  }
+              }
+              .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-          }
+            .padding(.bottom, 12)
 
-          Spacer()
+            Spacer()
+          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 8)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-      }
-      // }
-      // Tab Content
-      VStack {
-        switch selectedTab {
-          case .info:
-            InfoTabView()
-          case .documents:
-            DocumentsTabView(documentsViewModel: documentsViewModel)
+        // }
+        // Tab Content
+        VStack {
+          switch selectedTab {
+            case .info:
+              InfoTabView()
+            case .documents:
+              DocumentsTabView(
+                documentsViewModel: documentsViewModel,
+                peerUserId: chatItem.dialog.peerUserId,
+                peerThreadId: chatItem.dialog.peerThreadId
+              )
+          }
         }
+        .animation(.easeInOut(duration: 0.3), value: selectedTab)
       }
-      .animation(.easeInOut(duration: 0.3), value: selectedTab)
+      .coordinateSpace(name: "mainScroll")
     }
     .onAppear {
       Task {
@@ -213,6 +178,8 @@ struct InfoTabView: View {
 
 struct DocumentsTabView: View {
   @ObservedObject var documentsViewModel: ChatDocumentsViewModel
+  let peerUserId: Int64?
+  let peerThreadId: Int64?
 
   var body: some View {
     VStack(spacing: 16) {
@@ -239,17 +206,67 @@ struct DocumentsTabView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       } else {
-        ScrollView(.vertical) {
-          LazyVStack(spacing: 8) {
-            ForEach(documentsViewModel.documents, id: \.id) { document in
-              DocumentRow(
-                documentInfo: document
-              )
+        // Documents content without scroll
+        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+          ForEach(documentsViewModel.groupedDocuments, id: \.date) { group in
+            Section {
+              // Documents for this date
+              ForEach(group.documents, id: \.id) { document in
+                DocumentRow(
+                  documentInfo: document
+                )
+                .padding(.bottom, 8)
+              }
+            } header: {
+              HStack {
+                Text(formatDate(group.date))
+                  .font(.subheadline)
+                  .fontWeight(.medium)
+                  .foregroundColor(.secondary)
+                  .padding(.horizontal, 12)
+                  .padding(.vertical, 6)
+                  .background(
+                    Capsule()
+                      .fill(Color(.systemBackground).opacity(0.95))
+                  )
+                  .padding(.leading, 16)
+                Spacer()
+              }
+              .padding(.vertical, 8)
             }
           }
         }
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  // Format date for display
+  private func formatDate(_ date: Date) -> String {
+    let calendar = Calendar.current
+    let now = Date()
+
+    if calendar.isDateInToday(date) {
+      return "Today"
+    } else if calendar.isDateInYesterday(date) {
+      return "Yesterday"
+    } else if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
+      let formatter = DateFormatter()
+      formatter.dateFormat = "EEEE"
+      return formatter.string(from: date)
+    } else {
+      let formatter = DateFormatter()
+      formatter.dateFormat = "MMMM d, yyyy"
+      return formatter.string(from: date)
+    }
+  }
+}
+
+// Preference key for scroll offset
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+  static var defaultValue: CGFloat = 0
+
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = nextValue()
   }
 }
