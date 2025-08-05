@@ -63,4 +63,24 @@ public final class ChatDocumentsViewModel: ObservableObject, @unchecked Sendable
         }
       )
   }
+  
+  // MARK: - Helper Methods
+  
+  // Group documents by date
+  public var groupedDocuments: [DocumentGroup] {
+    let calendar = Calendar.current
+    let grouped = Dictionary(grouping: documents) { document in
+      calendar.startOfDay(for: document.document.date)
+    }
+    
+    return grouped.map { date, documents in
+      DocumentGroup(date: date, documents: documents.sorted { $0.document.date > $1.document.date })
+    }.sorted { $0.date > $1.date }
+  }
+}
+
+// Helper struct for grouped documents
+public struct DocumentGroup {
+  public let date: Date
+  public let documents: [DocumentInfo]
 }
