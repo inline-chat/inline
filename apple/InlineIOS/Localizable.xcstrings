@@ -80,6 +80,9 @@
     "💬" : {
 
     },
+    "📄" : {
+
+    },
     "🔍" : {
 
     },
@@ -171,13 +174,16 @@
         }
       }
     },
+    "Cannot Open Document" : {
+
+    },
     "Change Profile Photo" : {
 
     },
     "Chat" : {
 
     },
-    "Chat Info" : {
+    "Chat Information" : {
 
     },
     "Chat Title" : {
@@ -417,6 +423,9 @@
         }
       }
     },
+    "Documents shared in this chat will appear here" : {
+
+    },
     "Done" : {
 
     },
@@ -641,6 +650,9 @@
     "No chats or spaces yet" : {
 
     },
+    "No documents shared in this chat yet." : {
+
+    },
     "No Spaces Yet" : {
 
     },
@@ -720,7 +732,13 @@
         }
       }
     },
+    "private" : {
+
+    },
     "Private" : {
+
+    },
+    "public" : {
 
     },
     "Public" : {
@@ -830,6 +848,9 @@
       }
     },
     "Themes" : {
+
+    },
+    "This is the info tab content. Here you can view chat details, participants, and settings." : {
 
     },
     "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
