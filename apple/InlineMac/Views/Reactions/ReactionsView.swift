@@ -1,5 +1,7 @@
+import AppKit
 import Auth
 import InlineKit
+import InlineUI
 import SwiftUI
 
 // MARK: - View Model
@@ -107,11 +109,30 @@ struct ReactionItem: View {
 
   @State private var tooltip: String? = nil
 
-  static let padding: CGFloat = 8
+  private var usersToShow: [User] {
+    let reactions = group.reactions.prefix(Self.maxAvatars)
+    return reactions.compactMap { fullReaction in
+      if let user = fullReaction.userInfo?.user {
+        user
+      } else {
+        // FIXME: could be sync, need to check if it's needed
+        ObjectCache.shared.getUser(id: fullReaction.reaction.userId)?.user
+      }
+    }
+  }
+
+  static let padding: CGFloat = 6
   static let spacing: CGFloat = 4
   static let height: CGFloat = 28
   static let emojiFontSize: CGFloat = 14
   static let textFontSize: CGFloat = 12
+  static let avatarSize: CGFloat = 20
+  static let avatarOverlap: CGFloat = 4
+  static let maxAvatars: Int = 3
+
+  private static func shouldShowAvatars(_ group: GroupedReaction) -> Bool {
+    group.reactions.count <= maxAvatars
+  }
 
   var body: some View {
     item
@@ -130,18 +151,27 @@ struct ReactionItem: View {
       Text(emoji)
         .font(.system(size: Self.emojiFontSize))
 
-      Text("\(group.reactions.count)")
-        .font(.system(size: Self.textFontSize))
-        .foregroundColor(foregroundColor)
+      if Self.shouldShowAvatars(group) {
+        HStack(spacing: -Self.avatarOverlap) {
+          ForEach(usersToShow, id: \.id) { user in
+            UserAvatar(user: user, size: Self.avatarSize)
+          }
+        }
+      } else {
+        Text("\(group.reactions.count)")
+          .font(.system(size: Self.textFontSize))
+          .foregroundColor(foregroundColor)
+      }
     }
     .padding(.horizontal, Self.padding)
-    .frame(height: Self.height)
+    .frame(width: Self.size(group: group).width, height: Self.height)
     .background(backgroundColor)
     .cornerRadius(Self.height / 2)
     .ignoresSafeArea(.all)
     .onTapGesture {
       toggleReaction()
     }
+    .animation(.smoothSnappy, value: group.reactions.count)
   }
 
   var backgroundColor: Color {
@@ -173,13 +203,19 @@ struct ReactionItem: View {
 
   public static func size(group: GroupedReaction) -> CGSize {
     let textWidth = group.emoji.size(withAttributes: [.font: NSFont.systemFont(ofSize: emojiFontSize)]).width
+
+    // Number variant width
     let countWidth = "\(group.reactions.count)".size(withAttributes: [.font: NSFont.systemFont(ofSize: textFontSize)])
       .width
+    let widthCount = textWidth + countWidth + spacing + padding * 2
 
-    return CGSize(
-      width: ceil(textWidth + countWidth + spacing + padding * 2),
-      height: Self.height
-    )
+    // Avatar variant width (up to maxAvatars avatars)
+    let avatarCount = min(maxAvatars, group.reactions.count)
+    let avatarsWidth = avatarCount > 0 ? avatarSize + CGFloat(avatarCount - 1) * (avatarSize - avatarOverlap) : 0
+    let widthAvatar = textWidth + spacing + avatarsWidth + padding * 2
+
+    let finalWidth = max(widthCount, widthAvatar)
+    return CGSize(width: ceil(finalWidth), height: Self.height)
   }
 
   private func toggleReaction() {
