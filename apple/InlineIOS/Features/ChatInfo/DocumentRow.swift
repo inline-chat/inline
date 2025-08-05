@@ -32,6 +32,10 @@ struct DocumentRow: View {
     documentInfo?.document
   }
 
+  init(documentInfo: DocumentInfo?) {
+    self.documentInfo = documentInfo
+  }
+
   // MARK: - Body
 
   var body: some View {
