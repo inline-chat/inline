@@ -96,16 +96,6 @@ extension DocumentRow {
 
     documentURL = fileURL
 
-    // Check file extension to avoid QuickLook for problematic file types
-    let fileExtension = fileURL.pathExtension.lowercased()
-    let problematicExtensions = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"]
-
-    if problematicExtensions.contains(fileExtension) {
-      Log.shared.debug("📄 File type .\(fileExtension) may cause QuickLook crashes - showing alert")
-      showDocumentError("This document type may not preview correctly.")
-      return
-    }
-
     if QLPreviewController.canPreview(fileURL as QLPreviewItem) {
       Log.shared.debug("📄 Using QuickLook for preview")
       showingQuickLook = true
