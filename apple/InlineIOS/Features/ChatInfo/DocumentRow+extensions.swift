@@ -107,25 +107,6 @@ extension DocumentRow {
 
   // MARK: - Computed Properties
 
-  var fileIconName: String {
-    switch documentState {
-      case .needsDownload:
-        "arrow.down"
-      case .downloading:
-        "xmark"
-      case .locallyAvailable:
-        fileTypeIconName
-    }
-  }
-
-  var fileIconColor: Color {
-    switch documentState {
-      case .needsDownload, .downloading:
-        Color(ThemeManager.shared.selected.accent)
-      case .locallyAvailable:
-        .gray
-    }
-  }
 
   var fileTypeIconName: String {
     if let mimeType = document?.mimeType {
@@ -212,6 +193,26 @@ extension DocumentRow {
       // Certificates & Keys
       case "cer", "crt", "pem", "key": "lock.fill"
       default: "document.fill"
+    }
+  }
+
+  var fileIconName: String {
+    switch documentState {
+      case .needsDownload:
+        "arrow.down"
+      case .downloading:
+        "xmark"
+      case .locallyAvailable:
+        fileTypeIconName
+    }
+  }
+
+  var fileIconColor: Color {
+    switch documentState {
+      case .needsDownload, .downloading:
+        Color(ThemeManager.shared.selected.accent)
+      case .locallyAvailable:
+        .gray
     }
   }
 
