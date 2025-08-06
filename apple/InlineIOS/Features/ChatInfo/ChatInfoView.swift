@@ -289,7 +289,7 @@ struct InfoTabView: View {
                   .font(.title)
                   .foregroundColor(.secondary)
               }
-
+//
             VStack(spacing: 2) {
               Text("Add")
                 .font(.callout)
