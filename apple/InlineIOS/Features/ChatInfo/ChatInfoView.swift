@@ -222,24 +222,34 @@ struct InfoTabView: View {
 
   var body: some View {
     VStack(spacing: 16) {
+      VStack {
+        HStack {
+          Image(systemName: chatInfoView.isPrivate ? "lock.fill" : "person.2.fill")
+            .foregroundStyle(Color(ThemeManager.shared.selected.accent))
+            .font(.title3)
+
+          Text("Type")
+
+          Spacer()
+
+          Text(chatInfoView.isPrivate ? "Private" : "Public")
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+      }
+      .background(Color(UIColor { traitCollection in
+        if traitCollection.userInterfaceStyle == .dark {
+          UIColor(hex: "#141414") ?? UIColor.systemGray6
+        } else {
+          UIColor(hex: "#F8F8F8") ?? UIColor.systemGray6
+        }
+      }))
+      .clipShape(RoundedRectangle(cornerRadius: 10))
+      .padding(.bottom, 14)
+
       if chatInfoView.isPrivate, !chatInfoView.isDM {
         participantsGrid
-      } else {
-        VStack(spacing: 8) {
-          Spacer()
-
-          Text("Chat Information")
-            .font(.headline)
-            .foregroundColor(.primary)
-
-          Text("This is the info tab content. Here you can view chat details, participants, and settings.")
-            .font(.body)
-            .foregroundColor(.secondary)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 40)
-          Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       }
     }
     .padding(.horizontal, 16)
@@ -348,27 +358,11 @@ struct DocumentsTabView: View {
     VStack(spacing: 16) {
       if documentsViewModel.documents.isEmpty {
         VStack(spacing: 8) {
-          Spacer()
-
-          Text("📄")
-            .font(.largeTitle)
-            .themedPrimaryText()
-            .padding(.bottom, 8)
-
           Text("No documents shared in this chat yet.")
             .font(.headline)
             .themedPrimaryText()
-
-          Text("Documents shared in this chat will appear here")
-            .font(.subheadline)
-            .themedSecondaryText()
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 40)
-
-          Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .background(Color.red)
       } else {
         // Documents content without scroll
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
