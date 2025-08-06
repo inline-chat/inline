@@ -235,6 +235,8 @@ extension MainWindowController: NSToolbarDelegate {
       .navBack,
       .navForward,
       .chatTitle,
+      .participants,
+      .space,
       .translate,
     ]
   }
@@ -288,6 +290,13 @@ extension MainWindowController: NSToolbarDelegate {
           peer: peer,
           dependencies: dependencies
         )
+
+      case .participants:
+        guard case let .chat(peer) = nav.currentRoute else { return nil }
+        return ParticipantsToolbar(peer: peer, dependencies: dependencies)
+
+      case .space:
+        return NSToolbarItem(itemIdentifier: .space)
 
       case .translate:
         guard case let .chat(peer) = nav.currentRoute else { return nil }
@@ -345,6 +354,7 @@ extension NSToolbarItem.Identifier {
   static let navBack = Self("NavBack")
   static let navForward = Self("NavForward")
   static let chatTitle = Self("ChatTitle")
+  static let participants = Self("Participants")
   static let translate = Self("Translate")
 }
 
@@ -436,9 +446,21 @@ extension MainWindowController {
 
     // Route dependant items
     switch nav.currentRoute {
-      case .chat:
+      case .chat(let peer):
         items.append(.chatTitle)
         items.append(.flexibleSpace)
+        
+        // Only show participants for private thread chats (not DMs, not public threads)
+        if case .thread(let chatId) = peer {
+          // Check if thread is private (not public)
+          if let chat = ObjectCache.shared.getChat(id: chatId), chat.isPublic != true {
+            items.append(.participants)
+          }
+        }
+        
+        // Add space between participants and translate
+        items.append(.space)
+        
         // FIXME: check if we should show this
         items.append(.translate)
 
