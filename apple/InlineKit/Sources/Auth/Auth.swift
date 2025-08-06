@@ -42,6 +42,14 @@ public final class Auth: ObservableObject, @unchecked Sendable {
         let newCUID = await authManager.getCurrentUserId()
         let newToken = await authManager.getToken()
 
+        Task { @MainActor in
+          self.lock.withLock {
+            self.isLoggedIn = isLoggedIn
+            self.currentUserId = newCUID
+            self.token = newToken
+          }
+        }
+
         if isLoggedIn {
           await events.send(.login(
             userId: newCUID!,
@@ -49,14 +57,6 @@ public final class Auth: ObservableObject, @unchecked Sendable {
           ))
         } else {
           await events.send(.logout)
-        }
-
-        Task { @MainActor in
-          self.lock.withLock {
-            self.isLoggedIn = isLoggedIn
-            self.currentUserId = newCUID
-            self.token = newToken
-          }
         }
       }
     }
@@ -73,12 +73,8 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   }
 
   public func getToken() -> String? {
-    // if we already have a token, return it
-    if let token {
-      return token
-    }
-
-    return lock.withLock {
+    // Always access `token` under lock to ensure visibility across threads.
+    lock.withLock {
       token
     }
   }
@@ -109,6 +105,11 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   }
 
   public func logOut() async {
+    Task { @MainActor in
+      isLoggedIn = false
+      currentUserId = nil
+      token = nil
+    }
     await authManager.logOut()
     await update()
   }
@@ -277,7 +278,11 @@ actor AuthManager: Sendable {
 
   private func updateLoginStatus() async {
     let loggedIn = cachedToken != nil && cachedUserId != nil
-    await isLoggedIn.send(loggedIn)
+    
+    // Use Task to make this non-blocking
+    Task {
+      await isLoggedIn.send(loggedIn)
+    }
   }
 }
 
