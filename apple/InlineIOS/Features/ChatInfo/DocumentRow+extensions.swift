@@ -98,7 +98,17 @@ extension DocumentRow {
   @ViewBuilder
   var fileBackgroundRect: some View {
     RoundedRectangle(cornerRadius: fileWrapperCornerRadius)
-      .fill(.quinary)
+      .fill(fileBackgroundColor)
+  }
+
+  var fileBackgroundColor: Color {
+    Color(UIColor { traitCollection in
+      if traitCollection.userInterfaceStyle == .dark {
+        UIColor(hex: "#141414") ?? UIColor.systemGray6
+      } else {
+        UIColor(hex: "#F8F8F8") ?? UIColor.systemGray6
+      }
+    })
   }
 
   // MARK: - Computed Properties
