@@ -4,6 +4,9 @@
     "" : {
 
     },
+    " " : {
+
+    },
     "@%@" : {
 
     },
@@ -114,6 +117,9 @@
     "Actions" : {
 
     },
+    "Add" : {
+
+    },
     "Add a caption..." : {
       "localizations" : {
         "fa" : {
@@ -153,6 +159,9 @@
 
     },
     "Are you sure you want to logout? This will clear your local data and return you to the welcome screen." : {
+
+    },
+    "Are you sure you want to remove %@ from the chat?" : {
 
     },
     "By continuing, you acknowledge that you understand and agree to the [Terms & Conditions](https://inline.chat/legal) and [Privacy Policy](https://inline.chat/legal)." : {
@@ -745,6 +754,9 @@
 
     },
     "Remove" : {
+
+    },
+    "Remove Participant" : {
 
     },
     "Reset Translation Alerts" : {
