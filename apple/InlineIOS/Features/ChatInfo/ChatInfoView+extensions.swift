@@ -178,17 +178,17 @@ extension ChatInfoView {
   @ViewBuilder
   var participantsSection: some View {
     Section("Participants") {
-      if isOwnerOrAdmin {
+      if isOwnerOrAdmin && isPrivate {
         Button(action: {
           isSearching = true
         }) {
           Label("Add Participant", systemImage: "person.badge.plus")
         }
       }
-      ForEach(participantsViewModel.participants) { userInfo in
+      ForEach(participantsWithMembersViewModel.participants) { userInfo in
         ProfileRow(userInfo: userInfo, isChatInfo: true)
           .swipeActions {
-            if isOwnerOrAdmin {
+            if isOwnerOrAdmin && isPrivate {
               Button(role: .destructive, action: {
                 Task {
                   do {
