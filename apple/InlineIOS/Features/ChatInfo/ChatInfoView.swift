@@ -39,7 +39,7 @@ class ChatInfoViewEnvironment: ObservableObject {
 
 struct ChatInfoView: View {
   let chatItem: SpaceChatItem
-  @StateObject var participantsViewModel: ChatParticipantsViewModel
+  @StateObject var participantsWithMembersViewModel: ChatParticipantsWithMembersViewModel
   @EnvironmentStateObject var documentsViewModel: ChatDocumentsViewModel
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
   @State var isSearching = false
@@ -92,7 +92,7 @@ struct ChatInfoView: View {
 
   init(chatItem: SpaceChatItem) {
     self.chatItem = chatItem
-    _participantsViewModel = StateObject(wrappedValue: ChatParticipantsViewModel(
+    _participantsWithMembersViewModel = StateObject(wrappedValue: ChatParticipantsWithMembersViewModel(
       db: AppDatabase.shared,
       chatId: chatItem.chat?.id ?? 0
     ))
@@ -156,7 +156,7 @@ struct ChatInfoView: View {
                   isPrivate: isPrivate,
                   isDM: isDM,
                   isOwnerOrAdmin: isOwnerOrAdmin,
-                  participants: participantsViewModel.participants,
+                  participants: participantsWithMembersViewModel.participants,
                   chatId: chatItem.chat?.id ?? 0,
                   removeParticipant: { userInfo in
                     Task {
@@ -196,7 +196,7 @@ struct ChatInfoView: View {
         if let spaceId = chatItem.chat?.spaceId {
           await spaceMembersViewModel.refetchMembers()
         }
-        await participantsViewModel.refetchParticipants()
+        await participantsWithMembersViewModel.refetchParticipants()
       }
     }
     .onReceive(
@@ -248,7 +248,7 @@ struct InfoTabView: View {
       .clipShape(RoundedRectangle(cornerRadius: 10))
       .padding(.bottom, 14)
 
-      if chatInfoView.isPrivate, !chatInfoView.isDM {
+      if !chatInfoView.isDM {
         participantsGrid
       }
     }
@@ -275,8 +275,8 @@ struct InfoTabView: View {
       GridItem(.flexible()),
       GridItem(.flexible()),
     ], spacing: 16) {
-      // Plus button as first item
-      if chatInfoView.isOwnerOrAdmin {
+      // Plus button as first item (only for private chats)
+      if chatInfoView.isOwnerOrAdmin && chatInfoView.isPrivate {
         Button(action: {
           chatInfoView.isSearching = true
         }) {
@@ -331,7 +331,7 @@ struct InfoTabView: View {
         //   chatInfoView.openParticipantChat(userInfo)
         // }
         .onLongPressGesture {
-          if chatInfoView.isOwnerOrAdmin {
+          if chatInfoView.isOwnerOrAdmin && chatInfoView.isPrivate {
             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
             impactFeedback.impactOccurred()
             participantToRemove = userInfo
