@@ -6,6 +6,37 @@ import InlineUI
 import Logger
 import SwiftUI
 
+class ChatInfoViewEnvironment: ObservableObject {
+  @Binding var isSearching: Bool
+  let isPrivate: Bool
+  let isDM: Bool
+  let isOwnerOrAdmin: Bool
+  let participants: [UserInfo]
+  let chatId: Int64
+  let removeParticipant: (UserInfo) -> Void
+  let openParticipantChat: (UserInfo) -> Void
+
+  init(
+    isSearching: Binding<Bool>,
+    isPrivate: Bool,
+    isDM: Bool,
+    isOwnerOrAdmin: Bool,
+    participants: [UserInfo],
+    chatId: Int64,
+    removeParticipant: @escaping (UserInfo) -> Void,
+    openParticipantChat: @escaping (UserInfo) -> Void
+  ) {
+    _isSearching = isSearching
+    self.isPrivate = isPrivate
+    self.isDM = isDM
+    self.isOwnerOrAdmin = isOwnerOrAdmin
+    self.participants = participants
+    self.chatId = chatId
+    self.removeParticipant = removeParticipant
+    self.openParticipantChat = openParticipantChat
+  }
+}
+
 struct ChatInfoView: View {
   let chatItem: SpaceChatItem
   @StateObject var participantsViewModel: ChatParticipantsViewModel
@@ -120,6 +151,34 @@ struct ChatInfoView: View {
           switch selectedTab {
             case .info:
               InfoTabView()
+                .environmentObject(ChatInfoViewEnvironment(
+                  isSearching: $isSearching,
+                  isPrivate: isPrivate,
+                  isDM: isDM,
+                  isOwnerOrAdmin: isOwnerOrAdmin,
+                  participants: participantsViewModel.participants,
+                  chatId: chatItem.chat?.id ?? 0,
+                  removeParticipant: { userInfo in
+                    Task {
+                      do {
+                        try await Realtime.shared.invokeWithHandler(
+                          .removeChatParticipant,
+                          input: .removeChatParticipant(.with { input in
+                            input.chatID = chatItem.chat?.id ?? 0
+                            input.userID = userInfo.user.id
+                          })
+                        )
+                      } catch {
+                        Log.shared.error("Failed to remove participant", error: error)
+                      }
+                    }
+                  },
+                  openParticipantChat: { userInfo in
+                    let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+                    impactFeedback.impactOccurred()
+                    nav.push(.chat(peer: Peer.user(id: userInfo.user.id)))
+                  }
+                ))
             case .documents:
               DocumentsTabView(
                 documentsViewModel: documentsViewModel,
@@ -157,23 +216,126 @@ struct ChatInfoView: View {
 }
 
 struct InfoTabView: View {
+  @EnvironmentObject private var chatInfoView: ChatInfoViewEnvironment
+  @State private var participantToRemove: UserInfo?
+  @State private var showRemoveAlert = false
+
   var body: some View {
-    VStack(spacing: 8) {
-      Spacer()
-      Spacer()
+    VStack(spacing: 16) {
+      if chatInfoView.isPrivate, !chatInfoView.isDM {
+        participantsGrid
+      } else {
+        VStack(spacing: 8) {
+          Spacer()
 
-      Text("Chat Information")
-        .font(.headline)
-        .foregroundColor(.primary)
+          Text("Chat Information")
+            .font(.headline)
+            .foregroundColor(.primary)
 
-      Text("This is the info tab content. Here you can view chat details, participants, and settings.")
-        .font(.body)
-        .foregroundColor(.secondary)
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 40)
-      Spacer()
+          Text("This is the info tab content. Here you can view chat details, participants, and settings.")
+            .font(.body)
+            .foregroundColor(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 40)
+          Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+      }
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    .padding(.horizontal, 16)
+    .alert("Remove Participant", isPresented: $showRemoveAlert) {
+      Button("Cancel", role: .cancel) {}
+      Button("Remove", role: .destructive) {
+        if let participant = participantToRemove {
+          chatInfoView.removeParticipant(participant)
+        }
+      }
+    } message: {
+      if let participant = participantToRemove {
+        Text("Are you sure you want to remove \(participant.user.firstName ?? "this user") from the chat?")
+      }
+    }
+  }
+
+  @ViewBuilder
+  var participantsGrid: some View {
+    LazyVGrid(columns: [
+      GridItem(.flexible()),
+      GridItem(.flexible()),
+      GridItem(.flexible()),
+      GridItem(.flexible()),
+    ], spacing: 16) {
+      // Plus button as first item
+      if chatInfoView.isOwnerOrAdmin {
+        Button(action: {
+          chatInfoView.isSearching = true
+        }) {
+          VStack(spacing: 4) {
+            Circle()
+              .fill(Color(.systemGray6))
+              .frame(width: 75, height: 75)
+              .overlay {
+                Image(systemName: "plus")
+                  .font(.title)
+                  .foregroundColor(.secondary)
+              }
+
+            VStack(spacing: 2) {
+              Text("Add")
+                .font(.callout)
+                .lineLimit(1)
+
+              Text(" ")
+                .font(.caption)
+                .foregroundColor(.clear)
+            }
+          }
+        }
+        .buttonStyle(.plain)
+      }
+
+      // Existing participants
+      ForEach(chatInfoView.participants) { userInfo in
+        VStack(spacing: 4) {
+          UserAvatar(userInfo: userInfo, size: 75)
+
+          VStack(spacing: -2) {
+            Text(userInfo.user.firstName ?? "User")
+              .font(.callout)
+              .foregroundColor(.primary)
+              .lineLimit(1)
+
+            if let username = userInfo.user.username {
+              Text("@\(username)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+            } else {
+              Text(" ")
+                .font(.caption)
+                .foregroundColor(.clear)
+            }
+          }
+        }
+        // .onTapGesture {
+        //   chatInfoView.openParticipantChat(userInfo)
+        // }
+        .onLongPressGesture {
+          if chatInfoView.isOwnerOrAdmin {
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+            participantToRemove = userInfo
+            showRemoveAlert = true
+          }
+        }
+        .transition(.asymmetric(
+          insertion: .scale(scale: 0.8).combined(with: .opacity).combined(with: .move(edge: .bottom)),
+          removal: .scale(scale: 0.8).combined(with: .opacity).combined(with: .move(edge: .top))
+        ))
+      }
+    }
+    .padding(.top, 8)
+    .animation(.easeInOut(duration: 0.4), value: chatInfoView.participants.count)
   }
 }
 
@@ -206,6 +368,7 @@ struct DocumentsTabView: View {
           Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .background(Color.red)
       } else {
         // Documents content without scroll
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
