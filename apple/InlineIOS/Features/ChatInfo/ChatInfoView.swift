@@ -160,6 +160,7 @@ struct InfoTabView: View {
   var body: some View {
     VStack(spacing: 8) {
       Spacer()
+      Spacer()
 
       Text("Chat Information")
         .font(.headline)
@@ -213,7 +214,8 @@ struct DocumentsTabView: View {
               // Documents for this date
               ForEach(group.documents, id: \.id) { document in
                 DocumentRow(
-                  documentInfo: document
+                  documentInfo: document,
+                  chatId: peerThreadId
                 )
                 .padding(.bottom, 8)
               }
