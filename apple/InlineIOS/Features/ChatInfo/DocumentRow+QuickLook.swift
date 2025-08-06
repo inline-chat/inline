@@ -7,20 +7,24 @@ struct QuickLookView: UIViewControllerRepresentable {
 
   // MARK: - UIViewControllerRepresentable
 
-  func makeUIViewController(context: Context) -> QLPreviewController {
-    let controller = QLPreviewController()
-    controller.dataSource = context.coordinator
-    controller.delegate = context.coordinator
+  func makeUIViewController(context: Context) -> UINavigationController {
+    let previewController = QLPreviewController()
+    previewController.dataSource = context.coordinator
+    previewController.delegate = context.coordinator
     // Force reload the preview items when the controller is created
-    controller.reloadData()
-    return controller
+    previewController.reloadData()
+    
+    let navController = UINavigationController(rootViewController: previewController)
+    return navController
   }
 
-  func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {
+  func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {
     // Update coordinator's URL and reload data if URL changed
     if context.coordinator.url != url {
       context.coordinator.url = url
-      uiViewController.reloadData()
+      if let previewController = uiViewController.topViewController as? QLPreviewController {
+        previewController.reloadData()
+      }
     }
   }
 

@@ -83,9 +83,6 @@
     "💬" : {
 
     },
-    "📄" : {
-
-    },
     "🔍" : {
 
     },
@@ -190,9 +187,6 @@
 
     },
     "Chat" : {
-
-    },
-    "Chat Information" : {
 
     },
     "Chat Title" : {
@@ -431,9 +425,6 @@
           }
         }
       }
-    },
-    "Documents shared in this chat will appear here" : {
-
     },
     "Done" : {
 
@@ -741,13 +732,7 @@
         }
       }
     },
-    "private" : {
-
-    },
     "Private" : {
-
-    },
-    "public" : {
 
     },
     "Public" : {
@@ -862,9 +847,6 @@
     "Themes" : {
 
     },
-    "This is the info tab content. Here you can view chat details, participants, and settings." : {
-
-    },
     "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
 
     },
@@ -872,6 +854,9 @@
 
     },
     "Translate to %@?" : {
+
+    },
+    "Type" : {
 
     },
     "Type a username to find someone to add. eg. dena, mo" : {
