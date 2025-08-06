@@ -11,11 +11,17 @@ struct QuickLookView: UIViewControllerRepresentable {
     let controller = QLPreviewController()
     controller.dataSource = context.coordinator
     controller.delegate = context.coordinator
+    // Force reload the preview items when the controller is created
+    controller.reloadData()
     return controller
   }
 
   func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {
-    // No dynamic updates required – file URL is immutable for the lifetime of the sheet.
+    // Update coordinator's URL and reload data if URL changed
+    if context.coordinator.url != url {
+      context.coordinator.url = url
+      uiViewController.reloadData()
+    }
   }
 
   func makeCoordinator() -> Coordinator {
@@ -25,7 +31,7 @@ struct QuickLookView: UIViewControllerRepresentable {
   // MARK: - Coordinator
 
   final class Coordinator: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
-    let url: URL
+    var url: URL
     init(url: URL) { self.url = url }
 
     // QLPreviewControllerDataSource
