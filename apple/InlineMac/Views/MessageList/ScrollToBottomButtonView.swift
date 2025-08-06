@@ -9,7 +9,7 @@ struct ScrollToBottomButtonView: View {
   var onClick: (() -> Void)?
 
   var body: some View {
-    Button(action: {
+    let button = Button(action: {
       onClick?()
     }) {
       Image(systemName: "chevron.down")
@@ -20,24 +20,29 @@ struct ScrollToBottomButtonView: View {
     }
     .buttonStyle(ScrollToBottomButtonStyle())
     .focusable(false)
-    .background(
-      Circle()
-        .fill(.ultraThinMaterial)
-        .overlay(
-          Circle()
-            .strokeBorder(
-              (colorScheme == .dark ? Color.white : Color.black).opacity(0.1),
-              lineWidth: 0.5
-            )
-        )
-        .shadow(
-          color: (colorScheme == .dark ? Color.white : Color.black)
-            .opacity(colorScheme == .dark ? 0.1 : 0.15),
-          radius: 2,
-          x: 0,
-          y: -1
-        )
-    )
+
+    if #available(macOS 26.0, *) {
+      return button.glassEffect(.regular.interactive(), in: .circle)
+    } else {
+      return button.background(
+        Circle()
+          .fill(.ultraThinMaterial)
+          .overlay(
+            Circle()
+              .strokeBorder(
+                (colorScheme == .dark ? Color.white : Color.black).opacity(0.1),
+                lineWidth: 0.5
+              )
+          )
+          .shadow(
+            color: (colorScheme == .dark ? Color.white : Color.black)
+              .opacity(colorScheme == .dark ? 0.1 : 0.15),
+            radius: 2,
+            x: 0,
+            y: -1
+          )
+      )
+    }
   }
 }
 
