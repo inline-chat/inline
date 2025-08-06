@@ -142,6 +142,8 @@ extension DocumentRow {
     guard let documentInfo else { return .needsDownload }
     let documentId = documentInfo.id
     if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
+      // Try to get current progress from FileDownloader instead of resetting to 0
+      // This will be updated immediately by startMonitoringProgress() if needed
       return .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
     }
 
@@ -261,8 +263,20 @@ extension DocumentRow {
   }
 
   func setupInitialState() {
+    // Only update state if we're not already in a downloading state
+    // This preserves download progress when the view reappears during scrolling
+    if case .downloading = documentState {
+      // Already downloading, preserve current state and restore progress monitoring
+      startMonitoringProgress()
+      return
+    }
+    
     if let document {
       documentState = determineDocumentState(document)
+      // If we determined we're downloading, start monitoring progress
+      if case .downloading = documentState {
+        startMonitoringProgress()
+      }
     }
   }
 
