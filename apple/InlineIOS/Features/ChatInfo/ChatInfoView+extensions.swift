@@ -90,7 +90,7 @@ extension ChatInfoView {
   var chatInfoHeader: some View {
     VStack {
       if isDM, let userInfo = chatItem.userInfo {
-        UserAvatar(userInfo: userInfo, size: 100)
+        UserAvatar(userInfo: userInfo, size: 82)
         VStack(spacing: -3) {
           Text(userInfo.user.firstName ?? "User")
             .font(.title2)
@@ -178,7 +178,7 @@ extension ChatInfoView {
   @ViewBuilder
   var participantsSection: some View {
     Section("Participants") {
-      if isOwnerOrAdmin && isPrivate {
+      if isOwnerOrAdmin, isPrivate {
         Button(action: {
           isSearching = true
         }) {
@@ -188,7 +188,7 @@ extension ChatInfoView {
       ForEach(participantsWithMembersViewModel.participants) { userInfo in
         ProfileRow(userInfo: userInfo, isChatInfo: true)
           .swipeActions {
-            if isOwnerOrAdmin && isPrivate {
+            if isOwnerOrAdmin, isPrivate {
               Button(role: .destructive, action: {
                 Task {
                   do {
