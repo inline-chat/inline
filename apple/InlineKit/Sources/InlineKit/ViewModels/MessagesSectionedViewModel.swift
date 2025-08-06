@@ -11,13 +11,16 @@ public class MessagesSectionedViewModel {
   private static let calendar = Calendar.current
   private static let currentYearFormatter: DateFormatter = {
     let formatter = DateFormatter()
-    formatter.dateFormat = "MMMM d"
+    // formatter.dateFormat = "MMMM d"
+    formatter.dateFormat = "E, MMMM d"
+
     return formatter
   }()
 
   private static let otherYearFormatter: DateFormatter = {
     let formatter = DateFormatter()
-    formatter.dateFormat = "MMMM d, yyyy"
+    // formatter.dateFormat = "MMMM d, yyyy"
+    formatter.dateFormat = "E, MMMM d, yyyy"
     return formatter
   }()
 
