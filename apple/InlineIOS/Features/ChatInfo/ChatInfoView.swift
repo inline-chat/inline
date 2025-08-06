@@ -276,14 +276,14 @@ struct InfoTabView: View {
       GridItem(.flexible()),
     ], spacing: 16) {
       // Plus button as first item (only for private chats)
-      if chatInfoView.isOwnerOrAdmin && chatInfoView.isPrivate {
+      if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
         Button(action: {
           chatInfoView.isSearching = true
         }) {
           VStack(spacing: 4) {
             Circle()
               .fill(Color(.systemGray6))
-              .frame(width: 75, height: 75)
+              .frame(width: 68, height: 68)
               .overlay {
                 Image(systemName: "plus")
                   .font(.title)
@@ -307,7 +307,7 @@ struct InfoTabView: View {
       // Existing participants
       ForEach(chatInfoView.participants) { userInfo in
         VStack(spacing: 4) {
-          UserAvatar(userInfo: userInfo, size: 75)
+          UserAvatar(userInfo: userInfo, size: 68)
 
           VStack(spacing: -2) {
             Text(userInfo.user.firstName ?? "User")
@@ -331,7 +331,7 @@ struct InfoTabView: View {
         //   chatInfoView.openParticipantChat(userInfo)
         // }
         .onLongPressGesture {
-          if chatInfoView.isOwnerOrAdmin && chatInfoView.isPrivate {
+          if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
             impactFeedback.impactOccurred()
             participantToRemove = userInfo
