@@ -14,10 +14,6 @@ extension DocumentRow {
     (ThemeManager.shared.selected.secondaryTextColor?.color.opacity(0.4) ?? .secondary)
   }
 
-  var fileBackgrounRectFill: Material {
-    .thinMaterial
-  }
-
   var progressBarColor: Color {
     Color(ThemeManager.shared.selected.accent)
   }
@@ -31,7 +27,7 @@ extension DocumentRow {
   }
 
   var contentVPadding: CGFloat {
-    18
+    14
   }
 
   var contentHPadding: CGFloat {
@@ -52,13 +48,13 @@ extension DocumentRow {
   var fileIconCircleButton: some View {
     Button(action: fileIconButtonTapped) {
       ZStack {
-        Circle()
+        RoundedRectangle(cornerRadius: 18)
           .fill(fileCircleFill)
           .frame(width: fileCircleSize, height: fileCircleSize)
 
         // Progress indicator
         if case let .downloading(bytesReceived, totalBytes) = documentState {
-          Circle()
+          RoundedRectangle(cornerRadius: 18)
             .trim(from: 0, to: CGFloat(Double(bytesReceived) / Double(totalBytes)))
             .stroke(progressBarColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
             .frame(width: fileCircleSize, height: fileCircleSize)
@@ -102,11 +98,10 @@ extension DocumentRow {
   @ViewBuilder
   var fileBackgroundRect: some View {
     RoundedRectangle(cornerRadius: fileWrapperCornerRadius)
-      .fill(fileBackgrounRectFill)
+      .fill(.quinary)
   }
 
   // MARK: - Computed Properties
-
 
   var fileTypeIconName: String {
     if let mimeType = document?.mimeType {
