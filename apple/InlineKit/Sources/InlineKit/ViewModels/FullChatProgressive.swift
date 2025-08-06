@@ -80,14 +80,14 @@ public class MessagesProgressiveViewModel {
     case newer
   }
 
-  public func loadBatch(at direction: MessagesLoadDirection) {
+  public func loadBatch(at direction: MessagesLoadDirection, publish: Bool = true) {
     // top id as cursor?
     // firs try lets use date as cursor
     let cursor = direction == .older ? minDate : maxDate
     let limit = messages.count > 200 ? 200 : 100
     let prepend = direction == (reversed ? .newer : .older)
     //    log.debug("Loading next batch at \(direction) \(cursor)")
-    loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend)
+    loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend, publish: publish)
   }
 
   public func setAtBottom(_ atBottom: Bool) {
@@ -283,7 +283,7 @@ public class MessagesProgressiveViewModel {
     }
   }
 
-  private func loadAdditionalMessages(limit: Int, cursor: Date, prepend: Bool) {
+  private func loadAdditionalMessages(limit: Int, cursor: Date, prepend: Bool, publish: Bool) {
     let peer = peer
 
     log
@@ -328,10 +328,12 @@ public class MessagesProgressiveViewModel {
 
         updateRange()
 
-        // Notify observers about the new messages
-        let indices = prepend ? Array(0 ..< messagesBatch.count) :
-          Array((messages.count - messagesBatch.count) ..< messages.count)
-        callback?(.added(messagesBatch, indexSet: indices))
+        if publish {
+          // Notify observers about the new messages
+          let indices = prepend ? Array(0 ..< messagesBatch.count) :
+            Array((messages.count - messagesBatch.count) ..< messages.count)
+          callback?(.added(messagesBatch, indexSet: indices))
+        }
       }
     } catch {
       Log.shared.error("Failed to get messages \(error)")

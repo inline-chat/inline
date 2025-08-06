@@ -842,7 +842,7 @@ class MessageListAppKit: NSViewController {
 
         log.trace("Loading batch at top")
         let prevCount = viewModel.messages.count
-        viewModel.loadBatch(at: direction)
+        viewModel.loadBatch(at: direction, publish: false)
         let newCount = viewModel.messages.count
         let diff = newCount - prevCount
 
