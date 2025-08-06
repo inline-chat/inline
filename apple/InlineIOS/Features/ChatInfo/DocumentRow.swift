@@ -11,16 +11,15 @@ struct DocumentRow: View {
   // MARK: - Properties
 
   let documentInfo: DocumentInfo?
+  let chatId: Int64?
 
   @State var isBeingRemoved = false
   @State var documentState: DocumentState = .needsDownload
   @State var progressSubscription: AnyCancellable?
   @State var showingQuickLook = false
-  @State var showingDocumentPicker = false
   @State var showingAlert = false
   @State var alertMessage = ""
   @State var documentURL: URL?
-  @State var rotationAngle: Double = 0
 
   enum DocumentState: Equatable {
     case locallyAvailable
@@ -32,8 +31,9 @@ struct DocumentRow: View {
     documentInfo?.document
   }
 
-  init(documentInfo: DocumentInfo?) {
+  init(documentInfo: DocumentInfo?, chatId: Int64? = nil) {
     self.documentInfo = documentInfo
+    self.chatId = chatId
   }
 
   // MARK: - Body
@@ -56,6 +56,7 @@ struct DocumentRow: View {
     }
     .onAppear {
       setupInitialState()
+      setupNotificationListeners()
     }
     .onDisappear {
       cleanup()

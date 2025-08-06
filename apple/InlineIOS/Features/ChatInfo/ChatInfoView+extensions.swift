@@ -221,7 +221,8 @@ extension ChatInfoView {
   var documentsSection: some View {
     ForEach(documentsViewModel.documents) { documentInfo in
       DocumentRow(
-        documentInfo: documentInfo
+        documentInfo: documentInfo,
+        chatId: chatItem.chat?.id
       )
     }
   }
