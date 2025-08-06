@@ -129,14 +129,10 @@ extension ChatInfoView {
             }
           }
           .frame(width: 100, height: 100)
-        VStack(spacing: -3) {
-          Text(chatTitle)
-            .font(.title2)
-            .fontWeight(.semibold)
-          Text(isPrivate ? "private" : "public")
-            .font(.callout)
-            .foregroundColor(.secondary)
-        }
+
+        Text(chatTitle)
+          .font(.title2)
+          .fontWeight(.semibold)
       }
     }
   }
@@ -167,12 +163,11 @@ extension ChatInfoView {
   @ViewBuilder
   var publicChatSection: some View {
     Section {
-      InfoRow(
-        symbol: chatItem.chat?.isPublic != true ? "lock.fill" : "person.2.fill",
-        color: .purple,
-        title: "Chat Type",
-        value: chatItem.chat?.isPublic != true ? "Private" : "Public"
-      )
+      Label("Type", systemImage: chatItem.chat?.isPublic != true ? "lock.fill" : "person.2.fill")
+
+      Spacer()
+
+      Text(chatItem.chat?.isPublic != true ? "Private" : "Public")
     }
 
     if chatItem.chat?.isPublic != true {
