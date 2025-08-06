@@ -1,4 +1,5 @@
-
+import Combine
+import GRDB
 import InlineKit
 import Logger
 import QuickLook
@@ -42,25 +43,40 @@ extension DocumentRow {
       return
     }
 
+    // Prevent duplicate downloads
     if case .downloading = documentState {
       return
     }
 
+    // Update UI state and start observing progress
     documentState = .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
-
     startMonitoringProgress()
-    print("LET ME DOWNLOAD")
-//    FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { result in
-//      DispatchQueue.main.async {
-//        switch result {
-//        case .success:
-//          documentState = .locallyAvailable
-//        case let .failure(error):
-//          Log.shared.error("Document download failed:", error: error)
-//          documentState = .needsDownload
-//        }
-//      }
-//    }
+
+    // Create a minimal message for FileDownloader
+    // This is needed because FileDownloader requires a message context
+    let message = Message(
+      messageId: document.documentId,
+      fromId: 1, // Default sender
+      date: document.date,
+      text: nil,
+      peerUserId: nil,
+      peerThreadId: chatId,
+      chatId: chatId ?? 0,
+      documentId: document.id
+    )
+
+    // Start the download on the main actor (FileDownloader is @MainActor-isolated)
+    FileDownloader.shared.downloadDocument(document: documentInfo, for: message) { result in
+      DispatchQueue.main.async {
+        switch result {
+          case .success:
+            documentState = .locallyAvailable
+          case let .failure(error):
+            Log.shared.error("Document download failed:", error: error)
+            documentState = .needsDownload
+        }
+      }
+    }
   }
 
   func cancelDownload() {
@@ -162,6 +178,86 @@ extension DocumentRow {
           )
         }
       }
+  }
+
+  // MARK: - Notification Listeners
+
+  func setupNotificationListeners() {
+    NotificationCenter.default.addObserver(
+      forName: NSNotification.Name("DocumentUploadStarted"),
+      object: nil,
+      queue: .main
+    ) { notification in
+      handleDocumentUploadStarted(notification)
+    }
+
+    NotificationCenter.default.addObserver(
+      forName: NSNotification.Name("DocumentUploadCompleted"),
+      object: nil,
+      queue: .main
+    ) { notification in
+      handleDocumentUploadCompleted(notification)
+    }
+
+    NotificationCenter.default.addObserver(
+      forName: NSNotification.Name("DocumentUploadFailed"),
+      object: nil,
+      queue: .main
+    ) { notification in
+      handleDocumentUploadFailed(notification)
+    }
+
+    NotificationCenter.default.addObserver(
+      forName: NSNotification.Name("MessageStatusChanged"),
+      object: nil,
+      queue: .main
+    ) { notification in
+      handleMessageStatusChanged(notification)
+    }
+  }
+
+  func handleDocumentUploadStarted(_ notification: Notification) {
+    let notificationDocumentId = notification.userInfo?["documentId"] as? Int64
+    let currentDocumentId = document?.id
+
+    Log.shared.debug("📤 Upload notification received - notification ID: \(notificationDocumentId ?? -1), current ID: \(currentDocumentId ?? -1)")
+
+    guard let documentId = notificationDocumentId,
+          let document,
+          document.id == documentId
+    else {
+      Log.shared.debug("📤 Upload notification ignored - IDs don't match")
+      return
+    }
+
+    Log.shared.debug("📤 Document upload started for document ID: \(documentId)")
+    // Note: We don't handle upload state in DocumentRow since it's for chat info display
+  }
+
+  func handleDocumentUploadCompleted(_ notification: Notification) {
+    guard let documentId = notification.userInfo?["documentId"] as? Int64,
+          let document,
+          document.id == documentId
+    else { return }
+
+    Log.shared.debug("Document upload completed for document ID: \(documentId)")
+    documentState = .locallyAvailable
+  }
+
+  func handleDocumentUploadFailed(_ notification: Notification) {
+    guard let documentId = notification.userInfo?["documentId"] as? Int64,
+          let document,
+          document.id == documentId
+    else { return }
+
+    let error = notification.userInfo?["error"] as? Error
+    Log.shared.error("Document upload failed for document ID: \(documentId)", error: error)
+    documentState = .needsDownload
+  }
+
+  func handleMessageStatusChanged(_ notification: Notification) {
+    // This is primarily for upload status changes in message views
+    // DocumentRow in chat info doesn't need to handle this specifically
   }
 
   func setupInitialState() {
