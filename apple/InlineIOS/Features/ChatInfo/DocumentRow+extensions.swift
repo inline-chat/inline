@@ -53,9 +53,12 @@ extension DocumentRow {
           .frame(width: fileCircleSize, height: fileCircleSize)
 
         // Progress indicator
-        if case let .downloading(bytesReceived, totalBytes) = documentState {
+        if case let .downloading(bytesReceived, totalBytes) = documentState,
+           totalBytes > 0
+        {
+          let progress = max(0, min(CGFloat(Double(bytesReceived) / Double(totalBytes)), 1))
           Circle()
-            .trim(from: 0, to: CGFloat(Double(bytesReceived) / Double(totalBytes)))
+            .trim(from: 0, to: progress)
             .stroke(progressBarColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
             .frame(width: fileCircleSize, height: fileCircleSize)
             .rotationEffect(.degrees(-90))

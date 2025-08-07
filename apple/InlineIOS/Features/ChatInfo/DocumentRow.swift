@@ -21,6 +21,7 @@ struct DocumentRow: View {
   @State var showingAlert = false
   @State var alertMessage = ""
   @State var documentURL: URL?
+  @State  var docInteractionController: UIDocumentInteractionController? = nil
 
   enum DocumentState: Equatable {
     case locallyAvailable
