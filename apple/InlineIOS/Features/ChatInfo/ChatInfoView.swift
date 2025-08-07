@@ -60,6 +60,10 @@ struct ChatInfoView: View {
     case files = "Files"
   }
 
+  var availableTabs: [ChatInfoTab] {
+    isDM ? [.files] : [.info, .files]
+  }
+
   var isPrivate: Bool {
     chatItem.chat?.isPublic == false
   }
@@ -117,7 +121,7 @@ struct ChatInfoView: View {
 
           // Tab Bar
           HStack(spacing: 2) {
-            ForEach(ChatInfoTab.allCases, id: \.self) { tab in
+            ForEach(availableTabs, id: \.self) { tab in
               Button {
                 withAnimation(.easeInOut(duration: 0.3)) {
                   selectedTab = tab
@@ -150,36 +154,38 @@ struct ChatInfoView: View {
         VStack {
           switch selectedTab {
             case .info:
-              InfoTabView()
-                .environmentObject(ChatInfoViewEnvironment(
-                  isSearching: $isSearching,
-                  isPrivate: isPrivate,
-                  isDM: isDM,
-                  isOwnerOrAdmin: isOwnerOrAdmin,
-                  participants: participantsWithMembersViewModel.participants,
-                  chatId: chatItem.chat?.id ?? 0,
-                  removeParticipant: { userInfo in
-                    Task {
-                      do {
-                        try await Realtime.shared.invokeWithHandler(
-                          .removeChatParticipant,
-                          input: .removeChatParticipant(.with { input in
-                            input.chatID = chatItem.chat?.id ?? 0
-                            input.userID = userInfo.user.id
-                          })
-                        )
-                      } catch {
-                        Log.shared.error("Failed to remove participant", error: error)
+              if !isDM {
+                InfoTabView()
+                  .environmentObject(ChatInfoViewEnvironment(
+                    isSearching: $isSearching,
+                    isPrivate: isPrivate,
+                    isDM: isDM,
+                    isOwnerOrAdmin: isOwnerOrAdmin,
+                    participants: participantsWithMembersViewModel.participants,
+                    chatId: chatItem.chat?.id ?? 0,
+                    removeParticipant: { userInfo in
+                      Task {
+                        do {
+                          try await Realtime.shared.invokeWithHandler(
+                            .removeChatParticipant,
+                            input: .removeChatParticipant(.with { input in
+                              input.chatID = chatItem.chat?.id ?? 0
+                              input.userID = userInfo.user.id
+                            })
+                          )
+                        } catch {
+                          Log.shared.error("Failed to remove participant", error: error)
+                        }
                       }
+                    },
+                    openParticipantChat: { userInfo in
+                      let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+                      impactFeedback.impactOccurred()
+                      nav.push(.chat(peer: Peer.user(id: userInfo.user.id)))
                     }
-                  },
-                  openParticipantChat: { userInfo in
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-                    impactFeedback.impactOccurred()
-                    nav.push(.chat(peer: Peer.user(id: userInfo.user.id)))
-                  }
-                ))
-            case .documents:
+                  ))
+              }
+            case .files:
               DocumentsTabView(
                 documentsViewModel: documentsViewModel,
                 peerUserId: chatItem.dialog.peerUserId,
@@ -193,10 +199,15 @@ struct ChatInfoView: View {
     }
     .onAppear {
       Task {
-        if let spaceId = chatItem.chat?.spaceId {
+        if chatItem.chat?.spaceId != nil {
           await spaceMembersViewModel.refetchMembers()
         }
         await participantsWithMembersViewModel.refetchParticipants()
+
+        // Set default tab based on chat type
+        if isDM, selectedTab == .info {
+          selectedTab = .files
+        }
       }
     }
     .onReceive(
