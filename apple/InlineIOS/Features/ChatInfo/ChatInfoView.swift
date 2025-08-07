@@ -122,7 +122,7 @@ struct ChatInfoView: View {
           // Tab Bar
           HStack(spacing: 2) {
             Spacer()
-            
+
             ForEach(availableTabs, id: \.self) { tab in
               Button {
                 withAnimation(.easeInOut(duration: 0.3)) {
@@ -340,25 +340,27 @@ struct InfoTabView: View {
             }
           }
         }
-        // .onTapGesture {
-        //   chatInfoView.openParticipantChat(userInfo)
-        // }
-        .onLongPressGesture {
+        .contextMenu {
           if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
-            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-            impactFeedback.impactOccurred()
-            participantToRemove = userInfo
-            showRemoveAlert = true
+            Button(action: {
+              let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+              impactFeedback.impactOccurred()
+              participantToRemove = userInfo
+              showRemoveAlert = true
+            }) {
+              Label("Remove Participant", systemImage: "minus.circle")
+            }
           }
         }
+
         .transition(.asymmetric(
-          insertion: .scale(scale: 0.8).combined(with: .opacity).combined(with: .move(edge: .bottom)),
-          removal: .scale(scale: 0.8).combined(with: .opacity).combined(with: .move(edge: .top))
+          insertion: .scale(scale: 0.8).combined(with: .opacity),
+          removal: .scale(scale: 0.8).combined(with: .opacity)
         ))
       }
     }
     .padding(.top, 8)
-    .animation(.easeInOut(duration: 0.4), value: chatInfoView.participants.count)
+    .animation(.easeInOut(duration: 0.2), value: chatInfoView.participants.count)
   }
 }
 
