@@ -57,7 +57,7 @@ struct ChatInfoView: View {
 
   enum ChatInfoTab: String, CaseIterable {
     case info = "Info"
-    case documents = "Documents"
+    case files = "Files"
   }
 
   var isPrivate: Bool {
