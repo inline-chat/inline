@@ -58,7 +58,6 @@ struct DocumentRow: View {
     }
     .onAppear {
       setupInitialState()
-      setupNotificationListeners()
     }
     .onDisappear {
       cleanup()
