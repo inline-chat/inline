@@ -11,6 +11,7 @@ struct ChatView: View {
   @State private var navBarHeight: CGFloat = 0
   @State private var showTranslationPopover = false
   @State private var needsTranslation = false
+  @State private var isChatHeaderPressed = false
   @State var apiState: RealtimeAPIState = .connecting
   @State var isTranslationEnabled = false
 
@@ -184,11 +185,17 @@ struct ChatView: View {
     }
     .scaledToFill()
     .fixedSize()
+    .opacity(isChatHeaderPressed ? 0.7 : 1.0)
     .onTapGesture {
       if let chatItem = fullChatViewModel.chatItem {
         router.push(.chatInfo(chatItem: chatItem))
       }
     }
+    .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
+      withAnimation(.easeInOut(duration: 0.1)) {
+        isChatHeaderPressed = pressing
+      }
+    }, perform: {})
   }
 
   @ViewBuilder
