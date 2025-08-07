@@ -1,6 +1,6 @@
 import InlineKit
-import SwiftUI
 import InlineUI
+import SwiftUI
 
 struct SearchParticipantsView: View {
   @Binding var searchText: String
@@ -17,7 +17,7 @@ struct SearchParticipantsView: View {
       VStack {
         if !searchResults.isEmpty {
           List {
-            ForEach(searchResults) { userInfo in
+            ForEach(searchResults, id: \.user.id) { userInfo in
               Button(action: { onAddParticipant(userInfo) }) {
                 HStack(spacing: 9) {
                   UserAvatar(userInfo: userInfo, size: 32)
