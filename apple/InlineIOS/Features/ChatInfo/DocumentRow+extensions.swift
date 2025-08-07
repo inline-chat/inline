@@ -48,13 +48,13 @@ extension DocumentRow {
   var fileIconCircleButton: some View {
     Button(action: fileIconButtonTapped) {
       ZStack {
-        RoundedRectangle(cornerRadius: 18)
+        Circle()
           .fill(fileCircleFill)
           .frame(width: fileCircleSize, height: fileCircleSize)
 
         // Progress indicator
         if case let .downloading(bytesReceived, totalBytes) = documentState {
-          RoundedRectangle(cornerRadius: 18)
+          Circle()
             .trim(from: 0, to: CGFloat(Double(bytesReceived) / Double(totalBytes)))
             .stroke(progressBarColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
             .frame(width: fileCircleSize, height: fileCircleSize)
