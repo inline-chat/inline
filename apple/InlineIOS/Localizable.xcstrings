@@ -152,6 +152,16 @@
         }
       }
     },
+    "All the %lld %@ of %@ can have access to this chat." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "All the %1$lld %2$@ of %3$@ can have access to this chat."
+          }
+        }
+      }
+    },
     "Appearance" : {
 
     },
