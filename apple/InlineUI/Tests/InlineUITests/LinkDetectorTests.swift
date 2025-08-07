@@ -208,4 +208,14 @@ struct LinkDetectorTests {
     let matches = detector.detectLinks(in: text)
     #expect(matches.isEmpty, "data URLs should not be detected")
   }
+
+  @Test("Detects Wikipedia URLs with parentheses")
+  func detectsWikipediaURLsWithParentheses() async throws {
+    let url = "https://en.wikipedia.org/wiki/X_(XYZ)"
+    let text = "Check out this article: \(url)"
+    let matches = detector.detectLinks(in: text)
+    
+    #expect(matches.count == 1, "Should detect the Wikipedia URL with parentheses")
+    #expect(matches.first?.url.absoluteString == url, "Should detect the complete URL including parentheses")
+  }
 }
