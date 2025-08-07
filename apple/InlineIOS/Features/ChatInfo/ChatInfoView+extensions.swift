@@ -15,21 +15,26 @@ extension ChatInfoView {
     isSearchingState = true
     Task {
       do {
-        let result = try await api.searchContacts(query: query)
-
-        try await database.dbWriter.write { db in
-          for apiUser in result.users {
-            try apiUser.saveFull(db)
-          }
-        }
-
         try await database.reader.read { db in
           searchResults =
             try User
-              .filter(Column("username").like("%\(query.lowercased())%"))
+              .filter(
+                sql: "username LIKE ? OR firstName LIKE ? OR lastName LIKE ?",
+                arguments: [
+                  "%\(query.lowercased())%",
+                  "%\(query.lowercased())%",
+                  "%\(query.lowercased())%",
+                ]
+              )
+              // .filter(
+              //   Column("username").like("%\(query.lowercased())%")
+              // )
+              // .filter(Column("firstName").like("%\(query.lowercased())%"))
+              // .filter(Column("lastName").like("%\(query.lowercased())%"))
               .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
               .asRequest(of: UserInfo.self)
               .fetchAll(db)
+          print("searchResults: \(searchResults)")
         }
 
         await MainActor.run {

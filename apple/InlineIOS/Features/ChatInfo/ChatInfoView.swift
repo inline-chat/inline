@@ -13,6 +13,9 @@ class ChatInfoViewEnvironment: ObservableObject {
   let isOwnerOrAdmin: Bool
   let participants: [UserInfo]
   let chatId: Int64
+  let chatItem: SpaceChatItem
+  let spaceMembersViewModel: SpaceMembersViewModel
+  let space: Space?
   let removeParticipant: (UserInfo) -> Void
   let openParticipantChat: (UserInfo) -> Void
 
@@ -23,6 +26,9 @@ class ChatInfoViewEnvironment: ObservableObject {
     isOwnerOrAdmin: Bool,
     participants: [UserInfo],
     chatId: Int64,
+    chatItem: SpaceChatItem,
+    spaceMembersViewModel: SpaceMembersViewModel,
+    space: Space?,
     removeParticipant: @escaping (UserInfo) -> Void,
     openParticipantChat: @escaping (UserInfo) -> Void
   ) {
@@ -32,6 +38,9 @@ class ChatInfoViewEnvironment: ObservableObject {
     self.isOwnerOrAdmin = isOwnerOrAdmin
     self.participants = participants
     self.chatId = chatId
+    self.chatItem = chatItem
+    self.spaceMembersViewModel = spaceMembersViewModel
+    self.space = space
     self.removeParticipant = removeParticipant
     self.openParticipantChat = openParticipantChat
   }
@@ -42,6 +51,7 @@ struct ChatInfoView: View {
   @StateObject var participantsWithMembersViewModel: ChatParticipantsWithMembersViewModel
   @EnvironmentStateObject var documentsViewModel: ChatDocumentsViewModel
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
+  @State private var space: Space?
   @State var isSearching = false
   @State var searchText = ""
   @State var searchResults: [UserInfo] = []
@@ -165,6 +175,9 @@ struct ChatInfoView: View {
                     isOwnerOrAdmin: isOwnerOrAdmin,
                     participants: participantsWithMembersViewModel.participants,
                     chatId: chatItem.chat?.id ?? 0,
+                    chatItem: chatItem,
+                    spaceMembersViewModel: spaceMembersViewModel,
+                    space: space,
                     removeParticipant: { userInfo in
                       Task {
                         do {
@@ -201,8 +214,16 @@ struct ChatInfoView: View {
     }
     .onAppear {
       Task {
-        if chatItem.chat?.spaceId != nil {
+        if let spaceId = chatItem.chat?.spaceId {
           await spaceMembersViewModel.refetchMembers()
+          // Fetch space information
+          do {
+            space = try await database.reader.read { db in
+              try Space.fetchOne(db, id: spaceId)
+            }
+          } catch {
+            Log.shared.error("Failed to fetch space: \(error)")
+          }
         }
         await participantsWithMembersViewModel.refetchParticipants()
 
@@ -237,13 +258,11 @@ struct InfoTabView: View {
     VStack(spacing: 16) {
       VStack {
         HStack {
-          Image(systemName: chatInfoView.isPrivate ? "lock.fill" : "person.2.fill")
-            .foregroundStyle(Color(ThemeManager.shared.selected.accent))
-            .font(.title3)
-
           Text("Type")
 
           Spacer()
+          Image(systemName: chatInfoView.isPrivate ? "lock.fill" : "person.2.fill")
+            .foregroundStyle(Color(ThemeManager.shared.selected.accent))
 
           Text(chatInfoView.isPrivate ? "Private" : "Public")
             .foregroundStyle(.secondary)
@@ -261,8 +280,14 @@ struct InfoTabView: View {
       .clipShape(RoundedRectangle(cornerRadius: 10))
       .padding(.bottom, 14)
 
-      if !chatInfoView.isDM {
+      if !chatInfoView.isDM, chatInfoView.isPrivate {
         participantsGrid
+      } else {
+        Text(
+          "All the \(chatInfoView.spaceMembersViewModel.members.count) \(chatInfoView.spaceMembersViewModel.members.count == 1 ? "member" : "members") of \(chatInfoView.space?.displayName ?? "this space") can have access to this chat."
+        )
+        .foregroundColor(.secondary)
+        .font(.callout)
       }
     }
     .padding(.horizontal, 16)
@@ -318,6 +343,7 @@ struct InfoTabView: View {
       }
 
       // Existing participants
+
       ForEach(chatInfoView.participants) { userInfo in
         VStack(spacing: 4) {
           UserAvatar(userInfo: userInfo, size: 68)
@@ -374,7 +400,6 @@ struct DocumentsTabView: View {
       if documentsViewModel.documents.isEmpty {
         VStack(spacing: 8) {
           Text("No documents shared in this chat yet.")
-            .font(.headline)
             .themedPrimaryText()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
