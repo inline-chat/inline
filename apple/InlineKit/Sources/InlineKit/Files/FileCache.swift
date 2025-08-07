@@ -114,12 +114,18 @@ public actor FileCache: Sendable {
 
   /// Save a downloaded document to the cache and update the database
   public func saveDocumentDownload(document: DocumentInfo, localPath: String, message: Message) async throws {
+    try await saveDocumentDownload(document: document, localPath: localPath, message: message)
+  }
+
+  public func saveDocumentDownload(document: DocumentInfo, localPath: String, message: Message? = nil) async throws {
     try await database.dbWriter.write { db in
       try Document.filter(id: document.id).updateAll(db, [Document.Columns.localPath.set(to: localPath)])
       self.log.debug("Updated document \(document.id) with local path \(localPath)")
     }
 
-    triggerMessageReload(message: message)
+    if let message = message {
+      triggerMessageReload(message: message)
+    }
   }
 
   /// Save a downloaded video to the cache and update the database

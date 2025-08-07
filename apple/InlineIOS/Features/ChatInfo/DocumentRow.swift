@@ -11,6 +11,7 @@ struct DocumentRow: View {
   // MARK: - Properties
 
   let documentInfo: DocumentInfo?
+  let documentMessage: DocumentMessage?
   let chatId: Int64?
 
   @State var isBeingRemoved = false
@@ -31,8 +32,9 @@ struct DocumentRow: View {
     documentInfo?.document
   }
 
-  init(documentInfo: DocumentInfo?, chatId: Int64? = nil) {
+  init(documentInfo: DocumentInfo? = nil, documentMessage: DocumentMessage? = nil, chatId: Int64? = nil) {
     self.documentInfo = documentInfo
+    self.documentMessage = documentMessage
     self.chatId = chatId
   }
 

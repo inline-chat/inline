@@ -51,22 +51,10 @@ extension DocumentRow {
     // Update UI state and start observing progress
     documentState = .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
     startMonitoringProgress()
-
-    // Create a minimal message for FileDownloader
-    // This is needed because FileDownloader requires a message context
-    let message = Message(
-      messageId: document.documentId,
-      fromId: 1, // Default sender
-      date: document.date,
-      text: nil,
-      peerUserId: nil,
-      peerThreadId: chatId,
-      chatId: chatId ?? 0,
-      documentId: document.id
-    )
-
-    // Start the download on the main actor (FileDownloader is @MainActor-isolated)
-    FileDownloader.shared.downloadDocument(document: documentInfo, for: message) { result in
+    
+    let msg = documentMessage?.message
+    
+    FileDownloader.shared.downloadDocument(document: documentInfo, for: msg) { result in
       DispatchQueue.main.async {
         switch result {
           case .success:
@@ -222,7 +210,10 @@ extension DocumentRow {
     let notificationDocumentId = notification.userInfo?["documentId"] as? Int64
     let currentDocumentId = document?.id
 
-    Log.shared.debug("📤 Upload notification received - notification ID: \(notificationDocumentId ?? -1), current ID: \(currentDocumentId ?? -1)")
+    Log.shared
+      .debug(
+        "📤 Upload notification received - notification ID: \(notificationDocumentId ?? -1), current ID: \(currentDocumentId ?? -1)"
+      )
 
     guard let documentId = notificationDocumentId,
           let document,
@@ -270,7 +261,7 @@ extension DocumentRow {
       startMonitoringProgress()
       return
     }
-    
+
     if let document {
       documentState = determineDocumentState(document)
       // If we determined we're downloading, start monitoring progress
