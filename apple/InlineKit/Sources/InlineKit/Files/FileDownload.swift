@@ -89,6 +89,14 @@ public final class FileDownloader: NSObject, Sendable {
     for message: Message,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
+    downloadDocument(document: document, for: message, completion: completion)
+  }
+
+  public func downloadDocument(
+    document: DocumentInfo,
+    for message: Message? = nil,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
     Log.shared.debug("Downloading document \(document)")
     guard let urlString = document.document.cdnUrl, let url = URL(string: urlString) else {
       let error = NSError(
