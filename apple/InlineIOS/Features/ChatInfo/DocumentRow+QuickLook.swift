@@ -1,5 +1,6 @@
 import QuickLook
 import SwiftUI
+import UIKit
 
 /// A SwiftUI wrapper around `QLPreviewController` that previews a single local file.
 struct QuickLookView: UIViewControllerRepresentable {
@@ -11,8 +12,6 @@ struct QuickLookView: UIViewControllerRepresentable {
     let previewController = QLPreviewController()
     previewController.dataSource = context.coordinator
     previewController.delegate = context.coordinator
-    // Force reload the preview items when the controller is created
-    previewController.reloadData()
     
     let navController = UINavigationController(rootViewController: previewController)
     return navController
@@ -23,7 +22,11 @@ struct QuickLookView: UIViewControllerRepresentable {
     if context.coordinator.url != url {
       context.coordinator.url = url
       if let previewController = uiViewController.topViewController as? QLPreviewController {
-        previewController.reloadData()
+        // Force a complete reload by refreshing the current preview item
+        DispatchQueue.main.async {
+          previewController.reloadData()
+          previewController.refreshCurrentPreviewItem()
+        }
       }
     }
   }

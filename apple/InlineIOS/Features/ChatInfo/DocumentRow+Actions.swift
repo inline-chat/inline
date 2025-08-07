@@ -104,8 +104,27 @@ extension DocumentRow {
       Log.shared.debug("📄 Using QuickLook for preview")
       showingQuickLook = true
     } else {
-      Log.shared.debug("📄 QuickLook can't preview this file type")
-      showDocumentError("This document type is not supported for preview.")
+      Log.shared.debug("📄 QuickLook can't preview - showing share options")
+      // Use UIDocumentInteractionController for unsupported files
+      showShareMenu(for: fileURL)
+    }
+  }
+  
+  private func showShareMenu(for url: URL) {
+    // Find the root view controller to present from
+    guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+          let window = windowScene.windows.first,
+          let rootViewController = window.rootViewController else {
+      Log.shared.error("📄 Cannot find root view controller for share menu")
+      return
+    }
+    
+    let documentInteractionController = UIDocumentInteractionController(url: url)
+    
+    // Present share menu
+    let rect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
+    if !documentInteractionController.presentOptionsMenu(from: rect, in: rootViewController.view, animated: true) {
+      Log.shared.error("📄 Failed to present share menu")
     }
   }
 
