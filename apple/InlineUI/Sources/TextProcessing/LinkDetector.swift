@@ -30,8 +30,8 @@ public final class LinkDetector: Sendable {
     // This pattern matches "http" or "https", followed by "://", then any combination of
     // unreserved (A–Z a–z 0–9 -._~) and reserved characters (:/?#[]@!$&'()*+,;=%) until it hits
     // a whitespace character. This intentionally excludes angle brackets and other punctuation
-    // that typically terminates URLs in plain text.
-    let pattern = "https?://[^\\s<>()\\[\\]{}\"']+"
+    // that typically terminates URLs in plain text. Parentheses are allowed within URLs.
+    let pattern = "https?://[^\\s<>\\[\\]{}\"']+"
     return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
   }()
 
@@ -179,12 +179,9 @@ public final class LinkDetector: Sendable {
 
       var urlString = nsText.substring(with: match.range)
 
-      // Trim common trailing punctuation that should not be part of the URL (e.g. ",", ")", ".")
-      let trailingPunctuation = CharacterSet(charactersIn: ",.!?:;)]}'\"")
-      while let lastUnicodeScalar = urlString.unicodeScalars.last,
-            trailingPunctuation.contains(lastUnicodeScalar) {
-        urlString.removeLast()
-      }
+      // Trim common trailing punctuation that should not be part of the URL (e.g. ",", ".", "!")
+      // For parentheses, only trim unmatched closing ones
+      urlString = trimTrailingPunctuation(from: urlString)
 
       // Adjust range length if we trimmed characters
       let trimmedCount = match.range.length - urlString.utf16.count
@@ -259,12 +256,9 @@ public final class LinkDetector: Sendable {
 
       var urlSubstring = (text as NSString).substring(with: match.range)
 
-      // Trim common trailing punctuation that should not be part of the URL (e.g. ",", ")", ".")
-      let trailingPunctuation = CharacterSet(charactersIn: ",.!?:;)]}'\"")
-      while let lastScalar = urlSubstring.unicodeScalars.last,
-            trailingPunctuation.contains(lastScalar) {
-        urlSubstring.removeLast()
-      }
+      // Trim common trailing punctuation that should not be part of the URL (e.g. ",", ".", "!")
+      // For parentheses, only trim unmatched closing ones
+      urlSubstring = trimTrailingPunctuation(from: urlSubstring)
 
       // Adjust range length if we trimmed characters
       let trimmedCount = match.range.length - urlSubstring.utf16.count
@@ -285,6 +279,49 @@ public final class LinkDetector: Sendable {
         isWhitelistedTLD: true
       )
     }
+  }
+
+  /// Trims trailing punctuation from URLs while preserving balanced parentheses
+  private func trimTrailingPunctuation(from urlString: String) -> String {
+    var result = urlString
+    
+    // Count opening and closing parentheses to determine balance
+    let openParens = result.filter { $0 == "(" }.count
+    let closeParens = result.filter { $0 == ")" }.count
+    
+    // Basic punctuation that should always be trimmed
+    let basicPunctuation = CharacterSet(charactersIn: ",.!?:;'\"")
+    
+    // Trim basic punctuation
+    while let lastScalar = result.unicodeScalars.last,
+          basicPunctuation.contains(lastScalar) {
+      result.removeLast()
+    }
+    
+    // Only trim unmatched closing parentheses, brackets, or braces
+    let closingChars = [")", "]", "}"]
+    let openingChars = ["(", "[", "{"]
+    
+    while !result.isEmpty {
+      let lastChar = String(result.last!)
+      
+      if let index = closingChars.firstIndex(of: lastChar) {
+        let openingChar = openingChars[index]
+        let openCount = result.filter { String($0) == openingChar }.count
+        let closeCount = result.filter { String($0) == lastChar }.count
+        
+        // Only trim if there are more closing than opening
+        if closeCount > openCount {
+          result.removeLast()
+        } else {
+          break
+        }
+      } else {
+        break
+      }
+    }
+    
+    return result
   }
 
   /// Validates if a URL should be detected as a link
