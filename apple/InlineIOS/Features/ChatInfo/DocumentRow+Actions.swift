@@ -109,21 +109,27 @@ extension DocumentRow {
       showShareMenu(for: fileURL)
     }
   }
-  
+
   private func showShareMenu(for url: URL) {
     // Find the root view controller to present from
     guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
           let window = windowScene.windows.first,
-          let rootViewController = window.rootViewController else {
+          let rootViewController = window.rootViewController
+    else {
       Log.shared.error("📄 Cannot find root view controller for share menu")
       return
     }
-    
-    let documentInteractionController = UIDocumentInteractionController(url: url)
-    
+
+    // Create and store the interaction controller to keep it alive while the sheet is shown
+    docInteractionController = UIDocumentInteractionController(url: url)
+    guard let controller = docInteractionController else {
+      Log.shared.error("📄 Failed to initialize UIDocumentInteractionController")
+      return
+    }
+
     // Present share menu
     let rect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
-    if !documentInteractionController.presentOptionsMenu(from: rect, in: rootViewController.view, animated: true) {
+    if !controller.presentOptionsMenu(from: rect, in: rootViewController.view, animated: true) {
       Log.shared.error("📄 Failed to present share menu")
     }
   }
