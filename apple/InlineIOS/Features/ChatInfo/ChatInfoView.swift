@@ -121,6 +121,8 @@ struct ChatInfoView: View {
 
           // Tab Bar
           HStack(spacing: 2) {
+            Spacer()
+            
             ForEach(availableTabs, id: \.self) { tab in
               Button {
                 withAnimation(.easeInOut(duration: 0.3)) {
