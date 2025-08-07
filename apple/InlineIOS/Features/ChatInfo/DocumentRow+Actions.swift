@@ -51,9 +51,9 @@ extension DocumentRow {
     // Update UI state and start observing progress
     documentState = .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
     startMonitoringProgress()
-    
+
     let msg = documentMessage?.message
-    
+
     FileDownloader.shared.downloadDocument(document: documentInfo, for: msg) { result in
       DispatchQueue.main.async {
         switch result {
@@ -170,89 +170,6 @@ extension DocumentRow {
       }
   }
 
-  // MARK: - Notification Listeners
-
-  func setupNotificationListeners() {
-    NotificationCenter.default.addObserver(
-      forName: NSNotification.Name("DocumentUploadStarted"),
-      object: nil,
-      queue: .main
-    ) { notification in
-      handleDocumentUploadStarted(notification)
-    }
-
-    NotificationCenter.default.addObserver(
-      forName: NSNotification.Name("DocumentUploadCompleted"),
-      object: nil,
-      queue: .main
-    ) { notification in
-      handleDocumentUploadCompleted(notification)
-    }
-
-    NotificationCenter.default.addObserver(
-      forName: NSNotification.Name("DocumentUploadFailed"),
-      object: nil,
-      queue: .main
-    ) { notification in
-      handleDocumentUploadFailed(notification)
-    }
-
-    NotificationCenter.default.addObserver(
-      forName: NSNotification.Name("MessageStatusChanged"),
-      object: nil,
-      queue: .main
-    ) { notification in
-      handleMessageStatusChanged(notification)
-    }
-  }
-
-  func handleDocumentUploadStarted(_ notification: Notification) {
-    let notificationDocumentId = notification.userInfo?["documentId"] as? Int64
-    let currentDocumentId = document?.id
-
-    Log.shared
-      .debug(
-        "📤 Upload notification received - notification ID: \(notificationDocumentId ?? -1), current ID: \(currentDocumentId ?? -1)"
-      )
-
-    guard let documentId = notificationDocumentId,
-          let document,
-          document.id == documentId
-    else {
-      Log.shared.debug("📤 Upload notification ignored - IDs don't match")
-      return
-    }
-
-    Log.shared.debug("📤 Document upload started for document ID: \(documentId)")
-    // Note: We don't handle upload state in DocumentRow since it's for chat info display
-  }
-
-  func handleDocumentUploadCompleted(_ notification: Notification) {
-    guard let documentId = notification.userInfo?["documentId"] as? Int64,
-          let document,
-          document.id == documentId
-    else { return }
-
-    Log.shared.debug("Document upload completed for document ID: \(documentId)")
-    documentState = .locallyAvailable
-  }
-
-  func handleDocumentUploadFailed(_ notification: Notification) {
-    guard let documentId = notification.userInfo?["documentId"] as? Int64,
-          let document,
-          document.id == documentId
-    else { return }
-
-    let error = notification.userInfo?["error"] as? Error
-    Log.shared.error("Document upload failed for document ID: \(documentId)", error: error)
-    documentState = .needsDownload
-  }
-
-  func handleMessageStatusChanged(_ notification: Notification) {
-    // This is primarily for upload status changes in message views
-    // DocumentRow in chat info doesn't need to handle this specifically
-  }
-
   func setupInitialState() {
     // Only update state if we're not already in a downloading state
     // This preserves download progress when the view reappears during scrolling
@@ -264,7 +181,6 @@ extension DocumentRow {
 
     if let document {
       documentState = determineDocumentState(document)
-      // If we determined we're downloading, start monitoring progress
       if case .downloading = documentState {
         startMonitoringProgress()
       }
@@ -274,6 +190,5 @@ extension DocumentRow {
   func cleanup() {
     progressSubscription?.cancel()
     progressSubscription = nil
-    NotificationCenter.default.removeObserver(self)
   }
 }
