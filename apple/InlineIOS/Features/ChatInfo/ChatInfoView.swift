@@ -385,7 +385,7 @@ struct DocumentsTabView: View {
                   documentInfo: document,
                   chatId: peerThreadId
                 )
-                .padding(.bottom, 8)
+                .padding(.bottom, 4)
               }
             } header: {
               HStack {
