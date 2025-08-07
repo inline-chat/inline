@@ -286,7 +286,6 @@ struct InfoTabView: View {
       GridItem(.flexible()),
       GridItem(.flexible()),
     ], spacing: 16) {
-      // Plus button as first item (only for private chats)
       if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
         Button(action: {
           chatInfoView.isSearching = true
@@ -300,8 +299,8 @@ struct InfoTabView: View {
                   .font(.title)
                   .foregroundColor(.secondary)
               }
-//
-            VStack(spacing: 2) {
+
+            VStack(spacing: -2) {
               Text("Add")
                 .font(.callout)
                 .lineLimit(1)
@@ -309,6 +308,7 @@ struct InfoTabView: View {
               Text(" ")
                 .font(.caption)
                 .foregroundColor(.clear)
+                .lineLimit(1)
             }
           }
         }
