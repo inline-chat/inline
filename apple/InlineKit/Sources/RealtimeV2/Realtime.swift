@@ -163,6 +163,8 @@ public actor RealtimeV2 {
   private func updateConnectionState(_ newState: RealtimeConnectionState) async {
     guard newState != currentConnectionState else { return }
     currentConnectionState = newState
-    await connectionStateChannel.send(newState)
+    Task {
+      await connectionStateChannel.send(newState)
+    }
   }
 }
