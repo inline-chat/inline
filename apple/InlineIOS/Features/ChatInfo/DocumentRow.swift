@@ -10,8 +10,7 @@ import UniformTypeIdentifiers
 struct DocumentRow: View {
   // MARK: - Properties
 
-  let documentInfo: DocumentInfo?
-  let documentMessage: DocumentMessage?
+  let documentMessage: DocumentMessage
   let chatId: Int64?
 
   @State var isBeingRemoved = false
@@ -21,7 +20,7 @@ struct DocumentRow: View {
   @State var showingAlert = false
   @State var alertMessage = ""
   @State var documentURL: URL?
-  @State  var docInteractionController: UIDocumentInteractionController? = nil
+  @State var docInteractionController: UIDocumentInteractionController? = nil
 
   enum DocumentState: Equatable {
     case locallyAvailable
@@ -29,12 +28,10 @@ struct DocumentRow: View {
     case downloading(bytesReceived: Int64, totalBytes: Int64)
   }
 
-  var document: Document? {
-    documentInfo?.document
-  }
+  var documentInfo: DocumentInfo { documentMessage.document }
+  var document: Document { documentInfo.document }
 
-  init(documentInfo: DocumentInfo? = nil, documentMessage: DocumentMessage? = nil, chatId: Int64? = nil) {
-    self.documentInfo = documentInfo
+  init(documentMessage: DocumentMessage, chatId: Int64? = nil) {
     self.documentMessage = documentMessage
     self.chatId = chatId
   }

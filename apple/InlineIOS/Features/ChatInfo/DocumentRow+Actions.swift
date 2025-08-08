@@ -37,11 +37,8 @@ extension DocumentRow {
   // MARK: - File Operations
 
   func downloadFile() {
-    guard let documentInfo,
-          let document
-    else {
-      return
-    }
+    let documentInfo = documentInfo
+    let document = document
 
     // Prevent duplicate downloads
     if case .downloading = documentState {
@@ -52,10 +49,15 @@ extension DocumentRow {
     documentState = .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
     startMonitoringProgress()
 
-    let msg = documentMessage?.message
+    let msg = documentMessage.message
+
+    Log.shared.debug(
+      "UI downloadFile tapped: docId=\(documentInfo.id) msgId=\(msg.id) fileName=\(document.fileName ?? "nil") size=\(document.size ?? -1) mime=\(document.mimeType ?? "nil") cdnUrl=\(document.cdnUrl ?? "nil")"
+    )
 
     FileDownloader.shared.downloadDocument(document: documentInfo, for: msg) { result in
       DispatchQueue.main.async {
+        Log.shared.debug("UI downloadFile completion: docId=\(documentInfo.id) result=\(result)")
         switch result {
           case .success:
             documentState = .locallyAvailable
@@ -69,9 +71,7 @@ extension DocumentRow {
 
   func cancelDownload() {
     if case .downloading = documentState {
-      if let documentInfo {
-        FileDownloader.shared.cancelDocumentDownload(documentId: documentInfo.id)
-      }
+      FileDownloader.shared.cancelDocumentDownload(documentId: documentInfo.id)
 
       documentState = .needsDownload
       progressSubscription?.cancel()
@@ -82,9 +82,8 @@ extension DocumentRow {
   func openFile() {
     Log.shared.debug("📄 openFile() called")
 
-    guard let document,
-          let localPath = document.localPath
-    else {
+    let document = document
+    guard let localPath = document.localPath else {
       Log.shared.error("📄 Cannot open document: No local path available")
       return
     }
@@ -152,7 +151,7 @@ extension DocumentRow {
       }
     }
 
-    guard let documentInfo else { return .needsDownload }
+    let documentInfo = documentInfo
     let documentId = documentInfo.id
     if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
       // Try to get current progress from FileDownloader instead of resetting to 0
@@ -166,8 +165,6 @@ extension DocumentRow {
   // MARK: - Progress Monitoring
 
   func startMonitoringProgress() {
-    guard let documentInfo else { return }
-
     progressSubscription?.cancel()
 
     let documentId = documentInfo.id
@@ -184,12 +181,12 @@ extension DocumentRow {
         } else if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
           documentState = .downloading(
             bytesReceived: progress.bytesReceived,
-            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document?.size ?? 0)
+            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document.size ?? 0)
           )
         } else if progress.bytesReceived > 0 {
           documentState = .downloading(
             bytesReceived: progress.bytesReceived,
-            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document?.size ?? 0)
+            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document.size ?? 0)
           )
         }
       }
@@ -204,11 +201,9 @@ extension DocumentRow {
       return
     }
 
-    if let document {
-      documentState = determineDocumentState(document)
-      if case .downloading = documentState {
-        startMonitoringProgress()
-      }
+    documentState = determineDocumentState(document)
+    if case .downloading = documentState {
+      startMonitoringProgress()
     }
   }
 
