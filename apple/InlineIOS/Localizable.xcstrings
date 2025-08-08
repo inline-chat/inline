@@ -4,9 +4,6 @@
     "" : {
 
     },
-    " " : {
-
-    },
     "@%@" : {
 
     },
@@ -191,6 +188,9 @@
       }
     },
     "Cannot Open Document" : {
+
+    },
+    "Cannot preview document" : {
 
     },
     "Change Profile Photo" : {
@@ -856,6 +856,9 @@
           }
         }
       }
+    },
+    "The document is not available for preview. Please try downloading it again." : {
+
     },
     "Themes" : {
 
