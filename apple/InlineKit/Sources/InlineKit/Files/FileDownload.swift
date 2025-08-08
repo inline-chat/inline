@@ -83,15 +83,6 @@ public final class FileDownloader: NSObject, Sendable {
     progressPublisher(for: "photo_\(photoId)")
   }
 
-  /// Download a document file
-  public func downloadDocument(
-    document: DocumentInfo,
-    for message: Message,
-    completion: @escaping (Result<URL, Error>) -> Void
-  ) {
-    downloadDocument(document: document, for: message, completion: completion)
-  }
-
   public func downloadDocument(
     document: DocumentInfo,
     for message: Message? = nil,
