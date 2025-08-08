@@ -238,6 +238,8 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     reconnectionTask = Task { [weak self] in
       guard let self else { return }
 
+      await connecting()
+
       // Small delay with jitter to avoid busy-loop in pathological scenarios.
       // TODO: Improve reconnection logic especially timeout amount
       let delay = Double.random(in: 0.5 ... 3.0)
@@ -250,12 +252,15 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     }
   }
 
+  private func connecting() async {
+    guard await state != .connecting else { return }
+    state = .connecting
+    log.debug("Transport connecting (attempt #\(connectionAttemptId))")
+    Task { await _eventChannel.send(.connecting) }
+  }
+
   /// Internal method to handle the actual reconnection logic
   private func attemptReconnection() async {
-    // Double-check that we're still in a state where reconnection makes sense
-    guard state != .idle else { return }
-
-    await _eventChannel.send(.connecting)
     await openConnection()
 
     // Clear the reconnection task since we're done
