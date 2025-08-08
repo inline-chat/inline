@@ -375,27 +375,30 @@ extension NewSidebar: NSTableViewDelegate {
       }
     }
     archiveAction.backgroundColor = .systemPurple
-    archiveAction.image = NSImage(systemSymbolName: isArchived ? "pin.slash" : "pin", accessibilityDescription: nil)
+    archiveAction.image = NSImage(
+      systemSymbolName: isArchived ? "tray.fill" : "archivebox.fill",
+      accessibilityDescription: nil
+    )
     return archiveAction
   }
-  
+
   private func createReadUnreadAction(item: HomeChatItem) -> NSTableViewRowAction {
     let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
-    
+
     let readUnreadAction = NSTableViewRowAction(
       style: .regular,
       title: hasUnread ? "Mark Read" : "Mark Unread"
     ) { [weak self] _, row in
       guard let self else { return }
       let item = items[row]
-      
+
       // Dismiss the swipe action on the main thread
       tableView.rowActionsVisible = false
-      
+
       Task.detached {
         // Wait for the swipe action to be dismissed otherwise it will glitch
         try await Task.sleep(for: .milliseconds(340))
-        
+
         do {
           if hasUnread {
             // Mark as read using UnreadManager
@@ -404,21 +407,21 @@ extension NewSidebar: NSTableViewDelegate {
             // Mark as unread using realtime API
             try await self.dependencies.realtime
               .invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
-              $0.peerID = item.peerId.toInputPeer()
-            }))
+                $0.peerID = item.peerId.toInputPeer()
+              }))
           }
         } catch {
           Log.shared.error("Failed to update read/unread status", error: error)
         }
       }
     }
-    
+
     readUnreadAction.backgroundColor = hasUnread ? .systemBlue : .systemGray
     readUnreadAction.image = NSImage(
       systemSymbolName: hasUnread ? "checkmark.message.fill" : "message.badge.filled.fill",
       accessibilityDescription: nil
     )
-    
+
     return readUnreadAction
   }
 }
