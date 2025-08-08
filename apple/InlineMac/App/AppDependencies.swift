@@ -1,6 +1,7 @@
-import SwiftUI
 import Auth
 import InlineKit
+import RealtimeV2
+import SwiftUI
 
 @MainActor
 public struct AppDependencies {
@@ -32,6 +33,7 @@ extension View {
       .environmentObject(deps.nav)
       .environmentObject(deps.data)
       .environmentObject(deps.userSettings.notification)
+      .environmentObject(RealtimeState.shared)
       .environment(\.transactions, deps.transactions)
       .environment(\.realtime, deps.realtime)
       .appDatabase(deps.database)

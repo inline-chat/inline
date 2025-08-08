@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import Logger
 import SwiftUI
+import RealtimeV2
 
 struct HomeSidebar: View {
   // MARK: - State
@@ -276,7 +277,9 @@ struct HomeSidebar: View {
         .padding(.trailing, Theme.sidebarIconSpacing)
 
       // Text("Home")
-      if tab == .archive {
+      if realtimeState.connectionState != .connected {
+        Text(realtimeState.connectionState.title)
+      } else if tab == .archive {
         Text("Archive")
       } else {
         Text("Chats")
