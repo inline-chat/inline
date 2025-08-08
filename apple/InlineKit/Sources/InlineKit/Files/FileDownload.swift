@@ -307,11 +307,6 @@ public final class FileDownloader: NSObject, Sendable {
 
       // Execute completion handler
       completion(result)
-
-      // Clean up publisher after a delay
-      DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-        self?.downloadCompletions[id] = nil
-      }
     }
 
     // Start the download
@@ -329,11 +324,17 @@ public final class FileDownloader: NSObject, Sendable {
   private func completeDownload(id: String, location: URL?, error: Error?) {
     if let error {
       progressPublishers[id]?.send(DownloadProgress.failed(id: id, error: error))
-      downloadCompletions[id]?(.failure(error))
+      if let completion = downloadCompletions[id] {
+        downloadCompletions[id] = nil
+        completion(.failure(error))
+      }
     } else if let location, let publisher = progressPublishers[id] {
       let lastProgress = publisher.value
       progressPublishers[id]?.send(DownloadProgress.completed(id: id, totalBytes: lastProgress.totalBytes))
-      downloadCompletions[id]?(.success(location))
+      if let completion = downloadCompletions[id] {
+        downloadCompletions[id] = nil
+        completion(.success(location))
+      }
     }
   }
 }
@@ -361,6 +362,7 @@ extension FileDownloader: URLSessionDownloadDelegate {
 
       DispatchQueue.main.async {
         if let completion = self.downloadCompletions[taskId] {
+          self.downloadCompletions[taskId] = nil  // Prevent double call
           completion(.success(persistentTempURL))
         }
       }
@@ -369,6 +371,7 @@ extension FileDownloader: URLSessionDownloadDelegate {
       DispatchQueue.main.async {
         self.log.error("Error copying temporary file: \(downloadError)")
         if let completion = self.downloadCompletions[taskId] {
+          self.downloadCompletions[taskId] = nil  // Prevent double call
           completion(.failure(downloadError))
         }
       }
