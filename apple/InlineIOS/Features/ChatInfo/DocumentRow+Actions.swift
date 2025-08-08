@@ -80,31 +80,34 @@ extension DocumentRow {
   }
 
   func openFile() {
-    Log.shared.debug("📄 openFile() called")
-
-    let document = document
-    guard let localPath = document.localPath else {
-      Log.shared.error("📄 Cannot open document: No local path available")
+    Log.shared.debug("📄 openFile() called for state: \(documentState)")
+    
+    guard documentState == .locallyAvailable else {
+      Log.shared.error("📄 Cannot open document: Not locally available")
       return
     }
-
-    let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
-    let fileURL = cacheDirectory.appendingPathComponent(localPath)
-
-    guard FileManager.default.fileExists(atPath: fileURL.path) else {
-      Log.shared.error("📄 File does not exist at path: \(fileURL.path)")
+    
+    guard let fileURL = documentURL else {
+      Log.shared.error("📄 Cannot open document: No valid file URL")
       documentState = .needsDownload
       return
     }
-
-    documentURL = fileURL
-
+    
+    // Validate file is readable
+    guard FileManager.default.isReadableFile(atPath: fileURL.path) else {
+      Log.shared.error("📄 File is not readable at path: \(fileURL.path)")
+      showDocumentError("File is not accessible")
+      documentState = .needsDownload
+      return
+    }
+    
+    Log.shared.debug("📄 Opening file: \(fileURL.lastPathComponent)")
+    
     if QLPreviewController.canPreview(fileURL as QLPreviewItem) {
       Log.shared.debug("📄 Using QuickLook for preview")
       showingQuickLook = true
     } else {
       Log.shared.debug("📄 QuickLook can't preview - showing share options")
-      // Use UIDocumentInteractionController for unsupported files
       showShareMenu(for: fileURL)
     }
   }
@@ -141,21 +144,14 @@ extension DocumentRow {
   // MARK: - Document State Management
 
   func determineDocumentState(_ document: Document) -> DocumentState {
-    if let localPath = document.localPath {
-      let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
-      let fileURL = cacheDirectory.appendingPathComponent(localPath)
-
-      if FileManager.default.fileExists(atPath: fileURL.path) {
-        documentURL = fileURL
-        return .locallyAvailable
-      }
+    // Check if file exists locally using the computed documentURL property
+    if documentURL != nil {
+      return .locallyAvailable
     }
 
     let documentInfo = documentInfo
     let documentId = documentInfo.id
     if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
-      // Try to get current progress from FileDownloader instead of resetting to 0
-      // This will be updated immediately by startMonitoringProgress() if needed
       return .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
     }
 
