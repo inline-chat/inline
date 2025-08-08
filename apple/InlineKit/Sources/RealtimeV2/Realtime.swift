@@ -1,12 +1,16 @@
+import AsyncAlgorithms
 import Auth
 import Combine
 import Foundation
 import InlineProtocol
 import Logger
 
-public actor Realtime {
+/// Internal – later we will rename the main module to Realtime
+///
+/// This actor manages the real-time communication with the Inline Protocol server.
+public actor RealtimeV2 {
   /// The shared instance of the Realtime actor used across the application.
-  public static let shared = Realtime(transport: WebSocketTransport(), auth: Auth.shared)
+  public static let shared = RealtimeV2(transport: WebSocketTransport(), auth: Auth.shared)
 
   // MARK: - Core Components
 
@@ -23,6 +27,10 @@ public actor Realtime {
   private let log = Log.scoped("RealtimeV2")
   private var cancellables = Set<AnyCancellable>()
   private var tasks: Set<Task<Void, Never>> = []
+
+  // Connection state channel for cross-task consumption and the latest cached state
+  private let connectionStateChannel = AsyncChannel<RealtimeConnectionState>()
+  private var currentConnectionState: RealtimeConnectionState = .connecting
 
   // MARK: - Options
 
@@ -80,7 +88,7 @@ public actor Realtime {
     Task.detached {
       self.log.debug("Starting auth events listener")
       for await event in await self.auth.events {
-        guard Task.isCancelled else { return }
+        guard !Task.isCancelled else { return }
 
         switch event {
           case .login:
@@ -98,20 +106,23 @@ public actor Realtime {
     Task.detached {
       self.log.debug("Starting transport events listener")
       for await event in await self.client.events {
-        guard Task.isCancelled else { return }
+        guard !Task.isCancelled else { return }
 
         switch event {
           case .open:
             self.log.debug("Transport connected")
+            await self.updateConnectionState(.connected)
 
           case .connecting:
             self.log.debug("Transport connecting")
+            await self.updateConnectionState(.connecting)
         }
       }
     }.store(in: &tasks)
   }
 
   private func startTransport() async {
+    await updateConnectionState(.connecting)
     await client.startTransport()
   }
 
@@ -129,5 +140,29 @@ public actor Realtime {
     input: RpcCall.OneOf_Input?
   ) async throws -> RpcResult.OneOf_Result? {
     try await client.sendRpc(method: method, input: input)
+  }
+
+  /// Returns a stream of connection state changes that can be consumed from any task.
+  public func connectionStates() -> AsyncStream<RealtimeConnectionState> {
+    let channel = connectionStateChannel
+    return AsyncStream { continuation in
+      let task = Task {
+        for await state in channel {
+          continuation.yield(state)
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { @Sendable _ in
+        task.cancel()
+      }
+    }
+  }
+
+  // MARK: - Helpers
+
+  private func updateConnectionState(_ newState: RealtimeConnectionState) async {
+    guard newState != currentConnectionState else { return }
+    currentConnectionState = newState
+    await connectionStateChannel.send(newState)
   }
 }
