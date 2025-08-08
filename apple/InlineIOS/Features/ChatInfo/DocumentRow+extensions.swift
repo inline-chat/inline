@@ -7,11 +7,11 @@ extension DocumentRow {
   // MARK: - Theme
 
   var textColor: Color {
-    (ThemeManager.shared.selected.primaryTextColor?.color ?? .primary)
+    .primary
   }
 
   var labelColor: Color {
-    (ThemeManager.shared.selected.secondaryTextColor?.color.opacity(0.4) ?? .secondary)
+     .secondary
   }
 
   var progressBarColor: Color {
