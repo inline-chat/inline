@@ -382,12 +382,3 @@ struct InfoTabView: View {
     .animation(.easeInOut(duration: 0.2), value: chatInfoView.participants.count)
   }
 }
-
-// Preference key for scroll offset
-struct ScrollOffsetPreferenceKey: PreferenceKey {
-  static var defaultValue: CGFloat = 0
-
-  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-    value = nextValue()
-  }
-}
