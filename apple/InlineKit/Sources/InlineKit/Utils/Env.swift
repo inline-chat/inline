@@ -1,6 +1,6 @@
-import Logger
-
 import Auth
+import Logger
+import RealtimeV2
 import SwiftUI
 
 public extension EnvironmentValues {
