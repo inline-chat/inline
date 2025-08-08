@@ -57,12 +57,12 @@ actor ProtocolClient {
 
   private func connectionOpen() async {
     state = .open
-    await events.send(.open)
+    Task { await events.send(.open) }
   }
 
   private func connecting() async {
     state = .connecting
-    await events.send(.connecting)
+    Task { await events.send(.connecting) }
   }
 
   // MARK: - Listeners
@@ -120,7 +120,7 @@ actor ProtocolClient {
 
       case let .message(serverMessage):
         log.debug("Received server message: \(serverMessage)")
-        // TODO: Handle server messages (updates, notifications, etc.)
+      // TODO: Handle server messages (updates, notifications, etc.)
       default:
         log.debug("Protocol client: Unhandled message type: \(String(describing: message.body))")
     }
