@@ -129,7 +129,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // TODO: need to create the update, use the sequence number
   // we probably need to create the update and message in one transaction
   // to avoid multiple times locking the chat row for last message and pts.
-  // we can also sepearate the sequence caching. this will speed up and
+  // we can also separate the sequence caching. this will speed up and
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
   let { selfUpdates, updateGroup } = await pushUpdates({ inputPeer, messageInfo, currentUserId, update })
@@ -512,6 +512,15 @@ async function sendNotificationToUser({
   if (messageText) {
     // if has text, use text
     body = messageText.substring(0, 240)
+
+    // Add media type to the body if it's a media message with text
+    if (messageInfo.message.mediaType === "photo") {
+      body = "🖼️ " + body
+    } else if (messageInfo.message.mediaType === "video") {
+      body = "🎥 " + body
+    } else if (messageInfo.message.mediaType === "document") {
+      body = "📄 " + body
+    }
   } else if (messageInfo.message.isSticker) {
     body = "🖼️ Sticker"
   } else if (messageInfo.message.mediaType === "photo") {
