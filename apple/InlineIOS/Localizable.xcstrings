@@ -62,6 +62,16 @@
         }
       }
     },
+    "%lld %@ of %@ are participants of this chat. New members will have access by default." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld %2$@ of %3$@ are participants of this chat. New members will have access by default."
+          }
+        }
+      }
+    },
     "+1 555 555 5555" : {
       "comment" : "Phone number placeholder",
       "extractionState" : "stale",
@@ -148,16 +158,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加參與者"
-          }
-        }
-      }
-    },
-    "All the %lld %@ of %@ can have access to this chat." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "All the %1$lld %2$@ of %3$@ can have access to this chat."
           }
         }
       }
@@ -660,7 +660,7 @@
     "No chats or spaces yet" : {
 
     },
-    "No documents shared in this chat yet." : {
+    "No files found in this chat." : {
 
     },
     "No Spaces Yet" : {
@@ -682,6 +682,9 @@
 
     },
     "OK" : {
+
+    },
+    "Older files may not appear, will be fixed in an update." : {
 
     },
     "Only space admins and owners can connect and manage integrations." : {

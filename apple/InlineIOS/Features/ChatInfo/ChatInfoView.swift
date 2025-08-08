@@ -59,7 +59,7 @@ struct ChatInfoView: View {
   @StateObject var searchDebouncer = Debouncer(delay: 0.3)
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var api: ApiClient
-  @State private var selectedTab: ChatInfoTab = .info
+  @State private var selectedTab: ChatInfoTab
   @Namespace private var tabSelection
 
   @Environment(\.appDatabase) var database
@@ -121,6 +121,10 @@ struct ChatInfoView: View {
     _spaceMembersViewModel = EnvironmentStateObject { env in
       SpaceMembersViewModel(db: env.appDatabase, spaceId: chatItem.chat?.spaceId ?? 0)
     }
+
+    // Default tab based on chat type
+    // DMs have no info tab
+    selectedTab = chatItem.chat?.type == .thread ? .info : .files
   }
 
   var body: some View {
@@ -135,7 +139,8 @@ struct ChatInfoView: View {
 
             ForEach(availableTabs, id: \.self) { tab in
               Button {
-                withAnimation(.easeInOut(duration: 0.3)) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.smoothSnappy) {
                   selectedTab = tab
                 }
               } label: {
@@ -194,8 +199,7 @@ struct ChatInfoView: View {
                       }
                     },
                     openParticipantChat: { userInfo in
-                      let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-                      impactFeedback.impactOccurred()
+                      UIImpactFeedbackGenerator(style: .light).impactOccurred()
                       nav.push(.chat(peer: Peer.user(id: userInfo.user.id)))
                     }
                   ))
@@ -284,7 +288,7 @@ struct InfoTabView: View {
         participantsGrid
       } else {
         Text(
-          "All the \(chatInfoView.spaceMembersViewModel.members.count) \(chatInfoView.spaceMembersViewModel.members.count == 1 ? "member" : "members") of \(chatInfoView.space?.displayName ?? "this space") can have access to this chat."
+          "\(chatInfoView.spaceMembersViewModel.members.count) \(chatInfoView.spaceMembersViewModel.members.count == 1 ? "member" : "members") of \(chatInfoView.space?.displayName ?? "this space") are participants of this chat. New members will have access by default."
         )
         .foregroundColor(.secondary)
         .font(.callout)
@@ -349,26 +353,15 @@ struct InfoTabView: View {
           UserAvatar(userInfo: userInfo, size: 68)
 
           VStack(spacing: -2) {
-            Text(userInfo.user.firstName ?? "User")
+            Text(userInfo.user.shortDisplayName)
               .font(.callout)
               .foregroundColor(.primary)
               .lineLimit(1)
-
-            if let username = userInfo.user.username {
-              Text("@\(username)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-            } else {
-              Text(" ")
-                .font(.caption)
-                .foregroundColor(.clear)
-            }
           }
         }
         .contextMenu {
           if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
-            Button(action: {
+            Button(role: .destructive, action: {
               let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
               impactFeedback.impactOccurred()
               participantToRemove = userInfo
@@ -387,77 +380,6 @@ struct InfoTabView: View {
     }
     .padding(.top, 8)
     .animation(.easeInOut(duration: 0.2), value: chatInfoView.participants.count)
-  }
-}
-
-struct DocumentsTabView: View {
-  @ObservedObject var documentsViewModel: ChatDocumentsViewModel
-  let peerUserId: Int64?
-  let peerThreadId: Int64?
-
-  var body: some View {
-    VStack(spacing: 16) {
-      if documentsViewModel.documents.isEmpty {
-        VStack(spacing: 8) {
-          Text("No documents shared in this chat yet.")
-            .themedPrimaryText()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-      } else {
-        // Documents content without scroll
-        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-          ForEach(documentsViewModel.groupedDocuments, id: \.date) { group in
-            Section {
-              // Documents for this date
-              ForEach(group.documents, id: \.id) { document in
-                DocumentRow(
-                  documentInfo: document,
-                  chatId: peerThreadId
-                )
-                .padding(.bottom, 4)
-              }
-            } header: {
-              HStack {
-                Text(formatDate(group.date))
-                  .font(.subheadline)
-                  .fontWeight(.medium)
-                  .foregroundColor(.secondary)
-                  .padding(.horizontal, 12)
-                  .padding(.vertical, 6)
-                  .background(
-                    Capsule()
-                      .fill(Color(.systemBackground).opacity(0.95))
-                  )
-                  .padding(.leading, 16)
-                Spacer()
-              }
-              .padding(.vertical, 8)
-            }
-          }
-        }
-      }
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-  }
-
-  // Format date for display
-  private func formatDate(_ date: Date) -> String {
-    let calendar = Calendar.current
-    let now = Date()
-
-    if calendar.isDateInToday(date) {
-      return "Today"
-    } else if calendar.isDateInYesterday(date) {
-      return "Yesterday"
-    } else if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "EEEE"
-      return formatter.string(from: date)
-    } else {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "MMMM d, yyyy"
-      return formatter.string(from: date)
-    }
   }
 }
 
