@@ -12,6 +12,7 @@ struct HomeSidebar: View {
   @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager
+  @EnvironmentObject var realtimeState: RealtimeState
   @EnvironmentStateObject var home: HomeViewModel
   @EnvironmentStateObject var localSearch: HomeSearchViewModel
   @StateObject var search = GlobalSearch()
