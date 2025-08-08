@@ -291,16 +291,9 @@ struct InfoTabView: View {
                   .foregroundColor(.secondary)
               }
 
-            VStack(spacing: -2) {
-              Text("Add")
-                .font(.callout)
-                .lineLimit(1)
-
-              Text(" ")
-                .font(.caption)
-                .foregroundColor(.clear)
-                .lineLimit(1)
-            }
+            Text("Add")
+              .font(.callout)
+              .lineLimit(1)
           }
         }
         .buttonStyle(.plain)
@@ -312,12 +305,10 @@ struct InfoTabView: View {
         VStack(spacing: 4) {
           UserAvatar(userInfo: userInfo, size: 68)
 
-          VStack(spacing: -2) {
-            Text(userInfo.user.shortDisplayName)
-              .font(.callout)
-              .foregroundColor(.primary)
-              .lineLimit(1)
-          }
+          Text(userInfo.user.shortDisplayName)
+            .font(.callout)
+            .foregroundColor(.primary)
+            .lineLimit(1)
         }
         .contextMenu {
           if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
