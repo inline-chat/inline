@@ -19,7 +19,6 @@ struct DocumentRow: View {
   @State var showingQuickLook = false
   @State var showingAlert = false
   @State var alertMessage = ""
-  @State var documentURL: URL?
   @State var docInteractionController: UIDocumentInteractionController? = nil
 
   enum DocumentState: Equatable {
@@ -30,6 +29,30 @@ struct DocumentRow: View {
 
   var documentInfo: DocumentInfo { documentMessage.document }
   var document: Document { documentInfo.document }
+  
+  // MARK: - Computed Properties
+  
+  /// The file URL for the document if it exists locally
+  var documentURL: URL? {
+    guard let localPath = document.localPath else {
+      return nil
+    }
+    
+    let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
+    let fileURL = cacheDirectory.appendingPathComponent(localPath)
+    
+    // Only return the URL if the file actually exists
+    guard FileManager.default.fileExists(atPath: fileURL.path) else {
+      return nil
+    }
+    
+    return fileURL
+  }
+  
+  /// Whether the document is ready for preview (locally available with valid URL)
+  var canPreview: Bool {
+    documentState == .locallyAvailable && documentURL != nil
+  }
 
   init(documentMessage: DocumentMessage, chatId: Int64? = nil) {
     self.documentMessage = documentMessage
@@ -61,9 +84,7 @@ struct DocumentRow: View {
       cleanup()
     }
     .sheet(isPresented: $showingQuickLook) {
-      if let documentURL {
-        QuickLookView(url: documentURL)
-      }
+      quickLookPreview
     }
     .alert("Cannot Open Document", isPresented: $showingAlert) {
       Button("OK") {}
