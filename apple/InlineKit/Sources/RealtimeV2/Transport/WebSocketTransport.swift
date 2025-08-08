@@ -18,19 +18,29 @@ import UIKit
 actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   // MARK: Public `Transport` API --------------------------------------------
 
-  private let log = Log.scoped("RealtimeV2.WebSocketTransport")
+  private let log = Log.scoped("RealtimeV2.WebSocketTransport", enableTracing: true)
 
   nonisolated var events: AsyncChannel<TransportEvent> { _eventChannel }
 
   func start() async {
-    guard state == .idle else { return }
+    guard state == .idle else {
+      log.trace("Not starting connection because state is not idle (current: \(state))")
+      return
+    }
     log.debug("starting connection to \(url)")
+
+    // Transition to connecting state before opening connection
+    state = .connecting
     await openConnection()
   }
 
   func stop() async {
     guard state == .connected || state == .connecting else { return }
     log.debug("stopping connection")
+
+    // Cancel any active reconnection task
+    reconnectionTask?.cancel()
+    reconnectionTask = nil
 
     // Cancel the WebSocket task; listeners stay subscribed to the stream.
     task?.cancel(with: .goingAway, reason: nil)
@@ -65,6 +75,15 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   /// receive loops.
   private var receiveLoopTask: Task<Void, Never>?
 
+  /// Connection attempt ID to ensure delegate callbacks and cleanup operations
+  /// only affect the current connection attempt. Prevents stale callbacks from
+  /// previous connection attempts from interfering.
+  private var connectionAttemptId: UInt64 = 0
+
+  /// Task that handles the current reconnection attempt. Only one reconnection
+  /// can be in progress at a time to prevent resource leaks.
+  private var reconnectionTask: Task<Void, Never>?
+
   /// `URLSession` configured with this actor as its delegate so that we can
   /// reliably act on `didOpen`, `didClose` and error callbacks.
   private lazy var session: URLSession = { [unowned self] in
@@ -81,6 +100,16 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   /// This prevents multiple receive loops from running in parallel and ensures
   /// that no stale sockets are left dangling when we reconnect.
   private func cleanUpPreviousConnection() {
+    log.trace("cleaning up previous connection task and loop")
+
+    // Increment connection attempt ID to invalidate any pending delegate callbacks
+    // from the previous connection attempt
+    connectionAttemptId = connectionAttemptId &+ 1
+
+    // Cancel any active reconnection task to prevent concurrent reconnection attempts
+    reconnectionTask?.cancel()
+    reconnectionTask = nil
+
     // Cancel the detached receive task first so it stops using the socket.
     receiveLoopTask?.cancel()
     receiveLoopTask = nil
@@ -105,15 +134,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   }
 
   private static var defaultURL: URL {
-    if ProjectConfig.useProductionApi {
-      return URL(string: "wss://api.inline.chat/realtime")!
-    }
-
-    #if targetEnvironment(simulator)
-    return URL(string: "ws://localhost:8000/realtime")!
-    #else
-    return URL(string: "wss://api.inline.chat/realtime")!
-    #endif
+    URL(string: InlineConfig.realtimeServerURL)!
   }
 
   private let url: URL
@@ -121,11 +142,26 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   // MARK: Connection helpers -------------------------------------------------
 
   private func openConnection() async {
+    // Guard against starting a connection when we shouldn't
+    guard state != .idle else {
+      log.trace("Not opening connection because state is idle")
+      return
+    }
+
     // Ensure we start from a clean slate.
     cleanUpPreviousConnection()
 
-    state = .connecting
-    await _eventChannel.send(.connecting)
+    // Double-check state after cleanup - another task might have changed it
+    guard state != .idle else {
+      log.trace("Not opening connection because state became idle during cleanup")
+      return
+    }
+
+    if state != .connecting {
+      state = .connecting
+      log.debug("Transport connecting (attempt #\(connectionAttemptId))")
+      Task { await _eventChannel.send(.connecting) }
+    }
 
     let wsTask = session.webSocketTask(with: url)
     task = wsTask
@@ -165,9 +201,14 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
               }
             case .string:
               // Log warning
+              log
+                .warning(
+                  "Received string frame, expected binary data. This transport only supports binary protocol buffers."
+                )
               // This transport only supports binary protocol buffers.
               break
             @unknown default:
+              // Handle future cases gracefully
               break
           }
         } catch {
@@ -179,24 +220,46 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   }
 
   private func handleError(_ error: Error) async {
+    log.debug("WebSocket error: \(error)")
+
     // Attempt to reconnect transparently: transition back to `.connecting` and
     // try to re-open the socket.  The client will never see a `.disconnected`
     // event; instead it observes `.connecting → .connected` again.
 
     guard state != .idle else { return }
 
-    // Ensure any artefacts from the previous connection are cleaned up before
-    // attempting to reconnect.
-    cleanUpPreviousConnection()
+    // If a reconnection is already in progress, don't start another one
+    guard reconnectionTask == nil else {
+      log.trace("Reconnection already in progress, ignoring error")
+      return
+    }
+
+    // Start a reconnection task to handle this error
+    reconnectionTask = Task { [weak self] in
+      guard let self else { return }
+
+      // Small delay with jitter to avoid busy-loop in pathological scenarios.
+      // TODO: Improve reconnection logic especially timeout amount
+      let delay = Double.random(in: 0.5 ... 3.0)
+      try? await Task.sleep(for: .seconds(delay))
+
+      // Check if we're still the active reconnection task and haven't been cancelled
+      guard !Task.isCancelled else { return }
+
+      await attemptReconnection()
+    }
+  }
+
+  /// Internal method to handle the actual reconnection logic
+  private func attemptReconnection() async {
+    // Double-check that we're still in a state where reconnection makes sense
+    guard state != .idle else { return }
 
     await _eventChannel.send(.connecting)
-
-    // Small delay with jitter to avoid busy-loop in pathological scenarios.
-    // TODO: Improve reconnection logic
-    let delay = Double.random(in: 0.2 ... 3.0)
-    try? await Task.sleep(for: .seconds(delay))
-
     await openConnection()
+
+    // Clear the reconnection task since we're done
+    reconnectionTask = nil
   }
 
   // MARK: - URLSessionWebSocketDelegate ------------------------------------
@@ -215,28 +278,52 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
     reason: Data?
   ) {
-    Task { await self.handleClose(code: closeCode, reason: reason) }
+    Task { await self.handleClose(for: webSocketTask, code: closeCode, reason: reason) }
   }
 
   nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     guard let error else { return }
-    Task { await self.handleError(error) }
+    Task { await self.handleError(error, for: task) }
   }
 
   // MARK: Delegate helpers --------------------------------------------------
 
   private func connectionDidOpen(for task: URLSessionWebSocketTask) async {
-    guard self.task === task else { return }
+    guard self.task === task else {
+      log.trace("Ignoring didOpen for stale WebSocket task")
+      return
+    }
 
     state = .connected
+    log.debug("Transport connected (attempt #\(connectionAttemptId))")
     await _eventChannel.send(.connected)
 
     receiveLoop()
   }
 
-  private func handleClose(code: URLSessionWebSocketTask.CloseCode, reason: Data?) async {
+  private func handleClose(
+    for task: URLSessionWebSocketTask,
+    code: URLSessionWebSocketTask.CloseCode,
+    reason: Data?
+  ) async {
+    // Only handle close events for the current task to prevent stale callbacks
+    guard self.task === task else {
+      log.trace("Ignoring didClose for stale WebSocket task")
+      return
+    }
+
     // Treat all closes the same way for now and attempt to reconnect.
     let nsError = NSError(domain: "WebSocketClosed", code: Int(code.rawValue), userInfo: nil)
-    await handleError(nsError)
+    await handleError(nsError, for: task)
+  }
+
+  private func handleError(_ error: Error, for task: URLSessionTask) async {
+    // Only handle errors for the current task to prevent stale callbacks
+    guard self.task === task else {
+      log.trace("Ignoring error for stale task: \(error)")
+      return
+    }
+
+    await handleError(error)
   }
 }
