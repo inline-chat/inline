@@ -75,7 +75,7 @@ extension DocumentRow {
 
   @ViewBuilder
   var fileName: some View {
-    Text(document?.fileName ?? "Unknown File")
+    Text(document.fileName ?? "Unknown File")
       .font(.body)
       .foregroundColor(textColor)
       .lineLimit(1)
@@ -117,7 +117,7 @@ extension DocumentRow {
   // MARK: - Computed Properties
 
   var fileTypeIconName: String {
-    if let mimeType = document?.mimeType {
+    if let mimeType = document.mimeType {
       if mimeType.hasPrefix("image/") {
         return "photo.fill"
       } else if mimeType.hasPrefix("video/") {
@@ -131,7 +131,7 @@ extension DocumentRow {
       }
     }
 
-    if let fileName = document?.fileName,
+    if let fileName = document.fileName,
        let fileExtension = fileName.components(separatedBy: ".").last?.lowercased()
     {
       return iconName(for: fileExtension)
@@ -227,7 +227,7 @@ extension DocumentRow {
   var fileSizeText: String {
     switch documentState {
       case .locallyAvailable, .needsDownload:
-        return FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
+        return FileHelpers.formatFileSize(UInt64(document.size ?? 0))
       case let .downloading(bytesReceived, totalBytes):
         let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
         let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
@@ -237,7 +237,7 @@ extension DocumentRow {
 
   var fileSizeMinWidth: CGFloat {
     // Calculate approximate width needed for file size text
-    let sampleText = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
+    let sampleText = FileHelpers.formatFileSize(UInt64(document.size ?? 0))
     return max(80, CGFloat(sampleText.count * 8))
   }
 }

@@ -151,7 +151,7 @@ extension ChatInfoView {
       publicChatSection
     }
 
-    if !documentsViewModel.documents.isEmpty {
+    if !documentsViewModel.documentMessages.isEmpty {
       documentsSection
     }
   }
@@ -219,9 +219,9 @@ extension ChatInfoView {
 
   @ViewBuilder
   var documentsSection: some View {
-    ForEach(documentsViewModel.documents) { documentInfo in
+    ForEach(documentsViewModel.documentMessages, id: \.id) { documentMessage in
       DocumentRow(
-        documentInfo: documentInfo,
+        documentMessage: documentMessage,
         chatId: chatItem.chat?.id
       )
     }
