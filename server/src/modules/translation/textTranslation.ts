@@ -108,14 +108,16 @@ export async function translateTexts(
   log.debug("Text translation user prompt:", userPrompt)
 
   const response = await openaiClient.chat.completions.create({
-    model: "gpt-4.1-mini" as ChatModel,
+    model: "gpt-5-mini" as ChatModel,
+    verbosity: "medium",
+    reasoning_effort: "minimal",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
     response_format: zodResponseFormat(TextTranslationResultSchema, "text_translation"),
     user: `User:${input.actorId}`,
-    max_tokens: 16000,
+    max_completion_tokens: 20000,
   })
 
   const finishReason = response.choices[0]?.finish_reason
