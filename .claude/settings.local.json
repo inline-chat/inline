@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "mcp__ide__getDiagnostics",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(grep:*)",
+      "Bash(xcodebuild:*)"
     ],
     "deny": []
   }

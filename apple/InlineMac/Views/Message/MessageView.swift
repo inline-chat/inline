@@ -12,6 +12,7 @@ import NukeUI
 import SwiftUI
 import TextProcessing
 import Throttler
+import Translation
 
 class MessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true

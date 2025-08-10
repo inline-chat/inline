@@ -1,5 +1,6 @@
 import Auth
 import InlineKit
+import Translation
 import UIKit
 
 // TODO: extract the content into another view

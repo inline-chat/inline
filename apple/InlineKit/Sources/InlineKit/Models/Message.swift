@@ -2,7 +2,6 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
-import Translation
 
 public struct ApiMessage: Codable, Hashable, Sendable {
   public var id: Int64

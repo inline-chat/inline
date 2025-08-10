@@ -1,6 +1,7 @@
 import AppKit
 import InlineKit
 import InlineUI
+import Translation
 
 class EmbeddedMessageView: NSView {
   // MARK: - Constants
