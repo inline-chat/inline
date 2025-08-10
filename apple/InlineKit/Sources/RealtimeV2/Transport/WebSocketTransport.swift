@@ -253,7 +253,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   }
 
   private func connecting() async {
-    guard await state != .connecting else { return }
+    guard state != .connecting else { return }
     state = .connecting
     log.debug("Transport connecting (attempt #\(connectionAttemptId))")
     Task { await _eventChannel.send(.connecting) }
