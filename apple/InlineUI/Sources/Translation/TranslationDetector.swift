@@ -1,4 +1,5 @@
 import Combine
+import InlineKit
 import Logger
 import NaturalLanguage
 
@@ -7,7 +8,7 @@ public final class TranslationDetector {
   public static let shared = TranslationDetector()
 
   // Minimum confidence threshold for language detection (0.0 to 1.0)
-  private let confidenceThreshold: Double = 0.4
+  private let confidenceThreshold: Double = 0.7
 
   // Supported languages for detection
   private let supportedLanguages: [NLLanguage] = [
@@ -17,7 +18,7 @@ public final class TranslationDetector {
     .spanish,
     .french,
     .japanese,
-    .persian
+    .persian,
   ]
 
   public struct DetectionResult {
@@ -44,6 +45,8 @@ public final class TranslationDetector {
       log.debug("Translation alert dismissed for peer: \(peer.id)")
       return
     }
+    
+    let messagesToProcess = messages.suffix(3) // Only analyze the last 3 messages
 
     Task(priority: .background) {
       let userLanguage = UserLocale.getCurrentLanguage()
@@ -55,7 +58,7 @@ public final class TranslationDetector {
       ]
 
       // Process messages one by one until we find a different language
-      for message in messages {
+      for message in messagesToProcess {
         guard let text = message.message.text, !text.isEmpty else { continue }
 
         let cleanedText = LanguageDetector.cleanText(text)

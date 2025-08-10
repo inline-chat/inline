@@ -9,21 +9,23 @@ let baseDependencies: [PackageDescription.Target.Dependency] = [
 
 let package = Package(
   name: "InlineUI",
+
   platforms: [
     .iOS(.v17),
     .macOS(.v14),
   ],
-  
+
   products: [
     .library(name: "InlineUI", targets: ["InlineUI"]),
     .library(name: "TextProcessing", targets: ["TextProcessing"]),
+    .library(name: "Translation", targets: ["Translation"]),
   ],
-  
+
   dependencies: [
     .package(name: "InlineKit", path: "../InlineKit"),
     .package(url: "https://github.com/kean/Nuke", from: "12.8.0"),
   ],
-  
+
   targets: [
     .target(
       name: "InlineUI",
@@ -35,6 +37,11 @@ let package = Package(
 
     .target(
       name: "TextProcessing",
+      dependencies: baseDependencies,
+    ),
+
+    .target(
+      name: "Translation",
       dependencies: baseDependencies,
     ),
 

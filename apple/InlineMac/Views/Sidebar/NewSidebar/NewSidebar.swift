@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InlineKit
+import Translation
 import Logger
 
 class NewSidebar: NSViewController {
