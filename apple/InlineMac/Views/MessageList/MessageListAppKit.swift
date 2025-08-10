@@ -4,6 +4,7 @@ import InlineKit
 import Logger
 import SwiftUI
 import Throttler
+import Translation
 
 class MessageListAppKit: NSViewController {
   // Data
@@ -39,6 +40,10 @@ class MessageListAppKit: NSViewController {
 
   private var eventMonitorTask: Task<Void, Never>?
   private var cancellables: Set<AnyCancellable> = []
+  
+  // Translation system
+  private let translationViewModel: TranslationViewModel
+  private var hasAnalyzedInitialMessages = false
 
   init(dependencies: AppDependencies, peerId: Peer, chat: Chat) {
     self.dependencies = dependencies
@@ -50,6 +55,7 @@ class MessageListAppKit: NSViewController {
         for: peerId,
         chatId: chat.id
       )
+    translationViewModel = TranslationViewModel(peerId: peerId)
 
     super.init(nibName: nil, bundle: nil)
 
@@ -58,6 +64,7 @@ class MessageListAppKit: NSViewController {
     // observe data
     viewModel.observe { [weak self] update in
       self?.applyUpdate(update)
+      self?.handleTranslationForUpdate(update)
 
       switch update {
         case .added, .reload:
@@ -1224,6 +1231,46 @@ class MessageListAppKit: NSViewController {
     dispose()
 
     Log.shared.debug("🗑️ Deinit: \(type(of: self)) - \(self)")
+  }
+
+  // MARK: - Translation
+  
+  private func handleTranslationForUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
+    Task {
+      switch update {
+      case .reload:
+        // Trigger translation on all current messages
+        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+        
+        // Analyze for translation detection on initial load
+        if !hasAnalyzedInitialMessages && !viewModel.messages.isEmpty {
+          await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: viewModel.messages)
+          hasAnalyzedInitialMessages = true
+        }
+        
+      case let .added(addedMessages, _):
+        // Trigger translation on added messages
+        if !addedMessages.isEmpty {
+          await translationViewModel.messagesDisplayed(messages: addedMessages)
+          
+          // Analyze new messages for detection if initial analysis not done
+          if !hasAnalyzedInitialMessages {
+            await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: addedMessages)
+            hasAnalyzedInitialMessages = true
+          }
+        }
+        
+      case let .updated(updatedMessages, _, _):
+        // Handle updated messages
+        if !updatedMessages.isEmpty {
+          await translationViewModel.messagesDisplayed(messages: updatedMessages)
+        }
+        
+      case .deleted:
+        // No action needed for deletes
+        break
+      }
+    }
   }
 
   // MARK: - Unread
