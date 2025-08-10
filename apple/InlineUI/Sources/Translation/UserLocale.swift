@@ -1,5 +1,6 @@
 import Foundation
 import Logger
+import InlineKit
 
 public class UserLocale {
   private static let log = Log.scoped("UserLocale", enableTracing: false)

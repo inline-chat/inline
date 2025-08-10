@@ -3,17 +3,15 @@ import InlineKit
 import InlineUI
 import Logger
 import SwiftUI
+import Translation
 
 struct ChatView: View {
   var peerId: Peer
   var preview: Bool
 
   @State private var navBarHeight: CGFloat = 0
-  @State private var showTranslationPopover = false
-  @State private var needsTranslation = false
   @State private var isChatHeaderPressed = false
   @State var apiState: RealtimeAPIState = .connecting
-  @State var isTranslationEnabled = false
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var data: DataManager
@@ -93,7 +91,6 @@ struct ChatView: View {
     }
     .onAppear {
       getApiState()
-      getTranslationState()
       fetch()
     }
     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
@@ -102,16 +99,6 @@ struct ChatView: View {
       }
     }
     .onReceive(realtime.apiStatePublisher) { apiState = $0 }
-    .onReceive(TranslationDetector.shared.needsTranslation) { result in
-      needsTranslation = result.needsTranslation
-      if result.needsTranslation {
-        if TranslationState.shared.isTranslationEnabled(for: peerId) {
-          showTranslationPopover = false
-        } else {
-          showTranslationPopover = true
-        }
-      }
-    }
     .onReceive(
       NotificationCenter.default
         .publisher(for: Notification.Name("chatDeletedNotification"))
@@ -216,63 +203,19 @@ struct ChatView: View {
   }
 
   @ViewBuilder
-  var translationPopover: some View {
-    VStack {
-      Text(
-        "Translate to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
-      )
-      HStack(spacing: 12) {
-        Button("Translate") {
-          isTranslationEnabled = true
-          TranslationState.shared.setTranslationEnabled(true, for: fullChatViewModel.peer)
-          showTranslationPopover = false
-        }
-
-        if needsTranslation {
-          Button("Dismiss") {
-            TranslationAlertDismiss.shared.dismissForPeer(fullChatViewModel.peer)
-            showTranslationPopover = false
-          }
-          .foregroundStyle(.tertiary)
-        }
-
-      }.padding(.top, 4)
-    }
-  }
-
-  @ViewBuilder
   var translateButton: some View {
-    Button {
-      isTranslationEnabled.toggle()
-      TranslationState.shared.toggleTranslation(for: fullChatViewModel.peer)
-      showTranslationPopover = false
-    } label: {
-      Image(systemName: "translate")
-    }
-    .tint(isTranslationEnabled ? ThemeManager.shared.accentColor : .primary.opacity(0.7))
-    .popover(isPresented: $showTranslationPopover) {
-      translationPopover
-        .padding()
-        .presentationCompactAdaptation(.popover)
-    }
-    .onChange(of: showTranslationPopover) { _, isPresented in
-      if !isPresented {
-        needsTranslation = false
-      }
-    }
+    TranslationButton(peer: peerId)
+      .tint(ThemeManager.shared.accentColor)
   }
 
   func getApiState() {
     apiState = realtime.apiState
   }
 
-  func getTranslationState() {
-    isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: peerId)
-  }
-
   func fetch() {
     fullChatViewModel.refetchChatView()
   }
+  
 }
 
 struct ChatViewHeader: View {

@@ -2,6 +2,7 @@ import Auth
 import InlineKit
 import InlineUI
 import SwiftUI
+import Translation
 
 struct Props {
   let dialog: Dialog

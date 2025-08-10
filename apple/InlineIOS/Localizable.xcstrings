@@ -427,6 +427,7 @@
       }
     },
     "Dismiss" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hant" : {
           "stringUnit" : {
@@ -864,12 +865,6 @@
 
     },
     "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
-
-    },
-    "Translate" : {
-
-    },
-    "Translate to %@?" : {
 
     },
     "Type" : {
