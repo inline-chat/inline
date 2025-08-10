@@ -7,6 +7,7 @@ import Logger
 import Nuke
 import NukeUI
 import Photos
+import Translation
 import UIKit
 
 final class MessagesCollectionView: UICollectionView {
@@ -480,6 +481,8 @@ private extension MessagesCollectionView {
   class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
     private var currentCollectionView: UICollectionView?
     let viewModel: MessagesSectionedViewModel
+    private let translationViewModel: TranslationViewModel
+    private var hasAnalyzedInitialMessages = false
     private let peerId: Peer
     private let chatId: Int64
     private let spaceId: Int64
@@ -533,11 +536,13 @@ private extension MessagesCollectionView {
       self.chatId = chatId
       self.spaceId = spaceId
       viewModel = MessagesSectionedViewModel(peer: peerId, reversed: true)
+      translationViewModel = TranslationViewModel(peerId: peerId)
 
       super.init()
 
       viewModel.observe { [weak self] update in
         self?.applyUpdate(update)
+        self?.handleTranslationForUpdate(update)
       }
 
       // Subscribe to translation state changes
@@ -1519,6 +1524,56 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
         message: message,
         systemImage: systemImage
       )
+    }
+  }
+  
+  // MARK: - Translation Handling
+  
+  private func handleTranslationForUpdate(_ update: MessagesSectionedViewModel.SectionedMessagesChangeSet) {
+    Task<Void, Never> {
+      switch update {
+      case .reload:
+        // For reload, trigger translation on all current messages
+        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+        
+        // Also analyze for translation detection on initial load
+        if !hasAnalyzedInitialMessages && !viewModel.messages.isEmpty {
+          await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: viewModel.messages)
+          hasAnalyzedInitialMessages = true
+        }
+        
+      case .messagesAdded(_, let messageIds):
+        // For added messages, get them from the viewModel and trigger translation
+        let addedMessages = messageIds.compactMap { messageId in
+          viewModel.messagesByID[messageId]
+        }
+        if !addedMessages.isEmpty {
+          await translationViewModel.messagesDisplayed(messages: addedMessages)
+          
+          // Also analyze new messages for translation detection if we haven't done initial analysis
+          if !hasAnalyzedInitialMessages {
+            await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: addedMessages)
+            hasAnalyzedInitialMessages = true
+          }
+        }
+        
+      case .messagesUpdated(_, let messageIds):
+        // For updated messages, get them from the viewModel and trigger translation
+        let updatedMessages = messageIds.compactMap { messageId in
+          viewModel.messagesByID[messageId]
+        }
+        if !updatedMessages.isEmpty {
+          await translationViewModel.messagesDisplayed(messages: updatedMessages)
+        }
+        
+      case .sectionsChanged:
+        // For section changes, trigger translation on all current messages
+        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+        
+      case .messagesDeleted:
+        // No action needed for deletes
+        break
+      }
     }
   }
 }

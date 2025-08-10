@@ -1,4 +1,5 @@
 import InlineKit
+import Translation
 import UIKit
 
 class EmbedMessageView: UIView {

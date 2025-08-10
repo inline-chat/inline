@@ -7,6 +7,7 @@ import Nuke
 import NukeUI
 import SwiftUI
 import TextProcessing
+import Translation
 import UIKit
 
 class UIMessageView: UIView {

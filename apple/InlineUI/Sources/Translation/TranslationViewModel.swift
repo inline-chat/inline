@@ -1,6 +1,6 @@
 import Combine
 import Foundation
-import InlineProtocol
+import InlineKit
 import Logger
 
 public actor TranslationViewModel {
@@ -30,7 +30,7 @@ public actor TranslationViewModel {
     let timeoutTask: Task<Void, Never>
   }
 
-  init(peerId: Peer) {
+  public init(peerId: Peer) {
     self.peerId = peerId
 
     // Subscribe to translation state changes
@@ -67,7 +67,7 @@ public actor TranslationViewModel {
     }
   }
 
-  nonisolated func messagesDisplayed(messages: [FullMessage]) {
+  public nonisolated func messagesDisplayed(messages: [FullMessage]) {
     log.debug("Processing \(messages.count) messages for translation, peer: \(peerId)")
 
     // Check if translation is enabled for this peer
@@ -329,7 +329,7 @@ public actor TranslationViewModel {
     // Start timeout task
     let timeoutTask = Task {
       try? await Task.sleep(nanoseconds: UInt64(requestTimeout * 1_000_000_000))
-      await handleTimeout(for: request)
+      handleTimeout(for: request)
     }
 
     inProgressRequests[request] = RequestState(
@@ -436,7 +436,7 @@ public final class TranslatingStatePublisher {
       await state.removeBatch(messageIds: messageIds, peerId: peerId)
       let currentState = await state.translating
       log.debug("Removed batch of \(messageIds.count) messages from translating state")
-      await publisher.send(currentState)
+      publisher.send(currentState)
     }
   }
 
@@ -445,7 +445,7 @@ public final class TranslatingStatePublisher {
       await state.removeForPeer(peerId: peerId)
       let currentState = await state.translating
       log.debug("Removed \(currentState.count) messages for peer \(peerId) from translating state")
-      await publisher.send(currentState)
+      publisher.send(currentState)
     }
   }
 

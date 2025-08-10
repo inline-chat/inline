@@ -42,6 +42,8 @@
 		CD4E8E2A2E088F6100CE6BC0 /* TextProcessing in Frameworks */ = {isa = PBXBuildFile; productRef = CD4E8E292E088F6100CE6BC0 /* TextProcessing */; };
 		CD4E8E2C2E088F6B00CE6BC0 /* TextProcessing in Frameworks */ = {isa = PBXBuildFile; productRef = CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */; };
 		CD70BF1E2DE72D5100E9830A /* FileAttachments in Frameworks */ = {isa = PBXBuildFile; productRef = CD70BF1D2DE72D5100E9830A /* FileAttachments */; };
+		CD735FF02E493C8E00F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FEF2E493C8E00F7BFFE /* Translation */; };
+		CD735FF22E493C9400F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FF12E493C9400F7BFFE /* Translation */; };
 		CD76223E2E3690FC00F1A181 /* RealtimeV2 in Frameworks */ = {isa = PBXBuildFile; productRef = CD76223D2E3690FC00F1A181 /* RealtimeV2 */; };
 		CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D42D3E8066001AFC1A /* Nuke */; };
 		CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D62D3E8066001AFC1A /* NukeUI */; };
@@ -208,6 +210,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CD735FF02E493C8E00F7BFFE /* Translation in Frameworks */,
 				CD4E8E2C2E088F6B00CE6BC0 /* TextProcessing in Frameworks */,
 				C3AEE6AC2D4FCDD0005D1179 /* NukeUI in Frameworks */,
 				B77EE8082DC91CFD00C42B9E /* iPhoneNumberField in Frameworks */,
@@ -234,6 +237,7 @@
 				CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */,
 				CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */,
 				CD4D56CD2D2D4393006072AE /* Throttler in Frameworks */,
+				CD735FF22E493C9400F7BFFE /* Translation in Frameworks */,
 				CD70BF1E2DE72D5100E9830A /* FileAttachments in Frameworks */,
 				CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */,
 				CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */,
@@ -388,6 +392,7 @@
 				B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */,
 				B7F71EB82DDB3BA70091C872 /* RenderMeThis */,
 				CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */,
+				CD735FEF2E493C8E00F7BFFE /* Translation */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -424,6 +429,7 @@
 				CD70BF1D2DE72D5100E9830A /* FileAttachments */,
 				CD4E8E292E088F6100CE6BC0 /* TextProcessing */,
 				CD76223D2E3690FC00F1A181 /* RealtimeV2 */,
+				CD735FF12E493C9400F7BFFE /* Translation */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -1450,6 +1456,14 @@
 		CD70BF1D2DE72D5100E9830A /* FileAttachments */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = FileAttachments;
+		};
+		CD735FEF2E493C8E00F7BFFE /* Translation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Translation;
+		};
+		CD735FF12E493C9400F7BFFE /* Translation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Translation;
 		};
 		CD76223D2E3690FC00F1A181 /* RealtimeV2 */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import InlineKit
 import Logger
+import Translation
 
 class SidebarItemRow: NSTableCellView {
   typealias SidebarEvents = NewSidebar.SidebarEvents
