@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineKit
 import InlineProtocol
 import Logger
 
@@ -19,7 +20,7 @@ actor TranslationManager {
   ///   - messages: Messages to check for translation
   ///   - chatId: ID of the chat containing the messages
   ///   - peerId: Peer ID for the chat
-  func requestTranslations(messages: [Message], chatId: Int64, peerId: Peer) async throws {
+  func requestTranslations(messages: [InlineKit.Message], chatId: Int64, peerId: InlineKit.Peer) async throws {
     // Get user's preferred language
     let targetLanguage = UserLocale.getCurrentLanguage()
     log.debug("Requesting translations for \(messages.count) messages in \(targetLanguage)")
@@ -39,10 +40,10 @@ actor TranslationManager {
   public func filterMessagesNeedingTranslation(
     messages: [FullMessage],
     targetLanguage: String
-  ) async throws -> [Message] {
+  ) async throws -> [InlineKit.Message] {
     log.debug("Filtering \(messages.count) messages for translation needs")
 
-    var messagesNeedingTranslation: [Message] = []
+    var messagesNeedingTranslation: [InlineKit.Message] = []
 
     for fullMessage in messages {
       let message = fullMessage.message

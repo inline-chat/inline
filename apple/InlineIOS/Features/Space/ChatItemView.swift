@@ -1,6 +1,7 @@
 import InlineKit
 import InlineUI
 import SwiftUI
+import Translation
 
 struct ChatItemProps {
   let dialog: Dialog

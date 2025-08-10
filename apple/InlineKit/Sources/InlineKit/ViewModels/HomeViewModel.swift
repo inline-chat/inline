@@ -56,33 +56,6 @@ public struct EmbeddedMessage: Codable, FetchableRecord, PersistableRecord, Hash
     translations.first { $0.language == language }
   }
 
-  public var currentTranslation: Translation? {
-    translation(for: UserLocale.getCurrentLanguage())
-  }
-
-  /// Translation text for the message, without falling back to the original text
-  public var translationText: String? {
-    if TranslationState.shared.isTranslationEnabled(for: message.peerId) {
-      currentTranslation?.translation
-    } else {
-      nil
-    }
-  }
-
-  public var isTranslated: Bool {
-    translationText != nil
-  }
-
-  /// Display text for the message
-  /// If translation is enabled, use the current translation
-  /// Otherwise, use the message text
-  public var displayText: String? {
-    if let translationText {
-      translationText
-    } else {
-      message.text
-    }
-  }
 
   public enum CodingKeys: String, CodingKey {
     case message

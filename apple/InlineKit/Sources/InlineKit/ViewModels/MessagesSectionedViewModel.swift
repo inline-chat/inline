@@ -39,6 +39,7 @@ public class MessagesSectionedViewModel {
   // MARK: - Public Properties
 
   public var sections: [MessageSection] = []
+  public var messages: [FullMessage] { progressiveViewModel.messages }
   public var messagesByID: [Int64: FullMessage] { progressiveViewModel.messagesByID }
 
   // MARK: - Private Properties

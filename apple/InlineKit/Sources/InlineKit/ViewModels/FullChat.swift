@@ -82,9 +82,6 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     translations.first { $0.language == language }
   }
 
-  public var currentTranslation: Translation? {
-    translation(for: UserLocale.getCurrentLanguage())
-  }
 
   public var groupedReactions: [GroupedReaction] {
     let groupedDictionary = Dictionary(grouping: reactions, by: { $0.reaction.emoji })
@@ -139,39 +136,6 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   }
 }
 
-public extension FullMessage {
-  /// Translation text for the message, without falling back to the original text
-  var translationText: String? {
-    if TranslationState.shared.isTranslationEnabled(for: peerId) {
-      currentTranslation?.translation
-    } else {
-      message.text ?? nil
-    }
-  }
-
-  var translationEntities: MessageEntities? {
-    if TranslationState.shared.isTranslationEnabled(for: peerId) {
-      currentTranslation?.entities
-    } else {
-      message.entities
-    }
-  }
-
-  var isTranslated: Bool {
-    translationText != nil
-  }
-
-  /// Display text for the message
-  /// If translation is enabled, use the current translation
-  /// Otherwise, use the message text
-  var displayText: String? {
-    if let translationText {
-      translationText
-    } else {
-      message.text
-    }
-  }
-}
 
 public extension FullMessage {
   var debugDescription: String {

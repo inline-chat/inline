@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import Translation
 
 extension Notification.Name {
   static let toggleSidebar = Notification.Name("toggleSidebar")

@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import Translation
 
 class CacheAttrs {
   static var shared = CacheAttrs()

@@ -38,17 +38,14 @@ public class MessagesProgressiveViewModel {
 
   private let log = Log.scoped("MessagesViewModel", enableTracing: false)
   private let db = AppDatabase.shared
-  private let translationViewModel: TranslationViewModel
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
-  private var hasAnalyzedInitialMessages = false
 
   // Note:
   // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
   public init(peer: Peer, reversed: Bool = false) {
     self.peer = peer
     self.reversed = reversed
-    translationViewModel = TranslationViewModel(peerId: peer)
     // get initial batch
     loadMessages(.limit(initialLimit))
 
@@ -125,11 +122,6 @@ public class MessagesProgressiveViewModel {
 
           updateRange()
 
-          // Only analyze new messages if we haven't done initial analysis
-          if !hasAnalyzedInitialMessages, !newMessages.isEmpty {
-            TranslationDetector.shared.analyzeMessages(peer: peer, messages: newMessages)
-            hasAnalyzedInitialMessages = true
-          }
 
           // Return changeset
           return MessagesChangeSet.added(newMessages, indexSet: [messages.count - 1])
@@ -223,8 +215,6 @@ public class MessagesProgressiveViewModel {
     minDate = lowestDate
     maxDate = highestDate
 
-    // Trigger translation
-    translationViewModel.messagesDisplayed(messages: messages)
   }
 
   private func refetchCurrentRange() {
@@ -273,11 +263,6 @@ public class MessagesProgressiveViewModel {
 
       updateRange()
 
-      // Only analyze messages on initial load
-      if case let .limit(limit) = loadMode, limit == initialLimit, !hasAnalyzedInitialMessages {
-        TranslationDetector.shared.analyzeMessages(peer: peer, messages: messages)
-        hasAnalyzedInitialMessages = true
-      }
     } catch {
       Log.shared.error("Failed to get messages \(error)")
     }

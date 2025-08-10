@@ -1,6 +1,7 @@
 import InlineKit
 import InlineUI
 import SwiftUI
+import Translation
 import UIKit
 
 protocol MessageCellDelegate: AnyObject {
