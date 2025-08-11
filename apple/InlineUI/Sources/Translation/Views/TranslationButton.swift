@@ -65,8 +65,19 @@ public struct TranslationButton: View {
   /// Prompt when translation is available
   @ViewBuilder
   public var prompt: some View {
-    TranslationPrompt(peer: peer)
-      .presentationCompactAdaptation(.popover)
+    TranslationPrompt(peer: peer) {
+      showPrompt = false
+
+      #if os(iOS)
+      // without this delay, the popover doesn't appear or appears as sheet
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        showPopover = true
+      }
+      #else
+      showPopover = true
+      #endif
+    }
+    .presentationCompactAdaptation(.popover)
   }
 
   /// Root of the view
@@ -76,8 +87,12 @@ public struct TranslationButton: View {
         popover
       }
 
-      .popover(isPresented: $showPrompt, arrowEdge: .bottom) {
-        prompt
+      .overlay(alignment: .bottom) {
+        Color.clear.frame(width: 1, height: 1)
+          .allowsHitTesting(false)
+          .popover(isPresented: $showPrompt, arrowEdge: .bottom) {
+            prompt
+          }
       }
 
       .sheet(isPresented: $showOptionsSheet) {
