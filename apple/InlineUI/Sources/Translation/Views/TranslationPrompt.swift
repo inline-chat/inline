@@ -4,6 +4,7 @@ import SwiftUI
 /// Presented in a small popover when chat needs translation
 public struct TranslationPrompt: View {
   var peer: Peer
+  var action: (() -> Void)? = nil
 
   @Environment(\.dismiss) private var dismiss
 
@@ -12,7 +13,12 @@ public struct TranslationPrompt: View {
       // TODO: Translate this prompt in common user languages
       Text(
         "Translation available"
-      ).fixedSize()
+      )
+      .fixedSize()
+      .onTapGesture {
+        // If action is provided, call it
+        action?()
+      }
 
       #if os(macOS)
       // Close button
@@ -20,10 +26,11 @@ public struct TranslationPrompt: View {
       #endif
     }
     #if os(macOS)
-    .padding(.horizontal, 10)
+    .padding(.horizontal, 12)
     .padding(.vertical, 6)
     #else
-    .padding()
+    .padding(.horizontal, 12)
+    .padding(.vertical, 4)
     #endif
   }
 
