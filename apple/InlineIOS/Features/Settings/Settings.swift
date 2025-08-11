@@ -3,6 +3,7 @@ import GRDBQuery
 import InlineKit
 import Logger
 import SwiftUI
+import Translation
 
 struct SettingsView: View {
   @Query(CurrentUser()) var currentUser: UserInfo?
