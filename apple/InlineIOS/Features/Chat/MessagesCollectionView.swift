@@ -586,6 +586,16 @@ private extension MessagesCollectionView {
           fromOtherSender: isFromDifferentSender,
           spaceId: spaceId
         )
+        
+        cell.onUserTap = { [weak self] userId in
+          guard let self else { return }
+          // Navigate to user chat using notification center to bridge back to SwiftUI
+          NotificationCenter.default.post(
+            name: Notification.Name("NavigateToUser"),
+            object: nil,
+            userInfo: ["userId": userId]
+          )
+        }
       }
 
       dataSource = UICollectionViewDiffableDataSource<Date, FullMessage.ID>(

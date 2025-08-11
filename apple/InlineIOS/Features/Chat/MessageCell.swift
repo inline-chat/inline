@@ -16,6 +16,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   var avatarSpacerView: UIView?
 
   weak var delegate: MessageCellDelegate?
+  var onUserTap: ((Int64) -> Void)?
   private var panGesture: UIPanGestureRecognizer!
   private var swipeActive = false
   private var initialTranslation: CGFloat = 0
@@ -55,6 +56,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
+
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -136,6 +138,11 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     attributes.frame.size = size
     return attributes
+  }
+
+  @objc public func handleAvatarTap() {
+    guard let from = message.from else { return }
+    onUserTap?(from.id)
   }
 
   public func highlightBubble() {
@@ -315,6 +322,10 @@ extension MessageCollectionViewCell {
         avatar.translatesAutoresizingMaskIntoConstraints = false
         avatarView = avatar
       }
+
+      let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleAvatarTap))
+      avatar.isUserInteractionEnabled = true
+      avatar.addGestureRecognizer(tapGesture)
       avatarOrSpacer = avatar
 
     } else {
@@ -327,7 +338,10 @@ extension MessageCollectionViewCell {
 
     NSLayoutConstraint.activate([
       avatarOrSpacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
-      avatarOrSpacer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: avatarLeading + horizontalPadding),
+      avatarOrSpacer.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor,
+        constant: avatarLeading + horizontalPadding
+      ),
       avatarOrSpacer.widthAnchor.constraint(equalToConstant: avatarSize),
       avatarOrSpacer.heightAnchor.constraint(equalToConstant: avatarSize),
     ])
@@ -374,7 +388,10 @@ extension MessageCollectionViewCell {
         leadingConstraint = newMessageView.leadingAnchor
           .constraint(equalTo: contentView.leadingAnchor, constant: 32)
       }
-      trailingConstraint = newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -(10 + horizontalPadding))
+      trailingConstraint = newMessageView.trailingAnchor.constraint(
+        equalTo: contentView.trailingAnchor,
+        constant: -(10 + horizontalPadding)
+      )
     } else {
       var leadingAnchor = contentView.leadingAnchor
       var leadingConstant: CGFloat = horizontalPadding
@@ -387,7 +404,10 @@ extension MessageCollectionViewCell {
         contentView.addSubview(spacer)
         NSLayoutConstraint.activate([
           spacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
-          spacer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: avatarLeading + horizontalPadding),
+          spacer.leadingAnchor.constraint(
+            equalTo: contentView.leadingAnchor,
+            constant: avatarLeading + horizontalPadding
+          ),
           spacer.widthAnchor.constraint(equalToConstant: avatarSize),
           spacer.heightAnchor.constraint(equalToConstant: avatarSize),
         ])
@@ -395,8 +415,11 @@ extension MessageCollectionViewCell {
         leadingConstant = 3
       }
       leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingConstant)
-      
-      trailingConstraint = newMessageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding)
+
+      trailingConstraint = newMessageView.trailingAnchor.constraint(
+        equalTo: contentView.trailingAnchor,
+        constant: -horizontalPadding
+      )
     }
     NSLayoutConstraint.activate([
       leadingConstraint,
