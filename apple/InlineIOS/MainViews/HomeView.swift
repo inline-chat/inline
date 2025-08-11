@@ -124,7 +124,7 @@ struct HomeView: View {
       .navigationBarTitleDisplayMode(.inline)
       .navigationBarBackButtonHidden()
       .task {
-        initalFetch()
+        // initalFetch()
       }
       .onAppear {
         initalFetch()
