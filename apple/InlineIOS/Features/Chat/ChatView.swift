@@ -125,7 +125,16 @@ struct ChatView: View {
         }
       }
     }
+    .onReceive(
+      NotificationCenter.default
+        .publisher(for: Notification.Name("NavigateToUser"))
+    ) { notification in
+      if let userId = notification.userInfo?["userId"] as? Int64 {
+        router.push(.chat(peer: Peer.user(id: userId)))
+      }
+    }
     .environmentObject(fullChatViewModel)
+    .environment(router)
   }
 
   @ViewBuilder
