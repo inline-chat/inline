@@ -57,7 +57,6 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     return label
   }()
 
-
   override init(frame: CGRect) {
     super.init(frame: frame)
     setupContentSize()
@@ -179,7 +178,8 @@ extension MessageCollectionViewCell {
     // Calculate angle and only allow nearly horizontal swipes
     // An 16 degree angle corresponds to tan(16°) ≈ 0.287
     // This means vertical component should be at most 0.287 times the horizontal component
-    let maxAngleTangent: CGFloat = 0.287 // tan(16°)
+    // let maxAngleTangent: CGFloat = 0.287 // tan(16°)
+    let maxAngleTangent: CGFloat = 0.4452286853 // tan(24°)
     let isHorizontalEnough = abs(velocity.y) <= abs(velocity.x) * maxAngleTangent
 
     return abs(velocity.x) > abs(velocity.y) && isHorizontalEnough // Must be predominantly horizontal
