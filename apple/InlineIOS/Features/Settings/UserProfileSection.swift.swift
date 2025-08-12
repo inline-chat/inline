@@ -9,12 +9,11 @@ struct UserProfileSection: View {
     Section(header: Text("Account")) {
       if let user = currentUser {
         ProfileRow(userInfo: user)
-          .themedListRow()
+
       } else {
         Button("Set up profile") {
           // TODO: Add profile setup
         }
-        .themedListRow()
       }
     }
   }
