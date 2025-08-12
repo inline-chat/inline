@@ -93,9 +93,6 @@
     "🔍" : {
 
     },
-    "🔎" : {
-
-    },
     "🫙" : {
 
     },
@@ -139,9 +136,6 @@
           }
         }
       }
-    },
-    "Add Member" : {
-
     },
     "Add Participant" : {
       "localizations" : {
@@ -778,9 +772,6 @@
           }
         }
       }
-    },
-    "Please enter a username to search for" : {
-
     },
     "Please search a username or start a new chat or message                               , or create a new space by clicking the + button" : {
 
