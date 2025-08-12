@@ -350,6 +350,9 @@
     "Control how you receive notifications" : {
 
     },
+    "Copy" : {
+
+    },
     "Create" : {
       "localizations" : {
         "fa" : {
@@ -480,6 +483,15 @@
     "Email" : {
 
     },
+    "Email address" : {
+
+    },
+    "Enter email address" : {
+
+    },
+    "Enter phone number (e.g. +441234567891)" : {
+
+    },
     "Enter the code" : {
       "comment" : "Code input title",
       "localizations" : {
@@ -496,6 +508,9 @@
           }
         }
       }
+    },
+    "Enter username to search" : {
+
     },
     "Enter your email" : {
       "comment" : "Email input label",
@@ -533,6 +548,9 @@
         }
       }
     },
+    "Error" : {
+
+    },
     "Error Clearing Cache" : {
       "localizations" : {
         "fa" : {
@@ -568,16 +586,51 @@
     "Global Search" : {
 
     },
+    "I invited you to \"%@\" on Inline to chat with me.\nIf you don't have the app, get it from TestFlight for iOS and be sure to sign up with this phone number: %@.\nhttps://testflight.apple.com/join/FkC3f7fz" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "I invited you to \"%1$@\" on Inline to chat with me.\nIf you don't have the app, get it from TestFlight for iOS and be sure to sign up with this phone number: %2$@.\nhttps://testflight.apple.com/join/FkC3f7fz"
+          }
+        }
+      }
+    },
+    "I invited you to chat on Inline" : {
+
+    },
     "Integration Options" : {
 
     },
     "Integrations" : {
 
     },
+    "Invite" : {
+
+    },
+    "Invite %@ to %@?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Invite %1$@ to %2$@?"
+          }
+        }
+      }
+    },
     "Invite Member" : {
 
     },
     "Invite People" : {
+
+    },
+    "Invite people by email or username if already on the app. They will get access to public threads and you can add them to private threads after invite." : {
+
+    },
+    "Invite to %@" : {
+
+    },
+    "Invite via" : {
 
     },
     "It's an all new way to chat with your team." : {
@@ -597,6 +650,9 @@
           }
         }
       }
+    },
+    "Join me on Inline" : {
+
     },
     "Key" : {
       "extractionState" : "stale",
@@ -700,6 +756,9 @@
     "Participants" : {
 
     },
+    "Phone" : {
+
+    },
     "Phone number" : {
 
     },
@@ -801,6 +860,9 @@
     "Select Space" : {
 
     },
+    "Send Invite" : {
+
+    },
     "Sending Code..." : {
       "comment" : "Sending code button loading state",
       "localizations" : {
@@ -826,6 +888,12 @@
     },
     "Setup your profile" : {
       "comment" : "Profile setup title"
+    },
+    "Share" : {
+
+    },
+    "Share Invite" : {
+
     },
     "Sign in with email" : {
       "comment" : "Email sign in title"
@@ -857,6 +925,9 @@
           }
         }
       }
+    },
+    "Success" : {
+
     },
     "The document is not available for preview. Please try downloading it again." : {
 
