@@ -70,10 +70,6 @@ struct SpaceView: View {
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle("")
     .toolbar { toolbarContent }
-    .sheet(isPresented: $showAddMemberSheet) {
-      AddMember(showSheet: $showAddMemberSheet, spaceId: spaceId)
-        .presentationCornerRadius(28)
-    }
     .task { await loadData() }
   }
 
@@ -106,7 +102,9 @@ struct SpaceView: View {
         Button(action: { router.presentSheet(.createThread(spaceId: spaceId)) }) {
           Label("New Group Chat", systemImage: "plus.message")
         }
-        Button(action: { showAddMemberSheet = true }) {
+        Button(action: {
+          router.presentSheet(.addMember(spaceId: spaceId))
+        }) {
           Label("Invite Member", systemImage: "person.badge.plus")
         }
 
@@ -171,7 +169,9 @@ private struct MemberListView: View {
         MemberItemRow(
           member: member,
           hasUnread: {
-            if let dialog = viewModel.filteredMemberChats.first(where: { $0.user?.id == member.userInfo.user.id })?.dialog {
+            if let dialog = viewModel.filteredMemberChats.first(where: { $0.user?.id == member.userInfo.user.id })?
+              .dialog
+            {
               return (dialog.unreadCount ?? 0) > 0 || (dialog.unreadMark == true)
             }
             return false

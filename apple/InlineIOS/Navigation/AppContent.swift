@@ -34,6 +34,7 @@ enum Sheet: SheetType, Codable {
   case createThread(spaceId: Int64)
   case alphaSheet
   case createSpaceChat
+  case addMember(spaceId: Int64)
   var id: String {
     switch self {
       case .createSpace:
@@ -44,6 +45,8 @@ enum Sheet: SheetType, Codable {
         "alphaSheet"
       case .createSpaceChat:
         "createSpaceChat"
+      case let .addMember(spaceId):
+        "addMember_\(spaceId)"
     }
   }
 }
