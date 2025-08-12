@@ -131,6 +131,9 @@ struct ContentView2: View {
         AlphaSheet()
       case .createSpaceChat:
         CreateSpaceChat()
+      case let .addMember(spaceId):
+        // AddMember(showSheet: showSheet, spaceId: spaceId)
+        InviteToSpaceView(spaceId: spaceId)
     }
   }
 }
