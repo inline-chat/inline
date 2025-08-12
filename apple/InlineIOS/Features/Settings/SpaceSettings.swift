@@ -55,7 +55,6 @@ struct SpaceSettingsView: View {
               .themedSecondaryText()
           }
         }
-        .themedListRow()
       }
 
       Section {
@@ -73,7 +72,6 @@ struct SpaceSettingsView: View {
           }
           .padding(.vertical, 2)
         }
-        .themedListRow()
       }
 
       Section {
@@ -88,7 +86,6 @@ struct SpaceSettingsView: View {
               .foregroundColor(.red)
           }
         }
-        .themedListRow()
       }
     }
     .listStyle(.insetGrouped)
@@ -99,14 +96,14 @@ struct SpaceSettingsView: View {
       ToolbarItem(id: "settings", placement: .principal) {
         HStack {
           Image(systemName: "gearshape.fill")
-            .themedSecondaryText()
+            .foregroundColor(.secondary)
             .font(.callout)
             .padding(.trailing, 4)
           VStack(alignment: .leading) {
             Text("\(viewModel.space?.nameWithoutEmoji ?? "Space") Settings")
               .font(.body)
               .fontWeight(.semibold)
-              .themedPrimaryText()
+              .foregroundColor(.primary)
           }
         }
       }

@@ -30,7 +30,6 @@ struct LogoutSection: View {
         }
         .padding(.vertical, 2)
       }
-      .themedListRow()
     }
     .alert("Logout", isPresented: $showLogoutAlert) {
       Button("Cancel", role: .cancel) {}
