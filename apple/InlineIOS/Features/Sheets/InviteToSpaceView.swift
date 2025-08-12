@@ -212,7 +212,7 @@ public struct InviteToSpaceView: View {
       Button(action: sendPhoneInvite) {
         HStack {
           Spacer()
-          Text("Send Invite")
+          Text("Create Invite")
           Spacer()
         }
       }
