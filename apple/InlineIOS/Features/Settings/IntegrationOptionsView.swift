@@ -44,7 +44,6 @@ struct IntegrationOptionsView: View {
             }
           }
         }
-        .themedListRow()
       }
     }
     .listStyle(.insetGrouped)
@@ -69,12 +68,12 @@ struct IntegrationOptionsView: View {
               Text("Notion")
                 .font(.body)
                 .fontWeight(.semibold)
-                .themedPrimaryText()
+                .foregroundColor(.primary)
             }
           } else {
             // TODO: support Linear
             Text("Integration Options")
-              .themedPrimaryText()
+              .foregroundColor(.primary)
           }
         }
       }

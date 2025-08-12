@@ -20,7 +20,6 @@ struct IntegrationsView: View {
         clipped: true,
         completion: checkIntegrationConnection
       )
-      .themedListRow()
     }
     .listStyle(.insetGrouped)
     .onAppear {
@@ -33,14 +32,14 @@ struct IntegrationsView: View {
       ToolbarItem(id: "integrations", placement: .principal) {
         HStack {
           Image(systemName: "app.connected.to.app.below.fill")
-            .themedSecondaryText()
+            .foregroundColor(.secondary)
             .font(.callout)
             .padding(.trailing, 4)
           VStack(alignment: .leading) {
             Text("Integrations")
               .font(.body)
               .fontWeight(.semibold)
-              .themedPrimaryText()
+              .foregroundColor(.primary)
           }
         }
       }
