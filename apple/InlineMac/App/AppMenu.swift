@@ -70,7 +70,10 @@ final class AppMenu: NSObject {
       keyEquivalent: ""
     )
     logoutMenuItem.target = self
-    logoutMenuItem.image = NSImage(systemSymbolName: "rectangle.portrait.and.arrow.right", accessibilityDescription: nil)
+    logoutMenuItem.image = NSImage(
+      systemSymbolName: "rectangle.portrait.and.arrow.right",
+      accessibilityDescription: nil
+    )
     appMenu.addItem(logoutMenuItem)
 
     let clearCacheMenuItem = NSMenuItem(
@@ -433,10 +436,11 @@ final class AppMenu: NSObject {
   }
 
   private var settingsWindowController: SettingsWindowController?
-  
+
   @objc private func showPreferences(_ sender: Any?) {
     if settingsWindowController == nil {
-      settingsWindowController = SettingsWindowController()
+      guard let dependencies else { return }
+      settingsWindowController = SettingsWindowController(dependencies: dependencies)
     }
     settingsWindowController?.showWindow(sender)
   }
